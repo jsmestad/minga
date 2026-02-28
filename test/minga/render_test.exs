@@ -9,6 +9,8 @@ defmodule Minga.RenderTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Test.HeadlessPort
+
   describe "file content rendering" do
     test "opens a file and renders its content on screen" do
       ctx = start_editor("hello world\nsecond line\nthird line")
@@ -211,7 +213,7 @@ defmodule Minga.RenderTest do
       send_key(ctx, ?l)
 
       # Check that the screen has cells with reverse styling
-      screen = Minga.Test.HeadlessPort.get_screen(ctx.port)
+      screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, 0)
 
       # Cells 0-2 should be selected (reverse)
@@ -245,7 +247,7 @@ defmodule Minga.RenderTest do
   describe "no file open" do
     test "shows splash screen when no buffer is loaded" do
       id = :erlang.unique_integer([:positive])
-      {:ok, port} = Minga.Test.HeadlessPort.start_link(width: 80, height: 24)
+      {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
 
       {:ok, editor} =
         Minga.Editor.start_link(
@@ -257,9 +259,9 @@ defmodule Minga.RenderTest do
         )
 
       send(editor, {:minga_input, {:ready, 80, 24}})
-      :ok = Minga.Test.HeadlessPort.await_frame(port)
+      :ok = HeadlessPort.await_frame(port)
 
-      row0 = Minga.Test.HeadlessPort.get_row_text(port, 0)
+      row0 = HeadlessPort.get_row_text(port, 0)
       assert String.contains?(row0, "Minga")
     end
   end

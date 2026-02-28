@@ -177,11 +177,9 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call(:get_screen_text, _from, state) do
     text =
-      state.grid
-      |> Enum.map(fn row ->
+      Enum.map(state.grid, fn row ->
         row
-        |> Enum.map(& &1.char)
-        |> Enum.join()
+        |> Enum.map_join(& &1.char)
         |> String.trim_trailing()
       end)
 
@@ -204,8 +202,7 @@ defmodule Minga.Test.HeadlessPort do
     text =
       state.grid
       |> Enum.at(row, [])
-      |> Enum.map(& &1.char)
-      |> Enum.join()
+      |> Enum.map_join(& &1.char)
       |> String.trim_trailing()
 
     {:reply, text, state}
@@ -299,12 +296,9 @@ defmodule Minga.Test.HeadlessPort do
         text
         |> String.graphemes()
         |> Enum.with_index(col)
+        |> Enum.filter(fn {_char, c} -> c < state.width end)
         |> Enum.reduce(grid_row, fn {char, c}, acc ->
-          if c < state.width do
-            List.replace_at(acc, c, %{char: char, fg: fg, bg: bg, attrs: attrs})
-          else
-            acc
-          end
+          List.replace_at(acc, c, %{char: char, fg: fg, bg: bg, attrs: attrs})
         end)
 
       %{state | grid: List.replace_at(state.grid, row, new_row)}

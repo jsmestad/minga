@@ -1022,22 +1022,8 @@ defmodule Minga.Editor do
     {line, col} = BufferServer.cursor(buf)
 
     case BufferServer.get_lines(buf, line, 1) do
-      [text] ->
-        spaces = count_leading_spaces(text)
-        to_remove = min(spaces, 2)
-
-        if to_remove > 0 do
-          BufferServer.move_to(buf, {line, 0})
-
-          for _ <- 1..to_remove do
-            BufferServer.delete_at(buf)
-          end
-
-          BufferServer.move_to(buf, {line, max(0, col - to_remove)})
-        end
-
-      _ ->
-        :ok
+      [text] -> dedent_single_line(buf, line, col, text)
+      _ -> :ok
     end
 
     state
@@ -1562,19 +1548,17 @@ defmodule Minga.Editor do
     modeline_row = viewport.rows - 2
 
     modeline_commands =
-      render_modeline(
-        modeline_row,
-        viewport.cols,
-        state.mode,
-        state.mode_state,
-        file_name,
-        dirty_marker,
-        cursor_line,
-        cursor_col,
-        line_count,
-        buf_index,
-        buf_count
-      )
+      render_modeline(modeline_row, viewport.cols, %{
+        mode: state.mode,
+        mode_state: state.mode_state,
+        file_name: file_name,
+        dirty_marker: dirty_marker,
+        cursor_line: cursor_line,
+        cursor_col: cursor_col,
+        line_count: line_count,
+        buf_index: buf_index,
+        buf_count: buf_count
+      })
 
     # ── Minibuffer (row N-1) — command input or messages ──
     minibuffer_row = viewport.rows - 1
@@ -1734,6 +1718,15 @@ defmodule Minga.Editor do
     match_fg = 0xE5C07B
 
     # Item rows
+    picker_colors = %{
+      text_fg: text_fg,
+      highlight_fg: highlight_fg,
+      dim_fg: dim_fg,
+      bg: bg,
+      sel_bg: sel_bg,
+      match_fg: match_fg
+    }
+
     item_commands =
       visible
       |> Enum.with_index()
@@ -1743,69 +1736,15 @@ defmodule Minga.Editor do
         if row < 0 or row >= viewport.rows do
           []
         else
-          is_selected = idx == selected_offset
-          fg = if is_selected, do: highlight_fg, else: text_fg
-          row_bg = if is_selected, do: sel_bg, else: bg
-
-          # Label on the left, description on the right (dimmed, truncated)
-          label_text = " " <> label
-          avail_for_desc = max(0, viewport.cols - String.length(label_text) - 2)
-
-          desc_display =
-            if desc != "" and avail_for_desc > 10,
-              do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
-              else: ""
-
-          # Background fill for the row
-          row_text =
-            label_text <>
-              String.duplicate(
-                " ",
-                max(
-                  1,
-                  viewport.cols - String.length(label_text) - String.length(desc_display) - 1
-                )
-              ) <>
-              desc_display <> " "
-
-          row_text = String.slice(row_text, 0, viewport.cols)
-
-          bg_cmd =
-            Protocol.encode_draw(row, 0, String.pad_trailing(row_text, viewport.cols),
-              fg: fg,
-              bg: row_bg,
-              bold: is_selected
-            )
-
-          # Compute match positions in label and render highlighted characters
-          match_positions = Picker.match_positions(label, picker.query)
-
-          highlight_cmds =
-            if match_positions != [] do
-              label_graphemes = String.graphemes(label)
-
-              Enum.flat_map(match_positions, fn pos ->
-                if pos < length(label_graphemes) do
-                  char = Enum.at(label_graphemes, pos)
-                  # +1 for the leading space in label_text
-                  [Protocol.encode_draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)]
-                else
-                  []
-                end
-              end)
-            else
-              []
-            end
-
-          desc_cmds =
-            if desc_display != "" do
-              desc_start = viewport.cols - String.length(desc_display) - 1
-              [Protocol.encode_draw(row, desc_start, desc_display, fg: dim_fg, bg: row_bg)]
-            else
-              []
-            end
-
-          [bg_cmd] ++ highlight_cmds ++ desc_cmds
+          render_picker_item(
+            row,
+            label,
+            desc,
+            idx == selected_offset,
+            picker.query,
+            viewport.cols,
+            picker_colors
+          )
         end
       end)
 
@@ -1824,7 +1763,81 @@ defmodule Minga.Editor do
     cursor_col = String.length(prompt_text)
     cursor_pos = {prompt_row, cursor_col}
 
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     {separator_cmd ++ item_commands ++ [prompt_cmd], cursor_pos}
+  end
+
+  # Renders a single picker item row with background, match highlights, and description.
+  @spec render_picker_item(
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          boolean(),
+          String.t(),
+          pos_integer(),
+          map()
+        ) :: [binary()]
+  defp render_picker_item(row, label, desc, is_selected, query, cols, colors) do
+    fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
+    row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
+
+    label_text = " " <> label
+    avail_for_desc = max(0, cols - String.length(label_text) - 2)
+
+    desc_display =
+      if desc != "" and avail_for_desc > 10,
+        do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
+        else: ""
+
+    row_text =
+      label_text <>
+        String.duplicate(
+          " ",
+          max(1, cols - String.length(label_text) - String.length(desc_display) - 1)
+        ) <> desc_display <> " "
+
+    row_text = String.slice(row_text, 0, cols)
+
+    bg_cmd =
+      Protocol.encode_draw(row, 0, String.pad_trailing(row_text, cols),
+        fg: fg,
+        bg: row_bg,
+        bold: is_selected
+      )
+
+    highlight_cmds = render_match_highlights(row, label, query, colors.match_fg, row_bg)
+
+    desc_cmds =
+      if desc_display != "" do
+        desc_start = cols - String.length(desc_display) - 1
+        [Protocol.encode_draw(row, desc_start, desc_display, fg: colors.dim_fg, bg: row_bg)]
+      else
+        []
+      end
+
+    [bg_cmd | highlight_cmds] ++ desc_cmds
+  end
+
+  # Renders highlighted characters for fuzzy match positions in a picker label.
+  @spec render_match_highlights(
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_match_highlights(row, label, query, match_fg, row_bg) do
+    match_positions = Picker.match_positions(label, query)
+
+    label_graphemes = String.graphemes(label)
+    label_len = Enum.count(label_graphemes)
+
+    match_positions
+    |> Enum.filter(&(&1 < label_len))
+    |> Enum.map(fn pos ->
+      char = Enum.at(label_graphemes, pos)
+      Protocol.encode_draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)
+    end)
   end
 
   # ── Doom-style modeline ──────────────────────────────────────────────────────
@@ -1849,150 +1862,76 @@ defmodule Minga.Editor do
   @separator ""
   # @separator_thin ""
 
-  @spec render_modeline(
-          non_neg_integer(),
-          pos_integer(),
-          Mode.mode(),
-          Mode.state(),
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          pos_integer(),
-          non_neg_integer()
-        ) :: [binary()]
-  defp render_modeline(
-         row,
-         cols,
-         mode,
-         mode_state,
-         file_name,
-         dirty_marker,
-         cursor_line,
-         cursor_col,
-         line_count,
-         buf_index,
-         buf_count
-       ) do
-    # Segment colors
-    {mode_fg, mode_bg} = Map.get(@mode_colors, mode, {0x000000, 0x51AFEF})
+  @typedoc "Data for rendering the modeline."
+  @type modeline_data :: %{
+          mode: Mode.mode(),
+          mode_state: Mode.state(),
+          file_name: String.t(),
+          dirty_marker: String.t(),
+          cursor_line: non_neg_integer(),
+          cursor_col: non_neg_integer(),
+          line_count: non_neg_integer(),
+          buf_index: pos_integer(),
+          buf_count: non_neg_integer()
+        }
+
+  @spec render_modeline(non_neg_integer(), pos_integer(), modeline_data()) :: [binary()]
+  defp render_modeline(row, cols, data) do
+    {mode_fg, mode_bg} = Map.get(@mode_colors, data.mode, {0x000000, 0x51AFEF})
     bar_fg = 0xBBC2CF
     bar_bg = 0x23272E
     info_fg = 0xBBC2CF
     info_bg = 0x3F444A
 
-    # ── Left segments ──
+    # Build segments
+    mode_segment = " #{mode_badge(data.mode, data.mode_state)} "
+    buf_indicator = if data.buf_count > 1, do: " [#{data.buf_index}/#{data.buf_count}]", else: ""
+    file_segment = " #{data.file_name}#{data.dirty_marker}#{buf_indicator} "
 
-    # 1. Mode badge
-    mode_text = mode_badge(mode, mode_state)
-    mode_segment = " #{mode_text} "
-
-    # 2. Separator: mode → info
-    sep1 = @separator
-
-    # 3. File info segment (with buffer indicator when multiple buffers)
-    buf_indicator = if buf_count > 1, do: " [#{buf_index}/#{buf_count}]", else: ""
-    file_segment = " #{file_name}#{dirty_marker}#{buf_indicator} "
-
-    # 4. Separator: info → bar
-    sep2 = @separator
-
-    # ── Right segments ──
-
-    # Position info
     percent =
-      if line_count <= 1,
+      if data.line_count <= 1,
         do: "Top",
-        else: "#{div(cursor_line * 100, max(line_count - 1, 1))}%%"
+        else: "#{div(data.cursor_line * 100, max(data.line_count - 1, 1))}%%"
 
-    pos_segment = " #{cursor_line + 1}:#{cursor_col + 1} "
+    pos_segment = " #{data.cursor_line + 1}:#{data.cursor_col + 1} "
     pct_segment = " #{percent} "
 
-    # Separator: bar → info (right side)
-    sep3 = @separator
-    # Separator: info → accent (right side)
-    sep4 = @separator
-
-    # ── Build draw commands ──
-    # Left side
-    left_col = 0
-
-    commands = [
-      Protocol.encode_draw(row, left_col, mode_segment, fg: mode_fg, bg: mode_bg, bold: true)
+    # Build draw commands as a list of {text, fg, bg, opts} segments,
+    # then lay them out left-to-right.
+    left_segments = [
+      {mode_segment, mode_fg, mode_bg, bold: true},
+      {@separator, mode_bg, info_bg, []},
+      {file_segment, info_fg, info_bg, []},
+      {@separator, info_bg, bar_bg, []}
     ]
 
-    left_col = left_col + String.length(mode_segment)
+    right_segments = [
+      {@separator, info_bg, bar_bg, []},
+      {pos_segment, info_fg, info_bg, []},
+      {@separator, mode_bg, info_bg, []},
+      {pct_segment, mode_fg, mode_bg, bold: true}
+    ]
 
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, sep1, fg: mode_bg, bg: info_bg)
-        ]
+    left_width =
+      Enum.reduce(left_segments, 0, fn {text, _, _, _}, acc -> acc + String.length(text) end)
 
-    left_col = left_col + String.length(sep1)
+    right_width =
+      Enum.reduce(right_segments, 0, fn {text, _, _, _}, acc -> acc + String.length(text) end)
 
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, file_segment, fg: info_fg, bg: info_bg)
-        ]
+    fill_width = max(0, cols - left_width - right_width)
 
-    left_col = left_col + String.length(file_segment)
+    all_segments =
+      left_segments ++
+        [{String.duplicate(" ", fill_width), bar_fg, bar_bg, []}] ++
+        right_segments
 
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, sep2, fg: info_bg, bg: bar_bg)
-        ]
+    {commands, _} =
+      Enum.reduce(all_segments, {[], 0}, fn {text, fg, bg, opts}, {cmds, col} ->
+        cmd = Protocol.encode_draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
+        {[cmd | cmds], col + String.length(text)}
+      end)
 
-    left_col = left_col + String.length(sep2)
-
-    # Fill middle with bar background
-    right_total =
-      String.length(sep3) + String.length(pos_segment) +
-        String.length(sep4) + String.length(pct_segment)
-
-    fill_width = max(0, cols - left_col - right_total)
-    fill = String.duplicate(" ", fill_width)
-
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, fill, fg: bar_fg, bg: bar_bg)
-        ]
-
-    left_col = left_col + fill_width
-
-    # Right side
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, sep3, fg: info_bg, bg: bar_bg)
-        ]
-
-    left_col = left_col + String.length(sep3)
-
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, pos_segment, fg: info_fg, bg: info_bg)
-        ]
-
-    left_col = left_col + String.length(pos_segment)
-
-    commands =
-      commands ++
-        [
-          Protocol.encode_draw(row, left_col, sep4, fg: mode_bg, bg: info_bg)
-        ]
-
-    left_col = left_col + String.length(sep4)
-
-    commands ++
-      [
-        Protocol.encode_draw(row, left_col, pct_segment, fg: mode_fg, bg: mode_bg, bold: true)
-      ]
+    Enum.reverse(commands)
   end
 
   @spec mode_badge(Mode.mode(), Mode.state()) :: String.t()
@@ -2096,16 +2035,18 @@ defmodule Minga.Editor do
   # Adds a new buffer to the list and makes it active.
   @spec add_buffer(state(), pid()) :: state()
   defp add_buffer(state, pid) do
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     buffers = state.buffers ++ [pid]
-    idx = length(buffers) - 1
+    idx = Enum.count(buffers) - 1
     %{state | buffers: buffers, active_buffer: idx, buffer: pid}
   end
 
   # Switches to the buffer at the given index.
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
-  defp switch_to_buffer(%{buffers: buffers} = state, idx) when length(buffers) > 0 do
-    idx = rem(idx, length(buffers))
-    idx = if idx < 0, do: idx + length(buffers), else: idx
+  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
+    len = Enum.count(buffers)
+    idx = rem(idx, len)
+    idx = if idx < 0, do: idx + len, else: idx
     pid = Enum.at(buffers, idx)
     %{state | active_buffer: idx, buffer: pid}
   end
@@ -2114,16 +2055,17 @@ defmodule Minga.Editor do
 
   # Switches to the next buffer (wraps around).
   @spec next_buffer(state()) :: state()
-  defp next_buffer(%{buffers: buffers, active_buffer: idx} = state) when length(buffers) > 1 do
-    switch_to_buffer(state, rem(idx + 1, length(buffers)))
+  defp next_buffer(%{buffers: [_, _ | _] = buffers, active_buffer: idx} = state) do
+    switch_to_buffer(state, rem(idx + 1, Enum.count(buffers)))
   end
 
   defp next_buffer(state), do: state
 
   # Switches to the previous buffer (wraps around).
   @spec prev_buffer(state()) :: state()
-  defp prev_buffer(%{buffers: buffers, active_buffer: idx} = state) when length(buffers) > 1 do
-    new_idx = if idx == 0, do: length(buffers) - 1, else: idx - 1
+  defp prev_buffer(%{buffers: [_, _ | _] = buffers, active_buffer: idx} = state) do
+    len = Enum.count(buffers)
+    new_idx = if idx == 0, do: len - 1, else: idx - 1
     switch_to_buffer(state, new_idx)
   end
 
@@ -2132,8 +2074,7 @@ defmodule Minga.Editor do
   # Removes the current buffer and switches to the next one.
   # If it's the last buffer, leaves the editor with no buffer.
   @spec remove_current_buffer(state()) :: state()
-  defp remove_current_buffer(%{buffers: buffers, active_buffer: idx} = state)
-       when length(buffers) > 0 do
+  defp remove_current_buffer(%{buffers: [_ | _] = buffers, active_buffer: idx} = state) do
     buf = Enum.at(buffers, idx)
     # Stop the buffer process
     if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
@@ -2145,7 +2086,7 @@ defmodule Minga.Editor do
         %{state | buffers: [], active_buffer: 0, buffer: nil}
 
       _ ->
-        new_idx = min(idx, length(new_buffers) - 1)
+        new_idx = min(idx, Enum.count(new_buffers) - 1)
         new_active = Enum.at(new_buffers, new_idx)
         %{state | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
     end
@@ -2277,7 +2218,7 @@ defmodule Minga.Editor do
   # Only applies to sources that declare preview?() = true.
   @spec maybe_preview_picker_selection(state()) :: state()
   defp maybe_preview_picker_selection(%{picker: picker, picker_source: source} = state) do
-    if Minga.Picker.Source.preview?(source) do
+    if Picker.Source.preview?(source) do
       case Picker.selected_item(picker) do
         nil -> state
         item -> source.on_select(item, state)
@@ -2412,6 +2353,52 @@ defmodule Minga.Editor do
     if char == up, do: String.downcase(char), else: up
   end
 
+  # Computes how many leading spaces will be removed from the cursor's line.
+  @spec cursor_line_spaces_to_remove(
+          pid(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line) do
+    if cursor_line >= start_line and cursor_line <= end_line do
+      case BufferServer.get_lines(buf, cursor_line, 1) do
+        [text] -> min(count_leading_spaces(text), 2)
+        _ -> 0
+      end
+    else
+      0
+    end
+  end
+
+  # Dedents a single line by up to 2 spaces (used by do_dedent_lines).
+  @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
+  defp dedent_line_at(buf, line) do
+    case BufferServer.get_lines(buf, line, 1) do
+      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), 2))
+      _ -> :ok
+    end
+  end
+
+  # Removes up to 2 leading spaces from a single line (used by :dedent_line command).
+  @spec dedent_single_line(pid(), non_neg_integer(), non_neg_integer(), String.t()) :: :ok
+  defp dedent_single_line(buf, line, col, text) do
+    to_remove = min(count_leading_spaces(text), 2)
+    remove_leading_spaces(buf, line, to_remove)
+    if to_remove > 0, do: BufferServer.move_to(buf, {line, max(0, col - to_remove)})
+    :ok
+  end
+
+  # Deletes `n` characters from the start of a line.
+  @spec remove_leading_spaces(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp remove_leading_spaces(_buf, _line, 0), do: :ok
+
+  defp remove_leading_spaces(buf, line, n) when n > 0 do
+    BufferServer.move_to(buf, {line, 0})
+    for _ <- 1..n, do: BufferServer.delete_at(buf)
+    :ok
+  end
+
   @spec count_leading_spaces(String.t()) :: non_neg_integer()
   defp count_leading_spaces(text) do
     text
@@ -2446,33 +2433,10 @@ defmodule Minga.Editor do
   defp do_dedent_lines(buf, start_line, end_line) do
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
 
-    # Compute how many spaces will be removed from the cursor's line for col adjustment
-    cursor_removed =
-      if cursor_line >= start_line and cursor_line <= end_line do
-        case BufferServer.get_lines(buf, cursor_line, 1) do
-          [text] -> min(count_leading_spaces(text), 2)
-          _ -> 0
-        end
-      else
-        0
-      end
+    cursor_removed = cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line)
 
     for line <- start_line..end_line do
-      case BufferServer.get_lines(buf, line, 1) do
-        [text] ->
-          to_remove = min(count_leading_spaces(text), 2)
-
-          if to_remove > 0 do
-            BufferServer.move_to(buf, {line, 0})
-
-            for _ <- 1..to_remove do
-              BufferServer.delete_at(buf)
-            end
-          end
-
-        _ ->
-          :ok
-      end
+      dedent_line_at(buf, line)
     end
 
     new_col = max(0, cursor_col - cursor_removed)

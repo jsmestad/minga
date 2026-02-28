@@ -179,7 +179,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Asserts that a screen row contains the expected text."
   defmacro assert_row_contains(ctx, row, expected) do
     quote do
-      row_text = Minga.Test.EditorCase.screen_row(unquote(ctx), unquote(row))
+      row_text = screen_row(unquote(ctx), unquote(row))
 
       assert String.contains?(row_text, unquote(expected)),
              "Expected row #{unquote(row)} to contain #{inspect(unquote(expected))}, got: #{inspect(row_text)}"
@@ -189,7 +189,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Asserts the modeline contains the expected text."
   defmacro assert_modeline_contains(ctx, expected) do
     quote do
-      ml = Minga.Test.EditorCase.modeline(unquote(ctx))
+      ml = modeline(unquote(ctx))
 
       assert String.contains?(ml, unquote(expected)),
              "Expected modeline to contain #{inspect(unquote(expected))}, got: #{inspect(ml)}"
@@ -199,7 +199,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Asserts the minibuffer contains the expected text."
   defmacro assert_minibuffer_contains(ctx, expected) do
     quote do
-      mb = Minga.Test.EditorCase.minibuffer(unquote(ctx))
+      mb = minibuffer(unquote(ctx))
 
       assert String.contains?(mb, unquote(expected)),
              "Expected minibuffer to contain #{inspect(unquote(expected))}, got: #{inspect(mb)}"
@@ -217,7 +217,7 @@ defmodule Minga.Test.EditorCase do
           :command -> "COMMAND"
         end
 
-      ml = Minga.Test.EditorCase.modeline(unquote(ctx))
+      ml = modeline(unquote(ctx))
 
       assert String.contains?(ml, badge),
              "Expected modeline to show #{badge} mode, got: #{inspect(ml)}"

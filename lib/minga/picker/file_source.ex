@@ -81,9 +81,9 @@ defmodule Minga.Picker.FileSource do
 
   @spec add_buffer(map(), pid()) :: map()
   defp add_buffer(state, pid) do
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     buffers = state.buffers ++ [pid]
-    idx = Enum.count(buffers) - 1
-    %{state | buffers: buffers, active_buffer: idx, buffer: pid}
+    %{state | buffers: buffers, active_buffer: Enum.count(buffers) - 1, buffer: pid}
   end
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()
