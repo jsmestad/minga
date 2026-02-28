@@ -18,6 +18,9 @@ defmodule Minga.Editor.State do
   alias Minga.Picker
   alias Minga.WhichKey
 
+  @typedoc "Identifies what kind of picker is currently open."
+  @type picker_kind :: :buffer | :find_file | nil
+
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
   defstruct buffer: nil,
             buffers: [],
@@ -31,6 +34,7 @@ defmodule Minga.Editor.State do
             show_whichkey: false,
             register: nil,
             picker: nil,
+            picker_kind: nil,
             picker_prev_buffer: nil,
             mouse_dragging: false
 
@@ -47,6 +51,7 @@ defmodule Minga.Editor.State do
           show_whichkey: boolean(),
           register: String.t() | nil,
           picker: Picker.t() | nil,
+          picker_kind: picker_kind(),
           picker_prev_buffer: non_neg_integer() | nil,
           mouse_dragging: boolean()
         }

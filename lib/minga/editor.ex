@@ -808,10 +808,8 @@ defmodule Minga.Editor do
     apply_text_object(state, modifier, spec, :yank)
   end
 
-  # Stub leader-bound commands — logged for discoverability, not yet implemented.
   defp execute_command(state, :find_file) do
-    Logger.debug("find_file: not yet implemented")
-    state
+    open_file_finder(state)
   end
 
   defp execute_command(state, :buffer_list) do
@@ -1494,26 +1492,82 @@ defmodule Minga.Editor do
         state
       end
 
-    %{new_state | picker: picker, picker_prev_buffer: active_idx}
+    %{new_state | picker: picker, picker_kind: :buffer, picker_prev_buffer: active_idx}
+  end
+
+  # ── File finder ──────────────────────────────────────────────────────────
+
+  @spec open_file_finder(state()) :: state()
+  defp open_file_finder(state) do
+    root = File.cwd!()
+
+    case Minga.FileFind.list_files(root) do
+      {:ok, paths} ->
+        items =
+          Enum.map(paths, fn path ->
+            {path, Path.basename(path), path}
+          end)
+
+        picker = Picker.new(items, title: "Find file", max_visible: 10)
+
+        # Clear whichkey state if active
+        new_state =
+          if state.whichkey_timer do
+            WhichKey.cancel_timeout(state.whichkey_timer)
+            %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
+          else
+            state
+          end
+
+        %{new_state | picker: picker, picker_kind: :find_file, picker_prev_buffer: state.active_buffer}
+
+      {:error, msg} ->
+        Logger.error("find_file: #{msg}")
+        state
+    end
   end
 
   @spec handle_picker_key(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_picker_key(%{picker: _picker} = state, @escape, _mods) do
     # Cancel: restore previous buffer
     case state.picker_prev_buffer do
-      nil -> %{state | picker: nil, picker_prev_buffer: nil}
-      idx -> %{switch_to_buffer(state, idx) | picker: nil, picker_prev_buffer: nil}
+      nil -> close_picker(state)
+      idx -> close_picker(switch_to_buffer(state, idx))
+    end
+  end
+
+  defp handle_picker_key(%{picker: picker, picker_kind: :find_file} = state, @enter, _mods) do
+    case Picker.selected_id(picker) do
+      nil ->
+        close_picker(state)
+
+      rel_path ->
+        abs_path = Path.expand(rel_path)
+        new_state = close_picker(state)
+
+        case find_buffer_by_path(new_state, abs_path) do
+          nil ->
+            case start_buffer(abs_path) do
+              {:ok, pid} -> add_buffer(new_state, pid)
+              {:error, reason} ->
+                Logger.error("Failed to open file: #{inspect(reason)}")
+                new_state
+            end
+
+          idx ->
+            switch_to_buffer(new_state, idx)
+        end
     end
   end
 
   defp handle_picker_key(%{picker: picker} = state, @enter, _mods) do
-    # Select: switch to the selected buffer
+    # Default (buffer picker): switch to the selected buffer
     case Picker.selected_id(picker) do
       nil ->
-        %{state | picker: nil, picker_prev_buffer: nil}
+        close_picker(state)
 
       idx ->
-        %{switch_to_buffer(state, idx) | picker: nil, picker_prev_buffer: nil}
+        close_picker(switch_to_buffer(state, idx))
     end
   end
 
@@ -1564,8 +1618,17 @@ defmodule Minga.Editor do
   # Ignore all other keys
   defp handle_picker_key(state, _cp, _mods), do: state
 
-  # Preview: temporarily switch to the selected buffer's content
+  # Closes the picker and resets picker-related state.
+  @spec close_picker(state()) :: state()
+  defp close_picker(state) do
+    %{state | picker: nil, picker_kind: nil, picker_prev_buffer: nil}
+  end
+
+  # Preview: temporarily switch to the selected buffer's content.
+  # Only applies to buffer pickers — file finder doesn't preview.
   @spec maybe_preview_picker_selection(state()) :: state()
+  defp maybe_preview_picker_selection(%{picker_kind: :find_file} = state), do: state
+
   defp maybe_preview_picker_selection(%{picker: picker} = state) do
     case Picker.selected_id(picker) do
       nil -> state
