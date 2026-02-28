@@ -216,6 +216,7 @@ defmodule Minga.RenderTest do
 
       # Cells 0-2 should be selected (reverse)
       selected_cells = Enum.slice(row, 0, 3)
+
       assert Enum.all?(selected_cells, fn cell -> :reverse in cell.attrs end),
              "Expected cells 0-2 to have :reverse attribute"
     end
@@ -232,6 +233,7 @@ defmodule Minga.RenderTest do
 
       # Row 0 should no longer show "line 0"
       row0 = screen_row(ctx, 0)
+
       refute String.contains?(row0, "line 0"),
              "Expected line 0 to have scrolled off, got: #{inspect(row0)}"
 

@@ -31,7 +31,8 @@ defmodule Minga.Editor.State do
             show_whichkey: false,
             register: nil,
             picker: nil,
-            picker_prev_buffer: nil
+            picker_prev_buffer: nil,
+            mouse_dragging: false
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -46,6 +47,7 @@ defmodule Minga.Editor.State do
           show_whichkey: boolean(),
           register: String.t() | nil,
           picker: Picker.t() | nil,
-          picker_prev_buffer: non_neg_integer() | nil
+          picker_prev_buffer: non_neg_integer() | nil,
+          mouse_dragging: boolean()
         }
 end

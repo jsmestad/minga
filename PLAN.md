@@ -1,219 +1,327 @@
-# Plan: Minga — BEAM-Powered Modal Editor
+# Plan: Mouse Support (Scroll + Click + Drag Selection)
 
 ## Goal
 
-Build a usable modal text editor with Doom Emacs-style keybindings and which-key
-discovery, running on the BEAM with a Zig terminal renderer. Opens files, edits
-with Vim-style modal input, provides leader key sequences with which-key popups,
-and saves — all with full fault isolation between editor logic and terminal
-rendering.
+Add comprehensive mouse support to Minga: scroll wheel navigation,
+click-to-position cursor placement, and drag-to-select text, matching standard
+terminal editor behavior.
 
-## Architecture
+## Context
 
-Two OS processes, fully isolated:
+### Current Architecture
+- **Zig side** (`main.zig`): libvaxis parses terminal input via `/dev/tty`. The
+  `handleTtyEvent` function currently handles `key_press` events and forwards
+  them over the Port protocol. Mouse events are explicitly ignored with the
+  comment: *"We don't forward mouse / focus / paste to BEAM in this MVP."*
+- **Protocol** (`protocol.zig` / `protocol.ex`): Three input opcodes exist
+  (0x01 key_press, 0x02 resize, 0x03 ready). No mouse opcode.
+- **BEAM side** (`editor.ex`): Handles `{:minga_input, {:key_press, ...}}`
+  messages. Already has `:half_page_up`/`:half_page_down` commands and
+  `Viewport.scroll_to_cursor/2` logic. `BufferServer.move_to/2` allows
+  absolute cursor positioning.
+- **Visual mode** already exists with `visual_anchor`, characterwise/linewise
+  selection, highlight rendering, and yank/delete-on-selection commands.
+- **libvaxis** provides full mouse support via `vaxis.Event.mouse` with a
+  `Mouse` struct: `col: i16`, `row: i16`, `button` enum (including
+  `wheel_up`/`wheel_down`/`wheel_left`/`wheel_right`, `left`/`middle`/`right`),
+  `mods` (shift/alt/ctrl), `type` enum (press/release/motion/drag).
+- Mouse mode must be explicitly enabled via `vx.setMouseMode(tty.writer(), true)`.
 
-- **BEAM (Elixir)**: Buffer state, modal FSM, keybinding dispatch, command
-  execution, layout computation. Zero NIFs.
-- **Zig (libvaxis)**: Terminal ownership, raw input capture, screen rendering.
-  Runs as a BEAM Port. If it crashes, the supervisor restarts it and re-renders
-  — no data loss.
+### Design Decisions
 
-```
-┌─────────────────────────┐        Port (stdin/stdout)         ┌──────────────────────┐
-│     BEAM (Elixir)       │ ◄─── input events (keys, mouse) ── │    Zig (libvaxis)    │
-│                         │                                    │                      │
-│  Buffer (GenServer)     │ ── render commands (draw, etc.) ──►│  Terminal ownership  │
-│  Mode FSM               │                                    │  Raw mode / input    │
-│  Keymap (trie)          │                                    │  Screen rendering    │
-│  Command registry       │                                    │  Floating panels     │
-│  Which-Key              │                                    └──────────────────────┘
-│  Editor (orchestration) │
-│  Port Manager           │
-│  Supervisor (Stamm)     │
-└─────────────────────────┘
-```
+1. **Single general mouse opcode** (`0x04`) — carries row, col, button,
+   modifiers, and event type. Covers scroll, click, and drag with one opcode.
 
-### Technology Choices
+2. **Click-to-position in all editing modes** — left click moves cursor to
+   the clicked buffer position (accounting for viewport offset). In Visual
+   mode, click cancels selection and returns to Normal. In Insert mode,
+   click moves cursor and stays in Insert (VS Code behavior). In Command
+   mode, click cancels command and returns to Normal. Clicks on
+   modeline/minibuffer rows are ignored.
 
-| Component | Choice | Why |
-|-----------|--------|-----|
-| Buffer | Pure Elixir gap buffer | Simple, zero deps, fast enough for MVP |
-| TUI | libvaxis via Zig Port | Proven (Flow editor, Ghostty), full-featured, fault-isolated |
-| Types | Elixir 1.19 `@spec`/`@type` everywhere | Set-theoretic inference catches bugs at compile time |
-| Protocol | Length-prefixed binary over Port stdin/stdout | Zig uses `/dev/tty` for terminal I/O |
-| Packaging | Burrito | Single self-extracting binary, bundles ERTS + Zig renderer |
-| Testing | ExUnit + StreamData + Zig test | Unit, property-based, and Zig-side tests |
-| Linting | Credo (strict) + Dialyxir + mix format | Enforced in CI |
-| CI/CD | GitHub Actions | Lint/test/dialyzer on PR, Burrito builds on tag |
+3. **Scroll wheel** — scrolls viewport by 3 lines per tick (configurable
+   constant). Cursor is repositioned if it falls outside the viewport.
 
-### Terminal I/O vs Port I/O
+4. **Drag-to-select** — left press sets anchor and enters Visual mode
+   (characterwise). Drag events update cursor position, extending the
+   selection. Release finalizes the selection, leaving the user in Visual
+   mode to yank/delete/operate. This reuses the existing Visual mode
+   machinery — no new rendering or selection logic needed.
 
-libvaxis opens `/dev/tty` directly for terminal input/output (standard pattern
-for TUI programs that need stdin/stdout free — same as `fzf`, `dialog`). The
-Port protocol uses stdin/stdout exclusively for BEAM⟷Zig communication.
+## Approach
 
-### Port Protocol
+Add a general `mouse_event` input opcode (0x04) to the Port protocol carrying
+the full mouse event data. On the Zig side, enable mouse mode and forward all
+mouse events. On the BEAM side, decode and handle scroll wheel, left-click,
+and left-drag events.
 
-Simple binary opcodes — not ETF:
+### Alternatives Considered
 
-```
-Message = <<length::32-big, opcode::8, payload::binary>>
+1. **Separate opcodes per mouse action** (0x04 scroll, 0x05 click, 0x06 drag)
+   — More specific but creates protocol bloat. A single opcode with typed
+   fields is simpler and equally extensible.
 
-Input events (Zig → BEAM):
-  0x01 key_press:  <<0x01, codepoint::32, modifiers::8>>
-  0x02 resize:     <<0x02, width::16, height::16>>
-  0x03 ready:      <<0x03, width::16, height::16>>
+2. **Translate scroll/click to key events in Zig** — Avoids protocol changes
+   but loses mouse position data and makes Zig responsible for editor
+   semantics it shouldn't own.
 
-Render commands (BEAM → Zig):
-  0x10 draw_text:        <<0x10, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
-  0x11 set_cursor:       <<0x11, row::16, col::16>>
-  0x12 clear:            <<0x12>>
-  0x13 batch_end:        <<0x13>>
-  0x14 draw_panel:       <<0x14, row::16, col::16, width::16, height::16,
-                           border::8, content_len::16, content::binary>>
-  0x15 set_cursor_shape: <<0x15, shape::8>>
+3. **Custom mouse selection (not Visual mode)** — Some editors track mouse
+   selection separately from keyboard selection. Reusing Visual mode means
+   mouse and keyboard selections are interchangeable — user can start with
+   mouse, extend with keyboard, operate with either. Simpler and more
+   powerful.
 
-Cursor shapes: BLOCK=0x00, BEAM=0x01, UNDERLINE=0x02
+## Steps
 
-Modifier flags: SHIFT=0x01, CTRL=0x02, ALT=0x04, SUPER=0x08
-Style attrs:    BOLD=0x01, ITALIC=0x02, UNDERLINE=0x04, REVERSE=0x08
-```
+### 1. Add mouse_event opcode to Port protocol (both sides)
 
-### Supervision Tree
+- **Files**: `lib/minga/port/protocol.ex`, `zig/src/protocol.zig`
+- **Changes**:
+  - New opcode `0x04 mouse_event`:
+    ```
+    <<0x04, row::16-signed, col::16-signed, button::8, modifiers::8, event_type::8>>
+    ```
+  - Button values (matching libvaxis):
+    - `0x00` left, `0x01` middle, `0x02` right, `0x03` none
+    - `0x40` wheel_up, `0x41` wheel_down, `0x42` wheel_right, `0x43` wheel_left
+    - `0x80..0x83` button_8 through button_11
+  - Event type: `0x00` press, `0x01` release, `0x02` motion, `0x03` drag
+  - Modifier flags: same bitmask as key events (SHIFT=0x01, CTRL=0x02, etc.)
+  - Elixir: Add `@op_mouse_event 0x04`, decode clause returning
+    `{:mouse_event, row, col, button, modifiers, event_type}` with atom
+    conversions for button and type
+  - Elixir: Add `@type mouse_button`, `@type mouse_event_type` types
+  - Zig: Add `OP_MOUSE_EVENT = 0x04`, `encodeMouseEvent(buf, row, col, button, mods, event_type)`
+  - Add encode/decode tests on both sides
 
-```
-Minga.Supervisor (rest_for_one)
-├── Minga.Buffer.Supervisor (DynamicSupervisor)
-├── Minga.Port.Manager
-└── Minga.Editor
-```
+### 2. Enable mouse mode and forward events in Zig
 
-`rest_for_one`: if Port Manager crashes, Editor restarts too (depends on
-renderer). Buffer processes survive independently.
+- **Files**: `zig/src/main.zig`
+- **Changes**:
+  - After entering alt screen, call `vx.setMouseMode(tty.writer(), true)`
+  - In `handleTtyEvent`, add a `.mouse` arm:
+    - Map libvaxis `Mouse.Button` to protocol button byte
+    - Map libvaxis `Mouse.Type` to protocol event type byte
+    - Map libvaxis `Mouse.Modifiers` to protocol modifier bitmask
+    - Encode via `protocol.encodeMouseEvent()` and write to stdout
+  - All mouse events are forwarded (BEAM side decides what to ignore)
+
+### 3. Handle mouse scroll events in the Editor
+
+- **Files**: `lib/minga/editor.ex`
+- **Changes**:
+  - Add `handle_info({:minga_input, {:mouse_event, ...}}, state)` clause
+  - Define `@scroll_lines 3` module attribute
+  - For `wheel_up`/`wheel_down` button with `:press` type:
+    - Scroll viewport by `@scroll_lines` lines using `page_move/3`
+    - If cursor is now outside visible viewport, clamp it to nearest visible row
+    - Re-render
+  - Works in all modes (scroll doesn't change mode state)
+  - Ignore `wheel_left`/`wheel_right` for now (horizontal scroll is rare)
+
+### 4. Handle click-to-position in the Editor
+
+- **Files**: `lib/minga/editor.ex`
+- **Changes**:
+  - For `left` button with `:press` type (and NOT followed by drag — see step 5):
+    - Calculate buffer position: `{row + viewport.top, col + viewport.left}`
+    - Ignore clicks on modeline row (`viewport.rows - 2`) or minibuffer row
+      (`viewport.rows - 1`)
+    - Ignore clicks beyond the last buffer line (tilde `~` rows)
+    - Clamp column to line length
+    - Call `BufferServer.move_to(buf, {target_line, target_col})`
+    - In `:visual` mode: cancel selection, transition to `:normal`, reset
+      mode_state
+    - In `:normal` mode: just move cursor
+    - In `:insert` mode: move cursor, stay in insert mode
+    - In `:command` mode: cancel command, return to normal, then position
+    - Re-render
+  - For `middle`/`right` button: ignore (future: context menu, paste)
+
+### 5. Handle drag-to-select in the Editor
+
+- **Files**: `lib/minga/editor.ex`, `lib/minga/editor/state.ex` (if exists,
+  otherwise inline in editor.ex)
+- **Changes**:
+  - Add `mouse_dragging: boolean()` field to editor state (default `false`)
+  - **Left press** (refined from step 4):
+    - Calculate buffer position (same coordinate math as click)
+    - Ignore presses on modeline/minibuffer/tilde rows
+    - Move cursor to clicked position
+    - Set `mouse_dragging: true`
+    - If not already in visual mode: transition to `:visual` mode, set
+      `visual_anchor` to clicked position, `visual_type: :char`
+    - If already in visual mode: update `visual_anchor` to clicked position
+      (start a fresh selection from the click point)
+  - **Left drag** (event_type `:drag`):
+    - Only process if `mouse_dragging` is true
+    - Calculate buffer position from drag row/col
+    - Clamp to valid buffer bounds (same validation as click)
+    - Move cursor to drag position via `BufferServer.move_to/2`
+    - Visual mode highlight updates automatically on re-render (selection
+      spans from `visual_anchor` to current cursor)
+    - **Edge auto-scroll**: if drag row is 0, scroll viewport up by 1 line;
+      if drag row is `content_rows - 1`, scroll viewport down by 1 line
+    - Re-render
+  - **Left release** (event_type `:release`):
+    - Set `mouse_dragging: false`
+    - If anchor == cursor (click without drag, i.e. no movement): transition
+      back to `:normal` mode (this was just a click, not a selection)
+    - If anchor != cursor: stay in `:visual` mode — user can now `y`, `d`,
+      `c`, or press `Escape` to cancel
+    - Re-render
+  - **Mode interaction**:
+    - If in `:command` mode when drag starts: cancel command, enter visual
+    - If in `:insert` mode when drag starts: exit insert, enter visual
+    - If in `:normal` mode when drag starts: enter visual (most common case)
+    - If in `:visual` mode when drag starts: restart selection from new anchor
+
+### 6. Add tests
+
+- **Files**: `test/minga/port/protocol_test.exs`, `test/minga/editor_test.exs`
+- **Changes**:
+  - **Protocol (Elixir)**:
+    - Decode mouse_event with left click (press)
+    - Decode mouse_event with wheel_up/wheel_down
+    - Decode mouse_event with drag event type
+    - Decode mouse_event with release event type
+    - Decode mouse_event with all modifier flags
+    - Decode mouse_event with negative row/col (signed encoding)
+    - Decode truncated mouse_event → malformed
+    - Round-trip: decode what Zig would encode
+  - **Protocol (Zig)**:
+    - `encodeMouseEvent` byte layout verification
+    - Buffer too small → error
+    - All button types encode correctly
+    - All event types encode correctly
+    - Signed row/col encoding (negative values)
+  - **Editor — Scroll**:
+    - Mouse scroll down moves viewport down by 3 lines
+    - Mouse scroll up moves viewport up by 3 lines
+    - Mouse scroll at top of file doesn't go negative
+    - Mouse scroll at bottom of file clamps to last line
+    - Mouse scroll doesn't change mode
+    - Mouse scroll clamps cursor when it leaves viewport
+  - **Editor — Click**:
+    - Left click in content area moves cursor to clicked position
+    - Left click accounts for viewport scroll offset
+    - Left click on modeline/minibuffer row is ignored
+    - Left click on tilde row (beyond buffer end) is ignored
+    - Left click clamps column to line length
+    - Left click in visual mode cancels selection, returns to normal
+    - Left click in command mode cancels command, returns to normal
+    - Left click in insert mode moves cursor, stays in insert
+  - **Editor — Drag**:
+    - Left press + drag creates characterwise visual selection
+    - Drag updates cursor while anchor stays fixed
+    - Release after drag keeps visual selection active
+    - Release without movement (click) returns to normal mode
+    - Drag from normal mode enters visual mode
+    - Drag from insert mode exits insert, enters visual
+    - Drag clamps to buffer bounds
+    - Drag near viewport edge triggers auto-scroll
+
+## Testing
+
+- `mix test --warnings-as-errors` — all existing + new Elixir tests pass
+- `zig build test` — all existing + new Zig protocol tests pass
+- `mix lint` — no warnings, format + credo clean
+- Manual: open a long file, scroll with wheel, click to reposition, drag to
+  select text, yank selection with `y`, verify in each mode
+
+## Risks & Open Questions
+
+1. **Mouse mode vs terminal copy/paste** — Enabling mouse mode captures mouse
+   events that would normally go to the terminal for text selection. Users hold
+   Shift to bypass (standard terminal behavior). May want a `:set mouse=`
+   toggle later.
+
+2. **Signed row/col from libvaxis** — `Mouse.col` and `Mouse.row` are `i16`
+   (can be negative with pixel mouse coordinates before translation). We use
+   signed encoding in the protocol; BEAM side should ignore events with
+   negative coordinates.
+
+3. **Scroll amount with high-resolution scroll** — Modern trackpads may send
+   many small scroll events. The 3-line multiplier might feel too fast. Could
+   add a debounce or make the multiplier configurable later.
+
+4. **Drag auto-scroll speed** — When dragging past the viewport edge, we
+   scroll 1 line per drag event. With fast mouse movement this may feel slow.
+   Could use a timer-based auto-scroll if this becomes an issue, but 1-line
+   per event is the simple starting point.
+
+5. **Drag across modeline/minibuffer** — If the user drags into the modeline
+   area, we clamp to the last content row rather than selecting modeline text.
+   This is correct but may feel slightly laggy if the cursor "sticks" at the
+   bottom.
+
+6. **Picker/which-key interaction** — When the picker is open, mouse events
+   are ignored (they go through the picker key handler which won't match).
+   When which-key popup is visible, a click dismisses it (existing leader
+   cancel logic). This falls out naturally from the current architecture.
 
 ---
 
-## Current Status
+## GitHub Ticket
 
-### ✅ Completed
+```markdown
+# Users can navigate and select with the mouse (scroll, click, drag)
 
-| # | Commit | What | Tests |
-|---|--------|------|-------|
-| 1 | Project scaffolding | Mix project, Zig project, custom compiler, GitHub repo | 1 |
-| 2 | Gap buffer | Pure Elixir gap buffer with Unicode support | 57 + 3 props |
-| 3 | Buffer GenServer | File I/O, dirty tracking, GenServer wrapper | 22 |
-| 4 | Port protocol | Binary encode/decode (Elixir + Zig) | 30 + Zig tests |
-| 5 | Port Manager | GenServer, subscriber pattern, supervision | 5 |
-| 6 | Editor + viewport | Orchestration, scrolling, render pipeline | 21 |
-| 7 | Zig renderer module | libvaxis draw calls, style support | Zig tests |
-| 8 | CLI entry point | `mix minga`, arg parsing | — |
-| 9 | Command registry + keymap trie | Agent registry, prefix tree | 37 |
-| 10 | Vim FSM | Normal/Insert modes, count prefix, mode display | 94 |
-| 11 | Motions + operators | word/line/doc motions, delete/change/yank | 59 |
-| 12 | Visual mode | Characterwise + linewise selection | 42 |
-| 13 | Command mode | `:w`, `:q`, `:wq`, `:q!`, `:e`, `:<N>` | 34 |
-| 14 | Which-key + leader keys | SPC leader, Doom-style bindings, popup data | 34 |
-| 15 | Text objects | `iw`/`aw`, quotes, parens, brackets | 50+ |
-| — | Tooling | Credo, Dialyxir, formatter, `mix lint` alias | — |
-| — | Burrito packaging | Single binary for macOS/Linux | — |
-| — | GitHub Actions | CI (lint/test/dialyzer) + release pipeline | — |
+**Type:** Feature
 
-**Total: 680 tests (621 Elixir + 3 properties + 59 Zig), 0 failures**
+## What
+Minga does not respond to mouse input. Users cannot scroll through files with
+the mouse wheel, click to reposition the cursor, or drag to select text —
+three foundational interactions expected in any text editor. All navigation
+and selection currently requires keyboard shortcuts.
 
-### ✅ Recently Completed (formerly critical/important gaps)
+## Why
+Mouse interactions are baseline expectations for terminal editors. Without
+them, Minga feels broken on first interaction, especially for users coming
+from VS Code, Sublime, or any GUI editor. This is a critical first-impression
+issue that affects every new user's evaluation of whether the editor is usable.
 
-| Item | What was done |
-|------|--------------|
-| Zig event loop | Full concurrent loop in `main.zig`: `/dev/tty` via libvaxis, poll() on stdin+tty, signal handlers (SIGWINCH/SIGTERM/SIGINT), panic handler with terminal restore |
-| Supervisor wiring | Port.Manager and Editor start conditionally via `Application.get_env(:minga, :start_editor)` |
-| Renderer validation | `renderer.zig` updated to match libvaxis 0.15 API: `writeCell(col, row, cell)`, `showCursor()`, arena allocator for grapheme lifetime management |
-| Terminal restoration | `defer vx.deinit()` + `defer tty.deinit()` + `vaxis.recover()` panic handler covers all exit paths |
-| Undo/redo | Snapshot stack in Buffer.Server (capped at 1000), `u` / `Ctrl+R` in Normal mode |
-| Paste | `p` (after) / `P` (before) in Normal mode, register stored in Editor state |
-| Integration test | `test/minga/integration_test.exs` — full pipeline: navigation, insert, delete, undo, command mode |
-| Zig test coverage | Expanded from 18 → 54 tests across protocol, renderer, and main |
-| Doom modeline + minibuffer | Two-row footer: powerline-style modeline with colored mode badge, filename, position; separate minibuffer for `:` commands |
-| Cursor shape per mode | New opcode `0x15 set_cursor_shape` — block in normal/visual, beam in insert; libvaxis `setCursorShape()` |
-| Headless testing harness | HeadlessPort (virtual screen capture) + EditorCase (helpers, assertions) for render-level testing in CI |
-| Multiple buffers | `:e <file>` opens/switches buffers, `SPC b n/p` cycle, `SPC b d` kill, `SPC b b` switch; modeline shows `[N/M]` indicator |
-| Mode state cleanup | Transitioning back to Normal mode from Command/Visual resets mode_state to ModeState (fixes leader keys after `:` commands) |
+## Acceptance Criteria
 
-### ✅ Manual testing complete
+### Scroll
+- Scrolling the mouse wheel down moves the viewport down (content scrolls up)
+- Scrolling the mouse wheel up moves the viewport up (content scrolls down)
+- Scroll speed feels natural (approximately 3 lines per wheel tick)
+- Scrolling works in all editor modes without changing the current mode
+- The cursor is repositioned into the viewport if scrolling moves it off-screen
 
-End-to-end manual testing passed: terminal raw/alternate screen, file rendering,
-hjkl navigation, insert mode, `:w`/`:q`, clean exit, Ctrl+C restoration.
-Port protocol framing works through real Erlang Port connection.
+### Click
+- Left-clicking in the text area moves the cursor to the clicked position
+- Click position correctly accounts for scrolled viewport (clicking row 5 when
+  scrolled to line 100 positions cursor at line 105)
+- Clicking on the modeline or minibuffer rows does not move the cursor
+- Clicking past the last line of the file does not move the cursor
+- Clicking in Visual mode cancels the selection and returns to Normal mode
+- Clicking in Command mode cancels the command and returns to Normal mode
+- Clicking in Insert mode moves the cursor without leaving Insert mode
 
-### 🟢 Post-V1 / V2
+### Drag Selection
+- Pressing and dragging the left mouse button selects text (highlighted)
+- The selection starts at the press position and extends to the current drag
+  position
+- Releasing the mouse button after dragging leaves the selection active
+  (user can yank, delete, or operate on it)
+- Releasing without moving (a simple click) does not leave a selection active
+- Dragging near the top or bottom edge of the viewport auto-scrolls
+- After a drag selection, keyboard Visual mode commands work on the selection
+  (y to yank, d to delete, Escape to cancel)
 
-- **Syntax highlighting** — tree-sitter via Zig
-- **Multiple windows / splits** — `SPC w v`, `SPC w s`
-- **File finder** — `SPC f f` (currently a stub)
-- **Buffer switcher** — `SPC b b` (currently a stub)
-- **LFE extension layer** — scripting/config in Lisp Flavored Erlang
-- **Rope data structure** — large file support
-- **Windows support** — libvaxis has Windows backend, needs `/dev/tty`
-  alternative and cross-compiled Zig binary
-- **Mouse support** — libvaxis supports it, needs protocol opcodes
-- **Search / replace** — `/pattern`, `:%s/old/new/g`
-- **Marks** — `m{a-z}`, `'{a-z}`
-- **Macros** — `q{a-z}`, `@{a-z}`
-- **Line numbers** — absolute + relative
-- **Soft wrap** — long lines
-- **Autoindent** — language-aware indentation
-- **GUI renderer** — second Zig binary (`minga-gui`) using WebGPU/wgpu or
-  similar, same Port protocol; zero Elixir changes needed
+### General
+- Holding Shift while clicking allows normal terminal text selection (standard
+  terminal behavior — handled by the terminal emulator, not Minga)
 
----
-
-## Alternatives Considered
-
-| Alternative | Why rejected |
-|-------------|-------------|
-| ExRatatui (Rust NIF) | NIF crash risk, contradicts fault-tolerance goals |
-| Ratatouille | Abandoned since 2020, built on abandoned ExTermbox |
-| Raw ANSI from Elixir | 2-3 weeks of terminal plumbing before building the actual editor |
-| JSON/msgpack protocol | Verbose or extra deps; simple binary opcodes are sufficient |
-| Rust instead of Zig | Heavier toolchain, no advantage for a rendering Port |
-| Rope NIF for buffer | Complexity; gap buffer is fast enough for normal files |
-
-## Risks
-
-1. **`/dev/tty` in libvaxis** — Unverified. If libvaxis can't open `/dev/tty`
-   directly, fallback is fd 3 via a wrapper script that does
-   `exec 3<>/dev/tty ./minga-renderer`.
-
-2. **Port `{:packet, 4}` framing** — Erlang adds 4-byte length headers
-   automatically. Zig side must match. Tested in protocol tests but not
-   end-to-end through a real Port.
-
-3. **Zig build caching with Mix** — Custom Mix compiler checks timestamps.
-   Works but could miss edge cases with Zig's dependency cache.
-
-4. **Burrito + Zig renderer architecture** — The Zig binary in `priv/`
-   is architecture-specific. Cross-platform releases need per-target Zig
-   builds, which is handled by building on native GitHub Actions runners.
-
----
-
-## Build & Run
-
-```bash
-# Development
-mix deps.get
-mix compile          # builds Elixir + Zig
-mix test             # runs all tests (--warnings-as-errors)
-mix lint             # format + credo + compile warnings
-mix dialyzer         # static type analysis
-
-# Run the editor (once Zig event loop is implemented)
-mix minga README.md
-
-# Build release binary
-MIX_ENV=prod mix release minga
-./burrito_out/minga_macos_aarch64 README.md
-
-# Tag a release (triggers GitHub Actions build)
-git tag v0.1.0
-git push --tags
+### Developer Notes
+- libvaxis provides mouse events via `vaxis.Event.mouse` — must call
+  `vx.setMouseMode(tty.writer(), true)` to enable
+- Single protocol opcode `0x04` carries full mouse event (row, col, button,
+  mods, type) — covers all three interactions with one opcode
+- Drag selection reuses the existing Visual mode machinery (visual_anchor,
+  characterwise selection, highlight rendering, yank/delete commands) —
+  no new rendering or selection logic needed
+- Mouse.row and Mouse.col are i16 (signed) — ignore negative values
 ```

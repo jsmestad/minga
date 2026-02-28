@@ -128,7 +128,8 @@ defmodule Minga.BufferPickerTest do
 
       # On buffer 2 (bbb). Open picker, move to item 1 (bbb), then Enter
       send_keys(ctx, "<SPC>bb")
-      send_key(ctx, ?j, 0x02)  # Move to index 1
+      # Move to index 1
+      send_key(ctx, ?j, 0x02)
       send_key(ctx, 13)
 
       # Should show bbb content (stayed on same buffer)
@@ -152,7 +153,8 @@ defmodule Minga.BufferPickerTest do
       # Open picker, navigate to buffer 1 (preview changes), then cancel
       send_keys(ctx, "<SPC>bb")
       send_key(ctx, ?j, 0x02)
-      send_key(ctx, 27)  # Escape
+      # Escape
+      send_key(ctx, 27)
 
       # Should restore original buffer (bbb)
       assert_row_contains(ctx, 0, "bbb content")

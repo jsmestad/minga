@@ -209,6 +209,82 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  # ── Mouse event encoding/decoding ──
+
+  describe "decode_event/1 — mouse_event" do
+    test "decodes left click press" do
+      # opcode 0x04, row=5, col=10, button=left(0x00), mods=0, type=press(0x00)
+      payload = <<0x04, 5::16-signed, 10::16-signed, 0x00, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, 5, 10, :left, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes wheel_up press" do
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0x40, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, 0, 0, :wheel_up, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes wheel_down press" do
+      payload = <<0x04, 3::16-signed, 7::16-signed, 0x41, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, 3, 7, :wheel_down, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes drag event" do
+      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x03>>
+      assert {:ok, {:mouse_event, 8, 15, :left, 0, :drag}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes release event" do
+      payload = <<0x04, 8::16-signed, 15::16-signed, 0x00, 0x00, 0x01>>
+      assert {:ok, {:mouse_event, 8, 15, :left, 0, :release}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes mouse event with modifier flags" do
+      mods = Bitwise.bor(Protocol.mod_ctrl(), Protocol.mod_shift())
+      payload = <<0x04, 2::16-signed, 4::16-signed, 0x00, mods::8, 0x00>>
+      assert {:ok, {:mouse_event, 2, 4, :left, ^mods, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes mouse event with negative row/col (signed)" do
+      payload = <<0x04, -1::16-signed, -5::16-signed, 0x00, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, -1, -5, :left, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes right click" do
+      payload = <<0x04, 1::16-signed, 1::16-signed, 0x02, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, 1, 1, :right, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes middle click" do
+      payload = <<0x04, 1::16-signed, 1::16-signed, 0x01, 0x00, 0x00>>
+      assert {:ok, {:mouse_event, 1, 1, :middle, 0, :press}} = Protocol.decode_event(payload)
+    end
+
+    test "unknown button value returns {:unknown, value}" do
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0xFF, 0x00, 0x00>>
+
+      assert {:ok, {:mouse_event, 0, 0, {:unknown, 0xFF}, 0, :press}} =
+               Protocol.decode_event(payload)
+    end
+
+    test "unknown event type returns {:unknown, value}" do
+      payload = <<0x04, 0::16-signed, 0::16-signed, 0x00, 0x00, 0xFF>>
+
+      assert {:ok, {:mouse_event, 0, 0, :left, 0, {:unknown, 0xFF}}} =
+               Protocol.decode_event(payload)
+    end
+
+    test "truncated mouse_event returns malformed" do
+      # Too short — missing event_type
+      assert {:error, :malformed} =
+               Protocol.decode_event(<<0x04, 0::16-signed, 0::16-signed, 0x00, 0x00>>)
+    end
+
+    test "mouse_event has correct byte layout" do
+      payload = <<0x04, 0::16-signed, 5::16-signed, 0x40, 0x02, 0x00>>
+      assert {:ok, {:mouse_event, 0, 5, :wheel_up, 0x02, :press}} = Protocol.decode_event(payload)
+    end
+  end
+
   describe "cursor shape round-trip" do
     test "encode/decode block cursor" do
       encoded = Protocol.encode_cursor_shape(:block)

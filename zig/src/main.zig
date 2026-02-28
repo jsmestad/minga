@@ -119,6 +119,9 @@ pub fn main() !void {
     // Alternate screen keeps existing terminal output intact.
     try vx.enterAltScreen(tty.writer());
 
+    // Enable mouse mode so we receive scroll, click, and drag events.
+    try vx.setMouseMode(tty.writer(), true);
+
     // ── Signal handlers ───────────────────────────────────────────────────────
 
     installSignalHandlers();
@@ -325,7 +328,38 @@ fn handleTtyEvent(vx: *vaxis.Vaxis, event: vaxis.Event, stdout: *std.Io.Writer) 
             vx.queries_done.store(true, .unordered);
         },
 
-        // We don't forward mouse / focus / paste to BEAM in this MVP.
+        .mouse => |mouse| {
+            var mods: u8 = 0;
+            if (mouse.mods.shift) mods |= protocol.MOD_SHIFT;
+            if (mouse.mods.ctrl) mods |= protocol.MOD_CTRL;
+            if (mouse.mods.alt) mods |= protocol.MOD_ALT;
+
+            const button: u8 = switch (mouse.button) {
+                .left => protocol.MOUSE_LEFT,
+                .middle => protocol.MOUSE_MIDDLE,
+                .right => protocol.MOUSE_RIGHT,
+                .none => protocol.MOUSE_NONE,
+                .wheel_up => protocol.MOUSE_WHEEL_UP,
+                .wheel_down => protocol.MOUSE_WHEEL_DOWN,
+                .wheel_right => protocol.MOUSE_WHEEL_RIGHT,
+                .wheel_left => protocol.MOUSE_WHEEL_LEFT,
+                else => return, // ignore button_8..button_11 etc.
+            };
+
+            const event_type: u8 = switch (mouse.type) {
+                .press => protocol.MOUSE_PRESS,
+                .release => protocol.MOUSE_RELEASE,
+                .motion => protocol.MOUSE_MOTION,
+                .drag => protocol.MOUSE_DRAG,
+            };
+
+            var mbuf: [8]u8 = undefined;
+            const mlen = try protocol.encodeMouseEvent(&mbuf, mouse.row, mouse.col, button, mods, event_type);
+            try protocol.writeMessage(stdout, mbuf[0..mlen]);
+            try stdout.flush();
+        },
+
+        // We don't forward focus / paste to BEAM yet.
         else => {},
     }
 }

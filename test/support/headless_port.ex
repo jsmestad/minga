@@ -224,7 +224,8 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   def handle_call(:reset, _from, state) do
-    {:reply, :ok, %{state | grid: blank_grid(state.width, state.height), cursor: {0, 0}, frame_count: 0}}
+    {:reply, :ok,
+     %{state | grid: blank_grid(state.width, state.height), cursor: {0, 0}, frame_count: 0}}
   end
 
   # ── send_commands — the core render capture ──
@@ -279,7 +280,15 @@ defmodule Minga.Test.HeadlessPort do
     end
   end
 
-  @spec draw_text(State.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), [atom()], String.t()) :: State.t()
+  @spec draw_text(
+          State.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [atom()],
+          String.t()
+        ) :: State.t()
   defp draw_text(state, row, col, fg, bg, attrs, text) do
     if row >= state.height do
       state

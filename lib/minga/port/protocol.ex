@@ -8,11 +8,12 @@ defmodule Minga.Port.Protocol do
 
   ## Input Events (Zig → BEAM)
 
-  | Opcode | Name      | Payload                              |
-  |--------|-----------|--------------------------------------|
-  | 0x01   | key_press | `codepoint::32, modifiers::8`        |
-  | 0x02   | resize    | `width::16, height::16`              |
-  | 0x03   | ready     | `width::16, height::16`              |
+  | Opcode | Name        | Payload                                                     |
+  |--------|-------------|-------------------------------------------------------------|
+  | 0x01   | key_press   | `codepoint::32, modifiers::8`                               |
+  | 0x02   | resize      | `width::16, height::16`                                     |
+  | 0x03   | ready       | `width::16, height::16`                                     |
+  | 0x04   | mouse_event | `row::16-signed, col::16-signed, button::8, mods::8, type::8` |
 
   ## Render Commands (BEAM → Zig)
 
@@ -40,6 +41,7 @@ defmodule Minga.Port.Protocol do
   @op_key_press 0x01
   @op_resize 0x02
   @op_ready 0x03
+  @op_mouse_event 0x04
 
   # Render commands (BEAM → Zig)
   @op_draw_text 0x10
@@ -60,16 +62,51 @@ defmodule Minga.Port.Protocol do
   @mod_alt 0x04
   @mod_super 0x08
 
+  # ── Mouse button values (matching libvaxis) ──
+
+  @mouse_left 0x00
+  @mouse_middle 0x01
+  @mouse_right 0x02
+  @mouse_none 0x03
+  @mouse_wheel_up 0x40
+  @mouse_wheel_down 0x41
+  @mouse_wheel_right 0x42
+  @mouse_wheel_left 0x43
+
+  # ── Mouse event types ──
+
+  @mouse_press 0x00
+  @mouse_release 0x01
+  @mouse_motion 0x02
+  @mouse_drag 0x03
+
   # ── Types ──
 
   @typedoc "Modifier flag bitmask."
   @type modifiers :: non_neg_integer()
+
+  @typedoc "Mouse button identifier."
+  @type mouse_button ::
+          :left
+          | :middle
+          | :right
+          | :none
+          | :wheel_up
+          | :wheel_down
+          | :wheel_right
+          | :wheel_left
+          | {:unknown, non_neg_integer()}
+
+  @typedoc "Mouse event type."
+  @type mouse_event_type :: :press | :release | :motion | :drag | {:unknown, non_neg_integer()}
 
   @typedoc "An input event decoded from Zig."
   @type input_event ::
           {:key_press, codepoint :: non_neg_integer(), modifiers()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
+          | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
+             mouse_event_type()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -160,8 +197,16 @@ defmodule Minga.Port.Protocol do
     {:ok, {:ready, width, height}}
   end
 
+  def decode_event(
+        <<@op_mouse_event, row::16-signed, col::16-signed, button::8, mods::8, event_type::8>>
+      ) do
+    {:ok,
+     {:mouse_event, row, col, decode_mouse_button(button), mods,
+      decode_mouse_event_type(event_type)}}
+  end
+
   def decode_event(<<opcode::8, _rest::binary>>)
-      when opcode in [@op_key_press, @op_resize, @op_ready] do
+      when opcode in [@op_key_press, @op_resize, @op_ready, @op_mouse_event] do
     {:error, :malformed}
   end
 
@@ -255,4 +300,24 @@ defmodule Minga.Port.Protocol do
     |> then(fn a -> if (attrs &&& @attr_reverse) != 0, do: [:reverse | a], else: a end)
     |> Enum.reverse()
   end
+
+  # ── Mouse helpers ──
+
+  @spec decode_mouse_button(non_neg_integer()) :: mouse_button()
+  defp decode_mouse_button(@mouse_left), do: :left
+  defp decode_mouse_button(@mouse_middle), do: :middle
+  defp decode_mouse_button(@mouse_right), do: :right
+  defp decode_mouse_button(@mouse_none), do: :none
+  defp decode_mouse_button(@mouse_wheel_up), do: :wheel_up
+  defp decode_mouse_button(@mouse_wheel_down), do: :wheel_down
+  defp decode_mouse_button(@mouse_wheel_right), do: :wheel_right
+  defp decode_mouse_button(@mouse_wheel_left), do: :wheel_left
+  defp decode_mouse_button(other), do: {:unknown, other}
+
+  @spec decode_mouse_event_type(non_neg_integer()) :: mouse_event_type()
+  defp decode_mouse_event_type(@mouse_press), do: :press
+  defp decode_mouse_event_type(@mouse_release), do: :release
+  defp decode_mouse_event_type(@mouse_motion), do: :motion
+  defp decode_mouse_event_type(@mouse_drag), do: :drag
+  defp decode_mouse_event_type(other), do: {:unknown, other}
 end

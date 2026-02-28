@@ -30,6 +30,7 @@ defmodule Minga.Editor do
   import Bitwise
 
   @ctrl Protocol.mod_ctrl()
+  @scroll_lines 3
 
   @typedoc "Options for starting the editor."
   @type start_opt ::
@@ -134,7 +135,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, %{picker: picker} = state)
-       when not is_nil(picker) do
+      when not is_nil(picker) do
     new_state = handle_picker_key(state, codepoint, modifiers)
     do_render(new_state)
     {:noreply, new_state}
@@ -142,6 +143,12 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = handle_key(state, codepoint, modifiers)
+    do_render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:mouse_event, row, col, button, _mods, event_type}}, state) do
+    new_state = handle_mouse(state, row, col, button, event_type)
     do_render(new_state)
     {:noreply, new_state}
   end
@@ -240,6 +247,222 @@ defmodule Minga.Editor do
         Map.merge(after_commands, updates)
     end
   end
+
+  # ── Mouse dispatch ─────────────────────────────────────────────────────────────
+
+  @spec handle_mouse(
+          state(),
+          integer(),
+          integer(),
+          Protocol.mouse_button(),
+          Protocol.mouse_event_type()
+        ) :: state()
+
+  # Ignore mouse events when no buffer is open.
+  defp handle_mouse(%{buffer: nil} = state, _row, _col, _button, _type), do: state
+
+  # Ignore mouse events when picker is open.
+  defp handle_mouse(%{picker: picker} = state, _row, _col, _button, _type)
+       when not is_nil(picker),
+       do: state
+
+  # Ignore negative coordinates (can happen with pixel mouse before translation).
+  defp handle_mouse(state, row, _col, _button, _type) when row < 0, do: state
+  defp handle_mouse(state, _row, col, _button, _type) when col < 0, do: state
+
+  # ── Scroll wheel ──
+
+  defp handle_mouse(%{buffer: buf, viewport: vp} = state, _row, _col, :wheel_down, :press) do
+    page_move(buf, vp, @scroll_lines)
+    clamp_cursor_to_viewport(state)
+  end
+
+  defp handle_mouse(%{buffer: buf, viewport: vp} = state, _row, _col, :wheel_up, :press) do
+    page_move(buf, vp, -@scroll_lines)
+    clamp_cursor_to_viewport(state)
+  end
+
+  # ── Left click (press) — sets position and starts potential drag ──
+
+  defp handle_mouse(state, row, col, :left, :press) do
+    case mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {target_line, target_col} ->
+        BufferServer.move_to(state.buffer, {target_line, target_col})
+
+        # Enter visual mode for potential drag; record anchor.
+        visual_state = %VisualState{
+          visual_anchor: {target_line, target_col},
+          visual_type: :char
+        }
+
+        state
+        |> cancel_mode_for_mouse()
+        |> Map.merge(%{
+          mode: :visual,
+          mode_state: visual_state,
+          mouse_dragging: true
+        })
+    end
+  end
+
+  # ── Left drag — extends visual selection ──
+
+  defp handle_mouse(%{mouse_dragging: true} = state, row, col, :left, :drag) do
+    state
+    |> maybe_auto_scroll(row)
+    |> move_to_mouse_pos(row, col)
+  end
+
+  # ── Left release — finalize selection or cancel if no movement ──
+
+  # Release without movement (anchor == cursor) → was just a click, return to normal.
+  defp handle_mouse(
+         %{mouse_dragging: true, buffer: buf, mode_state: %VisualState{visual_anchor: anchor}} =
+           state,
+         _row,
+         _col,
+         :left,
+         :release
+       ) do
+    cursor = BufferServer.cursor(buf)
+    finalize_drag(state, anchor, cursor)
+  end
+
+  defp handle_mouse(%{mouse_dragging: true} = state, _row, _col, :left, :release) do
+    %{state | mouse_dragging: false, mode: :normal, mode_state: Mode.initial_state()}
+  end
+
+  # Ignore all other mouse events (right click, middle click, motion, etc.)
+  defp handle_mouse(state, _row, _col, _button, _type), do: state
+
+  # ── Mouse helpers ──
+
+  # Auto-scroll when dragging near viewport edges.
+  @spec maybe_auto_scroll(state(), integer()) :: state()
+  defp maybe_auto_scroll(%{buffer: buf, viewport: vp} = state, row) when row <= 0 do
+    page_move(buf, vp, -1)
+    state
+  end
+
+  defp maybe_auto_scroll(%{buffer: buf, viewport: vp} = state, row) do
+    scroll_threshold = Viewport.content_rows(vp) - 1
+    maybe_scroll_down(state, buf, vp, row, scroll_threshold)
+  end
+
+  defp maybe_scroll_down(state, buf, vp, row, threshold) when row >= threshold do
+    page_move(buf, vp, 1)
+    state
+  end
+
+  defp maybe_scroll_down(state, _buf, _vp, _row, _threshold), do: state
+
+  # Move cursor to the buffer position corresponding to a screen coordinate.
+  @spec move_to_mouse_pos(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp move_to_mouse_pos(state, row, col) do
+    case mouse_to_buffer_pos(state, row, col) do
+      nil ->
+        state
+
+      {line, col} ->
+        BufferServer.move_to(state.buffer, {line, col})
+        state
+    end
+  end
+
+  # Finalize a drag: if anchor == cursor it was just a click, return to normal;
+  # otherwise keep the visual selection active.
+  @spec finalize_drag(
+          state(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) :: state()
+  defp finalize_drag(state, pos, pos) do
+    %{state | mouse_dragging: false, mode: :normal, mode_state: Mode.initial_state()}
+  end
+
+  defp finalize_drag(state, _anchor, _cursor) do
+    %{state | mouse_dragging: false}
+  end
+
+  # Converts screen row/col to buffer position, or nil if the click is on
+  # modeline, minibuffer, or beyond the buffer content (tilde rows).
+  @spec mouse_to_buffer_pos(state(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp mouse_to_buffer_pos(%{buffer: buf, viewport: vp}, row, col) do
+    visible_rows = Viewport.content_rows(vp)
+    viewport = Viewport.scroll_to_cursor(vp, BufferServer.cursor(buf))
+    target_line = row + viewport.top
+    target_col = col + viewport.left
+    total_lines = BufferServer.line_count(buf)
+
+    resolve_buffer_pos(buf, row, visible_rows, target_line, target_col, total_lines)
+  end
+
+  # Click on modeline or minibuffer
+  defp resolve_buffer_pos(_buf, row, visible_rows, _line, _col, _total)
+       when row >= visible_rows,
+       do: nil
+
+  # Click on tilde row (beyond buffer content)
+  defp resolve_buffer_pos(_buf, _row, _visible, target_line, _col, total)
+       when target_line >= total,
+       do: nil
+
+  # Valid content area click
+  defp resolve_buffer_pos(buf, _row, _visible, target_line, target_col, _total) do
+    {target_line, clamp_col_to_line(buf, target_line, target_col)}
+  end
+
+  # Clamp cursor into the visible viewport after scrolling.
+  @spec clamp_cursor_to_viewport(state()) :: state()
+  defp clamp_cursor_to_viewport(%{buffer: buf, viewport: vp} = state) do
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    viewport = Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
+    {first_line, last_line} = Viewport.visible_range(viewport)
+
+    do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, last_line)
+  end
+
+  defp do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, _last_line)
+       when cursor_line < first_line do
+    BufferServer.move_to(buf, {first_line, clamp_col_to_line(buf, first_line, cursor_col)})
+    state
+  end
+
+  defp do_clamp_cursor(state, buf, cursor_line, cursor_col, _first_line, last_line)
+       when cursor_line > last_line do
+    BufferServer.move_to(buf, {last_line, clamp_col_to_line(buf, last_line, cursor_col)})
+    state
+  end
+
+  defp do_clamp_cursor(state, _buf, _cursor_line, _cursor_col, _first_line, _last_line),
+    do: state
+
+  @spec clamp_col_to_line(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp clamp_col_to_line(buf, line, col) do
+    case BufferServer.get_lines(buf, line, 1) do
+      [text] -> min(col, max(0, String.length(text) - 1))
+      [] -> 0
+    end
+  end
+
+  # Cancel the current mode for mouse interaction (returns state ready for
+  # visual mode entry).
+  @spec cancel_mode_for_mouse(state()) :: state()
+  defp cancel_mode_for_mouse(%{mode: :command, whichkey_timer: timer} = state)
+       when not is_nil(timer) do
+    WhichKey.cancel_timeout(timer)
+    %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
+  end
+
+  defp cancel_mode_for_mouse(%{mode: :command} = state) do
+    %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
+  end
+
+  defp cancel_mode_for_mouse(state), do: state
 
   # ── Command execution ────────────────────────────────────────────────────────
 
@@ -651,30 +874,33 @@ defmodule Minga.Editor do
 
     # ── Modeline (row N-2) — Doom Emacs-style colored segments ──
     {cursor_line, cursor_col} = cursor
+
     file_name =
       case BufferServer.file_path(state.buffer) do
         nil -> "[scratch]"
         path -> Path.basename(path)
       end
+
     dirty_marker = if BufferServer.dirty?(state.buffer), do: " ● ", else: ""
     line_count = BufferServer.line_count(state.buffer)
     buf_count = length(state.buffers)
     buf_index = state.active_buffer + 1
     modeline_row = viewport.rows - 2
 
-    modeline_commands = render_modeline(
-      modeline_row,
-      viewport.cols,
-      state.mode,
-      state.mode_state,
-      file_name,
-      dirty_marker,
-      cursor_line,
-      cursor_col,
-      line_count,
-      buf_index,
-      buf_count
-    )
+    modeline_commands =
+      render_modeline(
+        modeline_row,
+        viewport.cols,
+        state.mode,
+        state.mode_state,
+        file_name,
+        dirty_marker,
+        cursor_line,
+        cursor_col,
+        line_count,
+        buf_index,
+        buf_count
+      )
 
     # ── Minibuffer (row N-1) — command input or messages ──
     minibuffer_row = viewport.rows - 1
@@ -683,6 +909,7 @@ defmodule Minga.Editor do
       case state.mode do
         :command ->
           cmd_text = ":" <> state.mode_state.input
+
           Protocol.encode_draw(
             minibuffer_row,
             0,
@@ -790,11 +1017,22 @@ defmodule Minga.Editor do
     # Separator line
     title = picker.title
     filter_info = "#{Picker.count(picker)}/#{Picker.total(picker)}"
-    sep_text = " #{title} " <> String.duplicate("─", max(0, viewport.cols - String.length(title) - String.length(filter_info) - 4)) <> " #{filter_info} "
+
+    sep_text =
+      " #{title} " <>
+        String.duplicate(
+          "─",
+          max(0, viewport.cols - String.length(title) - String.length(filter_info) - 4)
+        ) <> " #{filter_info} "
+
     separator_cmd =
       if separator_row >= 0 do
-        [Protocol.encode_draw(separator_row, 0,
-          String.pad_trailing(sep_text, viewport.cols), fg: dim_fg, bg: bg)]
+        [
+          Protocol.encode_draw(separator_row, 0, String.pad_trailing(sep_text, viewport.cols),
+            fg: dim_fg,
+            bg: bg
+          )
+        ]
       else
         []
       end
@@ -805,6 +1043,7 @@ defmodule Minga.Editor do
       |> Enum.with_index()
       |> Enum.flat_map(fn {{_id, label, desc}, idx} ->
         row = first_item_row + idx
+
         if row < 0 or row >= viewport.rows do
           []
         else
@@ -815,24 +1054,36 @@ defmodule Minga.Editor do
           # Label on the left (bold for selected), description on the right (dimmed, truncated)
           label_text = " " <> label
           avail_for_desc = max(0, viewport.cols - String.length(label_text) - 2)
-          desc_display = if desc != "" and avail_for_desc > 10,
-            do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
-            else: ""
 
-          row_text = label_text <>
-            String.duplicate(" ", max(1, viewport.cols - String.length(label_text) - String.length(desc_display) - 1)) <>
-            desc_display <> " "
+          desc_display =
+            if desc != "" and avail_for_desc > 10,
+              do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
+              else: ""
+
+          row_text =
+            label_text <>
+              String.duplicate(
+                " ",
+                max(
+                  1,
+                  viewport.cols - String.length(label_text) - String.length(desc_display) - 1
+                )
+              ) <>
+              desc_display <> " "
+
           row_text = String.slice(row_text, 0, viewport.cols)
 
-          label_cmd = Protocol.encode_draw(row, 0,
-            String.pad_trailing(row_text, viewport.cols),
-            fg: fg, bg: row_bg, bold: is_selected)
+          label_cmd =
+            Protocol.encode_draw(row, 0, String.pad_trailing(row_text, viewport.cols),
+              fg: fg,
+              bg: row_bg,
+              bold: is_selected
+            )
 
           if desc_display != "" do
             # Render description portion in dimmer color
             desc_start = viewport.cols - String.length(desc_display) - 1
-            desc_cmd = Protocol.encode_draw(row, desc_start,
-              desc_display, fg: dim_fg, bg: row_bg)
+            desc_cmd = Protocol.encode_draw(row, desc_start, desc_display, fg: dim_fg, bg: row_bg)
             [label_cmd, desc_cmd]
           else
             [label_cmd]
@@ -842,11 +1093,15 @@ defmodule Minga.Editor do
 
     # Prompt line (replaces minibuffer)
     prompt_text = "> " <> picker.query
-    prompt_cmd = Protocol.encode_draw(
-      prompt_row, 0,
-      String.pad_trailing(prompt_text, viewport.cols),
-      fg: highlight_fg, bg: prompt_bg
-    )
+
+    prompt_cmd =
+      Protocol.encode_draw(
+        prompt_row,
+        0,
+        String.pad_trailing(prompt_text, viewport.cols),
+        fg: highlight_fg,
+        bg: prompt_bg
+      )
 
     cursor_col = String.length(prompt_text)
     cursor_pos = {prompt_row, cursor_col}
@@ -858,11 +1113,16 @@ defmodule Minga.Editor do
 
   # Doom Emacs color palette for mode indicators
   @mode_colors %{
-    normal:           {0x000000, 0x51AFEF},  # black on blue
-    insert:           {0x000000, 0x98BE65},  # black on green
-    visual:           {0x000000, 0xC678DD},  # black on magenta
-    operator_pending: {0x000000, 0xDA8548},  # black on orange
-    command:          {0x000000, 0xECBE7B}   # black on yellow
+    # black on blue
+    normal: {0x000000, 0x51AFEF},
+    # black on green
+    insert: {0x000000, 0x98BE65},
+    # black on magenta
+    visual: {0x000000, 0xC678DD},
+    # black on orange
+    operator_pending: {0x000000, 0xDA8548},
+    # black on yellow
+    command: {0x000000, 0xECBE7B}
   }
 
   # Powerline separator characters
@@ -882,7 +1142,19 @@ defmodule Minga.Editor do
           pos_integer(),
           non_neg_integer()
         ) :: [binary()]
-  defp render_modeline(row, cols, mode, mode_state, file_name, dirty_marker, cursor_line, cursor_col, line_count, buf_index, buf_count) do
+  defp render_modeline(
+         row,
+         cols,
+         mode,
+         mode_state,
+         file_name,
+         dirty_marker,
+         cursor_line,
+         cursor_col,
+         line_count,
+         buf_index,
+         buf_count
+       ) do
     # Segment colors
     {mode_fg, mode_bg} = Map.get(@mode_colors, mode, {0x000000, 0x51AFEF})
     bar_fg = 0xBBC2CF
@@ -925,56 +1197,82 @@ defmodule Minga.Editor do
     # ── Build draw commands ──
     # Left side
     left_col = 0
+
     commands = [
       Protocol.encode_draw(row, left_col, mode_segment, fg: mode_fg, bg: mode_bg, bold: true)
     ]
+
     left_col = left_col + String.length(mode_segment)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, sep1, fg: mode_bg, bg: info_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, sep1, fg: mode_bg, bg: info_bg)
+        ]
+
     left_col = left_col + String.length(sep1)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, file_segment, fg: info_fg, bg: info_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, file_segment, fg: info_fg, bg: info_bg)
+        ]
+
     left_col = left_col + String.length(file_segment)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, sep2, fg: info_bg, bg: bar_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, sep2, fg: info_bg, bg: bar_bg)
+        ]
+
     left_col = left_col + String.length(sep2)
 
     # Fill middle with bar background
-    right_total = String.length(sep3) + String.length(pos_segment) +
-                  String.length(sep4) + String.length(pct_segment)
+    right_total =
+      String.length(sep3) + String.length(pos_segment) +
+        String.length(sep4) + String.length(pct_segment)
+
     fill_width = max(0, cols - left_col - right_total)
     fill = String.duplicate(" ", fill_width)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, fill, fg: bar_fg, bg: bar_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, fill, fg: bar_fg, bg: bar_bg)
+        ]
+
     left_col = left_col + fill_width
 
     # Right side
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, sep3, fg: info_bg, bg: bar_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, sep3, fg: info_bg, bg: bar_bg)
+        ]
+
     left_col = left_col + String.length(sep3)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, pos_segment, fg: info_fg, bg: info_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, pos_segment, fg: info_fg, bg: info_bg)
+        ]
+
     left_col = left_col + String.length(pos_segment)
 
-    commands = commands ++ [
-      Protocol.encode_draw(row, left_col, sep4, fg: mode_bg, bg: info_bg)
-    ]
+    commands =
+      commands ++
+        [
+          Protocol.encode_draw(row, left_col, sep4, fg: mode_bg, bg: info_bg)
+        ]
+
     left_col = left_col + String.length(sep4)
 
-    commands ++ [
-      Protocol.encode_draw(row, left_col, pct_segment, fg: mode_fg, bg: mode_bg, bold: true)
-    ]
+    commands ++
+      [
+        Protocol.encode_draw(row, left_col, pct_segment, fg: mode_fg, bg: mode_bg, bold: true)
+      ]
   end
 
   @spec mode_badge(Mode.mode(), Mode.state()) :: String.t()

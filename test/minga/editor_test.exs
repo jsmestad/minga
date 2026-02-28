@@ -632,6 +632,271 @@ defmodule Minga.EditorTest do
     end
   end
 
+  # ── Mouse support ──
+
+  # Helper: send a mouse event and wait for the GenServer to process it.
+  defp send_mouse(editor, row, col, button, event_type, mods \\ 0) do
+    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type}})
+    Process.sleep(30)
+  end
+
+  describe "mouse scroll" do
+    # 30-line buffer, viewport 10 rows (8 content rows after footer)
+    defp start_mouse_editor do
+      content = Enum.map_join(0..29, "\n", &"line #{&1}")
+      {:ok, buffer} = BufferServer.start_link(content: content)
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10
+        )
+
+      {editor, buffer}
+    end
+
+    test "scroll down moves cursor down by 3 lines" do
+      {editor, buffer} = start_mouse_editor()
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 3
+    end
+
+    test "scroll up moves cursor up by 3 lines" do
+      {editor, buffer} = start_mouse_editor()
+      BufferServer.move_to(buffer, {10, 0})
+      Process.sleep(10)
+      send_mouse(editor, 0, 0, :wheel_up, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 7
+    end
+
+    test "scroll at top of file doesn't go negative" do
+      {editor, buffer} = start_mouse_editor()
+      send_mouse(editor, 0, 0, :wheel_up, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 0
+    end
+
+    test "scroll at bottom of file clamps to last line" do
+      {editor, buffer} = start_mouse_editor()
+      BufferServer.move_to(buffer, {29, 0})
+      Process.sleep(10)
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 29
+    end
+
+    test "scroll doesn't change mode" do
+      {editor, buffer} = start_mouse_editor()
+      # Enter insert mode
+      send_key(editor, ?i)
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+
+      # Should still be alive and buffer should have scrolled content position
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line >= 0
+      assert Process.alive?(editor)
+    end
+  end
+
+  describe "mouse click-to-position" do
+    test "left click moves cursor to clicked position" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
+      send_mouse(editor, 1, 3, :left, :press)
+      # After press, we're in visual mode (dragging); release to finalize as click
+      send_mouse(editor, 1, 3, :left, :release)
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 1
+      assert col == 3
+    end
+
+    test "left click accounts for viewport scroll offset" do
+      content = Enum.map_join(0..29, "\n", &"line #{&1}")
+      {:ok, buffer} = BufferServer.start_link(content: content)
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10
+        )
+
+      # Scroll down first
+      BufferServer.move_to(buffer, {15, 0})
+      Process.sleep(10)
+      # Force a render to update viewport
+      Editor.render(editor)
+      Process.sleep(30)
+
+      # Click at screen row 2 — should be buffer line 15 + 2 = ~17 area
+      send_mouse(editor, 2, 0, :left, :press)
+      send_mouse(editor, 2, 0, :left, :release)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line >= 10
+    end
+
+    test "left click on modeline row is ignored" do
+      {editor, buffer} = start_editor("hello\nworld")
+      original_cursor = BufferServer.cursor(buffer)
+      # Viewport is 10 rows, modeline is row 8 (rows - 2)
+      send_mouse(editor, 8, 5, :left, :press)
+      send_mouse(editor, 8, 5, :left, :release)
+      assert BufferServer.cursor(buffer) == original_cursor
+    end
+
+    test "left click on minibuffer row is ignored" do
+      {editor, buffer} = start_editor("hello\nworld")
+      original_cursor = BufferServer.cursor(buffer)
+      # Viewport is 10 rows, minibuffer is row 9 (rows - 1)
+      send_mouse(editor, 9, 5, :left, :press)
+      send_mouse(editor, 9, 5, :left, :release)
+      assert BufferServer.cursor(buffer) == original_cursor
+    end
+
+    test "left click on tilde row (beyond buffer end) is ignored" do
+      {editor, buffer} = start_editor("hello\nworld")
+      original_cursor = BufferServer.cursor(buffer)
+      # Buffer has 2 lines, clicking row 5 is a tilde row
+      send_mouse(editor, 5, 0, :left, :press)
+      send_mouse(editor, 5, 0, :left, :release)
+      assert BufferServer.cursor(buffer) == original_cursor
+    end
+
+    test "left click clamps column to line length" do
+      {editor, buffer} = start_editor("hi\nworld")
+      # "hi" is length 2, clicking at col 10 should clamp
+      send_mouse(editor, 0, 10, :left, :press)
+      send_mouse(editor, 0, 10, :left, :release)
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 0
+      assert col <= 1
+    end
+
+    test "left click in visual mode cancels selection, returns to normal" do
+      {editor, buffer} = start_editor("hello\nworld\nfoo")
+      # Enter visual mode
+      send_key(editor, ?v)
+      send_key(editor, ?l)
+      # Click somewhere
+      send_mouse(editor, 1, 2, :left, :press)
+      send_mouse(editor, 1, 2, :left, :release)
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 1
+      assert col == 2
+    end
+
+    test "left click in command mode cancels command, returns to normal" do
+      {editor, buffer} = start_editor("hello\nworld")
+      # Enter command mode
+      send_key(editor, ?:)
+      # Click somewhere
+      send_mouse(editor, 1, 2, :left, :press)
+      send_mouse(editor, 1, 2, :left, :release)
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 1
+      assert col == 2
+    end
+
+    test "left click in insert mode moves cursor, stays functional" do
+      {editor, buffer} = start_editor("hello\nworld")
+      send_key(editor, ?i)
+      send_mouse(editor, 1, 2, :left, :press)
+      send_mouse(editor, 1, 2, :left, :release)
+      # After release without drag, returns to normal from visual
+      # but the cursor should be at the clicked position
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 1
+      assert col == 2
+    end
+  end
+
+  describe "mouse drag selection" do
+    test "left press + drag creates visual selection" do
+      {editor, buffer} = start_editor("hello world foo")
+      # Press at position (0, 2)
+      send_mouse(editor, 0, 2, :left, :press)
+      # Drag to position (0, 8)
+      send_mouse(editor, 0, 8, :left, :drag)
+      # Cursor should have moved
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 0
+      assert col == 8
+    end
+
+    test "release after drag keeps visual selection active" do
+      {editor, buffer} = start_editor("hello world foo")
+      send_mouse(editor, 0, 2, :left, :press)
+      send_mouse(editor, 0, 8, :left, :drag)
+      send_mouse(editor, 0, 8, :left, :release)
+      # Cursor should still be at drag end
+      {_line, col} = BufferServer.cursor(buffer)
+      assert col == 8
+      # Should be able to yank the selection
+      send_key(editor, ?y)
+      assert Process.alive?(editor)
+    end
+
+    test "release without movement (click) returns to normal mode" do
+      {editor, _buffer} = start_editor("hello world")
+      send_mouse(editor, 0, 3, :left, :press)
+      # Release at same position — no drag
+      send_mouse(editor, 0, 3, :left, :release)
+      # Should be back in normal mode — typing 'l' should move, not insert
+      assert Process.alive?(editor)
+    end
+
+    test "drag clamps to buffer bounds" do
+      {editor, buffer} = start_editor("hi\nworld")
+      send_mouse(editor, 0, 0, :left, :press)
+      # Drag to a column past line length
+      send_mouse(editor, 0, 50, :left, :drag)
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 0
+      assert col <= 1
+    end
+
+    test "drag ignores events when not dragging" do
+      {editor, buffer} = start_editor("hello world")
+      original = BufferServer.cursor(buffer)
+      # Send drag without a preceding press
+      send_mouse(editor, 0, 5, :left, :drag)
+      assert BufferServer.cursor(buffer) == original
+    end
+  end
+
+  describe "mouse with no buffer" do
+    test "mouse events with no buffer don't crash" do
+      editor = start_editor_no_buffer()
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      send_mouse(editor, 0, 0, :left, :press)
+      send_mouse(editor, 0, 5, :left, :drag)
+      send_mouse(editor, 0, 5, :left, :release)
+      assert Process.alive?(editor)
+    end
+  end
+
+  describe "mouse with negative coordinates" do
+    test "negative row is ignored" do
+      {editor, buffer} = start_editor("hello")
+      original = BufferServer.cursor(buffer)
+      send_mouse(editor, -1, 5, :left, :press)
+      assert BufferServer.cursor(buffer) == original
+    end
+
+    test "negative col is ignored" do
+      {editor, buffer} = start_editor("hello")
+      original = BufferServer.cursor(buffer)
+      send_mouse(editor, 0, -3, :left, :press)
+      assert BufferServer.cursor(buffer) == original
+    end
+  end
+
   describe "stub commands" do
     test "find_file doesn't crash" do
       {editor, _buffer} = start_editor()

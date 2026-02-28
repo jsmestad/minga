@@ -3,9 +3,10 @@
 /// Messages use a simple binary format with 1-byte opcodes:
 ///
 /// Input events (Zig → BEAM):
-///   0x01 key_press:  codepoint:u32, modifiers:u8
-///   0x02 resize:     width:u16, height:u16
-///   0x03 ready:      width:u16, height:u16
+///   0x01 key_press:    codepoint:u32, modifiers:u8
+///   0x02 resize:       width:u16, height:u16
+///   0x03 ready:        width:u16, height:u16
+///   0x04 mouse_event:  row:i16, col:i16, button:u8, modifiers:u8, event_type:u8
 ///
 /// Render commands (BEAM → Zig):
 ///   0x10 draw_text:  row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
@@ -22,6 +23,7 @@ const std = @import("std");
 pub const OP_KEY_PRESS: u8 = 0x01;
 pub const OP_RESIZE: u8 = 0x02;
 pub const OP_READY: u8 = 0x03;
+pub const OP_MOUSE_EVENT: u8 = 0x04;
 pub const OP_DRAW_TEXT: u8 = 0x10;
 pub const OP_SET_CURSOR: u8 = 0x11;
 pub const OP_CLEAR: u8 = 0x12;
@@ -40,6 +42,24 @@ pub const MOD_SHIFT: u8 = 0x01;
 pub const MOD_CTRL: u8 = 0x02;
 pub const MOD_ALT: u8 = 0x04;
 pub const MOD_SUPER: u8 = 0x08;
+
+// ── Mouse button values (matching libvaxis Mouse.Button enum) ──
+
+pub const MOUSE_LEFT: u8 = 0x00;
+pub const MOUSE_MIDDLE: u8 = 0x01;
+pub const MOUSE_RIGHT: u8 = 0x02;
+pub const MOUSE_NONE: u8 = 0x03;
+pub const MOUSE_WHEEL_UP: u8 = 0x40;
+pub const MOUSE_WHEEL_DOWN: u8 = 0x41;
+pub const MOUSE_WHEEL_RIGHT: u8 = 0x42;
+pub const MOUSE_WHEEL_LEFT: u8 = 0x43;
+
+// ── Mouse event types ──
+
+pub const MOUSE_PRESS: u8 = 0x00;
+pub const MOUSE_RELEASE: u8 = 0x01;
+pub const MOUSE_MOTION: u8 = 0x02;
+pub const MOUSE_DRAG: u8 = 0x03;
 
 // ── Attribute flags ──
 
@@ -113,6 +133,19 @@ pub fn encodeReady(buf: []u8, width: u16, height: u16) !usize {
     std.mem.writeInt(u16, buf[1..3], width, .big);
     std.mem.writeInt(u16, buf[3..5], height, .big);
     return 5;
+}
+
+/// Encodes a mouse event into the provided buffer.
+/// Returns the number of bytes written (always 8).
+pub fn encodeMouseEvent(buf: []u8, row: i16, col: i16, button: u8, modifiers: u8, event_type: u8) !usize {
+    if (buf.len < 8) return error.Malformed;
+    buf[0] = OP_MOUSE_EVENT;
+    std.mem.writeInt(i16, buf[1..3], row, .big);
+    std.mem.writeInt(i16, buf[3..5], col, .big);
+    buf[5] = button;
+    buf[6] = modifiers;
+    buf[7] = event_type;
+    return 8;
 }
 
 /// Writes a length-prefixed message to the writer.
@@ -320,6 +353,82 @@ test "decode truncated draw_text returns malformed" {
 }
 
 // ── Encoding: buffer too small ────────────────────────────────────────────────
+
+// ── Mouse event encoding ──────────────────────────────────────────────────────
+
+test "encodeMouseEvent byte layout: left click press at (5, 10)" {
+    var buf: [8]u8 = undefined;
+    const len = try encodeMouseEvent(&buf, 5, 10, MOUSE_LEFT, 0, MOUSE_PRESS);
+    try std.testing.expectEqual(@as(usize, 8), len);
+    try std.testing.expectEqual(OP_MOUSE_EVENT, buf[0]);
+    try std.testing.expectEqual(@as(i16, 5), std.mem.readInt(i16, buf[1..3], .big));
+    try std.testing.expectEqual(@as(i16, 10), std.mem.readInt(i16, buf[3..5], .big));
+    try std.testing.expectEqual(MOUSE_LEFT, buf[5]);
+    try std.testing.expectEqual(@as(u8, 0), buf[6]);
+    try std.testing.expectEqual(MOUSE_PRESS, buf[7]);
+}
+
+test "encodeMouseEvent with wheel_up" {
+    var buf: [8]u8 = undefined;
+    _ = try encodeMouseEvent(&buf, 0, 0, MOUSE_WHEEL_UP, 0, MOUSE_PRESS);
+    try std.testing.expectEqual(MOUSE_WHEEL_UP, buf[5]);
+}
+
+test "encodeMouseEvent with wheel_down" {
+    var buf: [8]u8 = undefined;
+    _ = try encodeMouseEvent(&buf, 0, 0, MOUSE_WHEEL_DOWN, 0, MOUSE_PRESS);
+    try std.testing.expectEqual(MOUSE_WHEEL_DOWN, buf[5]);
+}
+
+test "encodeMouseEvent with drag event type" {
+    var buf: [8]u8 = undefined;
+    _ = try encodeMouseEvent(&buf, 8, 15, MOUSE_LEFT, 0, MOUSE_DRAG);
+    try std.testing.expectEqual(MOUSE_DRAG, buf[7]);
+}
+
+test "encodeMouseEvent with release event type" {
+    var buf: [8]u8 = undefined;
+    _ = try encodeMouseEvent(&buf, 0, 0, MOUSE_LEFT, 0, MOUSE_RELEASE);
+    try std.testing.expectEqual(MOUSE_RELEASE, buf[7]);
+}
+
+test "encodeMouseEvent with modifiers" {
+    var buf: [8]u8 = undefined;
+    const mods = MOD_CTRL | MOD_SHIFT;
+    _ = try encodeMouseEvent(&buf, 2, 4, MOUSE_LEFT, mods, MOUSE_PRESS);
+    try std.testing.expectEqual(mods, buf[6]);
+}
+
+test "encodeMouseEvent with negative coordinates" {
+    var buf: [8]u8 = undefined;
+    _ = try encodeMouseEvent(&buf, -1, -5, MOUSE_LEFT, 0, MOUSE_PRESS);
+    try std.testing.expectEqual(@as(i16, -1), std.mem.readInt(i16, buf[1..3], .big));
+    try std.testing.expectEqual(@as(i16, -5), std.mem.readInt(i16, buf[3..5], .big));
+}
+
+test "encodeMouseEvent buffer too small returns error" {
+    var buf: [7]u8 = undefined; // needs 8
+    const result = encodeMouseEvent(&buf, 0, 0, MOUSE_LEFT, 0, MOUSE_PRESS);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "encodeMouseEvent all button types" {
+    var buf: [8]u8 = undefined;
+    const buttons = [_]u8{ MOUSE_LEFT, MOUSE_MIDDLE, MOUSE_RIGHT, MOUSE_NONE, MOUSE_WHEEL_UP, MOUSE_WHEEL_DOWN, MOUSE_WHEEL_RIGHT, MOUSE_WHEEL_LEFT };
+    for (buttons) |b| {
+        _ = try encodeMouseEvent(&buf, 0, 0, b, 0, MOUSE_PRESS);
+        try std.testing.expectEqual(b, buf[5]);
+    }
+}
+
+test "encodeMouseEvent all event types" {
+    var buf: [8]u8 = undefined;
+    const types = [_]u8{ MOUSE_PRESS, MOUSE_RELEASE, MOUSE_MOTION, MOUSE_DRAG };
+    for (types) |t| {
+        _ = try encodeMouseEvent(&buf, 0, 0, MOUSE_LEFT, 0, t);
+        try std.testing.expectEqual(t, buf[7]);
+    }
+}
 
 test "encodeKeyPress buffer too small returns error" {
     var buf: [5]u8 = undefined; // needs 6
