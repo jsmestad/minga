@@ -201,5 +201,28 @@ defmodule Minga.Port.ProtocolTest do
       payload = <<0x01, 65::32, 0x03::8>>
       assert {:ok, {:key_press, 65, 3}} = Protocol.decode_event(payload)
     end
+
+    test "set_cursor_shape has correct byte layout" do
+      assert <<0x15, 0x00>> = Protocol.encode_cursor_shape(:block)
+      assert <<0x15, 0x01>> = Protocol.encode_cursor_shape(:beam)
+      assert <<0x15, 0x02>> = Protocol.encode_cursor_shape(:underline)
+    end
+  end
+
+  describe "cursor shape round-trip" do
+    test "encode/decode block cursor" do
+      encoded = Protocol.encode_cursor_shape(:block)
+      assert {:ok, {:set_cursor_shape, :block}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode/decode beam cursor" do
+      encoded = Protocol.encode_cursor_shape(:beam)
+      assert {:ok, {:set_cursor_shape, :beam}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode/decode underline cursor" do
+      encoded = Protocol.encode_cursor_shape(:underline)
+      assert {:ok, {:set_cursor_shape, :underline}} = Protocol.decode_command(encoded)
+    end
   end
 end

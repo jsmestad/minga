@@ -25,16 +25,22 @@ defmodule Minga.Editor.Viewport do
   end
 
   @doc """
+  Number of rows reserved for the footer (modeline + minibuffer).
+  """
+  @spec footer_rows() :: pos_integer()
+  def footer_rows, do: 2
+
+  @doc """
   Scrolls the viewport to keep the cursor visible.
 
   Returns a new viewport adjusted so that the cursor position
-  `{line, col}` is within the visible area. Reserves the last
-  row for the status line.
+  `{line, col}` is within the visible area. Reserves footer rows
+  for the modeline and minibuffer.
   """
   @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}) :: t()
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do
-    # Reserve 1 row for status line
-    visible_rows = max(vp.rows - 1, 1)
+    # Reserve rows for modeline + minibuffer
+    visible_rows = max(vp.rows - footer_rows(), 1)
 
     top =
       cond do
@@ -56,14 +62,13 @@ defmodule Minga.Editor.Viewport do
   @doc "Returns the range of visible lines as `{first_line, last_line}` (inclusive)."
   @spec visible_range(t()) :: {non_neg_integer(), non_neg_integer()}
   def visible_range(%__MODULE__{top: top, rows: rows}) do
-    # Reserve 1 row for status line
-    visible_rows = max(rows - 1, 1)
+    visible_rows = max(rows - footer_rows(), 1)
     {top, top + visible_rows - 1}
   end
 
-  @doc "Returns the number of content rows (total rows minus status line)."
+  @doc "Returns the number of content rows (total rows minus footer)."
   @spec content_rows(t()) :: pos_integer()
   def content_rows(%__MODULE__{rows: rows}) do
-    max(rows - 1, 1)
+    max(rows - footer_rows(), 1)
   end
 end

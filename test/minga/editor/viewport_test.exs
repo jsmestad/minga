@@ -22,8 +22,8 @@ defmodule Minga.Editor.ViewportTest do
 
     test "scrolls down when cursor moves past bottom" do
       vp = Viewport.new(10, 80) |> Viewport.scroll_to_cursor({15, 0})
-      # 10 rows, 1 for status = 9 visible. cursor at 15 means top = 15 - 9 + 1 = 7
-      assert vp.top == 7
+      # 10 rows, 2 for footer = 8 visible. cursor at 15 means top = 15 - 8 + 1 = 8
+      assert vp.top == 8
     end
 
     test "scrolls up when cursor moves above top" do
@@ -51,20 +51,21 @@ defmodule Minga.Editor.ViewportTest do
 
     test "handles very small terminal (3 rows)" do
       vp = Viewport.new(3, 40) |> Viewport.scroll_to_cursor({5, 0})
-      # 3 rows, 1 for status = 2 visible. cursor at 5 means top = 5 - 2 + 1 = 4
-      assert vp.top == 4
+      # 3 rows, 2 for footer = 1 visible. cursor at 5 means top = 5 - 1 + 1 = 5
+      assert vp.top == 5
     end
   end
 
   describe "visible_range/1" do
     test "returns correct range for standard terminal" do
       vp = Viewport.new(24, 80)
-      assert Viewport.visible_range(vp) == {0, 22}
+      # 24 rows - 2 footer = 22 content rows → lines 0..21
+      assert Viewport.visible_range(vp) == {0, 21}
     end
 
     test "returns correct range when scrolled" do
       vp = %Viewport{top: 10, left: 0, rows: 24, cols: 80}
-      assert Viewport.visible_range(vp) == {10, 32}
+      assert Viewport.visible_range(vp) == {10, 31}
     end
 
     test "handles small terminal" do
@@ -74,9 +75,9 @@ defmodule Minga.Editor.ViewportTest do
   end
 
   describe "content_rows/1" do
-    test "returns rows minus 1 for status line" do
+    test "returns rows minus footer for content" do
       vp = Viewport.new(24, 80)
-      assert Viewport.content_rows(vp) == 23
+      assert Viewport.content_rows(vp) == 22
     end
 
     test "minimum of 1 content row" do

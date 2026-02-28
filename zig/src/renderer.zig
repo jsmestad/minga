@@ -83,6 +83,15 @@ pub const Renderer = struct {
                 win.showCursor(sc.col, sc.row);
             },
 
+            .set_cursor_shape => |shape| {
+                const win = self.vx.window();
+                win.setCursorShape(switch (shape) {
+                    .block => .block,
+                    .beam => .beam,
+                    .underline => .underline,
+                });
+            },
+
             .batch_end => {
                 try self.vx.render(self.tty_writer);
                 // After render() all grapheme slices have been consumed —

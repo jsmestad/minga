@@ -16,12 +16,13 @@ defmodule Minga.Port.Protocol do
 
   ## Render Commands (BEAM → Zig)
 
-  | Opcode | Name       | Payload                                                              |
-  |--------|------------|----------------------------------------------------------------------|
-  | 0x10   | draw_text  | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
-  | 0x11   | set_cursor | `row::16, col::16`                                                   |
-  | 0x12   | clear      | (empty)                                                              |
-  | 0x13   | batch_end  | (empty)                                                              |
+  | Opcode | Name             | Payload                                                              |
+  |--------|------------------|----------------------------------------------------------------------|
+  | 0x10   | draw_text        | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
+  | 0x11   | set_cursor       | `row::16, col::16`                                                   |
+  | 0x12   | clear            | (empty)                                                              |
+  | 0x13   | batch_end        | (empty)                                                              |
+  | 0x15   | set_cursor_shape | `shape::8` (BLOCK=0, BEAM=1, UNDERLINE=2)                           |
 
   ## Modifier Flags
 
@@ -45,6 +46,12 @@ defmodule Minga.Port.Protocol do
   @op_set_cursor 0x11
   @op_clear 0x12
   @op_batch_end 0x13
+  @op_set_cursor_shape 0x15
+
+  # Cursor shapes
+  @cursor_block 0x00
+  @cursor_beam 0x01
+  @cursor_underline 0x02
 
   # ── Modifier flags ──
 
@@ -63,6 +70,9 @@ defmodule Minga.Port.Protocol do
           {:key_press, codepoint :: non_neg_integer(), modifiers()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
+
+  @typedoc "Cursor shape."
+  @type cursor_shape :: :block | :beam | :underline
 
   @typedoc "Text style attributes."
   @type style :: [
@@ -128,6 +138,12 @@ defmodule Minga.Port.Protocol do
   @spec encode_batch_end() :: binary()
   def encode_batch_end, do: <<@op_batch_end>>
 
+  @doc "Encodes a set_cursor_shape command."
+  @spec encode_cursor_shape(cursor_shape()) :: binary()
+  def encode_cursor_shape(:block), do: <<@op_set_cursor_shape, @cursor_block>>
+  def encode_cursor_shape(:beam), do: <<@op_set_cursor_shape, @cursor_beam>>
+  def encode_cursor_shape(:underline), do: <<@op_set_cursor_shape, @cursor_underline>>
+
   # ── Decoding (Zig → BEAM) ──
 
   @doc "Decodes an input event from a binary payload."
@@ -165,7 +181,8 @@ defmodule Minga.Port.Protocol do
            :clear
            | :batch_end
            | {:draw_text, map()}
-           | {:set_cursor, non_neg_integer(), non_neg_integer()}}
+           | {:set_cursor, non_neg_integer(), non_neg_integer()}
+           | {:set_cursor_shape, cursor_shape()}}
           | {:error, :unknown_opcode | :malformed}
   def decode_command(
         <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16,
@@ -185,6 +202,18 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(<<@op_batch_end>>) do
     {:ok, :batch_end}
+  end
+
+  def decode_command(<<@op_set_cursor_shape, @cursor_block>>) do
+    {:ok, {:set_cursor_shape, :block}}
+  end
+
+  def decode_command(<<@op_set_cursor_shape, @cursor_beam>>) do
+    {:ok, {:set_cursor_shape, :beam}}
+  end
+
+  def decode_command(<<@op_set_cursor_shape, @cursor_underline>>) do
+    {:ok, {:set_cursor_shape, :underline}}
   end
 
   def decode_command(<<_opcode::8, _rest::binary>>) do

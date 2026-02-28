@@ -566,7 +566,7 @@ defmodule Minga.EditorTest do
 
     test "Ctrl+d moves cursor down by half a page" do
       {editor, buffer} = start_scroll_editor()
-      # Viewport is 10 rows, content_rows = 9, half = 4
+      # Viewport is 10 rows, content_rows = 8 (2 for footer), half = 4
       send_key(editor, ?d, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 4
@@ -584,18 +584,20 @@ defmodule Minga.EditorTest do
 
     test "Ctrl+f moves cursor down by a full page" do
       {editor, buffer} = start_scroll_editor()
+      # content_rows = 8 (10 rows - 2 footer)
       send_key(editor, ?f, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 9
+      assert line == 8
     end
 
     test "Ctrl+b moves cursor up by a full page" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {20, 0})
       Process.sleep(10)
+      # content_rows = 8, so 20 - 8 = 12
       send_key(editor, ?b, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 11
+      assert line == 12
     end
 
     test "Ctrl+d clamps to last line at buffer end" do

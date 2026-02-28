@@ -603,38 +603,65 @@ defmodule Minga.Editor do
         []
       end
 
-    # Status line
+    # ── Modeline (row N-2) — Doom Emacs-style colored segments ──
     {cursor_line, cursor_col} = cursor
     file_name = BufferServer.file_path(state.buffer) || "[scratch]"
-    dirty_marker = if BufferServer.dirty?(state.buffer), do: " [+]", else: ""
+    dirty_marker = if BufferServer.dirty?(state.buffer), do: " ● ", else: ""
     line_count = BufferServer.line_count(state.buffer)
-    mode_label = Mode.display(state.mode, state.mode_state)
+    modeline_row = viewport.rows - 2
 
-    status_text =
+    modeline_commands = render_modeline(
+      modeline_row,
+      viewport.cols,
+      state.mode,
+      state.mode_state,
+      file_name,
+      dirty_marker,
+      cursor_line,
+      cursor_col,
+      line_count
+    )
+
+    # ── Minibuffer (row N-1) — command input or messages ──
+    minibuffer_row = viewport.rows - 1
+
+    minibuffer_command =
       case state.mode do
         :command ->
-          # In command mode the status line becomes the ex command line.
-          mode_label
+          cmd_text = ":" <> state.mode_state.input
+          Protocol.encode_draw(
+            minibuffer_row,
+            0,
+            String.pad_trailing(cmd_text, viewport.cols),
+            fg: 0xEEEEEE,
+            bg: 0x000000
+          )
 
         _ ->
-          " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  #{mode_label}"
+          # Empty minibuffer when not in command mode
+          Protocol.encode_draw(
+            minibuffer_row,
+            0,
+            String.duplicate(" ", viewport.cols),
+            fg: 0x888888,
+            bg: 0x000000
+          )
       end
 
-    status_row = viewport.rows - 1
+    # ── Cursor placement + shape ──
+    cursor_shape_command = Protocol.encode_cursor_shape(cursor_shape_for_mode(state.mode))
 
-    status_command =
-      Protocol.encode_draw(
-        status_row,
-        0,
-        String.pad_trailing(status_text, viewport.cols),
-        fg: 0x000000,
-        bg: 0xCCCCCC,
-        bold: true
-      )
+    cursor_command =
+      case state.mode do
+        :command ->
+          cmd_col = String.length(state.mode_state.input) + 1
+          Protocol.encode_cursor(minibuffer_row, cmd_col)
 
-    cursor_row = cursor_line - viewport.top
-    cursor_col_screen = cursor_col - viewport.left
-    cursor_command = Protocol.encode_cursor(cursor_row, cursor_col_screen)
+        _ ->
+          cursor_row = cursor_line - viewport.top
+          cursor_col_screen = cursor_col - viewport.left
+          Protocol.encode_cursor(cursor_row, cursor_col_screen)
+      end
 
     whichkey_commands = maybe_render_whichkey(state, viewport)
 
@@ -642,9 +669,10 @@ defmodule Minga.Editor do
       clear ++
         line_commands ++
         tilde_commands ++
-        [status_command] ++
+        modeline_commands ++
+        [minibuffer_command] ++
         whichkey_commands ++
-        [cursor_command, Protocol.encode_batch_end()]
+        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
     :ok
@@ -656,7 +684,7 @@ defmodule Minga.Editor do
     bindings = WhichKey.bindings_from_node(node)
     lines = WhichKey.render_popup(bindings)
 
-    popup_row = max(0, viewport.rows - 2 - length(lines))
+    popup_row = max(0, viewport.rows - 3 - length(lines))
 
     ([Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
        lines)
@@ -668,6 +696,138 @@ defmodule Minga.Editor do
   end
 
   defp maybe_render_whichkey(_state, _viewport), do: []
+
+  # ── Doom-style modeline ──────────────────────────────────────────────────────
+
+  # Doom Emacs color palette for mode indicators
+  @mode_colors %{
+    normal:           {0x000000, 0x51AFEF},  # black on blue
+    insert:           {0x000000, 0x98BE65},  # black on green
+    visual:           {0x000000, 0xC678DD},  # black on magenta
+    operator_pending: {0x000000, 0xDA8548},  # black on orange
+    command:          {0x000000, 0xECBE7B}   # black on yellow
+  }
+
+  # Powerline separator characters
+  @separator ""
+  # @separator_thin ""
+
+  @spec render_modeline(
+          non_neg_integer(),
+          pos_integer(),
+          Mode.mode(),
+          Mode.state(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_modeline(row, cols, mode, mode_state, file_name, dirty_marker, cursor_line, cursor_col, line_count) do
+    # Segment colors
+    {mode_fg, mode_bg} = Map.get(@mode_colors, mode, {0x000000, 0x51AFEF})
+    bar_fg = 0xBBC2CF
+    bar_bg = 0x23272E
+    info_fg = 0xBBC2CF
+    info_bg = 0x3F444A
+
+    # ── Left segments ──
+
+    # 1. Mode badge
+    mode_text = mode_badge(mode, mode_state)
+    mode_segment = " #{mode_text} "
+
+    # 2. Separator: mode → info
+    sep1 = @separator
+
+    # 3. File info segment
+    file_segment = " #{file_name}#{dirty_marker} "
+
+    # 4. Separator: info → bar
+    sep2 = @separator
+
+    # ── Right segments ──
+
+    # Position info
+    percent =
+      if line_count <= 1,
+        do: "Top",
+        else: "#{div(cursor_line * 100, max(line_count - 1, 1))}%%"
+
+    pos_segment = " #{cursor_line + 1}:#{cursor_col + 1} "
+    pct_segment = " #{percent} "
+
+    # Separator: bar → info (right side)
+    sep3 = @separator
+    # Separator: info → accent (right side)
+    sep4 = @separator
+
+    # ── Build draw commands ──
+    # Left side
+    left_col = 0
+    commands = [
+      Protocol.encode_draw(row, left_col, mode_segment, fg: mode_fg, bg: mode_bg, bold: true)
+    ]
+    left_col = left_col + String.length(mode_segment)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, sep1, fg: mode_bg, bg: info_bg)
+    ]
+    left_col = left_col + String.length(sep1)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, file_segment, fg: info_fg, bg: info_bg)
+    ]
+    left_col = left_col + String.length(file_segment)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, sep2, fg: info_bg, bg: bar_bg)
+    ]
+    left_col = left_col + String.length(sep2)
+
+    # Fill middle with bar background
+    right_total = String.length(sep3) + String.length(pos_segment) +
+                  String.length(sep4) + String.length(pct_segment)
+    fill_width = max(0, cols - left_col - right_total)
+    fill = String.duplicate(" ", fill_width)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, fill, fg: bar_fg, bg: bar_bg)
+    ]
+    left_col = left_col + fill_width
+
+    # Right side
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, sep3, fg: info_bg, bg: bar_bg)
+    ]
+    left_col = left_col + String.length(sep3)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, pos_segment, fg: info_fg, bg: info_bg)
+    ]
+    left_col = left_col + String.length(pos_segment)
+
+    commands = commands ++ [
+      Protocol.encode_draw(row, left_col, sep4, fg: mode_bg, bg: info_bg)
+    ]
+    left_col = left_col + String.length(sep4)
+
+    commands ++ [
+      Protocol.encode_draw(row, left_col, pct_segment, fg: mode_fg, bg: mode_bg, bold: true)
+    ]
+  end
+
+  @spec mode_badge(Mode.mode(), Mode.state()) :: String.t()
+  defp mode_badge(:visual, %Minga.Mode.VisualState{visual_type: :line}), do: "V-LINE"
+  defp mode_badge(:normal, _state), do: "NORMAL"
+  defp mode_badge(:insert, _state), do: "INSERT"
+  defp mode_badge(:visual, _state), do: "VISUAL"
+  defp mode_badge(:operator_pending, _state), do: "OPERATOR"
+  defp mode_badge(:command, _state), do: "COMMAND"
+
+  @spec cursor_shape_for_mode(Mode.mode()) :: Protocol.cursor_shape()
+  defp cursor_shape_for_mode(:insert), do: :beam
+  defp cursor_shape_for_mode(_mode), do: :block
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

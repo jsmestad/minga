@@ -26,6 +26,13 @@ pub const OP_DRAW_TEXT: u8 = 0x10;
 pub const OP_SET_CURSOR: u8 = 0x11;
 pub const OP_CLEAR: u8 = 0x12;
 pub const OP_BATCH_END: u8 = 0x13;
+pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
+
+// ── Cursor shapes ──
+
+pub const CURSOR_BLOCK: u8 = 0x00;
+pub const CURSOR_BEAM: u8 = 0x01;
+pub const CURSOR_UNDERLINE: u8 = 0x02;
 
 // ── Modifier flags ──
 
@@ -43,9 +50,16 @@ pub const ATTR_REVERSE: u8 = 0x08;
 
 // ── Decoded types ──
 
+pub const CursorShape = enum(u8) {
+    block = CURSOR_BLOCK,
+    beam = CURSOR_BEAM,
+    underline = CURSOR_UNDERLINE,
+};
+
 pub const RenderCommand = union(enum) {
     draw_text: DrawText,
     set_cursor: SetCursor,
+    set_cursor_shape: CursorShape,
     clear: void,
     batch_end: void,
 };
@@ -149,6 +163,11 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
         },
         OP_CLEAR => return .clear,
         OP_BATCH_END => return .batch_end,
+        OP_SET_CURSOR_SHAPE => {
+            if (rest.len < 1) return error.Malformed;
+            const shape = std.meta.intToEnum(CursorShape, rest[0]) catch return error.Malformed;
+            return .{ .set_cursor_shape = shape };
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -250,6 +269,37 @@ test "decode batch_end command" {
     const data = [_]u8{0x13};
     const cmd = try decodeCommand(&data);
     try std.testing.expect(cmd == .batch_end);
+}
+
+test "decode set_cursor_shape block" {
+    const data = [_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_BLOCK };
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .set_cursor_shape);
+    try std.testing.expectEqual(CursorShape.block, cmd.set_cursor_shape);
+}
+
+test "decode set_cursor_shape beam" {
+    const data = [_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_BEAM };
+    const cmd = try decodeCommand(&data);
+    try std.testing.expectEqual(CursorShape.beam, cmd.set_cursor_shape);
+}
+
+test "decode set_cursor_shape underline" {
+    const data = [_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_UNDERLINE };
+    const cmd = try decodeCommand(&data);
+    try std.testing.expectEqual(CursorShape.underline, cmd.set_cursor_shape);
+}
+
+test "decode set_cursor_shape truncated returns malformed" {
+    const data = [_]u8{OP_SET_CURSOR_SHAPE}; // missing shape byte
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode set_cursor_shape invalid value returns malformed" {
+    const data = [_]u8{ OP_SET_CURSOR_SHAPE, 0xFF }; // invalid shape
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
 }
 
 test "decode unknown opcode returns error" {

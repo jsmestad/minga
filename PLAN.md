@@ -65,12 +65,15 @@ Input events (Zig → BEAM):
   0x03 ready:      <<0x03, width::16, height::16>>
 
 Render commands (BEAM → Zig):
-  0x10 draw_text:  <<0x10, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
-  0x11 set_cursor: <<0x11, row::16, col::16>>
-  0x12 clear:      <<0x12>>
-  0x13 batch_end:  <<0x13>>
-  0x14 draw_panel: <<0x14, row::16, col::16, width::16, height::16,
-                     border::8, content_len::16, content::binary>>
+  0x10 draw_text:        <<0x10, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
+  0x11 set_cursor:       <<0x11, row::16, col::16>>
+  0x12 clear:            <<0x12>>
+  0x13 batch_end:        <<0x13>>
+  0x14 draw_panel:       <<0x14, row::16, col::16, width::16, height::16,
+                           border::8, content_len::16, content::binary>>
+  0x15 set_cursor_shape: <<0x15, shape::8>>
+
+Cursor shapes: BLOCK=0x00, BEAM=0x01, UNDERLINE=0x02
 
 Modifier flags: SHIFT=0x01, CTRL=0x02, ALT=0x04, SUPER=0x08
 Style attrs:    BOLD=0x01, ITALIC=0x02, UNDERLINE=0x04, REVERSE=0x08
