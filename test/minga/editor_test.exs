@@ -1,5 +1,5 @@
 defmodule Minga.EditorTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor

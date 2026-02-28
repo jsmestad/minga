@@ -129,6 +129,46 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :file_path)
   end
 
+  @doc "Returns the text between two positions (from_pos inclusive, to_pos exclusive)."
+  @spec content_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) ::
+          String.t()
+  def content_range(server, from_pos, to_pos) do
+    GenServer.call(server, {:content_range, from_pos, to_pos})
+  end
+
+  @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
+  @spec delete_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) :: :ok
+  def delete_range(server, from_pos, to_pos) do
+    GenServer.call(server, {:delete_range, from_pos, to_pos})
+  end
+
+  @doc """
+  Returns the text in the range [start_pos, end_pos] inclusive.
+  Positions are sorted automatically.
+  """
+  @spec get_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) :: String.t()
+  def get_range(server, start_pos, end_pos) do
+    GenServer.call(server, {:get_range, start_pos, end_pos})
+  end
+
+  @doc """
+  Returns the joined text of lines [start_line, end_line] inclusive (no trailing newline).
+  """
+  @spec get_lines_content(GenServer.server(), non_neg_integer(), non_neg_integer()) :: String.t()
+  def get_lines_content(server, start_line, end_line)
+      when is_integer(start_line) and start_line >= 0 and
+             is_integer(end_line) and end_line >= 0 do
+    GenServer.call(server, {:get_lines_content, start_line, end_line})
+  end
+
+  @doc "Deletes lines [start_line, end_line] inclusive. Cursor lands at the first remaining line."
+  @spec delete_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: :ok
+  def delete_lines(server, start_line, end_line)
+      when is_integer(start_line) and start_line >= 0 and
+             is_integer(end_line) and end_line >= 0 do
+    GenServer.call(server, {:delete_lines, start_line, end_line})
+  end
+
   # ── Server Callbacks ──
 
   @impl true
@@ -241,6 +281,33 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:file_path, _from, state) do
     {:reply, state.file_path, state}
+  end
+
+  def handle_call({:content_range, from_pos, to_pos}, _from, state) do
+    text = GapBuffer.content_range(state.gap_buffer, from_pos, to_pos)
+    {:reply, text, state}
+  end
+
+  def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
+    new_buf = GapBuffer.delete_range(state.gap_buffer, from_pos, to_pos)
+    dirty = new_buf != state.gap_buffer or state.dirty
+    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
+  end
+
+  def handle_call({:get_range, start_pos, end_pos}, _from, state) do
+    result = GapBuffer.get_range(state.gap_buffer, start_pos, end_pos)
+    {:reply, result, state}
+  end
+
+  def handle_call({:get_lines_content, start_line, end_line}, _from, state) do
+    result = GapBuffer.get_lines_content(state.gap_buffer, start_line, end_line)
+    {:reply, result, state}
+  end
+
+  def handle_call({:delete_lines, start_line, end_line}, _from, state) do
+    new_buf = GapBuffer.delete_lines(state.gap_buffer, start_line, end_line)
+    dirty = new_buf != state.gap_buffer or state.dirty
+    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
   end
 
   # ── Private ──

@@ -100,13 +100,22 @@ defmodule Minga.Mode do
   def display(:operator_pending), do: "-- OPERATOR --"
   def display(:command), do: "-- COMMAND --"
 
+  @doc """
+  Returns the status-line label for a mode, using the FSM state for
+  additional context. Currently used to distinguish `-- VISUAL --` from
+  `-- VISUAL LINE --` based on `:visual_type` in the state.
+  """
+  @spec display(mode(), state()) :: String.t()
+  def display(:visual, %{visual_type: :line}), do: "-- VISUAL LINE --"
+  def display(mode, _state), do: display(mode)
+
   # ── Private ──────────────────────────────────────────────────────────────────
 
   @spec mode_module(mode()) :: module()
   defp mode_module(:normal), do: Minga.Mode.Normal
   defp mode_module(:insert), do: Minga.Mode.Insert
-  defp mode_module(:visual), do: Minga.Mode.Normal
-  defp mode_module(:operator_pending), do: Minga.Mode.Normal
+  defp mode_module(:visual), do: Minga.Mode.Visual
+  defp mode_module(:operator_pending), do: Minga.Mode.OperatorPending
   defp mode_module(:command), do: Minga.Mode.Insert
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}

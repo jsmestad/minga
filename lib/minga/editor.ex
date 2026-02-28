@@ -166,6 +166,16 @@ defmodule Minga.Editor do
     key = {codepoint, modifiers}
     {new_mode, commands, new_mode_state} = Mode.process(state.mode, key, state.mode_state)
 
+    # When transitioning INTO visual mode, capture the current cursor as the
+    # selection anchor. The mode module sets :visual_type; we inject :visual_anchor.
+    new_mode_state =
+      if new_mode == :visual and state.mode != :visual and state.buffer do
+        anchor = BufferServer.cursor(state.buffer)
+        Map.put(new_mode_state, :visual_anchor, anchor)
+      else
+        new_mode_state
+      end
+
     new_state = %{state | mode: new_mode, mode_state: new_mode_state}
 
     Enum.reduce(commands, new_state, fn cmd, acc ->
@@ -262,6 +272,48 @@ defmodule Minga.Editor do
     System.stop(0)
   end
 
+  defp execute_command(%{buffer: buf, mode_state: ms}, :delete_visual_selection) do
+    anchor = Map.get(ms, :visual_anchor, {0, 0})
+    visual_type = Map.get(ms, :visual_type, :char)
+    cursor = BufferServer.cursor(buf)
+
+    case visual_type do
+      :char ->
+        # delete_range is inclusive on both ends — pass anchor and cursor directly.
+        BufferServer.delete_range(buf, anchor, cursor)
+
+      :line ->
+        {anchor_line, _} = anchor
+        {cursor_line, _} = cursor
+        start_line = min(anchor_line, cursor_line)
+        end_line = max(anchor_line, cursor_line)
+        BufferServer.delete_lines(buf, start_line, end_line)
+    end
+  end
+
+  defp execute_command(%{buffer: buf, mode_state: ms}, :yank_visual_selection) do
+    anchor = Map.get(ms, :visual_anchor, {0, 0})
+    visual_type = Map.get(ms, :visual_type, :char)
+    cursor = BufferServer.cursor(buf)
+
+    _yanked =
+      case visual_type do
+        :char ->
+          # get_range is inclusive on both ends
+          BufferServer.get_range(buf, anchor, cursor)
+
+        :line ->
+          {anchor_line, _} = anchor
+          {cursor_line, _} = cursor
+          start_line = min(anchor_line, cursor_line)
+          end_line = max(anchor_line, cursor_line)
+          BufferServer.get_lines_content(buf, start_line, end_line)
+      end
+
+    Logger.debug("Yanked visual selection")
+    :ok
+  end
+
   # Unknown or unimplemented commands are silently ignored.
   defp execute_command(_state, _cmd), do: :ok
 
@@ -289,22 +341,14 @@ defmodule Minga.Editor do
 
     clear = [Protocol.encode_clear()]
 
+    visual_selection = visual_selection_bounds(state, cursor)
+
     line_commands =
       lines
       |> Enum.with_index()
-      |> Enum.map(fn {line_text, screen_row} ->
-        visible_text =
-          if viewport.left > 0 do
-            line_text
-            |> String.graphemes()
-            |> Enum.drop(viewport.left)
-            |> Enum.take(viewport.cols)
-            |> Enum.join()
-          else
-            String.slice(line_text, 0, viewport.cols)
-          end
-
-        Protocol.encode_draw(screen_row, 0, visible_text)
+      |> Enum.flat_map(fn {line_text, screen_row} ->
+        buf_line = first_line + screen_row
+        render_line(line_text, screen_row, buf_line, viewport, visual_selection)
       end)
 
     tilde_commands =
@@ -321,7 +365,7 @@ defmodule Minga.Editor do
     file_name = BufferServer.file_path(state.buffer) || "[scratch]"
     dirty_marker = if BufferServer.dirty?(state.buffer), do: " [+]", else: ""
     line_count = BufferServer.line_count(state.buffer)
-    mode_label = Mode.display(state.mode)
+    mode_label = Mode.display(state.mode, state.mode_state)
 
     status_text =
       " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  #{mode_label}"
@@ -359,5 +403,147 @@ defmodule Minga.Editor do
       Minga.Buffer.Supervisor,
       {BufferServer, file_path: file_path}
     )
+  end
+
+  # ── Visual selection helpers ──────────────────────────────────────────────
+
+  @typedoc """
+  Represents the bounds of a visual selection for rendering.
+
+  * `nil` — no active selection
+  * `{:char, start_pos, end_pos}` — characterwise selection
+  * `{:line, start_line, end_line}` — linewise selection
+  """
+  @type visual_selection ::
+          nil
+          | {:char, Mode.state(), {non_neg_integer(), non_neg_integer()}}
+          | {:line, non_neg_integer(), non_neg_integer()}
+
+  @spec visual_selection_bounds(state(), Minga.Buffer.GapBuffer.position()) ::
+          visual_selection()
+  defp visual_selection_bounds(%{mode: :visual, mode_state: ms}, cursor) do
+    anchor = Map.get(ms, :visual_anchor, cursor)
+    visual_type = Map.get(ms, :visual_type, :char)
+
+    case visual_type do
+      :char ->
+        {start_pos, end_pos} = sort_positions(anchor, cursor)
+        {:char, start_pos, end_pos}
+
+      :line ->
+        {anchor_line, _} = anchor
+        {cursor_line, _} = cursor
+        {:line, min(anchor_line, cursor_line), max(anchor_line, cursor_line)}
+    end
+  end
+
+  defp visual_selection_bounds(_state, _cursor), do: nil
+
+  @spec sort_positions(
+          Minga.Buffer.GapBuffer.position(),
+          Minga.Buffer.GapBuffer.position()
+        ) :: {Minga.Buffer.GapBuffer.position(), Minga.Buffer.GapBuffer.position()}
+  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
+    if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
+  end
+
+  # Renders a single buffer line, applying visual selection highlights.
+  @spec render_line(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Editor.Viewport.t(),
+          visual_selection()
+        ) :: [binary()]
+  defp render_line(line_text, screen_row, buf_line, viewport, visual_selection) do
+    graphemes = String.graphemes(line_text)
+    line_len = length(graphemes)
+
+    # Compute visible graphemes accounting for horizontal scroll
+    visible_graphemes =
+      graphemes
+      |> Enum.drop(viewport.left)
+      |> Enum.take(viewport.cols)
+
+    case selection_cols_for_line(buf_line, line_len, visual_selection) do
+      nil ->
+        # No selection on this line
+        [Protocol.encode_draw(screen_row, 0, Enum.join(visible_graphemes))]
+
+      :full ->
+        # Entire line is selected (linewise or full-line char selection)
+        [Protocol.encode_draw(screen_row, 0, Enum.join(visible_graphemes), reverse: true)]
+
+      {sel_start, sel_end} ->
+        # Partial line selection — split into three segments
+        before_sel = Enum.take(visible_graphemes, max(0, sel_start - viewport.left))
+
+        sel_graphemes =
+          visible_graphemes
+          |> Enum.drop(max(0, sel_start - viewport.left))
+          |> Enum.take(sel_end - max(sel_start, viewport.left) + 1)
+
+        after_sel =
+          Enum.drop(
+            visible_graphemes,
+            max(0, sel_start - viewport.left) + length(sel_graphemes)
+          )
+
+        before_text = Enum.join(before_sel)
+        sel_text = Enum.join(sel_graphemes)
+        after_text = Enum.join(after_sel)
+
+        [
+          Protocol.encode_draw(screen_row, 0, before_text),
+          Protocol.encode_draw(
+            screen_row,
+            length(before_sel),
+            sel_text,
+            reverse: true
+          ),
+          Protocol.encode_draw(
+            screen_row,
+            length(before_sel) + length(sel_graphemes),
+            after_text
+          )
+        ]
+    end
+  end
+
+  @typedoc "Column range of a selection on a single line."
+  @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
+
+  @spec selection_cols_for_line(
+          non_neg_integer(),
+          non_neg_integer(),
+          visual_selection()
+        ) :: line_selection()
+  defp selection_cols_for_line(_buf_line, _line_len, nil), do: nil
+
+  defp selection_cols_for_line(buf_line, _line_len, {:line, start_line, end_line}) do
+    if buf_line >= start_line and buf_line <= end_line, do: :full, else: nil
+  end
+
+  defp selection_cols_for_line(
+         buf_line,
+         line_len,
+         {:char, {start_line, start_col}, {end_line, end_col}}
+       ) do
+    cond do
+      buf_line < start_line or buf_line > end_line ->
+        nil
+
+      start_line == end_line ->
+        {start_col, end_col}
+
+      buf_line == start_line ->
+        {start_col, max(0, line_len - 1)}
+
+      buf_line == end_line ->
+        {0, end_col}
+
+      true ->
+        :full
+    end
   end
 end

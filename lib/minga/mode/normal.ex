@@ -24,6 +24,17 @@ defmodule Minga.Mode.Normal do
   | `l`      | Move right                             |
   | `0`      | Move to line start (when no count) or continue count |
   | `1`–`9`  | Accumulate count prefix                |
+  | `d`      | Enter operator-pending (delete)        |
+  | `c`      | Enter operator-pending (change)        |
+  | `y`      | Enter operator-pending (yank)          |
+  | `p`      | Paste after cursor                     |
+  | `P`      | Paste before cursor                    |
+  | `w`      | Word forward                           |
+  | `b`      | Word backward                          |
+  | `e`      | Word end                               |
+  | `$`      | Line end                               |
+  | `^`      | First non-blank                        |
+  | `G`      | Document end                           |
   | `Escape` | Clear count prefix (already normal)    |
   | Arrow keys | Move in corresponding direction     |
   """
@@ -128,6 +139,72 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({@arrow_right, _mods}, state) do
     {:execute, :move_right, state}
+  end
+
+  # ── Visual mode entry ─────────────────────────────────────────────────────
+
+  # v → characterwise visual mode.
+  # The editor injects the :visual_anchor after the transition.
+  def handle_key({?v, 0}, state) do
+    {:transition, :visual, Map.put(state, :visual_type, :char)}
+  end
+
+  # V → linewise visual mode.
+  def handle_key({?V, 0}, state) do
+    {:transition, :visual, Map.put(state, :visual_type, :line)}
+  end
+
+  # ── Word / line motions ───────────────────────────────────────────────────
+
+  def handle_key({?w, 0}, state) do
+    {:execute, :word_forward, state}
+  end
+
+  def handle_key({?b, 0}, state) do
+    {:execute, :word_backward, state}
+  end
+
+  def handle_key({?e, 0}, state) do
+    {:execute, :word_end, state}
+  end
+
+  def handle_key({?$, 0}, state) do
+    {:execute, :move_to_line_end, state}
+  end
+
+  def handle_key({?^, 0}, state) do
+    {:execute, :move_to_first_non_blank, state}
+  end
+
+  def handle_key({?G, 0}, state) do
+    {:execute, :move_to_document_end, state}
+  end
+
+  # ── Operator entry (d / c / y) ────────────────────────────────────────────
+
+  def handle_key({?d, 0}, %{count: count} = state) do
+    op_state = state |> Map.put(:operator, :delete) |> Map.put(:op_count, count || 1)
+    {:transition, :operator_pending, op_state}
+  end
+
+  def handle_key({?c, 0}, %{count: count} = state) do
+    op_state = state |> Map.put(:operator, :change) |> Map.put(:op_count, count || 1)
+    {:transition, :operator_pending, op_state}
+  end
+
+  def handle_key({?y, 0}, %{count: count} = state) do
+    op_state = state |> Map.put(:operator, :yank) |> Map.put(:op_count, count || 1)
+    {:transition, :operator_pending, op_state}
+  end
+
+  # ── Paste ─────────────────────────────────────────────────────────────────
+
+  def handle_key({?p, 0}, state) do
+    {:execute, :paste_after, state}
+  end
+
+  def handle_key({?P, 0}, state) do
+    {:execute, :paste_before, state}
   end
 
   # ── Escape: already in Normal, just clear any pending count ──────────────

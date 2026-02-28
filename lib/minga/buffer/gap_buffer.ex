@@ -110,6 +110,27 @@ defmodule Minga.Buffer.GapBuffer do
     byte_size(before)
   end
 
+  @doc """
+  Returns the grapheme offset of a `{line, col}` position in the buffer content.
+  """
+  @spec position_to_offset(t(), position()) :: non_neg_integer()
+  def position_to_offset(%__MODULE__{} = buf, {line, col})
+      when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
+    text = content(buf)
+    all_lines = String.split(text, "\n")
+    grapheme_offset_for(all_lines, line, col)
+  end
+
+  @doc """
+  Converts a grapheme offset in the buffer content to a `{line, col}` position.
+  Clamps to valid bounds.
+  """
+  @spec offset_to_position(t(), non_neg_integer()) :: position()
+  def offset_to_position(%__MODULE__{} = buf, offset) when is_integer(offset) and offset >= 0 do
+    text = content(buf)
+    do_offset_to_position(text, offset, 0, 0)
+  end
+
   # ── Mutations ──
 
   @doc "Inserts a character (or string) at the cursor position."
@@ -189,6 +210,120 @@ defmodule Minga.Buffer.GapBuffer do
     %__MODULE__{before: before, after: after_}
   end
 
+  # ── Range operations ──
+
+  @doc """
+  Returns the text between two positions **inclusive** on both ends.
+  If the positions are reversed, they are normalised automatically.
+  """
+  @spec content_range(t(), position(), position()) :: String.t()
+  def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
+    text = content(buf)
+    all_lines = String.split(text, "\n")
+    total_graphemes = String.length(text)
+    from_off = grapheme_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = grapheme_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+    {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
+    extract_count = min(end_off - start_off + 1, total_graphemes - start_off)
+    {_, rest} = split_at_grapheme(text, start_off)
+    {extracted, _} = split_at_grapheme(rest, extract_count)
+    extracted
+  end
+
+  @doc """
+  Deletes the text between two positions **inclusive** on both ends.
+  If the positions are reversed, they are normalised automatically.
+  The cursor is placed at the earlier position.
+  """
+  @spec delete_range(t(), position(), position()) :: t()
+  def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
+    text = content(buf)
+    all_lines = String.split(text, "\n")
+    total_graphemes = String.length(text)
+    from_off = grapheme_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = grapheme_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+
+    {start_off, end_off, cursor_pos} =
+      if from_off <= to_off,
+        do: {from_off, to_off, from_pos},
+        else: {to_off, from_off, to_pos}
+
+    # Inclusive: delete end_off - start_off + 1 graphemes, clamped to buffer length.
+    delete_count = min(end_off - start_off + 1, total_graphemes - start_off)
+    {before_text, rest} = split_at_grapheme(text, start_off)
+    {_, after_text} = split_at_grapheme(rest, delete_count)
+    new_text = before_text <> after_text
+    move_to(new(new_text), cursor_pos)
+  end
+
+  @doc """
+  Returns the text in the range [start_pos, end_pos] inclusive (characterwise).
+
+  Positions are clamped to valid buffer bounds. If start_pos is after end_pos,
+  the positions are swapped automatically.
+  """
+  @spec get_range(t(), position(), position()) :: String.t()
+  def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
+    text = content(buf)
+    graphemes = String.graphemes(text)
+    all_lines = String.split(text, "\n")
+
+    {s, e} = sort_positions(start_pos, end_pos)
+    s_off = grapheme_offset_for(all_lines, elem(s, 0), elem(s, 1))
+    e_off = grapheme_offset_for(all_lines, elem(e, 0), elem(e, 1))
+
+    graphemes |> Enum.slice(s_off..e_off) |> Enum.join()
+  end
+
+  @doc """
+  Returns the joined text of lines [start_line, end_line] inclusive, with
+  newlines between them (no trailing newline).
+  """
+  @spec get_lines_content(t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  def get_lines_content(%__MODULE__{} = buf, start_line, end_line)
+      when is_integer(start_line) and start_line >= 0 and
+             is_integer(end_line) and end_line >= 0 do
+    {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
+
+    buf
+    |> content()
+    |> String.split("\n")
+    |> Enum.slice(s..e)
+    |> Enum.join("\n")
+  end
+
+  @doc """
+  Deletes lines [start_line, end_line] inclusive from the buffer.
+
+  The cursor is placed at the beginning of the line that now occupies
+  the start position (or the last remaining line if fewer lines remain).
+  """
+  @spec delete_lines(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def delete_lines(%__MODULE__{} = buf, start_line, end_line)
+      when is_integer(start_line) and start_line >= 0 and
+             is_integer(end_line) and end_line >= 0 do
+    text = content(buf)
+    all_lines = String.split(text, "\n")
+    total_lines = length(all_lines)
+
+    {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
+    s = min(s, total_lines - 1)
+    e = min(e, total_lines - 1)
+
+    before_lines = Enum.take(all_lines, s)
+    after_lines = Enum.drop(all_lines, e + 1)
+    remaining = before_lines ++ after_lines
+
+    new_text =
+      case remaining do
+        [] -> ""
+        lines -> Enum.join(lines, "\n")
+      end
+
+    target_line = min(s, max(0, length(remaining) - 1))
+    new_text |> new() |> move_to({target_line, 0})
+  end
+
   # ── Private helpers ──
 
   @spec move_left(t()) :: t()
@@ -264,6 +399,29 @@ defmodule Minga.Buffer.GapBuffer do
       nil ->
         {current_offset, 0}
     end
+  end
+
+  @spec do_offset_to_position(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          position()
+  defp do_offset_to_position("", _offset, line, col), do: {line, col}
+  defp do_offset_to_position(_text, 0, line, col), do: {line, col}
+
+  defp do_offset_to_position(text, offset, line, col) do
+    case String.next_grapheme(text) do
+      {"\n", rest} ->
+        do_offset_to_position(rest, offset - 1, line + 1, 0)
+
+      {_ch, rest} ->
+        do_offset_to_position(rest, offset - 1, line, col + 1)
+
+      nil ->
+        {line, col}
+    end
+  end
+
+  @spec sort_positions(position(), position()) :: {position(), position()}
+  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
+    if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
   @spec count_newlines(String.t()) :: non_neg_integer()

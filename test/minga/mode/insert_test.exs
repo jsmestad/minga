@@ -1,5 +1,5 @@
 defmodule Minga.Mode.InsertTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Minga.Mode
   alias Minga.Mode.Insert

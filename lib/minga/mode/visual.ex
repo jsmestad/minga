@@ -1,0 +1,161 @@
+defmodule Minga.Mode.Visual do
+  @moduledoc """
+  Vim Visual mode key handler.
+
+  Visual mode is entered from Normal mode via:
+
+  * `v` — characterwise visual (selects individual characters)
+  * `V` — linewise visual (selects whole lines)
+
+  The selection spans from the **anchor** (cursor position when visual mode was
+  entered, injected into the FSM state by `Minga.Editor`) to the **current
+  cursor position** (the moving end). All standard motion keys move the cursor
+  end, extending or shrinking the selection.
+
+  ## Operators
+
+  | Key      | Action                                          |
+  |----------|-------------------------------------------------|
+  | `d`      | Delete selection → Normal mode                  |
+  | `c`      | Delete selection → Insert mode                  |
+  | `y`      | Yank (copy) selection → Normal mode             |
+  | `Escape` | Cancel selection → Normal mode                  |
+
+  ## Motions (extend selection)
+
+  | Key    | Motion          |
+  |--------|-----------------|
+  | `h`    | Move left       |
+  | `j`    | Move down       |
+  | `k`    | Move up         |
+  | `l`    | Move right      |
+  | `w`    | Word forward    |
+  | `b`    | Word backward   |
+  | `e`    | End of word     |
+  | Arrows | Directional move|
+
+  ## State contract
+
+  Visual mode expects the following extra keys in the FSM state (set by the
+  editor when transitioning *into* visual mode):
+
+  * `:visual_anchor` — `t:Minga.Buffer.GapBuffer.position/0` — the fixed end
+    of the selection.
+  * `:visual_type` — `:char | :line` — selection granularity.
+  """
+
+  @behaviour Minga.Mode
+
+  alias Minga.Mode
+
+  # Special codepoints
+  @escape 27
+
+  # Arrow key codepoints sent by libvaxis
+  @arrow_up 57416
+  @arrow_down 57424
+  @arrow_left 57419
+  @arrow_right 57421
+
+  @typedoc "Selection type: characterwise or linewise."
+  @type selection_type :: :char | :line
+
+  @typedoc """
+  Extended FSM state used in Visual mode.
+
+  Carries the standard `:count` field plus visual-specific fields:
+  * `:visual_anchor` — fixed end of the selection (set by the editor).
+  * `:visual_type` — granularity of the selection.
+  """
+  @type visual_state :: %{
+          :count => non_neg_integer() | nil,
+          :visual_anchor => Minga.Buffer.GapBuffer.position(),
+          :visual_type => selection_type(),
+          optional(atom()) => term()
+        }
+
+  @impl Mode
+  @doc """
+  Handles a key event in Visual mode.
+
+  Returns a `t:Minga.Mode.result/0` describing what the editor should do.
+  """
+  @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
+
+  # ── Motions ─────────────────────────────────────────────────────────────────
+
+  def handle_key({?h, 0}, state) do
+    {:execute, :move_left, state}
+  end
+
+  def handle_key({?j, 0}, state) do
+    {:execute, :move_down, state}
+  end
+
+  def handle_key({?k, 0}, state) do
+    {:execute, :move_up, state}
+  end
+
+  def handle_key({?l, 0}, state) do
+    {:execute, :move_right, state}
+  end
+
+  def handle_key({?w, 0}, state) do
+    {:execute, :word_forward, state}
+  end
+
+  def handle_key({?b, 0}, state) do
+    {:execute, :word_backward, state}
+  end
+
+  def handle_key({?e, 0}, state) do
+    {:execute, :end_of_word, state}
+  end
+
+  # Arrow keys
+  def handle_key({@arrow_up, _mods}, state) do
+    {:execute, :move_up, state}
+  end
+
+  def handle_key({@arrow_down, _mods}, state) do
+    {:execute, :move_down, state}
+  end
+
+  def handle_key({@arrow_left, _mods}, state) do
+    {:execute, :move_left, state}
+  end
+
+  def handle_key({@arrow_right, _mods}, state) do
+    {:execute, :move_right, state}
+  end
+
+  # ── Operators ────────────────────────────────────────────────────────────────
+
+  @doc false
+  # d — delete selection, return to Normal
+  def handle_key({?d, 0}, state) do
+    {:execute_then_transition, [:delete_visual_selection], :normal, state}
+  end
+
+  # c — delete selection, enter Insert
+  def handle_key({?c, 0}, state) do
+    {:execute_then_transition, [:delete_visual_selection], :insert, state}
+  end
+
+  # y — yank selection, return to Normal
+  def handle_key({?y, 0}, state) do
+    {:execute_then_transition, [:yank_visual_selection], :normal, state}
+  end
+
+  # ── Escape: cancel visual selection ─────────────────────────────────────────
+
+  def handle_key({@escape, _mods}, state) do
+    {:transition, :normal, state}
+  end
+
+  # ── Unknown keys: no-op ──────────────────────────────────────────────────────
+
+  def handle_key(_key, state) do
+    {:continue, state}
+  end
+end
