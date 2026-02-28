@@ -34,7 +34,7 @@ defmodule Minga.Mode do
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
   tagged tuple carrying an argument (e.g. `{:insert_char, \"x\"}`).
   """
-  @type command :: atom() | {atom(), term()}
+  @type command :: atom() | {atom(), term()} | {atom(), term(), term()}
 
   @typedoc """
   FSM-level state. Always contains `:count` (the accumulated digit prefix).
@@ -107,6 +107,7 @@ defmodule Minga.Mode do
   """
   @spec display(mode(), state()) :: String.t()
   def display(:visual, %{visual_type: :line}), do: "-- VISUAL LINE --"
+  def display(:command, %{input: input}) when is_binary(input), do: ":" <> input
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ defmodule Minga.Mode do
   defp mode_module(:insert), do: Minga.Mode.Insert
   defp mode_module(:visual), do: Minga.Mode.Visual
   defp mode_module(:operator_pending), do: Minga.Mode.OperatorPending
-  defp mode_module(:command), do: Minga.Mode.Insert
+  defp mode_module(:command), do: Minga.Mode.Command
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

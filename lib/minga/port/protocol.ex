@@ -144,7 +144,8 @@ defmodule Minga.Port.Protocol do
     {:ok, {:ready, width, height}}
   end
 
-  def decode_event(<<opcode::8, _rest::binary>>) when opcode in [@op_key_press, @op_resize, @op_ready] do
+  def decode_event(<<opcode::8, _rest::binary>>)
+      when opcode in [@op_key_press, @op_resize, @op_ready] do
     {:error, :malformed}
   end
 
@@ -160,12 +161,18 @@ defmodule Minga.Port.Protocol do
 
   @doc "Decodes a render command from a binary payload (primarily for testing)."
   @spec decode_command(binary()) ::
-          {:ok, :clear | :batch_end | {:draw_text, map()} | {:set_cursor, non_neg_integer(), non_neg_integer()}}
+          {:ok,
+           :clear
+           | :batch_end
+           | {:draw_text, map()}
+           | {:set_cursor, non_neg_integer(), non_neg_integer()}}
           | {:error, :unknown_opcode | :malformed}
-  def decode_command(<<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary-size(text_len)>>) do
+  def decode_command(
+        <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16,
+          text::binary-size(text_len)>>
+      ) do
     {:ok,
-     {:draw_text,
-      %{row: row, col: col, fg: fg, bg: bg, attrs: decode_attrs(attrs), text: text}}}
+     {:draw_text, %{row: row, col: col, fg: fg, bg: bg, attrs: decode_attrs(attrs), text: text}}}
   end
 
   def decode_command(<<@op_set_cursor, row::16, col::16>>) do
@@ -201,7 +208,9 @@ defmodule Minga.Port.Protocol do
 
     0
     |> then(fn a -> if Keyword.get(style, :bold, false), do: a ||| @attr_bold, else: a end)
-    |> then(fn a -> if Keyword.get(style, :underline, false), do: a ||| @attr_underline, else: a end)
+    |> then(fn a ->
+      if Keyword.get(style, :underline, false), do: a ||| @attr_underline, else: a
+    end)
     |> then(fn a -> if Keyword.get(style, :italic, false), do: a ||| @attr_italic, else: a end)
     |> then(fn a -> if Keyword.get(style, :reverse, false), do: a ||| @attr_reverse, else: a end)
   end

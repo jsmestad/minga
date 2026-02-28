@@ -1,9 +1,10 @@
 defmodule Minga.Mode.VisualTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Mode
-  alias Minga.Mode.Visual
   alias Minga.Mode.Normal
+  alias Minga.Mode.Visual
 
   # Build a fresh FSM state as if visual mode was just entered with anchor at
   # the given position and the given type.
@@ -126,20 +127,20 @@ defmodule Minga.Mode.VisualTest do
   end
 
   describe "arrow keys in visual mode" do
-    test "up arrow (57416) emits :move_up" do
-      assert {:execute, :move_up, _} = Visual.handle_key({57416, 0}, visual_state())
+    test "up arrow (57_416) emits :move_up" do
+      assert {:execute, :move_up, _} = Visual.handle_key({57_416, 0}, visual_state())
     end
 
-    test "down arrow (57424) emits :move_down" do
-      assert {:execute, :move_down, _} = Visual.handle_key({57424, 0}, visual_state())
+    test "down arrow (57_424) emits :move_down" do
+      assert {:execute, :move_down, _} = Visual.handle_key({57_424, 0}, visual_state())
     end
 
-    test "left arrow (57419) emits :move_left" do
-      assert {:execute, :move_left, _} = Visual.handle_key({57419, 0}, visual_state())
+    test "left arrow (57_419) emits :move_left" do
+      assert {:execute, :move_left, _} = Visual.handle_key({57_419, 0}, visual_state())
     end
 
-    test "right arrow (57421) emits :move_right" do
-      assert {:execute, :move_right, _} = Visual.handle_key({57421, 0}, visual_state())
+    test "right arrow (57_421) emits :move_right" do
+      assert {:execute, :move_right, _} = Visual.handle_key({57_421, 0}, visual_state())
     end
   end
 
@@ -216,6 +217,7 @@ defmodule Minga.Mode.VisualTest do
 
     test "operators in linewise visual still emit the same commands" do
       state = visual_state({3, 0}, :line)
+
       assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
                Visual.handle_key({?d, 0}, state)
     end
@@ -290,59 +292,55 @@ defmodule Minga.Mode.VisualTest do
 
   describe "delete_visual_selection with real buffer (characterwise)" do
     setup do
-      {:ok, buf} =
-        Minga.Buffer.Server.start_link(content: "hello world\nfoo bar")
-
+      {:ok, buf} = BufferServer.start_link(content: "hello world\nfoo bar")
       {:ok, buf: buf}
     end
 
     test "deleting 'hello' from start of line", %{buf: buf} do
       # Place cursor at col 4 (on 'o')
-      Minga.Buffer.Server.move_to(buf, {0, 4})
+      BufferServer.move_to(buf, {0, 4})
 
       # Simulate: anchor={0,0}, cursor={0,4}, delete char selection
       anchor = {0, 0}
-      cursor = Minga.Buffer.Server.cursor(buf)
+      cursor = BufferServer.cursor(buf)
       assert cursor == {0, 4}
 
       # delete_range is inclusive on both ends
-      Minga.Buffer.Server.delete_range(buf, anchor, cursor)
+      BufferServer.delete_range(buf, anchor, cursor)
 
-      assert Minga.Buffer.Server.content(buf) == " world\nfoo bar"
+      assert BufferServer.content(buf) == " world\nfoo bar"
     end
 
     test "yanking a range returns correct text", %{buf: buf} do
-      Minga.Buffer.Server.move_to(buf, {0, 4})
-      text = Minga.Buffer.Server.get_range(buf, {0, 0}, {0, 4})
+      BufferServer.move_to(buf, {0, 4})
+      text = BufferServer.get_range(buf, {0, 0}, {0, 4})
       assert text == "hello"
     end
   end
 
   describe "delete_visual_selection with real buffer (linewise)" do
     setup do
-      {:ok, buf} =
-        Minga.Buffer.Server.start_link(content: "line one\nline two\nline three")
-
+      {:ok, buf} = BufferServer.start_link(content: "line one\nline two\nline three")
       {:ok, buf: buf}
     end
 
     test "deleting first two lines leaves only the third", %{buf: buf} do
-      Minga.Buffer.Server.delete_lines(buf, 0, 1)
-      assert Minga.Buffer.Server.content(buf) == "line three"
+      BufferServer.delete_lines(buf, 0, 1)
+      assert BufferServer.content(buf) == "line three"
     end
 
     test "deleting the middle line preserves surrounding lines", %{buf: buf} do
-      Minga.Buffer.Server.delete_lines(buf, 1, 1)
-      assert Minga.Buffer.Server.content(buf) == "line one\nline three"
+      BufferServer.delete_lines(buf, 1, 1)
+      assert BufferServer.content(buf) == "line one\nline three"
     end
 
     test "deleting all lines leaves an empty buffer", %{buf: buf} do
-      Minga.Buffer.Server.delete_lines(buf, 0, 2)
-      assert Minga.Buffer.Server.content(buf) == ""
+      BufferServer.delete_lines(buf, 0, 2)
+      assert BufferServer.content(buf) == ""
     end
 
     test "get_lines_content returns joined text of a range", %{buf: buf} do
-      text = Minga.Buffer.Server.get_lines_content(buf, 0, 1)
+      text = BufferServer.get_lines_content(buf, 0, 1)
       assert text == "line one\nline two"
     end
   end

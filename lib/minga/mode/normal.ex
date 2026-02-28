@@ -67,10 +67,10 @@ defmodule Minga.Mode.Normal do
   @space 32
 
   # Arrow key codepoints sent by libvaxis
-  @arrow_up 57416
-  @arrow_down 57424
-  @arrow_left 57419
-  @arrow_right 57421
+  @arrow_up 57_416
+  @arrow_down 57_424
+  @arrow_left 57_419
+  @arrow_right 57_421
 
   @impl Mode
   @doc """
@@ -86,6 +86,7 @@ defmodule Minga.Mode.Normal do
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %{leader_node: nil} = state) do
     leader_trie = Defaults.leader_trie()
+
     new_state =
       state
       |> Map.put(:leader_node, leader_trie)
@@ -97,6 +98,7 @@ defmodule Minga.Mode.Normal do
   # SPC pressed while already in leader mode → cancel and restart.
   def handle_key({@space, 0}, %{leader_node: _node} = state) do
     leader_trie = Defaults.leader_trie()
+
     new_state =
       state
       |> Map.put(:leader_node, leader_trie)
@@ -289,6 +291,13 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({@escape, _mods}, state) do
     {:continue, %{state | count: nil}}
+  end
+
+  # ── Command mode entry ────────────────────────────────────────────────────
+
+  # `:` → enter command-line mode.
+  def handle_key({?:, 0}, state) do
+    {:transition, :command, state}
   end
 
   # ── Unknown key: no-op ───────────────────────────────────────────────────

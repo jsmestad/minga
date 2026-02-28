@@ -187,14 +187,19 @@ defmodule Minga.Motion do
     if non_ws < 0 do
       0
     else
-      current = Enum.at(graphemes, non_ws)
+      find_run_start_at(graphemes, non_ws)
+    end
+  end
 
-      # Step 2: find the start of this word/punctuation run.
-      if word_char?(current) do
-        find_run_start(graphemes, non_ws, &word_char?/1)
-      else
-        find_run_start(graphemes, non_ws, fn g -> not word_char?(g) and not whitespace?(g) end)
-      end
+  # Step 2: find the start of the word/punctuation run at `index`.
+  @spec find_run_start_at([String.t()], non_neg_integer()) :: non_neg_integer()
+  defp find_run_start_at(graphemes, index) do
+    current = Enum.at(graphemes, index)
+
+    if word_char?(current) do
+      find_run_start(graphemes, index, &word_char?/1)
+    else
+      find_run_start(graphemes, index, fn g -> not word_char?(g) and not whitespace?(g) end)
     end
   end
 
@@ -244,7 +249,11 @@ defmodule Minga.Motion do
 
       # On punctuation: skip punctuation, then skip whitespace
       true ->
-        after_punct = skip_while(graphemes, offset + 1, max, fn g -> not word_char?(g) and not whitespace?(g) end)
+        after_punct =
+          skip_while(graphemes, offset + 1, max, fn g ->
+            not word_char?(g) and not whitespace?(g)
+          end)
+
         skip_while(graphemes, after_punct, max, &whitespace?/1)
     end
   end
@@ -272,7 +281,9 @@ defmodule Minga.Motion do
         last_in_run(graphemes, run_start, max, &word_char?/1)
 
       not whitespace?(run_char) ->
-        last_in_run(graphemes, run_start, max, fn g -> not word_char?(g) and not whitespace?(g) end)
+        last_in_run(graphemes, run_start, max, fn g ->
+          not word_char?(g) and not whitespace?(g)
+        end)
 
       true ->
         run_start

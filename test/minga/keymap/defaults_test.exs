@@ -141,7 +141,7 @@ defmodule Minga.Keymap.DefaultsTest do
     test "returns a non-empty list of binding tuples" do
       bindings = Defaults.all_bindings()
       assert is_list(bindings)
-      assert length(bindings) > 0
+      assert match?([_ | _], bindings)
     end
 
     test "each binding is a {keys, command, description} tuple" do

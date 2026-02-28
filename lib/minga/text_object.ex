@@ -314,28 +314,40 @@ defmodule Minga.TextObject do
     cursor_abs = find_abs_index(flat, line, col)
 
     case cursor_abs do
+      nil -> nil
+      abs_idx -> find_pair_from_index(flat, abs_idx, open_char, close_char)
+    end
+  end
+
+  @spec find_pair_from_index(list(), non_neg_integer(), String.t(), String.t()) ::
+          {position(), position()} | nil
+  defp find_pair_from_index(flat, abs_idx, open_char, close_char) do
+    case find_open(flat, abs_idx - 1, open_char, close_char, 0) do
       nil ->
         nil
 
-      abs_idx ->
-        # Search backward for an unmatched open delimiter.
-        case find_open(flat, abs_idx - 1, open_char, close_char, 0) do
-          nil ->
-            nil
+      open_abs ->
+        {open_line, open_col} = elem(Enum.at(flat, open_abs), 1)
+        find_matching_close(flat, open_abs, open_line, open_col, open_char, close_char)
+    end
+  end
 
-          open_abs ->
-            {open_line, open_col} = elem(Enum.at(flat, open_abs), 1)
+  @spec find_matching_close(
+          list(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          String.t()
+        ) :: {position(), position()} | nil
+  defp find_matching_close(flat, open_abs, open_line, open_col, open_char, close_char) do
+    case find_close(flat, open_abs + 1, open_char, close_char, 1) do
+      nil ->
+        nil
 
-            # Search forward from the open delimiter for the matching close.
-            case find_close(flat, open_abs + 1, open_char, close_char, 1) do
-              nil ->
-                nil
-
-              close_abs ->
-                {close_line, close_col} = elem(Enum.at(flat, close_abs), 1)
-                {{open_line, open_col}, {close_line, close_col}}
-            end
-        end
+      close_abs ->
+        {close_line, close_col} = elem(Enum.at(flat, close_abs), 1)
+        {{open_line, open_col}, {close_line, close_col}}
     end
   end
 
@@ -426,17 +438,16 @@ defmodule Minga.TextObject do
     text = GapBuffer.line_at(buffer, line) || ""
     len = String.length(text)
 
-    cond do
-      col + 1 < len -> {line, col + 1}
+    if col + 1 < len do
+      {line, col + 1}
+    else
       # Try start of next line
-      true ->
-        next_line = line + 1
-        next_text = GapBuffer.line_at(buffer, next_line)
+      next_line = line + 1
 
-        case next_text do
-          nil -> nil
-          _ -> {next_line, 0}
-        end
+      case GapBuffer.line_at(buffer, next_line) do
+        nil -> nil
+        _ -> {next_line, 0}
+      end
     end
   end
 

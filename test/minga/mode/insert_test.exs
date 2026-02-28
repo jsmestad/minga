@@ -57,20 +57,20 @@ defmodule Minga.Mode.InsertTest do
   end
 
   describe "arrow keys" do
-    test "up arrow (57416) emits :move_up" do
-      assert {:execute, :move_up, _} = Insert.handle_key({57416, 0}, fresh_state())
+    test "up arrow (57_416) emits :move_up" do
+      assert {:execute, :move_up, _} = Insert.handle_key({57_416, 0}, fresh_state())
     end
 
-    test "down arrow (57424) emits :move_down" do
-      assert {:execute, :move_down, _} = Insert.handle_key({57424, 0}, fresh_state())
+    test "down arrow (57_424) emits :move_down" do
+      assert {:execute, :move_down, _} = Insert.handle_key({57_424, 0}, fresh_state())
     end
 
-    test "left arrow (57419) emits :move_left" do
-      assert {:execute, :move_left, _} = Insert.handle_key({57419, 0}, fresh_state())
+    test "left arrow (57_419) emits :move_left" do
+      assert {:execute, :move_left, _} = Insert.handle_key({57_419, 0}, fresh_state())
     end
 
-    test "right arrow (57421) emits :move_right" do
-      assert {:execute, :move_right, _} = Insert.handle_key({57421, 0}, fresh_state())
+    test "right arrow (57_421) emits :move_right" do
+      assert {:execute, :move_right, _} = Insert.handle_key({57_421, 0}, fresh_state())
     end
   end
 

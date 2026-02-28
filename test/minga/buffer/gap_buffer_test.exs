@@ -326,7 +326,9 @@ defmodule Minga.Buffer.GapBufferTest do
       buf = GapBuffer.new("hello")
       original = GapBuffer.content(buf)
 
-      buf = buf |> GapBuffer.move(:right) |> GapBuffer.insert_char("X") |> GapBuffer.delete_before()
+      buf =
+        buf |> GapBuffer.move(:right) |> GapBuffer.insert_char("X") |> GapBuffer.delete_before()
+
       assert GapBuffer.content(buf) == original
     end
 
@@ -412,7 +414,8 @@ defmodule Minga.Buffer.GapBufferTest do
     property "moving does not alter content" do
       check all(
               text <- string(:printable, min_length: 1, max_length: 200),
-              moves <- list_of(member_of([:left, :right, :up, :down]), min_length: 1, max_length: 20)
+              moves <-
+                list_of(member_of([:left, :right, :up, :down]), min_length: 1, max_length: 20)
             ) do
         buf = GapBuffer.new(text)
 
@@ -428,7 +431,8 @@ defmodule Minga.Buffer.GapBufferTest do
     property "cursor is always within valid bounds" do
       check all(
               text <- string(:printable, min_length: 0, max_length: 200),
-              moves <- list_of(member_of([:left, :right, :up, :down]), min_length: 0, max_length: 30)
+              moves <-
+                list_of(member_of([:left, :right, :up, :down]), min_length: 0, max_length: 30)
             ) do
         buf = GapBuffer.new(text)
 

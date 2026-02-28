@@ -189,12 +189,18 @@ defmodule Minga.Editor do
 
     # When transitioning INTO visual mode, capture the current cursor as the
     # selection anchor. The mode module sets :visual_type; we inject :visual_anchor.
+    # When transitioning INTO command mode, initialise the :input accumulator.
     new_mode_state =
-      if new_mode == :visual and state.mode != :visual and state.buffer do
-        anchor = BufferServer.cursor(state.buffer)
-        Map.put(new_mode_state, :visual_anchor, anchor)
-      else
-        new_mode_state
+      cond do
+        new_mode == :visual and state.mode != :visual and state.buffer ->
+          anchor = BufferServer.cursor(state.buffer)
+          Map.put(new_mode_state, :visual_anchor, anchor)
+
+        new_mode == :command and state.mode != :command ->
+          Map.put(new_mode_state, :input, "")
+
+        true ->
+          new_mode_state
       end
 
     base_state = %{state | mode: new_mode, mode_state: new_mode_state}
@@ -306,6 +312,42 @@ defmodule Minga.Editor do
     System.stop(0)
   end
 
+  # ── Ex command (from : command line) ────────────────────────────────────────
+
+  defp execute_command(state, {:execute_ex_command, {:save, []}}) do
+    execute_command(state, :save)
+  end
+
+  defp execute_command(_state, {:execute_ex_command, {:quit, []}}) do
+    Logger.info("Quitting editor")
+    System.stop(0)
+  end
+
+  defp execute_command(_state, {:execute_ex_command, {:force_quit, []}}) do
+    Logger.info("Force quitting editor")
+    System.stop(0)
+  end
+
+  defp execute_command(state, {:execute_ex_command, {:save_quit, []}}) do
+    execute_command(state, :save)
+    Logger.info("Quitting editor after save")
+    System.stop(0)
+  end
+
+  defp execute_command(_state, {:execute_ex_command, {:edit, file_path}}) do
+    Logger.info("Opening file: #{file_path}")
+  end
+
+  defp execute_command(%{buffer: buf}, {:execute_ex_command, {:goto_line, line_num}})
+       when not is_nil(buf) do
+    target_line = max(0, line_num - 1)
+    BufferServer.move_to(buf, {target_line, 0})
+  end
+
+  defp execute_command(_state, {:execute_ex_command, {:unknown, raw}}) do
+    Logger.warning("Unknown ex command: #{raw}")
+  end
+
   defp execute_command(%{buffer: buf, mode_state: ms}, :delete_visual_selection) do
     anchor = Map.get(ms, :visual_anchor, {0, 0})
     visual_type = Map.get(ms, :visual_type, :char)
@@ -356,20 +398,37 @@ defmodule Minga.Editor do
     timer = WhichKey.start_timeout()
     # Mutate the GenServer state via the process dictionary as a side-channel.
     # (The return value of execute_command is :ok; state mutation happens in handle_key.)
-    Process.put(:__leader_update__, %{whichkey_node: node, whichkey_timer: timer, show_whichkey: false})
+    Process.put(:__leader_update__, %{
+      whichkey_node: node,
+      whichkey_timer: timer,
+      show_whichkey: false
+    })
+
     :ok
   end
 
   defp execute_command(state, {:leader_progress, node}) do
     if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
     timer = WhichKey.start_timeout()
-    Process.put(:__leader_update__, %{whichkey_node: node, whichkey_timer: timer, show_whichkey: state.show_whichkey})
+
+    Process.put(:__leader_update__, %{
+      whichkey_node: node,
+      whichkey_timer: timer,
+      show_whichkey: state.show_whichkey
+    })
+
     :ok
   end
 
   defp execute_command(state, :leader_cancel) do
     if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
-    Process.put(:__leader_update__, %{whichkey_node: nil, whichkey_timer: nil, show_whichkey: false})
+
+    Process.put(:__leader_update__, %{
+      whichkey_node: nil,
+      whichkey_timer: nil,
+      show_whichkey: false
+    })
+
     :ok
   end
 
@@ -466,7 +525,14 @@ defmodule Minga.Editor do
     mode_label = Mode.display(state.mode, state.mode_state)
 
     status_text =
-      " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  #{mode_label}"
+      case state.mode do
+        :command ->
+          # In command mode the status line becomes the ex command line.
+          mode_label
+
+        _ ->
+          " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  #{mode_label}"
+      end
 
     status_row = viewport.rows - 1
 
@@ -506,13 +572,13 @@ defmodule Minga.Editor do
 
     popup_row = max(0, viewport.rows - 2 - length(lines))
 
-    [Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
-      lines
-      |> Enum.with_index(popup_row + 1)
-      |> Enum.map(fn {line_text, row} ->
-        padded = String.pad_trailing(line_text, viewport.cols)
-        Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
-      end)
+    ([Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
+       lines)
+    |> Enum.with_index(popup_row + 1)
+    |> Enum.map(fn {line_text, row} ->
+      padded = String.pad_trailing(line_text, viewport.cols)
+      Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
+    end)
   end
 
   defp maybe_render_whichkey(_state, _viewport), do: []
@@ -524,7 +590,12 @@ defmodule Minga.Editor do
   @typedoc "How to apply a text object to the buffer."
   @type text_object_action :: :delete | :yank
 
-  @spec apply_text_object(state(), TextObject.text_object_modifier(), term(), text_object_action()) :: :ok
+  @spec apply_text_object(
+          state(),
+          Minga.Mode.OperatorPending.text_object_modifier(),
+          term(),
+          text_object_action()
+        ) :: :ok
   defp apply_text_object(%{buffer: buf} = _state, modifier, spec, action) do
     cursor = BufferServer.cursor(buf)
     content = BufferServer.content(buf)
@@ -583,7 +654,8 @@ defmodule Minga.Editor do
   """
   @type visual_selection ::
           nil
-          | {:char, Mode.state(), {non_neg_integer(), non_neg_integer()}}
+          | {:char, {non_neg_integer(), non_neg_integer()},
+             {non_neg_integer(), non_neg_integer()}}
           | {:line, non_neg_integer(), non_neg_integer()}
 
   @spec visual_selection_bounds(state(), Minga.Buffer.GapBuffer.position()) ::

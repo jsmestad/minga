@@ -31,14 +31,18 @@ defmodule Minga.MixProject do
   defp deps do
     [
       {:stream_data, "~> 1.0", only: [:test, :dev]},
-      {:ex_doc, "~> 0.35", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.35", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 
   defp aliases do
     [
       minga: ["run --no-halt -e 'Minga.CLI.main(System.argv())'"],
-      test: ["test --warnings-as-errors"]
+      test: ["test --warnings-as-errors"],
+      lint: ["format --check-formatted", "credo --strict", "compile --warnings-as-errors"],
+      "lint.fix": ["format", "credo --strict"]
     ]
   end
 end

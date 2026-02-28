@@ -52,10 +52,10 @@ defmodule Minga.Mode.Visual do
   @escape 27
 
   # Arrow key codepoints sent by libvaxis
-  @arrow_up 57416
-  @arrow_down 57424
-  @arrow_left 57419
-  @arrow_right 57421
+  @arrow_up 57_416
+  @arrow_down 57_424
+  @arrow_left 57_419
+  @arrow_right 57_421
 
   @typedoc "Selection type: characterwise or linewise."
   @type selection_type :: :char | :line

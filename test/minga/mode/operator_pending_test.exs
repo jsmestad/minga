@@ -14,36 +14,42 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "delete operator with motion" do
     test "d+w emits {:delete_motion, :word_forward} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :word_forward}], :normal, _} =
                OperatorPending.handle_key({?w, 0}, state)
     end
 
     test "d+b emits {:delete_motion, :word_backward} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :word_backward}], :normal, _} =
                OperatorPending.handle_key({?b, 0}, state)
     end
 
     test "d+e emits {:delete_motion, :word_end} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :word_end}], :normal, _} =
                OperatorPending.handle_key({?e, 0}, state)
     end
 
     test "d+0 emits {:delete_motion, :line_start} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :line_start}], :normal, _} =
                OperatorPending.handle_key({?0, 0}, state)
     end
 
     test "d+$ emits {:delete_motion, :line_end} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :line_end}], :normal, _} =
                OperatorPending.handle_key({?$, 0}, state)
     end
 
     test "d+G emits {:delete_motion, :document_end} and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [{:delete_motion, :document_end}], :normal, _} =
                OperatorPending.handle_key({?G, 0}, state)
     end
@@ -51,6 +57,7 @@ defmodule Minga.Mode.OperatorPendingTest do
     test "d+g+g emits {:delete_motion, :document_start} and transitions to :normal" do
       state = op_state(:delete)
       {:continue, state2} = OperatorPending.handle_key({?g, 0}, state)
+
       assert {:execute_then_transition, [{:delete_motion, :document_start}], :normal, _} =
                OperatorPending.handle_key({?g, 0}, state2)
     end
@@ -61,18 +68,21 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "change operator with motion" do
     test "c+w emits {:change_motion, :word_forward} and transitions to :insert" do
       state = op_state(:change)
+
       assert {:execute_then_transition, [{:change_motion, :word_forward}], :insert, _} =
                OperatorPending.handle_key({?w, 0}, state)
     end
 
     test "c+e emits {:change_motion, :word_end} and transitions to :insert" do
       state = op_state(:change)
+
       assert {:execute_then_transition, [{:change_motion, :word_end}], :insert, _} =
                OperatorPending.handle_key({?e, 0}, state)
     end
 
     test "c+$ emits {:change_motion, :line_end} and transitions to :insert" do
       state = op_state(:change)
+
       assert {:execute_then_transition, [{:change_motion, :line_end}], :insert, _} =
                OperatorPending.handle_key({?$, 0}, state)
     end
@@ -83,12 +93,14 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "yank operator with motion" do
     test "y+w emits {:yank_motion, :word_forward} and transitions to :normal" do
       state = op_state(:yank)
+
       assert {:execute_then_transition, [{:yank_motion, :word_forward}], :normal, _} =
                OperatorPending.handle_key({?w, 0}, state)
     end
 
     test "y+b emits {:yank_motion, :word_backward} and transitions to :normal" do
       state = op_state(:yank)
+
       assert {:execute_then_transition, [{:yank_motion, :word_backward}], :normal, _} =
                OperatorPending.handle_key({?b, 0}, state)
     end
@@ -99,12 +111,14 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "dd (delete line)" do
     test "d+d emits :delete_line and transitions to :normal" do
       state = op_state(:delete)
+
       assert {:execute_then_transition, [:delete_line], :normal, _} =
                OperatorPending.handle_key({?d, 0}, state)
     end
 
     test "dd with op_count=3 emits 3 :delete_line commands" do
       state = op_state(:delete, 3)
+
       assert {:execute_then_transition, [:delete_line, :delete_line, :delete_line], :normal, _} =
                OperatorPending.handle_key({?d, 0}, state)
     end
@@ -113,6 +127,7 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "cc (change line)" do
     test "c+c emits :change_line and transitions to :insert" do
       state = op_state(:change)
+
       assert {:execute_then_transition, [:change_line], :insert, _} =
                OperatorPending.handle_key({?c, 0}, state)
     end
@@ -121,6 +136,7 @@ defmodule Minga.Mode.OperatorPendingTest do
   describe "yy (yank line)" do
     test "y+y emits :yank_line and transitions to :normal" do
       state = op_state(:yank)
+
       assert {:execute_then_transition, [:yank_line], :normal, _} =
                OperatorPending.handle_key({?y, 0}, state)
     end
@@ -168,6 +184,7 @@ defmodule Minga.Mode.OperatorPendingTest do
       # op_count=2 (from `2d`), then press `3w` (motion count=3) → 6 commands
       state = %{count: nil, operator: :delete, op_count: 2}
       {:continue, s2} = OperatorPending.handle_key({?3, 0}, state)
+
       assert {:execute_then_transition, cmds, :normal, _} =
                OperatorPending.handle_key({?w, 0}, s2)
 

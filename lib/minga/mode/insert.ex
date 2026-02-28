@@ -23,10 +23,10 @@ defmodule Minga.Mode.Insert do
   @enter 13
 
   # Arrow key codepoints sent by libvaxis
-  @arrow_up 57416
-  @arrow_down 57424
-  @arrow_left 57419
-  @arrow_right 57421
+  @arrow_up 57_416
+  @arrow_down 57_424
+  @arrow_left 57_419
+  @arrow_right 57_421
 
   @impl Mode
   @doc """
@@ -71,12 +71,10 @@ defmodule Minga.Mode.Insert do
   # Printable Unicode characters (codepoints 32..0x10FFFF, no modifiers)
   def handle_key({codepoint, 0}, state)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
-    try do
-      char = <<codepoint::utf8>>
-      {:execute, {:insert_char, char}, state}
-    rescue
-      ArgumentError -> {:continue, state}
-    end
+    char = <<codepoint::utf8>>
+    {:execute, {:insert_char, char}, state}
+  rescue
+    ArgumentError -> {:continue, state}
   end
 
   # Ignore all other keys (control sequences, unknown modifiers, etc.)
