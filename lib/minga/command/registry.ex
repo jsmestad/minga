@@ -50,7 +50,8 @@ defmodule Minga.Command.Registry do
     {:half_page_down, "Scroll half page down"},
     {:half_page_up, "Scroll half page up"},
     {:page_down, "Scroll page down"},
-    {:page_up, "Scroll page up"}
+    {:page_up, "Scroll page up"},
+    {:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

@@ -42,7 +42,8 @@ defmodule Minga.Command.RegistryTest do
           :half_page_down,
           :half_page_up,
           :page_down,
-          :page_up
+          :page_up,
+          :cycle_line_numbers
         ]
         |> Enum.sort()
 

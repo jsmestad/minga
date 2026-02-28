@@ -36,6 +36,7 @@ defmodule Minga.Command.Parser do
           | {:save_quit, []}
           | {:edit, String.t()}
           | {:goto_line, pos_integer()}
+          | {:set, atom()}
           | {:unknown, String.t()}
 
   @doc """
@@ -72,6 +73,15 @@ defmodule Minga.Command.Parser do
   defp do_parse("q"), do: {:quit, []}
   defp do_parse("q!"), do: {:force_quit, []}
   defp do_parse("wq"), do: {:save_quit, []}
+
+  defp do_parse("set number"), do: {:set, :number}
+  defp do_parse("set nu"), do: {:set, :number}
+  defp do_parse("set nonumber"), do: {:set, :nonumber}
+  defp do_parse("set nonu"), do: {:set, :nonumber}
+  defp do_parse("set relativenumber"), do: {:set, :relativenumber}
+  defp do_parse("set rnu"), do: {:set, :relativenumber}
+  defp do_parse("set norelativenumber"), do: {:set, :norelativenumber}
+  defp do_parse("set nornu"), do: {:set, :norelativenumber}
 
   defp do_parse("e " <> rest) do
     filename = String.trim(rest)

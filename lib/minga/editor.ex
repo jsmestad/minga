@@ -1297,6 +1297,50 @@ defmodule Minga.Editor do
     state
   end
 
+  defp execute_command(state, :cycle_line_numbers) do
+    next =
+      case state.line_numbers do
+        :hybrid -> :absolute
+        :absolute -> :relative
+        :relative -> :none
+        :none -> :hybrid
+      end
+
+    %{state | line_numbers: next}
+  end
+
+  # :set number → absolute line numbers
+  defp execute_command(state, {:execute_ex_command, {:set, :number}}) do
+    %{state | line_numbers: :absolute}
+  end
+
+  # :set nonumber → no line numbers
+  defp execute_command(state, {:execute_ex_command, {:set, :nonumber}}) do
+    %{state | line_numbers: :none}
+  end
+
+  # :set relativenumber — if already :absolute, switch to :hybrid; otherwise :relative
+  defp execute_command(state, {:execute_ex_command, {:set, :relativenumber}}) do
+    new_style =
+      case state.line_numbers do
+        :absolute -> :hybrid
+        _ -> :relative
+      end
+
+    %{state | line_numbers: new_style}
+  end
+
+  # :set norelativenumber — if :hybrid, drop to :absolute; if :relative, drop to :none
+  defp execute_command(state, {:execute_ex_command, {:set, :norelativenumber}}) do
+    new_style =
+      case state.line_numbers do
+        :hybrid -> :absolute
+        _ -> :none
+      end
+
+    %{state | line_numbers: new_style}
+  end
+
   defp execute_command(state, {:execute_ex_command, {:unknown, raw}}) do
     Logger.debug("Unknown ex command: #{raw}")
     state
@@ -1493,8 +1537,12 @@ defmodule Minga.Editor do
     line_count = snapshot.line_count
 
     # 3. Compute gutter dimensions and re-check horizontal scroll.
-    gutter_w = Viewport.gutter_width(line_count)
-    content_w = Viewport.content_cols(viewport, line_count)
+    line_number_style = state.line_numbers
+
+    gutter_w =
+      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+
+    content_w = max(viewport.cols - gutter_w, 1)
 
     viewport =
       if cursor_col >= viewport.left + content_w do
@@ -1513,7 +1561,9 @@ defmodule Minga.Editor do
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {line_text, screen_row}, {gutters, contents} ->
         buf_line = first_line + screen_row
-        gutter_cmd = render_gutter_number(screen_row, buf_line, cursor_line, gutter_w)
+
+        gutter_cmd =
+          render_gutter_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
 
         content_cmds =
           render_line(
@@ -1526,7 +1576,8 @@ defmodule Minga.Editor do
             content_w
           )
 
-        {[gutter_cmd | gutters], contents ++ content_cmds}
+        new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
+        {new_gutters, contents ++ content_cmds}
       end)
 
     gutter_commands = Enum.reverse(gutter_commands)
@@ -2572,25 +2623,43 @@ defmodule Minga.Editor do
   @gutter_fg 0x555555
   @gutter_current_fg 0xBBC2CF
 
+  @typedoc "Line number display style."
+  @type line_number_style :: :hybrid | :absolute | :relative | :none
+
   @spec render_gutter_number(
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer()
-        ) :: binary()
-  defp render_gutter_number(screen_row, buf_line, cursor_line, gutter_w) do
-    # Hybrid mode: absolute on cursor line, relative elsewhere
-    {number, fg} =
-      if buf_line == cursor_line do
-        {buf_line + 1, @gutter_current_fg}
-      else
-        {abs(buf_line - cursor_line), @gutter_fg}
-      end
+          non_neg_integer(),
+          line_number_style()
+        ) :: binary() | []
+  defp render_gutter_number(_screen_row, _buf_line, _cursor_line, 0, :none), do: []
+
+  defp render_gutter_number(screen_row, buf_line, cursor_line, gutter_w, style) do
+    {number, fg} = gutter_number_and_color(buf_line, cursor_line, style)
 
     # Right-align the number in (gutter_w - 1) chars, leave 1 char separator
     num_str = Integer.to_string(number)
     padded = String.pad_leading(num_str, gutter_w - 1)
     Protocol.encode_draw(screen_row, 0, padded, fg: fg)
+  end
+
+  @spec gutter_number_and_color(non_neg_integer(), non_neg_integer(), line_number_style()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp gutter_number_and_color(buf_line, _cursor_line, :absolute) do
+    {buf_line + 1, @gutter_current_fg}
+  end
+
+  defp gutter_number_and_color(buf_line, cursor_line, :relative) do
+    {abs(buf_line - cursor_line), @gutter_fg}
+  end
+
+  defp gutter_number_and_color(buf_line, cursor_line, :hybrid) do
+    if buf_line == cursor_line do
+      {buf_line + 1, @gutter_current_fg}
+    else
+      {abs(buf_line - cursor_line), @gutter_fg}
+    end
   end
 
   # ── Line rendering ────────────────────────────────────────────────────────

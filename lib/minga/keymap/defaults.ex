@@ -52,7 +52,10 @@ defmodule Minga.Keymap.Defaults do
     {[{?q, @none}, {?q, @none}], :quit, "Quit editor"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
-    {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"}
+    {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
+
+    # ── Toggle ────────────────────────────────────────────────────────────────
+    {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
 
   # Group prefix descriptions shown in which-key at the SPC level.
@@ -61,7 +64,8 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}], "+buffer"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
-    {[{?h, @none}], "+help"}
+    {[{?h, @none}], "+help"},
+    {[{?t, @none}], "+toggle"}
   ]
 
   # ---------------------------------------------------------------------------

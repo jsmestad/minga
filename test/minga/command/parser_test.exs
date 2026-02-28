@@ -64,6 +64,28 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — set commands" do
+    test ":set number" do
+      assert {:set, :number} = Parser.parse("set number")
+      assert {:set, :number} = Parser.parse("set nu")
+    end
+
+    test ":set nonumber" do
+      assert {:set, :nonumber} = Parser.parse("set nonumber")
+      assert {:set, :nonumber} = Parser.parse("set nonu")
+    end
+
+    test ":set relativenumber" do
+      assert {:set, :relativenumber} = Parser.parse("set relativenumber")
+      assert {:set, :relativenumber} = Parser.parse("set rnu")
+    end
+
+    test ":set norelativenumber" do
+      assert {:set, :norelativenumber} = Parser.parse("set norelativenumber")
+      assert {:set, :norelativenumber} = Parser.parse("set nornu")
+    end
+  end
+
   describe "parse/1 — unknown commands" do
     test "unrecognised command returns {:unknown, raw}" do
       assert {:unknown, "xyz"} = Parser.parse("xyz")

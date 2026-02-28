@@ -40,7 +40,11 @@ defmodule Minga.Editor.State do
             mouse_dragging: false,
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
-            autopair_enabled: true
+            autopair_enabled: true,
+            line_numbers: :hybrid
+
+  @typedoc "Line number display style."
+  @type line_number_style :: :hybrid | :absolute | :relative | :none
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -60,6 +64,7 @@ defmodule Minga.Editor.State do
           mouse_dragging: boolean(),
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
-          autopair_enabled: boolean()
+          autopair_enabled: boolean(),
+          line_numbers: line_number_style()
         }
 end
