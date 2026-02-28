@@ -84,13 +84,12 @@ Help it by being explicit:
 
 ### Pre-commit Checks
 
-All four must pass before committing any Elixir changes:
+All must pass before committing any Elixir changes:
 
 ```bash
-mix compile --warnings-as-errors  # Type/warning cleanliness
-mix credo --strict                # Style & refactoring
-mix dialyzer                      # Typespec consistency
+mix lint                          # Formatting, credo --strict, compile --warnings-as-errors
 mix test --warnings-as-errors     # Tests
+mix dialyzer                      # Typespec consistency
 ```
 
 Example:
