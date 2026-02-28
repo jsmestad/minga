@@ -179,6 +179,14 @@ defmodule Minga.Port.Manager do
 
   @spec default_renderer_path() :: String.t()
   defp default_renderer_path do
-    Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+    # In a release (or Burrito binary), the renderer lives in priv/
+    priv_path = Application.app_dir(:minga, "priv/minga-renderer")
+
+    if File.exists?(priv_path) do
+      priv_path
+    else
+      # Dev/test fallback: compiled Zig binary in the source tree
+      Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+    end
   end
 end

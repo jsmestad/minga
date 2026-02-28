@@ -2,8 +2,14 @@ defmodule Minga.CLI do
   @moduledoc """
   Command-line interface for Minga.
 
-  Parses arguments and launches the editor. Used by `mix minga <filename>`.
+  Serves as the entry point for both `mix minga <filename>` and
+  the standalone Burrito binary (`./minga <filename>`).
+
+  In Burrito mode, arguments are fetched via `Burrito.Util.Args.argv/0`
+  which works whether running standalone or under Mix.
   """
+
+  alias Burrito.Util.Args
 
   require Logger
 
@@ -20,37 +26,51 @@ defmodule Minga.CLI do
         open_editor(nil)
 
       {:error, message} ->
-        IO.puts(:stderr, "Error: #{message}")
+        IO.puts(:stderr, message)
         System.stop(1)
     end
 
     :ok
   end
 
+  @doc """
+  Entry point used by the OTP application in release/Burrito mode.
+
+  Called from `Minga.Application` when CLI args are detected.
+  """
+  @spec start_from_cli() :: :ok
+  def start_from_cli do
+    args = Args.argv()
+    main(args)
+  end
+
   @spec parse_args([String.t()]) :: {:file, String.t()} | :no_file | {:error, String.t()}
   defp parse_args([]), do: :no_file
   defp parse_args(["--help" | _]), do: {:error, usage()}
   defp parse_args(["-h" | _]), do: {:error, usage()}
+  defp parse_args(["--version" | _]), do: {:error, "minga #{Minga.version()}"}
+  defp parse_args(["-v" | _]), do: {:error, "minga #{Minga.version()}"}
   defp parse_args([file_path | _]), do: {:file, file_path}
 
   @spec usage() :: String.t()
   defp usage do
     """
-    Usage: mix minga [filename]
+    minga #{Minga.version()} — BEAM-powered modal text editor
+
+    Usage: minga [filename]
 
     Options:
-      -h, --help    Show this help message
+      -h, --help       Show this help message
+      -v, --version    Show version
 
     Examples:
-      mix minga README.md    Open a file
-      mix minga              Start with empty buffer
+      minga README.md    Open a file
+      minga              Start with empty buffer
     """
   end
 
   @spec open_editor(String.t() | nil) :: :ok
   defp open_editor(file_path) do
-    # The Port Manager and Editor are started by the Application supervisor.
-    # We just need to tell the Editor to open the file.
     case file_path do
       nil ->
         :ok

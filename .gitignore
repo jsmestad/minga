@@ -13,6 +13,8 @@ zig/.zig-cache/
 
 # Generated
 erl_crash.dump
+/priv/minga-renderer
+/burrito_out/
 
 # Editor / OS
 *.swp

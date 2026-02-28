@@ -12,6 +12,9 @@ defmodule Minga.Application do
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
       ├── Minga.Port.Manager
       └── Minga.Editor (added in a later commit)
+
+  In standalone (Burrito) mode, automatically processes CLI arguments
+  after the supervision tree is up.
   """
 
   use Application
@@ -26,6 +29,13 @@ defmodule Minga.Application do
     ]
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
-    Supervisor.start_link(children, opts)
+    result = Supervisor.start_link(children, opts)
+
+    # In Burrito standalone mode, kick off the CLI
+    if Burrito.Util.running_standalone?() do
+      Task.start(fn -> Minga.CLI.start_from_cli() end)
+    end
+
+    result
   end
 end
