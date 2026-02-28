@@ -2,8 +2,15 @@ defmodule Minga.Editor.State do
   @moduledoc """
   Internal state for the Editor GenServer.
 
-  Holds references to the buffer, port manager, viewport, modal FSM state,
-  which-key popup state, and the yank register.
+  Holds references to the buffer list, port manager, viewport, modal FSM
+  state, which-key popup state, and the yank register.
+
+  ## Buffer management
+
+  The editor tracks multiple open buffers in a list (`buffers`) with an
+  `active_buffer` index pointing to the currently displayed buffer.
+  The convenience field `buffer` is kept in sync as the pid of the
+  active buffer for backward compatibility with rendering and commands.
   """
 
   alias Minga.Editor.Viewport
@@ -12,6 +19,8 @@ defmodule Minga.Editor.State do
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
   defstruct buffer: nil,
+            buffers: [],
+            active_buffer: 0,
             port_manager: nil,
             viewport: nil,
             mode: :normal,
@@ -23,6 +32,8 @@ defmodule Minga.Editor.State do
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
+          buffers: [pid()],
+          active_buffer: non_neg_integer(),
           port_manager: GenServer.server() | nil,
           viewport: Viewport.t(),
           mode: Mode.mode(),

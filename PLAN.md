@@ -118,7 +118,7 @@ renderer). Buffer processes survive independently.
 | — | Burrito packaging | Single binary for macOS/Linux | — |
 | — | GitHub Actions | CI (lint/test/dialyzer) + release pipeline | — |
 
-**Total: 592 tests (535 Elixir + 3 properties + 54 Zig), 0 failures**
+**Total: 680 tests (621 Elixir + 3 properties + 59 Zig), 0 failures**
 
 ### ✅ Recently Completed (formerly critical/important gaps)
 
@@ -132,29 +132,17 @@ renderer). Buffer processes survive independently.
 | Paste | `p` (after) / `P` (before) in Normal mode, register stored in Editor state |
 | Integration test | `test/minga/integration_test.exs` — full pipeline: navigation, insert, delete, undo, command mode |
 | Zig test coverage | Expanded from 18 → 54 tests across protocol, renderer, and main |
+| Doom modeline + minibuffer | Two-row footer: powerline-style modeline with colored mode badge, filename, position; separate minibuffer for `:` commands |
+| Cursor shape per mode | New opcode `0x15 set_cursor_shape` — block in normal/visual, beam in insert; libvaxis `setCursorShape()` |
+| Headless testing harness | HeadlessPort (virtual screen capture) + EditorCase (helpers, assertions) for render-level testing in CI |
+| Multiple buffers | `:e <file>` opens/switches buffers, `SPC b n/p` cycle, `SPC b d` kill, `SPC b b` switch; modeline shows `[N/M]` indicator |
+| Mode state cleanup | Transitioning back to Normal mode from Command/Visual resets mode_state to ModeState (fixes leader keys after `:` commands) |
 
-### 🟡 Remaining — needs manual testing
+### ✅ Manual testing complete
 
-#### 1. End-to-end manual testing
-
-**Status**: All logic is implemented and unit-tested, but the full editor
-has not been launched in a real terminal yet.
-**Needed**: Run `mix minga README.md` and verify:
-- Terminal enters raw/alternate screen mode
-- File content displays correctly
-- hjkl navigation works
-- `i` enters insert, typing works, `Esc` returns to normal
-- `:w` saves, `:q` quits
-- Terminal restores cleanly on exit
-- Ctrl+C / kill doesn't leave terminal in raw mode
-
-#### 2. Port protocol end-to-end
-
-**Status**: `{:packet, 4}` framing tested in unit tests on both sides,
-but never tested through a real Erlang Port connection.
-**Needed**: Verify the 4-byte length prefix handling works correctly
-when BEAM spawns the Zig binary. This is the most likely failure point
-on first real launch.
+End-to-end manual testing passed: terminal raw/alternate screen, file rendering,
+hjkl navigation, insert mode, `:w`/`:q`, clean exit, Ctrl+C restoration.
+Port protocol framing works through real Erlang Port connection.
 
 ### 🟢 Post-V1 / V2
 

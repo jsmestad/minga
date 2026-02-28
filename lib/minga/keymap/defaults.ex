@@ -33,6 +33,8 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Buffer ────────────────────────────────────────────────────────────────
     {[{?b, @none}, {?b, @none}], :buffer_list, "Switch buffer"},
+    {[{?b, @none}, {?n, @none}], :buffer_next, "Next buffer"},
+    {[{?b, @none}, {?p, @none}], :buffer_prev, "Previous buffer"},
     {[{?b, @none}, {?d, @none}], :kill_buffer, "Kill buffer"},
 
     # ── Window ────────────────────────────────────────────────────────────────

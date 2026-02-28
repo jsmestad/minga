@@ -82,8 +82,12 @@ defmodule Minga.Editor do
       end
     end
 
+    buffers = if buffer, do: [buffer], else: []
+
     state = %EditorState{
       buffer: buffer,
+      buffers: buffers,
+      active_buffer: 0,
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
       mode: :normal,
@@ -98,7 +102,7 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case start_buffer(file_path) do
       {:ok, pid} ->
-        new_state = %{state | buffer: pid}
+        new_state = add_buffer(state, pid)
         do_render(new_state)
         {:reply, :ok, new_state}
 
@@ -205,6 +209,19 @@ defmodule Minga.Editor do
       Enum.reduce(commands, base_state, fn cmd, acc ->
         execute_command(acc, cmd)
       end)
+
+    # After commands have executed (they may need the old mode_state, e.g.
+    # VisualState for delete_visual_selection), clean up the mode_state
+    # if we've transitioned back to Normal from a different mode.
+    after_commands =
+      if new_mode == :normal and state.mode != :normal do
+        case after_commands.mode_state do
+          %Mode.State{} -> after_commands
+          _ -> %{after_commands | mode_state: Mode.initial_state()}
+        end
+      else
+        after_commands
+      end
 
     # Apply any leader/whichkey state updates emitted by execute_command.
     case Process.delete(:__leader_update__) do
@@ -408,8 +425,23 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, {:execute_ex_command, {:edit, file_path}}) do
-    Logger.debug("Opening file: #{file_path}")
-    state
+    # Check if the file is already open in a buffer
+    case find_buffer_by_path(state, file_path) do
+      nil ->
+        # Open a new buffer for this file
+        case start_buffer(file_path) do
+          {:ok, pid} ->
+            add_buffer(state, pid)
+
+          {:error, reason} ->
+            Logger.error("Failed to open file: #{inspect(reason)}")
+            state
+        end
+
+      idx ->
+        # Switch to existing buffer
+        switch_to_buffer(state, idx)
+    end
   end
 
   defp execute_command(%{buffer: buf} = state, {:execute_ex_command, {:goto_line, line_num}}) do
@@ -540,13 +572,20 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, :buffer_list) do
-    Logger.debug("buffer_list: not yet implemented")
-    state
+    # Cycle to next buffer (interactive picker is a future enhancement)
+    next_buffer(state)
+  end
+
+  defp execute_command(state, :buffer_next) do
+    next_buffer(state)
+  end
+
+  defp execute_command(state, :buffer_prev) do
+    prev_buffer(state)
   end
 
   defp execute_command(state, :kill_buffer) do
-    Logger.debug("kill_buffer: not yet implemented")
-    state
+    remove_current_buffer(state)
   end
 
   defp execute_command(state, :window_left), do: state
@@ -605,9 +644,15 @@ defmodule Minga.Editor do
 
     # ── Modeline (row N-2) — Doom Emacs-style colored segments ──
     {cursor_line, cursor_col} = cursor
-    file_name = BufferServer.file_path(state.buffer) || "[scratch]"
+    file_name =
+      case BufferServer.file_path(state.buffer) do
+        nil -> "[scratch]"
+        path -> Path.basename(path)
+      end
     dirty_marker = if BufferServer.dirty?(state.buffer), do: " ● ", else: ""
     line_count = BufferServer.line_count(state.buffer)
+    buf_count = length(state.buffers)
+    buf_index = state.active_buffer + 1
     modeline_row = viewport.rows - 2
 
     modeline_commands = render_modeline(
@@ -619,7 +664,9 @@ defmodule Minga.Editor do
       dirty_marker,
       cursor_line,
       cursor_col,
-      line_count
+      line_count,
+      buf_index,
+      buf_count
     )
 
     # ── Minibuffer (row N-1) — command input or messages ──
@@ -721,9 +768,11 @@ defmodule Minga.Editor do
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
           non_neg_integer()
         ) :: [binary()]
-  defp render_modeline(row, cols, mode, mode_state, file_name, dirty_marker, cursor_line, cursor_col, line_count) do
+  defp render_modeline(row, cols, mode, mode_state, file_name, dirty_marker, cursor_line, cursor_col, line_count, buf_index, buf_count) do
     # Segment colors
     {mode_fg, mode_bg} = Map.get(@mode_colors, mode, {0x000000, 0x51AFEF})
     bar_fg = 0xBBC2CF
@@ -740,8 +789,9 @@ defmodule Minga.Editor do
     # 2. Separator: mode → info
     sep1 = @separator
 
-    # 3. File info segment
-    file_segment = " #{file_name}#{dirty_marker} "
+    # 3. File info segment (with buffer indicator when multiple buffers)
+    buf_indicator = if buf_count > 1, do: " [#{buf_index}/#{buf_count}]", else: ""
+    file_segment = " #{file_name}#{dirty_marker}#{buf_indicator} "
 
     # 4. Separator: info → bar
     sep2 = @separator
@@ -909,6 +959,76 @@ defmodule Minga.Editor do
       Minga.Buffer.Supervisor,
       {BufferServer, file_path: file_path}
     )
+  end
+
+  # ── Buffer management helpers ────────────────────────────────────────────
+
+  # Adds a new buffer to the list and makes it active.
+  @spec add_buffer(state(), pid()) :: state()
+  defp add_buffer(state, pid) do
+    buffers = state.buffers ++ [pid]
+    idx = length(buffers) - 1
+    %{state | buffers: buffers, active_buffer: idx, buffer: pid}
+  end
+
+  # Switches to the buffer at the given index.
+  @spec switch_to_buffer(state(), non_neg_integer()) :: state()
+  defp switch_to_buffer(%{buffers: buffers} = state, idx) when length(buffers) > 0 do
+    idx = rem(idx, length(buffers))
+    idx = if idx < 0, do: idx + length(buffers), else: idx
+    pid = Enum.at(buffers, idx)
+    %{state | active_buffer: idx, buffer: pid}
+  end
+
+  defp switch_to_buffer(state, _idx), do: state
+
+  # Switches to the next buffer (wraps around).
+  @spec next_buffer(state()) :: state()
+  defp next_buffer(%{buffers: buffers, active_buffer: idx} = state) when length(buffers) > 1 do
+    switch_to_buffer(state, rem(idx + 1, length(buffers)))
+  end
+
+  defp next_buffer(state), do: state
+
+  # Switches to the previous buffer (wraps around).
+  @spec prev_buffer(state()) :: state()
+  defp prev_buffer(%{buffers: buffers, active_buffer: idx} = state) when length(buffers) > 1 do
+    new_idx = if idx == 0, do: length(buffers) - 1, else: idx - 1
+    switch_to_buffer(state, new_idx)
+  end
+
+  defp prev_buffer(state), do: state
+
+  # Removes the current buffer and switches to the next one.
+  # If it's the last buffer, leaves the editor with no buffer.
+  @spec remove_current_buffer(state()) :: state()
+  defp remove_current_buffer(%{buffers: buffers, active_buffer: idx} = state)
+       when length(buffers) > 0 do
+    buf = Enum.at(buffers, idx)
+    # Stop the buffer process
+    if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
+
+    new_buffers = List.delete_at(buffers, idx)
+
+    case new_buffers do
+      [] ->
+        %{state | buffers: [], active_buffer: 0, buffer: nil}
+
+      _ ->
+        new_idx = min(idx, length(new_buffers) - 1)
+        new_active = Enum.at(new_buffers, new_idx)
+        %{state | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+    end
+  end
+
+  defp remove_current_buffer(state), do: state
+
+  # Finds a buffer by file path, returns its index or nil.
+  @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
+  defp find_buffer_by_path(%{buffers: buffers}, file_path) do
+    Enum.find_index(buffers, fn buf ->
+      Process.alive?(buf) && BufferServer.file_path(buf) == file_path
+    end)
   end
 
   # ── Visual selection helpers ──────────────────────────────────────────────
