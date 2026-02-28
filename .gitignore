@@ -26,3 +26,4 @@ Thumbs.db
 # Environment
 .env
 .env.local
+PLAN.md
