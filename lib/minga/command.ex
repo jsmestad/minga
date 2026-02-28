@@ -12,7 +12,7 @@ defmodule Minga.Command do
       %Minga.Command{
         name: :save,
         description: "Save the current file",
-        execute: fn state -> Minga.Editor.save(state) end
+        execute: fn state -> Minga.Editor.Commands.execute(state, :save) end
       }
   """
 
