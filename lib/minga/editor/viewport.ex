@@ -71,4 +71,28 @@ defmodule Minga.Editor.Viewport do
   def content_rows(%__MODULE__{rows: rows}) do
     max(rows - footer_rows(), 1)
   end
+
+  @doc """
+  Computes the gutter width for line numbers based on total line count.
+
+  Returns `max(digits(line_count), 2) + 1` — at least 2 digits plus a
+  trailing space separator. For example: 1–99 lines → 3, 100–999 → 4.
+  """
+  @spec gutter_width(non_neg_integer()) :: pos_integer()
+  def gutter_width(line_count) when is_integer(line_count) and line_count >= 0 do
+    digits = line_count |> max(1) |> Integer.digits() |> length()
+    max(digits, 2) + 1
+  end
+
+  @doc """
+  Returns the number of columns available for buffer content after the gutter.
+
+  Subtracts `gutter_width(line_count)` from the viewport's total columns,
+  clamped to at least 1.
+  """
+  @spec content_cols(t(), non_neg_integer()) :: pos_integer()
+  def content_cols(%__MODULE__{cols: cols}, line_count)
+      when is_integer(line_count) and line_count >= 0 do
+    max(cols - gutter_width(line_count), 1)
+  end
 end

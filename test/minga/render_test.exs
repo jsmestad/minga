@@ -186,24 +186,30 @@ defmodule Minga.RenderTest do
   end
 
   describe "screen cursor position" do
-    test "cursor starts at 0,0" do
+    # Gutter width for 2-line file: 3 (2 digits + 1 separator)
+    @gutter_w 3
+
+    test "cursor starts at gutter offset" do
       ctx = start_editor("hello\nworld")
-      assert screen_cursor(ctx) == {0, 0}
+      assert screen_cursor(ctx) == {0, @gutter_w}
     end
 
-    test "cursor follows hjkl movement" do
+    test "cursor follows hjkl movement with gutter offset" do
       ctx = start_editor("hello\nworld")
 
       send_key(ctx, ?l)
       send_key(ctx, ?l)
-      assert screen_cursor(ctx) == {0, 2}
+      assert screen_cursor(ctx) == {0, @gutter_w + 2}
 
       send_key(ctx, ?j)
-      assert screen_cursor(ctx) == {1, 2}
+      assert screen_cursor(ctx) == {1, @gutter_w + 2}
     end
   end
 
   describe "visual selection rendering" do
+    # Gutter width for 1-line file: 3
+    @sel_gutter_w 3
+
     test "selected text has reverse attribute" do
       ctx = start_editor("hello world")
 
@@ -216,11 +222,11 @@ defmodule Minga.RenderTest do
       screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, 0)
 
-      # Cells 0-2 should be selected (reverse)
-      selected_cells = Enum.slice(row, 0, 3)
+      # Content starts after gutter; cells gutter_w..gutter_w+2 should be selected
+      selected_cells = Enum.slice(row, @sel_gutter_w, 3)
 
       assert Enum.all?(selected_cells, fn cell -> :reverse in cell.attrs end),
-             "Expected cells 0-2 to have :reverse attribute"
+             "Expected cells #{@sel_gutter_w}-#{@sel_gutter_w + 2} to have :reverse attribute"
     end
   end
 

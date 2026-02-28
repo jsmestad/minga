@@ -85,4 +85,50 @@ defmodule Minga.Editor.ViewportTest do
       assert Viewport.content_rows(vp) == 1
     end
   end
+
+  describe "gutter_width/1" do
+    test "minimum width of 3 for small files (2 digits + separator)" do
+      assert Viewport.gutter_width(1) == 3
+      assert Viewport.gutter_width(9) == 3
+      assert Viewport.gutter_width(0) == 3
+    end
+
+    test "stays at 3 for files up to 99 lines" do
+      assert Viewport.gutter_width(10) == 3
+      assert Viewport.gutter_width(99) == 3
+    end
+
+    test "grows to 4 for 100+ lines" do
+      assert Viewport.gutter_width(100) == 4
+      assert Viewport.gutter_width(999) == 4
+    end
+
+    test "grows to 5 for 1000+ lines" do
+      assert Viewport.gutter_width(1000) == 5
+      assert Viewport.gutter_width(9999) == 5
+    end
+
+    test "grows to 6 for 10000+ lines" do
+      assert Viewport.gutter_width(10_000) == 6
+    end
+  end
+
+  describe "content_cols/2" do
+    test "subtracts gutter width from total cols" do
+      vp = Viewport.new(24, 80)
+      # 50 lines → gutter_width 3 → content_cols 77
+      assert Viewport.content_cols(vp, 50) == 77
+    end
+
+    test "adjusts for larger line counts" do
+      vp = Viewport.new(24, 80)
+      # 1000 lines → gutter_width 5 → content_cols 75
+      assert Viewport.content_cols(vp, 1000) == 75
+    end
+
+    test "minimum of 1 content column" do
+      vp = Viewport.new(24, 3)
+      assert Viewport.content_cols(vp, 100) >= 1
+    end
+  end
 end

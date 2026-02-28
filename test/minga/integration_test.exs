@@ -21,7 +21,8 @@ defmodule Minga.IntegrationTest do
 
       assert buffer_content(ctx) == original
       assert buffer_cursor(ctx) == {0, 2}
-      assert screen_cursor(ctx) == {0, 2}
+      # Screen cursor is offset by gutter width (3 for a 3-line file)
+      assert screen_cursor(ctx) == {0, 3 + 2}
     end
 
     test "h moves cursor left" do

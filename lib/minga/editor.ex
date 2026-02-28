@@ -1490,23 +1490,51 @@ defmodule Minga.Editor do
     snapshot = BufferServer.render_snapshot(state.buffer, first_line, visible_rows)
     lines = snapshot.lines
     {cursor_line, cursor_col} = snapshot.cursor
+    line_count = snapshot.line_count
+
+    # 3. Compute gutter dimensions and re-check horizontal scroll.
+    gutter_w = Viewport.gutter_width(line_count)
+    content_w = Viewport.content_cols(viewport, line_count)
+
+    viewport =
+      if cursor_col >= viewport.left + content_w do
+        %{viewport | left: cursor_col - content_w + 1}
+      else
+        viewport
+      end
 
     clear = [Protocol.encode_clear()]
 
     visual_selection = visual_selection_bounds(state, cursor)
 
-    line_commands =
+    # 4. Render gutter + content lines.
+    {gutter_commands, line_commands} =
       lines
       |> Enum.with_index()
-      |> Enum.flat_map(fn {line_text, screen_row} ->
+      |> Enum.reduce({[], []}, fn {line_text, screen_row}, {gutters, contents} ->
         buf_line = first_line + screen_row
-        render_line(line_text, screen_row, buf_line, viewport, visual_selection)
+        gutter_cmd = render_gutter_number(screen_row, buf_line, cursor_line, gutter_w)
+
+        content_cmds =
+          render_line(
+            line_text,
+            screen_row,
+            buf_line,
+            viewport,
+            visual_selection,
+            gutter_w,
+            content_w
+          )
+
+        {[gutter_cmd | gutters], contents ++ content_cmds}
       end)
+
+    gutter_commands = Enum.reverse(gutter_commands)
 
     tilde_commands =
       if length(lines) < visible_rows do
         for row <- length(lines)..(visible_rows - 1) do
-          Protocol.encode_draw(row, 0, "~", fg: 0x555555)
+          Protocol.encode_draw(row, gutter_w, "~", fg: 0x555555)
         end
       else
         []
@@ -1587,13 +1615,15 @@ defmodule Minga.Editor do
         minibuffer_row,
         cursor_line,
         cursor_col,
-        viewport
+        viewport,
+        gutter_w
       )
 
     whichkey_commands = maybe_render_whichkey(state, viewport)
 
     all_commands =
       clear ++
+        gutter_commands ++
         line_commands ++
         tilde_commands ++
         modeline_commands ++
@@ -1634,19 +1664,47 @@ defmodule Minga.Editor do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          Viewport.t()
+          Viewport.t(),
+          non_neg_integer()
         ) :: binary()
-  defp resolve_cursor_command({row, col}, _mode, _mode_state, _mb_row, _cur_line, _cur_col, _vp) do
+  defp resolve_cursor_command(
+         {row, col},
+         _mode,
+         _mode_state,
+         _mb_row,
+         _cur_line,
+         _cur_col,
+         _vp,
+         _gutter_w
+       ) do
     Protocol.encode_cursor(row, col)
   end
 
-  defp resolve_cursor_command(nil, :command, mode_state, minibuffer_row, _cur_line, _cur_col, _vp) do
+  defp resolve_cursor_command(
+         nil,
+         :command,
+         mode_state,
+         minibuffer_row,
+         _cur_line,
+         _cur_col,
+         _vp,
+         _gutter_w
+       ) do
     cmd_col = String.length(mode_state.input) + 1
     Protocol.encode_cursor(minibuffer_row, cmd_col)
   end
 
-  defp resolve_cursor_command(nil, _mode, _mode_state, _mb_row, cursor_line, cursor_col, viewport) do
-    Protocol.encode_cursor(cursor_line - viewport.top, cursor_col - viewport.left)
+  defp resolve_cursor_command(
+         nil,
+         _mode,
+         _mode_state,
+         _mb_row,
+         cursor_line,
+         cursor_col,
+         viewport,
+         gutter_w
+       ) do
+    Protocol.encode_cursor(cursor_line - viewport.top, gutter_w + cursor_col - viewport.left)
   end
 
   # ── Picker rendering ────────────────────────────────────────────────────────
@@ -2509,31 +2567,69 @@ defmodule Minga.Editor do
   end
 
   # Renders a single buffer line, applying visual selection highlights.
+  # ── Gutter rendering ────────────────────────────────────────────────────────
+
+  @gutter_fg 0x555555
+  @gutter_current_fg 0xBBC2CF
+
+  @spec render_gutter_number(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
+  defp render_gutter_number(screen_row, buf_line, cursor_line, gutter_w) do
+    # Hybrid mode: absolute on cursor line, relative elsewhere
+    {number, fg} =
+      if buf_line == cursor_line do
+        {buf_line + 1, @gutter_current_fg}
+      else
+        {abs(buf_line - cursor_line), @gutter_fg}
+      end
+
+    # Right-align the number in (gutter_w - 1) chars, leave 1 char separator
+    num_str = Integer.to_string(number)
+    padded = String.pad_leading(num_str, gutter_w - 1)
+    Protocol.encode_draw(screen_row, 0, padded, fg: fg)
+  end
+
+  # ── Line rendering ────────────────────────────────────────────────────────
+
   @spec render_line(
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           Minga.Editor.Viewport.t(),
-          visual_selection()
+          visual_selection(),
+          non_neg_integer(),
+          pos_integer()
         ) :: [binary()]
-  defp render_line(line_text, screen_row, buf_line, viewport, visual_selection) do
+  defp render_line(
+         line_text,
+         screen_row,
+         buf_line,
+         viewport,
+         visual_selection,
+         gutter_w,
+         content_w
+       ) do
     graphemes = String.graphemes(line_text)
     line_len = length(graphemes)
 
-    # Compute visible graphemes accounting for horizontal scroll
+    # Compute visible graphemes accounting for horizontal scroll and gutter
     visible_graphemes =
       graphemes
       |> Enum.drop(viewport.left)
-      |> Enum.take(viewport.cols)
+      |> Enum.take(content_w)
 
     case selection_cols_for_line(buf_line, line_len, visual_selection) do
       nil ->
         # No selection on this line
-        [Protocol.encode_draw(screen_row, 0, Enum.join(visible_graphemes))]
+        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
 
       :full ->
         # Entire line is selected (linewise or full-line char selection)
-        [Protocol.encode_draw(screen_row, 0, Enum.join(visible_graphemes), reverse: true)]
+        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes), reverse: true)]
 
       {sel_start, sel_end} ->
         # Partial line selection — split into three segments
@@ -2555,16 +2651,16 @@ defmodule Minga.Editor do
         after_text = Enum.join(after_sel)
 
         [
-          Protocol.encode_draw(screen_row, 0, before_text),
+          Protocol.encode_draw(screen_row, gutter_w, before_text),
           Protocol.encode_draw(
             screen_row,
-            length(before_sel),
+            gutter_w + length(before_sel),
             sel_text,
             reverse: true
           ),
           Protocol.encode_draw(
             screen_row,
-            length(before_sel) + length(sel_graphemes),
+            gutter_w + length(before_sel) + length(sel_graphemes),
             after_text
           )
         ]
