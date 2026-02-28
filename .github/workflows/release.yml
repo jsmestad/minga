@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  MIX_ENV: prod
+  ELIXIR_VERSION: "1.19.4"
+  OTP_VERSION: "28.2"
+  ZIG_VERSION: "0.15.2"
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux_x86_64
+            artifact: minga_linux_x86_64
+          - os: ubuntu-24.04-arm
+            target: linux_aarch64
+            artifact: minga_linux_aarch64
+          - os: macos-14
+            target: macos_aarch64
+            artifact: minga_macos_aarch64
+          - os: macos-13
+            target: macos_x86_64
+            artifact: minga_macos_x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: release-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - run: mix deps.get --only prod
+      - run: mix release minga
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: burrito_out/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Prepare binaries
+        run: |
+          mkdir -p release-binaries
+          for dir in release-artifacts/minga_*; do
+            name=$(basename "$dir")
+            cp "$dir/$name" "release-binaries/$name"
+            chmod +x "release-binaries/$name"
+          done
+          ls -lh release-binaries/
+
+      - name: Generate checksums
+        run: |
+          cd release-binaries
+          sha256sum minga_* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-binaries/minga_*
+            release-binaries/SHA256SUMS.txt
