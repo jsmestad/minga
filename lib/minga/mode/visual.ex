@@ -212,6 +212,16 @@ defmodule Minga.Mode.Visual do
   # ── Operators ────────────────────────────────────────────────────────────────
 
   @doc false
+  # > — indent visual selection, return to Normal
+  def handle_key({?>, 0}, state) do
+    {:execute_then_transition, [:indent_visual_selection], :normal, state}
+  end
+
+  # < — dedent visual selection, return to Normal
+  def handle_key({?<, 0}, state) do
+    {:execute_then_transition, [:dedent_visual_selection], :normal, state}
+  end
+
   # d — delete selection, return to Normal
   def handle_key({?d, 0}, state) do
     {:execute_then_transition, [:delete_visual_selection], :normal, state}

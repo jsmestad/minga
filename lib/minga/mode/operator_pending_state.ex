@@ -16,7 +16,7 @@ defmodule Minga.Mode.OperatorPendingState do
             leader_keys: []
 
   @typedoc "The pending operator."
-  @type operator :: :delete | :change | :yank
+  @type operator :: :delete | :change | :yank | :indent | :dedent
 
   @typedoc "Text object modifier (inner vs around)."
   @type text_object_modifier :: :inner | :around

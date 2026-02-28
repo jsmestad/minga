@@ -297,4 +297,104 @@ defmodule Minga.Mode.OperatorPendingTest do
       assert {:continue, ^state} = OperatorPending.handle_key({?z, 0}, state)
     end
   end
+
+  # ── Indent operator (#57) ──────────────────────────────────────────────────
+
+  describe ">< (indent/dedent) operator entry from Normal" do
+    test "> from Normal transitions to :operator_pending with :indent" do
+      state = Mode.initial_state()
+      {mode, _cmds, op_state} = Mode.process(:normal, {?>, 0}, state)
+      assert mode == :operator_pending
+      assert op_state.operator == :indent
+      assert op_state.op_count == 1
+    end
+
+    test "< from Normal transitions to :operator_pending with :dedent" do
+      state = Mode.initial_state()
+      {mode, _cmds, op_state} = Mode.process(:normal, {?<, 0}, state)
+      assert mode == :operator_pending
+      assert op_state.operator == :dedent
+      assert op_state.op_count == 1
+    end
+
+    test "3> from Normal gives op_count=3 for indent" do
+      state = Mode.initial_state()
+      {_, _, s1} = Mode.process(:normal, {?3, 0}, state)
+      {mode, _, op_state} = Mode.process(:normal, {?>, 0}, s1)
+      assert mode == :operator_pending
+      assert op_state.operator == :indent
+      assert op_state.op_count == 3
+    end
+  end
+
+  describe ">> (indent current lines)" do
+    test ">> emits {:indent_lines, 1} and returns to :normal" do
+      state = op_state(:indent)
+
+      assert {:execute_then_transition, [{:indent_lines, 1}], :normal, _} =
+               OperatorPending.handle_key({?>, 0}, state)
+    end
+
+    test ">> with op_count=3 emits {:indent_lines, 3}" do
+      state = op_state(:indent, 3)
+
+      assert {:execute_then_transition, [{:indent_lines, 3}], :normal, _} =
+               OperatorPending.handle_key({?>, 0}, state)
+    end
+  end
+
+  describe "<< (dedent current lines)" do
+    test "<< emits {:dedent_lines, 1} and returns to :normal" do
+      state = op_state(:dedent)
+
+      assert {:execute_then_transition, [{:dedent_lines, 1}], :normal, _} =
+               OperatorPending.handle_key({?<, 0}, state)
+    end
+
+    test "<< with op_count=3 emits {:dedent_lines, 3}" do
+      state = op_state(:dedent, 3)
+
+      assert {:execute_then_transition, [{:dedent_lines, 3}], :normal, _} =
+               OperatorPending.handle_key({?<, 0}, state)
+    end
+  end
+
+  describe ">motion (indent to motion target)" do
+    test ">w emits {:indent_motion, :word_forward} and returns to :normal" do
+      state = op_state(:indent)
+
+      assert {:execute_then_transition, [{:indent_motion, :word_forward}], :normal, _} =
+               OperatorPending.handle_key({?w, 0}, state)
+    end
+
+    test ">} emits {:indent_motion, :paragraph_forward} and returns to :normal" do
+      state = op_state(:indent)
+
+      assert {:execute_then_transition, [{:indent_motion, :paragraph_forward}], :normal, _} =
+               OperatorPending.handle_key({?}, 0}, state)
+    end
+
+    test ">G emits {:indent_motion, :document_end} and returns to :normal" do
+      state = op_state(:indent)
+
+      assert {:execute_then_transition, [{:indent_motion, :document_end}], :normal, _} =
+               OperatorPending.handle_key({?G, 0}, state)
+    end
+  end
+
+  describe "<motion (dedent to motion target)" do
+    test "<w emits {:dedent_motion, :word_forward} and returns to :normal" do
+      state = op_state(:dedent)
+
+      assert {:execute_then_transition, [{:dedent_motion, :word_forward}], :normal, _} =
+               OperatorPending.handle_key({?w, 0}, state)
+    end
+
+    test "<gg emits {:dedent_motion, :document_start} and returns to :normal" do
+      state = %OperatorPendingState{operator: :dedent, op_count: 1, pending_g: true}
+
+      assert {:execute_then_transition, [{:dedent_motion, :document_start}], :normal, _} =
+               OperatorPending.handle_key({?g, 0}, state)
+    end
+  end
 end

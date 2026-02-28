@@ -16,8 +16,7 @@ defmodule Minga.Mode.State do
             leader_keys: [],
             pending_g: false,
             pending_find: nil,
-            pending_replace: false,
-            pending_shift: nil
+            pending_replace: false
 
   @typedoc "Pending find-char direction."
   @type find_direction :: :f | :F | :t | :T
@@ -28,7 +27,6 @@ defmodule Minga.Mode.State do
           leader_keys: [String.t()],
           pending_g: boolean(),
           pending_find: find_direction() | nil,
-          pending_replace: boolean(),
-          pending_shift: :indent | :dedent | nil
+          pending_replace: boolean()
         }
 end

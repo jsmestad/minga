@@ -257,6 +257,50 @@ defmodule Minga.Mode.VisualTest do
 
   # ── Unknown keys ────────────────────────────────────────────────────────────
 
+  describe "> and < indent/dedent in visual mode (#57)" do
+    test "> emits :indent_visual_selection and transitions to :normal" do
+      state = visual_state({0, 0}, :char)
+
+      assert {:execute_then_transition, [:indent_visual_selection], :normal, _} =
+               Visual.handle_key({?>, 0}, state)
+    end
+
+    test "< emits :dedent_visual_selection and transitions to :normal" do
+      state = visual_state({0, 0}, :char)
+
+      assert {:execute_then_transition, [:dedent_visual_selection], :normal, _} =
+               Visual.handle_key({?<, 0}, state)
+    end
+
+    test "> works in linewise visual mode" do
+      state = visual_state({2, 0}, :line)
+
+      assert {:execute_then_transition, [:indent_visual_selection], :normal, _} =
+               Visual.handle_key({?>, 0}, state)
+    end
+
+    test "< works in linewise visual mode" do
+      state = visual_state({2, 0}, :line)
+
+      assert {:execute_then_transition, [:dedent_visual_selection], :normal, _} =
+               Visual.handle_key({?<, 0}, state)
+    end
+
+    test "Mode.process: > returns :normal mode with :indent_visual_selection command" do
+      state = visual_state()
+      {new_mode, commands, _} = Mode.process(:visual, {?>, 0}, state)
+      assert new_mode == :normal
+      assert commands == [:indent_visual_selection]
+    end
+
+    test "Mode.process: < returns :normal mode with :dedent_visual_selection command" do
+      state = visual_state()
+      {new_mode, commands, _} = Mode.process(:visual, {?<, 0}, state)
+      assert new_mode == :normal
+      assert commands == [:dedent_visual_selection]
+    end
+  end
+
   describe "unknown keys in visual mode" do
     test "unknown key produces {:continue, state}" do
       state = visual_state({0, 0})

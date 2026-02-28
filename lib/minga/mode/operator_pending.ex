@@ -223,7 +223,7 @@ defmodule Minga.Mode.OperatorPending do
     execute_with_motion(state, :match_bracket)
   end
 
-  # ── Double-operator: line-wise variants (dd / cc / yy) ───────────────────
+  # ── Double-operator: line-wise variants (dd / cc / yy / >> / <<) ─────────
 
   def handle_key({?d, 0}, %OPState{operator: :delete} = state) do
     cmds = List.duplicate(:delete_line, OPState.total_count(state))
@@ -238,6 +238,18 @@ defmodule Minga.Mode.OperatorPending do
   def handle_key({?y, 0}, %OPState{operator: :yank} = state) do
     cmds = List.duplicate(:yank_line, OPState.total_count(state))
     {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
+  end
+
+  # >> — indent current line(s): the count before > is the number of lines
+  def handle_key({?>, 0}, %OPState{operator: :indent} = state) do
+    {:execute_then_transition, [{:indent_lines, OPState.total_count(state)}], :normal,
+     OPState.to_base_state(state)}
+  end
+
+  # << — dedent current line(s)
+  def handle_key({?<, 0}, %OPState{operator: :dedent} = state) do
+    {:execute_then_transition, [{:dedent_lines, OPState.total_count(state)}], :normal,
+     OPState.to_base_state(state)}
   end
 
   # ── Page / half-page motions ───────────────────────────────────────────────
@@ -304,4 +316,6 @@ defmodule Minga.Mode.OperatorPending do
   defp motion_command(:delete, motion), do: {:delete_motion, motion}
   defp motion_command(:change, motion), do: {:change_motion, motion}
   defp motion_command(:yank, motion), do: {:yank_motion, motion}
+  defp motion_command(:indent, motion), do: {:indent_motion, motion}
+  defp motion_command(:dedent, motion), do: {:dedent_motion, motion}
 end

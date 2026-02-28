@@ -422,22 +422,41 @@ defmodule Minga.Mode.Normal do
     {:execute, :toggle_case, state}
   end
 
-  # >> — indent (first > sets pending_shift)
-  def handle_key({?>, 0}, %ModeState{pending_shift: nil} = state) do
-    {:continue, %{state | pending_shift: :indent}}
+  # s — delete char at cursor, enter Insert mode (substitute char)
+  def handle_key({?s, 0}, state) do
+    {:execute_then_transition, [:delete_at], :insert, state}
   end
 
-  def handle_key({?>, 0}, %ModeState{pending_shift: :indent} = state) do
-    {:execute, :indent_line, %{state | pending_shift: nil}}
+  # S — clear line and enter Insert mode (substitute line)
+  def handle_key({?S, 0}, state) do
+    {:execute_then_transition, [:change_line], :insert, state}
   end
 
-  # << — dedent (first < sets pending_shift)
-  def handle_key({?<, 0}, %ModeState{pending_shift: nil} = state) do
-    {:continue, %{state | pending_shift: :dedent}}
+  # C — delete from cursor to end of line, enter Insert mode (change to EOL)
+  def handle_key({?C, 0}, state) do
+    {:execute_then_transition, [{:delete_motion, :line_end}], :insert, state}
   end
 
-  def handle_key({?<, 0}, %ModeState{pending_shift: :dedent} = state) do
-    {:execute, :dedent_line, %{state | pending_shift: nil}}
+  # D — delete from cursor to end of line, stay in Normal mode
+  def handle_key({?D, 0}, state) do
+    {:execute, {:delete_motion, :line_end}, state}
+  end
+
+  # R — enter Replace mode
+  def handle_key({?R, 0}, _state) do
+    {:transition, :replace, %Minga.Mode.ReplaceState{}}
+  end
+
+  # > — enter operator-pending for indent
+  def handle_key({?>, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :indent, op_count: count || 1}}
+  end
+
+  # < — enter operator-pending for dedent
+  def handle_key({?<, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :dedent, op_count: count || 1}}
   end
 
   # + — next line first non-blank

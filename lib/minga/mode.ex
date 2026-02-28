@@ -28,7 +28,7 @@ defmodule Minga.Mode do
   """
 
   @typedoc "Available editor modes."
-  @type mode :: :normal | :insert | :visual | :operator_pending | :command
+  @type mode :: :normal | :insert | :visual | :operator_pending | :command | :replace
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -46,6 +46,7 @@ defmodule Minga.Mode do
           | Minga.Mode.OperatorPendingState.t()
           | Minga.Mode.VisualState.t()
           | Minga.Mode.CommandState.t()
+          | Minga.Mode.ReplaceState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -104,6 +105,7 @@ defmodule Minga.Mode do
   def display(:visual), do: "-- VISUAL --"
   def display(:operator_pending), do: "-- OPERATOR --"
   def display(:command), do: "-- COMMAND --"
+  def display(:replace), do: "-- REPLACE --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -123,6 +125,7 @@ defmodule Minga.Mode do
   defp mode_module(:visual), do: Minga.Mode.Visual
   defp mode_module(:operator_pending), do: Minga.Mode.OperatorPending
   defp mode_module(:command), do: Minga.Mode.Command
+  defp mode_module(:replace), do: Minga.Mode.Replace
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

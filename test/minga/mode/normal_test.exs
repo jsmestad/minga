@@ -322,4 +322,71 @@ defmodule Minga.Mode.NormalTest do
       assert s2 == s
     end
   end
+
+  describe "s/S/C/D shortcuts (#51)" do
+    test "s emits [:delete_at] and transitions to :insert" do
+      assert {:execute_then_transition, [:delete_at], :insert, _} =
+               Normal.handle_key({?s, 0}, fresh_state())
+    end
+
+    test "S emits [:change_line] and transitions to :insert" do
+      assert {:execute_then_transition, [:change_line], :insert, _} =
+               Normal.handle_key({?S, 0}, fresh_state())
+    end
+
+    test "C emits [{:delete_motion, :line_end}] and transitions to :insert" do
+      assert {:execute_then_transition, [{:delete_motion, :line_end}], :insert, _} =
+               Normal.handle_key({?C, 0}, fresh_state())
+    end
+
+    test "D emits {:delete_motion, :line_end} and stays in normal mode" do
+      assert {:execute, {:delete_motion, :line_end}, _} =
+               Normal.handle_key({?D, 0}, fresh_state())
+    end
+  end
+
+  describe "R enters replace mode (#52)" do
+    test "R transitions to :replace mode" do
+      assert {:transition, :replace, state} = Normal.handle_key({?R, 0}, fresh_state())
+      assert %Minga.Mode.ReplaceState{} = state
+    end
+
+    test "R mode state has empty original_chars stack" do
+      {:transition, :replace, state} = Normal.handle_key({?R, 0}, fresh_state())
+      assert state.original_chars == []
+    end
+  end
+
+  describe "> and < as indent/dedent operators (#57)" do
+    test "> transitions to :operator_pending with :indent operator" do
+      {:transition, :operator_pending, state} = Normal.handle_key({?>, 0}, fresh_state())
+      assert state.operator == :indent
+      assert state.op_count == 1
+    end
+
+    test "< transitions to :operator_pending with :dedent operator" do
+      {:transition, :operator_pending, state} = Normal.handle_key({?<, 0}, fresh_state())
+      assert state.operator == :dedent
+      assert state.op_count == 1
+    end
+
+    test "3> transitions to :operator_pending with :indent and op_count 3" do
+      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
+      {:transition, :operator_pending, state} = Normal.handle_key({?>, 0}, s1)
+      assert state.operator == :indent
+      assert state.op_count == 3
+    end
+
+    test "3< transitions to :operator_pending with :dedent and op_count 3" do
+      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
+      {:transition, :operator_pending, state} = Normal.handle_key({?<, 0}, s1)
+      assert state.operator == :dedent
+      assert state.op_count == 3
+    end
+
+    test "pending_shift field no longer exists on Mode.State" do
+      state = fresh_state()
+      refute Map.has_key?(state, :pending_shift)
+    end
+  end
 end

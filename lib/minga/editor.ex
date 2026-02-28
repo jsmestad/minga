@@ -740,6 +740,59 @@ defmodule Minga.Editor do
     state
   end
 
+  # ── Replace mode commands ─────────────────────────────────────────────────
+
+  # Replace overwrite: save original char, delete_at, insert new char.
+  # Updates mode_state.original_chars stack so backspace can restore.
+  defp execute_command(
+         %{buffer: buf, mode_state: %Minga.Mode.ReplaceState{} = ms} = state,
+         {:replace_overwrite, char}
+       ) do
+    {line, col} = BufferServer.cursor(buf)
+
+    original =
+      case BufferServer.get_lines(buf, line, 1) do
+        [text] ->
+          graphemes = String.graphemes(text)
+          if col < length(graphemes), do: Enum.at(graphemes, col), else: " "
+
+        _ ->
+          " "
+      end
+
+    BufferServer.delete_at(buf)
+    BufferServer.insert_char(buf, char)
+    new_ms = %{ms | original_chars: [original | ms.original_chars]}
+    %{state | mode_state: new_ms}
+  end
+
+  # Fallback for replace_overwrite when not in replace mode state (safety guard)
+  defp execute_command(state, {:replace_overwrite, _char}), do: state
+
+  # Replace restore: pop original char, delete char before cursor (the one we overwrote),
+  # insert the original back, move left to stay on it.
+  # No-op when original_chars stack is empty (cannot backspace past entry point).
+  defp execute_command(
+         %{
+           buffer: buf,
+           mode_state: %Minga.Mode.ReplaceState{original_chars: [orig | rest]} = ms
+         } = state,
+         :replace_restore
+       ) do
+    BufferServer.delete_before(buf)
+    BufferServer.insert_char(buf, orig)
+    BufferServer.move(buf, :left)
+    new_ms = %{ms | original_chars: rest}
+    %{state | mode_state: new_ms}
+  end
+
+  # No-op when stack is empty
+  defp execute_command(%{mode_state: %Minga.Mode.ReplaceState{original_chars: []}} = state, :replace_restore),
+    do: state
+
+  # Fallback for replace_restore when not in replace mode state
+  defp execute_command(state, :replace_restore), do: state
+
   defp execute_command(%{buffer: buf} = state, :indent_line) do
     {line, col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
@@ -770,6 +823,84 @@ defmodule Minga.Editor do
         :ok
     end
 
+    state
+  end
+
+  # ── Multi-line indent/dedent commands ────────────────────────────────────
+
+  # Indent N lines starting at cursor (used by >>)
+  defp execute_command(%{buffer: buf} = state, {:indent_lines, n}) do
+    {cursor_line, _} = BufferServer.cursor(buf)
+    total = BufferServer.line_count(buf)
+    end_line = min(cursor_line + n - 1, total - 1)
+    do_indent_lines(buf, cursor_line, end_line)
+    state
+  end
+
+  # Dedent N lines starting at cursor (used by <<)
+  defp execute_command(%{buffer: buf} = state, {:dedent_lines, n}) do
+    {cursor_line, _} = BufferServer.cursor(buf)
+    total = BufferServer.line_count(buf)
+    end_line = min(cursor_line + n - 1, total - 1)
+    do_dedent_lines(buf, cursor_line, end_line)
+    state
+  end
+
+  # Indent lines from cursor to motion target
+  defp execute_command(%{buffer: buf} = state, {:indent_motion, motion}) do
+    content = BufferServer.content(buf)
+    cursor = BufferServer.cursor(buf)
+    tmp_buf = GapBuffer.new(content)
+    target = resolve_motion(tmp_buf, cursor, motion)
+    {cursor_line, _} = cursor
+    {target_line, _} = target
+    start_line = min(cursor_line, target_line)
+    end_line = max(cursor_line, target_line)
+    do_indent_lines(buf, start_line, end_line)
+    state
+  end
+
+  # Dedent lines from cursor to motion target
+  defp execute_command(%{buffer: buf} = state, {:dedent_motion, motion}) do
+    content = BufferServer.content(buf)
+    cursor = BufferServer.cursor(buf)
+    tmp_buf = GapBuffer.new(content)
+    target = resolve_motion(tmp_buf, cursor, motion)
+    {cursor_line, _} = cursor
+    {target_line, _} = target
+    start_line = min(cursor_line, target_line)
+    end_line = max(cursor_line, target_line)
+    do_dedent_lines(buf, start_line, end_line)
+    state
+  end
+
+  # Indent the visual selection (line range)
+  defp execute_command(
+         %{buffer: buf, mode_state: %VisualState{} = ms} = state,
+         :indent_visual_selection
+       ) do
+    anchor = ms.visual_anchor
+    cursor = BufferServer.cursor(buf)
+    {anchor_line, _} = anchor
+    {cursor_line, _} = cursor
+    start_line = min(anchor_line, cursor_line)
+    end_line = max(anchor_line, cursor_line)
+    do_indent_lines(buf, start_line, end_line)
+    state
+  end
+
+  # Dedent the visual selection (line range)
+  defp execute_command(
+         %{buffer: buf, mode_state: %VisualState{} = ms} = state,
+         :dedent_visual_selection
+       ) do
+    anchor = ms.visual_anchor
+    cursor = BufferServer.cursor(buf)
+    {anchor_line, _} = anchor
+    {cursor_line, _} = cursor
+    start_line = min(anchor_line, cursor_line)
+    end_line = max(anchor_line, cursor_line)
+    do_dedent_lines(buf, start_line, end_line)
     state
   end
 
@@ -903,6 +1034,30 @@ defmodule Minga.Editor do
     {line, _col} = BufferServer.cursor(buf)
     yanked = BufferServer.get_lines_content(buf, line, line)
     BufferServer.delete_lines(buf, line, line)
+    %{state | register: yanked <> "\n"}
+  end
+
+  # change_line: delete the content of the current line, position cursor at col 0.
+  # Used by `cc` (operator-pending) and `S` (normal mode shortcut).
+  defp execute_command(%{buffer: buf} = state, :change_line) do
+    {line, _col} = BufferServer.cursor(buf)
+    yanked = BufferServer.get_lines_content(buf, line, line)
+
+    case BufferServer.get_lines(buf, line, 1) do
+      [text] when text != "" ->
+        # Delete all characters on the line (from col 0 to end)
+        line_len = String.length(text)
+        BufferServer.move_to(buf, {line, 0})
+
+        for _ <- 1..line_len do
+          BufferServer.delete_at(buf)
+        end
+
+      _ ->
+        :ok
+    end
+
+    BufferServer.move_to(buf, {line, 0})
     %{state | register: yanked <> "\n"}
   end
 
@@ -1424,7 +1579,9 @@ defmodule Minga.Editor do
     # black on orange
     operator_pending: {0x000000, 0xDA8548},
     # black on yellow
-    command: {0x000000, 0xECBE7B}
+    command: {0x000000, 0xECBE7B},
+    # black on red/orange
+    replace: {0x000000, 0xFF6C6B}
   }
 
   # Powerline separator characters
@@ -1584,9 +1741,11 @@ defmodule Minga.Editor do
   defp mode_badge(:visual, _state), do: "VISUAL"
   defp mode_badge(:operator_pending, _state), do: "OPERATOR"
   defp mode_badge(:command, _state), do: "COMMAND"
+  defp mode_badge(:replace, _state), do: "REPLACE"
 
   @spec cursor_shape_for_mode(Mode.mode()) :: Protocol.cursor_shape()
   defp cursor_shape_for_mode(:insert), do: :beam
+  defp cursor_shape_for_mode(:replace), do: :underline
   defp cursor_shape_for_mode(_mode), do: :block
 
   # ── Private helpers ──────────────────────────────────────────────────────────
@@ -1992,6 +2151,66 @@ defmodule Minga.Editor do
     |> String.graphemes()
     |> Enum.take_while(&(&1 == " "))
     |> length()
+  end
+
+  # Indent lines [start_line..end_line] by 2 spaces each.
+  # Restores cursor to original position (shifted by +2 if on an indented line).
+  @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp do_indent_lines(buf, start_line, end_line) do
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+
+    for line <- start_line..end_line do
+      BufferServer.move_to(buf, {line, 0})
+      BufferServer.insert_char(buf, "  ")
+    end
+
+    new_col =
+      if cursor_line >= start_line and cursor_line <= end_line,
+        do: cursor_col + 2,
+        else: cursor_col
+
+    BufferServer.move_to(buf, {cursor_line, new_col})
+    :ok
+  end
+
+  # Dedent lines [start_line..end_line] by up to 2 spaces each.
+  # Restores cursor to original position (adjusted for removed spaces on cursor's line).
+  @spec do_dedent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp do_dedent_lines(buf, start_line, end_line) do
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+
+    # Compute how many spaces will be removed from the cursor's line for col adjustment
+    cursor_removed =
+      if cursor_line >= start_line and cursor_line <= end_line do
+        case BufferServer.get_lines(buf, cursor_line, 1) do
+          [text] -> min(count_leading_spaces(text), 2)
+          _ -> 0
+        end
+      else
+        0
+      end
+
+    for line <- start_line..end_line do
+      case BufferServer.get_lines(buf, line, 1) do
+        [text] ->
+          to_remove = min(count_leading_spaces(text), 2)
+
+          if to_remove > 0 do
+            BufferServer.move_to(buf, {line, 0})
+
+            for _ <- 1..to_remove do
+              BufferServer.delete_at(buf)
+            end
+          end
+
+        _ ->
+          :ok
+      end
+    end
+
+    new_col = max(0, cursor_col - cursor_removed)
+    BufferServer.move_to(buf, {cursor_line, new_col})
+    :ok
   end
 
   # ── Visual selection helpers ──────────────────────────────────────────────
