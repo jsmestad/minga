@@ -47,8 +47,15 @@ defmodule Minga.WhichKeyTest do
       children = [{{?f, 0}, "Find file"}, {{?s, 0}, "Save file"}]
       result = WhichKey.format_bindings(children)
 
-      assert Enum.any?(result, &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"}))
-      assert Enum.any?(result, &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"}))
+      assert Enum.any?(
+               result,
+               &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"})
+             )
+
+      assert Enum.any?(
+               result,
+               &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"})
+             )
     end
 
     test "formats :prefix atom label as '+prefix'" do
@@ -84,8 +91,16 @@ defmodule Minga.WhichKeyTest do
 
       # Should be sorted by key string.
       assert Enum.map(bindings, & &1.key) == ["f", "s"]
-      assert Enum.any?(bindings, &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"}))
-      assert Enum.any?(bindings, &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"}))
+
+      assert Enum.any?(
+               bindings,
+               &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"})
+             )
+
+      assert Enum.any?(
+               bindings,
+               &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"})
+             )
     end
 
     test "labels prefix-only nodes as '+prefix'" do

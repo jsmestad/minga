@@ -207,14 +207,12 @@ defmodule Minga.Mode.Normal do
   # v → characterwise visual mode.
   # The editor injects the :visual_anchor after the transition.
   def handle_key({?v, 0}, %ModeState{} = state) do
-    {:transition, :visual,
-     %Minga.Mode.VisualState{count: state.count, visual_type: :char}}
+    {:transition, :visual, %Minga.Mode.VisualState{count: state.count, visual_type: :char}}
   end
 
   # V → linewise visual mode.
   def handle_key({?V, 0}, %ModeState{} = state) do
-    {:transition, :visual,
-     %Minga.Mode.VisualState{count: state.count, visual_type: :line}}
+    {:transition, :visual, %Minga.Mode.VisualState{count: state.count, visual_type: :line}}
   end
 
   # ── Word / line motions ───────────────────────────────────────────────────

@@ -189,24 +189,24 @@ defmodule Minga.Mode.OperatorPending do
   # ── Double-operator: line-wise variants (dd / cc / yy) ───────────────────
 
   def handle_key({?d, 0}, %OPState{operator: :delete} = state) do
-    cmds = List.duplicate(:delete_line, total_count(state))
-    {:execute_then_transition, cmds, :normal, to_base_state(state)}
+    cmds = List.duplicate(:delete_line, OPState.total_count(state))
+    {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
   end
 
   def handle_key({?c, 0}, %OPState{operator: :change} = state) do
-    cmds = List.duplicate(:change_line, total_count(state))
-    {:execute_then_transition, cmds, :insert, to_base_state(state)}
+    cmds = List.duplicate(:change_line, OPState.total_count(state))
+    {:execute_then_transition, cmds, :insert, OPState.to_base_state(state)}
   end
 
   def handle_key({?y, 0}, %OPState{operator: :yank} = state) do
-    cmds = List.duplicate(:yank_line, total_count(state))
-    {:execute_then_transition, cmds, :normal, to_base_state(state)}
+    cmds = List.duplicate(:yank_line, OPState.total_count(state))
+    {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
   end
 
   # ── Escape: cancel back to Normal ────────────────────────────────────────
 
   def handle_key({@escape, _mods}, %OPState{} = state) do
-    {:transition, :normal, to_base_state(state)}
+    {:transition, :normal, OPState.to_base_state(state)}
   end
 
   # ── Unknown key: no-op ───────────────────────────────────────────────────
@@ -217,18 +217,16 @@ defmodule Minga.Mode.OperatorPending do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
-  alias Minga.Mode.OperatorPendingState, as: OpType
-
   # Emits a text-object command and transitions to the appropriate mode.
-  @spec execute_text_object(OPState.t(), OpType.text_object_modifier(), term()) :: Mode.result()
+  @spec execute_text_object(OPState.t(), OPState.text_object_modifier(), term()) :: Mode.result()
   defp execute_text_object(%OPState{operator: operator} = state, modifier, object_spec) do
     cmd = text_object_command(operator, modifier, object_spec)
     target_mode = if operator == :change, do: :insert, else: :normal
-    {:execute_then_transition, [cmd], target_mode, to_base_state(state)}
+    {:execute_then_transition, [cmd], target_mode, OPState.to_base_state(state)}
   end
 
   # Maps (operator, modifier, object_spec) → command tuple.
-  @spec text_object_command(OpType.operator(), OpType.text_object_modifier(), term()) ::
+  @spec text_object_command(OPState.operator(), OPState.text_object_modifier(), term()) ::
           Mode.command()
   defp text_object_command(:delete, modifier, spec), do: {:delete_text_object, modifier, spec}
   defp text_object_command(:change, modifier, spec), do: {:change_text_object, modifier, spec}
@@ -238,30 +236,17 @@ defmodule Minga.Mode.OperatorPending do
   @spec execute_with_motion(OPState.t(), atom()) :: Mode.result()
   defp execute_with_motion(%OPState{operator: operator} = state, motion) do
     cmd = motion_command(operator, motion)
-    cmds = List.duplicate(cmd, total_count(state))
+    cmds = List.duplicate(cmd, OPState.total_count(state))
     target_mode = if operator == :change, do: :insert, else: :normal
 
     # We compute count ourselves — set count to nil so the dispatcher doesn't
     # double-multiply when processing {:execute_then_transition, ...}.
-    {:execute_then_transition, cmds, target_mode, to_base_state(state)}
+    {:execute_then_transition, cmds, target_mode, OPState.to_base_state(state)}
   end
 
   # Maps (operator, motion) → the command atom/tuple the editor expects.
-  @spec motion_command(OpType.operator(), atom()) :: Mode.command()
+  @spec motion_command(OPState.operator(), atom()) :: Mode.command()
   defp motion_command(:delete, motion), do: {:delete_motion, motion}
   defp motion_command(:change, motion), do: {:change_motion, motion}
   defp motion_command(:yank, motion), do: {:yank_motion, motion}
-
-  # Total repeat count: op_count (from before the operator key) × motion count.
-  @spec total_count(OPState.t()) :: pos_integer()
-  defp total_count(%OPState{op_count: op_count, count: count}) do
-    motion_count = count || 1
-    op_count * motion_count
-  end
-
-  # Converts operator-pending state back to the base Mode.State.
-  @spec to_base_state(OPState.t()) :: Mode.State.t()
-  defp to_base_state(_state) do
-    %Mode.State{}
-  end
 end

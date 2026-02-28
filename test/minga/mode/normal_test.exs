@@ -1,9 +1,9 @@
 defmodule Minga.Mode.NormalTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Keymap.Defaults
   alias Minga.Mode
   alias Minga.Mode.Normal
-  alias Minga.Keymap.Defaults
 
   # Shorthand: call Normal.handle_key directly with a fresh state.
   defp fresh_state, do: Mode.initial_state()

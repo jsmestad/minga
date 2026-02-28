@@ -401,7 +401,10 @@ defmodule Minga.Editor do
     state
   end
 
-  defp execute_command(%{buffer: buf, mode_state: %VisualState{} = ms} = state, :delete_visual_selection) do
+  defp execute_command(
+         %{buffer: buf, mode_state: %VisualState{} = ms} = state,
+         :delete_visual_selection
+       ) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)
@@ -426,7 +429,10 @@ defmodule Minga.Editor do
     %{state | register: yanked}
   end
 
-  defp execute_command(%{buffer: buf, mode_state: %VisualState{} = ms} = state, :yank_visual_selection) do
+  defp execute_command(
+         %{buffer: buf, mode_state: %VisualState{} = ms} = state,
+         :yank_visual_selection
+       ) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)

@@ -30,4 +30,24 @@ defmodule Minga.Mode.OperatorPendingState do
           leader_node: Minga.Keymap.Trie.node_t() | nil,
           leader_keys: [String.t()]
         }
+
+  @doc """
+  Total repeat count: `op_count` (from before the operator key) × motion count.
+
+  For example, `3dw` has `op_count=3` and `count=nil` (motion count defaults to 1),
+  so `total_count/1` returns 3. `d2w` has `op_count=1` and `count=2`, returning 2.
+  """
+  @spec total_count(t()) :: pos_integer()
+  def total_count(%__MODULE__{op_count: op_count, count: count}) do
+    op_count * (count || 1)
+  end
+
+  @doc """
+  Converts operator-pending state back to the base `Mode.State`,
+  discarding all operator-specific fields.
+  """
+  @spec to_base_state(t()) :: Minga.Mode.State.t()
+  def to_base_state(%__MODULE__{}) do
+    %Minga.Mode.State{}
+  end
 end
