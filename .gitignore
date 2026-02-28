@@ -1,0 +1,26 @@
+# Elixir
+/_build/
+/deps/
+/cover/
+/doc/
+*.ez
+*.beam
+minga-*.tar
+
+# Zig
+zig/zig-out/
+zig/.zig-cache/
+
+# Generated
+erl_crash.dump
+
+# Editor / OS
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

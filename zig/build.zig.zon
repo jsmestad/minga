@@ -1,0 +1,18 @@
+.{
+    .name = .minga_renderer,
+    .version = "0.1.0",
+    .fingerprint = 0xdc03f5b24c8f2d89,
+
+    .dependencies = .{
+        .vaxis = .{
+            .url = "git+https://github.com/rockorager/libvaxis.git#a3ae1d53feeeeaeb6218de3d38837559811acae4",
+            .hash = "vaxis-0.5.1-BWNV_JxLCQDqWG6pB_gLLit8NgtHbnMcVyQmTMw6Qil9",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
