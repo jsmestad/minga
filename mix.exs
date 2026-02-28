@@ -23,7 +23,7 @@ defmodule Minga.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "test/support", "test/perf"]
   defp elixirc_paths(_), do: ["lib"]
 
   def application do
@@ -39,7 +39,8 @@ defmodule Minga.MixProject do
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:benchee, "~> 1.3", only: :dev, runtime: false}
     ]
   end
 

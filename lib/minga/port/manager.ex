@@ -96,10 +96,8 @@ defmodule Minga.Port.Manager do
   end
 
   def handle_cast({:send_commands, commands}, state) do
-    Enum.each(commands, fn cmd ->
-      Port.command(state.port, cmd)
-    end)
-
+    batch = IO.iodata_to_binary(commands)
+    Port.command(state.port, batch)
     {:noreply, state}
   end
 

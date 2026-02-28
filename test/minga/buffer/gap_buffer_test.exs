@@ -452,7 +452,176 @@ defmodule Minga.Buffer.GapBufferTest do
     end
   end
 
+  # ── Cache validity tests ──
+
+  describe "cache: cursor and line_count accuracy" do
+    test "insert at start of line updates col" do
+      buf = GapBuffer.new("hello") |> GapBuffer.insert_char("X")
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+
+    test "insert in middle of line updates col" do
+      buf =
+        GapBuffer.new("hello")
+        |> GapBuffer.move_to({0, 2})
+        |> GapBuffer.insert_char("X")
+
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 3}
+    end
+
+    test "insert at end of line updates col" do
+      buf =
+        GapBuffer.new("hello")
+        |> GapBuffer.move_to({0, 5})
+        |> GapBuffer.insert_char("X")
+
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 6}
+    end
+
+    test "inserting a newline increments line and resets col" do
+      buf = GapBuffer.new("ab") |> GapBuffer.move(:right) |> GapBuffer.insert_char("\n")
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {1, 0}
+      assert GapBuffer.line_count(buf) == 2
+    end
+
+    test "inserting multi-line string updates cursor and line_count" do
+      buf = GapBuffer.new("start") |> GapBuffer.move_to({0, 5}) |> GapBuffer.insert_char("a\nb\nc")
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {2, 1}
+      assert GapBuffer.line_count(buf) == 3
+    end
+
+    test "delete_before at start of line joins lines, updates cursor and line_count" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({1, 0}) |> GapBuffer.delete_before()
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 2}
+      assert GapBuffer.line_count(buf) == 1
+    end
+
+    test "delete_before in middle of line decrements col" do
+      buf = GapBuffer.new("hello") |> GapBuffer.move_to({0, 3}) |> GapBuffer.delete_before()
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "delete_at on newline decrements line_count, cursor unchanged" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({0, 2}) |> GapBuffer.delete_at()
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 2}
+      assert GapBuffer.line_count(buf) == 1
+    end
+
+    test "delete_at on regular char, cursor and line_count unchanged" do
+      buf = GapBuffer.new("hello") |> GapBuffer.delete_at()
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 0}
+      assert GapBuffer.line_count(buf) == 1
+    end
+
+    test "move_to arbitrary position updates cache" do
+      buf = GapBuffer.new("abc\ndef\nghi") |> GapBuffer.move_to({2, 1})
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {2, 1}
+    end
+
+    test "move_left across newline updates line and col" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({1, 0}) |> GapBuffer.move(:left)
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "move_right across newline updates line and resets col" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({0, 2}) |> GapBuffer.move(:right)
+      assert_cache_valid(buf)
+      assert GapBuffer.cursor(buf) == {1, 0}
+    end
+
+    test "delete_range spanning multiple lines rebuilds cache correctly" do
+      buf = GapBuffer.new("abc\ndef\nghi") |> GapBuffer.delete_range({0, 1}, {1, 1})
+      assert_cache_valid(buf)
+    end
+
+    test "delete_lines rebuilds cache correctly" do
+      buf = GapBuffer.new("a\nb\nc\nd") |> GapBuffer.delete_lines(1, 2)
+      assert_cache_valid(buf)
+      assert GapBuffer.line_count(buf) == 2
+    end
+  end
+
+  # ── Property: cache always matches recomputed values ──
+
+  describe "property: cache consistency" do
+    property "cached cursor and line_count match recomputed values after any operations" do
+      check all(
+              text <- string(:ascii, min_length: 0, max_length: 80),
+              ops <-
+                list_of(
+                  one_of([
+                    member_of([:left, :right, :up, :down, :delete_before, :delete_at]),
+                    {:insert, string(:ascii, length: 1)},
+                    {:move_to, integer(0..5), integer(0..20)}
+                  ]),
+                  min_length: 0,
+                  max_length: 20
+                )
+            ) do
+        buf = GapBuffer.new(text)
+
+        result =
+          Enum.reduce(ops, buf, fn
+            {:insert, char}, acc -> GapBuffer.insert_char(acc, char)
+            {:move_to, l, c}, acc -> GapBuffer.move_to(acc, {l, c})
+            :delete_before, acc -> GapBuffer.delete_before(acc)
+            :delete_at, acc -> GapBuffer.delete_at(acc)
+            dir, acc -> GapBuffer.move(acc, dir)
+          end)
+
+        assert_cache_valid(result)
+      end
+    end
+  end
+
   # ── Test helpers ──
+
+  # Verifies that the cached cursor_line, cursor_col, and line_count fields
+  # match values recomputed from the raw buffer content.
+  @spec assert_cache_valid(GapBuffer.t()) :: :ok
+  defp assert_cache_valid(%GapBuffer{
+         before: before,
+         after: after_,
+         cursor_line: cl,
+         cursor_col: cc,
+         line_count: lc
+       }) do
+    # Recompute cursor from `before`
+    lines_before = String.split(before, "\n")
+    expected_line = length(lines_before) - 1
+    expected_col = lines_before |> List.last() |> String.length()
+
+    # Recompute line_count from full content
+    text = before <> after_
+
+    expected_lc =
+      case text do
+        "" -> 1
+        _ -> text |> String.graphemes() |> Enum.count(&(&1 == "\n")) |> Kernel.+(1)
+      end
+
+    assert cl == expected_line,
+           "cursor_line: got #{cl}, expected #{expected_line} (before=#{inspect(before)})"
+
+    assert cc == expected_col,
+           "cursor_col: got #{cc}, expected #{expected_col} (before=#{inspect(before)})"
+
+    assert lc == expected_lc,
+           "line_count: got #{lc}, expected #{expected_lc} (content=#{inspect(text)})"
+
+    :ok
+  end
 
   @spec offset_to_position(String.t(), non_neg_integer()) :: GapBuffer.position()
   defp offset_to_position(text, char_offset) do

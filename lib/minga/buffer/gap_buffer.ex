@@ -24,13 +24,16 @@ defmodule Minga.Buffer.GapBuffer do
       "Hhello\\nworld"
   """
 
-  @enforce_keys [:before, :after]
-  defstruct [:before, :after]
+  @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
+  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count]
 
   @typedoc "A gap buffer instance."
   @type t :: %__MODULE__{
           before: String.t(),
-          after: String.t()
+          after: String.t(),
+          cursor_line: non_neg_integer(),
+          cursor_col: non_neg_integer(),
+          line_count: pos_integer()
         }
 
   @typedoc "A zero-indexed {line, col} position in the buffer."
@@ -54,7 +57,13 @@ defmodule Minga.Buffer.GapBuffer do
   """
   @spec new(String.t()) :: t()
   def new(text \\ "") when is_binary(text) do
-    %__MODULE__{before: "", after: text}
+    lc =
+      case text do
+        "" -> 1
+        _ -> count_newlines(text) + 1
+      end
+
+    %__MODULE__{before: "", after: text, cursor_line: 0, cursor_col: 0, line_count: lc}
   end
 
   # ── Queries ──
@@ -93,14 +102,7 @@ defmodule Minga.Buffer.GapBuffer do
       1
   """
   @spec line_count(t()) :: pos_integer()
-  def line_count(%__MODULE__{} = buf) do
-    text = content(buf)
-
-    case text do
-      "" -> 1
-      _ -> count_newlines(text) + 1
-    end
-  end
+  def line_count(%__MODULE__{line_count: lc}), do: lc
 
   @doc """
   Returns the text of a specific line (zero-indexed), without the trailing newline.
@@ -128,12 +130,7 @@ defmodule Minga.Buffer.GapBuffer do
 
   @doc "Returns the current cursor position as a `{line, col}` tuple."
   @spec cursor(t()) :: position()
-  def cursor(%__MODULE__{before: before}) do
-    lines_before = String.split(before, "\n")
-    line = length(lines_before) - 1
-    col = lines_before |> List.last() |> String.length()
-    {line, col}
-  end
+  def cursor(%__MODULE__{cursor_line: line, cursor_col: col}), do: {line, col}
 
   @doc "Returns the byte offset of the cursor in the full text."
   @spec cursor_offset(t()) :: non_neg_integer()
@@ -175,8 +172,14 @@ defmodule Minga.Buffer.GapBuffer do
       "hello world"
   """
   @spec insert_char(t(), String.t()) :: t()
-  def insert_char(%__MODULE__{before: before, after: after_}, char) when is_binary(char) do
-    %__MODULE__{before: before <> char, after: after_}
+  def insert_char(
+        %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col,
+                    line_count: lc} = _buf,
+        char
+      )
+      when is_binary(char) do
+    {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, char)
+    %__MODULE__{before: before <> char, after: after_, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
   end
 
   @doc """
@@ -192,14 +195,20 @@ defmodule Minga.Buffer.GapBuffer do
       "hell"
   """
   @spec delete_before(t()) :: t()
-  def delete_before(%__MODULE__{before: "", after: after_}) do
-    %__MODULE__{before: "", after: after_}
-  end
+  def delete_before(%__MODULE__{before: ""} = buf), do: buf
 
-  def delete_before(%__MODULE__{before: before, after: after_}) do
-    # Remove the last grapheme from `before`
-    {new_before, _removed} = pop_last_grapheme(before)
-    %__MODULE__{before: new_before, after: after_}
+  def delete_before(
+        %__MODULE__{before: before, cursor_line: line, cursor_col: col, line_count: lc} = buf
+      ) do
+    {new_before, removed} = pop_last_grapheme(before)
+
+    {new_line, new_col, new_lc} =
+      case removed do
+        "\n" -> {line - 1, col_in_last_line(new_before), lc - 1}
+        _ -> {line, col - 1, lc}
+      end
+
+    %{buf | before: new_before, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
   end
 
   @doc """
@@ -207,15 +216,13 @@ defmodule Minga.Buffer.GapBuffer do
   Returns the buffer unchanged if the cursor is at the end.
   """
   @spec delete_at(t()) :: t()
-  def delete_at(%__MODULE__{before: before, after: ""}) do
-    %__MODULE__{before: before, after: ""}
-  end
+  def delete_at(%__MODULE__{after: ""} = buf), do: buf
 
-  def delete_at(%__MODULE__{before: before, after: after_}) do
-    # Remove the first grapheme from `after_`
+  def delete_at(%__MODULE__{after: after_, line_count: lc} = buf) do
     case String.next_grapheme(after_) do
-      {_grapheme, rest} -> %__MODULE__{before: before, after: rest}
-      nil -> %__MODULE__{before: before, after: after_}
+      {"\n", rest} -> %{buf | after: rest, line_count: lc - 1}
+      {_grapheme, rest} -> %{buf | after: rest}
+      nil -> buf
     end
   end
 
@@ -266,7 +273,7 @@ defmodule Minga.Buffer.GapBuffer do
     # Split at grapheme position (not byte position)
     {before, after_} = split_at_grapheme(text, grapheme_offset)
 
-    %__MODULE__{before: before, after: after_}
+    %{buf | before: before, after: after_, cursor_line: line, cursor_col: col}
   end
 
   # ── Range operations ──
@@ -386,48 +393,77 @@ defmodule Minga.Buffer.GapBuffer do
   # ── Private helpers ──
 
   @spec move_left(t()) :: t()
-  defp move_left(%__MODULE__{before: "", after: after_}) do
-    %__MODULE__{before: "", after: after_}
-  end
+  defp move_left(%__MODULE__{before: ""} = buf), do: buf
 
-  defp move_left(%__MODULE__{before: before, after: after_}) do
+  defp move_left(%__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf) do
     {new_before, char} = pop_last_grapheme(before)
-    %__MODULE__{before: new_before, after: char <> after_}
+
+    {new_line, new_col} =
+      case char do
+        "\n" -> {line - 1, col_in_last_line(new_before)}
+        _ -> {line, col - 1}
+      end
+
+    %{buf | before: new_before, after: char <> after_, cursor_line: new_line, cursor_col: new_col}
   end
 
   @spec move_right(t()) :: t()
-  defp move_right(%__MODULE__{before: before, after: ""}) do
-    %__MODULE__{before: before, after: ""}
-  end
+  defp move_right(%__MODULE__{after: ""} = buf), do: buf
 
-  defp move_right(%__MODULE__{before: before, after: after_}) do
+  defp move_right(%__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf) do
     case String.next_grapheme(after_) do
-      {grapheme, rest} -> %__MODULE__{before: before <> grapheme, after: rest}
-      nil -> %__MODULE__{before: before, after: ""}
+      {"\n", rest} ->
+        %{buf | before: before <> "\n", after: rest, cursor_line: line + 1, cursor_col: 0}
+
+      {grapheme, rest} ->
+        %{buf | before: before <> grapheme, after: rest, cursor_col: col + 1}
+
+      nil ->
+        buf
     end
   end
 
   @spec move_up(t()) :: t()
-  defp move_up(%__MODULE__{} = buf) do
-    {line, col} = cursor(buf)
+  defp move_up(%__MODULE__{cursor_line: 0} = buf), do: buf
 
-    if line == 0 do
-      buf
-    else
-      move_to(buf, {line - 1, col})
-    end
+  defp move_up(%__MODULE__{cursor_line: line, cursor_col: col} = buf) do
+    move_to(buf, {line - 1, col})
   end
 
   @spec move_down(t()) :: t()
-  defp move_down(%__MODULE__{} = buf) do
-    {line, col} = cursor(buf)
-    max_line = line_count(buf) - 1
+  defp move_down(%__MODULE__{cursor_line: line, line_count: lc} = buf) when line >= lc - 1,
+    do: buf
 
-    if line >= max_line do
-      buf
-    else
-      move_to(buf, {line + 1, col})
+  defp move_down(%__MODULE__{cursor_line: line, cursor_col: col} = buf) do
+    move_to(buf, {line + 1, col})
+  end
+
+  # Computes new cursor position and line_count after inserting `text` at the current cursor.
+  # Handles multi-line inserts by counting newlines in the inserted text.
+  @spec compute_cursor_after_insert(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          String.t()
+        ) :: {non_neg_integer(), non_neg_integer(), pos_integer()}
+  defp compute_cursor_after_insert(line, col, lc, text) do
+    case String.split(text, "\n") do
+      [single] ->
+        {line, col + String.length(single), lc}
+
+      chunks ->
+        newline_count = length(chunks) - 1
+        {line + newline_count, String.length(List.last(chunks)), lc + newline_count}
     end
+  end
+
+  # Returns the grapheme column of the position after the last `\n` in `str`,
+  # i.e. the column you'd be at if the cursor were at the end of `str`.
+  @spec col_in_last_line(String.t()) :: non_neg_integer()
+  defp col_in_last_line(""), do: 0
+
+  defp col_in_last_line(str) do
+    str |> String.split("\n") |> List.last() |> String.length()
   end
 
   # Splits off the last grapheme from a string, preserving exact binary representation.

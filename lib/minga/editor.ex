@@ -855,11 +855,16 @@ defmodule Minga.Editor do
   end
 
   defp do_render(state) do
+    # 1. Get cursor (O(1) with cached gap buffer) for viewport scrolling.
     cursor = BufferServer.cursor(state.buffer)
     viewport = Viewport.scroll_to_cursor(state.viewport, cursor)
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
-    lines = BufferServer.get_lines(state.buffer, first_line, visible_rows)
+
+    # 2. Fetch all remaining render data in a single GenServer call.
+    snapshot = BufferServer.render_snapshot(state.buffer, first_line, visible_rows)
+    lines = snapshot.lines
+    {cursor_line, cursor_col} = snapshot.cursor
 
     clear = [Protocol.encode_clear()]
 
@@ -883,16 +888,14 @@ defmodule Minga.Editor do
       end
 
     # ── Modeline (row N-2) — Doom Emacs-style colored segments ──
-    {cursor_line, cursor_col} = cursor
-
     file_name =
-      case BufferServer.file_path(state.buffer) do
+      case snapshot.file_path do
         nil -> "[scratch]"
         path -> Path.basename(path)
       end
 
-    dirty_marker = if BufferServer.dirty?(state.buffer), do: " ● ", else: ""
-    line_count = BufferServer.line_count(state.buffer)
+    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
+    line_count = snapshot.line_count
     buf_count = length(state.buffers)
     buf_index = state.active_buffer + 1
     modeline_row = viewport.rows - 2

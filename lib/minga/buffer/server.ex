@@ -129,6 +129,30 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :file_path)
   end
 
+  @typedoc "All data needed to render a single frame, fetched in one GenServer call."
+  @type render_snapshot :: %{
+          cursor: GapBuffer.position(),
+          line_count: pos_integer(),
+          lines: [String.t()],
+          file_path: String.t() | nil,
+          dirty: boolean()
+        }
+
+  @doc """
+  Returns all data needed to render a single frame in one GenServer call.
+
+  Fetches cursor position, total line count, the visible line range starting at
+  `first_line` (up to `count` lines), file path, and dirty flag atomically.
+  This replaces 5 individual calls (cursor, line_count, get_lines, file_path,
+  dirty?) with a single round-trip.
+  """
+  @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
+          render_snapshot()
+  def render_snapshot(server, first_line, count)
+      when is_integer(first_line) and first_line >= 0 and is_integer(count) and count >= 0 do
+    GenServer.call(server, {:render_snapshot, first_line, count})
+  end
+
   @doc "Returns the text between two positions (from_pos inclusive, to_pos exclusive)."
   @spec content_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) ::
           String.t()
@@ -300,6 +324,20 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:file_path, _from, state) do
     {:reply, state.file_path, state}
+  end
+
+  def handle_call({:render_snapshot, first_line, count}, _from, state) do
+    buf = state.gap_buffer
+
+    snapshot = %{
+      cursor: GapBuffer.cursor(buf),
+      line_count: GapBuffer.line_count(buf),
+      lines: GapBuffer.lines(buf, first_line, count),
+      file_path: state.file_path,
+      dirty: state.dirty
+    }
+
+    {:reply, snapshot, state}
   end
 
   def handle_call({:content_range, from_pos, to_pos}, _from, state) do

@@ -205,6 +205,36 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
     }
 }
 
+/// Returns the byte size of the first command in `payload`.
+///
+/// Used when iterating a batch message containing multiple concatenated
+/// commands.  The caller advances its offset by this value after decoding
+/// each command.
+///
+/// Fixed sizes:
+///   0x12 clear:            1 byte  (opcode only)
+///   0x13 batch_end:        1 byte  (opcode only)
+///   0x11 set_cursor:       5 bytes (opcode + row:2 + col:2)
+///   0x15 set_cursor_shape: 2 bytes (opcode + shape:1)
+///   0x10 draw_text:       14 bytes + text_len
+pub fn commandSize(payload: []const u8) usize {
+    if (payload.len == 0) return 0;
+    return switch (payload[0]) {
+        OP_CLEAR => 1,
+        OP_BATCH_END => 1,
+        OP_SET_CURSOR => 5,
+        OP_SET_CURSOR_SHAPE => 2,
+        OP_DRAW_TEXT => blk: {
+            // opcode(1) + row(2) + col(2) + fg(3) + bg(3) + attrs(1) + text_len(2) = 14 fixed bytes
+            if (payload.len < 14) break :blk payload.len;
+            const text_len = std.mem.readInt(u16, payload[12..14], .big);
+            break :blk 14 + text_len;
+        },
+        // Unknown opcode: skip 1 byte so the loop always makes progress.
+        else => 1,
+    };
+}
+
 /// Reads a 4-byte big-endian length header from the reader.
 /// Returns the message length, or null on EOF.
 pub fn readMessageLength(reader: anytype) !?u32 {
@@ -649,6 +679,131 @@ test "encodeKeyPress byte layout: each position verified" {
     try std.testing.expectEqual(@as(u8, 0x00), buf[4]);
     // [5] modifiers
     try std.testing.expectEqual(MOD_CTRL | MOD_ALT, buf[5]);
+}
+
+// ── commandSize ──────────────────────────────────────────────────────────────
+
+test "commandSize: clear is 1 byte" {
+    const data = [_]u8{OP_CLEAR};
+    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
+}
+
+test "commandSize: batch_end is 1 byte" {
+    const data = [_]u8{OP_BATCH_END};
+    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
+}
+
+test "commandSize: set_cursor is 5 bytes" {
+    const data = [_]u8{ OP_SET_CURSOR, 0x00, 0x01, 0x00, 0x02 };
+    try std.testing.expectEqual(@as(usize, 5), commandSize(&data));
+}
+
+test "commandSize: set_cursor_shape is 2 bytes" {
+    const data = [_]u8{ OP_SET_CURSOR_SHAPE, CURSOR_BLOCK };
+    try std.testing.expectEqual(@as(usize, 2), commandSize(&data));
+}
+
+test "commandSize: draw_text with 5-byte text is 19 bytes" {
+    // 14 fixed + 5 text = 19
+    const data = [_]u8{
+        OP_DRAW_TEXT,
+        0x00, 0x00, // row
+        0x00, 0x00, // col
+        0xFF, 0xFF, 0xFF, // fg
+        0x00, 0x00, 0x00, // bg
+        0x00, // attrs
+        0x00, 0x05, // text_len = 5
+    } ++ "hello".*;
+    try std.testing.expectEqual(@as(usize, 19), commandSize(&data));
+}
+
+test "commandSize: draw_text with 0-byte text is 14 bytes" {
+    const data = [_]u8{
+        OP_DRAW_TEXT,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00,
+        0x00,
+        0x00, 0x00, // text_len = 0
+    };
+    try std.testing.expectEqual(@as(usize, 14), commandSize(&data));
+}
+
+test "commandSize: truncated draw_text returns remaining length" {
+    // Only 3 bytes — malformed, returns what's left
+    const data = [_]u8{ OP_DRAW_TEXT, 0x00, 0x01 };
+    try std.testing.expectEqual(@as(usize, 3), commandSize(&data));
+}
+
+test "commandSize: unknown opcode returns 1" {
+    const data = [_]u8{0xFE};
+    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
+}
+
+test "commandSize: empty payload returns 0" {
+    try std.testing.expectEqual(@as(usize, 0), commandSize(&[_]u8{}));
+}
+
+test "batch decode: clear + set_cursor + batch_end parsed correctly" {
+    // Concatenated batch: clear(1) + set_cursor(5) + batch_end(1) = 7 bytes
+    const payload = [_]u8{
+        OP_CLEAR,
+        OP_SET_CURSOR, 0x00, 0x05, 0x00, 0x0A,
+        OP_BATCH_END,
+    };
+
+    var offset: usize = 0;
+    var cmds: [3]RenderCommand = undefined;
+    var count: usize = 0;
+
+    while (offset < payload.len) {
+        const remaining = payload[offset..];
+        cmds[count] = try decodeCommand(remaining);
+        count += 1;
+        offset += commandSize(remaining);
+    }
+
+    try std.testing.expectEqual(@as(usize, 3), count);
+    try std.testing.expect(cmds[0] == .clear);
+    try std.testing.expect(cmds[1] == .set_cursor);
+    try std.testing.expectEqual(@as(u16, 5), cmds[1].set_cursor.row);
+    try std.testing.expectEqual(@as(u16, 10), cmds[1].set_cursor.col);
+    try std.testing.expect(cmds[2] == .batch_end);
+}
+
+test "batch decode: draw_text (variable length) in the middle" {
+    // clear(1) + draw_text(19) + batch_end(1) = 21 bytes
+    const payload = [_]u8{OP_CLEAR} ++ [_]u8{
+        OP_DRAW_TEXT,
+        0x00, 0x01, // row=1
+        0x00, 0x02, // col=2
+        0xFF, 0xFF, 0xFF, // fg
+        0x00, 0x00, 0x00, // bg
+        0x00, // attrs
+        0x00, 0x05, // text_len=5
+    } ++ "hello".* ++ [_]u8{OP_BATCH_END};
+
+    var offset: usize = 0;
+    var cmds: [3]RenderCommand = undefined;
+    var count: usize = 0;
+
+    while (offset < payload.len) {
+        const remaining = payload[offset..];
+        cmds[count] = try decodeCommand(remaining);
+        count += 1;
+        offset += commandSize(remaining);
+    }
+
+    try std.testing.expectEqual(@as(usize, 3), count);
+    try std.testing.expect(cmds[0] == .clear);
+    switch (cmds[1]) {
+        .draw_text => |dt| {
+            try std.testing.expectEqual(@as(u16, 1), dt.row);
+            try std.testing.expectEqualStrings("hello", dt.text);
+        },
+        else => return error.WrongVariant,
+    }
+    try std.testing.expect(cmds[2] == .batch_end);
 }
 
 test "encodeResize byte layout: self-consistent encoding" {

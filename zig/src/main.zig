@@ -205,14 +205,21 @@ fn runEventLoop(
             const payload = msg_buf[0..msg_len];
             if (!try readExact(stdin_fd, payload)) break :main_loop;
 
-            const cmd = protocol.decodeCommand(payload) catch |err| {
-                std.log.warn("protocol decode error: {}", .{err});
-                continue :main_loop;
-            };
-
-            rend.handleCommand(cmd) catch |err| {
-                std.log.warn("renderer error: {}", .{err});
-            };
+            // A single Port message may contain multiple concatenated render
+            // commands (batch protocol).  Walk the payload decoding each
+            // command in sequence until all bytes are consumed.
+            var offset: usize = 0;
+            while (offset < msg_len) {
+                const remaining = payload[offset..];
+                const cmd = protocol.decodeCommand(remaining) catch |err| {
+                    std.log.warn("protocol decode error at offset {}: {}", .{ offset, err });
+                    break;
+                };
+                rend.handleCommand(cmd) catch |err| {
+                    std.log.warn("renderer error: {}", .{err});
+                };
+                offset += protocol.commandSize(remaining);
+            }
         }
 
         // ── stdin HUP / error (BEAM closed the port) ──────────────────────
