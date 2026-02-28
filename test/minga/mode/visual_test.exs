@@ -408,4 +408,43 @@ defmodule Minga.Mode.VisualTest do
       assert text == "line one\nline two"
     end
   end
+
+  # ── Visual wrapping ────────────────────────────────────────────────────────
+
+  describe "wrapping with paired delimiters" do
+    test "( wraps selection in parens" do
+      state = visual_state({0, 0}, :char)
+      result = Visual.handle_key({?(, 0}, state)
+      assert {:execute_then_transition, [{:wrap_visual_selection, "(", ")"}], :normal, _} = result
+    end
+
+    test "[ wraps selection in brackets" do
+      state = visual_state({0, 0}, :char)
+      result = Visual.handle_key({?[, 0}, state)
+      assert {:execute_then_transition, [{:wrap_visual_selection, "[", "]"}], :normal, _} = result
+    end
+
+    # Note: { is paragraph-backward in Visual mode, so wrapping in braces
+    # is not available. Use operator-pending text objects instead.
+
+    test "\" wraps selection in double quotes" do
+      state = visual_state({0, 0}, :char)
+      result = Visual.handle_key({?", 0}, state)
+
+      assert {:execute_then_transition, [{:wrap_visual_selection, "\"", "\""}], :normal, _} =
+               result
+    end
+
+    test "' wraps selection in single quotes" do
+      state = visual_state({0, 0}, :char)
+      result = Visual.handle_key({?', 0}, state)
+      assert {:execute_then_transition, [{:wrap_visual_selection, "'", "'"}], :normal, _} = result
+    end
+
+    test "` wraps selection in backticks" do
+      state = visual_state({0, 0}, :char)
+      result = Visual.handle_key({?`, 0}, state)
+      assert {:execute_then_transition, [{:wrap_visual_selection, "`", "`"}], :normal, _} = result
+    end
+  end
 end

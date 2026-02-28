@@ -224,9 +224,12 @@ defmodule Minga.Motion do
   @spec find_char_forward(GapBuffer.t(), position(), String.t()) :: position()
   def find_char_forward(%GapBuffer{} = buf, {line, col}, char) do
     case GapBuffer.line_at(buf, line) do
-      nil -> {line, col}
+      nil ->
+        {line, col}
+
       text ->
         graphemes = String.graphemes(text)
+
         case find_in_graphemes(graphemes, char, col + 1) do
           nil -> {line, col}
           idx -> {line, idx}
@@ -247,9 +250,12 @@ defmodule Minga.Motion do
   @spec find_char_backward(GapBuffer.t(), position(), String.t()) :: position()
   def find_char_backward(%GapBuffer{} = buf, {line, col}, char) do
     case GapBuffer.line_at(buf, line) do
-      nil -> {line, col}
+      nil ->
+        {line, col}
+
       text ->
         graphemes = String.graphemes(text)
+
         case rfind_in_graphemes(graphemes, char, col - 1) do
           nil -> {line, col}
           idx -> {line, idx}
@@ -301,7 +307,9 @@ defmodule Minga.Motion do
     "[" => {"[", "]", :forward},
     "]" => {"[", "]", :backward},
     "{" => {"{", "}", :forward},
-    "}" => {"{", "}", :backward}
+    "}" => {"{", "}", :backward},
+    "<" => {"<", ">", :forward},
+    ">" => {"<", ">", :backward}
   }
 
   @doc """
@@ -319,30 +327,33 @@ defmodule Minga.Motion do
   """
   @spec match_bracket(GapBuffer.t(), position()) :: position()
   def match_bracket(%GapBuffer{} = buf, {line, col} = pos) do
-    text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
-    all_lines = String.split(text, "\n")
-    offset = offset_for(all_lines, line, col)
-
-    # Find the first bracket at or after cursor on current line
     current_line_text = GapBuffer.line_at(buf, line) || ""
     line_graphemes = String.graphemes(current_line_text)
 
-    bracket_offset = find_bracket_on_line(line_graphemes, col)
-
-    case bracket_offset do
+    case find_bracket_on_line(line_graphemes, col) do
       nil -> pos
-      bracket_col ->
-        bracket_char = Enum.at(line_graphemes, bracket_col)
-        abs_offset = offset - col + bracket_col
+      bracket_col -> do_match_bracket(buf, pos, line_graphemes, bracket_col)
+    end
+  end
 
-        case Map.get(@bracket_pairs, bracket_char) do
+  @spec do_match_bracket(GapBuffer.t(), position(), [String.t()], non_neg_integer()) ::
+          position()
+  defp do_match_bracket(buf, {line, col} = pos, line_graphemes, bracket_col) do
+    bracket_char = Enum.at(line_graphemes, bracket_col)
+
+    case Map.get(@bracket_pairs, bracket_char) do
+      nil ->
+        pos
+
+      {open, close, direction} ->
+        text = GapBuffer.content(buf)
+        graphemes = String.graphemes(text)
+        all_lines = String.split(text, "\n")
+        abs_offset = offset_for(all_lines, line, col) - col + bracket_col
+
+        case scan_for_match(graphemes, abs_offset, open, close, direction) do
           nil -> pos
-          {open, close, direction} ->
-            case scan_for_match(graphemes, abs_offset, open, close, direction) do
-              nil -> pos
-              match_offset -> GapBuffer.offset_to_position(buf, match_offset)
-            end
+          match_offset -> GapBuffer.offset_to_position(buf, match_offset)
         end
     end
   end
@@ -656,7 +667,7 @@ defmodule Minga.Motion do
 
   # ── Bracket matching helpers ─────────────────────────────────────────────
 
-  @bracket_chars MapSet.new(["(", ")", "[", "]", "{", "}"])
+  @bracket_chars MapSet.new(["(", ")", "[", "]", "{", "}", "<", ">"])
 
   # Find first bracket char at or after `col` on the line.
   @spec find_bracket_on_line([String.t()], non_neg_integer()) :: non_neg_integer() | nil
@@ -669,7 +680,13 @@ defmodule Minga.Motion do
   end
 
   # Scan for matching bracket, counting nesting.
-  @spec scan_for_match([String.t()], non_neg_integer(), String.t(), String.t(), :forward | :backward) ::
+  @spec scan_for_match(
+          [String.t()],
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          :forward | :backward
+        ) ::
           non_neg_integer() | nil
   defp scan_for_match(graphemes, offset, open, close, :forward) do
     do_scan_forward(graphemes, offset + 1, length(graphemes), open, close, 1)
@@ -679,7 +696,14 @@ defmodule Minga.Motion do
     do_scan_backward(graphemes, offset - 1, open, close, 1)
   end
 
-  @spec do_scan_forward([String.t()], non_neg_integer(), non_neg_integer(), String.t(), String.t(), non_neg_integer()) ::
+  @spec do_scan_forward(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer()
+        ) ::
           non_neg_integer() | nil
   defp do_scan_forward(_graphemes, idx, total, _open, _close, _depth) when idx >= total, do: nil
 

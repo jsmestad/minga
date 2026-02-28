@@ -241,6 +241,55 @@ defmodule Minga.MotionTest do
 
   # ── Edge cases ─────────────────────────────────────────────────────────────
 
+  describe "match_bracket/2" do
+    test "jumps from ( to matching )" do
+      b = buf("(hello)")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 6}
+    end
+
+    test "jumps from ) to matching (" do
+      b = buf("(hello)")
+      assert Motion.match_bracket(b, {0, 6}) == {0, 0}
+    end
+
+    test "handles nested brackets" do
+      b = buf("(a (b) c)")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 8}
+      assert Motion.match_bracket(b, {0, 3}) == {0, 5}
+    end
+
+    test "jumps from < to matching >" do
+      b = buf("<div>")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 4}
+    end
+
+    test "jumps from > to matching <" do
+      b = buf("<div>")
+      assert Motion.match_bracket(b, {0, 4}) == {0, 0}
+    end
+
+    test "handles nested angle brackets" do
+      b = buf("<a <b>>")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 6}
+      assert Motion.match_bracket(b, {0, 3}) == {0, 5}
+    end
+
+    test "returns original position when no bracket found" do
+      b = buf("hello world")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 0}
+    end
+
+    test "returns original position on unmatched bracket" do
+      b = buf("(hello")
+      assert Motion.match_bracket(b, {0, 0}) == {0, 0}
+    end
+
+    test "works across multiple lines" do
+      b = buf("(\nhello\n)")
+      assert Motion.match_bracket(b, {0, 0}) == {2, 0}
+    end
+  end
+
   describe "edge cases" do
     test "word_forward on a single newline" do
       b = buf("\n")

@@ -39,7 +39,8 @@ defmodule Minga.Editor.State do
             picker_restore: nil,
             mouse_dragging: false,
             last_find_char: nil,
-            change_recorder: ChangeRecorder.new()
+            change_recorder: ChangeRecorder.new(),
+            autopair_enabled: true
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -58,6 +59,7 @@ defmodule Minga.Editor.State do
           picker_restore: non_neg_integer() | nil,
           mouse_dragging: boolean(),
           last_find_char: last_find_char(),
-          change_recorder: ChangeRecorder.t()
+          change_recorder: ChangeRecorder.t(),
+          autopair_enabled: boolean()
         }
 end

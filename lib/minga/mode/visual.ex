@@ -209,6 +209,32 @@ defmodule Minga.Mode.Visual do
     {:execute, :move_right, state}
   end
 
+  # ── Wrapping (auto-pair) ──────────────────────────────────────────────────────
+
+  # Typing an opening delimiter wraps the visual selection.
+  def handle_key({?(, 0}, state) do
+    {:execute_then_transition, [{:wrap_visual_selection, "(", ")"}], :normal, state}
+  end
+
+  def handle_key({?[, 0}, state) do
+    {:execute_then_transition, [{:wrap_visual_selection, "[", "]"}], :normal, state}
+  end
+
+  # Note: { and } are paragraph motions in Visual mode, so { wrapping is not
+  # available here. Use operator-pending text objects instead (e.g. vi{).
+
+  def handle_key({?", 0}, state) do
+    {:execute_then_transition, [{:wrap_visual_selection, "\"", "\""}], :normal, state}
+  end
+
+  def handle_key({?', 0}, state) do
+    {:execute_then_transition, [{:wrap_visual_selection, "'", "'"}], :normal, state}
+  end
+
+  def handle_key({?`, 0}, state) do
+    {:execute_then_transition, [{:wrap_visual_selection, "`", "`"}], :normal, state}
+  end
+
   # ── Operators ────────────────────────────────────────────────────────────────
 
   @doc false

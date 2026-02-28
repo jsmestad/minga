@@ -136,7 +136,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, %{picker: picker} = state)
-      when not is_nil(picker) do
+      when is_struct(picker, Minga.Picker) do
     new_state = handle_picker_key(state, codepoint, modifiers)
     do_render(new_state)
     {:noreply, new_state}
@@ -242,7 +242,13 @@ defmodule Minga.Editor do
   # ── Change recording helpers ───────────────────────────────────────────────
 
   # No-op during replay — don't overwrite the stored change.
-  @spec maybe_record_change(state(), Mode.mode(), Mode.mode(), [Mode.command()], {non_neg_integer(), non_neg_integer()}) :: state()
+  @spec maybe_record_change(
+          state(),
+          Mode.mode(),
+          Mode.mode(),
+          [Mode.command()],
+          {non_neg_integer(), non_neg_integer()}
+        ) :: state()
   defp maybe_record_change(%{change_recorder: %{replaying: true}} = state, _, _, _, _), do: state
 
   defp maybe_record_change(%{change_recorder: rec} = state, old_mode, new_mode, commands, key) do
@@ -252,7 +258,13 @@ defmodule Minga.Editor do
 
   # ── Already recording: record key and check for change end ──
 
-  @spec update_recorder(ChangeRecorder.t(), Mode.mode(), Mode.mode(), [Mode.command()], ChangeRecorder.key()) :: ChangeRecorder.t()
+  @spec update_recorder(
+          ChangeRecorder.t(),
+          Mode.mode(),
+          Mode.mode(),
+          [Mode.command()],
+          ChangeRecorder.key()
+        ) :: ChangeRecorder.t()
   defp update_recorder(%{recording: true} = rec, old_mode, :normal, _commands, key)
        when old_mode in [:insert, :replace, :operator_pending] do
     rec |> ChangeRecorder.record_key(key) |> ChangeRecorder.stop_recording()
@@ -307,9 +319,10 @@ defmodule Minga.Editor do
   # ── Mode state adjustments on transition ────────────────────────────────────
 
   # Entering visual mode: capture cursor as selection anchor.
-  @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) :: Mode.state()
+  @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) ::
+          Mode.state()
   defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buffer: buf})
-       when old_mode != :visual and not is_nil(buf) do
+       when old_mode != :visual and is_pid(buf) do
     anchor = BufferServer.cursor(buf)
     %{mode_state | visual_anchor: anchor}
   end
@@ -327,7 +340,8 @@ defmodule Minga.Editor do
   defp adjust_mode_state_on_transition(mode_state, _old_mode, _new_mode, _state), do: mode_state
 
   # Handle Normal → Normal: detect edits, pending keys, or motions.
-  @spec do_update_normal_to_normal(ChangeRecorder.t(), [Mode.command()], ChangeRecorder.key()) :: ChangeRecorder.t()
+  @spec do_update_normal_to_normal(ChangeRecorder.t(), [Mode.command()], ChangeRecorder.key()) ::
+          ChangeRecorder.t()
 
   # No commands (count accumulation, pending prefix) — buffer the key.
   defp do_update_normal_to_normal(rec, [], key) do
@@ -410,7 +424,7 @@ defmodule Minga.Editor do
 
   # Ignore mouse events when picker is open.
   defp handle_mouse(%{picker: picker} = state, _row, _col, _button, _type)
-       when not is_nil(picker),
+       when is_struct(picker, Minga.Picker),
        do: state
 
   # Ignore negative coordinates (can happen with pixel mouse before translation).
@@ -612,7 +626,7 @@ defmodule Minga.Editor do
   # visual mode entry).
   @spec cancel_mode_for_mouse(state()) :: state()
   defp cancel_mode_for_mouse(%{mode: :command, whichkey_timer: timer} = state)
-       when not is_nil(timer) do
+       when is_reference(timer) do
     WhichKey.cancel_timeout(timer)
     %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
   end
@@ -662,6 +676,27 @@ defmodule Minga.Editor do
     state
   end
 
+  defp execute_command(
+         %{buffer: buf, mode: :insert, autopair_enabled: true} = state,
+         :delete_before
+       ) do
+    content = BufferServer.content(buf)
+    cursor = BufferServer.cursor(buf)
+    tmp_buf = GapBuffer.new(content)
+
+    case Minga.AutoPair.on_backspace(tmp_buf, cursor) do
+      :delete_pair ->
+        # Delete the opening char (before cursor) and closing char (at cursor).
+        BufferServer.delete_before(buf)
+        BufferServer.delete_at(buf)
+
+      :passthrough ->
+        BufferServer.delete_before(buf)
+    end
+
+    state
+  end
+
   defp execute_command(%{buffer: buf} = state, :delete_before) do
     BufferServer.delete_before(buf)
     state
@@ -674,6 +709,31 @@ defmodule Minga.Editor do
 
   defp execute_command(%{buffer: buf} = state, :insert_newline) do
     BufferServer.insert_char(buf, "\n")
+    state
+  end
+
+  defp execute_command(
+         %{buffer: buf, mode: :insert, autopair_enabled: true} = state,
+         {:insert_char, char}
+       )
+       when is_binary(char) do
+    content = BufferServer.content(buf)
+    cursor = BufferServer.cursor(buf)
+    tmp_buf = GapBuffer.new(content)
+
+    case Minga.AutoPair.on_insert(tmp_buf, cursor, char) do
+      {:pair, open, close} ->
+        BufferServer.insert_char(buf, open)
+        BufferServer.insert_char(buf, close)
+        BufferServer.move(buf, :left)
+
+      {:skip, _char} ->
+        BufferServer.move(buf, :right)
+
+      {:passthrough, char} ->
+        BufferServer.insert_char(buf, char)
+    end
+
     state
   end
 
@@ -774,7 +834,10 @@ defmodule Minga.Editor do
 
   defp execute_command(state, :repeat_find_char), do: state
 
-  defp execute_command(%{last_find_char: {dir, char}, buffer: buf} = state, :repeat_find_char_reverse) do
+  defp execute_command(
+         %{last_find_char: {dir, char}, buffer: buf} = state,
+         :repeat_find_char_reverse
+       ) do
     reverse_dir = reverse_find_direction(dir)
     apply_find_char(buf, reverse_dir, char)
     state
@@ -938,8 +1001,11 @@ defmodule Minga.Editor do
   end
 
   # No-op when stack is empty
-  defp execute_command(%{mode_state: %Minga.Mode.ReplaceState{original_chars: []}} = state, :replace_restore),
-    do: state
+  defp execute_command(
+         %{mode_state: %Minga.Mode.ReplaceState{original_chars: []}} = state,
+         :replace_restore
+       ),
+       do: state
 
   # Fallback for replace_restore when not in replace mode state
   defp execute_command(state, :replace_restore), do: state
@@ -1325,6 +1391,31 @@ defmodule Minga.Editor do
     %{state | register: yanked}
   end
 
+  # ── Visual wrapping (auto-pair) ─────────────────────────────────────────────
+
+  defp execute_command(
+         %{buffer: buf, mode_state: %VisualState{} = ms} = state,
+         {:wrap_visual_selection, open, close}
+       ) do
+    anchor = ms.visual_anchor
+    cursor = BufferServer.cursor(buf)
+    {start_pos, end_pos} = sort_positions(anchor, cursor)
+    {end_line, end_col} = end_pos
+    {start_line, start_col} = start_pos
+
+    # Insert closing delimiter after the end of selection
+    BufferServer.move_to(buf, {end_line, end_col + 1})
+    BufferServer.insert_char(buf, close)
+
+    # Insert opening delimiter at the start of selection
+    BufferServer.move_to(buf, {start_line, start_col})
+    BufferServer.insert_char(buf, open)
+
+    # Position cursor after the opening delimiter
+    BufferServer.move_to(buf, {start_line, start_col})
+    state
+  end
+
   # ── Leader / which-key commands ───────────────────────────────────────────
 
   defp execute_command(state, {:leader_start, node}) do
@@ -1368,17 +1459,17 @@ defmodule Minga.Editor do
   # ── Text object commands ───────────────────────────────────────────────────
 
   defp execute_command(%{buffer: buf} = state, {:delete_text_object, modifier, spec})
-       when not is_nil(buf) do
+       when is_pid(buf) do
     apply_text_object(state, modifier, spec, :delete)
   end
 
   defp execute_command(%{buffer: buf} = state, {:change_text_object, modifier, spec})
-       when not is_nil(buf) do
+       when is_pid(buf) do
     apply_text_object(state, modifier, spec, :delete)
   end
 
   defp execute_command(%{buffer: buf} = state, {:yank_text_object, modifier, spec})
-       when not is_nil(buf) do
+       when is_pid(buf) do
     apply_text_object(state, modifier, spec, :yank)
   end
 
@@ -1524,7 +1615,15 @@ defmodule Minga.Editor do
       end
 
     cursor_command =
-      resolve_cursor_command(picker_cursor, state.mode, state.mode_state, minibuffer_row, cursor_line, cursor_col, viewport)
+      resolve_cursor_command(
+        picker_cursor,
+        state.mode,
+        state.mode_state,
+        minibuffer_row,
+        cursor_line,
+        cursor_col,
+        viewport
+      )
 
     whichkey_commands = maybe_render_whichkey(state, viewport)
 
@@ -1544,7 +1643,7 @@ defmodule Minga.Editor do
 
   @spec maybe_render_whichkey(state(), Viewport.t()) :: [binary()]
   defp maybe_render_whichkey(%{show_whichkey: true, whichkey_node: node}, viewport)
-       when not is_nil(node) do
+       when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     lines = WhichKey.render_popup(bindings)
 
@@ -2089,7 +2188,12 @@ defmodule Minga.Editor do
             state
           end
 
-        %{new_state | picker: picker, picker_source: source_module, picker_restore: state.active_buffer}
+        %{
+          new_state
+          | picker: picker,
+            picker_source: source_module,
+            picker_restore: state.active_buffer
+        }
     end
   end
 
@@ -2254,6 +2358,7 @@ defmodule Minga.Editor do
   defp resolve_motion(_tmp_buf, cursor, :half_page_up), do: cursor
   defp resolve_motion(_tmp_buf, cursor, :page_down), do: cursor
   defp resolve_motion(_tmp_buf, cursor, :page_up), do: cursor
+
   defp resolve_motion(tmp_buf, cursor, :word_forward_big),
     do: Minga.Motion.word_forward_big(tmp_buf, cursor)
 
