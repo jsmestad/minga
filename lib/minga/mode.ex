@@ -37,10 +37,15 @@ defmodule Minga.Mode do
   @type command :: atom() | {atom(), term()} | {atom(), term(), term()}
 
   @typedoc """
-  FSM-level state. Always contains `:count` (the accumulated digit prefix).
-  Mode modules may add additional keys for their own bookkeeping.
+  FSM-level state. The base `Mode.State` struct carries shared fields (count,
+  leader). Mode-specific structs (`VisualState`, `CommandState`, etc.) extend
+  this with their own fields.
   """
-  @type state :: %{:count => non_neg_integer() | nil, optional(atom()) => term()}
+  @type state ::
+          Minga.Mode.State.t()
+          | Minga.Mode.OperatorPendingState.t()
+          | Minga.Mode.VisualState.t()
+          | Minga.Mode.CommandState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -74,8 +79,8 @@ defmodule Minga.Mode do
   @doc """
   Returns a fresh FSM state with no accumulated count and no leader sequence.
   """
-  @spec initial_state() :: state()
-  def initial_state, do: %{count: nil, leader_node: nil, leader_keys: []}
+  @spec initial_state() :: Minga.Mode.State.t()
+  def initial_state, do: %Minga.Mode.State{}
 
   @doc """
   Processes a key event for the given `mode`.
@@ -106,8 +111,8 @@ defmodule Minga.Mode do
   `-- VISUAL LINE --` based on `:visual_type` in the state.
   """
   @spec display(mode(), state()) :: String.t()
-  def display(:visual, %{visual_type: :line}), do: "-- VISUAL LINE --"
-  def display(:command, %{input: input}) when is_binary(input), do: ":" <> input
+  def display(:visual, %Minga.Mode.VisualState{visual_type: :line}), do: "-- VISUAL LINE --"
+  def display(:command, %Minga.Mode.CommandState{input: input}), do: ":" <> input
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -143,5 +148,5 @@ defmodule Minga.Mode do
   end
 
   @spec reset_count(state()) :: state()
-  defp reset_count(state), do: %{state | count: nil}
+  defp reset_count(%_{} = state), do: %{state | count: nil}
 end

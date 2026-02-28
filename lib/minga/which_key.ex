@@ -29,8 +29,20 @@ defmodule Minga.WhichKey do
 
   alias Minga.Keymap.Trie
 
+  defmodule Binding do
+    @moduledoc "A formatted key binding entry for which-key popup display."
+
+    @enforce_keys [:key, :description]
+    defstruct [:key, :description]
+
+    @type t :: %__MODULE__{
+            key: String.t(),
+            description: String.t()
+          }
+  end
+
   @typedoc "A formatted binding entry for display."
-  @type binding :: %{key: String.t(), description: String.t()}
+  @type binding :: Binding.t()
 
   @typedoc "An opaque timer reference returned by `start_timeout/1`."
   @type timer_ref :: reference()
@@ -103,7 +115,7 @@ defmodule Minga.WhichKey do
   @spec format_bindings([{Trie.key(), String.t() | atom()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
     Enum.map(children, fn {key, label} ->
-      %{
+      %Binding{
         key: format_key(key),
         description: format_label(label)
       }
@@ -130,7 +142,7 @@ defmodule Minga.WhichKey do
   """
   @spec render_popup([binding()]) :: [String.t()]
   def render_popup(bindings) when is_list(bindings) do
-    Enum.map(bindings, fn %{key: key, description: desc} ->
+    Enum.map(bindings, fn %Binding{key: key, description: desc} ->
       padded_key = String.pad_trailing(key, 8)
       "  #{padded_key}#{desc}"
     end)

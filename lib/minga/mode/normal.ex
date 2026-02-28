@@ -62,6 +62,7 @@ defmodule Minga.Mode.Normal do
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.Trie
   alias Minga.Mode
+  alias Minga.Mode.State, as: ModeState
   alias Minga.WhichKey
 
   # Special codepoints
@@ -89,49 +90,34 @@ defmodule Minga.Mode.Normal do
   # ── Leader key handling ───────────────────────────────────────────────────
 
   # SPC pressed while not in leader mode → start leader sequence.
-  def handle_key({@space, 0}, %{leader_node: nil} = state) do
+  def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
     leader_trie = Defaults.leader_trie()
-
-    new_state =
-      state
-      |> Map.put(:leader_node, leader_trie)
-      |> Map.put(:leader_keys, ["SPC"])
-
+    new_state = %{state | leader_node: leader_trie, leader_keys: ["SPC"]}
     {:execute, {:leader_start, leader_trie}, new_state}
   end
 
   # SPC pressed while already in leader mode → cancel and restart.
-  def handle_key({@space, 0}, %{leader_node: _node} = state) do
+  def handle_key({@space, 0}, %ModeState{leader_node: _node} = state) do
     leader_trie = Defaults.leader_trie()
-
-    new_state =
-      state
-      |> Map.put(:leader_node, leader_trie)
-      |> Map.put(:leader_keys, ["SPC"])
-
+    new_state = %{state | leader_node: leader_trie, leader_keys: ["SPC"]}
     {:execute, [:leader_cancel, {:leader_start, leader_trie}], new_state}
   end
 
   # Any other key while in leader mode → walk the trie.
-  def handle_key(key, %{leader_node: node} = state) when not is_nil(node) do
+  def handle_key(key, %ModeState{leader_node: node} = state) when not is_nil(node) do
     case Trie.lookup(node, key) do
       :not_found ->
-        new_state = state |> Map.put(:leader_node, nil) |> Map.put(:leader_keys, [])
+        new_state = %{state | leader_node: nil, leader_keys: []}
         {:execute, :leader_cancel, new_state}
 
       {:prefix, sub_node} ->
         formatted = WhichKey.format_key(key)
-        new_keys = Map.get(state, :leader_keys, ["SPC"]) ++ [formatted]
-
-        new_state =
-          state
-          |> Map.put(:leader_node, sub_node)
-          |> Map.put(:leader_keys, new_keys)
-
+        new_keys = state.leader_keys ++ [formatted]
+        new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
         {:execute, {:leader_progress, sub_node}, new_state}
 
       {:command, command} ->
-        new_state = state |> Map.put(:leader_node, nil) |> Map.put(:leader_keys, [])
+        new_state = %{state | leader_node: nil, leader_keys: []}
         {:execute, [command, :leader_cancel], new_state}
     end
   end
@@ -139,7 +125,7 @@ defmodule Minga.Mode.Normal do
   # ── Count prefix accumulation ─────────────────────────────────────────────
 
   # Digits 1-9 always start or extend the count.
-  def handle_key({digit, 0}, %{count: count} = state)
+  def handle_key({digit, 0}, %ModeState{count: count} = state)
       when digit in ?1..?9 do
     digit_value = digit - ?0
     new_count = if count, do: count * 10 + digit_value, else: digit_value
@@ -147,7 +133,7 @@ defmodule Minga.Mode.Normal do
   end
 
   # `0` continues an in-progress count; otherwise it's the "go to line start" motion.
-  def handle_key({?0, 0}, %{count: count} = state) when is_integer(count) do
+  def handle_key({?0, 0}, %ModeState{count: count} = state) when is_integer(count) do
     {:continue, %{state | count: count * 10}}
   end
 
@@ -220,13 +206,15 @@ defmodule Minga.Mode.Normal do
 
   # v → characterwise visual mode.
   # The editor injects the :visual_anchor after the transition.
-  def handle_key({?v, 0}, state) do
-    {:transition, :visual, Map.put(state, :visual_type, :char)}
+  def handle_key({?v, 0}, %ModeState{} = state) do
+    {:transition, :visual,
+     %Minga.Mode.VisualState{count: state.count, visual_type: :char}}
   end
 
   # V → linewise visual mode.
-  def handle_key({?V, 0}, state) do
-    {:transition, :visual, Map.put(state, :visual_type, :line)}
+  def handle_key({?V, 0}, %ModeState{} = state) do
+    {:transition, :visual,
+     %Minga.Mode.VisualState{count: state.count, visual_type: :line}}
   end
 
   # ── Word / line motions ───────────────────────────────────────────────────
@@ -257,19 +245,19 @@ defmodule Minga.Mode.Normal do
 
   # ── Operator entry (d / c / y) ────────────────────────────────────────────
 
-  def handle_key({?d, 0}, %{count: count} = state) do
-    op_state = state |> Map.put(:operator, :delete) |> Map.put(:op_count, count || 1)
-    {:transition, :operator_pending, op_state}
+  def handle_key({?d, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :delete, op_count: count || 1}}
   end
 
-  def handle_key({?c, 0}, %{count: count} = state) do
-    op_state = state |> Map.put(:operator, :change) |> Map.put(:op_count, count || 1)
-    {:transition, :operator_pending, op_state}
+  def handle_key({?c, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :change, op_count: count || 1}}
   end
 
-  def handle_key({?y, 0}, %{count: count} = state) do
-    op_state = state |> Map.put(:operator, :yank) |> Map.put(:op_count, count || 1)
-    {:transition, :operator_pending, op_state}
+  def handle_key({?y, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :yank, op_count: count || 1}}
   end
 
   # ── Paste ─────────────────────────────────────────────────────────────────
@@ -294,17 +282,13 @@ defmodule Minga.Mode.Normal do
 
   # ── Escape: already in Normal, clear count and cancel any leader sequence ──
 
-  def handle_key({@escape, _mods}, %{leader_node: node} = state) when not is_nil(node) do
-    new_state =
-      state
-      |> Map.put(:leader_node, nil)
-      |> Map.put(:leader_keys, [])
-      |> Map.put(:count, nil)
-
+  def handle_key({@escape, _mods}, %ModeState{leader_node: node} = state)
+      when not is_nil(node) do
+    new_state = %{state | leader_node: nil, leader_keys: [], count: nil}
     {:execute, :leader_cancel, new_state}
   end
 
-  def handle_key({@escape, _mods}, state) do
+  def handle_key({@escape, _mods}, %ModeState{} = state) do
     {:continue, %{state | count: nil}}
   end
 

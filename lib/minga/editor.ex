@@ -16,8 +16,9 @@ defmodule Minga.Editor do
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Viewport
-  alias Minga.Keymap.Trie
   alias Minga.Mode
+  alias Minga.Mode.CommandState
+  alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.TextObject
@@ -37,18 +38,10 @@ defmodule Minga.Editor do
           | {:width, pos_integer()}
           | {:height, pos_integer()}
 
+  alias Minga.Editor.State, as: EditorState
+
   @typedoc "Internal state."
-  @type state :: %{
-          buffer: pid() | nil,
-          port_manager: GenServer.server(),
-          viewport: Viewport.t(),
-          mode: Mode.mode(),
-          mode_state: Mode.state(),
-          whichkey_node: Trie.node_t() | nil,
-          whichkey_timer: WhichKey.timer_ref() | nil,
-          show_whichkey: boolean(),
-          register: String.t() | nil
-        }
+  @type state :: EditorState.t()
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -89,16 +82,12 @@ defmodule Minga.Editor do
       end
     end
 
-    state = %{
+    state = %EditorState{
       buffer: buffer,
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
       mode: :normal,
-      mode_state: Mode.initial_state(),
-      whichkey_node: nil,
-      whichkey_timer: nil,
-      show_whichkey: false,
-      register: nil
+      mode_state: Mode.initial_state()
     }
 
     {:ok, state}
@@ -189,16 +178,19 @@ defmodule Minga.Editor do
     {new_mode, commands, new_mode_state} = Mode.process(state.mode, key, state.mode_state)
 
     # When transitioning INTO visual mode, capture the current cursor as the
-    # selection anchor. The mode module sets :visual_type; we inject :visual_anchor.
-    # When transitioning INTO command mode, initialise the :input accumulator.
+    # selection anchor. When transitioning INTO command mode, ensure we have
+    # a CommandState.
     new_mode_state =
       cond do
         new_mode == :visual and state.mode != :visual and state.buffer ->
           anchor = BufferServer.cursor(state.buffer)
-          Map.put(new_mode_state, :visual_anchor, anchor)
+          %{new_mode_state | visual_anchor: anchor}
 
         new_mode == :command and state.mode != :command ->
-          Map.put(new_mode_state, :input, "")
+          case new_mode_state do
+            %CommandState{} -> new_mode_state
+            _ -> %CommandState{}
+          end
 
         true ->
           new_mode_state
@@ -409,9 +401,9 @@ defmodule Minga.Editor do
     state
   end
 
-  defp execute_command(%{buffer: buf, mode_state: ms} = state, :delete_visual_selection) do
-    anchor = Map.get(ms, :visual_anchor, {0, 0})
-    visual_type = Map.get(ms, :visual_type, :char)
+  defp execute_command(%{buffer: buf, mode_state: %VisualState{} = ms} = state, :delete_visual_selection) do
+    anchor = ms.visual_anchor
+    visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)
 
     yanked =
@@ -434,9 +426,9 @@ defmodule Minga.Editor do
     %{state | register: yanked}
   end
 
-  defp execute_command(%{buffer: buf, mode_state: ms} = state, :yank_visual_selection) do
-    anchor = Map.get(ms, :visual_anchor, {0, 0})
-    visual_type = Map.get(ms, :visual_type, :char)
+  defp execute_command(%{buffer: buf, mode_state: %VisualState{} = ms} = state, :yank_visual_selection) do
+    anchor = ms.visual_anchor
+    visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)
 
     yanked =
@@ -658,7 +650,7 @@ defmodule Minga.Editor do
 
   @spec apply_text_object(
           state(),
-          Minga.Mode.OperatorPending.text_object_modifier(),
+          Minga.Mode.OperatorPendingState.text_object_modifier(),
           term(),
           text_object_action()
         ) :: state()
@@ -729,9 +721,9 @@ defmodule Minga.Editor do
 
   @spec visual_selection_bounds(state(), Minga.Buffer.GapBuffer.position()) ::
           visual_selection()
-  defp visual_selection_bounds(%{mode: :visual, mode_state: ms}, cursor) do
-    anchor = Map.get(ms, :visual_anchor, cursor)
-    visual_type = Map.get(ms, :visual_type, :char)
+  defp visual_selection_bounds(%{mode: :visual, mode_state: %VisualState{} = ms}, cursor) do
+    anchor = ms.visual_anchor
+    visual_type = ms.visual_type
 
     case visual_type do
       :char ->

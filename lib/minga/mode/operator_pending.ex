@@ -71,12 +71,7 @@ defmodule Minga.Mode.OperatorPending do
   @behaviour Minga.Mode
 
   alias Minga.Mode
-
-  @typedoc "The pending operator."
-  @type operator :: :delete | :change | :yank
-
-  @typedoc "Text object modifier (inner vs around)."
-  @type text_object_modifier :: :inner | :around
+  alias Minga.Mode.OperatorPendingState, as: OPState
 
   @escape 27
 
@@ -91,13 +86,13 @@ defmodule Minga.Mode.OperatorPending do
   # ── Text object modifier (i / a) ─────────────────────────────────────────
 
   # `i` enters "inner" text object mode — only when no modifier already set.
-  def handle_key({?i, 0}, %{text_object_modifier: nil} = state) do
-    {:continue, Map.put(state, :text_object_modifier, :inner)}
+  def handle_key({?i, 0}, %OPState{text_object_modifier: nil} = state) do
+    {:continue, %{state | text_object_modifier: :inner}}
   end
 
   # `a` enters "around" text object mode — only when no modifier already set.
-  def handle_key({?a, 0}, %{text_object_modifier: nil} = state) do
-    {:continue, Map.put(state, :text_object_modifier, :around)}
+  def handle_key({?a, 0}, %OPState{text_object_modifier: nil} = state) do
+    {:continue, %{state | text_object_modifier: :around}}
   end
 
   # ── Text object completion ─────────────────────────────────────────────────
@@ -105,113 +100,113 @@ defmodule Minga.Mode.OperatorPending do
   # These clauses match only when a text_object_modifier is pending.
 
   # `w` — word text object.
-  def handle_key({?w, 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({?w, 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) do
     execute_text_object(state, modifier, :word)
   end
 
   # `"` — double-quoted string.
-  def handle_key({?", 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({?", 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) do
     execute_text_object(state, modifier, {:quote, "\""})
   end
 
   # `'` — single-quoted string.
-  def handle_key({?', 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({?', 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) do
     execute_text_object(state, modifier, {:quote, "'"})
   end
 
   # `(` or `)` — parentheses.
-  def handle_key({paren, 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({paren, 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) and paren in [?(, ?)] do
     execute_text_object(state, modifier, {:paren, "(", ")"})
   end
 
   # `[` or `]` — square brackets.
-  def handle_key({bracket, 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({bracket, 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) and bracket in [?[, ?]] do
     execute_text_object(state, modifier, {:paren, "[", "]"})
   end
 
   # `{` or `}` — curly braces.
-  def handle_key({brace, 0}, %{text_object_modifier: modifier} = state)
+  def handle_key({brace, 0}, %OPState{text_object_modifier: modifier} = state)
       when not is_nil(modifier) and brace in [?{, ?}] do
     execute_text_object(state, modifier, {:paren, "{", "}"})
   end
 
   # ── Count accumulation ───────────────────────────────────────────────────
 
-  def handle_key({digit, 0}, %{count: count} = state) when digit in ?1..?9 do
+  def handle_key({digit, 0}, %OPState{count: count} = state) when digit in ?1..?9 do
     digit_val = digit - ?0
     new_count = if count, do: count * 10 + digit_val, else: digit_val
     {:continue, %{state | count: new_count}}
   end
 
   # `0` with an in-progress count extends it; otherwise it's the line-start motion.
-  def handle_key({?0, 0}, %{count: count} = state) when is_integer(count) do
+  def handle_key({?0, 0}, %OPState{count: count} = state) when is_integer(count) do
     {:continue, %{state | count: count * 10}}
   end
 
-  def handle_key({?0, 0}, state) do
+  def handle_key({?0, 0}, %OPState{} = state) do
     execute_with_motion(state, :line_start)
   end
 
   # ── Two-key g prefix (gg = document start) ───────────────────────────────
 
-  def handle_key({?g, 0}, %{pending_g: true} = state) do
+  def handle_key({?g, 0}, %OPState{pending_g: true} = state) do
     execute_with_motion(%{state | pending_g: false}, :document_start)
   end
 
-  def handle_key({?g, 0}, state) do
-    {:continue, Map.put(state, :pending_g, true)}
+  def handle_key({?g, 0}, %OPState{} = state) do
+    {:continue, %{state | pending_g: true}}
   end
 
   # ── Word motions ─────────────────────────────────────────────────────────
 
-  def handle_key({?w, 0}, state) do
+  def handle_key({?w, 0}, %OPState{} = state) do
     execute_with_motion(state, :word_forward)
   end
 
-  def handle_key({?b, 0}, state) do
+  def handle_key({?b, 0}, %OPState{} = state) do
     execute_with_motion(state, :word_backward)
   end
 
-  def handle_key({?e, 0}, state) do
+  def handle_key({?e, 0}, %OPState{} = state) do
     execute_with_motion(state, :word_end)
   end
 
   # ── Line / document motions ───────────────────────────────────────────────
 
-  def handle_key({?$, 0}, state) do
+  def handle_key({?$, 0}, %OPState{} = state) do
     execute_with_motion(state, :line_end)
   end
 
-  def handle_key({?G, 0}, state) do
+  def handle_key({?G, 0}, %OPState{} = state) do
     execute_with_motion(state, :document_end)
   end
 
   # ── Double-operator: line-wise variants (dd / cc / yy) ───────────────────
 
-  def handle_key({?d, 0}, %{operator: :delete} = state) do
+  def handle_key({?d, 0}, %OPState{operator: :delete} = state) do
     cmds = List.duplicate(:delete_line, total_count(state))
-    {:execute_then_transition, cmds, :normal, clear_op_state(state)}
+    {:execute_then_transition, cmds, :normal, to_base_state(state)}
   end
 
-  def handle_key({?c, 0}, %{operator: :change} = state) do
+  def handle_key({?c, 0}, %OPState{operator: :change} = state) do
     cmds = List.duplicate(:change_line, total_count(state))
-    {:execute_then_transition, cmds, :insert, clear_op_state(state)}
+    {:execute_then_transition, cmds, :insert, to_base_state(state)}
   end
 
-  def handle_key({?y, 0}, %{operator: :yank} = state) do
+  def handle_key({?y, 0}, %OPState{operator: :yank} = state) do
     cmds = List.duplicate(:yank_line, total_count(state))
-    {:execute_then_transition, cmds, :normal, clear_op_state(state)}
+    {:execute_then_transition, cmds, :normal, to_base_state(state)}
   end
 
   # ── Escape: cancel back to Normal ────────────────────────────────────────
 
-  def handle_key({@escape, _mods}, state) do
-    {:transition, :normal, clear_op_state(state)}
+  def handle_key({@escape, _mods}, %OPState{} = state) do
+    {:transition, :normal, to_base_state(state)}
   end
 
   # ── Unknown key: no-op ───────────────────────────────────────────────────
@@ -222,54 +217,51 @@ defmodule Minga.Mode.OperatorPending do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
+  alias Minga.Mode.OperatorPendingState, as: OpType
+
   # Emits a text-object command and transitions to the appropriate mode.
-  @spec execute_text_object(Mode.state(), text_object_modifier(), term()) :: Mode.result()
-  defp execute_text_object(%{operator: operator} = state, modifier, object_spec) do
+  @spec execute_text_object(OPState.t(), OpType.text_object_modifier(), term()) :: Mode.result()
+  defp execute_text_object(%OPState{operator: operator} = state, modifier, object_spec) do
     cmd = text_object_command(operator, modifier, object_spec)
     target_mode = if operator == :change, do: :insert, else: :normal
-    {:execute_then_transition, [cmd], target_mode, clear_op_state(state)}
+    {:execute_then_transition, [cmd], target_mode, to_base_state(state)}
   end
 
   # Maps (operator, modifier, object_spec) → command tuple.
-  @spec text_object_command(operator(), text_object_modifier(), term()) :: Mode.command()
+  @spec text_object_command(OpType.operator(), OpType.text_object_modifier(), term()) ::
+          Mode.command()
   defp text_object_command(:delete, modifier, spec), do: {:delete_text_object, modifier, spec}
   defp text_object_command(:change, modifier, spec), do: {:change_text_object, modifier, spec}
   defp text_object_command(:yank, modifier, spec), do: {:yank_text_object, modifier, spec}
 
   # Build and emit the motion command, with correct repetition.
-  @spec execute_with_motion(Mode.state(), atom()) :: Mode.result()
-  defp execute_with_motion(%{operator: operator} = state, motion) do
+  @spec execute_with_motion(OPState.t(), atom()) :: Mode.result()
+  defp execute_with_motion(%OPState{operator: operator} = state, motion) do
     cmd = motion_command(operator, motion)
     cmds = List.duplicate(cmd, total_count(state))
     target_mode = if operator == :change, do: :insert, else: :normal
 
     # We compute count ourselves — set count to nil so the dispatcher doesn't
     # double-multiply when processing {:execute_then_transition, ...}.
-    {:execute_then_transition, cmds, target_mode, clear_op_state(state)}
+    {:execute_then_transition, cmds, target_mode, to_base_state(state)}
   end
 
   # Maps (operator, motion) → the command atom/tuple the editor expects.
-  @spec motion_command(operator(), atom()) :: Mode.command()
+  @spec motion_command(OpType.operator(), atom()) :: Mode.command()
   defp motion_command(:delete, motion), do: {:delete_motion, motion}
   defp motion_command(:change, motion), do: {:change_motion, motion}
   defp motion_command(:yank, motion), do: {:yank_motion, motion}
 
   # Total repeat count: op_count (from before the operator key) × motion count.
-  @spec total_count(Mode.state()) :: pos_integer()
-  defp total_count(state) do
-    op_count = Map.get(state, :op_count, 1)
-    motion_count = state.count || 1
+  @spec total_count(OPState.t()) :: pos_integer()
+  defp total_count(%OPState{op_count: op_count, count: count}) do
+    motion_count = count || 1
     op_count * motion_count
   end
 
-  # Strips operator-specific keys from the FSM state and resets count.
-  @spec clear_op_state(Mode.state()) :: Mode.state()
-  defp clear_op_state(state) do
-    state
-    |> Map.delete(:operator)
-    |> Map.delete(:op_count)
-    |> Map.delete(:pending_g)
-    |> Map.delete(:text_object_modifier)
-    |> Map.put(:count, nil)
+  # Converts operator-pending state back to the base Mode.State.
+  @spec to_base_state(OPState.t()) :: Mode.State.t()
+  defp to_base_state(_state) do
+    %Mode.State{}
   end
 end

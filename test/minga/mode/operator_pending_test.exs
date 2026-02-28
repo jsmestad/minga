@@ -3,10 +3,11 @@ defmodule Minga.Mode.OperatorPendingTest do
 
   alias Minga.Mode
   alias Minga.Mode.OperatorPending
+  alias Minga.Mode.OperatorPendingState
 
   # Build the FSM state as it would look after transitioning from Normal on `d`.
   defp op_state(operator, op_count \\ 1) do
-    %{count: nil, operator: operator, op_count: op_count}
+    %OperatorPendingState{operator: operator, op_count: op_count}
   end
 
   # ── d + motion ─────────────────────────────────────────────────────────────
@@ -150,10 +151,10 @@ defmodule Minga.Mode.OperatorPendingTest do
       assert {:transition, :normal, _} = OperatorPending.handle_key({27, 0}, state)
     end
 
-    test "Escape clears the operator from state" do
+    test "Escape returns base Mode.State without operator fields" do
       state = op_state(:delete)
       {:transition, :normal, new_state} = OperatorPending.handle_key({27, 0}, state)
-      refute Map.has_key?(new_state, :operator)
+      assert %Mode.State{} = new_state
     end
   end
 
@@ -182,7 +183,7 @@ defmodule Minga.Mode.OperatorPendingTest do
 
     test "motion count multiplies op_count" do
       # op_count=2 (from `2d`), then press `3w` (motion count=3) → 6 commands
-      state = %{count: nil, operator: :delete, op_count: 2}
+      state = %OperatorPendingState{operator: :delete, op_count: 2}
       {:continue, s2} = OperatorPending.handle_key({?3, 0}, state)
 
       assert {:execute_then_transition, cmds, :normal, _} =

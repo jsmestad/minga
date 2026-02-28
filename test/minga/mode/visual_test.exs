@@ -6,12 +6,12 @@ defmodule Minga.Mode.VisualTest do
   alias Minga.Mode.Normal
   alias Minga.Mode.Visual
 
+  alias Minga.Mode.VisualState
+
   # Build a fresh FSM state as if visual mode was just entered with anchor at
   # the given position and the given type.
   defp visual_state(anchor \\ {0, 0}, type \\ :char) do
-    Mode.initial_state()
-    |> Map.put(:visual_anchor, anchor)
-    |> Map.put(:visual_type, type)
+    %VisualState{visual_anchor: anchor, visual_type: type}
   end
 
   # ── Entering visual from Normal ──────────────────────────────────────────────
@@ -30,9 +30,11 @@ defmodule Minga.Mode.VisualTest do
       assert new_state.visual_type == :char
     end
 
-    test "v does not set visual_anchor (editor injects it)" do
+    test "v returns VisualState with default anchor (editor overrides it)" do
       {:transition, :visual, new_state} = Normal.handle_key({?v, 0}, Mode.initial_state())
-      refute Map.has_key?(new_state, :visual_anchor)
+      assert %VisualState{} = new_state
+      # Default anchor is {0, 0}; the editor overwrites this with the real cursor position
+      assert new_state.visual_anchor == {0, 0}
     end
   end
 
@@ -223,7 +225,7 @@ defmodule Minga.Mode.VisualTest do
     end
 
     test "Mode.display shows -- VISUAL LINE -- for linewise" do
-      assert Mode.display(:visual, %{visual_type: :line}) == "-- VISUAL LINE --"
+      assert Mode.display(:visual, %VisualState{visual_type: :line}) == "-- VISUAL LINE --"
     end
 
     test "Mode.display shows -- VISUAL -- for characterwise" do

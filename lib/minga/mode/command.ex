@@ -28,6 +28,7 @@ defmodule Minga.Mode.Command do
 
   alias Minga.Command.Parser
   alias Minga.Mode
+  alias Minga.Mode.CommandState
 
   # Special codepoints
   @escape 27
@@ -39,42 +40,27 @@ defmodule Minga.Mode.Command do
   @arrow_left 57_419
   @arrow_right 57_421
 
-  @typedoc """
-  Extended FSM state for Command mode.
-
-  * `:input` — the command string typed so far (without the leading `:`).
-  """
-  @type command_state :: %{
-          :count => non_neg_integer() | nil,
-          :input => String.t(),
-          optional(atom()) => term()
-        }
-
   @impl Mode
   @doc """
   Handles a key event in Command mode.
 
   Returns a `t:Minga.Mode.result/0` describing the FSM transition.
   """
-  @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
+  @spec handle_key(Mode.key(), CommandState.t()) :: Mode.result()
 
   # Enter → parse the accumulated input and emit an :execute_ex_command
-  def handle_key({@enter, _mods}, state) do
-    input = Map.get(state, :input, "")
+  def handle_key({@enter, _mods}, %CommandState{input: input} = state) do
     parsed = Parser.parse(input)
-    clean_state = Map.put(state, :input, "")
-    {:execute_then_transition, [{:execute_ex_command, parsed}], :normal, clean_state}
+    {:execute_then_transition, [{:execute_ex_command, parsed}], :normal, %{state | input: ""}}
   end
 
   # Escape → cancel, return to Normal without executing
-  def handle_key({@escape, _mods}, state) do
-    {:transition, :normal, Map.put(state, :input, "")}
+  def handle_key({@escape, _mods}, %CommandState{} = state) do
+    {:transition, :normal, %{state | input: ""}}
   end
 
   # Backspace (DEL 127 or BS 8) — remove last char; if empty → Normal
-  def handle_key({cp, _mods}, state) when cp in [8, 127] do
-    input = Map.get(state, :input, "")
-
+  def handle_key({cp, _mods}, %CommandState{input: input} = state) when cp in [8, 127] do
     case input do
       "" ->
         {:transition, :normal, state}
@@ -83,24 +69,22 @@ defmodule Minga.Mode.Command do
         new_input = String.slice(input, 0, String.length(input) - 1)
 
         if new_input == "" do
-          {:transition, :normal, Map.put(state, :input, "")}
+          {:transition, :normal, %{state | input: ""}}
         else
-          {:continue, Map.put(state, :input, new_input)}
+          {:continue, %{state | input: new_input}}
         end
     end
   end
 
   # Arrow keys — ignored in command mode (use terminal editing only)
-  def handle_key({cp, _mods}, state)
+  def handle_key({cp, _mods}, %CommandState{} = state)
       when cp in [@arrow_up, @arrow_down, @arrow_left, @arrow_right] do
     {:continue, state}
   end
 
   # Printable Unicode characters (no modifiers) → append to input
-  def handle_key({codepoint, 0}, state)
+  def handle_key({codepoint, 0}, %CommandState{input: input} = state)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
-    input = Map.get(state, :input, "")
-
     char =
       try do
         <<codepoint::utf8>>
@@ -110,12 +94,12 @@ defmodule Minga.Mode.Command do
 
     case char do
       nil -> {:continue, state}
-      c -> {:continue, Map.put(state, :input, input <> c)}
+      c -> {:continue, %{state | input: input <> c}}
     end
   end
 
   # Ignore all other keys (control sequences, arrows, etc.)
-  def handle_key(_key, state) do
+  def handle_key(_key, %CommandState{} = state) do
     {:continue, state}
   end
 end

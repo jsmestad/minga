@@ -47,6 +47,7 @@ defmodule Minga.Mode.Visual do
   @behaviour Minga.Mode
 
   alias Minga.Mode
+  alias Minga.Mode.VisualState
 
   # Special codepoints
   @escape 27
@@ -57,30 +58,13 @@ defmodule Minga.Mode.Visual do
   @arrow_left 57_419
   @arrow_right 57_421
 
-  @typedoc "Selection type: characterwise or linewise."
-  @type selection_type :: :char | :line
-
-  @typedoc """
-  Extended FSM state used in Visual mode.
-
-  Carries the standard `:count` field plus visual-specific fields:
-  * `:visual_anchor` — fixed end of the selection (set by the editor).
-  * `:visual_type` — granularity of the selection.
-  """
-  @type visual_state :: %{
-          :count => non_neg_integer() | nil,
-          :visual_anchor => Minga.Buffer.GapBuffer.position(),
-          :visual_type => selection_type(),
-          optional(atom()) => term()
-        }
-
   @impl Mode
   @doc """
   Handles a key event in Visual mode.
 
   Returns a `t:Minga.Mode.result/0` describing what the editor should do.
   """
-  @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
+  @spec handle_key(Mode.key(), VisualState.t()) :: Mode.result()
 
   # ── Motions ─────────────────────────────────────────────────────────────────
 

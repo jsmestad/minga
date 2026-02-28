@@ -35,18 +35,23 @@ defmodule Minga.Keymap.Trie do
   """
   @type key :: {codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
 
-  @typedoc """
-  A trie node.
+  defmodule Node do
+    @moduledoc "A single node in the keymap trie."
 
-  * `children`    — map of key → child node for continuing sequences
-  * `command`     — atom name of the bound command, or `nil` for prefix-only nodes
-  * `description` — human-readable label for which-key display, or `nil`
-  """
-  @type node_t :: %{
-          children: %{key() => node_t()},
-          command: atom() | nil,
-          description: String.t() | nil
-        }
+    @enforce_keys []
+    defstruct children: %{},
+              command: nil,
+              description: nil
+
+    @type t :: %__MODULE__{
+            children: %{Minga.Keymap.Trie.key() => t()},
+            command: atom() | nil,
+            description: String.t() | nil
+          }
+  end
+
+  @typedoc "A trie node."
+  @type node_t :: Node.t()
 
   # ── API ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +60,7 @@ defmodule Minga.Keymap.Trie do
   """
   @spec new() :: node_t()
   def new do
-    %{children: %{}, command: nil, description: nil}
+    %Node{}
   end
 
   @doc """
@@ -72,18 +77,16 @@ defmodule Minga.Keymap.Trie do
   * `description` — human-readable description for which-key display
   """
   @spec bind(node_t(), [key()], atom(), String.t()) :: node_t()
-  def bind(%{children: children} = root, [key | rest], command, description)
+  def bind(%Node{children: children} = root, [key | rest], command, description)
       when is_atom(command) and is_binary(description) do
     child = Map.get(children, key, new())
 
     updated_child =
       case rest do
         [] ->
-          # Terminal node — set the command
           %{child | command: command, description: description}
 
         _ ->
-          # Intermediate node — recurse
           bind(child, rest, command, description)
       end
 
@@ -101,23 +104,16 @@ defmodule Minga.Keymap.Trie do
   * `:not_found` — the key does not exist in this trie node
   """
   @spec lookup(node_t(), key()) :: {:command, atom()} | {:prefix, node_t()} | :not_found
-  def lookup(%{children: children}, key) do
+  def lookup(%Node{children: children}, key) do
     case Map.fetch(children, key) do
       :error ->
         :not_found
 
-      {:ok, %{command: nil} = child} ->
+      {:ok, %Node{command: nil} = child} ->
         {:prefix, child}
 
-      {:ok, %{command: command, children: sub_children} = child} ->
-        if map_size(sub_children) > 0 do
-          # Could be both a command and a prefix; prefer command
-          {:command, command}
-        else
-          # Pure terminal
-          _ = child
-          {:command, command}
-        end
+      {:ok, %Node{command: command}} ->
+        {:command, command}
     end
   end
 
@@ -128,7 +124,7 @@ defmodule Minga.Keymap.Trie do
   Creates intermediate nodes as needed.
   """
   @spec bind_prefix(node_t(), [key()], String.t()) :: node_t()
-  def bind_prefix(%{children: children} = root, [key | rest], description)
+  def bind_prefix(%Node{children: children} = root, [key | rest], description)
       when is_binary(description) do
     child = Map.get(children, key, new())
 
@@ -152,8 +148,8 @@ defmodule Minga.Keymap.Trie do
   prefix or unnamed node).
   """
   @spec children(node_t()) :: [{key(), String.t() | atom()}]
-  def children(%{children: children}) do
-    Enum.map(children, fn {key, %{command: command, description: description, children: sub}} ->
+  def children(%Node{children: children}) do
+    Enum.map(children, fn {key, %Node{command: command, description: description, children: sub}} ->
       label =
         cond do
           description != nil -> description

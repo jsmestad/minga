@@ -3,12 +3,13 @@ defmodule Minga.Mode.CommandTest do
   use ExUnit.Case, async: true
 
   alias Minga.Mode.Command
+  alias Minga.Mode.CommandState
 
   @enter 13
   @escape 27
 
   # Build a fresh command-mode state (as injected by the editor).
-  defp fresh_state(input \\ ""), do: %{count: nil, input: input}
+  defp fresh_state(input \\ ""), do: %CommandState{input: input}
 
   # ── Typing characters ────────────────────────────────────────────────────────
 
@@ -155,15 +156,11 @@ defmodule Minga.Mode.CommandTest do
     test "typing w then enter emits :save command" do
       alias Minga.Mode
 
-      # Start in normal, press :
-      initial = Mode.initial_state() |> Map.put(:input, "")
-      {_mode, _, state1} = Mode.process(:normal, {?:, 0}, initial)
-
-      # Simulate editor injecting :input
-      state_with_input = Map.put(state1, :input, "")
+      # Simulate editor injecting CommandState (as the editor does on : transition)
+      cmd_state = %CommandState{}
 
       # Type "w"
-      {_mode, _, state2} = Mode.process(:command, {?w, 0}, state_with_input)
+      {_mode, _, state2} = Mode.process(:command, {?w, 0}, cmd_state)
       assert state2.input == "w"
 
       # Press Enter

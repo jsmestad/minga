@@ -47,23 +47,23 @@ defmodule Minga.WhichKeyTest do
       children = [{{?f, 0}, "Find file"}, {{?s, 0}, "Save file"}]
       result = WhichKey.format_bindings(children)
 
-      assert Enum.any?(result, &(&1 == %{key: "f", description: "Find file"}))
-      assert Enum.any?(result, &(&1 == %{key: "s", description: "Save file"}))
+      assert Enum.any?(result, &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"}))
+      assert Enum.any?(result, &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"}))
     end
 
     test "formats :prefix atom label as '+prefix'" do
       result = WhichKey.format_bindings([{{?f, 0}, :prefix}])
-      assert result == [%{key: "f", description: "+prefix"}]
+      assert result == [%Minga.WhichKey.Binding{key: "f", description: "+prefix"}]
     end
 
     test "formats :unknown atom label as '?'" do
       result = WhichKey.format_bindings([{{?x, 0}, :unknown}])
-      assert result == [%{key: "x", description: "?"}]
+      assert result == [%Minga.WhichKey.Binding{key: "x", description: "?"}]
     end
 
     test "formats arbitrary atom label as its string form" do
       result = WhichKey.format_bindings([{{?q, 0}, :quit}])
-      assert result == [%{key: "q", description: "quit"}]
+      assert result == [%Minga.WhichKey.Binding{key: "q", description: "quit"}]
     end
 
     test "returns empty list for empty children" do
@@ -84,8 +84,8 @@ defmodule Minga.WhichKeyTest do
 
       # Should be sorted by key string.
       assert Enum.map(bindings, & &1.key) == ["f", "s"]
-      assert Enum.any?(bindings, &(&1 == %{key: "s", description: "Save file"}))
-      assert Enum.any?(bindings, &(&1 == %{key: "f", description: "Find file"}))
+      assert Enum.any?(bindings, &(&1 == %Minga.WhichKey.Binding{key: "s", description: "Save file"}))
+      assert Enum.any?(bindings, &(&1 == %Minga.WhichKey.Binding{key: "f", description: "Find file"}))
     end
 
     test "labels prefix-only nodes as '+prefix'" do
@@ -95,7 +95,7 @@ defmodule Minga.WhichKeyTest do
 
       # The `f` child is a prefix node with no description.
       bindings = WhichKey.bindings_from_node(trie)
-      assert [%{key: "f", description: "+prefix"}] = bindings
+      assert [%Minga.WhichKey.Binding{key: "f", description: "+prefix"}] = bindings
     end
 
     test "uses bind_prefix description when set" do
@@ -105,7 +105,7 @@ defmodule Minga.WhichKeyTest do
         |> Trie.bind_prefix([{?f, 0}], "+file")
 
       bindings = WhichKey.bindings_from_node(trie)
-      assert [%{key: "f", description: "+file"}] = bindings
+      assert [%Minga.WhichKey.Binding{key: "f", description: "+file"}] = bindings
     end
 
     test "returns empty list for leaf node with no children" do
@@ -123,8 +123,8 @@ defmodule Minga.WhichKeyTest do
   describe "render_popup/1" do
     test "renders each binding as a padded text line" do
       bindings = [
-        %{key: "f", description: "Find file"},
-        %{key: "s", description: "Save file"}
+        %Minga.WhichKey.Binding{key: "f", description: "Find file"},
+        %Minga.WhichKey.Binding{key: "s", description: "Save file"}
       ]
 
       lines = WhichKey.render_popup(bindings)

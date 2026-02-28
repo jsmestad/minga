@@ -24,14 +24,10 @@ defmodule Minga.Port.Manager do
           {:name, GenServer.name()}
           | {:renderer_path, String.t()}
 
+  alias Minga.Port.Manager.State, as: PortState
+
   @typedoc "Internal state."
-  @type state :: %{
-          port: port() | nil,
-          subscribers: [pid()],
-          renderer_path: String.t(),
-          ready: boolean(),
-          terminal_size: {width :: pos_integer(), height :: pos_integer()} | nil
-        }
+  @type state :: PortState.t()
 
   # ── Client API ──
 
@@ -73,14 +69,7 @@ defmodule Minga.Port.Manager do
   def init(opts) do
     renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path())
 
-    state = %{
-      port: nil,
-      subscribers: [],
-      renderer_path: renderer_path,
-      ready: false,
-      terminal_size: nil
-    }
-
+    state = %PortState{renderer_path: renderer_path}
     {:ok, start_port(state)}
   end
 
