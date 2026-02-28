@@ -4,8 +4,11 @@ defmodule Minga.ModeTest do
   alias Minga.Mode
 
   describe "initial_state/0" do
-    test "returns a map with nil count" do
-      assert Mode.initial_state() == %{count: nil}
+    test "returns a map with nil count and empty leader state" do
+      state = Mode.initial_state()
+      assert state.count == nil
+      assert state.leader_node == nil
+      assert state.leader_keys == []
     end
   end
 

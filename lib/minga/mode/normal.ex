@@ -8,10 +8,26 @@ defmodule Minga.Mode.Normal do
   count is applied by the `Minga.Mode` dispatcher when an `:execute` result
   is returned.
 
+  ## Leader key sequences
+
+  Pressing **SPC** (space) enters leader mode. Subsequent keys are looked up in
+  the `Minga.Keymap.Defaults` leader trie:
+
+  * **Prefix match** — continue accumulating (`SPC f` waits for `f`, `s`, …).
+    The editor starts (or resets) a 300 ms which-key timer. When the timer fires
+    the editor shows a popup with the available continuations.
+  * **Command match** — the bound command is executed and leader mode ends.
+  * **No match** — leader mode is cancelled.
+
+  The FSM state carries `:leader_node` (current trie node, `nil` when not in
+  leader mode) and `:leader_keys` (list of formatted key strings accumulated so
+  far, for status-bar display).
+
   ## Supported keys
 
   | Key      | Action                                 |
   |----------|----------------------------------------|
+  | `SPC`    | Enter leader key mode                  |
   | `i`      | Transition to Insert mode              |
   | `a`      | Move right, transition to Insert       |
   | `A`      | Move to line end, transition to Insert |
@@ -35,16 +51,20 @@ defmodule Minga.Mode.Normal do
   | `$`      | Line end                               |
   | `^`      | First non-blank                        |
   | `G`      | Document end                           |
-  | `Escape` | Clear count prefix (already normal)    |
+  | `Escape` | Clear count prefix / cancel leader     |
   | Arrow keys | Move in corresponding direction     |
   """
 
   @behaviour Minga.Mode
 
+  alias Minga.Keymap.Defaults
+  alias Minga.Keymap.Trie
   alias Minga.Mode
+  alias Minga.WhichKey
 
   # Special codepoints
   @escape 27
+  @space 32
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57416
@@ -60,6 +80,54 @@ defmodule Minga.Mode.Normal do
   any commands to execute.
   """
   @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
+
+  # ── Leader key handling ───────────────────────────────────────────────────
+
+  # SPC pressed while not in leader mode → start leader sequence.
+  def handle_key({@space, 0}, %{leader_node: nil} = state) do
+    leader_trie = Defaults.leader_trie()
+    new_state =
+      state
+      |> Map.put(:leader_node, leader_trie)
+      |> Map.put(:leader_keys, ["SPC"])
+
+    {:execute, {:leader_start, leader_trie}, new_state}
+  end
+
+  # SPC pressed while already in leader mode → cancel and restart.
+  def handle_key({@space, 0}, %{leader_node: _node} = state) do
+    leader_trie = Defaults.leader_trie()
+    new_state =
+      state
+      |> Map.put(:leader_node, leader_trie)
+      |> Map.put(:leader_keys, ["SPC"])
+
+    {:execute, [:leader_cancel, {:leader_start, leader_trie}], new_state}
+  end
+
+  # Any other key while in leader mode → walk the trie.
+  def handle_key(key, %{leader_node: node} = state) when not is_nil(node) do
+    case Trie.lookup(node, key) do
+      :not_found ->
+        new_state = state |> Map.put(:leader_node, nil) |> Map.put(:leader_keys, [])
+        {:execute, :leader_cancel, new_state}
+
+      {:prefix, sub_node} ->
+        formatted = WhichKey.format_key(key)
+        new_keys = Map.get(state, :leader_keys, ["SPC"]) ++ [formatted]
+
+        new_state =
+          state
+          |> Map.put(:leader_node, sub_node)
+          |> Map.put(:leader_keys, new_keys)
+
+        {:execute, {:leader_progress, sub_node}, new_state}
+
+      {:command, command} ->
+        new_state = state |> Map.put(:leader_node, nil) |> Map.put(:leader_keys, [])
+        {:execute, [command, :leader_cancel], new_state}
+    end
+  end
 
   # ── Count prefix accumulation ─────────────────────────────────────────────
 
@@ -207,7 +275,17 @@ defmodule Minga.Mode.Normal do
     {:execute, :paste_before, state}
   end
 
-  # ── Escape: already in Normal, just clear any pending count ──────────────
+  # ── Escape: already in Normal, clear count and cancel any leader sequence ──
+
+  def handle_key({@escape, _mods}, %{leader_node: node} = state) when not is_nil(node) do
+    new_state =
+      state
+      |> Map.put(:leader_node, nil)
+      |> Map.put(:leader_keys, [])
+      |> Map.put(:count, nil)
+
+    {:execute, :leader_cancel, new_state}
+  end
 
   def handle_key({@escape, _mods}, state) do
     {:continue, %{state | count: nil}}

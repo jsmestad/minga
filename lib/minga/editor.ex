@@ -13,11 +13,15 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Viewport
+  alias Minga.Keymap.Trie
   alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.TextObject
+  alias Minga.WhichKey
 
   require Logger
 
@@ -39,7 +43,10 @@ defmodule Minga.Editor do
           port_manager: GenServer.server(),
           viewport: Viewport.t(),
           mode: Mode.mode(),
-          mode_state: Mode.state()
+          mode_state: Mode.state(),
+          whichkey_node: Trie.node_t() | nil,
+          whichkey_timer: WhichKey.timer_ref() | nil,
+          show_whichkey: boolean()
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -73,7 +80,7 @@ defmodule Minga.Editor do
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
 
-    if is_pid(port_manager) or is_atom(port_manager) do
+    unless is_nil(port_manager) do
       try do
         PortManager.subscribe(port_manager)
       catch
@@ -86,7 +93,10 @@ defmodule Minga.Editor do
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
       mode: :normal,
-      mode_state: Mode.initial_state()
+      mode_state: Mode.initial_state(),
+      whichkey_node: nil,
+      whichkey_timer: nil,
+      show_whichkey: false
     }
 
     {:ok, state}
@@ -133,6 +143,17 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  def handle_info({:whichkey_timeout, ref}, %{whichkey_timer: ref} = state) do
+    new_state = %{state | show_whichkey: true}
+    do_render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:whichkey_timeout, _ref}, state) do
+    # Stale timer — ignore.
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -176,12 +197,25 @@ defmodule Minga.Editor do
         new_mode_state
       end
 
-    new_state = %{state | mode: new_mode, mode_state: new_mode_state}
+    base_state = %{state | mode: new_mode, mode_state: new_mode_state}
 
-    Enum.reduce(commands, new_state, fn cmd, acc ->
-      execute_command(acc, cmd)
-      acc
-    end)
+    # Clear any stale leader update from the process dictionary.
+    Process.delete(:__leader_update__)
+
+    after_commands =
+      Enum.reduce(commands, base_state, fn cmd, acc ->
+        execute_command(acc, cmd)
+        acc
+      end)
+
+    # Apply any leader/whichkey state updates emitted by execute_command.
+    case Process.delete(:__leader_update__) do
+      nil ->
+        after_commands
+
+      updates ->
+        Map.merge(after_commands, updates)
+    end
   end
 
   # ── Command execution ────────────────────────────────────────────────────────
@@ -314,6 +348,70 @@ defmodule Minga.Editor do
     :ok
   end
 
+  # ── Leader / which-key commands ───────────────────────────────────────────
+
+  defp execute_command(state, {:leader_start, node}) do
+    # Cancel any in-flight timer, then start a fresh one.
+    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    timer = WhichKey.start_timeout()
+    # Mutate the GenServer state via the process dictionary as a side-channel.
+    # (The return value of execute_command is :ok; state mutation happens in handle_key.)
+    Process.put(:__leader_update__, %{whichkey_node: node, whichkey_timer: timer, show_whichkey: false})
+    :ok
+  end
+
+  defp execute_command(state, {:leader_progress, node}) do
+    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    timer = WhichKey.start_timeout()
+    Process.put(:__leader_update__, %{whichkey_node: node, whichkey_timer: timer, show_whichkey: state.show_whichkey})
+    :ok
+  end
+
+  defp execute_command(state, :leader_cancel) do
+    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    Process.put(:__leader_update__, %{whichkey_node: nil, whichkey_timer: nil, show_whichkey: false})
+    :ok
+  end
+
+  # ── Text object commands ───────────────────────────────────────────────────
+
+  defp execute_command(%{buffer: buf} = state, {:delete_text_object, modifier, spec})
+       when not is_nil(buf) do
+    apply_text_object(state, modifier, spec, :delete)
+  end
+
+  defp execute_command(%{buffer: buf} = state, {:change_text_object, modifier, spec})
+       when not is_nil(buf) do
+    # Delete the range; the mode FSM has already arranged the transition to :insert.
+    apply_text_object(state, modifier, spec, :delete)
+  end
+
+  defp execute_command(%{buffer: buf} = state, {:yank_text_object, modifier, spec})
+       when not is_nil(buf) do
+    apply_text_object(state, modifier, spec, :yank)
+  end
+
+  # Stub leader-bound commands — logged for discoverability, not yet implemented.
+  defp execute_command(_state, :find_file) do
+    Logger.info("find_file: not yet implemented")
+  end
+
+  defp execute_command(_state, :buffer_list) do
+    Logger.info("buffer_list: not yet implemented")
+  end
+
+  defp execute_command(_state, :kill_buffer) do
+    Logger.info("kill_buffer: not yet implemented")
+  end
+
+  defp execute_command(_state, :window_left), do: :ok
+  defp execute_command(_state, :window_right), do: :ok
+  defp execute_command(_state, :window_up), do: :ok
+  defp execute_command(_state, :window_down), do: :ok
+  defp execute_command(_state, :split_vertical), do: :ok
+  defp execute_command(_state, :split_horizontal), do: :ok
+  defp execute_command(_state, :describe_key), do: :ok
+
   # Unknown or unimplemented commands are silently ignored.
   defp execute_command(_state, _cmd), do: :ok
 
@@ -386,16 +484,85 @@ defmodule Minga.Editor do
     cursor_col_screen = cursor_col - viewport.left
     cursor_command = Protocol.encode_cursor(cursor_row, cursor_col_screen)
 
+    whichkey_commands = maybe_render_whichkey(state, viewport)
+
     all_commands =
       clear ++
         line_commands ++
-        tilde_commands ++ [status_command, cursor_command, Protocol.encode_batch_end()]
+        tilde_commands ++
+        [status_command] ++
+        whichkey_commands ++
+        [cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
     :ok
   end
 
+  @spec maybe_render_whichkey(state(), Viewport.t()) :: [binary()]
+  defp maybe_render_whichkey(%{show_whichkey: true, whichkey_node: node}, viewport)
+       when not is_nil(node) do
+    bindings = WhichKey.bindings_from_node(node)
+    lines = WhichKey.render_popup(bindings)
+
+    popup_row = max(0, viewport.rows - 2 - length(lines))
+
+    [Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
+      lines
+      |> Enum.with_index(popup_row + 1)
+      |> Enum.map(fn {line_text, row} ->
+        padded = String.pad_trailing(line_text, viewport.cols)
+        Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
+      end)
+  end
+
+  defp maybe_render_whichkey(_state, _viewport), do: []
+
   # ── Private helpers ──────────────────────────────────────────────────────────
+
+  # ── Text object execution helper ──────────────────────────────────────────
+
+  @typedoc "How to apply a text object to the buffer."
+  @type text_object_action :: :delete | :yank
+
+  @spec apply_text_object(state(), TextObject.text_object_modifier(), term(), text_object_action()) :: :ok
+  defp apply_text_object(%{buffer: buf} = _state, modifier, spec, action) do
+    cursor = BufferServer.cursor(buf)
+    content = BufferServer.content(buf)
+    tmp_buf = GapBuffer.new(content)
+
+    range = compute_text_object_range(tmp_buf, cursor, modifier, spec)
+
+    case {action, range} do
+      {_, nil} ->
+        :ok
+
+      {:delete, {start_pos, end_pos}} ->
+        BufferServer.delete_range(buf, start_pos, end_pos)
+
+      {:yank, {_start_pos, _end_pos}} ->
+        Logger.debug("yank text object (register support not yet implemented)")
+        :ok
+    end
+  end
+
+  @spec compute_text_object_range(GapBuffer.t(), TextObject.position(), atom(), term()) ::
+          TextObject.range()
+  defp compute_text_object_range(buf, pos, :inner, :word), do: TextObject.inner_word(buf, pos)
+  defp compute_text_object_range(buf, pos, :around, :word), do: TextObject.a_word(buf, pos)
+
+  defp compute_text_object_range(buf, pos, :inner, {:quote, q}),
+    do: TextObject.inner_quotes(buf, pos, q)
+
+  defp compute_text_object_range(buf, pos, :around, {:quote, q}),
+    do: TextObject.a_quotes(buf, pos, q)
+
+  defp compute_text_object_range(buf, pos, :inner, {:paren, open, close}),
+    do: TextObject.inner_parens(buf, pos, open, close)
+
+  defp compute_text_object_range(buf, pos, :around, {:paren, open, close}),
+    do: TextObject.a_parens(buf, pos, open, close)
+
+  defp compute_text_object_range(_buf, _pos, _modifier, _spec), do: nil
 
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   defp start_buffer(file_path) do

@@ -72,10 +72,10 @@ defmodule Minga.Mode do
   # ── Public API ───────────────────────────────────────────────────────────────
 
   @doc """
-  Returns a fresh FSM state with no accumulated count.
+  Returns a fresh FSM state with no accumulated count and no leader sequence.
   """
   @spec initial_state() :: state()
-  def initial_state, do: %{count: nil}
+  def initial_state, do: %{count: nil, leader_node: nil, leader_keys: []}
 
   @doc """
   Processes a key event for the given `mode`.

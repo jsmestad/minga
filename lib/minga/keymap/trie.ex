@@ -122,6 +122,29 @@ defmodule Minga.Keymap.Trie do
   end
 
   @doc """
+  Sets a human-readable description on an intermediate (prefix) node without
+  binding a command. Useful for labelling leader-key groups like `f → "+file"`.
+
+  Creates intermediate nodes as needed.
+  """
+  @spec bind_prefix(node_t(), [key()], String.t()) :: node_t()
+  def bind_prefix(%{children: children} = root, [key | rest], description)
+      when is_binary(description) do
+    child = Map.get(children, key, new())
+
+    updated_child =
+      case rest do
+        [] ->
+          %{child | description: description}
+
+        _ ->
+          bind_prefix(child, rest, description)
+      end
+
+    %{root | children: Map.put(children, key, updated_child)}
+  end
+
+  @doc """
   Returns the direct children of a trie node for which-key display.
 
   Each entry is a `{key, label}` tuple where `label` is either the
