@@ -115,102 +115,43 @@ renderer). Buffer processes survive independently.
 | — | Burrito packaging | Single binary for macOS/Linux | — |
 | — | GitHub Actions | CI (lint/test/dialyzer) + release pipeline | — |
 
-**Total: 517 tests (514 + 3 properties), 0 failures**
+**Total: 592 tests (535 Elixir + 3 properties + 54 Zig), 0 failures**
 
-### 🔴 Critical — Must fix before the editor actually runs
+### ✅ Recently Completed (formerly critical/important gaps)
 
-These are the gaps between "all Elixir logic works in tests" and "you can
-actually open a terminal and edit a file":
+| Item | What was done |
+|------|--------------|
+| Zig event loop | Full concurrent loop in `main.zig`: `/dev/tty` via libvaxis, poll() on stdin+tty, signal handlers (SIGWINCH/SIGTERM/SIGINT), panic handler with terminal restore |
+| Supervisor wiring | Port.Manager and Editor start conditionally via `Application.get_env(:minga, :start_editor)` |
+| Renderer validation | `renderer.zig` updated to match libvaxis 0.15 API: `writeCell(col, row, cell)`, `showCursor()`, arena allocator for grapheme lifetime management |
+| Terminal restoration | `defer vx.deinit()` + `defer tty.deinit()` + `vaxis.recover()` panic handler covers all exit paths |
+| Undo/redo | Snapshot stack in Buffer.Server (capped at 1000), `u` / `Ctrl+R` in Normal mode |
+| Paste | `p` (after) / `P` (before) in Normal mode, register stored in Editor state |
+| Integration test | `test/minga/integration_test.exs` — full pipeline: navigation, insert, delete, undo, command mode |
+| Zig test coverage | Expanded from 18 → 54 tests across protocol, renderer, and main |
 
-#### 1. Zig event loop (`main.zig`)
+### 🟡 Remaining — needs manual testing
 
-**Status**: Stub — prints version and exits.
-**Needed**: Full concurrent event loop:
+#### 1. End-to-end manual testing
 
-```
-1. Open /dev/tty via libvaxis (NOT stdin/stdout)
-2. Initialize vaxis with /dev/tty fd
-3. Send ready event to BEAM (width, height) via stdout
-4. Concurrent loop:
-   a. Poll libvaxis for terminal events → encode → write to stdout (Port)
-   b. Read stdin for render commands → decode → pass to Renderer
-   c. Handle resize events → send to BEAM
-5. On stdin EOF (BEAM closed port): restore terminal, exit cleanly
-```
+**Status**: All logic is implemented and unit-tested, but the full editor
+has not been launched in a real terminal yet.
+**Needed**: Run `mix minga README.md` and verify:
+- Terminal enters raw/alternate screen mode
+- File content displays correctly
+- hjkl navigation works
+- `i` enters insert, typing works, `Esc` returns to normal
+- `:w` saves, `:q` quits
+- Terminal restores cleanly on exit
+- Ctrl+C / kill doesn't leave terminal in raw mode
 
-Key risk: libvaxis's API for opening `/dev/tty` instead of stdin needs
-verification. Fallback: fd 3 via wrapper script.
+#### 2. Port protocol end-to-end
 
-**Files**: `zig/src/main.zig`
-
-#### 2. Wire supervisor tree
-
-**Status**: `application.ex` has Port.Manager and Editor commented out.
-**Needed**: Uncomment and start them in the supervision tree. Editor needs
-to subscribe to Port.Manager on init and start rendering.
-
-**Files**: `lib/minga/application.ex`
-
-#### 3. Validate Zig renderer against real libvaxis API
-
-**Status**: `renderer.zig` compiles but API calls are based on libvaxis
-docs/examples, not verified at runtime.
-**Needed**: Test with a real vaxis instance. The `writeCell`, `setCursorPos`,
-`window()`, `render()` calls may need adjustment for libvaxis 0.15's actual
-API surface.
-
-**Files**: `zig/src/renderer.zig`
-
-#### 4. Terminal restoration on crash
-
-**Status**: Not implemented.
-**Needed**: If the BEAM process crashes or gets SIGTERM, the Zig renderer
-must restore terminal state (disable raw mode, show cursor, etc.). libvaxis
-handles this via its `deinit()`, but we need to ensure it's called on all
-exit paths — including when stdin closes unexpectedly.
-
-**Files**: `zig/src/main.zig`
-
-### 🟡 Important — Needed for usable editor
-
-#### 5. Undo/redo
-
-**Status**: Not implemented, not in original plan.
-**Needed**: Table stakes for any editor. Users expect `u` / `Ctrl+R`.
-
-Design options:
-- **A. Command history stack**: Store reverse operations for each edit.
-  Simple, low memory, but complex for compound operations.
-- **B. Snapshot stack**: Store full gap buffer states. Simple to implement
-  with Elixir's immutable data (just push `t()` onto a list). Memory cost
-  is manageable for normal files since Elixir shares unchanged binary
-  segments.
-- **Recommended**: Option B (snapshot stack) — Elixir's structural sharing
-  makes this nearly free. Cap at ~1000 undo levels.
-
-**Files**: `lib/minga/buffer/server.ex`, `lib/minga/mode/normal.ex`
-
-#### 6. Paste (`p` / `P`)
-
-**Status**: Yank (`y`) stores text, but there's no paste command.
-**Needed**: `p` pastes after cursor, `P` pastes before cursor. Register
-storage is already implicit in the operator module.
-
-**Files**: `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
-
-#### 7. End-to-end integration test
-
-**Status**: No test that starts the full OTP app and sends simulated
-keystrokes through the Port protocol.
-**Needed**: At minimum, a test that verifies:
-- App starts without crash
-- Open file → buffer has content
-- Simulate key events → buffer changes
-- Save → file written
-
-Can use a mock Zig binary (echo script) instead of real terminal.
-
-**Files**: `test/minga/integration_test.exs`
+**Status**: `{:packet, 4}` framing tested in unit tests on both sides,
+but never tested through a real Erlang Port connection.
+**Needed**: Verify the 4-byte length prefix handling works correctly
+when BEAM spawns the Zig binary. This is the most likely failure point
+on first real launch.
 
 ### 🟢 Post-V1 / V2
 
@@ -229,6 +170,8 @@ Can use a mock Zig binary (echo script) instead of real terminal.
 - **Line numbers** — absolute + relative
 - **Soft wrap** — long lines
 - **Autoindent** — language-aware indentation
+- **GUI renderer** — second Zig binary (`minga-gui`) using WebGPU/wgpu or
+  similar, same Port protocol; zero Elixir changes needed
 
 ---
 
