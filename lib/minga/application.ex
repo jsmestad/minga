@@ -23,6 +23,7 @@ defmodule Minga.Application do
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
     base_children = [
+      Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       Minga.Command.Registry
     ]

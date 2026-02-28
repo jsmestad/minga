@@ -1244,23 +1244,7 @@ defmodule Minga.Editor do
   # Used by `cc` (operator-pending) and `S` (normal mode shortcut).
   defp execute_command(%{buffer: buf} = state, :change_line) do
     {line, _col} = BufferServer.cursor(buf)
-    yanked = BufferServer.get_lines_content(buf, line, line)
-
-    case BufferServer.get_lines(buf, line, 1) do
-      [text] when text != "" ->
-        # Delete all characters on the line (from col 0 to end)
-        line_len = String.length(text)
-        BufferServer.move_to(buf, {line, 0})
-
-        for _ <- 1..line_len do
-          BufferServer.delete_at(buf)
-        end
-
-      _ ->
-        :ok
-    end
-
-    BufferServer.move_to(buf, {line, 0})
+    {:ok, yanked} = BufferServer.clear_line(buf, line)
     %{state | register: yanked <> "\n"}
   end
 
@@ -1547,11 +1531,14 @@ defmodule Minga.Editor do
     buf_index = state.active_buffer + 1
     modeline_row = viewport.rows - 2
 
+    filetype = Map.get(snapshot, :filetype, :text)
+
     modeline_commands =
       render_modeline(modeline_row, viewport.cols, %{
         mode: state.mode,
         mode_state: state.mode_state,
         file_name: file_name,
+        filetype: filetype,
         dirty_marker: dirty_marker,
         cursor_line: cursor_line,
         cursor_col: cursor_col,
@@ -1867,6 +1854,7 @@ defmodule Minga.Editor do
           mode: Mode.mode(),
           mode_state: Mode.state(),
           file_name: String.t(),
+          filetype: atom(),
           dirty_marker: String.t(),
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
@@ -1887,6 +1875,7 @@ defmodule Minga.Editor do
     mode_segment = " #{mode_badge(data.mode, data.mode_state)} "
     buf_indicator = if data.buf_count > 1, do: " [#{data.buf_index}/#{data.buf_count}]", else: ""
     file_segment = " #{data.file_name}#{data.dirty_marker}#{buf_indicator} "
+    filetype_segment = " #{filetype_label(data.filetype)} "
 
     percent =
       if data.line_count <= 1,
@@ -1898,6 +1887,9 @@ defmodule Minga.Editor do
 
     # Build draw commands as a list of {text, fg, bg, opts} segments,
     # then lay them out left-to-right.
+    filetype_fg = 0x98BE65
+    filetype_bg = bar_bg
+
     left_segments = [
       {mode_segment, mode_fg, mode_bg, bold: true},
       {@separator, mode_bg, info_bg, []},
@@ -1906,6 +1898,7 @@ defmodule Minga.Editor do
     ]
 
     right_segments = [
+      {filetype_segment, filetype_fg, filetype_bg, []},
       {@separator, info_bg, bar_bg, []},
       {pos_segment, info_fg, info_bg, []},
       {@separator, mode_bg, info_bg, []},
@@ -1942,6 +1935,44 @@ defmodule Minga.Editor do
   defp mode_badge(:operator_pending, _state), do: "OPERATOR"
   defp mode_badge(:command, _state), do: "COMMAND"
   defp mode_badge(:replace, _state), do: "REPLACE"
+
+  @spec filetype_label(atom()) :: String.t()
+  defp filetype_label(:text), do: "Text"
+  defp filetype_label(:elixir), do: "Elixir"
+  defp filetype_label(:erlang), do: "Erlang"
+  defp filetype_label(:heex), do: "HEEx"
+  defp filetype_label(:ruby), do: "Ruby"
+  defp filetype_label(:javascript), do: "JavaScript"
+  defp filetype_label(:typescript), do: "TypeScript"
+  defp filetype_label(:javascript_react), do: "JSX"
+  defp filetype_label(:typescript_react), do: "TSX"
+  defp filetype_label(:go), do: "Go"
+  defp filetype_label(:rust), do: "Rust"
+  defp filetype_label(:zig), do: "Zig"
+  defp filetype_label(:c), do: "C"
+  defp filetype_label(:cpp), do: "C++"
+  defp filetype_label(:lua), do: "Lua"
+  defp filetype_label(:python), do: "Python"
+  defp filetype_label(:bash), do: "Shell"
+  defp filetype_label(:html), do: "HTML"
+  defp filetype_label(:css), do: "CSS"
+  defp filetype_label(:json), do: "JSON"
+  defp filetype_label(:yaml), do: "YAML"
+  defp filetype_label(:toml), do: "TOML"
+  defp filetype_label(:markdown), do: "Markdown"
+  defp filetype_label(:sql), do: "SQL"
+  defp filetype_label(:graphql), do: "GraphQL"
+  defp filetype_label(:kotlin), do: "Kotlin"
+  defp filetype_label(:gleam), do: "Gleam"
+  defp filetype_label(:dockerfile), do: "Dockerfile"
+  defp filetype_label(:make), do: "Makefile"
+  defp filetype_label(:emacs_lisp), do: "Emacs Lisp"
+  defp filetype_label(:lfe), do: "LFE"
+  defp filetype_label(:nix), do: "Nix"
+  defp filetype_label(:java), do: "Java"
+  defp filetype_label(:swift), do: "Swift"
+  defp filetype_label(:fish), do: "Fish"
+  defp filetype_label(other), do: other |> Atom.to_string() |> String.capitalize()
 
   @spec cursor_shape_for_mode(Mode.mode()) :: Protocol.cursor_shape()
   defp cursor_shape_for_mode(:insert), do: :beam
@@ -2234,8 +2265,7 @@ defmodule Minga.Editor do
   @spec apply_motion(pid(), (GapBuffer.t(), Minga.Motion.position() -> Minga.Motion.position())) ::
           :ok
   defp apply_motion(buf, motion_fn) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     new_pos = motion_fn.(tmp_buf, cursor)
     BufferServer.move_to(buf, new_pos)
@@ -2247,8 +2277,7 @@ defmodule Minga.Editor do
 
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   defp apply_operator_motion(buf, state, motion, action) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
     target = resolve_motion(tmp_buf, cursor, motion)
@@ -2324,8 +2353,7 @@ defmodule Minga.Editor do
 
   @spec apply_find_char(pid(), Minga.Mode.State.find_direction(), String.t()) :: :ok
   defp apply_find_char(buf, dir, char) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
     motion_fn =

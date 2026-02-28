@@ -19,6 +19,7 @@ defmodule Minga.Buffer.Server do
   use GenServer
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Filetype
 
   @typedoc "Options for starting a buffer server."
   @type start_opt ::
@@ -129,12 +130,19 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :file_path)
   end
 
+  @doc "Returns the detected filetype atom for this buffer."
+  @spec filetype(GenServer.server()) :: atom()
+  def filetype(server) do
+    GenServer.call(server, :filetype)
+  end
+
   @typedoc "All data needed to render a single frame, fetched in one GenServer call."
   @type render_snapshot :: %{
           cursor: GapBuffer.position(),
           line_count: pos_integer(),
           lines: [String.t()],
           file_path: String.t() | nil,
+          filetype: atom(),
           dirty: boolean()
         }
 
@@ -185,6 +193,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:get_lines_content, start_line, end_line})
   end
 
+  @doc "Returns the content and cursor position in a single GenServer call."
+  @spec content_and_cursor(GenServer.server()) :: {String.t(), GapBuffer.position()}
+  def content_and_cursor(server) do
+    GenServer.call(server, :content_and_cursor)
+  end
+
+  @doc "Clears all content on the given line. Returns `{:ok, yanked_text}`."
+  @spec clear_line(GenServer.server(), non_neg_integer()) :: {:ok, String.t()}
+  def clear_line(server, line) when is_integer(line) and line >= 0 do
+    GenServer.call(server, {:clear_line, line})
+  end
+
   @doc "Undoes the last mutation, restoring the previous buffer state."
   @spec undo(GenServer.server()) :: :ok
   def undo(server) do
@@ -215,9 +235,13 @@ defmodule Minga.Buffer.Server do
 
     case load_content(file_path, initial_content) do
       {:ok, text, path} ->
+        first_line = text |> String.split("\n", parts: 2) |> List.first("")
+        filetype = Filetype.detect_from_content(path, first_line)
+
         state = %BufState{
           gap_buffer: GapBuffer.new(text),
-          file_path: path
+          file_path: path,
+          filetype: filetype
         }
 
         {:ok, state}
@@ -232,10 +256,14 @@ defmodule Minga.Buffer.Server do
   def handle_call({:open, file_path}, _from, state) do
     case File.read(file_path) do
       {:ok, text} ->
+        first_line = text |> String.split("\n", parts: 2) |> List.first("")
+        filetype = Filetype.detect_from_content(file_path, first_line)
+
         new_state = %{
           state
           | gap_buffer: GapBuffer.new(text),
             file_path: file_path,
+            filetype: filetype,
             dirty: false
         }
 
@@ -326,6 +354,10 @@ defmodule Minga.Buffer.Server do
     {:reply, state.file_path, state}
   end
 
+  def handle_call(:filetype, _from, state) do
+    {:reply, state.filetype, state}
+  end
+
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
     buf = state.gap_buffer
 
@@ -334,6 +366,7 @@ defmodule Minga.Buffer.Server do
       line_count: GapBuffer.line_count(buf),
       lines: GapBuffer.lines(buf, first_line, count),
       file_path: state.file_path,
+      filetype: state.filetype,
       dirty: state.dirty
     }
 
@@ -372,6 +405,20 @@ defmodule Minga.Buffer.Server do
       {:reply, :ok, state}
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+    end
+  end
+
+  def handle_call(:content_and_cursor, _from, state) do
+    {:reply, GapBuffer.content_and_cursor(state.gap_buffer), state}
+  end
+
+  def handle_call({:clear_line, line}, _from, state) do
+    {yanked, new_buf} = GapBuffer.clear_line(state.gap_buffer, line)
+
+    if new_buf == state.gap_buffer do
+      {:reply, {:ok, yanked}, state}
+    else
+      {:reply, {:ok, yanked}, push_undo(state, new_buf) |> mark_dirty()}
     end
   end
 

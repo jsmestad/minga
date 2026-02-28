@@ -10,6 +10,7 @@ defmodule Minga.Buffer.State do
   @enforce_keys [:gap_buffer]
   defstruct gap_buffer: nil,
             file_path: nil,
+            filetype: :text,
             dirty: false,
             undo_stack: [],
             redo_stack: []
@@ -17,6 +18,7 @@ defmodule Minga.Buffer.State do
   @type t :: %__MODULE__{
           gap_buffer: GapBuffer.t(),
           file_path: String.t() | nil,
+          filetype: atom(),
           dirty: boolean(),
           undo_stack: [GapBuffer.t()],
           redo_stack: [GapBuffer.t()]
