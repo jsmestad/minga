@@ -32,6 +32,10 @@ defmodule Minga.Mode.Visual do
   | `w`    | Word forward    |
   | `b`    | Word backward   |
   | `e`    | End of word     |
+  | `C-d`  | Half-page down  |
+  | `C-u`  | Half-page up    |
+  | `C-f`  | Page down       |
+  | `C-b`  | Page up         |
   | Arrows | Directional move|
 
   ## State contract
@@ -46,11 +50,16 @@ defmodule Minga.Mode.Visual do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.VisualState
 
   # Special codepoints
   @escape 27
+
+  # Modifier flags (mirrors Minga.Port.Protocol)
+  @ctrl 0x02
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_416
@@ -94,6 +103,28 @@ defmodule Minga.Mode.Visual do
 
   def handle_key({?e, 0}, state) do
     {:execute, :end_of_word, state}
+  end
+
+  # ── Page / half-page scrolling ──────────────────────────────────────────────
+
+  # Ctrl+D → half-page down
+  def handle_key({?d, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :half_page_down, state}
+  end
+
+  # Ctrl+U → half-page up
+  def handle_key({?u, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :half_page_up, state}
+  end
+
+  # Ctrl+F → full page down
+  def handle_key({?f, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :page_down, state}
+  end
+
+  # Ctrl+B → full page up
+  def handle_key({?b, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :page_up, state}
   end
 
   # Arrow keys

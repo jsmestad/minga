@@ -162,6 +162,24 @@ defmodule Minga.Mode.NormalTest do
     end
   end
 
+  describe "page / half-page scrolling" do
+    test "Ctrl+d produces :half_page_down" do
+      assert {:execute, :half_page_down, _} = Normal.handle_key({?d, 0x02}, fresh_state())
+    end
+
+    test "Ctrl+u produces :half_page_up" do
+      assert {:execute, :half_page_up, _} = Normal.handle_key({?u, 0x02}, fresh_state())
+    end
+
+    test "Ctrl+f produces :page_down" do
+      assert {:execute, :page_down, _} = Normal.handle_key({?f, 0x02}, fresh_state())
+    end
+
+    test "Ctrl+b produces :page_up" do
+      assert {:execute, :page_up, _} = Normal.handle_key({?b, 0x02}, fresh_state())
+    end
+  end
+
   describe "undo / redo" do
     test "u produces :undo" do
       assert {:execute, :undo, _} = Normal.handle_key({?u, 0}, fresh_state())

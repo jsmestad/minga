@@ -70,10 +70,13 @@ defmodule Minga.Mode.OperatorPending do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Mode
   alias Minga.Mode.OperatorPendingState, as: OPState
 
   @escape 27
+  @ctrl 0x02
 
   @impl Mode
   @doc """
@@ -201,6 +204,24 @@ defmodule Minga.Mode.OperatorPending do
   def handle_key({?y, 0}, %OPState{operator: :yank} = state) do
     cmds = List.duplicate(:yank_line, OPState.total_count(state))
     {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
+  end
+
+  # ── Page / half-page motions ───────────────────────────────────────────────
+
+  def handle_key({?d, mods}, %OPState{} = state) when band(mods, @ctrl) != 0 do
+    execute_with_motion(state, :half_page_down)
+  end
+
+  def handle_key({?u, mods}, %OPState{} = state) when band(mods, @ctrl) != 0 do
+    execute_with_motion(state, :half_page_up)
+  end
+
+  def handle_key({?f, mods}, %OPState{} = state) when band(mods, @ctrl) != 0 do
+    execute_with_motion(state, :page_down)
+  end
+
+  def handle_key({?b, mods}, %OPState{} = state) when band(mods, @ctrl) != 0 do
+    execute_with_motion(state, :page_up)
   end
 
   # ── Escape: cancel back to Normal ────────────────────────────────────────

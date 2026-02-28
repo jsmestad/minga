@@ -316,6 +316,28 @@ defmodule Minga.Editor do
     state
   end
 
+  # ── Page / half-page scrolling ────────────────────────────────────────────────
+
+  defp execute_command(%{buffer: buf, viewport: vp} = state, :half_page_down) do
+    page_move(buf, vp, div(Viewport.content_rows(vp), 2))
+    state
+  end
+
+  defp execute_command(%{buffer: buf, viewport: vp} = state, :half_page_up) do
+    page_move(buf, vp, -div(Viewport.content_rows(vp), 2))
+    state
+  end
+
+  defp execute_command(%{buffer: buf, viewport: vp} = state, :page_down) do
+    page_move(buf, vp, Viewport.content_rows(vp))
+    state
+  end
+
+  defp execute_command(%{buffer: buf, viewport: vp} = state, :page_up) do
+    page_move(buf, vp, -Viewport.content_rows(vp))
+    state
+  end
+
   # ── Undo / redo ──────────────────────────────────────────────────────────────
 
   defp execute_command(%{buffer: buf} = state, :undo) do
@@ -701,6 +723,25 @@ defmodule Minga.Editor do
     do: TextObject.a_parens(buf, pos, open, close)
 
   defp compute_text_object_range(_buf, _pos, _modifier, _spec), do: nil
+
+  # Move the cursor by `delta` lines (positive = down, negative = up),
+  # clamping to buffer bounds. Column is preserved or clamped to the new line's length.
+  @spec page_move(pid(), Viewport.t(), integer()) :: :ok
+  defp page_move(buf, _vp, delta) do
+    {line, col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    target_line = line + delta
+    target_line = max(0, min(target_line, total_lines - 1))
+
+    # Clamp column to the new line's length
+    target_col =
+      case BufferServer.get_lines(buf, target_line, 1) do
+        [text] -> min(col, max(0, String.length(text) - 1))
+        [] -> 0
+      end
+
+    BufferServer.move_to(buf, {target_line, target_col})
+  end
 
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   defp start_buffer(file_path) do

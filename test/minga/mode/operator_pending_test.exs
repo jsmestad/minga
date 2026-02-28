@@ -145,6 +145,40 @@ defmodule Minga.Mode.OperatorPendingTest do
 
   # ── Escape cancels ─────────────────────────────────────────────────────────
 
+  describe "page / half-page motions" do
+    test "d+Ctrl+d emits {:delete_motion, :half_page_down}" do
+      ctrl = 0x02
+      state = %OperatorPendingState{operator: :delete, op_count: 1}
+
+      assert {:execute_then_transition, [{:delete_motion, :half_page_down}], :normal, _} =
+               OperatorPending.handle_key({?d, ctrl}, state)
+    end
+
+    test "d+Ctrl+u emits {:delete_motion, :half_page_up}" do
+      ctrl = 0x02
+      state = %OperatorPendingState{operator: :delete, op_count: 1}
+
+      assert {:execute_then_transition, [{:delete_motion, :half_page_up}], :normal, _} =
+               OperatorPending.handle_key({?u, ctrl}, state)
+    end
+
+    test "y+Ctrl+f emits {:yank_motion, :page_down}" do
+      ctrl = 0x02
+      state = %OperatorPendingState{operator: :yank, op_count: 1}
+
+      assert {:execute_then_transition, [{:yank_motion, :page_down}], :normal, _} =
+               OperatorPending.handle_key({?f, ctrl}, state)
+    end
+
+    test "c+Ctrl+b emits {:change_motion, :page_up} and transitions to insert" do
+      ctrl = 0x02
+      state = %OperatorPendingState{operator: :change, op_count: 1}
+
+      assert {:execute_then_transition, [{:change_motion, :page_up}], :insert, _} =
+               OperatorPending.handle_key({?b, ctrl}, state)
+    end
+  end
+
   describe "Escape" do
     test "Escape transitions back to :normal" do
       state = op_state(:delete)

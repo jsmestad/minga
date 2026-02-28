@@ -545,6 +545,91 @@ defmodule Minga.EditorTest do
     end
   end
 
+  describe "page / half-page scrolling" do
+    # Generate a 30-line buffer for scrolling tests (viewport is 10 rows = 9 content rows)
+    defp start_scroll_editor do
+      content = Enum.map_join(0..29, "\n", &"line #{&1}")
+
+      {:ok, buffer} = BufferServer.start_link(content: content)
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10
+        )
+
+      {editor, buffer}
+    end
+
+    test "Ctrl+d moves cursor down by half a page" do
+      {editor, buffer} = start_scroll_editor()
+      # Viewport is 10 rows, content_rows = 9, half = 4
+      send_key(editor, ?d, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 4
+    end
+
+    test "Ctrl+u moves cursor up by half a page" do
+      {editor, buffer} = start_scroll_editor()
+      # Move down first, then half-page up
+      BufferServer.move_to(buffer, {10, 0})
+      Process.sleep(10)
+      send_key(editor, ?u, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 6
+    end
+
+    test "Ctrl+f moves cursor down by a full page" do
+      {editor, buffer} = start_scroll_editor()
+      send_key(editor, ?f, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 9
+    end
+
+    test "Ctrl+b moves cursor up by a full page" do
+      {editor, buffer} = start_scroll_editor()
+      BufferServer.move_to(buffer, {20, 0})
+      Process.sleep(10)
+      send_key(editor, ?b, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 11
+    end
+
+    test "Ctrl+d clamps to last line at buffer end" do
+      {editor, buffer} = start_scroll_editor()
+      BufferServer.move_to(buffer, {28, 0})
+      Process.sleep(10)
+      send_key(editor, ?d, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      # 30 lines (0-29), should clamp to line 29
+      assert line == 29
+    end
+
+    test "Ctrl+u clamps to first line at buffer start" do
+      {editor, buffer} = start_scroll_editor()
+      BufferServer.move_to(buffer, {2, 0})
+      Process.sleep(10)
+      send_key(editor, ?u, 0x02)
+      {line, _col} = BufferServer.cursor(buffer)
+      assert line == 0
+    end
+
+    test "column is clamped to new line length" do
+      # Lines have different lengths: "line 0" (6) vs "line 29" (7)
+      {editor, buffer} = start_scroll_editor()
+      # Put cursor at col 6 on line 29 (length 7, so col 6 is valid)
+      BufferServer.move_to(buffer, {29, 6})
+      Process.sleep(10)
+      # Page up to a shorter line — col should clamp
+      send_key(editor, ?b, 0x02)
+      {_line, col} = BufferServer.cursor(buffer)
+      assert col <= 6
+    end
+  end
+
   describe "stub commands" do
     test "find_file doesn't crash" do
       {editor, _buffer} = start_editor()

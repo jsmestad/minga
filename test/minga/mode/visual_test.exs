@@ -128,6 +128,24 @@ defmodule Minga.Mode.VisualTest do
     end
   end
 
+  describe "page / half-page scrolling in visual mode" do
+    test "Ctrl+d emits :half_page_down" do
+      assert {:execute, :half_page_down, _} = Visual.handle_key({?d, 0x02}, visual_state())
+    end
+
+    test "Ctrl+u emits :half_page_up" do
+      assert {:execute, :half_page_up, _} = Visual.handle_key({?u, 0x02}, visual_state())
+    end
+
+    test "Ctrl+f emits :page_down" do
+      assert {:execute, :page_down, _} = Visual.handle_key({?f, 0x02}, visual_state())
+    end
+
+    test "Ctrl+b emits :page_up" do
+      assert {:execute, :page_up, _} = Visual.handle_key({?b, 0x02}, visual_state())
+    end
+  end
+
   describe "arrow keys in visual mode" do
     test "up arrow (57_416) emits :move_up" do
       assert {:execute, :move_up, _} = Visual.handle_key({57_416, 0}, visual_state())
