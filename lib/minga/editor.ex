@@ -680,8 +680,7 @@ defmodule Minga.Editor do
          %{buffer: buf, mode: :insert, autopair_enabled: true} = state,
          :delete_before
        ) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
     case Minga.AutoPair.on_backspace(tmp_buf, cursor) do
@@ -717,8 +716,7 @@ defmodule Minga.Editor do
          {:insert_char, char}
        )
        when is_binary(char) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
     case Minga.AutoPair.on_insert(tmp_buf, cursor, char) do
@@ -1051,8 +1049,7 @@ defmodule Minga.Editor do
 
   # Indent lines from cursor to motion target
   defp execute_command(%{buffer: buf} = state, {:indent_motion, motion}) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     target = resolve_motion(tmp_buf, cursor, motion)
     {cursor_line, _} = cursor
@@ -1065,8 +1062,7 @@ defmodule Minga.Editor do
 
   # Dedent lines from cursor to motion target
   defp execute_command(%{buffer: buf} = state, {:dedent_motion, motion}) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     target = resolve_motion(tmp_buf, cursor, motion)
     {cursor_line, _} = cursor
@@ -1108,8 +1104,7 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(%{buffer: buf} = state, :next_line_first_non_blank) do
-    content = BufferServer.content(buf)
-    {line, _col} = BufferServer.cursor(buf)
+    {content, {line, _col}} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     total = GapBuffer.line_count(tmp_buf)
     next_line = min(line + 1, total - 1)
@@ -1119,8 +1114,7 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(%{buffer: buf} = state, :prev_line_first_non_blank) do
-    content = BufferServer.content(buf)
-    {line, _col} = BufferServer.cursor(buf)
+    {content, {line, _col}} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     prev_line = max(line - 1, 0)
     new_pos = Minga.Motion.first_non_blank(tmp_buf, {prev_line, 0})
@@ -1993,8 +1987,7 @@ defmodule Minga.Editor do
           text_object_action()
         ) :: state()
   defp apply_text_object(%{buffer: buf} = state, modifier, spec, action) do
-    cursor = BufferServer.cursor(buf)
-    content = BufferServer.content(buf)
+    {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
     range = compute_text_object_range(tmp_buf, cursor, modifier, spec)

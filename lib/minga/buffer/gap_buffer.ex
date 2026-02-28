@@ -242,14 +242,10 @@ defmodule Minga.Buffer.GapBuffer do
 
   @doc "Moves the cursor one step in the given direction."
   @spec move(t(), direction()) :: t()
-  def move(%__MODULE__{} = buf, direction) when direction in [:left, :right, :up, :down] do
-    case direction do
-      :left -> move_left(buf)
-      :right -> move_right(buf)
-      :up -> move_up(buf)
-      :down -> move_down(buf)
-    end
-  end
+  def move(%__MODULE__{} = buf, :left), do: move_left(buf)
+  def move(%__MODULE__{} = buf, :right), do: move_right(buf)
+  def move(%__MODULE__{} = buf, :up), do: move_up(buf)
+  def move(%__MODULE__{} = buf, :down), do: move_down(buf)
 
   @doc """
   Moves the cursor to an exact `{line, col}` position.
@@ -402,6 +398,43 @@ defmodule Minga.Buffer.GapBuffer do
     new_text |> new() |> move_to({target_line, 0})
   end
 
+  @doc """
+  Clears all content on the given line, leaving an empty line.
+  Returns `{yanked_text, new_buffer}` where `yanked_text` is the text
+  that was on the line. The cursor is placed at column 0 of the line.
+  """
+  @spec clear_line(t(), non_neg_integer()) :: {String.t(), t()}
+  def clear_line(%__MODULE__{} = buf, line_num) when is_integer(line_num) and line_num >= 0 do
+    case line_at(buf, line_num) do
+      nil ->
+        {"", buf}
+
+      "" ->
+        {"", move_to(buf, {line_num, 0})}
+
+      text ->
+        line_len = String.length(text)
+        start_pos = {line_num, 0}
+        end_pos = {line_num, line_len - 1}
+        new_buf = delete_range(buf, start_pos, end_pos)
+        {text, new_buf}
+    end
+  end
+
+  @doc """
+  Returns the content and cursor position in a single call,
+  avoiding separate content/1 + cursor/1 round-trips.
+  """
+  @spec content_and_cursor(t()) :: {String.t(), position()}
+  def content_and_cursor(%__MODULE__{
+        before: before,
+        after: after_,
+        cursor_line: line,
+        cursor_col: col
+      }) do
+    {before <> after_, {line, col}}
+  end
+
   # ── Private helpers ──
 
   @spec move_left(t()) :: t()
@@ -537,9 +570,7 @@ defmodule Minga.Buffer.GapBuffer do
 
   @spec count_newlines(String.t()) :: non_neg_integer()
   defp count_newlines(str) do
-    str
-    |> String.graphemes()
-    |> Enum.count(&(&1 == "\n"))
+    length(:binary.matches(str, "\n"))
   end
 
   @spec grapheme_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::

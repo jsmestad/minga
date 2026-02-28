@@ -29,6 +29,9 @@ defmodule Minga.Motion do
   @typedoc "A zero-indexed {line, col} cursor position."
   @type position :: GapBuffer.position()
 
+  # Inline hot character classification helpers for JIT optimization.
+  @compile {:inline, word_char?: 1, whitespace?: 1, classify_char: 1}
+
   # ── Word motions ────────────────────────────────────────────────────────────
 
   @doc """
@@ -47,8 +50,8 @@ defmodule Minga.Motion do
   @spec word_forward(GapBuffer.t(), position()) :: position()
   def word_forward(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
-    total = length(graphemes)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
+    total = tuple_size(graphemes)
 
     if total == 0 do
       pos
@@ -75,9 +78,9 @@ defmodule Minga.Motion do
   @spec word_backward(GapBuffer.t(), position()) :: position()
   def word_backward(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
 
-    if graphemes == [] do
+    if tuple_size(graphemes) == 0 do
       pos
     else
       all_lines = String.split(text, "\n")
@@ -107,8 +110,8 @@ defmodule Minga.Motion do
   @spec word_end(GapBuffer.t(), position()) :: position()
   def word_end(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
-    total = length(graphemes)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
+    total = tuple_size(graphemes)
 
     if total == 0 do
       pos
@@ -171,12 +174,18 @@ defmodule Minga.Motion do
         {line, 0}
 
       text ->
-        col =
-          text
-          |> String.graphemes()
-          |> Enum.find_index(fn g -> g not in [" ", "\t"] end)
+        col = find_first_non_blank(text, 0)
+        {line, col}
+    end
+  end
 
-        {line, col || 0}
+  # Walk the binary to find first non-blank, avoiding String.graphemes allocation.
+  @spec find_first_non_blank(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp find_first_non_blank(text, col) do
+    case String.next_grapheme(text) do
+      {g, rest} when g in [" ", "\t"] -> find_first_non_blank(rest, col + 1)
+      {_g, _rest} -> col
+      nil -> 0
     end
   end
 
@@ -228,9 +237,7 @@ defmodule Minga.Motion do
         {line, col}
 
       text ->
-        graphemes = String.graphemes(text)
-
-        case find_in_graphemes(graphemes, char, col + 1) do
+        case find_in_binary(text, char, col + 1, 0) do
           nil -> {line, col}
           idx -> {line, idx}
         end
@@ -254,9 +261,9 @@ defmodule Minga.Motion do
         {line, col}
 
       text ->
-        graphemes = String.graphemes(text)
+        graphemes = text |> String.graphemes() |> List.to_tuple()
 
-        case rfind_in_graphemes(graphemes, char, col - 1) do
+        case rfind_in_tuple(graphemes, char, col - 1) do
           nil -> {line, col}
           idx -> {line, idx}
         end
@@ -328,18 +335,18 @@ defmodule Minga.Motion do
   @spec match_bracket(GapBuffer.t(), position()) :: position()
   def match_bracket(%GapBuffer{} = buf, {line, col} = pos) do
     current_line_text = GapBuffer.line_at(buf, line) || ""
-    line_graphemes = String.graphemes(current_line_text)
+    line_graphemes = current_line_text |> String.graphemes() |> List.to_tuple()
 
-    case find_bracket_on_line(line_graphemes, col) do
+    case find_bracket_on_line(line_graphemes, col, tuple_size(line_graphemes)) do
       nil -> pos
       bracket_col -> do_match_bracket(buf, pos, line_graphemes, bracket_col)
     end
   end
 
-  @spec do_match_bracket(GapBuffer.t(), position(), [String.t()], non_neg_integer()) ::
+  @spec do_match_bracket(GapBuffer.t(), position(), tuple(), non_neg_integer()) ::
           position()
   defp do_match_bracket(buf, {line, col} = pos, line_graphemes, bracket_col) do
-    bracket_char = Enum.at(line_graphemes, bracket_col)
+    bracket_char = elem(line_graphemes, bracket_col)
 
     case Map.get(@bracket_pairs, bracket_char) do
       nil ->
@@ -347,7 +354,7 @@ defmodule Minga.Motion do
 
       {open, close, direction} ->
         text = GapBuffer.content(buf)
-        graphemes = String.graphemes(text)
+        graphemes = text |> String.graphemes() |> List.to_tuple()
         all_lines = String.split(text, "\n")
         abs_offset = offset_for(all_lines, line, col) - col + bracket_col
 
@@ -372,7 +379,6 @@ defmodule Minga.Motion do
   @spec paragraph_forward(GapBuffer.t(), position()) :: position()
   def paragraph_forward(%GapBuffer{} = buf, {line, _col}) do
     total = GapBuffer.line_count(buf)
-    # Skip non-blank lines, then find next blank line
     find_paragraph_boundary(buf, line + 1, total, :forward)
   end
 
@@ -405,8 +411,8 @@ defmodule Minga.Motion do
   @spec word_forward_big(GapBuffer.t(), position()) :: position()
   def word_forward_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
-    total = length(graphemes)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
+    total = tuple_size(graphemes)
 
     if total == 0 do
       pos
@@ -430,9 +436,9 @@ defmodule Minga.Motion do
   @spec word_backward_big(GapBuffer.t(), position()) :: position()
   def word_backward_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
 
-    if graphemes == [] do
+    if tuple_size(graphemes) == 0 do
       pos
     else
       all_lines = String.split(text, "\n")
@@ -459,8 +465,8 @@ defmodule Minga.Motion do
   @spec word_end_big(GapBuffer.t(), position()) :: position()
   def word_end_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = String.graphemes(text)
-    total = length(graphemes)
+    graphemes = text |> String.graphemes() |> List.to_tuple()
+    total = tuple_size(graphemes)
 
     if total == 0 do
       pos
@@ -485,13 +491,30 @@ defmodule Minga.Motion do
     prefix + col
   end
 
-  # `b` motion helpers: move backward to start of the previous/current word.
+  # ── Character classification (JIT-friendly binary pattern matching) ──────
 
-  # Moves backward from `offset`, first skipping whitespace, then finding the
-  # start of the word (or punctuation) run. Returns the starting grapheme index.
-  @spec do_word_backward([String.t()], non_neg_integer()) :: non_neg_integer()
+  @spec classify_char(String.t()) :: :word | :whitespace | :punctuation
+  defp classify_char(<<c, _::binary>>) when c >= ?a and c <= ?z, do: :word
+  defp classify_char(<<c, _::binary>>) when c >= ?A and c <= ?Z, do: :word
+  defp classify_char(<<c, _::binary>>) when c >= ?0 and c <= ?9, do: :word
+  defp classify_char(<<?_, _::binary>>), do: :word
+  defp classify_char(<<?\s, _::binary>>), do: :whitespace
+  defp classify_char(<<?\t, _::binary>>), do: :whitespace
+  defp classify_char(<<?\n, _::binary>>), do: :whitespace
+  defp classify_char(_), do: :punctuation
+
+  @spec word_char?(String.t() | nil) :: boolean()
+  defp word_char?(nil), do: false
+  defp word_char?(g), do: classify_char(g) == :word
+
+  @spec whitespace?(String.t() | nil) :: boolean()
+  defp whitespace?(nil), do: false
+  defp whitespace?(g), do: classify_char(g) == :whitespace
+
+  # ── `b` motion helpers ──
+
+  @spec do_word_backward(tuple(), non_neg_integer()) :: non_neg_integer()
   defp do_word_backward(graphemes, offset) do
-    # Step 1: skip backward past any whitespace to land on a non-whitespace char.
     non_ws = backward_find(graphemes, offset, fn g -> not whitespace?(g) end)
 
     if non_ws < 0 do
@@ -501,10 +524,9 @@ defmodule Minga.Motion do
     end
   end
 
-  # Step 2: find the start of the word/punctuation run at `index`.
-  @spec find_run_start_at([String.t()], non_neg_integer()) :: non_neg_integer()
+  @spec find_run_start_at(tuple(), non_neg_integer()) :: non_neg_integer()
   defp find_run_start_at(graphemes, index) do
-    current = Enum.at(graphemes, index)
+    current = elem(graphemes, index)
 
     if word_char?(current) do
       find_run_start(graphemes, index, &word_char?/1)
@@ -513,155 +535,149 @@ defmodule Minga.Motion do
     end
   end
 
-  # Searches backward from `offset` for the first index where `pred` is true.
-  # Returns -1 if no such index is found.
-  @spec backward_find([String.t()], integer(), (String.t() -> boolean())) :: integer()
+  @spec backward_find(tuple(), integer(), (String.t() -> boolean())) :: integer()
   defp backward_find(_graphemes, offset, _pred) when offset < 0, do: -1
 
   defp backward_find(graphemes, offset, pred) do
-    if pred.(Enum.at(graphemes, offset)) do
+    if pred.(elem(graphemes, offset)) do
       offset
     else
       backward_find(graphemes, offset - 1, pred)
     end
   end
 
-  # Finds the leftmost consecutive index satisfying `pred`, starting from `offset`
-  # and scanning backward. Returns `offset` itself if the char before it does not
-  # satisfy `pred` (or we are at position 0).
-  @spec find_run_start([String.t()], non_neg_integer(), (String.t() -> boolean())) ::
+  @spec find_run_start(tuple(), non_neg_integer(), (String.t() -> boolean())) ::
           non_neg_integer()
   defp find_run_start(graphemes, offset, pred) do
-    if offset > 0 and pred.(Enum.at(graphemes, offset - 1)) do
+    if offset > 0 and pred.(elem(graphemes, offset - 1)) do
       find_run_start(graphemes, offset - 1, pred)
     else
       offset
     end
   end
 
-  # `w` motion: skip current non-whitespace run, then skip whitespace.
-  # Works on a grapheme list; `max` is the last valid index.
-  @spec do_word_forward([String.t()], non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  # ── `w` motion helpers ──
+
+  @spec do_word_forward(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   defp do_word_forward(_graphemes, offset, max) when offset >= max, do: max
 
   defp do_word_forward(graphemes, offset, max) do
-    current = Enum.at(graphemes, offset)
-
-    cond do
-      # On whitespace (including newline): skip to first non-whitespace
-      whitespace?(current) ->
-        skip_while(graphemes, offset + 1, max, &whitespace?/1)
-
-      # On a word char: skip word chars, then skip whitespace
-      word_char?(current) ->
-        after_word = skip_while(graphemes, offset + 1, max, &word_char?/1)
-        skip_while(graphemes, after_word, max, &whitespace?/1)
-
-      # On punctuation: skip punctuation, then skip whitespace
-      true ->
-        after_punct =
-          skip_while(graphemes, offset + 1, max, fn g ->
-            not word_char?(g) and not whitespace?(g)
-          end)
-
-        skip_while(graphemes, after_punct, max, &whitespace?/1)
-    end
+    current = elem(graphemes, offset)
+    advance_word_forward(graphemes, offset, max, classify_char(current))
   end
 
-  # `e` motion: skip whitespace forward, then go to last char of the next run.
-  @spec do_word_end([String.t()], non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  @spec advance_word_forward(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          :word | :whitespace | :punctuation
+        ) :: non_neg_integer()
+  defp advance_word_forward(graphemes, offset, max, :whitespace) do
+    skip_while(graphemes, offset + 1, max, &whitespace?/1)
+  end
+
+  defp advance_word_forward(graphemes, offset, max, :word) do
+    after_word = skip_while(graphemes, offset + 1, max, &word_char?/1)
+    skip_while(graphemes, after_word, max, &whitespace?/1)
+  end
+
+  defp advance_word_forward(graphemes, offset, max, :punctuation) do
+    after_punct =
+      skip_while(graphemes, offset + 1, max, fn g ->
+        not word_char?(g) and not whitespace?(g)
+      end)
+
+    skip_while(graphemes, after_punct, max, &whitespace?/1)
+  end
+
+  # ── `e` motion helpers ──
+
+  @spec do_word_end(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   defp do_word_end(_graphemes, offset, max) when offset >= max, do: max
 
   defp do_word_end(graphemes, offset, max) do
-    # If we're not at end of buffer, start from offset+1 to look ahead
     start = min(offset + 1, max)
-    current = Enum.at(graphemes, start)
+    current = elem(graphemes, start)
 
-    # Skip leading whitespace
     run_start =
       if whitespace?(current),
         do: skip_while(graphemes, start, max, &whitespace?/1),
         else: start
 
-    # Now advance to the end of the word run
-    run_char = Enum.at(graphemes, run_start)
-
-    cond do
-      word_char?(run_char) ->
-        last_in_run(graphemes, run_start, max, &word_char?/1)
-
-      not whitespace?(run_char) ->
-        last_in_run(graphemes, run_start, max, fn g ->
-          not word_char?(g) and not whitespace?(g)
-        end)
-
-      true ->
-        run_start
-    end
+    run_char = elem(graphemes, run_start)
+    advance_word_end(graphemes, run_start, max, classify_char(run_char))
   end
 
-  # Returns the index of the last consecutive element satisfying `pred`, starting at `offset`.
-  @spec last_in_run([String.t()], non_neg_integer(), non_neg_integer(), (String.t() -> boolean())) ::
+  @spec advance_word_end(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          :word | :whitespace | :punctuation
+        ) :: non_neg_integer()
+  defp advance_word_end(graphemes, run_start, max, :word) do
+    last_in_run(graphemes, run_start, max, &word_char?/1)
+  end
+
+  defp advance_word_end(graphemes, run_start, max, :punctuation) do
+    last_in_run(graphemes, run_start, max, fn g ->
+      not word_char?(g) and not whitespace?(g)
+    end)
+  end
+
+  defp advance_word_end(_graphemes, run_start, _max, :whitespace), do: run_start
+
+  @spec last_in_run(tuple(), non_neg_integer(), non_neg_integer(), (String.t() -> boolean())) ::
           non_neg_integer()
   defp last_in_run(graphemes, offset, max, pred) do
     next = offset + 1
 
-    if next <= max and pred.(Enum.at(graphemes, next)) do
+    if next <= max and pred.(elem(graphemes, next)) do
       last_in_run(graphemes, next, max, pred)
     else
       offset
     end
   end
 
-  # Advances `offset` while the grapheme at `offset` satisfies `pred`, up to `max`.
-  @spec skip_while([String.t()], non_neg_integer(), non_neg_integer(), (String.t() -> boolean())) ::
+  @spec skip_while(tuple(), non_neg_integer(), non_neg_integer(), (String.t() -> boolean())) ::
           non_neg_integer()
   defp skip_while(_graphemes, offset, max, _pred) when offset > max, do: max
 
   defp skip_while(graphemes, offset, max, pred) do
-    g = Enum.at(graphemes, offset)
-
-    if g != nil and pred.(g) do
+    if pred.(elem(graphemes, offset)) do
       skip_while(graphemes, offset + 1, max, pred)
     else
       offset
     end
   end
 
-  @spec word_char?(String.t() | nil) :: boolean()
-  defp word_char?(nil), do: false
-  defp word_char?(g), do: g =~ ~r/^[a-zA-Z0-9_]$/
-
-  @spec whitespace?(String.t() | nil) :: boolean()
-  defp whitespace?(nil), do: false
-  defp whitespace?(g), do: g in [" ", "\t", "\n"]
-
   # ── Find-char helpers ────────────────────────────────────────────────────
 
-  # Find first occurrence of `char` in `graphemes` starting from `from` index.
-  @spec find_in_graphemes([String.t()], String.t(), non_neg_integer()) ::
+  # Walk forward through the binary, tracking grapheme index. O(n) single pass.
+  @spec find_in_binary(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer() | nil
-  defp find_in_graphemes(graphemes, char, from) do
-    graphemes
-    |> Enum.with_index()
-    |> Enum.find_value(fn {g, idx} ->
-      if idx >= from and g == char, do: idx
-    end)
+  defp find_in_binary(text, char, from, current_idx) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        if current_idx >= from and g == char do
+          current_idx
+        else
+          find_in_binary(rest, char, from, current_idx + 1)
+        end
+
+      nil ->
+        nil
+    end
   end
 
-  # Find last occurrence of `char` in `graphemes` at or before `to` index.
-  @spec rfind_in_graphemes([String.t()], String.t(), integer()) ::
-          non_neg_integer() | nil
-  defp rfind_in_graphemes(_graphemes, _char, to) when to < 0, do: nil
+  # Reverse find in a tuple (backward from `to` index).
+  @spec rfind_in_tuple(tuple(), String.t(), integer()) :: non_neg_integer() | nil
+  defp rfind_in_tuple(_graphemes, _char, to) when to < 0, do: nil
 
-  defp rfind_in_graphemes(graphemes, char, to) do
-    graphemes
-    |> Enum.with_index()
-    |> Enum.filter(fn {g, idx} -> idx <= to and g == char end)
-    |> List.last()
-    |> case do
-      nil -> nil
-      {_g, idx} -> idx
+  defp rfind_in_tuple(graphemes, char, to) do
+    if elem(graphemes, to) == char do
+      to
+    else
+      rfind_in_tuple(graphemes, char, to - 1)
     end
   end
 
@@ -669,19 +685,22 @@ defmodule Minga.Motion do
 
   @bracket_chars MapSet.new(["(", ")", "[", "]", "{", "}", "<", ">"])
 
-  # Find first bracket char at or after `col` on the line.
-  @spec find_bracket_on_line([String.t()], non_neg_integer()) :: non_neg_integer() | nil
-  defp find_bracket_on_line(graphemes, col) do
-    graphemes
-    |> Enum.with_index()
-    |> Enum.find_value(fn {g, idx} ->
-      if idx >= col and MapSet.member?(@bracket_chars, g), do: idx
-    end)
+  @spec find_bracket_on_line(tuple(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp find_bracket_on_line(_graphemes, col, size) when col >= size, do: nil
+
+  defp find_bracket_on_line(graphemes, col, size) do
+    g = elem(graphemes, col)
+
+    if MapSet.member?(@bracket_chars, g) do
+      col
+    else
+      find_bracket_on_line(graphemes, col + 1, size)
+    end
   end
 
-  # Scan for matching bracket, counting nesting.
   @spec scan_for_match(
-          [String.t()],
+          tuple(),
           non_neg_integer(),
           String.t(),
           String.t(),
@@ -689,7 +708,7 @@ defmodule Minga.Motion do
         ) ::
           non_neg_integer() | nil
   defp scan_for_match(graphemes, offset, open, close, :forward) do
-    do_scan_forward(graphemes, offset + 1, length(graphemes), open, close, 1)
+    do_scan_forward(graphemes, offset + 1, tuple_size(graphemes), open, close, 1)
   end
 
   defp scan_for_match(graphemes, offset, open, close, :backward) do
@@ -697,7 +716,7 @@ defmodule Minga.Motion do
   end
 
   @spec do_scan_forward(
-          [String.t()],
+          tuple(),
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
@@ -708,29 +727,62 @@ defmodule Minga.Motion do
   defp do_scan_forward(_graphemes, idx, total, _open, _close, _depth) when idx >= total, do: nil
 
   defp do_scan_forward(graphemes, idx, total, open, close, depth) do
-    g = Enum.at(graphemes, idx)
-
-    cond do
-      g == close and depth == 1 -> idx
-      g == close -> do_scan_forward(graphemes, idx + 1, total, open, close, depth - 1)
-      g == open -> do_scan_forward(graphemes, idx + 1, total, open, close, depth + 1)
-      true -> do_scan_forward(graphemes, idx + 1, total, open, close, depth)
-    end
+    g = elem(graphemes, idx)
+    do_scan_forward_match(graphemes, idx, total, open, close, depth, g)
   end
 
-  @spec do_scan_backward([String.t()], integer(), String.t(), String.t(), non_neg_integer()) ::
+  @spec do_scan_forward_match(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          String.t()
+        ) :: non_neg_integer() | nil
+  defp do_scan_forward_match(_graphemes, idx, _total, _open, close, 1, g) when g == close, do: idx
+
+  defp do_scan_forward_match(graphemes, idx, total, open, close, depth, g) when g == close do
+    do_scan_forward(graphemes, idx + 1, total, open, close, depth - 1)
+  end
+
+  defp do_scan_forward_match(graphemes, idx, total, open, close, depth, g) when g == open do
+    do_scan_forward(graphemes, idx + 1, total, open, close, depth + 1)
+  end
+
+  defp do_scan_forward_match(graphemes, idx, total, open, close, depth, _g) do
+    do_scan_forward(graphemes, idx + 1, total, open, close, depth)
+  end
+
+  @spec do_scan_backward(tuple(), integer(), String.t(), String.t(), non_neg_integer()) ::
           non_neg_integer() | nil
   defp do_scan_backward(_graphemes, idx, _open, _close, _depth) when idx < 0, do: nil
 
   defp do_scan_backward(graphemes, idx, open, close, depth) do
-    g = Enum.at(graphemes, idx)
+    g = elem(graphemes, idx)
+    do_scan_backward_match(graphemes, idx, open, close, depth, g)
+  end
 
-    cond do
-      g == open and depth == 1 -> idx
-      g == open -> do_scan_backward(graphemes, idx - 1, open, close, depth - 1)
-      g == close -> do_scan_backward(graphemes, idx - 1, open, close, depth + 1)
-      true -> do_scan_backward(graphemes, idx - 1, open, close, depth)
-    end
+  @spec do_scan_backward_match(
+          tuple(),
+          integer(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          String.t()
+        ) :: non_neg_integer() | nil
+  defp do_scan_backward_match(_graphemes, idx, open, _close, 1, g) when g == open, do: idx
+
+  defp do_scan_backward_match(graphemes, idx, open, close, depth, g) when g == open do
+    do_scan_backward(graphemes, idx - 1, open, close, depth - 1)
+  end
+
+  defp do_scan_backward_match(graphemes, idx, open, close, depth, g) when g == close do
+    do_scan_backward(graphemes, idx - 1, open, close, depth + 1)
+  end
+
+  defp do_scan_backward_match(graphemes, idx, open, close, depth, _g) do
+    do_scan_backward(graphemes, idx - 1, open, close, depth)
   end
 
   # ── Paragraph helpers ────────────────────────────────────────────────────
@@ -759,50 +811,45 @@ defmodule Minga.Motion do
 
   # ── WORD motion helpers (whitespace-delimited) ───────────────────────────
 
-  @spec do_word_forward_big([String.t()], non_neg_integer(), non_neg_integer()) ::
+  @spec do_word_forward_big(tuple(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
   defp do_word_forward_big(_graphemes, offset, max) when offset >= max, do: max
 
   defp do_word_forward_big(graphemes, offset, max) do
-    current = Enum.at(graphemes, offset)
+    current = elem(graphemes, offset)
 
     if whitespace?(current) do
-      # On whitespace: skip to first non-whitespace
       skip_while(graphemes, offset + 1, max, &whitespace?/1)
     else
-      # On non-whitespace: skip to whitespace, then skip whitespace
       after_word = skip_while(graphemes, offset + 1, max, fn g -> not whitespace?(g) end)
       skip_while(graphemes, after_word, max, &whitespace?/1)
     end
   end
 
-  @spec do_word_backward_big([String.t()], non_neg_integer()) :: non_neg_integer()
+  @spec do_word_backward_big(tuple(), non_neg_integer()) :: non_neg_integer()
   defp do_word_backward_big(graphemes, offset) do
-    # Skip backward past whitespace
     non_ws = backward_find(graphemes, offset, fn g -> not whitespace?(g) end)
 
     if non_ws < 0 do
       0
     else
-      # Find start of non-whitespace run
       find_run_start(graphemes, non_ws, fn g -> not whitespace?(g) end)
     end
   end
 
-  @spec do_word_end_big([String.t()], non_neg_integer(), non_neg_integer()) ::
+  @spec do_word_end_big(tuple(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
   defp do_word_end_big(_graphemes, offset, max) when offset >= max, do: max
 
   defp do_word_end_big(graphemes, offset, max) do
     start = min(offset + 1, max)
-    current = Enum.at(graphemes, start)
+    current = elem(graphemes, start)
 
     run_start =
       if whitespace?(current),
         do: skip_while(graphemes, start, max, &whitespace?/1),
         else: start
 
-    # Advance to end of non-whitespace run
     last_in_run(graphemes, run_start, max, fn g -> not whitespace?(g) end)
   end
 end
