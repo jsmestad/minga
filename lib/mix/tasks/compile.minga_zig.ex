@@ -49,10 +49,28 @@ defmodule Mix.Tasks.Compile.MingaZig do
       File.cp!(src, dest)
       # Ensure executable
       File.chmod!(dest, 0o755)
+      codesign_if_macos(dest)
       Mix.shell().info("Copied renderer to #{dest}")
     end
 
     :ok
+  end
+
+  # On macOS, Zig's ad-hoc linker signature is rejected by Apple System Policy
+  # (Gatekeeper), resulting in SIGKILL (exit 137). Re-signing with `codesign -s -`
+  # produces a valid ad-hoc signature that macOS accepts.
+  @spec codesign_if_macos(String.t()) :: :ok
+  defp codesign_if_macos(path) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        case System.cmd("codesign", ["--force", "--sign", "-", path], stderr_to_stdout: true) do
+          {_output, 0} -> :ok
+          {output, _code} -> Mix.shell().error("codesign failed: #{output}")
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   @impl true
