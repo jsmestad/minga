@@ -1456,8 +1456,8 @@ defmodule Minga.Editor do
 
   @escape 27
   @enter 13
-  @arrow_down 57_424
-  @arrow_up 57_416
+  @arrow_down 57_353
+  @arrow_up 57_352
 
   @spec open_buffer_picker(state()) :: state()
   defp open_buffer_picker(%{buffers: []} = state), do: state

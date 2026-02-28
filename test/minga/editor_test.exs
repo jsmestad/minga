@@ -86,8 +86,8 @@ defmodule Minga.EditorTest do
       {editor, buffer} = start_editor("hello\nworld\nfoo")
       original = BufferServer.content(buffer)
 
-      send_key(editor, 57_421)
-      send_key(editor, 57_421)
+      send_key(editor, 57_351)
+      send_key(editor, 57_351)
 
       assert BufferServer.content(buffer) == original
       assert BufferServer.cursor(buffer) == {0, 2}

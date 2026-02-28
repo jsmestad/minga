@@ -23,10 +23,10 @@ defmodule Minga.Mode.Insert do
   @enter 13
 
   # Arrow key codepoints sent by libvaxis
-  @arrow_up 57_416
-  @arrow_down 57_424
-  @arrow_left 57_419
-  @arrow_right 57_421
+  @arrow_up 57_352
+  @arrow_down 57_353
+  @arrow_left 57_350
+  @arrow_right 57_351
 
   @impl Mode
   @doc """

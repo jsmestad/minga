@@ -137,7 +137,7 @@ defmodule Minga.Mode.CommandTest do
     end
 
     test "arrow keys are ignored" do
-      assert {:continue, state} = Command.handle_key({57_416, 0}, fresh_state("w"))
+      assert {:continue, state} = Command.handle_key({57_352, 0}, fresh_state("w"))
       assert state.input == "w"
     end
   end
