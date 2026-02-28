@@ -16,9 +16,9 @@ defmodule Minga.Editor do
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.Modeline
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
+  alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -107,7 +107,7 @@ defmodule Minga.Editor do
     case start_buffer(file_path) do
       {:ok, pid} ->
         new_state = add_buffer(state, pid)
-        do_render(new_state)
+        Renderer.render(new_state)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -118,7 +118,7 @@ defmodule Minga.Editor do
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast(:render, state) do
-    do_render(state)
+    Renderer.render(state)
     {:noreply, state}
   end
 
@@ -126,13 +126,13 @@ defmodule Minga.Editor do
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
@@ -144,25 +144,25 @@ defmodule Minga.Editor do
         s -> s
       end
 
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = handle_key(state, codepoint, modifiers)
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:mouse_event, row, col, button, _mods, event_type}}, state) do
     new_state = Mouse.handle(state, row, col, button, event_type)
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:whichkey_timeout, ref}, %{whichkey_timer: ref} = state) do
     new_state = %{state | show_whichkey: true}
-    do_render(new_state)
+    Renderer.render(new_state)
     {:noreply, new_state}
   end
 
@@ -1286,256 +1286,6 @@ defmodule Minga.Editor do
   # Unknown or unimplemented commands are silently ignored.
   defp execute_command(state, _cmd), do: state
 
-  # ── Rendering ────────────────────────────────────────────────────────────────
-
-  @spec do_render(state()) :: :ok
-  defp do_render(%{buffer: nil} = state) do
-    commands = [
-      Protocol.encode_clear(),
-      Protocol.encode_draw(0, 0, "Minga v#{Minga.version()} — No file open"),
-      Protocol.encode_draw(1, 0, "Use: mix minga <filename>"),
-      Protocol.encode_cursor(0, 0),
-      Protocol.encode_batch_end()
-    ]
-
-    PortManager.send_commands(state.port_manager, commands)
-  end
-
-  defp do_render(state) do
-    # 1. Get cursor (O(1) with cached gap buffer) for viewport scrolling.
-    cursor = BufferServer.cursor(state.buffer)
-    viewport = Viewport.scroll_to_cursor(state.viewport, cursor)
-    {first_line, _last_line} = Viewport.visible_range(viewport)
-    visible_rows = Viewport.content_rows(viewport)
-
-    # 2. Fetch all remaining render data in a single GenServer call.
-    snapshot = BufferServer.render_snapshot(state.buffer, first_line, visible_rows)
-    lines = snapshot.lines
-    {cursor_line, cursor_col} = snapshot.cursor
-    line_count = snapshot.line_count
-
-    # 3. Compute gutter dimensions and re-check horizontal scroll.
-    line_number_style = state.line_numbers
-
-    gutter_w =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
-
-    content_w = max(viewport.cols - gutter_w, 1)
-
-    viewport =
-      if cursor_col >= viewport.left + content_w do
-        %{viewport | left: cursor_col - content_w + 1}
-      else
-        viewport
-      end
-
-    clear = [Protocol.encode_clear()]
-
-    visual_selection = visual_selection_bounds(state, cursor)
-
-    # 4. Render gutter + content lines.
-    {gutter_commands, line_commands} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce({[], []}, fn {line_text, screen_row}, {gutters, contents} ->
-        buf_line = first_line + screen_row
-
-        gutter_cmd =
-          render_gutter_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
-
-        content_cmds =
-          render_line(
-            line_text,
-            screen_row,
-            buf_line,
-            viewport,
-            visual_selection,
-            gutter_w,
-            content_w
-          )
-
-        new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
-        {new_gutters, contents ++ content_cmds}
-      end)
-
-    gutter_commands = Enum.reverse(gutter_commands)
-
-    tilde_commands =
-      if length(lines) < visible_rows do
-        for row <- length(lines)..(visible_rows - 1) do
-          Protocol.encode_draw(row, gutter_w, "~", fg: 0x555555)
-        end
-      else
-        []
-      end
-
-    # ── Modeline (row N-2) — Doom Emacs-style colored segments ──
-    file_name =
-      case snapshot.file_path do
-        nil -> "[scratch]"
-        path -> Path.basename(path)
-      end
-
-    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
-    line_count = snapshot.line_count
-    buf_count = length(state.buffers)
-    buf_index = state.active_buffer + 1
-    modeline_row = viewport.rows - 2
-
-    filetype = Map.get(snapshot, :filetype, :text)
-
-    modeline_commands =
-      Modeline.render(modeline_row, viewport.cols, %{
-        mode: state.mode,
-        mode_state: state.mode_state,
-        file_name: file_name,
-        filetype: filetype,
-        dirty_marker: dirty_marker,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        line_count: line_count,
-        buf_index: buf_index,
-        buf_count: buf_count
-      })
-
-    # ── Minibuffer (row N-1) — command input or messages ──
-    minibuffer_row = viewport.rows - 1
-
-    minibuffer_command =
-      case state.mode do
-        :command ->
-          cmd_text = ":" <> state.mode_state.input
-
-          Protocol.encode_draw(
-            minibuffer_row,
-            0,
-            String.pad_trailing(cmd_text, viewport.cols),
-            fg: 0xEEEEEE,
-            bg: 0x000000
-          )
-
-        _ ->
-          # Empty minibuffer when not in command mode
-          Protocol.encode_draw(
-            minibuffer_row,
-            0,
-            String.duplicate(" ", viewport.cols),
-            fg: 0x888888,
-            bg: 0x000000
-          )
-      end
-
-    # ── Picker overlay (when active, replaces minibuffer + overlays content) ──
-    {picker_commands, picker_cursor} = PickerUI.render(state, viewport)
-
-    # ── Cursor placement + shape ──
-    cursor_shape_command =
-      if state.picker do
-        Protocol.encode_cursor_shape(:beam)
-      else
-        Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
-      end
-
-    cursor_command =
-      resolve_cursor_command(
-        picker_cursor,
-        state.mode,
-        state.mode_state,
-        minibuffer_row,
-        cursor_line,
-        cursor_col,
-        viewport,
-        gutter_w
-      )
-
-    whichkey_commands = maybe_render_whichkey(state, viewport)
-
-    all_commands =
-      clear ++
-        gutter_commands ++
-        line_commands ++
-        tilde_commands ++
-        modeline_commands ++
-        [minibuffer_command] ++
-        whichkey_commands ++
-        picker_commands ++
-        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
-
-    PortManager.send_commands(state.port_manager, all_commands)
-    :ok
-  end
-
-  @spec maybe_render_whichkey(state(), Viewport.t()) :: [binary()]
-  defp maybe_render_whichkey(%{show_whichkey: true, whichkey_node: node}, viewport)
-       when is_map(node) do
-    bindings = WhichKey.bindings_from_node(node)
-    lines = WhichKey.render_popup(bindings)
-
-    popup_row = max(0, viewport.rows - 3 - length(lines))
-
-    ([Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
-       lines)
-    |> Enum.with_index(popup_row + 1)
-    |> Enum.map(fn {line_text, row} ->
-      padded = String.pad_trailing(line_text, viewport.cols)
-      Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
-    end)
-  end
-
-  defp maybe_render_whichkey(_state, _viewport), do: []
-
-  # ── Cursor position resolution ──────────────────────────────────────────────
-
-  @spec resolve_cursor_command(
-          {non_neg_integer(), non_neg_integer()} | nil,
-          Mode.mode(),
-          Mode.state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Viewport.t(),
-          non_neg_integer()
-        ) :: binary()
-  defp resolve_cursor_command(
-         {row, col},
-         _mode,
-         _mode_state,
-         _mb_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
-       ) do
-    Protocol.encode_cursor(row, col)
-  end
-
-  defp resolve_cursor_command(
-         nil,
-         :command,
-         mode_state,
-         minibuffer_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
-       ) do
-    cmd_col = String.length(mode_state.input) + 1
-    Protocol.encode_cursor(minibuffer_row, cmd_col)
-  end
-
-  defp resolve_cursor_command(
-         nil,
-         _mode,
-         _mode_state,
-         _mb_row,
-         cursor_line,
-         cursor_col,
-         viewport,
-         gutter_w
-       ) do
-    Protocol.encode_cursor(cursor_line - viewport.top, gutter_w + cursor_col - viewport.left)
-  end
-
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # ── Text object execution helper ──────────────────────────────────────────
@@ -1902,41 +1652,6 @@ defmodule Minga.Editor do
     :ok
   end
 
-  # ── Visual selection helpers ──────────────────────────────────────────────
-
-  @typedoc """
-  Represents the bounds of a visual selection for rendering.
-
-  * `nil` — no active selection
-  * `{:char, start_pos, end_pos}` — characterwise selection
-  * `{:line, start_line, end_line}` — linewise selection
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
-
-  @spec visual_selection_bounds(state(), Minga.Buffer.GapBuffer.position()) ::
-          visual_selection()
-  defp visual_selection_bounds(%{mode: :visual, mode_state: %VisualState{} = ms}, cursor) do
-    anchor = ms.visual_anchor
-    visual_type = ms.visual_type
-
-    case visual_type do
-      :char ->
-        {start_pos, end_pos} = sort_positions(anchor, cursor)
-        {:char, start_pos, end_pos}
-
-      :line ->
-        {anchor_line, _} = anchor
-        {cursor_line, _} = cursor
-        {:line, min(anchor_line, cursor_line), max(anchor_line, cursor_line)}
-    end
-  end
-
-  defp visual_selection_bounds(_state, _cursor), do: nil
-
   @spec sort_positions(
           Minga.Buffer.GapBuffer.position(),
           Minga.Buffer.GapBuffer.position()
@@ -1944,158 +1659,4 @@ defmodule Minga.Editor do
   defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
-
-  # Renders a single buffer line, applying visual selection highlights.
-  # ── Gutter rendering ────────────────────────────────────────────────────────
-
-  @gutter_fg 0x555555
-  @gutter_current_fg 0xBBC2CF
-
-  @typedoc "Line number display style."
-  @type line_number_style :: :hybrid | :absolute | :relative | :none
-
-  @spec render_gutter_number(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          line_number_style()
-        ) :: binary() | []
-  defp render_gutter_number(_screen_row, _buf_line, _cursor_line, 0, :none), do: []
-
-  defp render_gutter_number(screen_row, buf_line, cursor_line, gutter_w, style) do
-    {number, fg} = gutter_number_and_color(buf_line, cursor_line, style)
-
-    # Right-align the number in (gutter_w - 1) chars, leave 1 char separator
-    num_str = Integer.to_string(number)
-    padded = String.pad_leading(num_str, gutter_w - 1)
-    Protocol.encode_draw(screen_row, 0, padded, fg: fg)
-  end
-
-  @spec gutter_number_and_color(non_neg_integer(), non_neg_integer(), line_number_style()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp gutter_number_and_color(buf_line, _cursor_line, :absolute) do
-    {buf_line + 1, @gutter_current_fg}
-  end
-
-  defp gutter_number_and_color(buf_line, cursor_line, :relative) do
-    {abs(buf_line - cursor_line), @gutter_fg}
-  end
-
-  defp gutter_number_and_color(buf_line, cursor_line, :hybrid) do
-    if buf_line == cursor_line do
-      {buf_line + 1, @gutter_current_fg}
-    else
-      {abs(buf_line - cursor_line), @gutter_fg}
-    end
-  end
-
-  # ── Line rendering ────────────────────────────────────────────────────────
-
-  @spec render_line(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Minga.Editor.Viewport.t(),
-          visual_selection(),
-          non_neg_integer(),
-          pos_integer()
-        ) :: [binary()]
-  defp render_line(
-         line_text,
-         screen_row,
-         buf_line,
-         viewport,
-         visual_selection,
-         gutter_w,
-         content_w
-       ) do
-    graphemes = String.graphemes(line_text)
-    line_len = length(graphemes)
-
-    # Compute visible graphemes accounting for horizontal scroll and gutter
-    visible_graphemes =
-      graphemes
-      |> Enum.drop(viewport.left)
-      |> Enum.take(content_w)
-
-    case selection_cols_for_line(buf_line, line_len, visual_selection) do
-      nil ->
-        # No selection on this line
-        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
-
-      :full ->
-        # Entire line is selected (linewise or full-line char selection)
-        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes), reverse: true)]
-
-      {sel_start, sel_end} ->
-        # Partial line selection — split into three segments
-        before_sel = Enum.take(visible_graphemes, max(0, sel_start - viewport.left))
-
-        sel_graphemes =
-          visible_graphemes
-          |> Enum.drop(max(0, sel_start - viewport.left))
-          |> Enum.take(sel_end - max(sel_start, viewport.left) + 1)
-
-        after_sel =
-          Enum.drop(
-            visible_graphemes,
-            max(0, sel_start - viewport.left) + length(sel_graphemes)
-          )
-
-        before_text = Enum.join(before_sel)
-        sel_text = Enum.join(sel_graphemes)
-        after_text = Enum.join(after_sel)
-
-        [
-          Protocol.encode_draw(screen_row, gutter_w, before_text),
-          Protocol.encode_draw(
-            screen_row,
-            gutter_w + length(before_sel),
-            sel_text,
-            reverse: true
-          ),
-          Protocol.encode_draw(
-            screen_row,
-            gutter_w + length(before_sel) + length(sel_graphemes),
-            after_text
-          )
-        ]
-    end
-  end
-
-  @typedoc "Column range of a selection on a single line."
-  @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
-
-  @spec selection_cols_for_line(
-          non_neg_integer(),
-          non_neg_integer(),
-          visual_selection()
-        ) :: line_selection()
-  defp selection_cols_for_line(_buf_line, _line_len, nil), do: nil
-
-  defp selection_cols_for_line(buf_line, _line_len, {:line, start_line, end_line}) do
-    if buf_line >= start_line and buf_line <= end_line, do: :full, else: nil
-  end
-
-  # Line outside selection range.
-  defp selection_cols_for_line(buf_line, _line_len, {:char, {start_line, _sc}, {end_line, _ec}})
-       when buf_line < start_line or buf_line > end_line,
-       do: nil
-
-  # Single-line selection.
-  defp selection_cols_for_line(_buf_line, _line_len, {:char, {same, start_col}, {same, end_col}}),
-    do: {start_col, end_col}
-
-  # First line of multi-line selection.
-  defp selection_cols_for_line(buf_line, line_len, {:char, {buf_line, start_col}, _end_pos}),
-    do: {start_col, max(0, line_len - 1)}
-
-  # Last line of multi-line selection.
-  defp selection_cols_for_line(buf_line, _line_len, {:char, _start_pos, {buf_line, end_col}}),
-    do: {0, end_col}
-
-  # Interior line of multi-line selection.
-  defp selection_cols_for_line(_buf_line, _line_len, {:char, _start_pos, _end_pos}),
-    do: :full
 end
