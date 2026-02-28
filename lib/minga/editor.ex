@@ -273,13 +273,15 @@ defmodule Minga.Editor do
   # ── Scroll wheel ──
 
   defp handle_mouse(%{buffer: buf, viewport: vp} = state, _row, _col, :wheel_down, :press) do
-    page_move(buf, vp, @scroll_lines)
-    clamp_cursor_to_viewport(state)
+    total_lines = BufferServer.line_count(buf)
+    new_vp = scroll_viewport(vp, @scroll_lines, total_lines)
+    %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
   defp handle_mouse(%{buffer: buf, viewport: vp} = state, _row, _col, :wheel_up, :press) do
-    page_move(buf, vp, -@scroll_lines)
-    clamp_cursor_to_viewport(state)
+    total_lines = BufferServer.line_count(buf)
+    new_vp = scroll_viewport(vp, -@scroll_lines, total_lines)
+    %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
   # ── Left click (press) — sets position and starts potential drag ──
@@ -340,6 +342,16 @@ defmodule Minga.Editor do
 
   # ── Mouse helpers ──
 
+  # Scroll the viewport by `delta` lines without moving the cursor.
+  # Clamps so the viewport doesn't scroll past the buffer.
+  @spec scroll_viewport(Viewport.t(), integer(), non_neg_integer()) :: Viewport.t()
+  defp scroll_viewport(%Viewport{} = vp, delta, total_lines) do
+    visible_rows = Viewport.content_rows(vp)
+    max_top = max(0, total_lines - visible_rows)
+    new_top = (vp.top + delta) |> max(0) |> min(max_top)
+    %Viewport{vp | top: new_top}
+  end
+
   # Auto-scroll when dragging near viewport edges.
   @spec maybe_auto_scroll(state(), integer()) :: state()
   defp maybe_auto_scroll(%{buffer: buf, viewport: vp} = state, row) when row <= 0 do
@@ -393,9 +405,8 @@ defmodule Minga.Editor do
           {non_neg_integer(), non_neg_integer()} | nil
   defp mouse_to_buffer_pos(%{buffer: buf, viewport: vp}, row, col) do
     visible_rows = Viewport.content_rows(vp)
-    viewport = Viewport.scroll_to_cursor(vp, BufferServer.cursor(buf))
-    target_line = row + viewport.top
-    target_col = col + viewport.left
+    target_line = row + vp.top
+    target_col = col + vp.left
     total_lines = BufferServer.line_count(buf)
 
     resolve_buffer_pos(buf, row, visible_rows, target_line, target_col, total_lines)
@@ -420,8 +431,9 @@ defmodule Minga.Editor do
   @spec clamp_cursor_to_viewport(state()) :: state()
   defp clamp_cursor_to_viewport(%{buffer: buf, viewport: vp} = state) do
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
-    viewport = Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
-    {first_line, last_line} = Viewport.visible_range(viewport)
+    # Use the viewport directly — don't call scroll_to_cursor, which would
+    # move the viewport back to the cursor and undo viewport-first scrolling.
+    {first_line, last_line} = Viewport.visible_range(vp)
 
     do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, last_line)
   end

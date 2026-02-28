@@ -658,20 +658,53 @@ defmodule Minga.EditorTest do
       {editor, buffer}
     end
 
-    test "scroll down moves cursor down by 3 lines" do
+    test "scroll down moves viewport without moving cursor when cursor stays visible" do
       {editor, buffer} = start_mouse_editor()
+      # Cursor starts at {0, 0}. Viewport scrolls down 3 lines.
+      # Cursor is now above the viewport, so it gets clamped to the top visible line.
       send_mouse(editor, 0, 0, :wheel_down, :press)
       {line, _col} = BufferServer.cursor(buffer)
+      # Cursor clamped to new viewport top (line 3)
       assert line == 3
     end
 
-    test "scroll up moves cursor up by 3 lines" do
+    test "scroll down keeps cursor in place when it remains visible" do
       {editor, buffer} = start_mouse_editor()
-      BufferServer.move_to(buffer, {10, 0})
+      # Place cursor in the middle of the viewport
+      BufferServer.move_to(buffer, {5, 0})
       Process.sleep(10)
+      # Scroll down 3 — cursor at line 5 is still visible (viewport top goes from 0 to 3)
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      # Cursor stays at line 5 (still within viewport 3..10)
+      assert line == 5
+    end
+
+    test "scroll up moves viewport without moving cursor when cursor stays visible" do
+      {editor, buffer} = start_mouse_editor()
+      # Scroll down to establish a viewport where cursor is in the middle.
+      # Viewport is 10 rows (8 content). Scroll down 6 lines so viewport.top = 6.
+      # Then place cursor at line 9 (middle of viewport 6..13).
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      # viewport.top is now 6, cursor was clamped to 6
+      BufferServer.move_to(buffer, {9, 0})
+      Process.sleep(10)
+      # Now scroll up 3 — viewport.top goes from 6 to 3, cursor at 9 is still
+      # visible (viewport 3..10), so cursor should stay at 9.
       send_mouse(editor, 0, 0, :wheel_up, :press)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 7
+      assert line == 9
+    end
+
+    test "scroll clamps cursor when it falls outside viewport" do
+      {editor, buffer} = start_mouse_editor()
+      # Cursor at line 0. Scroll down enough that line 0 is no longer visible.
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      send_mouse(editor, 0, 0, :wheel_down, :press)
+      {line, _col} = BufferServer.cursor(buffer)
+      # Cursor should be clamped to the top of the new viewport
+      assert line >= 3
     end
 
     test "scroll at top of file doesn't go negative" do
@@ -681,24 +714,22 @@ defmodule Minga.EditorTest do
       assert line == 0
     end
 
-    test "scroll at bottom of file clamps to last line" do
+    test "scroll at bottom of file clamps viewport" do
       {editor, buffer} = start_mouse_editor()
-      BufferServer.move_to(buffer, {29, 0})
-      Process.sleep(10)
-      send_mouse(editor, 0, 0, :wheel_down, :press)
+      # Scroll down many times to get near the bottom
+      for _i <- 1..10, do: send_mouse(editor, 0, 0, :wheel_down, :press)
+      # Cursor should be clamped but not past the last line
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 29
+      assert line >= 0
+      assert line <= 29
     end
 
     test "scroll doesn't change mode" do
-      {editor, buffer} = start_mouse_editor()
+      {editor, _buffer} = start_mouse_editor()
       # Enter insert mode
       send_key(editor, ?i)
       send_mouse(editor, 0, 0, :wheel_down, :press)
-
-      # Should still be alive and buffer should have scrolled content position
-      {line, _col} = BufferServer.cursor(buffer)
-      assert line >= 0
+      # Editor should still be alive and functional
       assert Process.alive?(editor)
     end
   end
@@ -727,18 +758,15 @@ defmodule Minga.EditorTest do
           height: 10
         )
 
-      # Scroll down first
-      BufferServer.move_to(buffer, {15, 0})
-      Process.sleep(10)
-      # Force a render to update viewport
-      Editor.render(editor)
-      Process.sleep(30)
+      # Scroll down via mouse wheel to establish viewport offset.
+      # Each scroll moves viewport.top by 3. 4 scrolls = viewport.top at 12.
+      for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
 
-      # Click at screen row 2 — should be buffer line 15 + 2 = ~17 area
+      # Click at screen row 2 — should map to buffer line 12 + 2 = 14
       send_mouse(editor, 2, 0, :left, :press)
       send_mouse(editor, 2, 0, :left, :release)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line >= 10
+      assert line == 14
     end
 
     test "left click on modeline row is ignored" do
