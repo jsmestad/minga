@@ -173,13 +173,25 @@ defmodule Minga.Buffer.GapBuffer do
   """
   @spec insert_char(t(), String.t()) :: t()
   def insert_char(
-        %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col,
-                    line_count: lc} = _buf,
+        %__MODULE__{
+          before: before,
+          after: after_,
+          cursor_line: line,
+          cursor_col: col,
+          line_count: lc
+        } = _buf,
         char
       )
       when is_binary(char) do
     {new_line, new_col, new_lc} = compute_cursor_after_insert(line, col, lc, char)
-    %__MODULE__{before: before <> char, after: after_, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
+
+    %__MODULE__{
+      before: before <> char,
+      after: after_,
+      cursor_line: new_line,
+      cursor_col: new_col,
+      line_count: new_lc
+    }
   end
 
   @doc """
@@ -395,7 +407,9 @@ defmodule Minga.Buffer.GapBuffer do
   @spec move_left(t()) :: t()
   defp move_left(%__MODULE__{before: ""} = buf), do: buf
 
-  defp move_left(%__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf) do
+  defp move_left(
+         %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf
+       ) do
     {new_before, char} = pop_last_grapheme(before)
 
     {new_line, new_col} =
@@ -410,7 +424,9 @@ defmodule Minga.Buffer.GapBuffer do
   @spec move_right(t()) :: t()
   defp move_right(%__MODULE__{after: ""} = buf), do: buf
 
-  defp move_right(%__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf) do
+  defp move_right(
+         %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf
+       ) do
     case String.next_grapheme(after_) do
       {"\n", rest} ->
         %{buf | before: before <> "\n", after: rest, cursor_line: line + 1, cursor_col: 0}

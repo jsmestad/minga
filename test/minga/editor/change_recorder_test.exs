@@ -27,7 +27,8 @@ defmodule Minga.Editor.ChangeRecorderTest do
         |> ChangeRecorder.record_key({?d, 0})
         |> ChangeRecorder.record_key({?w, 0})
 
-      assert rec.keys == [{?d, 0}, {?w, 0}]
+      # Keys are stored in reverse internally; stop_recording reverses them.
+      assert Enum.reverse(rec.keys) == [{?d, 0}, {?w, 0}]
     end
 
     test "record_key is no-op when not recording" do

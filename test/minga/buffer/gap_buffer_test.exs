@@ -489,7 +489,9 @@ defmodule Minga.Buffer.GapBufferTest do
     end
 
     test "inserting multi-line string updates cursor and line_count" do
-      buf = GapBuffer.new("start") |> GapBuffer.move_to({0, 5}) |> GapBuffer.insert_char("a\nb\nc")
+      buf =
+        GapBuffer.new("start") |> GapBuffer.move_to({0, 5}) |> GapBuffer.insert_char("a\nb\nc")
+
       assert_cache_valid(buf)
       assert GapBuffer.cursor(buf) == {2, 1}
       assert GapBuffer.line_count(buf) == 3

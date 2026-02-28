@@ -12,7 +12,9 @@ defmodule Minga.FileFindTest do
 
   describe "list_files/1" do
     setup do
-      tmp_dir = Path.join(System.tmp_dir!(), "minga_file_find_test_#{System.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "minga_file_find_test_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
 
       # Create some files

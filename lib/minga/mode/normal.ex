@@ -108,7 +108,7 @@ defmodule Minga.Mode.Normal do
   end
 
   # Any other key while in leader mode → walk the trie.
-  def handle_key(key, %ModeState{leader_node: node} = state) when not is_nil(node) do
+  def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
     case Trie.lookup(node, key) do
       :not_found ->
         new_state = %{state | leader_node: nil, leader_keys: []}
@@ -116,7 +116,7 @@ defmodule Minga.Mode.Normal do
 
       {:prefix, sub_node} ->
         formatted = WhichKey.format_key(key)
-        new_keys = state.leader_keys ++ [formatted]
+        new_keys = [formatted | state.leader_keys]
         new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
         {:execute, {:leader_progress, sub_node}, new_state}
 
@@ -280,7 +280,7 @@ defmodule Minga.Mode.Normal do
 
   # Complete the find-char motion with the target character
   def handle_key({codepoint, 0}, %ModeState{pending_find: dir} = state)
-      when not is_nil(dir) and codepoint >= 32 do
+      when dir in [:f, :F, :t, :T] and codepoint >= 32 do
     char = <<codepoint::utf8>>
     {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
   end
@@ -492,7 +492,7 @@ defmodule Minga.Mode.Normal do
   # ── Escape: already in Normal, clear count and cancel any leader sequence ──
 
   def handle_key({@escape, _mods}, %ModeState{leader_node: node} = state)
-      when not is_nil(node) do
+      when is_map(node) do
     new_state = %{state | leader_node: nil, leader_keys: [], count: nil}
     {:execute, :leader_cancel, new_state}
   end

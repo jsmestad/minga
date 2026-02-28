@@ -63,12 +63,16 @@ defmodule Minga.Buffer.GapBufferPerfTest do
   describe "cursor/1 is O(1)" do
     test "small buffer: cursor completes in < 1ms per call", %{small: buf} do
       avg_us = avg_time_us(fn -> GapBuffer.cursor(buf) end)
-      assert avg_us < 1_000, "cursor/1 on #{@small_lines}-line buffer took #{avg_us}µs (expected < 1ms)"
+
+      assert avg_us < 1_000,
+             "cursor/1 on #{@small_lines}-line buffer took #{avg_us}µs (expected < 1ms)"
     end
 
     test "large buffer: cursor completes in < 1ms per call", %{large: buf} do
       avg_us = avg_time_us(fn -> GapBuffer.cursor(buf) end)
-      assert avg_us < 1_000, "cursor/1 on #{@large_lines}-line buffer took #{avg_us}µs (expected < 1ms)"
+
+      assert avg_us < 1_000,
+             "cursor/1 on #{@large_lines}-line buffer took #{avg_us}µs (expected < 1ms)"
     end
 
     test "cursor does not scale with buffer size", %{small: small, large: large} do
@@ -161,8 +165,11 @@ defmodule Minga.Buffer.GapBufferPerfTest do
 
     test "delete_before speed is proportional to before length, not total buffer size" do
       # Build two buffers with different total sizes but the same short `before`.
-      buf_small = GapBuffer.new(String.duplicate(@line, @small_lines)) |> GapBuffer.move_to({0, 5})
-      buf_large = GapBuffer.new(String.duplicate(@line, @large_lines)) |> GapBuffer.move_to({0, 5})
+      buf_small =
+        GapBuffer.new(String.duplicate(@line, @small_lines)) |> GapBuffer.move_to({0, 5})
+
+      buf_large =
+        GapBuffer.new(String.duplicate(@line, @large_lines)) |> GapBuffer.move_to({0, 5})
 
       small_us = avg_time_us(fn -> GapBuffer.delete_before(buf_small) end)
       large_us = avg_time_us(fn -> GapBuffer.delete_before(buf_large) end)

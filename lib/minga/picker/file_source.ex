@@ -82,14 +82,15 @@ defmodule Minga.Picker.FileSource do
   @spec add_buffer(map(), pid()) :: map()
   defp add_buffer(state, pid) do
     buffers = state.buffers ++ [pid]
-    idx = length(buffers) - 1
+    idx = Enum.count(buffers) - 1
     %{state | buffers: buffers, active_buffer: idx, buffer: pid}
   end
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buffers: buffers} = state, idx) when length(buffers) > 0 do
-    idx = rem(idx, length(buffers))
-    idx = if idx < 0, do: idx + length(buffers), else: idx
+  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
+    len = Enum.count(buffers)
+    idx = rem(idx, len)
+    idx = if idx < 0, do: idx + len, else: idx
     pid = Enum.at(buffers, idx)
     %{state | active_buffer: idx, buffer: pid}
   end

@@ -42,7 +42,7 @@ defmodule Minga.Editor.ChangeRecorder do
   @doc "Begins recording a new change. Promotes any pending keys into the recording."
   @spec start_recording(t()) :: t()
   def start_recording(%__MODULE__{pending_keys: pending} = rec) do
-    %{rec | recording: true, keys: pending, pending_keys: []}
+    %{rec | recording: true, keys: Enum.reverse(pending), pending_keys: []}
   end
 
   @doc "Begins recording only if not already recording. Preserves existing keys."
@@ -53,7 +53,7 @@ defmodule Minga.Editor.ChangeRecorder do
   @doc "Buffers a key as a potential part of a future change (e.g., count digits, `r` prefix)."
   @spec buffer_pending_key(t(), key()) :: t()
   def buffer_pending_key(%__MODULE__{} = rec, key) do
-    %{rec | pending_keys: rec.pending_keys ++ [key]}
+    %{rec | pending_keys: [key | rec.pending_keys]}
   end
 
   @doc "Clears pending keys without saving them."
@@ -69,7 +69,7 @@ defmodule Minga.Editor.ChangeRecorder do
   """
   @spec record_key(t(), key()) :: t()
   def record_key(%__MODULE__{recording: true} = rec, key) do
-    %{rec | keys: rec.keys ++ [key]}
+    %{rec | keys: [key | rec.keys]}
   end
 
   def record_key(%__MODULE__{} = rec, _key), do: rec
@@ -81,7 +81,7 @@ defmodule Minga.Editor.ChangeRecorder do
   """
   @spec stop_recording(t()) :: t()
   def stop_recording(%__MODULE__{recording: true, keys: keys} = rec) do
-    %{rec | recording: false, keys: [], last_change: keys}
+    %{rec | recording: false, keys: [], last_change: Enum.reverse(keys)}
   end
 
   def stop_recording(%__MODULE__{} = rec), do: rec

@@ -58,11 +58,9 @@ defmodule Minga.Picker.CommandSource do
     Defaults.all_bindings()
     |> Enum.into(%{}, fn {keys, command, _desc} ->
       key_str =
-        keys
-        |> Enum.map(fn {codepoint, _mods} ->
+        Enum.map_join(keys, " ", fn {codepoint, _mods} ->
           <<codepoint::utf8>>
         end)
-        |> Enum.join(" ")
 
       {command, key_str}
     end)

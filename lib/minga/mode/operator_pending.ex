@@ -104,37 +104,37 @@ defmodule Minga.Mode.OperatorPending do
 
   # `w` — word text object.
   def handle_key({?w, 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) do
+      when modifier in [:inner, :around] do
     execute_text_object(state, modifier, :word)
   end
 
   # `"` — double-quoted string.
   def handle_key({?", 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) do
+      when modifier in [:inner, :around] do
     execute_text_object(state, modifier, {:quote, "\""})
   end
 
   # `'` — single-quoted string.
   def handle_key({?', 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) do
+      when modifier in [:inner, :around] do
     execute_text_object(state, modifier, {:quote, "'"})
   end
 
   # `(` or `)` — parentheses.
   def handle_key({paren, 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) and paren in [?(, ?)] do
+      when modifier in [:inner, :around] and paren in [?(, ?)] do
     execute_text_object(state, modifier, {:paren, "(", ")"})
   end
 
   # `[` or `]` — square brackets.
   def handle_key({bracket, 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) and bracket in [?[, ?]] do
+      when modifier in [:inner, :around] and bracket in [?[, ?]] do
     execute_text_object(state, modifier, {:paren, "[", "]"})
   end
 
   # `{` or `}` — curly braces.
   def handle_key({brace, 0}, %OPState{text_object_modifier: modifier} = state)
-      when not is_nil(modifier) and brace in [?{, ?}] do
+      when modifier in [:inner, :around] and brace in [?{, ?}] do
     execute_text_object(state, modifier, {:paren, "{", "}"})
   end
 
