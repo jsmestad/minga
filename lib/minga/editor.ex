@@ -15,6 +15,7 @@ defmodule Minga.Editor do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -194,26 +195,16 @@ defmodule Minga.Editor do
   # All other keys go through the Mode FSM.
   defp handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
-    {new_mode, commands, new_mode_state} = Mode.process(state.mode, key, state.mode_state)
+    old_mode = state.mode
+    {new_mode, commands, new_mode_state} = Mode.process(old_mode, key, state.mode_state)
 
-    # When transitioning INTO visual mode, capture the current cursor as the
-    # selection anchor. When transitioning INTO command mode, ensure we have
-    # a CommandState.
+    # ── Change recording ─────────────────────────────────────────────────
+    # Record keys for dot repeat, unless we're currently replaying.
+    state = maybe_record_change(state, old_mode, new_mode, commands, key)
+
+    # When transitioning INTO visual or command mode, adjust mode_state.
     new_mode_state =
-      cond do
-        new_mode == :visual and state.mode != :visual and state.buffer ->
-          anchor = BufferServer.cursor(state.buffer)
-          %{new_mode_state | visual_anchor: anchor}
-
-        new_mode == :command and state.mode != :command ->
-          case new_mode_state do
-            %CommandState{} -> new_mode_state
-            _ -> %CommandState{}
-          end
-
-        true ->
-          new_mode_state
-      end
+      adjust_mode_state_on_transition(new_mode_state, old_mode, new_mode, state)
 
     base_state = %{state | mode: new_mode, mode_state: new_mode_state}
 
@@ -229,7 +220,7 @@ defmodule Minga.Editor do
     # VisualState for delete_visual_selection), clean up the mode_state
     # if we've transitioned back to Normal from a different mode.
     after_commands =
-      if new_mode == :normal and state.mode != :normal do
+      if new_mode == :normal and old_mode != :normal do
         case after_commands.mode_state do
           %Mode.State{} -> after_commands
           _ -> %{after_commands | mode_state: Mode.initial_state()}
@@ -245,6 +236,162 @@ defmodule Minga.Editor do
 
       updates ->
         Map.merge(after_commands, updates)
+    end
+  end
+
+  # ── Change recording helpers ───────────────────────────────────────────────
+
+  # No-op during replay — don't overwrite the stored change.
+  @spec maybe_record_change(state(), Mode.mode(), Mode.mode(), [Mode.command()], {non_neg_integer(), non_neg_integer()}) :: state()
+  defp maybe_record_change(%{change_recorder: %{replaying: true}} = state, _, _, _, _), do: state
+
+  defp maybe_record_change(%{change_recorder: rec} = state, old_mode, new_mode, commands, key) do
+    rec = update_recorder(rec, old_mode, new_mode, commands, key)
+    %{state | change_recorder: rec}
+  end
+
+  # ── Already recording: record key and check for change end ──
+
+  @spec update_recorder(ChangeRecorder.t(), Mode.mode(), Mode.mode(), [Mode.command()], ChangeRecorder.key()) :: ChangeRecorder.t()
+  defp update_recorder(%{recording: true} = rec, old_mode, :normal, _commands, key)
+       when old_mode in [:insert, :replace, :operator_pending] do
+    rec |> ChangeRecorder.record_key(key) |> ChangeRecorder.stop_recording()
+  end
+
+  defp update_recorder(%{recording: true} = rec, _old_mode, _new_mode, _commands, key) do
+    ChangeRecorder.record_key(rec, key)
+  end
+
+  # ── From Normal: mode transition starts recording ──
+
+  defp update_recorder(rec, :normal, new_mode, _commands, key)
+       when new_mode in [:insert, :replace, :operator_pending] do
+    rec |> ChangeRecorder.start_recording() |> ChangeRecorder.record_key(key)
+  end
+
+  # ── From Normal: single-key edit stays in Normal ──
+
+  defp update_recorder(rec, :normal, :normal, commands, key) do
+    do_update_normal_to_normal(rec, commands, key)
+  end
+
+  # ── From OperatorPending: record and handle completion ──
+
+  defp update_recorder(rec, :operator_pending, :normal, _commands, key) do
+    rec
+    |> ChangeRecorder.start_recording_if_not()
+    |> ChangeRecorder.record_key(key)
+    |> ChangeRecorder.stop_recording()
+  end
+
+  defp update_recorder(rec, :operator_pending, :insert, _commands, key) do
+    rec
+    |> ChangeRecorder.start_recording_if_not()
+    |> ChangeRecorder.record_key(key)
+  end
+
+  defp update_recorder(rec, :operator_pending, :operator_pending, _commands, key) do
+    rec
+    |> ChangeRecorder.start_recording_if_not()
+    |> ChangeRecorder.record_key(key)
+  end
+
+  defp update_recorder(rec, :operator_pending, _new_mode, _commands, _key) do
+    ChangeRecorder.cancel_recording(rec)
+  end
+
+  # ── All other mode transitions: no recording changes ──
+
+  defp update_recorder(rec, _old_mode, _new_mode, _commands, _key), do: rec
+
+  # ── Mode state adjustments on transition ────────────────────────────────────
+
+  # Entering visual mode: capture cursor as selection anchor.
+  @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) :: Mode.state()
+  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buffer: buf})
+       when old_mode != :visual and not is_nil(buf) do
+    anchor = BufferServer.cursor(buf)
+    %{mode_state | visual_anchor: anchor}
+  end
+
+  # Entering command mode: ensure CommandState.
+  defp adjust_mode_state_on_transition(mode_state, old_mode, :command, _state)
+       when old_mode != :command do
+    case mode_state do
+      %CommandState{} -> mode_state
+      _ -> %CommandState{}
+    end
+  end
+
+  # All other transitions: pass through.
+  defp adjust_mode_state_on_transition(mode_state, _old_mode, _new_mode, _state), do: mode_state
+
+  # Handle Normal → Normal: detect edits, pending keys, or motions.
+  @spec do_update_normal_to_normal(ChangeRecorder.t(), [Mode.command()], ChangeRecorder.key()) :: ChangeRecorder.t()
+
+  # No commands (count accumulation, pending prefix) — buffer the key.
+  defp do_update_normal_to_normal(rec, [], key) do
+    ChangeRecorder.buffer_pending_key(rec, key)
+  end
+
+  # Commands present — check if any are editing commands.
+  defp do_update_normal_to_normal(rec, commands, key) do
+    case Enum.any?(commands, &editing_command?/1) do
+      true ->
+        rec
+        |> ChangeRecorder.start_recording()
+        |> ChangeRecorder.record_key(key)
+        |> ChangeRecorder.stop_recording()
+
+      false ->
+        ChangeRecorder.clear_pending(rec)
+    end
+  end
+
+  @spec editing_command?(Mode.command()) :: boolean()
+  defp editing_command?(:delete_at), do: true
+  defp editing_command?(:delete_before), do: true
+  defp editing_command?(:delete_line), do: true
+  defp editing_command?(:change_line), do: true
+  defp editing_command?(:join_lines), do: true
+  defp editing_command?(:toggle_case), do: true
+  defp editing_command?(:indent_line), do: true
+  defp editing_command?(:dedent_line), do: true
+  defp editing_command?(:paste_after), do: true
+  defp editing_command?(:paste_before), do: true
+  defp editing_command?({:replace_char, _}), do: true
+  defp editing_command?({:delete_motion, _}), do: true
+  defp editing_command?({:indent_lines, _}), do: true
+  defp editing_command?({:dedent_lines, _}), do: true
+  defp editing_command?(_), do: false
+
+  # ── Dot repeat replay ──────────────────────────────────────────────────────
+
+  @spec replay_last_change(state(), non_neg_integer() | nil) :: state()
+  defp replay_last_change(%{change_recorder: rec} = state, count) do
+    case ChangeRecorder.get_last_change(rec) do
+      nil ->
+        # No prior change — no-op.
+        state
+
+      keys ->
+        # If a count was given with `.` (e.g. `3.`), replace the original
+        # change's count prefix with the new one.
+        keys = ChangeRecorder.replace_count(keys, count)
+
+        # Enter replay mode — suppresses recording.
+        rec = ChangeRecorder.start_replay(rec)
+        state = %{state | change_recorder: rec}
+
+        # Feed each key through handle_key sequentially.
+        state =
+          Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
+            handle_key(acc, codepoint, modifiers)
+          end)
+
+        # Exit replay mode.
+        rec = ChangeRecorder.stop_replay(state.change_recorder)
+        %{state | change_recorder: rec}
     end
   end
 
@@ -487,6 +634,10 @@ defmodule Minga.Editor do
 
   defp execute_command(state, :find_file) do
     open_picker(state, Minga.Picker.FileSource)
+  end
+
+  defp execute_command(state, {:dot_repeat, count}) do
+    replay_last_change(state, count)
   end
 
   defp execute_command(%{buffer: nil} = state, _cmd), do: state
@@ -1373,20 +1524,7 @@ defmodule Minga.Editor do
       end
 
     cursor_command =
-      cond do
-        picker_cursor != nil ->
-          {row, col} = picker_cursor
-          Protocol.encode_cursor(row, col)
-
-        state.mode == :command ->
-          cmd_col = String.length(state.mode_state.input) + 1
-          Protocol.encode_cursor(minibuffer_row, cmd_col)
-
-        true ->
-          cursor_row = cursor_line - viewport.top
-          cursor_col_screen = cursor_col - viewport.left
-          Protocol.encode_cursor(cursor_row, cursor_col_screen)
-      end
+      resolve_cursor_command(picker_cursor, state.mode, state.mode_state, minibuffer_row, cursor_line, cursor_col, viewport)
 
     whichkey_commands = maybe_render_whichkey(state, viewport)
 
@@ -1422,6 +1560,30 @@ defmodule Minga.Editor do
   end
 
   defp maybe_render_whichkey(_state, _viewport), do: []
+
+  # ── Cursor position resolution ──────────────────────────────────────────────
+
+  @spec resolve_cursor_command(
+          {non_neg_integer(), non_neg_integer()} | nil,
+          Mode.mode(),
+          Mode.state(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Viewport.t()
+        ) :: binary()
+  defp resolve_cursor_command({row, col}, _mode, _mode_state, _mb_row, _cur_line, _cur_col, _vp) do
+    Protocol.encode_cursor(row, col)
+  end
+
+  defp resolve_cursor_command(nil, :command, mode_state, minibuffer_row, _cur_line, _cur_col, _vp) do
+    cmd_col = String.length(mode_state.input) + 1
+    Protocol.encode_cursor(minibuffer_row, cmd_col)
+  end
+
+  defp resolve_cursor_command(nil, _mode, _mode_state, _mb_row, cursor_line, cursor_col, viewport) do
+    Protocol.encode_cursor(cursor_line - viewport.top, cursor_col - viewport.left)
+  end
 
   # ── Picker rendering ────────────────────────────────────────────────────────
 
@@ -2333,26 +2495,24 @@ defmodule Minga.Editor do
     if buf_line >= start_line and buf_line <= end_line, do: :full, else: nil
   end
 
-  defp selection_cols_for_line(
-         buf_line,
-         line_len,
-         {:char, {start_line, start_col}, {end_line, end_col}}
-       ) do
-    cond do
-      buf_line < start_line or buf_line > end_line ->
-        nil
+  # Line outside selection range.
+  defp selection_cols_for_line(buf_line, _line_len, {:char, {start_line, _sc}, {end_line, _ec}})
+       when buf_line < start_line or buf_line > end_line,
+       do: nil
 
-      start_line == end_line ->
-        {start_col, end_col}
+  # Single-line selection.
+  defp selection_cols_for_line(_buf_line, _line_len, {:char, {same, start_col}, {same, end_col}}),
+    do: {start_col, end_col}
 
-      buf_line == start_line ->
-        {start_col, max(0, line_len - 1)}
+  # First line of multi-line selection.
+  defp selection_cols_for_line(buf_line, line_len, {:char, {buf_line, start_col}, _end_pos}),
+    do: {start_col, max(0, line_len - 1)}
 
-      buf_line == end_line ->
-        {0, end_col}
+  # Last line of multi-line selection.
+  defp selection_cols_for_line(buf_line, _line_len, {:char, _start_pos, {buf_line, end_col}}),
+    do: {0, end_col}
 
-      true ->
-        :full
-    end
-  end
+  # Interior line of multi-line selection.
+  defp selection_cols_for_line(_buf_line, _line_len, {:char, _start_pos, _end_pos}),
+    do: :full
 end

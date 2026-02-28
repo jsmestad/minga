@@ -74,7 +74,24 @@ Help it by being explicit:
 - **`@enforce_keys`** on structs for required fields
 - **Guards** in function heads where they aid type inference
 - **Pattern matching** over `if/cond` — helps type narrowing across clauses
+- **No `cond` blocks** — use multi-clause functions with pattern matching and
+  guards instead. `cond` defeats BEAM JIT optimizations and hides control flow
+  that the type system and compiler can reason about. Extract a private
+  helper with multiple `defp` clauses rather than inlining a `cond`.
+- **`[head | tail]`** over `list ++ [item]` — appending to a list is O(n);
+  prepend and reverse if order matters
 - `mix compile --warnings-as-errors` must pass clean
+
+### Pre-commit Checks
+
+All four must pass before committing any Elixir changes:
+
+```bash
+mix compile --warnings-as-errors  # Type/warning cleanliness
+mix credo --strict                # Style & refactoring
+mix dialyzer                      # Typespec consistency
+mix test --warnings-as-errors     # Tests
+```
 
 Example:
 

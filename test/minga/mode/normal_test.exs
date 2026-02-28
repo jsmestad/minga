@@ -389,4 +389,23 @@ defmodule Minga.Mode.NormalTest do
       refute Map.has_key?(state, :pending_shift)
     end
   end
+
+  describe "dot repeat (#49)" do
+    test ". emits {:dot_repeat, nil} with no count" do
+      assert {:execute, {:dot_repeat, nil}, _} = Normal.handle_key({?., 0}, fresh_state())
+    end
+
+    test ". emits {:dot_repeat, 3} with count prefix 3" do
+      {:continue, s1} = Normal.handle_key({?3, 0}, fresh_state())
+      assert {:execute, {:dot_repeat, 3}, state} = Normal.handle_key({?., 0}, s1)
+      # Count is consumed — reset to nil
+      assert state.count == nil
+    end
+
+    test ". emits {:dot_repeat, 15} with count prefix 15" do
+      {:continue, s1} = Normal.handle_key({?1, 0}, fresh_state())
+      {:continue, s2} = Normal.handle_key({?5, 0}, s1)
+      assert {:execute, {:dot_repeat, 15}, _} = Normal.handle_key({?., 0}, s2)
+    end
+  end
 end

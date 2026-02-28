@@ -13,6 +13,7 @@ defmodule Minga.Editor.State do
   active buffer for backward compatibility with rendering and commands.
   """
 
+  alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Picker
@@ -37,7 +38,8 @@ defmodule Minga.Editor.State do
             picker_source: nil,
             picker_restore: nil,
             mouse_dragging: false,
-            last_find_char: nil
+            last_find_char: nil,
+            change_recorder: ChangeRecorder.new()
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -55,6 +57,7 @@ defmodule Minga.Editor.State do
           picker_source: module() | nil,
           picker_restore: non_neg_integer() | nil,
           mouse_dragging: boolean(),
-          last_find_char: last_find_char()
+          last_find_char: last_find_char(),
+          change_recorder: ChangeRecorder.t()
         }
 end

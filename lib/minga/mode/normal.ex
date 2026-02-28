@@ -390,6 +390,20 @@ defmodule Minga.Mode.Normal do
 
   # ── Single-key editing commands ────────────────────────────────────────────
 
+  # r — replace char (wait for next char)
+  def handle_key({?r, 0}, %ModeState{pending_replace: false} = state) do
+    {:continue, %{state | pending_replace: true}}
+  end
+
+  # Complete replace with the target character.
+  # MUST come before x/X/J/etc. so those codepoints are correctly captured
+  # as the replacement target when pending_replace is true.
+  def handle_key({codepoint, 0}, %ModeState{pending_replace: true} = state)
+      when codepoint >= 32 do
+    char = <<codepoint::utf8>>
+    {:execute, {:replace_char, char}, %{state | pending_replace: false}}
+  end
+
   # x — delete char at cursor
   def handle_key({?x, 0}, state) do
     {:execute, :delete_at, state}
@@ -403,18 +417,6 @@ defmodule Minga.Mode.Normal do
   # J — join current line with next
   def handle_key({?J, 0}, state) do
     {:execute, :join_lines, state}
-  end
-
-  # r — replace char (wait for next char)
-  def handle_key({?r, 0}, state) do
-    {:continue, %{state | pending_replace: true}}
-  end
-
-  # Complete replace with the target character
-  def handle_key({codepoint, 0}, %ModeState{pending_replace: true} = state)
-      when codepoint >= 32 do
-    char = <<codepoint::utf8>>
-    {:execute, {:replace_char, char}, %{state | pending_replace: false}}
   end
 
   # ~ — toggle case
@@ -467,6 +469,14 @@ defmodule Minga.Mode.Normal do
   # - — prev line first non-blank
   def handle_key({?-, 0}, state) do
     {:execute, :prev_line_first_non_blank, state}
+  end
+
+  # ── Dot repeat ──────────────────────────────────────────────────────────
+
+  # Dot repeat carries its own count — pass it as a parameter rather than
+  # letting the dispatcher multiply the command via List.duplicate.
+  def handle_key({?., 0}, %ModeState{count: count} = state) do
+    {:execute, {:dot_repeat, count}, %{state | count: nil}}
   end
 
   # ── Undo / redo ───────────────────────────────────────────────────────────
