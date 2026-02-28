@@ -15,6 +15,7 @@ defmodule Minga.Editor.State do
 
   alias Minga.Editor.Viewport
   alias Minga.Mode
+  alias Minga.Picker
   alias Minga.WhichKey
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
@@ -28,7 +29,9 @@ defmodule Minga.Editor.State do
             whichkey_node: nil,
             whichkey_timer: nil,
             show_whichkey: false,
-            register: nil
+            register: nil,
+            picker: nil,
+            picker_prev_buffer: nil
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -41,6 +44,8 @@ defmodule Minga.Editor.State do
           whichkey_node: Minga.Keymap.Trie.node_t() | nil,
           whichkey_timer: WhichKey.timer_ref() | nil,
           show_whichkey: boolean(),
-          register: String.t() | nil
+          register: String.t() | nil,
+          picker: Picker.t() | nil,
+          picker_prev_buffer: non_neg_integer() | nil
         }
 end

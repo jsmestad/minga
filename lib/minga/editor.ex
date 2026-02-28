@@ -19,6 +19,7 @@ defmodule Minga.Editor do
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.VisualState
+  alias Minga.Picker
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.TextObject
@@ -128,6 +129,13 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
+    do_render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, %{picker: picker} = state)
+       when not is_nil(picker) do
+    new_state = handle_picker_key(state, codepoint, modifiers)
     do_render(new_state)
     {:noreply, new_state}
   end
@@ -572,8 +580,7 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, :buffer_list) do
-    # Cycle to next buffer (interactive picker is a future enhancement)
-    next_buffer(state)
+    open_buffer_picker(state)
   end
 
   defp execute_command(state, :buffer_next) do
@@ -695,16 +702,28 @@ defmodule Minga.Editor do
           )
       end
 
+    # ── Picker overlay (when active, replaces minibuffer + overlays content) ──
+    {picker_commands, picker_cursor} = maybe_render_picker(state, viewport)
+
     # ── Cursor placement + shape ──
-    cursor_shape_command = Protocol.encode_cursor_shape(cursor_shape_for_mode(state.mode))
+    cursor_shape_command =
+      if state.picker do
+        Protocol.encode_cursor_shape(:beam)
+      else
+        Protocol.encode_cursor_shape(cursor_shape_for_mode(state.mode))
+      end
 
     cursor_command =
-      case state.mode do
-        :command ->
+      cond do
+        picker_cursor != nil ->
+          {row, col} = picker_cursor
+          Protocol.encode_cursor(row, col)
+
+        state.mode == :command ->
           cmd_col = String.length(state.mode_state.input) + 1
           Protocol.encode_cursor(minibuffer_row, cmd_col)
 
-        _ ->
+        true ->
           cursor_row = cursor_line - viewport.top
           cursor_col_screen = cursor_col - viewport.left
           Protocol.encode_cursor(cursor_row, cursor_col_screen)
@@ -719,6 +738,7 @@ defmodule Minga.Editor do
         modeline_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
+        picker_commands ++
         [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
@@ -743,6 +763,96 @@ defmodule Minga.Editor do
   end
 
   defp maybe_render_whichkey(_state, _viewport), do: []
+
+  # ── Picker rendering ────────────────────────────────────────────────────────
+
+  @spec maybe_render_picker(state(), Viewport.t()) ::
+          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
+  defp maybe_render_picker(%{picker: nil}, _viewport), do: {[], nil}
+
+  defp maybe_render_picker(%{picker: picker}, viewport) do
+    {visible, selected_offset} = Picker.visible_items(picker)
+    item_count = length(visible)
+
+    # Layout: items grow upward from row N-2, prompt on row N-1
+    prompt_row = viewport.rows - 1
+    separator_row = prompt_row - item_count - 1
+    first_item_row = separator_row + 1
+
+    # Background colors
+    bg = 0x1E2127
+    sel_bg = 0x3E4451
+    prompt_bg = 0x1E2127
+    dim_fg = 0x5C6370
+    text_fg = 0xABB2BF
+    highlight_fg = 0xFFFFFF
+
+    # Separator line
+    title = picker.title
+    filter_info = "#{Picker.count(picker)}/#{Picker.total(picker)}"
+    sep_text = " #{title} " <> String.duplicate("─", max(0, viewport.cols - String.length(title) - String.length(filter_info) - 4)) <> " #{filter_info} "
+    separator_cmd =
+      if separator_row >= 0 do
+        [Protocol.encode_draw(separator_row, 0,
+          String.pad_trailing(sep_text, viewport.cols), fg: dim_fg, bg: bg)]
+      else
+        []
+      end
+
+    # Item rows
+    item_commands =
+      visible
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{_id, label, desc}, idx} ->
+        row = first_item_row + idx
+        if row < 0 or row >= viewport.rows do
+          []
+        else
+          is_selected = idx == selected_offset
+          fg = if is_selected, do: highlight_fg, else: text_fg
+          row_bg = if is_selected, do: sel_bg, else: bg
+
+          # Label on the left (bold for selected), description on the right (dimmed, truncated)
+          label_text = " " <> label
+          avail_for_desc = max(0, viewport.cols - String.length(label_text) - 2)
+          desc_display = if desc != "" and avail_for_desc > 10,
+            do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
+            else: ""
+
+          row_text = label_text <>
+            String.duplicate(" ", max(1, viewport.cols - String.length(label_text) - String.length(desc_display) - 1)) <>
+            desc_display <> " "
+          row_text = String.slice(row_text, 0, viewport.cols)
+
+          label_cmd = Protocol.encode_draw(row, 0,
+            String.pad_trailing(row_text, viewport.cols),
+            fg: fg, bg: row_bg, bold: is_selected)
+
+          if desc_display != "" do
+            # Render description portion in dimmer color
+            desc_start = viewport.cols - String.length(desc_display) - 1
+            desc_cmd = Protocol.encode_draw(row, desc_start,
+              desc_display, fg: dim_fg, bg: row_bg)
+            [label_cmd, desc_cmd]
+          else
+            [label_cmd]
+          end
+        end
+      end)
+
+    # Prompt line (replaces minibuffer)
+    prompt_text = "> " <> picker.query
+    prompt_cmd = Protocol.encode_draw(
+      prompt_row, 0,
+      String.pad_trailing(prompt_text, viewport.cols),
+      fg: highlight_fg, bg: prompt_bg
+    )
+
+    cursor_col = String.length(prompt_text)
+    cursor_pos = {prompt_row, cursor_col}
+
+    {separator_cmd ++ item_commands ++ [prompt_cmd], cursor_pos}
+  end
 
   # ── Doom-style modeline ──────────────────────────────────────────────────────
 
@@ -1029,6 +1139,128 @@ defmodule Minga.Editor do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)
+  end
+
+  # ── Picker helpers ────────────────────────────────────────────────────────
+
+  @escape 27
+  @enter 13
+  @arrow_down 57_424
+  @arrow_up 57_416
+
+  @spec open_buffer_picker(state()) :: state()
+  defp open_buffer_picker(%{buffers: []} = state), do: state
+
+  defp open_buffer_picker(%{buffers: buffers, active_buffer: active_idx} = state) do
+    items =
+      buffers
+      |> Enum.with_index()
+      |> Enum.map(fn {buf, idx} ->
+        name =
+          case BufferServer.file_path(buf) do
+            nil -> "[scratch]"
+            path -> Path.basename(path)
+          end
+
+        desc =
+          case BufferServer.file_path(buf) do
+            nil -> ""
+            path -> path
+          end
+
+        dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
+
+        {idx, name <> dirty, desc}
+      end)
+
+    picker = Picker.new(items, title: "Switch buffer", max_visible: 10)
+
+    # Clear whichkey state if active
+    new_state =
+      if state.whichkey_timer do
+        WhichKey.cancel_timeout(state.whichkey_timer)
+        %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
+      else
+        state
+      end
+
+    %{new_state | picker: picker, picker_prev_buffer: active_idx}
+  end
+
+  @spec handle_picker_key(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_picker_key(%{picker: _picker} = state, @escape, _mods) do
+    # Cancel: restore previous buffer
+    case state.picker_prev_buffer do
+      nil -> %{state | picker: nil, picker_prev_buffer: nil}
+      idx -> %{switch_to_buffer(state, idx) | picker: nil, picker_prev_buffer: nil}
+    end
+  end
+
+  defp handle_picker_key(%{picker: picker} = state, @enter, _mods) do
+    # Select: switch to the selected buffer
+    case Picker.selected_id(picker) do
+      nil ->
+        %{state | picker: nil, picker_prev_buffer: nil}
+
+      idx ->
+        %{switch_to_buffer(state, idx) | picker: nil, picker_prev_buffer: nil}
+    end
+  end
+
+  # C-j or arrow down → move selection down
+  defp handle_picker_key(%{picker: picker} = state, cp, mods)
+       when (cp == ?j and band(mods, @ctrl) != 0) or cp == @arrow_down do
+    new_picker = Picker.move_down(picker)
+    state = %{state | picker: new_picker}
+    maybe_preview_picker_selection(state)
+  end
+
+  # C-k or arrow up → move selection up
+  defp handle_picker_key(%{picker: picker} = state, cp, mods)
+       when (cp == ?k and band(mods, @ctrl) != 0) or cp == @arrow_up do
+    new_picker = Picker.move_up(picker)
+    state = %{state | picker: new_picker}
+    maybe_preview_picker_selection(state)
+  end
+
+  # Backspace
+  defp handle_picker_key(%{picker: picker} = state, cp, _mods) when cp in [8, 127] do
+    new_picker = Picker.backspace(picker)
+    state = %{state | picker: new_picker}
+    maybe_preview_picker_selection(state)
+  end
+
+  # Printable characters → filter
+  defp handle_picker_key(%{picker: picker} = state, codepoint, 0)
+       when codepoint >= 32 and codepoint <= 0x10FFFF do
+    char =
+      try do
+        <<codepoint::utf8>>
+      rescue
+        ArgumentError -> nil
+      end
+
+    case char do
+      nil ->
+        state
+
+      c ->
+        new_picker = Picker.type_char(picker, c)
+        state = %{state | picker: new_picker}
+        maybe_preview_picker_selection(state)
+    end
+  end
+
+  # Ignore all other keys
+  defp handle_picker_key(state, _cp, _mods), do: state
+
+  # Preview: temporarily switch to the selected buffer's content
+  @spec maybe_preview_picker_selection(state()) :: state()
+  defp maybe_preview_picker_selection(%{picker: picker} = state) do
+    case Picker.selected_id(picker) do
+      nil -> state
+      idx -> switch_to_buffer(state, idx)
+    end
   end
 
   # ── Visual selection helpers ──────────────────────────────────────────────

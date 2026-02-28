@@ -105,9 +105,9 @@ defmodule Minga.BufferManagementTest do
     end
   end
 
-  describe "SPC b b — switch buffer (cycles)" do
+  describe "SPC b b — buffer picker" do
     @tag :tmp_dir
-    test "SPC b b cycles to next buffer", %{tmp_dir: tmp_dir} do
+    test "SPC b b opens picker, Enter on first item switches buffer", %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "x.txt")
       path2 = Path.join(tmp_dir, "y.txt")
       File.write!(path1, "ex")
@@ -117,8 +117,9 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, ":e #{path2}<CR>")
       assert_row_contains(ctx, 0, "why")
 
-      # SPC b b → next buffer (wraps to first)
+      # SPC b b → opens picker, first item is x.txt, Enter selects it
       send_keys(ctx, "<SPC>bb")
+      send_key(ctx, 13)
       assert_row_contains(ctx, 0, "ex")
     end
   end
