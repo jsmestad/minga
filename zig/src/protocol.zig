@@ -268,3 +268,243 @@ test "decode truncated draw_text returns malformed" {
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
+
+// ── Encoding: buffer too small ────────────────────────────────────────────────
+
+test "encodeKeyPress buffer too small returns error" {
+    var buf: [5]u8 = undefined; // needs 6
+    const result = encodeKeyPress(&buf, 65, 0);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "encodeReady buffer too small returns error" {
+    var buf: [4]u8 = undefined; // needs 5
+    const result = encodeReady(&buf, 80, 24);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "encodeResize buffer too small returns error" {
+    var buf: [4]u8 = undefined; // needs 5
+    const result = encodeResize(&buf, 80, 24);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+// ── Encoding: special values ──────────────────────────────────────────────────
+
+test "encodeKeyPress with max unicode codepoint (0x10FFFF)" {
+    var buf: [6]u8 = undefined;
+    const len = try encodeKeyPress(&buf, 0x10FFFF, 0);
+    try std.testing.expectEqual(@as(usize, 6), len);
+    try std.testing.expectEqual(@as(u8, OP_KEY_PRESS), buf[0]);
+    try std.testing.expectEqual(@as(u32, 0x10FFFF), std.mem.readInt(u32, buf[1..5], .big));
+    try std.testing.expectEqual(@as(u8, 0), buf[5]);
+}
+
+test "encodeKeyPress with all modifier flags combined" {
+    var buf: [6]u8 = undefined;
+    const all_mods = MOD_SHIFT | MOD_CTRL | MOD_ALT | MOD_SUPER;
+    const len = try encodeKeyPress(&buf, 65, all_mods);
+    try std.testing.expectEqual(@as(usize, 6), len);
+    try std.testing.expectEqual(all_mods, buf[5]);
+}
+
+test "encodeReady with large terminal dimensions (500x200)" {
+    var buf: [5]u8 = undefined;
+    const len = try encodeReady(&buf, 500, 200);
+    try std.testing.expectEqual(@as(usize, 5), len);
+    try std.testing.expectEqual(@as(u8, OP_READY), buf[0]);
+    try std.testing.expectEqual(@as(u16, 500), std.mem.readInt(u16, buf[1..3], .big));
+    try std.testing.expectEqual(@as(u16, 200), std.mem.readInt(u16, buf[3..5], .big));
+}
+
+test "encodeResize with minimum dimensions (1x1)" {
+    var buf: [5]u8 = undefined;
+    const len = try encodeResize(&buf, 1, 1);
+    try std.testing.expectEqual(@as(usize, 5), len);
+    try std.testing.expectEqual(@as(u8, OP_RESIZE), buf[0]);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[1..3], .big));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[3..5], .big));
+}
+
+// ── Decoding: draw_text edge cases ────────────────────────────────────────────
+
+test "decode draw_text with empty text (text_len=0)" {
+    const data = [_]u8{
+        0x10,
+        0x00, 0x01, // row=1
+        0x00, 0x02, // col=2
+        0x00, 0x00, 0x00, // fg=0
+        0x00, 0x00, 0x00, // bg=0
+        0x00, // attrs
+        0x00, 0x00, // text_len=0
+    };
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .draw_text => |dt| {
+            try std.testing.expectEqual(@as(u16, 1), dt.row);
+            try std.testing.expectEqual(@as(u16, 2), dt.col);
+            try std.testing.expectEqual(@as(usize, 0), dt.text.len);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode draw_text with all style attributes (bold+italic+underline+reverse)" {
+    const all_attrs = ATTR_BOLD | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_REVERSE;
+    const data = [_]u8{
+        0x10,
+        0x00, 0x00, // row=0
+        0x00, 0x00, // col=0
+        0x00, 0x00, 0x00, // fg=0
+        0x00, 0x00, 0x00, // bg=0
+        all_attrs, // attrs
+        0x00, 0x00, // text_len=0
+    };
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .draw_text => |dt| {
+            try std.testing.expectEqual(all_attrs, dt.attrs);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode draw_text with max colors (0xFFFFFF fg and bg)" {
+    const data = [_]u8{
+        0x10,
+        0x00, 0x00, // row=0
+        0x00, 0x00, // col=0
+        0xFF, 0xFF, 0xFF, // fg=0xFFFFFF
+        0xFF, 0xFF, 0xFF, // bg=0xFFFFFF
+        0x00, // attrs
+        0x00, 0x00, // text_len=0
+    };
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .draw_text => |dt| {
+            try std.testing.expectEqual(@as(u24, 0xFFFFFF), dt.fg);
+            try std.testing.expectEqual(@as(u24, 0xFFFFFF), dt.bg);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode draw_text where text_len exceeds remaining data returns malformed" {
+    const data = [_]u8{
+        0x10,
+        0x00, 0x00, // row
+        0x00, 0x00, // col
+        0x00, 0x00, 0x00, // fg
+        0x00, 0x00, 0x00, // bg
+        0x00, // attrs
+        0x00, 0x0A, // text_len=10, but no text bytes follow
+    };
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+// ── Decoding: set_cursor edge cases ───────────────────────────────────────────
+
+test "decode set_cursor with row=0 col=0" {
+    const data = [_]u8{ 0x11, 0x00, 0x00, 0x00, 0x00 };
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .set_cursor => |sc| {
+            try std.testing.expectEqual(@as(u16, 0), sc.row);
+            try std.testing.expectEqual(@as(u16, 0), sc.col);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode set_cursor with large values (1000, 2000)" {
+    var data: [5]u8 = undefined;
+    data[0] = OP_SET_CURSOR;
+    std.mem.writeInt(u16, data[1..3], 1000, .big);
+    std.mem.writeInt(u16, data[3..5], 2000, .big);
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .set_cursor => |sc| {
+            try std.testing.expectEqual(@as(u16, 1000), sc.row);
+            try std.testing.expectEqual(@as(u16, 2000), sc.col);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode set_cursor truncated (only 3 bytes after opcode) returns malformed" {
+    const data = [_]u8{ 0x11, 0x00, 0x05, 0x00 }; // 4 bytes total: opcode + 3
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+// ── writeMessage ──────────────────────────────────────────────────────────────
+
+test "writeMessage writes correct 4-byte big-endian length prefix" {
+    var out: [12]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&out);
+    try writeMessage(fbs.writer(), "hello");
+    const written = fbs.getWritten();
+    // First 4 bytes: length = 5
+    try std.testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, written[0..4], .big));
+    // Payload follows
+    try std.testing.expectEqualSlices(u8, "hello", written[4..9]);
+}
+
+test "writeMessage with empty payload writes length 0" {
+    var out: [8]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&out);
+    try writeMessage(fbs.writer(), "");
+    const written = fbs.getWritten();
+    try std.testing.expectEqual(@as(usize, 4), written.len);
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, written[0..4], .big));
+}
+
+// ── readMessageLength ─────────────────────────────────────────────────────────
+
+test "readMessageLength returns correct value for known bytes" {
+    const data = [_]u8{ 0x00, 0x00, 0x00, 0x2A }; // big-endian 42
+    var fbs = std.io.fixedBufferStream(&data);
+    const result = try readMessageLength(fbs.reader());
+    try std.testing.expectEqual(@as(?u32, 42), result);
+}
+
+test "readMessageLength returns null on EOF (empty reader)" {
+    const data = [_]u8{};
+    var fbs = std.io.fixedBufferStream(&data);
+    const result = try readMessageLength(fbs.reader());
+    try std.testing.expectEqual(@as(?u32, null), result);
+}
+
+// ── Round-trip / byte-position verification ───────────────────────────────────
+
+test "encodeKeyPress byte layout: each position verified" {
+    var buf: [6]u8 = undefined;
+    _ = try encodeKeyPress(&buf, 0x0001F600, MOD_CTRL | MOD_ALT); // 😀, ctrl+alt
+    // [0] opcode
+    try std.testing.expectEqual(OP_KEY_PRESS, buf[0]);
+    // [1..4] codepoint big-endian
+    try std.testing.expectEqual(@as(u8, 0x00), buf[1]);
+    try std.testing.expectEqual(@as(u8, 0x01), buf[2]);
+    try std.testing.expectEqual(@as(u8, 0xF6), buf[3]);
+    try std.testing.expectEqual(@as(u8, 0x00), buf[4]);
+    // [5] modifiers
+    try std.testing.expectEqual(MOD_CTRL | MOD_ALT, buf[5]);
+}
+
+test "encodeResize byte layout: self-consistent encoding" {
+    var buf: [5]u8 = undefined;
+    _ = try encodeResize(&buf, 0x0102, 0x0304);
+    try std.testing.expectEqual(OP_RESIZE, buf[0]);
+    // width = 0x0102 → [0x01, 0x02]
+    try std.testing.expectEqual(@as(u8, 0x01), buf[1]);
+    try std.testing.expectEqual(@as(u8, 0x02), buf[2]);
+    // height = 0x0304 → [0x03, 0x04]
+    try std.testing.expectEqual(@as(u8, 0x03), buf[3]);
+    try std.testing.expectEqual(@as(u8, 0x04), buf[4]);
+    // Decode back the width and height directly from the bytes
+    const width_back = std.mem.readInt(u16, buf[1..3], .big);
+    const height_back = std.mem.readInt(u16, buf[3..5], .big);
+    try std.testing.expectEqual(@as(u16, 0x0102), width_back);
+    try std.testing.expectEqual(@as(u16, 0x0304), height_back);
+}

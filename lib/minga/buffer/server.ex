@@ -30,8 +30,12 @@ defmodule Minga.Buffer.Server do
   @type state :: %{
           gap_buffer: GapBuffer.t(),
           file_path: String.t() | nil,
-          dirty: boolean()
+          dirty: boolean(),
+          undo_stack: [GapBuffer.t()],
+          redo_stack: [GapBuffer.t()]
         }
+
+  @max_undo_stack 1000
 
   # ── Client API ──
 
@@ -161,6 +165,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:get_lines_content, start_line, end_line})
   end
 
+  @doc "Undoes the last mutation, restoring the previous buffer state."
+  @spec undo(GenServer.server()) :: :ok
+  def undo(server) do
+    GenServer.call(server, :undo)
+  end
+
+  @doc "Redoes the last undone mutation."
+  @spec redo(GenServer.server()) :: :ok
+  def redo(server) do
+    GenServer.call(server, :redo)
+  end
+
   @doc "Deletes lines [start_line, end_line] inclusive. Cursor lands at the first remaining line."
   @spec delete_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: :ok
   def delete_lines(server, start_line, end_line)
@@ -182,7 +198,9 @@ defmodule Minga.Buffer.Server do
         state = %{
           gap_buffer: GapBuffer.new(text),
           file_path: path,
-          dirty: false
+          dirty: false,
+          undo_stack: [],
+          redo_stack: []
         }
 
         {:ok, state}
@@ -213,19 +231,27 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:insert_char, char}, _from, state) do
     new_buf = GapBuffer.insert_char(state.gap_buffer, char)
-    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: true}}
+    {:reply, :ok, push_undo(state, new_buf) |> Map.put(:dirty, true)}
   end
 
   def handle_call(:delete_before, _from, state) do
     new_buf = GapBuffer.delete_before(state.gap_buffer)
-    dirty = new_buf != state.gap_buffer or state.dirty
-    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
+
+    if new_buf == state.gap_buffer do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, push_undo(state, new_buf) |> Map.put(:dirty, true)}
+    end
   end
 
   def handle_call(:delete_at, _from, state) do
     new_buf = GapBuffer.delete_at(state.gap_buffer)
-    dirty = new_buf != state.gap_buffer or state.dirty
-    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
+
+    if new_buf == state.gap_buffer do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, push_undo(state, new_buf) |> Map.put(:dirty, true)}
+    end
   end
 
   def handle_call({:move, direction}, _from, state) do
@@ -290,8 +316,12 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
     new_buf = GapBuffer.delete_range(state.gap_buffer, from_pos, to_pos)
-    dirty = new_buf != state.gap_buffer or state.dirty
-    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
+
+    if new_buf == state.gap_buffer do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, push_undo(state, new_buf) |> Map.put(:dirty, true)}
+    end
   end
 
   def handle_call({:get_range, start_pos, end_pos}, _from, state) do
@@ -306,8 +336,48 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
     new_buf = GapBuffer.delete_lines(state.gap_buffer, start_line, end_line)
-    dirty = new_buf != state.gap_buffer or state.dirty
-    {:reply, :ok, %{state | gap_buffer: new_buf, dirty: dirty}}
+
+    if new_buf == state.gap_buffer do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, push_undo(state, new_buf) |> Map.put(:dirty, true)}
+    end
+  end
+
+  def handle_call(:undo, _from, state) do
+    case state.undo_stack do
+      [] ->
+        {:reply, :ok, state}
+
+      [prev_buf | rest_undo] ->
+        new_state = %{
+          state
+          | gap_buffer: prev_buf,
+            undo_stack: rest_undo,
+            redo_stack: [state.gap_buffer | state.redo_stack],
+            dirty: true
+        }
+
+        {:reply, :ok, new_state}
+    end
+  end
+
+  def handle_call(:redo, _from, state) do
+    case state.redo_stack do
+      [] ->
+        {:reply, :ok, state}
+
+      [next_buf | rest_redo] ->
+        new_state = %{
+          state
+          | gap_buffer: next_buf,
+            redo_stack: rest_redo,
+            undo_stack: [state.gap_buffer | state.undo_stack],
+            dirty: true
+        }
+
+        {:reply, :ok, new_state}
+    end
   end
 
   # ── Private ──
@@ -322,6 +392,17 @@ defmodule Minga.Buffer.Server do
       {:error, :enoent} -> {:ok, "", file_path}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # Pushes the current gap_buffer onto the undo stack (capped at @max_undo_stack),
+  # sets the new gap_buffer, and clears the redo stack.
+  @spec push_undo(state(), GapBuffer.t()) :: state()
+  defp push_undo(state, new_buf) do
+    new_undo =
+      [state.gap_buffer | state.undo_stack]
+      |> Enum.take(@max_undo_stack)
+
+    %{state | gap_buffer: new_buf, undo_stack: new_undo, redo_stack: []}
   end
 
   @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}

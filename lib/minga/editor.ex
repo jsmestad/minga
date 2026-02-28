@@ -46,7 +46,8 @@ defmodule Minga.Editor do
           mode_state: Mode.state(),
           whichkey_node: Trie.node_t() | nil,
           whichkey_timer: WhichKey.timer_ref() | nil,
-          show_whichkey: boolean()
+          show_whichkey: boolean(),
+          register: String.t() | nil
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -96,7 +97,8 @@ defmodule Minga.Editor do
       mode_state: Mode.initial_state(),
       whichkey_node: nil,
       whichkey_timer: nil,
-      show_whichkey: false
+      show_whichkey: false,
+      register: nil
     }
 
     {:ok, state}
@@ -211,7 +213,6 @@ defmodule Minga.Editor do
     after_commands =
       Enum.reduce(commands, base_state, fn cmd, acc ->
         execute_command(acc, cmd)
-        acc
       end)
 
     # Apply any leader/whichkey state updates emitted by execute_command.
@@ -226,47 +227,56 @@ defmodule Minga.Editor do
 
   # ── Command execution ────────────────────────────────────────────────────────
 
-  @spec execute_command(state(), Mode.command()) :: :ok
-  defp execute_command(%{buffer: nil}, _cmd), do: :ok
+  @spec execute_command(state(), Mode.command()) :: state()
+  defp execute_command(%{buffer: nil} = state, _cmd), do: state
 
-  defp execute_command(%{buffer: buf}, :move_left) do
+  defp execute_command(%{buffer: buf} = state, :move_left) do
     BufferServer.move(buf, :left)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :move_right) do
+  defp execute_command(%{buffer: buf} = state, :move_right) do
     BufferServer.move(buf, :right)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :move_up) do
+  defp execute_command(%{buffer: buf} = state, :move_up) do
     BufferServer.move(buf, :up)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :move_down) do
+  defp execute_command(%{buffer: buf} = state, :move_down) do
     BufferServer.move(buf, :down)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :delete_before) do
+  defp execute_command(%{buffer: buf} = state, :delete_before) do
     BufferServer.delete_before(buf)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :delete_at) do
+  defp execute_command(%{buffer: buf} = state, :delete_at) do
     BufferServer.delete_at(buf)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :insert_newline) do
+  defp execute_command(%{buffer: buf} = state, :insert_newline) do
     BufferServer.insert_char(buf, "\n")
+    state
   end
 
-  defp execute_command(%{buffer: buf}, {:insert_char, char}) when is_binary(char) do
+  defp execute_command(%{buffer: buf} = state, {:insert_char, char}) when is_binary(char) do
     BufferServer.insert_char(buf, char)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :move_to_line_start) do
+  defp execute_command(%{buffer: buf} = state, :move_to_line_start) do
     {line, _col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :move_to_line_end) do
+  defp execute_command(%{buffer: buf} = state, :move_to_line_end) do
     {line, _col} = BufferServer.cursor(buf)
 
     end_col =
@@ -276,10 +286,10 @@ defmodule Minga.Editor do
       end
 
     BufferServer.move_to(buf, {line, end_col})
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :insert_line_below) do
-    # Move to end of the current line and insert a newline.
+  defp execute_command(%{buffer: buf} = state, :insert_line_below) do
     {line, _col} = BufferServer.cursor(buf)
 
     end_col =
@@ -290,26 +300,76 @@ defmodule Minga.Editor do
 
     BufferServer.move_to(buf, {line, end_col})
     BufferServer.insert_char(buf, "\n")
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :insert_line_above) do
-    # Move to the start of the current line, insert a newline, then step up.
+  defp execute_command(%{buffer: buf} = state, :insert_line_above) do
     {line, _col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
     BufferServer.insert_char(buf, "\n")
     BufferServer.move(buf, :up)
+    state
   end
 
-  defp execute_command(%{buffer: buf}, :save) do
+  defp execute_command(%{buffer: buf} = state, :save) do
     case BufferServer.save(buf) do
       :ok -> Logger.info("File saved")
       {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
     end
+
+    state
   end
 
-  defp execute_command(_state, :quit) do
+  defp execute_command(state, :quit) do
     Logger.info("Quitting editor")
     System.stop(0)
+    state
+  end
+
+  # ── Undo / redo ──────────────────────────────────────────────────────────────
+
+  defp execute_command(%{buffer: buf} = state, :undo) do
+    BufferServer.undo(buf)
+    state
+  end
+
+  defp execute_command(%{buffer: buf} = state, :redo) do
+    BufferServer.redo(buf)
+    state
+  end
+
+  # ── Paste ─────────────────────────────────────────────────────────────────────
+
+  defp execute_command(%{buffer: buf, register: text} = state, :paste_before)
+       when is_binary(text) do
+    BufferServer.insert_char(buf, text)
+    state
+  end
+
+  defp execute_command(state, :paste_before), do: state
+
+  defp execute_command(%{buffer: buf, register: text} = state, :paste_after)
+       when is_binary(text) do
+    BufferServer.move(buf, :right)
+    BufferServer.insert_char(buf, text)
+    state
+  end
+
+  defp execute_command(state, :paste_after), do: state
+
+  # ── Line-wise operator commands (dd / yy) ────────────────────────────────────
+
+  defp execute_command(%{buffer: buf} = state, :delete_line) do
+    {line, _col} = BufferServer.cursor(buf)
+    yanked = BufferServer.get_lines_content(buf, line, line)
+    BufferServer.delete_lines(buf, line, line)
+    %{state | register: yanked <> "\n"}
+  end
+
+  defp execute_command(%{buffer: buf} = state, :yank_line) do
+    {line, _col} = BufferServer.cursor(buf)
+    yanked = BufferServer.get_lines_content(buf, line, line)
+    %{state | register: yanked <> "\n"}
   end
 
   # ── Ex command (from : command line) ────────────────────────────────────────
@@ -318,64 +378,72 @@ defmodule Minga.Editor do
     execute_command(state, :save)
   end
 
-  defp execute_command(_state, {:execute_ex_command, {:quit, []}}) do
-    Logger.info("Quitting editor")
-    System.stop(0)
+  defp execute_command(state, {:execute_ex_command, {:quit, []}}) do
+    execute_command(state, :quit)
   end
 
-  defp execute_command(_state, {:execute_ex_command, {:force_quit, []}}) do
+  defp execute_command(state, {:execute_ex_command, {:force_quit, []}}) do
     Logger.info("Force quitting editor")
     System.stop(0)
+    state
   end
 
   defp execute_command(state, {:execute_ex_command, {:save_quit, []}}) do
-    execute_command(state, :save)
+    state_after_save = execute_command(state, :save)
     Logger.info("Quitting editor after save")
     System.stop(0)
+    state_after_save
   end
 
-  defp execute_command(_state, {:execute_ex_command, {:edit, file_path}}) do
+  defp execute_command(state, {:execute_ex_command, {:edit, file_path}}) do
     Logger.info("Opening file: #{file_path}")
+    state
   end
 
-  defp execute_command(%{buffer: buf}, {:execute_ex_command, {:goto_line, line_num}})
-       when not is_nil(buf) do
+  defp execute_command(%{buffer: buf} = state, {:execute_ex_command, {:goto_line, line_num}}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
+    state
   end
 
-  defp execute_command(_state, {:execute_ex_command, {:unknown, raw}}) do
+  defp execute_command(state, {:execute_ex_command, {:unknown, raw}}) do
     Logger.warning("Unknown ex command: #{raw}")
+    state
   end
 
-  defp execute_command(%{buffer: buf, mode_state: ms}, :delete_visual_selection) do
+  defp execute_command(%{buffer: buf, mode_state: ms} = state, :delete_visual_selection) do
     anchor = Map.get(ms, :visual_anchor, {0, 0})
     visual_type = Map.get(ms, :visual_type, :char)
     cursor = BufferServer.cursor(buf)
 
-    case visual_type do
-      :char ->
-        # delete_range is inclusive on both ends — pass anchor and cursor directly.
-        BufferServer.delete_range(buf, anchor, cursor)
-
-      :line ->
-        {anchor_line, _} = anchor
-        {cursor_line, _} = cursor
-        start_line = min(anchor_line, cursor_line)
-        end_line = max(anchor_line, cursor_line)
-        BufferServer.delete_lines(buf, start_line, end_line)
-    end
-  end
-
-  defp execute_command(%{buffer: buf, mode_state: ms}, :yank_visual_selection) do
-    anchor = Map.get(ms, :visual_anchor, {0, 0})
-    visual_type = Map.get(ms, :visual_type, :char)
-    cursor = BufferServer.cursor(buf)
-
-    _yanked =
+    yanked =
       case visual_type do
         :char ->
-          # get_range is inclusive on both ends
+          text = BufferServer.get_range(buf, anchor, cursor)
+          BufferServer.delete_range(buf, anchor, cursor)
+          text
+
+        :line ->
+          {anchor_line, _} = anchor
+          {cursor_line, _} = cursor
+          start_line = min(anchor_line, cursor_line)
+          end_line = max(anchor_line, cursor_line)
+          text = BufferServer.get_lines_content(buf, start_line, end_line)
+          BufferServer.delete_lines(buf, start_line, end_line)
+          text <> "\n"
+      end
+
+    %{state | register: yanked}
+  end
+
+  defp execute_command(%{buffer: buf, mode_state: ms} = state, :yank_visual_selection) do
+    anchor = Map.get(ms, :visual_anchor, {0, 0})
+    visual_type = Map.get(ms, :visual_type, :char)
+    cursor = BufferServer.cursor(buf)
+
+    yanked =
+      case visual_type do
+        :char ->
           BufferServer.get_range(buf, anchor, cursor)
 
         :line ->
@@ -383,28 +451,26 @@ defmodule Minga.Editor do
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          BufferServer.get_lines_content(buf, start_line, end_line)
+          BufferServer.get_lines_content(buf, start_line, end_line) <> "\n"
       end
 
     Logger.debug("Yanked visual selection")
-    :ok
+    %{state | register: yanked}
   end
 
   # ── Leader / which-key commands ───────────────────────────────────────────
 
   defp execute_command(state, {:leader_start, node}) do
-    # Cancel any in-flight timer, then start a fresh one.
     if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
     timer = WhichKey.start_timeout()
-    # Mutate the GenServer state via the process dictionary as a side-channel.
-    # (The return value of execute_command is :ok; state mutation happens in handle_key.)
+    # Side-channel: whichkey updates are merged after the reduce completes.
     Process.put(:__leader_update__, %{
       whichkey_node: node,
       whichkey_timer: timer,
       show_whichkey: false
     })
 
-    :ok
+    state
   end
 
   defp execute_command(state, {:leader_progress, node}) do
@@ -417,7 +483,7 @@ defmodule Minga.Editor do
       show_whichkey: state.show_whichkey
     })
 
-    :ok
+    state
   end
 
   defp execute_command(state, :leader_cancel) do
@@ -429,7 +495,7 @@ defmodule Minga.Editor do
       show_whichkey: false
     })
 
-    :ok
+    state
   end
 
   # ── Text object commands ───────────────────────────────────────────────────
@@ -441,7 +507,6 @@ defmodule Minga.Editor do
 
   defp execute_command(%{buffer: buf} = state, {:change_text_object, modifier, spec})
        when not is_nil(buf) do
-    # Delete the range; the mode FSM has already arranged the transition to :insert.
     apply_text_object(state, modifier, spec, :delete)
   end
 
@@ -451,28 +516,31 @@ defmodule Minga.Editor do
   end
 
   # Stub leader-bound commands — logged for discoverability, not yet implemented.
-  defp execute_command(_state, :find_file) do
+  defp execute_command(state, :find_file) do
     Logger.info("find_file: not yet implemented")
+    state
   end
 
-  defp execute_command(_state, :buffer_list) do
+  defp execute_command(state, :buffer_list) do
     Logger.info("buffer_list: not yet implemented")
+    state
   end
 
-  defp execute_command(_state, :kill_buffer) do
+  defp execute_command(state, :kill_buffer) do
     Logger.info("kill_buffer: not yet implemented")
+    state
   end
 
-  defp execute_command(_state, :window_left), do: :ok
-  defp execute_command(_state, :window_right), do: :ok
-  defp execute_command(_state, :window_up), do: :ok
-  defp execute_command(_state, :window_down), do: :ok
-  defp execute_command(_state, :split_vertical), do: :ok
-  defp execute_command(_state, :split_horizontal), do: :ok
-  defp execute_command(_state, :describe_key), do: :ok
+  defp execute_command(state, :window_left), do: state
+  defp execute_command(state, :window_right), do: state
+  defp execute_command(state, :window_up), do: state
+  defp execute_command(state, :window_down), do: state
+  defp execute_command(state, :split_vertical), do: state
+  defp execute_command(state, :split_horizontal), do: state
+  defp execute_command(state, :describe_key), do: state
 
   # Unknown or unimplemented commands are silently ignored.
-  defp execute_command(_state, _cmd), do: :ok
+  defp execute_command(state, _cmd), do: state
 
   # ── Rendering ────────────────────────────────────────────────────────────────
 
@@ -595,8 +663,8 @@ defmodule Minga.Editor do
           Minga.Mode.OperatorPending.text_object_modifier(),
           term(),
           text_object_action()
-        ) :: :ok
-  defp apply_text_object(%{buffer: buf} = _state, modifier, spec, action) do
+        ) :: state()
+  defp apply_text_object(%{buffer: buf} = state, modifier, spec, action) do
     cursor = BufferServer.cursor(buf)
     content = BufferServer.content(buf)
     tmp_buf = GapBuffer.new(content)
@@ -605,14 +673,17 @@ defmodule Minga.Editor do
 
     case {action, range} do
       {_, nil} ->
-        :ok
+        state
 
       {:delete, {start_pos, end_pos}} ->
+        text = BufferServer.get_range(buf, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
+        %{state | register: text}
 
-      {:yank, {_start_pos, _end_pos}} ->
-        Logger.debug("yank text object (register support not yet implemented)")
-        :ok
+      {:yank, {start_pos, end_pos}} ->
+        text = BufferServer.get_range(buf, start_pos, end_pos)
+        Logger.debug("Yanked text object: #{byte_size(text)} bytes")
+        %{state | register: text}
     end
   end
 

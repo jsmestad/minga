@@ -26,7 +26,9 @@ defmodule Minga.Command.RegistryTest do
           :move_down,
           :delete_before,
           :delete_at,
-          :insert_newline
+          :insert_newline,
+          :undo,
+          :redo
         ]
         |> Enum.sort()
 

@@ -34,7 +34,9 @@ defmodule Minga.Command.Registry do
     {:move_down, "Move cursor down"},
     {:delete_before, "Delete character before cursor (backspace)"},
     {:delete_at, "Delete character at cursor (delete)"},
-    {:insert_newline, "Insert a newline at cursor"}
+    {:insert_newline, "Insert a newline at cursor"},
+    {:undo, "Undo the last change"},
+    {:redo, "Redo the last undone change"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -128,6 +130,14 @@ defmodule Minga.Command.Registry do
   defp execute_insert_newline(state),
     do: Map.update(state, :pending_commands, [:insert_newline], &[:insert_newline | &1])
 
+  @spec execute_undo(map()) :: map()
+  defp execute_undo(state),
+    do: Map.update(state, :pending_commands, [:undo], &[:undo | &1])
+
+  @spec execute_redo(map()) :: map()
+  defp execute_redo(state),
+    do: Map.update(state, :pending_commands, [:redo], &[:redo | &1])
+
   # Maps a built-in command name to its execute function capture.
   @spec built_in_execute(atom()) :: function()
   defp built_in_execute(:save), do: &execute_save/1
@@ -140,6 +150,8 @@ defmodule Minga.Command.Registry do
   defp built_in_execute(:delete_before), do: &execute_delete_before/1
   defp built_in_execute(:delete_at), do: &execute_delete_at/1
   defp built_in_execute(:insert_newline), do: &execute_insert_newline/1
+  defp built_in_execute(:undo), do: &execute_undo/1
+  defp built_in_execute(:redo), do: &execute_redo/1
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

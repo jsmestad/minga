@@ -57,6 +57,8 @@ defmodule Minga.Mode.Normal do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.Trie
   alias Minga.Mode
@@ -65,6 +67,9 @@ defmodule Minga.Mode.Normal do
   # Special codepoints
   @escape 27
   @space 32
+
+  # Modifier flags (mirrors Minga.Port.Protocol)
+  @ctrl 0x02
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_416
@@ -275,6 +280,16 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({?P, 0}, state) do
     {:execute, :paste_before, state}
+  end
+
+  # ── Undo / redo ───────────────────────────────────────────────────────────
+
+  def handle_key({?u, 0}, state) do
+    {:execute, :undo, state}
+  end
+
+  def handle_key({?r, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :redo, state}
   end
 
   # ── Escape: already in Normal, clear count and cancel any leader sequence ──

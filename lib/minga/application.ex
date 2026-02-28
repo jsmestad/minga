@@ -22,11 +22,18 @@ defmodule Minga.Application do
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
-    children = [
+    base_children = [
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one}
-      # Minga.Port.Manager and Minga.Editor will be added when
-      # they're ready to be wired together (commits 6-8)
     ]
+
+    editor_children =
+      if Application.get_env(:minga, :start_editor, false) do
+        [Minga.Port.Manager, Minga.Editor]
+      else
+        []
+      end
+
+    children = base_children ++ editor_children
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)
