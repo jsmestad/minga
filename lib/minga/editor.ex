@@ -2,18 +2,20 @@ defmodule Minga.Editor do
   @moduledoc """
   Editor orchestration GenServer.
 
-  Ties together the buffer, port manager, and viewport. Receives
-  input events from the Port Manager, dispatches them to the buffer,
-  recomputes the visible region, and sends render commands back.
+  Ties together the buffer, port manager, viewport, and modal FSM. Receives
+  input events from the Port Manager, routes them through `Minga.Mode.process/3`,
+  executes the resulting commands against the buffer, recomputes the visible
+  region, and sends render commands back to the Zig renderer.
 
-  For the walking skeleton (Phase 1), all input is treated as direct
-  insertion — no modal FSM yet. Modal editing is added in Phase 2.
+  The editor starts in **Normal mode** (Vim-style). The status line reflects
+  the current mode: `-- NORMAL --`, `-- INSERT --`, etc.
   """
 
   use GenServer
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Viewport
+  alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
@@ -36,10 +38,11 @@ defmodule Minga.Editor do
           buffer: pid() | nil,
           port_manager: GenServer.server(),
           viewport: Viewport.t(),
-          mode: :insert
+          mode: Mode.mode(),
+          mode_state: Mode.state()
         }
 
-  # ── Client API ──
+  # ── Client API ──────────────────────────────────────────────────────────────
 
   @doc "Starts the editor."
   @spec start_link([start_opt()]) :: GenServer.on_start()
@@ -60,7 +63,7 @@ defmodule Minga.Editor do
     GenServer.cast(server, :render)
   end
 
-  # ── Server Callbacks ──
+  # ── Server Callbacks ─────────────────────────────────────────────────────────
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
@@ -70,7 +73,6 @@ defmodule Minga.Editor do
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
 
-    # Subscribe to input events from the port manager
     if is_pid(port_manager) or is_atom(port_manager) do
       try do
         PortManager.subscribe(port_manager)
@@ -83,7 +85,8 @@ defmodule Minga.Editor do
       buffer: buffer,
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
-      mode: :insert
+      mode: :normal,
+      mode_state: Mode.initial_state()
     }
 
     {:ok, state}
@@ -134,96 +137,138 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # ── Key handling (Phase 1: insert-only mode) ──
+  # ── Key dispatch ─────────────────────────────────────────────────────────────
 
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp handle_key(%{buffer: nil} = state, _codepoint, _modifiers), do: state
 
-  # Ctrl+S → save
+  # Global bindings — processed before the Mode FSM.
+  # Ctrl+S → save (works in any mode).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    case BufferServer.save(state.buffer) do
-      :ok -> Logger.info("File saved")
-      {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
+    if state.buffer do
+      case BufferServer.save(state.buffer) do
+        :ok -> Logger.info("File saved")
+        {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
+      end
     end
 
     state
   end
 
-  # Ctrl+Q → quit
+  # Ctrl+Q → quit (works in any mode).
   defp handle_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
     Logger.info("Quitting editor")
     System.stop(0)
-    # unreachable but required for type consistency
     state
   end
 
-  # Arrow keys (using common terminal codepoints)
-  # Up = 0xF700, Down = 0xF701, Left = 0xF702, Right = 0xF703
-  # But we'll also handle standard VT sequences mapped by libvaxis
-  defp handle_key(state, codepoint, _mods) when codepoint in [0xF700, 57416] do
-    BufferServer.move(state.buffer, :up)
-    state
+  # All other keys go through the Mode FSM.
+  defp handle_key(state, codepoint, modifiers) do
+    key = {codepoint, modifiers}
+    {new_mode, commands, new_mode_state} = Mode.process(state.mode, key, state.mode_state)
+
+    new_state = %{state | mode: new_mode, mode_state: new_mode_state}
+
+    Enum.reduce(commands, new_state, fn cmd, acc ->
+      execute_command(acc, cmd)
+      acc
+    end)
   end
 
-  defp handle_key(state, codepoint, _mods) when codepoint in [0xF701, 57424] do
-    BufferServer.move(state.buffer, :down)
-    state
+  # ── Command execution ────────────────────────────────────────────────────────
+
+  @spec execute_command(state(), Mode.command()) :: :ok
+  defp execute_command(%{buffer: nil}, _cmd), do: :ok
+
+  defp execute_command(%{buffer: buf}, :move_left) do
+    BufferServer.move(buf, :left)
   end
 
-  defp handle_key(state, codepoint, _mods) when codepoint in [0xF702, 57419] do
-    BufferServer.move(state.buffer, :left)
-    state
+  defp execute_command(%{buffer: buf}, :move_right) do
+    BufferServer.move(buf, :right)
   end
 
-  defp handle_key(state, codepoint, _mods) when codepoint in [0xF703, 57421] do
-    BufferServer.move(state.buffer, :right)
-    state
+  defp execute_command(%{buffer: buf}, :move_up) do
+    BufferServer.move(buf, :up)
   end
 
-  # Backspace
-  defp handle_key(state, codepoint, _mods) when codepoint in [8, 127] do
-    BufferServer.delete_before(state.buffer)
-    state
+  defp execute_command(%{buffer: buf}, :move_down) do
+    BufferServer.move(buf, :down)
   end
 
-  # Delete
-  defp handle_key(state, 0xF728, _mods) do
-    BufferServer.delete_at(state.buffer)
-    state
+  defp execute_command(%{buffer: buf}, :delete_before) do
+    BufferServer.delete_before(buf)
   end
 
-  # Enter
-  defp handle_key(state, 13, _mods) do
-    BufferServer.insert_char(state.buffer, "\n")
-    state
+  defp execute_command(%{buffer: buf}, :delete_at) do
+    BufferServer.delete_at(buf)
   end
 
-  # Tab
-  defp handle_key(state, 9, _mods) do
-    BufferServer.insert_char(state.buffer, "  ")
-    state
+  defp execute_command(%{buffer: buf}, :insert_newline) do
+    BufferServer.insert_char(buf, "\n")
   end
 
-  # Printable characters
-  defp handle_key(state, codepoint, _mods) when codepoint >= 32 and codepoint <= 0x10FFFF do
-    case <<codepoint::utf8>> do
-      char when is_binary(char) ->
-        BufferServer.insert_char(state.buffer, char)
-        state
+  defp execute_command(%{buffer: buf}, {:insert_char, char}) when is_binary(char) do
+    BufferServer.insert_char(buf, char)
+  end
+
+  defp execute_command(%{buffer: buf}, :move_to_line_start) do
+    {line, _col} = BufferServer.cursor(buf)
+    BufferServer.move_to(buf, {line, 0})
+  end
+
+  defp execute_command(%{buffer: buf}, :move_to_line_end) do
+    {line, _col} = BufferServer.cursor(buf)
+
+    end_col =
+      case BufferServer.get_lines(buf, line, 1) do
+        [text] -> max(0, String.length(text) - 1)
+        [] -> 0
+      end
+
+    BufferServer.move_to(buf, {line, end_col})
+  end
+
+  defp execute_command(%{buffer: buf}, :insert_line_below) do
+    # Move to end of the current line and insert a newline.
+    {line, _col} = BufferServer.cursor(buf)
+
+    end_col =
+      case BufferServer.get_lines(buf, line, 1) do
+        [text] -> String.length(text)
+        [] -> 0
+      end
+
+    BufferServer.move_to(buf, {line, end_col})
+    BufferServer.insert_char(buf, "\n")
+  end
+
+  defp execute_command(%{buffer: buf}, :insert_line_above) do
+    # Move to the start of the current line, insert a newline, then step up.
+    {line, _col} = BufferServer.cursor(buf)
+    BufferServer.move_to(buf, {line, 0})
+    BufferServer.insert_char(buf, "\n")
+    BufferServer.move(buf, :up)
+  end
+
+  defp execute_command(%{buffer: buf}, :save) do
+    case BufferServer.save(buf) do
+      :ok -> Logger.info("File saved")
+      {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
     end
-  rescue
-    # Invalid codepoint
-    ArgumentError -> state
   end
 
-  # Ignore other keys
-  defp handle_key(state, _codepoint, _mods), do: state
+  defp execute_command(_state, :quit) do
+    Logger.info("Quitting editor")
+    System.stop(0)
+  end
 
-  # ── Rendering ──
+  # Unknown or unimplemented commands are silently ignored.
+  defp execute_command(_state, _cmd), do: :ok
+
+  # ── Rendering ────────────────────────────────────────────────────────────────
 
   @spec do_render(state()) :: :ok
   defp do_render(%{buffer: nil} = state) do
-    # Render empty screen with welcome message
     commands = [
       Protocol.encode_clear(),
       Protocol.encode_draw(0, 0, "Minga v#{Minga.version()} — No file open"),
@@ -242,15 +287,12 @@ defmodule Minga.Editor do
     visible_rows = Viewport.content_rows(viewport)
     lines = BufferServer.get_lines(state.buffer, first_line, visible_rows)
 
-    # Build render commands
-    commands = [Protocol.encode_clear()]
+    clear = [Protocol.encode_clear()]
 
-    # Draw buffer lines
     line_commands =
       lines
       |> Enum.with_index()
       |> Enum.map(fn {line_text, screen_row} ->
-        # Handle horizontal scrolling
         visible_text =
           if viewport.left > 0 do
             line_text
@@ -265,7 +307,6 @@ defmodule Minga.Editor do
         Protocol.encode_draw(screen_row, 0, visible_text)
       end)
 
-    # Draw tildes for empty lines past the buffer
     tilde_commands =
       if length(lines) < visible_rows do
         for row <- length(lines)..(visible_rows - 1) do
@@ -280,32 +321,37 @@ defmodule Minga.Editor do
     file_name = BufferServer.file_path(state.buffer) || "[scratch]"
     dirty_marker = if BufferServer.dirty?(state.buffer), do: " [+]", else: ""
     line_count = BufferServer.line_count(state.buffer)
+    mode_label = Mode.display(state.mode)
 
     status_text =
-      " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  -- INSERT --"
+      " #{file_name}#{dirty_marker}  #{cursor_line + 1}:#{cursor_col + 1}  #{line_count}L  #{mode_label}"
 
     status_row = viewport.rows - 1
 
     status_command =
-      Protocol.encode_draw(status_row, 0, String.pad_trailing(status_text, viewport.cols),
+      Protocol.encode_draw(
+        status_row,
+        0,
+        String.pad_trailing(status_text, viewport.cols),
         fg: 0x000000,
         bg: 0xCCCCCC,
         bold: true
       )
 
-    # Cursor position (relative to viewport)
     cursor_row = cursor_line - viewport.top
     cursor_col_screen = cursor_col - viewport.left
     cursor_command = Protocol.encode_cursor(cursor_row, cursor_col_screen)
 
     all_commands =
-      commands ++ line_commands ++ tilde_commands ++ [status_command, cursor_command, Protocol.encode_batch_end()]
+      clear ++
+        line_commands ++
+        tilde_commands ++ [status_command, cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
     :ok
   end
 
-  # ── Private ──
+  # ── Private helpers ──────────────────────────────────────────────────────────
 
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   defp start_buffer(file_path) do
