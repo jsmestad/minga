@@ -102,8 +102,7 @@ defmodule Minga.Port.Manager do
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
-  def handle_cast({:send_commands, commands}, %{port: nil} = state) do
-    Logger.warning("Port not open, dropping #{length(commands)} commands")
+  def handle_cast({:send_commands, _commands}, %{port: nil} = state) do
     {:noreply, state}
   end
 
@@ -120,7 +119,6 @@ defmodule Minga.Port.Manager do
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
       {:ok, {:ready, width, height}} ->
-        Logger.info("Zig renderer ready: #{width}x#{height}")
         new_state = %{state | ready: true, terminal_size: {width, height}}
         broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
         {:noreply, new_state}
@@ -167,7 +165,6 @@ defmodule Minga.Port.Manager do
 
       %{state | port: port}
     else
-      Logger.warning("Renderer binary not found at #{state.renderer_path}")
       state
     end
   end

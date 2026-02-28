@@ -18,11 +18,11 @@ defmodule Minga.CLI do
   def main(args) do
     case parse_args(args) do
       {:file, path} ->
-        Logger.info("Opening file: #{path}")
+        Logger.debug("Opening file: #{path}")
         open_editor(path)
 
       :no_file ->
-        Logger.info("Starting with empty buffer")
+        Logger.debug("Starting with empty buffer")
         open_editor(nil)
 
       {:error, message} ->
@@ -44,13 +44,18 @@ defmodule Minga.CLI do
     main(args)
   end
 
+  @doc """
+  Parses CLI arguments into an action.
+
+  Returns `{:file, path}`, `:no_file`, or `{:error, message}`.
+  """
   @spec parse_args([String.t()]) :: {:file, String.t()} | :no_file | {:error, String.t()}
-  defp parse_args([]), do: :no_file
-  defp parse_args(["--help" | _]), do: {:error, usage()}
-  defp parse_args(["-h" | _]), do: {:error, usage()}
-  defp parse_args(["--version" | _]), do: {:error, "minga #{Minga.version()}"}
-  defp parse_args(["-v" | _]), do: {:error, "minga #{Minga.version()}"}
-  defp parse_args([file_path | _]), do: {:file, file_path}
+  def parse_args([]), do: :no_file
+  def parse_args(["--help" | _]), do: {:error, usage()}
+  def parse_args(["-h" | _]), do: {:error, usage()}
+  def parse_args(["--version" | _]), do: {:error, "minga #{Minga.version()}"}
+  def parse_args(["-v" | _]), do: {:error, "minga #{Minga.version()}"}
+  def parse_args([file_path | _]), do: {:file, file_path}
 
   @spec usage() :: String.t()
   defp usage do
@@ -81,7 +86,7 @@ defmodule Minga.CLI do
 
         case Process.whereis(Minga.Editor) do
           nil ->
-            Logger.warning("Editor not running yet")
+            Logger.debug("Editor not running yet")
 
           _pid ->
             Minga.Editor.open_file(path)

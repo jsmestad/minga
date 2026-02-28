@@ -169,7 +169,7 @@ defmodule Minga.Editor do
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
     if state.buffer do
       case BufferServer.save(state.buffer) do
-        :ok -> Logger.info("File saved")
+        :ok -> :ok
         {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
       end
     end
@@ -179,7 +179,6 @@ defmodule Minga.Editor do
 
   # Ctrl+Q → quit (works in any mode).
   defp handle_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    Logger.info("Quitting editor")
     System.stop(0)
     state
   end
@@ -313,7 +312,7 @@ defmodule Minga.Editor do
 
   defp execute_command(%{buffer: buf} = state, :save) do
     case BufferServer.save(buf) do
-      :ok -> Logger.info("File saved")
+      :ok -> :ok
       {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
     end
 
@@ -321,7 +320,6 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, :quit) do
-    Logger.info("Quitting editor")
     System.stop(0)
     state
   end
@@ -383,20 +381,20 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, {:execute_ex_command, {:force_quit, []}}) do
-    Logger.info("Force quitting editor")
+    Logger.debug("Force quitting editor")
     System.stop(0)
     state
   end
 
   defp execute_command(state, {:execute_ex_command, {:save_quit, []}}) do
     state_after_save = execute_command(state, :save)
-    Logger.info("Quitting editor after save")
+    Logger.debug("Quitting editor after save")
     System.stop(0)
     state_after_save
   end
 
   defp execute_command(state, {:execute_ex_command, {:edit, file_path}}) do
-    Logger.info("Opening file: #{file_path}")
+    Logger.debug("Opening file: #{file_path}")
     state
   end
 
@@ -407,7 +405,7 @@ defmodule Minga.Editor do
   end
 
   defp execute_command(state, {:execute_ex_command, {:unknown, raw}}) do
-    Logger.warning("Unknown ex command: #{raw}")
+    Logger.debug("Unknown ex command: #{raw}")
     state
   end
 
@@ -517,17 +515,17 @@ defmodule Minga.Editor do
 
   # Stub leader-bound commands — logged for discoverability, not yet implemented.
   defp execute_command(state, :find_file) do
-    Logger.info("find_file: not yet implemented")
+    Logger.debug("find_file: not yet implemented")
     state
   end
 
   defp execute_command(state, :buffer_list) do
-    Logger.info("buffer_list: not yet implemented")
+    Logger.debug("buffer_list: not yet implemented")
     state
   end
 
   defp execute_command(state, :kill_buffer) do
-    Logger.info("kill_buffer: not yet implemented")
+    Logger.debug("kill_buffer: not yet implemented")
     state
   end
 
