@@ -1,371 +1,144 @@
-# Plan: Keystroke Latency Optimization
+# Plan: Generic Picker Framework with Fuzzy Matching
 
 ## Goal
-
-Reduce keystroke-to-screen latency from O(n) in buffer size to O(1) for
-typical editing operations, and cut per-keystroke overhead from 6+ GenServer
-round-trips and 50+ Port syscalls to 1 of each. This brings Minga's
-interactive responsiveness from "fine under 100KB, sluggish over 1MB" to
-"smooth at any file size."
+Upgrade the existing `Minga.Picker` from a simple substring-matching data structure into a full behaviour-based picker framework with fuzzy/orderless matching, match highlighting, annotations, alternative actions, and a `:picker` mode in the FSM — so that every "pick one from a list" feature (command palette, file finder, buffer switcher, grep, help) is a trivial 10-line wrapper.
 
 ## Context
 
-### Current Hot Path (per keystroke)
+### What exists today
+- **`Minga.Picker`** (190 lines) — pure data structure with `{id, label, desc}` items, substring filtering, up/down navigation, visible window scrolling. Solid foundation.
+- **Picker rendering** — already implemented in `Editor.do_render/1` via `maybe_render_picker/2`. Bottom-panel overlay with separator, items, prompt line, and cursor positioning.
+- **Picker key handling** — `handle_picker_key/3` in `Editor` handles Esc, Enter, C-j/C-k, arrows, backspace, printable chars. Dispatches by `picker_kind` (`:buffer` or `:find_file`).
+- **Two picker consumers** — `open_buffer_picker/1` and `open_file_finder/1` in `Editor`, each manually constructing items and handling selection.
+- **Editor state** — `EditorState` has `picker`, `picker_kind`, `picker_prev_buffer` fields.
+- **No fuzzy matching** — current filtering is `String.contains?` substring match.
+- **No match highlighting** — selected items get bold, but matched characters aren't highlighted.
+- **No behaviour** — adding a new picker source requires touching `Editor` directly.
 
-A single keypress currently follows this pipeline:
-
-1. **Zig** detects keypress → encodes → writes to Port stdout (~µs)
-2. **PortManager** decodes → sends `{:minga_input, ...}` to Editor (~µs)
-3. **Editor** `handle_key` → Mode FSM → `execute_command`:
-   - Typical command (e.g. `:move_right`): 1 `BufferServer.call` (sync)
-   - Some commands (e.g. `:insert_line_below`): 3-4 `BufferServer.call`s
-4. **Editor** `do_render` — 5 more `BufferServer.call`s:
-   - `cursor/1`, `get_lines/3`, `file_path/1`, `dirty?/1`, `line_count/1`
-5. **Editor** encodes ~50+ render commands → `PortManager.send_commands`
-6. **PortManager** sends each command as a separate `Port.command` (1 syscall each)
-7. **Zig** decodes each → draws to libvaxis → `batch_end` flushes to terminal
-
-**Bottleneck #1 — O(n) buffer queries**: `cursor()` does
-`String.split(before, "\n")` every call. `line_count()` concatenates
-`before <> after_` then scans for newlines. `move_to()` rebuilds full content
-and splits all lines. For a 1MB file, each query allocates and scans ~1MB.
-With 6+ queries per keystroke, that's ~6MB of allocation per keypress.
-
-**Bottleneck #2 — GenServer round-trips**: The render path alone makes 5
-synchronous `GenServer.call` round-trips to `BufferServer`. Each round-trip
-involves message send → scheduler pickup → execute → reply. Even at ~5-10µs
-overhead per call, that's 25-50µs of pure scheduling overhead before any real
-work.
-
-**Bottleneck #3 — Port I/O**: `PortManager.send_commands` calls
-`Port.command(state.port, cmd)` in a loop — one write syscall per render
-command. A typical frame has 50-60 commands (clear + 50 lines + modeline +
-minibuffer + cursor + shape + batch_end). That's 50-60 syscalls per keystroke.
-
-### What We're NOT Changing
-
-- The BEAM ↔ Zig Port architecture (it's architecturally sound)
-- The gap buffer as the core data structure (it's correct for this use case)
-- The GenServer-per-buffer isolation model
-- The Mode FSM or command dispatch
-- The Zig renderer or libvaxis integration
+### Key patterns
+- Modes are atoms (`:normal`, `:insert`, etc.) dispatched via `Mode.process/3`.
+- The picker bypasses the Mode FSM — `handle_info` checks `picker != nil` before routing to `handle_picker_key`. This is fine and avoids adding a `:picker` mode to the FSM.
+- Rendering uses `Protocol.encode_draw/4+` with fg/bg/bold/reverse options.
+- Commands are atoms or tagged tuples executed by `execute_command/2`.
 
 ## Approach
 
-Three independent, stackable optimizations ordered by impact:
-
-1. **Cache derived state in GapBuffer** — eliminate O(n) queries
-2. **Batch buffer queries for rendering** — 1 GenServer call instead of 5
-3. **Batch Port commands into a single binary** — 1 syscall instead of 50+
-
-Each step is independently valuable and testable. Together they reduce
-keystroke latency from O(n) to O(1) and cut constant-factor overhead by ~10x.
+Evolve the existing code incrementally rather than rewriting. The picker data structure gets fuzzy matching and scoring. A new `Minga.Picker.Source` behaviour defines the contract for picker sources. The editor's picker handling becomes generic — dispatching select/cancel to the source module rather than branching on `picker_kind`.
 
 ### Alternatives Considered
-
-1. **Replace gap buffer with rope/piece table** — Solves O(n) queries
-   structurally but is a massive rewrite touching every buffer consumer. The
-   caching approach gets us O(1) queries with surgical changes to one module.
-   A rope can be considered later if needed for very large files (100MB+).
-
-2. **Move buffer into Editor GenServer (eliminate BufferServer)** — Removes
-   GenServer overhead entirely but sacrifices crash isolation. A single bad
-   buffer operation would take down the editor. The batch-query approach gets
-   most of the benefit while keeping isolation.
-
-3. **ETS-based buffer storage** — Allows concurrent reads without GenServer
-   serialization. But gap buffers aren't naturally decomposable into
-   key-value pairs, and the complexity isn't justified when batch queries
-   solve the problem.
-
-4. **NIF-based gap buffer** — Move the gap buffer to C/Zig for raw speed.
-   Maximum performance but sacrifices BEAM safety guarantees (NIF crash =
-   VM crash). The caching approach gets 95% of the benefit without this risk.
+1. **Full `:picker` mode in the FSM** — Issue #16 suggests this, but the current approach (checking `picker != nil` in `handle_info`) is simpler and already works. Adding a mode would require changes to `Mode`, every mode module, and the modeline. Not worth it — the current pattern is fine.
+2. **Separate GenServer per picker** — Overengineered. The picker is fast, synchronous, and ephemeral. A data structure in EditorState is correct.
+3. **Embark-style action menu (C-o)** — Specified in #16 but premature. We can add it later as a picker-over-actions. Skip for now to keep scope tight.
 
 ## Steps
 
-### 1. Cache cursor position and line count in GapBuffer
-
-- **Files**: `lib/minga/buffer/gap_buffer.ex`, `test/minga/buffer/gap_buffer_test.exs`
+### 1. Add fuzzy/orderless matching to `Minga.Picker`
+- **Files**: `lib/minga/picker.ex`, `test/minga/picker_test.exs`
 - **Changes**:
-  - Add `cursor_line`, `cursor_col`, and `line_count` fields to the
-    `%GapBuffer{}` struct (with `@enforce_keys` updated)
-  - `new/1`: compute initial values during construction (scan once)
-  - `cursor/1`: return `{buf.cursor_line, buf.cursor_col}` — O(1)
-  - `line_count/1`: return `buf.line_count` — O(1)
-  - **Update cached fields incrementally in every mutation**:
-    - `insert_char/2`: if inserting `"\n"`, increment `line_count` and
-      `cursor_line`, set `cursor_col` to 0. Otherwise increment `cursor_col`.
-      For multi-char inserts, count newlines in the inserted text and compute
-      the new column from the last newline position.
-    - `delete_before/1`: if the deleted grapheme is `"\n"`, decrement
-      `line_count` and `cursor_line`, set `cursor_col` to the length of the
-      line that now precedes the cursor (scan backward in `before` to the
-      previous `"\n"` or start). Otherwise decrement `cursor_col`.
-    - `delete_at/1`: if the deleted grapheme is `"\n"`, decrement
-      `line_count`. Cursor position doesn't change.
-    - `move_left/1`: if the character moved is `"\n"`, decrement
-      `cursor_line` and set `cursor_col` to the length of the line now
-      before the cursor. Otherwise decrement `cursor_col`.
-    - `move_right/1`: if the character moved is `"\n"`, increment
-      `cursor_line` and set `cursor_col` to 0. Otherwise increment
-      `cursor_col`.
-    - `move_up/1`, `move_down/1`: these call `move_to/2`, handled below.
-    - `move_to/2`: already computes the target line/col during clamping —
-      store them in the struct instead of recomputing in `cursor/1`.
-    - `delete_range/2`, `delete_lines/2`: these reconstruct the buffer via
-      `new()` + `move_to()` — the cache is rebuilt by those functions.
-  - Keep the existing `cursor/1` logic as a private `compute_cursor/1` for
-    use in `@assert` debug checks (verify cache consistency in test builds)
-  - All existing tests must continue to pass unchanged (the API doesn't
-    change, only the implementation)
-  - Add new tests:
-    - Cache accuracy after insert at start/middle/end of line
-    - Cache accuracy after inserting newlines
-    - Cache accuracy after delete_before at line start (joining lines)
-    - Cache accuracy after delete_at on a newline character
-    - Cache accuracy after move_to to arbitrary positions
-    - Cache accuracy after delete_range spanning multiple lines
-    - Cache accuracy after delete_lines
-    - Property test: for any sequence of operations, cached values match
-      computed values
+  - Replace `refilter/1`'s `String.contains?` with orderless fuzzy matching: split query on spaces, each segment must match independently (case-insensitive). Score candidates by: exact prefix > substring > fuzzy character match. Sort filtered results by score (best first).
+  - Add `match_positions/2` function that returns the indices of matched characters in a label, for use by the renderer to highlight them.
+  - Keep the existing `filter/2`, `type_char/2`, `backspace/1` API unchanged.
+  - Add tests for: orderless matching ("b sw" matches "buffer-switch"), scoring/sort order, `match_positions/2`, edge cases (empty query, all-space query, unicode).
 
-### 2. Add `render_snapshot` to BufferServer (batch query)
-
-- **Files**: `lib/minga/buffer/server.ex`, `lib/minga/editor.ex`,
-  `test/minga/editor_test.exs`
+### 2. Define `Minga.Picker.Source` behaviour
+- **Files**: `lib/minga/picker/source.ex`
 - **Changes**:
-  - **BufferServer**: Add a new `render_snapshot/3` function that returns all
-    data needed for a single render frame in one GenServer.call:
+  - Define behaviour with callbacks:
     ```elixir
-    @type render_snapshot :: %{
-      cursor: GapBuffer.position(),
-      line_count: pos_integer(),
-      lines: [String.t()],
-      file_path: String.t() | nil,
-      dirty: boolean()
-    }
-
-    @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
-            render_snapshot()
-    def render_snapshot(server, first_line, count) do
-      GenServer.call(server, {:render_snapshot, first_line, count})
-    end
+    @callback candidates(term()) :: [Minga.Picker.item()]
+    @callback on_select(Minga.Picker.item(), state :: term()) :: term()
+    @callback on_cancel(state :: term()) :: term()
+    @callback preview?(item()) :: boolean()  # optional, default false
     ```
-  - **BufferServer handle_call**: Single clause that reads all fields from
-    state in one shot — no repeated `content()` / `String.split()` calls:
-    ```elixir
-    def handle_call({:render_snapshot, first_line, count}, _from, state) do
-      buf = state.gap_buffer
-      snapshot = %{
-        cursor: GapBuffer.cursor(buf),
-        line_count: GapBuffer.line_count(buf),
-        lines: GapBuffer.lines(buf, first_line, count),
-        file_path: state.file_path,
-        dirty: state.dirty
-      }
-      {:reply, snapshot, state}
-    end
-    ```
-  - **Editor `do_render/1`**: Replace the 5 individual BufferServer calls with
-    a two-step approach:
-    1. First call `BufferServer.cursor/1` to get the cursor (needed to compute
-       viewport scrolling and determine `first_line`)
-    2. Then call `BufferServer.render_snapshot/3` with the computed
-       `first_line` and `visible_rows` to get everything else in one call
-    - This reduces the render path from 5 GenServer calls to 2
-    - With step 1's cached cursor, both calls are O(1) in buffer size
-  - **Editor**: Also review `execute_command` clauses that make multiple
-    BufferServer calls (e.g. `insert_line_below` makes 4 calls). Where
-    possible, add compound operations to BufferServer to batch these. This
-    is a follow-up optimization noted but not required for this step.
-  - Update existing editor tests as needed (the render output should be
-    identical; only the call pattern changes)
+  - `candidates/1` receives context (e.g., editor state or options).
+  - `on_select/2` and `on_cancel/1` receive editor state and return new editor state — this lets each source control what happens.
+  - `preview?/1` is optional (default false via `__using__` macro or `@optional_callbacks`).
 
-### 3. Batch Port commands into a single binary
-
-- **Files**: `lib/minga/port/manager.ex`, `lib/minga/port/protocol.ex`,
-  `zig/src/protocol.zig`, `zig/src/main.zig`,
-  `test/minga/port/protocol_test.exs`
+### 3. Convert buffer picker to a Source
+- **Files**: `lib/minga/picker/buffer_source.ex`, `test/minga/picker/buffer_source_test.exs`
 - **Changes**:
-  - **Protocol (Elixir)**: Add `encode_batch/1` that concatenates a list of
-    encoded command binaries into a single binary, with each command prefixed
-    by its own 2-byte length:
-    ```elixir
-    @spec encode_batch([binary()]) :: binary()
-    def encode_batch(commands) when is_list(commands) do
-      IO.iodata_to_binary(commands)
-    end
-    ```
-    Actually, the simpler approach: since each command already starts with an
-    opcode byte, and the Zig side knows the exact byte layout of each opcode,
-    we can concatenate commands directly and decode them sequentially. The
-    existing `{:packet, 4}` framing gives us the total message length, so
-    the Zig side just walks through the payload decoding commands one at a
-    time until the buffer is exhausted.
-  - **PortManager `send_commands/2`**: Instead of calling `Port.command/2` in
-    a loop, concatenate all commands into a single binary and send once:
-    ```elixir
-    def handle_cast({:send_commands, commands}, state) do
-      batch = IO.iodata_to_binary(commands)
-      Port.command(state.port, batch)
-      {:noreply, state}
-    end
-    ```
-    This sends one `{:packet, 4}` message containing all commands.
-  - **Protocol (Zig)**: Add a `decodeBatch` function or modify the stdin
-    handler in `main.zig` to process a payload containing multiple
-    concatenated commands. After reading the 4-byte length prefix and the
-    full payload, iterate through the payload calling `decodeCommand` on
-    successive slices until exhausted:
-    ```zig
-    // In runEventLoop, replace single-command decode with batch decode:
-    var offset: usize = 0;
-    while (offset < msg_len) {
-        const remaining = payload[offset..];
-        const cmd = protocol.decodeCommand(remaining) catch |err| {
-            std.log.warn("protocol decode error at offset {}: {}", .{offset, err});
-            break;
-        };
-        rend.handleCommand(cmd) catch |err| {
-            std.log.warn("renderer error: {}", .{err});
-        };
-        offset += protocol.commandSize(remaining);
-    }
-    ```
-  - **Protocol (Zig)**: Add `commandSize(payload: []const u8) usize` that
-    returns the byte size of the first command in a payload, based on the
-    opcode:
-    - `0x12` (clear): 1 byte
-    - `0x13` (batch_end): 1 byte
-    - `0x11` (set_cursor): 5 bytes
-    - `0x15` (set_cursor_shape): 2 bytes
-    - `0x10` (draw_text): 12 + text_len (read text_len from bytes 10-11)
-  - Tests:
-    - Elixir: `encode_batch/1` concatenates correctly
-    - Zig: batch payload with multiple commands decodes to correct sequence
-    - Zig: `commandSize` returns correct sizes for all opcodes
-    - Zig: batch with draw_text (variable length) in the middle works
-    - Integration: existing editor tests still pass (output unchanged)
+  - Extract `open_buffer_picker/1`'s item-building logic into `Minga.Picker.BufferSource.candidates/1`.
+  - `on_select/2` switches to the selected buffer (extracted from the current `handle_picker_key` Enter clause for `:buffer`).
+  - `on_cancel/1` restores the previous buffer.
+  - `preview?/1` returns true — buffer picker previews on navigation.
+
+### 4. Convert file finder to a Source
+- **Files**: `lib/minga/picker/file_source.ex`, `test/minga/picker/file_source_test.exs`
+- **Changes**:
+  - Extract `open_file_finder/1`'s item-building logic into `Minga.Picker.FileSource.candidates/1` (delegates to `Minga.FileFind`).
+  - `on_select/2` opens the file (extracted from current `:find_file` Enter handler).
+  - `on_cancel/1` restores previous buffer.
+  - `preview?/1` returns false.
+
+### 5. Generalize Editor picker handling
+- **Files**: `lib/minga/editor.ex`, `lib/minga/editor/state.ex`
+- **Changes**:
+  - Replace `picker_kind` field with `picker_source` (the source module atom) in `EditorState`.
+  - Add `open_picker/3` helper: `open_picker(state, source_module, opts)` — calls `source.candidates(opts)`, builds `Picker.new(items, ...)`, stores source module on state.
+  - Refactor `handle_picker_key/3`:
+    - Enter → calls `state.picker_source.on_select(selected_item, state)`.
+    - Escape → calls `state.picker_source.on_cancel(state)`.
+    - Navigation (C-j/C-k/arrows) → if source has `preview?` returning true, call `on_select` as preview.
+    - Remove `picker_kind`-specific branching.
+  - Update `execute_command/2` for `:find_file` and `:buffer_list` to use `open_picker/3`.
+  - Remove `picker_kind` and `picker_prev_buffer` from `EditorState` — sources own their own cancel behavior via closure or state stored in the picker's items.
+
+### 6. Add match highlighting to picker rendering
+- **Files**: `lib/minga/editor.ex` (in `maybe_render_picker/2`)
+- **Changes**:
+  - After computing visible items, call `Picker.match_positions/2` for each item's label against the current query.
+  - Render matched characters with a highlight color (e.g., `0xE5C07B` yellow) while non-matched characters use the normal text color.
+  - This requires splitting each label into segments and issuing multiple `encode_draw` calls per item (similar to how visual selection rendering works).
+
+### 7. Add Command source (bonus — ships command palette, issue #15)
+- **Files**: `lib/minga/picker/command_source.ex`, `lib/minga/command/registry.ex` (if not exists), `lib/minga/keymap/defaults.ex`
+- **Changes**:
+  - Create `Minga.Picker.CommandSource` implementing Source behaviour.
+  - `candidates/1` returns all registered commands with their keybinding annotations.
+  - `on_select/2` executes the command.
+  - Add `SPC :` keybinding in defaults (Doom's `M-x` equivalent).
+  - This validates the entire framework end-to-end with a third source.
 
 ## Testing
-
-- `mix test --warnings-as-errors` — all existing + new tests pass after each
-  step
-- `zig build test` — all existing + new Zig protocol tests pass (step 3)
-- **Step 1 verification**: Add a debug assertion in GapBuffer tests that
-  compares cached cursor/line_count against recomputed values after every
-  operation in property tests. This catches cache drift.
-- **Step 2 verification**: Existing editor render tests produce identical
-  output. New test verifies `render_snapshot` returns same data as individual
-  calls.
-- **Step 3 verification**: Existing render/protocol tests pass. New test sends
-  a batched message through a mock port and verifies identical Zig-side
-  command sequence.
-
-### Performance Validation
-
-After all three steps, we can validate with a simple benchmark:
-
-```elixir
-# In iex or a test
-{:ok, buf} = BufferServer.start_link(content: String.duplicate("hello world\n", 100_000))
-# 100K lines = ~1.2MB
-
-# Before: each of these is O(n)
-:timer.tc(fn -> BufferServer.cursor(buf) end)        # expect ~ms
-:timer.tc(fn -> BufferServer.line_count(buf) end)     # expect ~ms
-
-# After step 1: each is O(1)
-:timer.tc(fn -> BufferServer.cursor(buf) end)         # expect ~µs
-:timer.tc(fn -> BufferServer.line_count(buf) end)     # expect ~µs
-```
+- **Step 1**: Property-based tests for fuzzy matching (any substring of a label always scores > 0; exact match scores highest). Unit tests for orderless matching, `match_positions/2`, scoring sort order.
+- **Steps 3-4**: Unit tests for each source's `candidates/1` output shape and `on_select/on_cancel` behavior (using mock editor state).
+- **Step 5**: Existing editor integration tests should continue passing. The buffer picker and file finder behavior is unchanged from the user's perspective.
+- **Step 6**: Visual — needs manual verification in terminal.
+- **Step 7**: Unit test that command source returns all registered commands.
+- Run `mix test --warnings-as-errors` after each step.
 
 ## Risks & Open Questions
-
-1. **Cache correctness is critical** — A wrong cached cursor position would
-   cause silent editing corruption. Mitigation: property-based tests that
-   verify cache against recomputed values for random operation sequences.
-   Consider a debug-only `assert_cache_valid/1` guard in dev/test builds.
-
-2. **Multi-grapheme insert cache update** — `insert_char/2` accepts arbitrary
-   strings (e.g. paste), not just single characters. The cache update must
-   handle multi-line inserts correctly by counting newlines in the inserted
-   text and computing the column from the last newline's position. This is
-   the trickiest part of step 1.
-
-3. **Unicode column counting** — `cursor_col` currently tracks grapheme
-   count, not byte offset. The cached value must match the grapheme-based
-   counting used by `move_to` and `lines`. Since we're caching what
-   `cursor/1` already returns, the semantics don't change.
-
-4. **Batch protocol backward compatibility** — The Zig side currently expects
-   one command per `{:packet, 4}` message. Step 3 changes this to multiple
-   commands per message. Both sides must be updated atomically (same commit).
-   If only one side is updated, the renderer will break.
-
-5. **`lines/3` is still O(n)** — Even with cached cursor and line_count,
-   `get_lines` still calls `content()` + `String.split("\n")` +
-   `Enum.slice`. This is O(n) in buffer size. A true fix requires a line
-   index (array of byte offsets to line starts), which is a larger change.
-   For now, this is acceptable because `get_lines` returns only the visible
-   lines (~50) and the split happens once per frame. A line index is a
-   potential step 4 but out of scope for this plan.
-
-6. **Undo memory** — Not addressed in this plan. The full-snapshot undo
-   system will still consume O(edits × buffer_size) memory. This is a
-   separate concern worth its own plan (diff-based undo). Noted here for
-   completeness.
-
----
+- **Fuzzy scoring algorithm**: Starting simple (orderless substring with prefix bonus). If it feels wrong in practice, can swap in a proper fuzzy scorer (fzy/fzf algorithm) later without changing the API.
+- **Performance with large file lists**: The current `Picker.refilter/1` calls `Enum.filter` on every keystroke. For thousands of files this could lag. Mitigation: score+sort is still fast for <10k items; can add debouncing or async filtering later if needed.
+- **`picker_prev_buffer` removal**: Moving cancel behavior into sources means each source must capture restore state in its closure. Need to ensure this works cleanly with the GenServer state flow.
 
 ## GitHub Ticket
 
 ```markdown
-# Editor responds instantly to keystrokes regardless of file size
+# Users can navigate and select from filterable lists throughout the editor
 
 **Type:** Feature
 
 ## What
-Editing files larger than ~100KB introduces noticeable input lag because every
-keystroke triggers multiple O(n) string operations across the full buffer
-content, 5+ synchronous GenServer round-trips for rendering data, and 50+
-individual system calls to send render commands to the terminal renderer. These
-costs scale linearly with file size, making files over 1MB feel sluggish and
-files over 10MB essentially unusable for interactive editing.
+The editor needs a generic picker framework — a single UI component that powers every "choose one from a list" interaction: switching buffers, finding files, running commands, searching, and any future selection-based feature. Currently each picker use case is hardcoded with its own branching logic in the editor.
 
 ## Why
-Keystroke responsiveness is the most fundamental quality of a text editor. Users
-perceive latency above ~50ms as lag and above ~100ms as broken. Files in the
-100KB-10MB range (large modules, generated code, logs, data files) are common
-editing targets. If Minga cannot handle them smoothly, users will not trust it
-as a primary editor. Every competing editor (Neovim, Emacs, Zed, VSCode)
-handles multi-megabyte files with sub-millisecond keystroke latency.
+This is the highest-leverage infrastructure investment remaining. Once the picker framework exists with a simple behaviour interface, adding new interactive commands (command palette, grep results, help lookup, theme switching) becomes a ~10-line module each. Without it, every new picker feature requires modifying the editor's core key handling and rendering code.
 
 ## Acceptance Criteria
-
-- Typing, cursor movement, and scrolling in a 1MB file feel identical to a 1KB
-  file — no perceptible delay
-- `GapBuffer.cursor/1` and `GapBuffer.line_count/1` execute in constant time
-  (O(1)) regardless of buffer size
-- A single render frame requires at most 2 GenServer calls to the buffer
-  server, down from 5+
-- All render commands for a single frame are sent to the Zig renderer as a
-  single Port message, not individual messages per command
-- All existing editor tests continue to pass without modification to their
-  assertions
-- Opening and editing a 10MB file does not introduce visible keystroke lag
+- Typing in the picker prompt narrows results using fuzzy/orderless matching (e.g., "b sw" matches "buffer-switch")
+- Matched characters are visually highlighted in each candidate
+- `Enter` selects the current candidate and performs the source-defined action
+- `Esc` cancels and restores previous state
+- `C-j`/`C-k` (or arrows) navigate the list; selection wraps at boundaries
+- Adding a new picker source requires only implementing a behaviour module — no changes to the editor core
+- Buffer switching (`SPC b b`) and file finding (`SPC f f`) continue to work identically from the user's perspective
+- A command palette (`SPC :`) is available, listing all registered commands with their keybindings
 
 ### Developer Notes
-- Three independent optimizations stacked: (1) cache cursor/line_count in the
-  gap buffer struct and update incrementally on mutations, (2) add a
-  `render_snapshot` batch query to BufferServer, (3) concatenate Port commands
-  into a single binary per frame
-- The gap buffer struct gains `cursor_line`, `cursor_col`, `line_count` fields
-  — updated in O(1) by tracking what character was inserted/deleted/moved
-- `get_lines/3` remains O(n) — a line index optimization is a separate future
-  improvement
-- Undo memory (full-snapshot storage) is a separate concern, not addressed here
-- The batch Port protocol change requires both Elixir and Zig sides to be
-  updated in the same commit
+- Evolve the existing `Minga.Picker` data structure — don't rewrite from scratch
+- Define `Minga.Picker.Source` behaviour with `candidates/1`, `on_select/2`, `on_cancel/1`
+- The picker remains a data structure on `EditorState`, not a separate process or FSM mode
+- Fuzzy matching: split query on spaces, each segment matches independently, sort by match quality
+- Defer the action menu (`C-o` for alternative actions) to a follow-up ticket
 ```

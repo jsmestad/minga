@@ -27,6 +27,9 @@ defmodule Minga.Keymap.Defaults do
   # ---------------------------------------------------------------------------
 
   @leader_bindings [
+    # ── Command palette ──────────────────────────────────────────────────────
+    {[{?:, @none}], :command_palette, "Execute command"},
+
     # ── File ──────────────────────────────────────────────────────────────────
     {[{?f, @none}, {?f, @none}], :find_file, "Find file"},
     {[{?f, @none}, {?s, @none}], :save, "Save file"},

@@ -28,7 +28,21 @@ defmodule Minga.Command.RegistryTest do
           :delete_at,
           :insert_newline,
           :undo,
-          :redo
+          :redo,
+          :find_file,
+          :buffer_list,
+          :buffer_next,
+          :buffer_prev,
+          :kill_buffer,
+          :command_palette,
+          :delete_line,
+          :yank_line,
+          :paste_after,
+          :paste_before,
+          :half_page_down,
+          :half_page_up,
+          :page_down,
+          :page_up
         ]
         |> Enum.sort()
 

@@ -479,6 +479,16 @@ defmodule Minga.Editor do
   # ── Command execution ────────────────────────────────────────────────────────
 
   @spec execute_command(state(), Mode.command()) :: state()
+
+  # Picker commands work even with no buffer open
+  defp execute_command(state, :command_palette) do
+    open_picker(state, Minga.Picker.CommandSource)
+  end
+
+  defp execute_command(state, :find_file) do
+    open_picker(state, Minga.Picker.FileSource)
+  end
+
   defp execute_command(%{buffer: nil} = state, _cmd), do: state
 
   defp execute_command(%{buffer: buf} = state, :move_left) do
@@ -808,12 +818,8 @@ defmodule Minga.Editor do
     apply_text_object(state, modifier, spec, :yank)
   end
 
-  defp execute_command(state, :find_file) do
-    open_file_finder(state)
-  end
-
   defp execute_command(state, :buffer_list) do
-    open_buffer_picker(state)
+    open_picker(state, Minga.Picker.BufferSource)
   end
 
   defp execute_command(state, :buffer_next) do
@@ -1050,6 +1056,9 @@ defmodule Minga.Editor do
         []
       end
 
+    # Match highlight color (yellow/gold)
+    match_fg = 0xE5C07B
+
     # Item rows
     item_commands =
       visible
@@ -1064,7 +1073,7 @@ defmodule Minga.Editor do
           fg = if is_selected, do: highlight_fg, else: text_fg
           row_bg = if is_selected, do: sel_bg, else: bg
 
-          # Label on the left (bold for selected), description on the right (dimmed, truncated)
+          # Label on the left, description on the right (dimmed, truncated)
           label_text = " " <> label
           avail_for_desc = max(0, viewport.cols - String.length(label_text) - 2)
 
@@ -1073,6 +1082,7 @@ defmodule Minga.Editor do
               do: String.slice(desc, -min(avail_for_desc, String.length(desc)), avail_for_desc),
               else: ""
 
+          # Background fill for the row
           row_text =
             label_text <>
               String.duplicate(
@@ -1086,21 +1096,42 @@ defmodule Minga.Editor do
 
           row_text = String.slice(row_text, 0, viewport.cols)
 
-          label_cmd =
+          bg_cmd =
             Protocol.encode_draw(row, 0, String.pad_trailing(row_text, viewport.cols),
               fg: fg,
               bg: row_bg,
               bold: is_selected
             )
 
-          if desc_display != "" do
-            # Render description portion in dimmer color
-            desc_start = viewport.cols - String.length(desc_display) - 1
-            desc_cmd = Protocol.encode_draw(row, desc_start, desc_display, fg: dim_fg, bg: row_bg)
-            [label_cmd, desc_cmd]
-          else
-            [label_cmd]
-          end
+          # Compute match positions in label and render highlighted characters
+          match_positions = Picker.match_positions(label, picker.query)
+
+          highlight_cmds =
+            if match_positions != [] do
+              label_graphemes = String.graphemes(label)
+
+              Enum.flat_map(match_positions, fn pos ->
+                if pos < length(label_graphemes) do
+                  char = Enum.at(label_graphemes, pos)
+                  # +1 for the leading space in label_text
+                  [Protocol.encode_draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)]
+                else
+                  []
+                end
+              end)
+            else
+              []
+            end
+
+          desc_cmds =
+            if desc_display != "" do
+              desc_start = viewport.cols - String.length(desc_display) - 1
+              [Protocol.encode_draw(row, desc_start, desc_display, fg: dim_fg, bg: row_bg)]
+            else
+              []
+            end
+
+          [bg_cmd] ++ highlight_cmds ++ desc_cmds
         end
       end)
 
@@ -1459,59 +1490,16 @@ defmodule Minga.Editor do
   @arrow_down 57_353
   @arrow_up 57_352
 
-  @spec open_buffer_picker(state()) :: state()
-  defp open_buffer_picker(%{buffers: []} = state), do: state
+  @spec open_picker(state(), module()) :: state()
+  defp open_picker(state, source_module) do
+    items = source_module.candidates(state)
 
-  defp open_buffer_picker(%{buffers: buffers, active_buffer: active_idx} = state) do
-    items =
-      buffers
-      |> Enum.with_index()
-      |> Enum.map(fn {buf, idx} ->
-        name =
-          case BufferServer.file_path(buf) do
-            nil -> "[scratch]"
-            path -> Path.basename(path)
-          end
-
-        desc =
-          case BufferServer.file_path(buf) do
-            nil -> ""
-            path -> path
-          end
-
-        dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
-
-        {idx, name <> dirty, desc}
-      end)
-
-    picker = Picker.new(items, title: "Switch buffer", max_visible: 10)
-
-    # Clear whichkey state if active
-    new_state =
-      if state.whichkey_timer do
-        WhichKey.cancel_timeout(state.whichkey_timer)
-        %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
-      else
+    case items do
+      [] ->
         state
-      end
 
-    %{new_state | picker: picker, picker_kind: :buffer, picker_prev_buffer: active_idx}
-  end
-
-  # ── File finder ──────────────────────────────────────────────────────────
-
-  @spec open_file_finder(state()) :: state()
-  defp open_file_finder(state) do
-    root = File.cwd!()
-
-    case Minga.FileFind.list_files(root) do
-      {:ok, paths} ->
-        items =
-          Enum.map(paths, fn path ->
-            {path, Path.basename(path), path}
-          end)
-
-        picker = Picker.new(items, title: "Find file", max_visible: 10)
+      _ ->
+        picker = Picker.new(items, title: source_module.title(), max_visible: 10)
 
         # Clear whichkey state if active
         new_state =
@@ -1522,55 +1510,30 @@ defmodule Minga.Editor do
             state
           end
 
-        %{new_state | picker: picker, picker_kind: :find_file, picker_prev_buffer: state.active_buffer}
-
-      {:error, msg} ->
-        Logger.error("find_file: #{msg}")
-        state
+        %{new_state | picker: picker, picker_source: source_module, picker_restore: state.active_buffer}
     end
   end
 
   @spec handle_picker_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp handle_picker_key(%{picker: _picker} = state, @escape, _mods) do
-    # Cancel: restore previous buffer
-    case state.picker_prev_buffer do
-      nil -> close_picker(state)
-      idx -> close_picker(switch_to_buffer(state, idx))
-    end
+  defp handle_picker_key(%{picker_source: source} = state, @escape, _mods) do
+    new_state = source.on_cancel(state)
+    close_picker(new_state)
   end
 
-  defp handle_picker_key(%{picker: picker, picker_kind: :find_file} = state, @enter, _mods) do
-    case Picker.selected_id(picker) do
+  defp handle_picker_key(%{picker: picker, picker_source: source} = state, @enter, _mods) do
+    case Picker.selected_item(picker) do
       nil ->
         close_picker(state)
 
-      rel_path ->
-        abs_path = Path.expand(rel_path)
+      item ->
         new_state = close_picker(state)
-
-        case find_buffer_by_path(new_state, abs_path) do
-          nil ->
-            case start_buffer(abs_path) do
-              {:ok, pid} -> add_buffer(new_state, pid)
-              {:error, reason} ->
-                Logger.error("Failed to open file: #{inspect(reason)}")
-                new_state
-            end
-
-          idx ->
-            switch_to_buffer(new_state, idx)
+        new_state = source.on_select(item, new_state)
+        # Sources may set :pending_command to trigger command execution
+        # (e.g., the command palette selecting "save" → execute :save)
+        case Map.get(new_state, :pending_command) do
+          nil -> new_state
+          cmd -> new_state |> Map.delete(:pending_command) |> execute_command(cmd)
         end
-    end
-  end
-
-  defp handle_picker_key(%{picker: picker} = state, @enter, _mods) do
-    # Default (buffer picker): switch to the selected buffer
-    case Picker.selected_id(picker) do
-      nil ->
-        close_picker(state)
-
-      idx ->
-        close_picker(switch_to_buffer(state, idx))
     end
   end
 
@@ -1624,18 +1587,20 @@ defmodule Minga.Editor do
   # Closes the picker and resets picker-related state.
   @spec close_picker(state()) :: state()
   defp close_picker(state) do
-    %{state | picker: nil, picker_kind: nil, picker_prev_buffer: nil}
+    %{state | picker: nil, picker_source: nil, picker_restore: nil}
   end
 
-  # Preview: temporarily switch to the selected buffer's content.
-  # Only applies to buffer pickers — file finder doesn't preview.
+  # Preview: temporarily apply the source's on_select for the highlighted item.
+  # Only applies to sources that declare preview?() = true.
   @spec maybe_preview_picker_selection(state()) :: state()
-  defp maybe_preview_picker_selection(%{picker_kind: :find_file} = state), do: state
-
-  defp maybe_preview_picker_selection(%{picker: picker} = state) do
-    case Picker.selected_id(picker) do
-      nil -> state
-      idx -> switch_to_buffer(state, idx)
+  defp maybe_preview_picker_selection(%{picker: picker, picker_source: source} = state) do
+    if Minga.Picker.Source.preview?(source) do
+      case Picker.selected_item(picker) do
+        nil -> state
+        item -> source.on_select(item, state)
+      end
+    else
+      state
     end
   end
 

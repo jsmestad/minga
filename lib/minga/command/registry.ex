@@ -36,7 +36,21 @@ defmodule Minga.Command.Registry do
     {:delete_at, "Delete character at cursor (delete)"},
     {:insert_newline, "Insert a newline at cursor"},
     {:undo, "Undo the last change"},
-    {:redo, "Redo the last undone change"}
+    {:redo, "Redo the last undone change"},
+    {:find_file, "Find file in project"},
+    {:buffer_list, "Switch buffer"},
+    {:buffer_next, "Next buffer"},
+    {:buffer_prev, "Previous buffer"},
+    {:kill_buffer, "Kill current buffer"},
+    {:command_palette, "Execute command"},
+    {:delete_line, "Delete current line"},
+    {:yank_line, "Yank current line"},
+    {:paste_after, "Paste after cursor"},
+    {:paste_before, "Paste before cursor"},
+    {:half_page_down, "Scroll half page down"},
+    {:half_page_up, "Scroll half page up"},
+    {:page_down, "Scroll page down"},
+    {:page_up, "Scroll page up"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -138,6 +152,10 @@ defmodule Minga.Command.Registry do
   defp execute_redo(state),
     do: Map.update(state, :pending_commands, [:redo], &[:redo | &1])
 
+  @spec execute_generic(map(), atom()) :: map()
+  defp execute_generic(state, cmd),
+    do: Map.update(state, :pending_commands, [cmd], &[cmd | &1])
+
   # Maps a built-in command name to its execute function capture.
   @spec built_in_execute(atom()) :: function()
   defp built_in_execute(:save), do: &execute_save/1
@@ -152,6 +170,7 @@ defmodule Minga.Command.Registry do
   defp built_in_execute(:insert_newline), do: &execute_insert_newline/1
   defp built_in_execute(:undo), do: &execute_undo/1
   defp built_in_execute(:redo), do: &execute_redo/1
+  defp built_in_execute(cmd), do: &execute_generic(&1, cmd)
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
