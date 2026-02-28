@@ -57,6 +57,12 @@ defmodule Minga.Keymap.Trie do
 
   @doc """
   Creates a new, empty trie root node.
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Trie.new()
+      iex> Minga.Keymap.Trie.lookup(trie, {?j, 0})
+      :not_found
   """
   @spec new() :: node_t()
   def new do
@@ -75,6 +81,15 @@ defmodule Minga.Keymap.Trie do
   * `keys`        — non-empty list of `t:key/0` values representing the sequence
   * `command`     — atom name of the command to bind
   * `description` — human-readable description for which-key display
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Trie.new()
+      iex> trie = Minga.Keymap.Trie.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      iex> Minga.Keymap.Trie.lookup(trie, {?j, 0})
+      {:command, :move_down}
+      iex> Minga.Keymap.Trie.lookup(trie, {?k, 0})
+      :not_found
   """
   @spec bind(node_t(), [key()], atom(), String.t()) :: node_t()
   def bind(%Node{children: children} = root, [key | rest], command, description)
@@ -102,6 +117,15 @@ defmodule Minga.Keymap.Trie do
   * `{:prefix, node_t()}` — the key is a valid prefix; the returned node can
     be used as the new root for the next key
   * `:not_found` — the key does not exist in this trie node
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Trie.new()
+      iex> trie = Minga.Keymap.Trie.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
+      iex> match?({:prefix, _}, Minga.Keymap.Trie.lookup(trie, {?g, 0}))
+      true
+      iex> Minga.Keymap.Trie.lookup(trie, {?z, 0})
+      :not_found
   """
   @spec lookup(node_t(), key()) :: {:command, atom()} | {:prefix, node_t()} | :not_found
   def lookup(%Node{children: children}, key) do
@@ -146,6 +170,13 @@ defmodule Minga.Keymap.Trie do
   Each entry is a `{key, label}` tuple where `label` is either the
   description string (for a terminal binding) or the command atom (for a
   prefix or unnamed node).
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Trie.new()
+      iex> trie = Minga.Keymap.Trie.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      iex> Minga.Keymap.Trie.children(trie)
+      [{{106, 0}, "Move cursor down"}]
   """
   @spec children(node_t()) :: [{key(), String.t() | atom()}]
   def children(%Node{children: children}) do

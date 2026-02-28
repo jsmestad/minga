@@ -111,6 +111,11 @@ defmodule Minga.WhichKey do
   @doc """
   Formats a list of `{key, label}` pairs (as returned by `Minga.Keymap.Trie.children/1`)
   into a list of `t:binding/0` maps suitable for rendering in a which-key popup.
+
+  ## Examples
+
+      iex> Minga.WhichKey.format_bindings([{{?j, 0}, "Move cursor down"}])
+      [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down"}]
   """
   @spec format_bindings([{Trie.key(), String.t() | atom()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
@@ -139,6 +144,12 @@ defmodule Minga.WhichKey do
 
   Returns a list of strings, one per row, each of the form `"  key  description"`.
   Suitable for drawing with the port renderer.
+
+  ## Examples
+
+      iex> alias Minga.WhichKey.Binding
+      iex> Minga.WhichKey.render_popup([%Binding{key: "j", description: "Move down"}])
+      ["  j       Move down"]
   """
   @spec render_popup([binding()]) :: [String.t()]
   def render_popup(bindings) when is_list(bindings) do

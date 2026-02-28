@@ -41,7 +41,17 @@ defmodule Minga.Buffer.GapBuffer do
 
   # ── Construction ──
 
-  @doc "Creates a new gap buffer from a string. Cursor starts at {0, 0}."
+  @doc """
+  Creates a new gap buffer from a string. Cursor starts at `{0, 0}`.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello")
+      iex> Minga.Buffer.GapBuffer.content(buf)
+      "hello"
+      iex> Minga.Buffer.GapBuffer.cursor(buf)
+      {0, 0}
+  """
   @spec new(String.t()) :: t()
   def new(text \\ "") when is_binary(text) do
     %__MODULE__{before: "", after: text}
@@ -55,12 +65,33 @@ defmodule Minga.Buffer.GapBuffer do
     before <> after_
   end
 
-  @doc "Returns true if the buffer contains no text."
+  @doc """
+  Returns true if the buffer contains no text.
+
+  ## Examples
+
+      iex> Minga.Buffer.GapBuffer.empty?(Minga.Buffer.GapBuffer.new(""))
+      true
+      iex> Minga.Buffer.GapBuffer.empty?(Minga.Buffer.GapBuffer.new("hi"))
+      false
+  """
   @spec empty?(t()) :: boolean()
   def empty?(%__MODULE__{before: "", after: ""}), do: true
   def empty?(%__MODULE__{}), do: false
 
-  @doc "Returns the total number of lines in the buffer."
+  @doc """
+  Returns the total number of lines in the buffer.
+
+  An empty buffer counts as one line.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("one\\ntwo\\nthree")
+      iex> Minga.Buffer.GapBuffer.line_count(buf)
+      3
+      iex> Minga.Buffer.GapBuffer.line_count(Minga.Buffer.GapBuffer.new(""))
+      1
+  """
   @spec line_count(t()) :: pos_integer()
   def line_count(%__MODULE__{} = buf) do
     text = content(buf)
@@ -133,7 +164,16 @@ defmodule Minga.Buffer.GapBuffer do
 
   # ── Mutations ──
 
-  @doc "Inserts a character (or string) at the cursor position."
+  @doc """
+  Inserts a character (or string) at the cursor position.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("world")
+      iex> buf = Minga.Buffer.GapBuffer.insert_char(buf, "hello ")
+      iex> Minga.Buffer.GapBuffer.content(buf)
+      "hello world"
+  """
   @spec insert_char(t(), String.t()) :: t()
   def insert_char(%__MODULE__{before: before, after: after_}, char) when is_binary(char) do
     %__MODULE__{before: before <> char, after: after_}
@@ -142,6 +182,14 @@ defmodule Minga.Buffer.GapBuffer do
   @doc """
   Deletes the character before the cursor (backspace).
   Returns the buffer unchanged if the cursor is at the beginning.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello")
+      iex> buf = Minga.Buffer.GapBuffer.move_to(buf, {0, 5})
+      iex> buf = Minga.Buffer.GapBuffer.delete_before(buf)
+      iex> Minga.Buffer.GapBuffer.content(buf)
+      "hell"
   """
   @spec delete_before(t()) :: t()
   def delete_before(%__MODULE__{before: "", after: after_}) do
@@ -184,7 +232,18 @@ defmodule Minga.Buffer.GapBuffer do
     end
   end
 
-  @doc "Moves the cursor to an exact `{line, col}` position."
+  @doc """
+  Moves the cursor to an exact `{line, col}` position.
+
+  Line and column are clamped to valid buffer bounds.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> buf = Minga.Buffer.GapBuffer.move_to(buf, {1, 3})
+      iex> Minga.Buffer.GapBuffer.cursor(buf)
+      {1, 3}
+  """
   @spec move_to(t(), position()) :: t()
   def move_to(%__MODULE__{} = buf, {target_line, target_col})
       when is_integer(target_line) and target_line >= 0 and

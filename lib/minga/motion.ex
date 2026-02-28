@@ -37,6 +37,12 @@ defmodule Minga.Motion do
   From any non-whitespace run, advances past the current run, then skips
   leading whitespace.  From whitespace, just skips to the next non-whitespace.
   Stops at the last position in the buffer rather than going out of bounds.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.word_forward(buf, {0, 0})
+      {0, 6}
   """
   @spec word_forward(GapBuffer.t(), position()) :: position()
   def word_forward(%GapBuffer{} = buf, {line, col} = pos) do
@@ -59,6 +65,12 @@ defmodule Minga.Motion do
 
   Skips backward past whitespace, then backward past the word run,
   stopping at the first character of that run.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.word_backward(buf, {0, 6})
+      {0, 0}
   """
   @spec word_backward(GapBuffer.t(), position()) :: position()
   def word_backward(%GapBuffer{} = buf, {line, col} = pos) do
@@ -85,6 +97,12 @@ defmodule Minga.Motion do
 
   Skips forward past any whitespace, then advances to the last character
   of the next non-whitespace run.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.word_end(buf, {0, 0})
+      {0, 4}
   """
   @spec word_end(GapBuffer.t(), position()) :: position()
   def word_end(%GapBuffer{} = buf, {line, col} = pos) do
@@ -106,6 +124,12 @@ defmodule Minga.Motion do
 
   @doc """
   Move to the first column of the current line (like Vim's `0`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> Minga.Motion.line_start(buf, {0, 4})
+      {0, 0}
   """
   @spec line_start(GapBuffer.t(), position()) :: position()
   def line_start(%GapBuffer{}, {line, _col}), do: {line, 0}
@@ -114,6 +138,12 @@ defmodule Minga.Motion do
   Move to the last column of the current line (like Vim's `$`).
   Returns the position of the last grapheme on the line.
   For an empty line, returns `{line, 0}`.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> Minga.Motion.line_end(buf, {0, 0})
+      {0, 4}
   """
   @spec line_end(GapBuffer.t(), position()) :: position()
   def line_end(%GapBuffer{} = buf, {line, _col}) do
@@ -127,6 +157,12 @@ defmodule Minga.Motion do
   @doc """
   Move to the first non-blank character on the current line (like Vim's `^`).
   Falls back to `{line, 0}` when the line is entirely blank.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> Minga.Motion.first_non_blank(buf, {0, 0})
+      {0, 2}
   """
   @spec first_non_blank(GapBuffer.t(), position()) :: position()
   def first_non_blank(%GapBuffer{} = buf, {line, _col}) do
@@ -149,12 +185,23 @@ defmodule Minga.Motion do
   @doc """
   Move to the very start of the buffer (like Vim's `gg`).
   Always returns `{0, 0}`.
+
+  ## Examples
+
+      iex> Minga.Motion.document_start(Minga.Buffer.GapBuffer.new("hello\\nworld"))
+      {0, 0}
   """
   @spec document_start(GapBuffer.t()) :: position()
   def document_start(%GapBuffer{}), do: {0, 0}
 
   @doc """
   Move to the last character of the last line (like Vim's `G`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> Minga.Motion.document_end(buf)
+      {1, 4}
   """
   @spec document_end(GapBuffer.t()) :: position()
   def document_end(%GapBuffer{} = buf) do
