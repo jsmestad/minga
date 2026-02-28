@@ -84,7 +84,7 @@ defmodule Minga.MixProject do
         "run --no-halt --no-start -e 'Application.put_env(:minga, :start_editor, true); Application.ensure_all_started(:minga); Minga.CLI.main(System.argv())'"
       ],
       test: ["test --warnings-as-errors"],
-      lint: ["format --check-formatted", "credo --strict", "compile --warnings-as-errors"],
+      lint: ["format --check-formatted", "credo --strict", "compile --warnings-as-errors", "dialyzer"],
       "lint.fix": ["format", "credo --strict"]
     ]
   end
