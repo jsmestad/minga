@@ -1,0 +1,459 @@
+defmodule Minga.Buffer.GapBufferTest do
+  use ExUnit.Case, async: true
+  use ExUnitProperties
+
+  alias Minga.Buffer.GapBuffer
+
+  # ── Construction ──
+
+  describe "new/1" do
+    test "creates an empty buffer" do
+      buf = GapBuffer.new()
+      assert GapBuffer.content(buf) == ""
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+
+    test "creates a buffer from a string" do
+      buf = GapBuffer.new("hello")
+      assert GapBuffer.content(buf) == "hello"
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+
+    test "creates a buffer from a multi-line string" do
+      buf = GapBuffer.new("hello\nworld\n!")
+      assert GapBuffer.content(buf) == "hello\nworld\n!"
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+  end
+
+  # ── Queries ──
+
+  describe "empty?/1" do
+    test "returns true for empty buffer" do
+      assert GapBuffer.empty?(GapBuffer.new())
+    end
+
+    test "returns false for non-empty buffer" do
+      refute GapBuffer.empty?(GapBuffer.new("x"))
+    end
+  end
+
+  describe "line_count/1" do
+    test "empty buffer has 1 line" do
+      assert GapBuffer.line_count(GapBuffer.new()) == 1
+    end
+
+    test "single line without newline" do
+      assert GapBuffer.line_count(GapBuffer.new("hello")) == 1
+    end
+
+    test "counts lines separated by newlines" do
+      assert GapBuffer.line_count(GapBuffer.new("a\nb\nc")) == 3
+    end
+
+    test "trailing newline adds an empty line" do
+      assert GapBuffer.line_count(GapBuffer.new("a\nb\n")) == 3
+    end
+  end
+
+  describe "line_at/2" do
+    test "returns the first line" do
+      buf = GapBuffer.new("hello\nworld")
+      assert GapBuffer.line_at(buf, 0) == "hello"
+    end
+
+    test "returns the second line" do
+      buf = GapBuffer.new("hello\nworld")
+      assert GapBuffer.line_at(buf, 1) == "world"
+    end
+
+    test "returns nil for out-of-range line" do
+      buf = GapBuffer.new("hello")
+      assert GapBuffer.line_at(buf, 5) == nil
+    end
+
+    test "returns empty string for empty line" do
+      buf = GapBuffer.new("hello\n\nworld")
+      assert GapBuffer.line_at(buf, 1) == ""
+    end
+  end
+
+  describe "lines/3" do
+    test "returns a range of lines" do
+      buf = GapBuffer.new("a\nb\nc\nd\ne")
+      assert GapBuffer.lines(buf, 1, 3) == ["b", "c", "d"]
+    end
+
+    test "returns empty list when start is past end" do
+      buf = GapBuffer.new("a\nb")
+      assert GapBuffer.lines(buf, 10, 5) == []
+    end
+
+    test "returns fewer lines when count exceeds available" do
+      buf = GapBuffer.new("a\nb\nc")
+      assert GapBuffer.lines(buf, 1, 10) == ["b", "c"]
+    end
+  end
+
+  describe "cursor/1" do
+    test "starts at {0, 0} for new buffer" do
+      assert GapBuffer.cursor(GapBuffer.new("hello")) == {0, 0}
+    end
+
+    test "reflects position after moving right" do
+      buf = GapBuffer.new("hello") |> GapBuffer.move(:right) |> GapBuffer.move(:right)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "reflects position on second line" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({1, 1})
+      assert GapBuffer.cursor(buf) == {1, 1}
+    end
+  end
+
+  # ── Insertion ──
+
+  describe "insert_char/2" do
+    test "inserts at the beginning of a buffer" do
+      buf = GapBuffer.new("hello") |> GapBuffer.insert_char("X")
+      assert GapBuffer.content(buf) == "Xhello"
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+
+    test "inserts in the middle after moving" do
+      buf =
+        GapBuffer.new("hello")
+        |> GapBuffer.move(:right)
+        |> GapBuffer.move(:right)
+        |> GapBuffer.insert_char("X")
+
+      assert GapBuffer.content(buf) == "heXllo"
+      assert GapBuffer.cursor(buf) == {0, 3}
+    end
+
+    test "inserts at the end" do
+      buf = GapBuffer.new("hi") |> GapBuffer.move_to({0, 2}) |> GapBuffer.insert_char("!")
+      assert GapBuffer.content(buf) == "hi!"
+    end
+
+    test "inserts a newline" do
+      buf = GapBuffer.new("ab") |> GapBuffer.move(:right) |> GapBuffer.insert_char("\n")
+      assert GapBuffer.content(buf) == "a\nb"
+      assert GapBuffer.cursor(buf) == {1, 0}
+    end
+
+    test "inserts unicode emoji" do
+      buf = GapBuffer.new("hi") |> GapBuffer.insert_char("🥨")
+      assert GapBuffer.content(buf) == "🥨hi"
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+
+    test "inserts multi-byte CJK character" do
+      buf = GapBuffer.new("hi") |> GapBuffer.insert_char("日")
+      assert GapBuffer.content(buf) == "日hi"
+    end
+
+    test "inserts into empty buffer" do
+      buf = GapBuffer.new() |> GapBuffer.insert_char("a")
+      assert GapBuffer.content(buf) == "a"
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+  end
+
+  # ── Deletion ──
+
+  describe "delete_before/1" do
+    test "deletes the character before the cursor" do
+      buf =
+        GapBuffer.new("hello")
+        |> GapBuffer.move(:right)
+        |> GapBuffer.move(:right)
+        |> GapBuffer.delete_before()
+
+      assert GapBuffer.content(buf) == "hllo"
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+
+    test "does nothing at the start of the buffer" do
+      buf = GapBuffer.new("hello") |> GapBuffer.delete_before()
+      assert GapBuffer.content(buf) == "hello"
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+
+    test "deleting newline joins lines" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({1, 0}) |> GapBuffer.delete_before()
+      assert GapBuffer.content(buf) == "abcd"
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "deletes unicode character" do
+      buf =
+        GapBuffer.new("🥨hi")
+        |> GapBuffer.move(:right)
+        |> GapBuffer.delete_before()
+
+      assert GapBuffer.content(buf) == "hi"
+    end
+
+    test "does nothing on empty buffer" do
+      buf = GapBuffer.new() |> GapBuffer.delete_before()
+      assert GapBuffer.content(buf) == ""
+      assert GapBuffer.empty?(buf)
+    end
+  end
+
+  describe "delete_at/1" do
+    test "deletes the character at the cursor" do
+      buf = GapBuffer.new("hello") |> GapBuffer.delete_at()
+      assert GapBuffer.content(buf) == "ello"
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+
+    test "does nothing at the end of the buffer" do
+      buf = GapBuffer.new("hi") |> GapBuffer.move_to({0, 2}) |> GapBuffer.delete_at()
+      assert GapBuffer.content(buf) == "hi"
+    end
+
+    test "deletes newline at cursor joins lines" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({0, 2}) |> GapBuffer.delete_at()
+      assert GapBuffer.content(buf) == "abcd"
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "deletes unicode character at cursor" do
+      buf = GapBuffer.new("🥨hi") |> GapBuffer.delete_at()
+      assert GapBuffer.content(buf) == "hi"
+    end
+  end
+
+  # ── Movement ──
+
+  describe "move/2 :left" do
+    test "moves cursor left" do
+      buf = GapBuffer.new("hello") |> GapBuffer.move_to({0, 3}) |> GapBuffer.move(:left)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "stays at start when already at {0, 0}" do
+      buf = GapBuffer.new("hello") |> GapBuffer.move(:left)
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+
+    test "wraps to end of previous line" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({1, 0}) |> GapBuffer.move(:left)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+  end
+
+  describe "move/2 :right" do
+    test "moves cursor right" do
+      buf = GapBuffer.new("hello") |> GapBuffer.move(:right)
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+
+    test "stays at end when already at the end" do
+      buf = GapBuffer.new("hi") |> GapBuffer.move_to({0, 2}) |> GapBuffer.move(:right)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "wraps to start of next line" do
+      buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({0, 2}) |> GapBuffer.move(:right)
+      assert GapBuffer.cursor(buf) == {1, 0}
+    end
+  end
+
+  describe "move/2 :up" do
+    test "moves cursor to the same column on previous line" do
+      buf = GapBuffer.new("hello\nworld") |> GapBuffer.move_to({1, 3}) |> GapBuffer.move(:up)
+      assert GapBuffer.cursor(buf) == {0, 3}
+    end
+
+    test "clamps column when previous line is shorter" do
+      buf = GapBuffer.new("hi\nworld") |> GapBuffer.move_to({1, 4}) |> GapBuffer.move(:up)
+      assert GapBuffer.cursor(buf) == {0, 2}
+    end
+
+    test "stays on first line when already on line 0" do
+      buf = GapBuffer.new("hello\nworld") |> GapBuffer.move(:up)
+      assert GapBuffer.cursor(buf) == {0, 0}
+    end
+  end
+
+  describe "move/2 :down" do
+    test "moves cursor to the same column on next line" do
+      buf = GapBuffer.new("hello\nworld") |> GapBuffer.move_to({0, 3}) |> GapBuffer.move(:down)
+      assert GapBuffer.cursor(buf) == {1, 3}
+    end
+
+    test "clamps column when next line is shorter" do
+      buf = GapBuffer.new("hello\nhi") |> GapBuffer.move_to({0, 4}) |> GapBuffer.move(:down)
+      assert GapBuffer.cursor(buf) == {1, 2}
+    end
+
+    test "stays on last line when already on the last line" do
+      buf = GapBuffer.new("hello\nworld") |> GapBuffer.move_to({1, 0}) |> GapBuffer.move(:down)
+      assert GapBuffer.cursor(buf) == {1, 0}
+    end
+  end
+
+  describe "move_to/2" do
+    test "moves to exact position" do
+      buf = GapBuffer.new("abc\ndef\nghi") |> GapBuffer.move_to({2, 1})
+      assert GapBuffer.cursor(buf) == {2, 1}
+    end
+
+    test "clamps line to last line" do
+      buf = GapBuffer.new("abc\ndef") |> GapBuffer.move_to({99, 0})
+      assert GapBuffer.cursor(buf) == {1, 0}
+    end
+
+    test "clamps column to end of line" do
+      buf = GapBuffer.new("abc\ndef") |> GapBuffer.move_to({0, 99})
+      assert GapBuffer.cursor(buf) == {0, 3}
+    end
+
+    test "preserves buffer content after move" do
+      text = "hello\nworld"
+      buf = GapBuffer.new(text) |> GapBuffer.move_to({1, 3})
+      assert GapBuffer.content(buf) == text
+    end
+  end
+
+  # ── Round-trip integrity ──
+
+  describe "content integrity" do
+    test "insert then delete_before restores original" do
+      buf = GapBuffer.new("hello")
+      original = GapBuffer.content(buf)
+
+      buf = buf |> GapBuffer.move(:right) |> GapBuffer.insert_char("X") |> GapBuffer.delete_before()
+      assert GapBuffer.content(buf) == original
+    end
+
+    test "moving around does not change content" do
+      text = "hello\nworld\nfoo"
+      buf = GapBuffer.new(text)
+
+      buf =
+        buf
+        |> GapBuffer.move(:right)
+        |> GapBuffer.move(:down)
+        |> GapBuffer.move(:left)
+        |> GapBuffer.move(:up)
+        |> GapBuffer.move_to({2, 1})
+        |> GapBuffer.move_to({0, 0})
+
+      assert GapBuffer.content(buf) == text
+    end
+
+    test "multiple insertions and deletions" do
+      buf =
+        GapBuffer.new()
+        |> GapBuffer.insert_char("a")
+        |> GapBuffer.insert_char("b")
+        |> GapBuffer.insert_char("c")
+        |> GapBuffer.delete_before()
+        |> GapBuffer.insert_char("C")
+
+      assert GapBuffer.content(buf) == "abC"
+    end
+  end
+
+  # ── Unicode edge cases ──
+
+  describe "unicode handling" do
+    test "handles combining characters" do
+      # é as e + combining acute accent
+      text = "cafe\u0301"
+      buf = GapBuffer.new(text)
+      assert GapBuffer.line_count(buf) == 1
+      # Content preserves the original representation (NFD)
+      assert GapBuffer.content(buf) == text
+    end
+
+    test "handles emoji sequences" do
+      buf = GapBuffer.new("🇩🇪") |> GapBuffer.insert_char("!")
+      assert GapBuffer.content(buf) == "!🇩🇪"
+    end
+
+    test "cursor position counts graphemes not bytes" do
+      buf = GapBuffer.new("🥨ab") |> GapBuffer.move(:right)
+      assert GapBuffer.cursor(buf) == {0, 1}
+    end
+  end
+
+  # ── Property-based tests ──
+
+  describe "property: insert/delete round-trip" do
+    property "inserting then deleting before restores the buffer" do
+      check all(
+              text <- string(:printable, min_length: 0, max_length: 100),
+              char <- string(:printable, length: 1),
+              pos <- integer(0..max(String.length(text), 1))
+            ) do
+        buf = GapBuffer.new(text)
+        clamped_pos = min(pos, String.length(text))
+        line_col = offset_to_position(text, clamped_pos)
+
+        buf =
+          buf
+          |> GapBuffer.move_to(line_col)
+          |> GapBuffer.insert_char(char)
+          |> GapBuffer.delete_before()
+
+        assert GapBuffer.content(buf) == text
+      end
+    end
+
+    property "moving does not alter content" do
+      check all(
+              text <- string(:printable, min_length: 1, max_length: 200),
+              moves <- list_of(member_of([:left, :right, :up, :down]), min_length: 1, max_length: 20)
+            ) do
+        buf = GapBuffer.new(text)
+
+        result =
+          Enum.reduce(moves, buf, fn dir, acc ->
+            GapBuffer.move(acc, dir)
+          end)
+
+        assert GapBuffer.content(result) == text
+      end
+    end
+
+    property "cursor is always within valid bounds" do
+      check all(
+              text <- string(:printable, min_length: 0, max_length: 200),
+              moves <- list_of(member_of([:left, :right, :up, :down]), min_length: 0, max_length: 30)
+            ) do
+        buf = GapBuffer.new(text)
+
+        buf =
+          Enum.reduce(moves, buf, fn dir, acc ->
+            GapBuffer.move(acc, dir)
+          end)
+
+        {line, col} = GapBuffer.cursor(buf)
+        max_line = GapBuffer.line_count(buf) - 1
+        assert line >= 0 and line <= max_line
+
+        current_line = GapBuffer.line_at(buf, line)
+        max_col = String.length(current_line)
+        assert col >= 0 and col <= max_col
+      end
+    end
+  end
+
+  # ── Test helpers ──
+
+  @spec offset_to_position(String.t(), non_neg_integer()) :: GapBuffer.position()
+  defp offset_to_position(text, char_offset) do
+    graphemes = String.graphemes(text)
+    before_cursor = Enum.take(graphemes, char_offset)
+    before_text = Enum.join(before_cursor)
+    lines = String.split(before_text, "\n")
+    line = length(lines) - 1
+    col = lines |> List.last() |> String.length()
+    {line, col}
+  end
+end
