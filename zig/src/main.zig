@@ -1,4 +1,5 @@
 const std = @import("std");
+pub const protocol = @import("protocol.zig");
 
 /// Minga terminal renderer.
 ///
@@ -14,6 +15,10 @@ pub fn main() !void {
 }
 
 test "smoke test" {
-    // Verify the binary compiles and links correctly
     try std.testing.expect(true);
+}
+
+// Pull in protocol tests
+test {
+    _ = protocol;
 }
