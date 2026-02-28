@@ -175,14 +175,16 @@ defmodule Minga.Buffer.GapBuffer do
     max_line = length(all_lines) - 1
     line = min(target_line, max_line)
 
-    # Clamp col to valid range for that line
+    # Clamp col to valid range for that line (grapheme count)
     line_text = Enum.at(all_lines, line)
     max_col = String.length(line_text)
     col = min(target_col, max_col)
 
-    # Calculate byte offset
-    offset = byte_offset_for(all_lines, line, col)
-    {before, after_} = String.split_at(text, offset)
+    # Calculate grapheme offset from start of text
+    grapheme_offset = grapheme_offset_for(all_lines, line, col)
+
+    # Split at grapheme position (not byte position)
+    {before, after_} = split_at_grapheme(text, grapheme_offset)
 
     %__MODULE__{before: before, after: after_}
   end
@@ -234,12 +236,34 @@ defmodule Minga.Buffer.GapBuffer do
     end
   end
 
+  # Splits off the last grapheme from a string, preserving exact binary representation.
+  # Returns {rest, last_grapheme}.
   @spec pop_last_grapheme(String.t()) :: {String.t(), String.t()}
   defp pop_last_grapheme(str) do
-    graphemes = String.graphemes(str)
-    last = List.last(graphemes)
-    rest = graphemes |> Enum.drop(-1) |> Enum.join()
+    byte_len = byte_size(str)
+    # Walk forward with next_grapheme to find where the last grapheme starts
+    {last_start, _} = find_last_grapheme_offset(str, 0)
+    rest = binary_part(str, 0, last_start)
+    last = binary_part(str, last_start, byte_len - last_start)
     {rest, last}
+  end
+
+  # Walks the string grapheme by grapheme, tracking the byte offset
+  # of the start of the last grapheme.
+  @spec find_last_grapheme_offset(String.t(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp find_last_grapheme_offset(str, current_offset) do
+    case String.next_grapheme_size(str) do
+      {size, ""} ->
+        # This is the last grapheme
+        {current_offset, size}
+
+      {size, rest} ->
+        find_last_grapheme_offset(rest, current_offset + size)
+
+      nil ->
+        {current_offset, 0}
+    end
   end
 
   @spec count_newlines(String.t()) :: non_neg_integer()
@@ -249,24 +273,35 @@ defmodule Minga.Buffer.GapBuffer do
     |> Enum.count(&(&1 == "\n"))
   end
 
-  @spec byte_offset_for([String.t()], non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp byte_offset_for(all_lines, target_line, target_col) do
-    # Sum bytes of all complete lines before target_line (including \n)
-    lines_before =
+  @spec grapheme_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp grapheme_offset_for(all_lines, target_line, target_col) do
+    # Count graphemes in all complete lines before target_line (including \n)
+    graphemes_before =
       all_lines
       |> Enum.take(target_line)
-      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+      |> Enum.reduce(0, fn line, acc -> acc + String.length(line) + 1 end)
 
-    # Add bytes for the partial column in the target line
-    target_line_text = Enum.at(all_lines, target_line)
+    # Add graphemes for the partial column in the target line
+    graphemes_before + target_col
+  end
 
-    col_bytes =
-      target_line_text
-      |> String.graphemes()
-      |> Enum.take(target_col)
-      |> Enum.join()
-      |> byte_size()
+  # Split a string at a grapheme position, preserving exact binary representation
+  @spec split_at_grapheme(String.t(), non_neg_integer()) :: {String.t(), String.t()}
+  defp split_at_grapheme(str, 0), do: {"", str}
 
-    lines_before + col_bytes
+  defp split_at_grapheme(str, count) do
+    do_split_at_grapheme(str, count, "")
+  end
+
+  @spec do_split_at_grapheme(String.t(), non_neg_integer(), String.t()) ::
+          {String.t(), String.t()}
+  defp do_split_at_grapheme(str, 0, acc), do: {acc, str}
+
+  defp do_split_at_grapheme(str, remaining, acc) do
+    case String.next_grapheme(str) do
+      {grapheme, rest} -> do_split_at_grapheme(rest, remaining - 1, acc <> grapheme)
+      nil -> {acc, ""}
+    end
   end
 end
