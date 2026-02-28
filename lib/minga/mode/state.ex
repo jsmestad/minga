@@ -13,11 +13,22 @@ defmodule Minga.Mode.State do
   @enforce_keys []
   defstruct count: nil,
             leader_node: nil,
-            leader_keys: []
+            leader_keys: [],
+            pending_g: false,
+            pending_find: nil,
+            pending_replace: false,
+            pending_shift: nil
+
+  @typedoc "Pending find-char direction."
+  @type find_direction :: :f | :F | :t | :T
 
   @type t :: %__MODULE__{
           count: non_neg_integer() | nil,
           leader_node: Trie.node_t() | nil,
-          leader_keys: [String.t()]
+          leader_keys: [String.t()],
+          pending_g: boolean(),
+          pending_find: find_direction() | nil,
+          pending_replace: boolean(),
+          pending_shift: :indent | :dedent | nil
         }
 end

@@ -241,8 +241,102 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_to_first_non_blank, state}
   end
 
-  def handle_key({?G, 0}, state) do
+  def handle_key({?G, 0}, %ModeState{count: nil} = state) do
     {:execute, :move_to_document_end, state}
+  end
+
+  # G with count → go to line N
+  def handle_key({?G, 0}, %ModeState{count: count} = state) when is_integer(count) do
+    {:execute, {:goto_line, count}, %{state | count: nil}}
+  end
+
+  # g prefix — wait for second key
+  def handle_key({?g, 0}, %ModeState{pending_g: false} = state) do
+    {:continue, %{state | pending_g: true}}
+  end
+
+  # gg — document start
+  def handle_key({?g, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :move_to_document_start, %{state | pending_g: false}}
+  end
+
+  # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
+
+  def handle_key({?f, 0}, state) do
+    {:continue, %{state | pending_find: :f}}
+  end
+
+  def handle_key({?F, 0}, state) do
+    {:continue, %{state | pending_find: :F}}
+  end
+
+  def handle_key({?t, 0}, state) do
+    {:continue, %{state | pending_find: :t}}
+  end
+
+  def handle_key({?T, 0}, state) do
+    {:continue, %{state | pending_find: :T}}
+  end
+
+  # Complete the find-char motion with the target character
+  def handle_key({codepoint, 0}, %ModeState{pending_find: dir} = state)
+      when not is_nil(dir) and codepoint >= 32 do
+    char = <<codepoint::utf8>>
+    {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
+  end
+
+  # ── Repeat find-char (;  ,) ─────────────────────────────────────────────
+
+  def handle_key({?;, 0}, state) do
+    {:execute, :repeat_find_char, state}
+  end
+
+  def handle_key({?,, 0}, state) do
+    {:execute, :repeat_find_char_reverse, state}
+  end
+
+  # ── Bracket matching (%) ─────────────────────────────────────────────────
+
+  def handle_key({?%, 0}, state) do
+    {:execute, :match_bracket, state}
+  end
+
+  # ── Paragraph motions ({ / }) ────────────────────────────────────────────
+
+  def handle_key({?{, 0}, state) do
+    {:execute, :paragraph_backward, state}
+  end
+
+  def handle_key({?}, 0}, state) do
+    {:execute, :paragraph_forward, state}
+  end
+
+  # ── Screen-relative motions (H / M / L) ─────────────────────────────────
+
+  def handle_key({?H, 0}, state) do
+    {:execute, {:move_to_screen, :top}, state}
+  end
+
+  def handle_key({?M, 0}, state) do
+    {:execute, {:move_to_screen, :middle}, state}
+  end
+
+  def handle_key({?L, 0}, state) do
+    {:execute, {:move_to_screen, :bottom}, state}
+  end
+
+  # ── WORD motions (W / B / E) ─────────────────────────────────────────────
+
+  def handle_key({?W, 0}, state) do
+    {:execute, :word_forward_big, state}
+  end
+
+  def handle_key({?B, 0}, state) do
+    {:execute, :word_backward_big, state}
+  end
+
+  def handle_key({?E, 0}, state) do
+    {:execute, :word_end_big, state}
   end
 
   # ── Operator entry (d / c / y) ────────────────────────────────────────────
@@ -292,6 +386,68 @@ defmodule Minga.Mode.Normal do
   # Ctrl+B → full page up
   def handle_key({?b, mods}, state) when band(mods, @ctrl) != 0 do
     {:execute, :page_up, state}
+  end
+
+  # ── Single-key editing commands ────────────────────────────────────────────
+
+  # x — delete char at cursor
+  def handle_key({?x, 0}, state) do
+    {:execute, :delete_at, state}
+  end
+
+  # X — delete char before cursor
+  def handle_key({?X, 0}, state) do
+    {:execute, :delete_before, state}
+  end
+
+  # J — join current line with next
+  def handle_key({?J, 0}, state) do
+    {:execute, :join_lines, state}
+  end
+
+  # r — replace char (wait for next char)
+  def handle_key({?r, 0}, state) do
+    {:continue, %{state | pending_replace: true}}
+  end
+
+  # Complete replace with the target character
+  def handle_key({codepoint, 0}, %ModeState{pending_replace: true} = state)
+      when codepoint >= 32 do
+    char = <<codepoint::utf8>>
+    {:execute, {:replace_char, char}, %{state | pending_replace: false}}
+  end
+
+  # ~ — toggle case
+  def handle_key({?~, 0}, state) do
+    {:execute, :toggle_case, state}
+  end
+
+  # >> — indent (first > sets pending_shift)
+  def handle_key({?>, 0}, %ModeState{pending_shift: nil} = state) do
+    {:continue, %{state | pending_shift: :indent}}
+  end
+
+  def handle_key({?>, 0}, %ModeState{pending_shift: :indent} = state) do
+    {:execute, :indent_line, %{state | pending_shift: nil}}
+  end
+
+  # << — dedent (first < sets pending_shift)
+  def handle_key({?<, 0}, %ModeState{pending_shift: nil} = state) do
+    {:continue, %{state | pending_shift: :dedent}}
+  end
+
+  def handle_key({?<, 0}, %ModeState{pending_shift: :dedent} = state) do
+    {:execute, :dedent_line, %{state | pending_shift: nil}}
+  end
+
+  # + — next line first non-blank
+  def handle_key({?+, 0}, state) do
+    {:execute, :next_line_first_non_blank, state}
+  end
+
+  # - — prev line first non-blank
+  def handle_key({?-, 0}, state) do
+    {:execute, :prev_line_first_non_blank, state}
   end
 
   # ── Undo / redo ───────────────────────────────────────────────────────────

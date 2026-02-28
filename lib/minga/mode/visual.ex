@@ -102,7 +102,72 @@ defmodule Minga.Mode.Visual do
   end
 
   def handle_key({?e, 0}, state) do
-    {:execute, :end_of_word, state}
+    {:execute, :word_end, state}
+  end
+
+  def handle_key({?$, 0}, state) do
+    {:execute, :move_to_line_end, state}
+  end
+
+  def handle_key({?^, 0}, state) do
+    {:execute, :move_to_first_non_blank, state}
+  end
+
+  def handle_key({?0, 0}, state) do
+    {:execute, :move_to_line_start, state}
+  end
+
+  def handle_key({?G, 0}, state) do
+    {:execute, :move_to_document_end, state}
+  end
+
+  # g prefix for gg
+  def handle_key({?g, 0}, %{pending_g: true} = state) do
+    {:execute, :move_to_document_start, %{state | pending_g: false}}
+  end
+
+  def handle_key({?g, 0}, state) do
+    {:continue, Map.put(state, :pending_g, true)}
+  end
+
+  # WORD motions
+  def handle_key({?W, 0}, state) do
+    {:execute, :word_forward_big, state}
+  end
+
+  def handle_key({?B, 0}, state) do
+    {:execute, :word_backward_big, state}
+  end
+
+  def handle_key({?E, 0}, state) do
+    {:execute, :word_end_big, state}
+  end
+
+  # Paragraph motions
+  def handle_key({?{, 0}, state) do
+    {:execute, :paragraph_backward, state}
+  end
+
+  def handle_key({?}, 0}, state) do
+    {:execute, :paragraph_forward, state}
+  end
+
+  # Bracket matching
+  def handle_key({?%, 0}, state) do
+    {:execute, :match_bracket, state}
+  end
+
+  # Screen-relative
+  def handle_key({?H, 0}, state) do
+    {:execute, {:move_to_screen, :top}, state}
+  end
+
+  def handle_key({?M, 0}, state) do
+    {:execute, {:move_to_screen, :middle}, state}
+  end
+
+  def handle_key({?L, 0}, state) do
+    {:execute, {:move_to_screen, :bottom}, state}
   end
 
   # ── Page / half-page scrolling ──────────────────────────────────────────────

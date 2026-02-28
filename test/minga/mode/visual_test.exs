@@ -107,9 +107,9 @@ defmodule Minga.Mode.VisualTest do
       assert {:execute, :word_backward, _} = Visual.handle_key({?b, 0}, state)
     end
 
-    test "e emits :end_of_word" do
+    test "e emits :word_end" do
       state = visual_state()
-      assert {:execute, :end_of_word, _} = Visual.handle_key({?e, 0}, state)
+      assert {:execute, :word_end, _} = Visual.handle_key({?e, 0}, state)
     end
 
     test "Mode.process: j in visual emits :move_down and stays in :visual" do

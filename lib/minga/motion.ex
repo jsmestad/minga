@@ -209,6 +209,258 @@ defmodule Minga.Motion do
     line_end(buf, {last_line, 0})
   end
 
+  # ── Find-char motions ─────────────────────────────────────────────────────
+
+  @doc """
+  Move forward to the next occurrence of `char` on the current line (Vim's `f`).
+  Returns the original position if `char` is not found.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.find_char_forward(buf, {0, 0}, "o")
+      {0, 4}
+  """
+  @spec find_char_forward(GapBuffer.t(), position(), String.t()) :: position()
+  def find_char_forward(%GapBuffer{} = buf, {line, col}, char) do
+    case GapBuffer.line_at(buf, line) do
+      nil -> {line, col}
+      text ->
+        graphemes = String.graphemes(text)
+        case find_in_graphemes(graphemes, char, col + 1) do
+          nil -> {line, col}
+          idx -> {line, idx}
+        end
+    end
+  end
+
+  @doc """
+  Move backward to the previous occurrence of `char` on the current line (Vim's `F`).
+  Returns the original position if `char` is not found.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.find_char_backward(buf, {0, 7}, "o")
+      {0, 4}
+  """
+  @spec find_char_backward(GapBuffer.t(), position(), String.t()) :: position()
+  def find_char_backward(%GapBuffer{} = buf, {line, col}, char) do
+    case GapBuffer.line_at(buf, line) do
+      nil -> {line, col}
+      text ->
+        graphemes = String.graphemes(text)
+        case rfind_in_graphemes(graphemes, char, col - 1) do
+          nil -> {line, col}
+          idx -> {line, idx}
+        end
+    end
+  end
+
+  @doc """
+  Move to one before the next occurrence of `char` on the current line (Vim's `t`).
+  Returns the original position if `char` is not found.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.till_char_forward(buf, {0, 0}, "o")
+      {0, 3}
+  """
+  @spec till_char_forward(GapBuffer.t(), position(), String.t()) :: position()
+  def till_char_forward(%GapBuffer{} = buf, {line, col}, char) do
+    case find_char_forward(buf, {line, col}, char) do
+      {^line, ^col} -> {line, col}
+      {^line, found_col} -> {line, max(col, found_col - 1)}
+    end
+  end
+
+  @doc """
+  Move to one after the previous occurrence of `char` on the current line (Vim's `T`).
+  Returns the original position if `char` is not found.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> Minga.Motion.till_char_backward(buf, {0, 7}, "o")
+      {0, 5}
+  """
+  @spec till_char_backward(GapBuffer.t(), position(), String.t()) :: position()
+  def till_char_backward(%GapBuffer{} = buf, {line, col}, char) do
+    case find_char_backward(buf, {line, col}, char) do
+      {^line, ^col} -> {line, col}
+      {^line, found_col} -> {line, min(col, found_col + 1)}
+    end
+  end
+
+  # ── Bracket matching ─────────────────────────────────────────────────────
+
+  @bracket_pairs %{
+    "(" => {"(", ")", :forward},
+    ")" => {"(", ")", :backward},
+    "[" => {"[", "]", :forward},
+    "]" => {"[", "]", :backward},
+    "{" => {"{", "}", :forward},
+    "}" => {"{", "}", :backward}
+  }
+
+  @doc """
+  Jump to the matching bracket/paren/brace (Vim's `%`).
+
+  Scans forward from cursor to find the first bracket character, then
+  finds its match counting nesting. Returns original position if no
+  bracket is found or match is unbalanced.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("(hello)")
+      iex> Minga.Motion.match_bracket(buf, {0, 0})
+      {0, 6}
+  """
+  @spec match_bracket(GapBuffer.t(), position()) :: position()
+  def match_bracket(%GapBuffer{} = buf, {line, col} = pos) do
+    text = GapBuffer.content(buf)
+    graphemes = String.graphemes(text)
+    all_lines = String.split(text, "\n")
+    offset = offset_for(all_lines, line, col)
+
+    # Find the first bracket at or after cursor on current line
+    current_line_text = GapBuffer.line_at(buf, line) || ""
+    line_graphemes = String.graphemes(current_line_text)
+
+    bracket_offset = find_bracket_on_line(line_graphemes, col)
+
+    case bracket_offset do
+      nil -> pos
+      bracket_col ->
+        bracket_char = Enum.at(line_graphemes, bracket_col)
+        abs_offset = offset - col + bracket_col
+
+        case Map.get(@bracket_pairs, bracket_char) do
+          nil -> pos
+          {open, close, direction} ->
+            case scan_for_match(graphemes, abs_offset, open, close, direction) do
+              nil -> pos
+              match_offset -> GapBuffer.offset_to_position(buf, match_offset)
+            end
+        end
+    end
+  end
+
+  # ── Paragraph motions ─────────────────────────────────────────────────────
+
+  @doc """
+  Move to the next blank line (Vim's `}`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld\\n\\nfoo")
+      iex> Minga.Motion.paragraph_forward(buf, {0, 0})
+      {2, 0}
+  """
+  @spec paragraph_forward(GapBuffer.t(), position()) :: position()
+  def paragraph_forward(%GapBuffer{} = buf, {line, _col}) do
+    total = GapBuffer.line_count(buf)
+    # Skip non-blank lines, then find next blank line
+    find_paragraph_boundary(buf, line + 1, total, :forward)
+  end
+
+  @doc """
+  Move to the previous blank line (Vim's `{`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld\\n\\nfoo")
+      iex> Minga.Motion.paragraph_backward(buf, {3, 0})
+      {2, 0}
+  """
+  @spec paragraph_backward(GapBuffer.t(), position()) :: position()
+  def paragraph_backward(%GapBuffer{} = buf, {line, _col}) do
+    find_paragraph_boundary(buf, line - 1, GapBuffer.line_count(buf), :backward)
+  end
+
+  # ── WORD motions (whitespace-delimited) ──────────────────────────────────
+
+  @doc """
+  Move forward to the start of the next WORD (Vim's `W`).
+  WORDs are separated by whitespace only (no punctuation boundaries).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> Minga.Motion.word_forward_big(buf, {0, 0})
+      {0, 8}
+  """
+  @spec word_forward_big(GapBuffer.t(), position()) :: position()
+  def word_forward_big(%GapBuffer{} = buf, {line, col} = pos) do
+    text = GapBuffer.content(buf)
+    graphemes = String.graphemes(text)
+    total = length(graphemes)
+
+    if total == 0 do
+      pos
+    else
+      all_lines = String.split(text, "\n")
+      offset = offset_for(all_lines, line, col)
+      new_offset = do_word_forward_big(graphemes, offset, total - 1)
+      GapBuffer.offset_to_position(buf, new_offset)
+    end
+  end
+
+  @doc """
+  Move backward to the start of the previous WORD (Vim's `B`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> Minga.Motion.word_backward_big(buf, {0, 8})
+      {0, 0}
+  """
+  @spec word_backward_big(GapBuffer.t(), position()) :: position()
+  def word_backward_big(%GapBuffer{} = buf, {line, col} = pos) do
+    text = GapBuffer.content(buf)
+    graphemes = String.graphemes(text)
+
+    if graphemes == [] do
+      pos
+    else
+      all_lines = String.split(text, "\n")
+      offset = offset_for(all_lines, line, col)
+
+      if offset == 0 do
+        {0, 0}
+      else
+        new_offset = do_word_backward_big(graphemes, offset - 1)
+        GapBuffer.offset_to_position(buf, new_offset)
+      end
+    end
+  end
+
+  @doc """
+  Move to the end of the current or next WORD (Vim's `E`).
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> Minga.Motion.word_end_big(buf, {0, 0})
+      {0, 6}
+  """
+  @spec word_end_big(GapBuffer.t(), position()) :: position()
+  def word_end_big(%GapBuffer{} = buf, {line, col} = pos) do
+    text = GapBuffer.content(buf)
+    graphemes = String.graphemes(text)
+    total = length(graphemes)
+
+    if total == 0 do
+      pos
+    else
+      all_lines = String.split(text, "\n")
+      offset = offset_for(all_lines, line, col)
+      new_offset = do_word_end_big(graphemes, offset, total - 1)
+      GapBuffer.offset_to_position(buf, new_offset)
+    end
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # Returns the grapheme offset for a given {line, col} in the already-split lines.
@@ -372,4 +624,161 @@ defmodule Minga.Motion do
   @spec whitespace?(String.t() | nil) :: boolean()
   defp whitespace?(nil), do: false
   defp whitespace?(g), do: g in [" ", "\t", "\n"]
+
+  # ── Find-char helpers ────────────────────────────────────────────────────
+
+  # Find first occurrence of `char` in `graphemes` starting from `from` index.
+  @spec find_in_graphemes([String.t()], String.t(), non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp find_in_graphemes(graphemes, char, from) do
+    graphemes
+    |> Enum.with_index()
+    |> Enum.find_value(fn {g, idx} ->
+      if idx >= from and g == char, do: idx
+    end)
+  end
+
+  # Find last occurrence of `char` in `graphemes` at or before `to` index.
+  @spec rfind_in_graphemes([String.t()], String.t(), integer()) ::
+          non_neg_integer() | nil
+  defp rfind_in_graphemes(_graphemes, _char, to) when to < 0, do: nil
+
+  defp rfind_in_graphemes(graphemes, char, to) do
+    graphemes
+    |> Enum.with_index()
+    |> Enum.filter(fn {g, idx} -> idx <= to and g == char end)
+    |> List.last()
+    |> case do
+      nil -> nil
+      {_g, idx} -> idx
+    end
+  end
+
+  # ── Bracket matching helpers ─────────────────────────────────────────────
+
+  @bracket_chars MapSet.new(["(", ")", "[", "]", "{", "}"])
+
+  # Find first bracket char at or after `col` on the line.
+  @spec find_bracket_on_line([String.t()], non_neg_integer()) :: non_neg_integer() | nil
+  defp find_bracket_on_line(graphemes, col) do
+    graphemes
+    |> Enum.with_index()
+    |> Enum.find_value(fn {g, idx} ->
+      if idx >= col and MapSet.member?(@bracket_chars, g), do: idx
+    end)
+  end
+
+  # Scan for matching bracket, counting nesting.
+  @spec scan_for_match([String.t()], non_neg_integer(), String.t(), String.t(), :forward | :backward) ::
+          non_neg_integer() | nil
+  defp scan_for_match(graphemes, offset, open, close, :forward) do
+    do_scan_forward(graphemes, offset + 1, length(graphemes), open, close, 1)
+  end
+
+  defp scan_for_match(graphemes, offset, open, close, :backward) do
+    do_scan_backward(graphemes, offset - 1, open, close, 1)
+  end
+
+  @spec do_scan_forward([String.t()], non_neg_integer(), non_neg_integer(), String.t(), String.t(), non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp do_scan_forward(_graphemes, idx, total, _open, _close, _depth) when idx >= total, do: nil
+
+  defp do_scan_forward(graphemes, idx, total, open, close, depth) do
+    g = Enum.at(graphemes, idx)
+
+    cond do
+      g == close and depth == 1 -> idx
+      g == close -> do_scan_forward(graphemes, idx + 1, total, open, close, depth - 1)
+      g == open -> do_scan_forward(graphemes, idx + 1, total, open, close, depth + 1)
+      true -> do_scan_forward(graphemes, idx + 1, total, open, close, depth)
+    end
+  end
+
+  @spec do_scan_backward([String.t()], integer(), String.t(), String.t(), non_neg_integer()) ::
+          non_neg_integer() | nil
+  defp do_scan_backward(_graphemes, idx, _open, _close, _depth) when idx < 0, do: nil
+
+  defp do_scan_backward(graphemes, idx, open, close, depth) do
+    g = Enum.at(graphemes, idx)
+
+    cond do
+      g == open and depth == 1 -> idx
+      g == open -> do_scan_backward(graphemes, idx - 1, open, close, depth - 1)
+      g == close -> do_scan_backward(graphemes, idx - 1, open, close, depth + 1)
+      true -> do_scan_backward(graphemes, idx - 1, open, close, depth)
+    end
+  end
+
+  # ── Paragraph helpers ────────────────────────────────────────────────────
+
+  @spec find_paragraph_boundary(GapBuffer.t(), integer(), non_neg_integer(), :forward | :backward) ::
+          position()
+  defp find_paragraph_boundary(_buf, line, _total, _dir) when line < 0, do: {0, 0}
+
+  defp find_paragraph_boundary(_buf, line, total, _dir) when line >= total do
+    {max(0, total - 1), 0}
+  end
+
+  defp find_paragraph_boundary(buf, line, total, dir) do
+    line_text = GapBuffer.line_at(buf, line) || ""
+    next = if dir == :forward, do: line + 1, else: line - 1
+
+    if blank_line?(line_text) do
+      {line, 0}
+    else
+      find_paragraph_boundary(buf, next, total, dir)
+    end
+  end
+
+  @spec blank_line?(String.t()) :: boolean()
+  defp blank_line?(text), do: String.trim(text) == ""
+
+  # ── WORD motion helpers (whitespace-delimited) ───────────────────────────
+
+  @spec do_word_forward_big([String.t()], non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_word_forward_big(_graphemes, offset, max) when offset >= max, do: max
+
+  defp do_word_forward_big(graphemes, offset, max) do
+    current = Enum.at(graphemes, offset)
+
+    if whitespace?(current) do
+      # On whitespace: skip to first non-whitespace
+      skip_while(graphemes, offset + 1, max, &whitespace?/1)
+    else
+      # On non-whitespace: skip to whitespace, then skip whitespace
+      after_word = skip_while(graphemes, offset + 1, max, fn g -> not whitespace?(g) end)
+      skip_while(graphemes, after_word, max, &whitespace?/1)
+    end
+  end
+
+  @spec do_word_backward_big([String.t()], non_neg_integer()) :: non_neg_integer()
+  defp do_word_backward_big(graphemes, offset) do
+    # Skip backward past whitespace
+    non_ws = backward_find(graphemes, offset, fn g -> not whitespace?(g) end)
+
+    if non_ws < 0 do
+      0
+    else
+      # Find start of non-whitespace run
+      find_run_start(graphemes, non_ws, fn g -> not whitespace?(g) end)
+    end
+  end
+
+  @spec do_word_end_big([String.t()], non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_word_end_big(_graphemes, offset, max) when offset >= max, do: max
+
+  defp do_word_end_big(graphemes, offset, max) do
+    start = min(offset + 1, max)
+    current = Enum.at(graphemes, start)
+
+    run_start =
+      if whitespace?(current),
+        do: skip_while(graphemes, start, max, &whitespace?/1),
+        else: start
+
+    # Advance to end of non-whitespace run
+    last_in_run(graphemes, run_start, max, fn g -> not whitespace?(g) end)
+  end
 end

@@ -1,144 +1,240 @@
-# Plan: Generic Picker Framework with Fuzzy Matching
+# Plan: Vim Motion Parity — Wire Existing + Add Missing Motions
 
 ## Goal
-Upgrade the existing `Minga.Picker` from a simple substring-matching data structure into a full behaviour-based picker framework with fuzzy/orderless matching, match highlighting, annotations, alternative actions, and a `:picker` mode in the FSM — so that every "pick one from a list" feature (command palette, file finder, buffer switcher, grep, help) is a trivial 10-line wrapper.
+Bring Minga's motion system to full Vim/Doom Emacs parity: wire up the existing `Motion` module that's disconnected from the editor, then implement the ~30 missing motions that Vim users rely on constantly (`gg`, `f/F/t/T`, `;/,`, `%`, `{/}`, `H/M/L`, `W/B/E`, `J`, `x`, `r`, `~`, `.`, `>>`, `<<`, search `//?/n/N/*/#`).
 
 ## Context
 
-### What exists today
-- **`Minga.Picker`** (190 lines) — pure data structure with `{id, label, desc}` items, substring filtering, up/down navigation, visible window scrolling. Solid foundation.
-- **Picker rendering** — already implemented in `Editor.do_render/1` via `maybe_render_picker/2`. Bottom-panel overlay with separator, items, prompt line, and cursor positioning.
-- **Picker key handling** — `handle_picker_key/3` in `Editor` handles Esc, Enter, C-j/C-k, arrows, backspace, printable chars. Dispatches by `picker_kind` (`:buffer` or `:find_file`).
-- **Two picker consumers** — `open_buffer_picker/1` and `open_file_finder/1` in `Editor`, each manually constructing items and handling selection.
-- **Editor state** — `EditorState` has `picker`, `picker_kind`, `picker_prev_buffer` fields.
-- **No fuzzy matching** — current filtering is `String.contains?` substring match.
-- **No match highlighting** — selected items get bold, but matched characters aren't highlighted.
-- **No behaviour** — adding a new picker source requires touching `Editor` directly.
+### What exists
+- **`Minga.Motion`** — pure functions for `w`, `b`, `e`, `0`, `$`, `^`, `gg`, `G`. All tested. But **never called from Editor** — the `execute_command` clauses for `:word_forward`, `:word_backward`, `:word_end`, `:move_to_first_non_blank`, `:move_to_document_start`, `:move_to_document_end` don't exist.
+- **Normal mode** dispatches `w/b/e/$` as command atoms but Editor silently drops them via the catch-all `execute_command(state, _cmd), do: state`.
+- **Operator-pending** has motion support for `w/b/e/0/$` as `{:delete_motion, :word_forward}` etc., but Editor has no `execute_command` for `{:delete_motion, _}` or `{:change_motion, _}` or `{:yank_motion, _}` — these also silently drop.
+- **Visual mode** dispatches `w/b/e` but same wiring gap.
+- **GapBuffer** has `content/1`, `line_at/2`, `offset_to_position/2`, `line_count/1` — sufficient for most motion implementations.
 
-### Key patterns
-- Modes are atoms (`:normal`, `:insert`, etc.) dispatched via `Mode.process/3`.
-- The picker bypasses the Mode FSM — `handle_info` checks `picker != nil` before routing to `handle_picker_key`. This is fine and avoids adding a `:picker` mode to the FSM.
-- Rendering uses `Protocol.encode_draw/4+` with fg/bg/bold/reverse options.
-- Commands are atoms or tagged tuples executed by `execute_command/2`.
+### What's missing entirely
+1. **Wiring** — `execute_command` for all existing motion commands
+2. **`gg`** — Normal mode doesn't handle the two-key `g` prefix (OP mode does)
+3. **`f/F/t/T` + char** — find-char motions (needs intermediate state to capture next char)
+4. **`;` / `,`** — repeat last find-char
+5. **`%`** — matching bracket jump
+6. **`{` / `}`** — paragraph motions
+7. **`H/M/L`** — screen-relative motions (need viewport)
+8. **`W/B/E`** — WORD motions (whitespace-delimited)
+9. **`J`** — join lines
+10. **`x`** — delete char at cursor (alias for `dl`)
+11. **`r` + char** — replace character
+12. **`~`** — toggle case
+13. **`.`** — repeat last change (complex — needs change recording)
+14. **`>>`/`<<`** — indent/dedent
+15. **`/`/`?`/`n`/`N`/`*`/`#`** — search (significant feature, separate issue)
+16. **Operator+motion execution** — `d/c/y` + any motion (`dw`, `d$`, `dG`, `cf{char}`, etc.)
+
+### Scoping decision
+Search (`/`, `?`, `n`, `N`, `*`, `#`) and repeat (`.`) are large features that warrant their own issues. This plan covers **everything else** — wiring existing motions, new motion functions, operator+motion execution, and single-key editing commands.
 
 ## Approach
 
-Evolve the existing code incrementally rather than rewriting. The picker data structure gets fuzzy matching and scoring. A new `Minga.Picker.Source` behaviour defines the contract for picker sources. The editor's picker handling becomes generic — dispatching select/cancel to the source module rather than branching on `picker_kind`.
+Three phases:
+1. **Wire existing motions** — add `execute_command` clauses to connect Normal/Visual/OP mode dispatches to `Motion` functions via `BufferServer`
+2. **Add new motion functions** to `Motion` module + wire them into all three modes
+3. **Add single-key editing commands** (`x`, `J`, `r`, `~`, `>>`, `<<`) — these aren't motions but are expected Normal mode keys
 
-### Alternatives Considered
-1. **Full `:picker` mode in the FSM** — Issue #16 suggests this, but the current approach (checking `picker != nil` in `handle_info`) is simpler and already works. Adding a mode would require changes to `Mode`, every mode module, and the modeline. Not worth it — the current pattern is fine.
-2. **Separate GenServer per picker** — Overengineered. The picker is fast, synchronous, and ephemeral. A data structure in EditorState is correct.
-3. **Embark-style action menu (C-o)** — Specified in #16 but premature. We can add it later as a picker-over-actions. Skip for now to keep scope tight.
+The operator+motion system (`dw`, `c$`, `yG` etc.) requires a generic approach: `execute_command` for `{:delete_motion, motion_name}` applies the motion to get a range, then deletes/changes/yanks that range.
 
 ## Steps
 
-### 1. Add fuzzy/orderless matching to `Minga.Picker`
-- **Files**: `lib/minga/picker.ex`, `test/minga/picker_test.exs`
+### 1. Wire existing motions to Editor
+- **Files**: `lib/minga/editor.ex`
 - **Changes**:
-  - Replace `refilter/1`'s `String.contains?` with orderless fuzzy matching: split query on spaces, each segment must match independently (case-insensitive). Score candidates by: exact prefix > substring > fuzzy character match. Sort filtered results by score (best first).
-  - Add `match_positions/2` function that returns the indices of matched characters in a label, for use by the renderer to highlight them.
-  - Keep the existing `filter/2`, `type_char/2`, `backspace/1` API unchanged.
-  - Add tests for: orderless matching ("b sw" matches "buffer-switch"), scoring/sort order, `match_positions/2`, edge cases (empty query, all-space query, unicode).
+  - Add `execute_command` clauses for: `:word_forward`, `:word_backward`, `:word_end`, `:move_to_first_non_blank`, `:move_to_document_start`, `:move_to_document_end`
+  - Each calls the corresponding `Motion` function via buffer content, then `BufferServer.move_to`
+  - Pattern: get content + cursor from buffer → call `Motion.xyz(gap_buf, cursor)` → `BufferServer.move_to(buf, new_pos)`
 
-### 2. Define `Minga.Picker.Source` behaviour
-- **Files**: `lib/minga/picker/source.ex`
+### 2. Wire operator+motion execution
+- **Files**: `lib/minga/editor.ex`
 - **Changes**:
-  - Define behaviour with callbacks:
-    ```elixir
-    @callback candidates(term()) :: [Minga.Picker.item()]
-    @callback on_select(Minga.Picker.item(), state :: term()) :: term()
-    @callback on_cancel(state :: term()) :: term()
-    @callback preview?(item()) :: boolean()  # optional, default false
-    ```
-  - `candidates/1` receives context (e.g., editor state or options).
-  - `on_select/2` and `on_cancel/1` receive editor state and return new editor state — this lets each source control what happens.
-  - `preview?/1` is optional (default false via `__using__` macro or `@optional_callbacks`).
+  - Add generic `execute_command` for `{:delete_motion, motion}`, `{:change_motion, motion}`, `{:yank_motion, motion}`
+  - Get cursor + content, apply motion to get target position, determine range (cursor→target), delete/yank that range
+  - For `:change_motion`, delete range (editor transitions to insert mode via the OP mode's `:execute_then_transition`)
+  - Reuse existing `BufferServer.delete_range/3` and `BufferServer.get_range/3`
 
-### 3. Convert buffer picker to a Source
-- **Files**: `lib/minga/picker/buffer_source.ex`, `test/minga/picker/buffer_source_test.exs`
+### 3. Add `gg` to Normal mode
+- **Files**: `lib/minga/mode/normal.ex`, `lib/minga/mode/state.ex`
 - **Changes**:
-  - Extract `open_buffer_picker/1`'s item-building logic into `Minga.Picker.BufferSource.candidates/1`.
-  - `on_select/2` switches to the selected buffer (extracted from the current `handle_picker_key` Enter clause for `:buffer`).
-  - `on_cancel/1` restores the previous buffer.
-  - `preview?/1` returns true — buffer picker previews on navigation.
+  - Add `:pending_g` field to `Mode.State` (like OP mode already has)
+  - `g` → set `pending_g: true`, `gg` → emit `:move_to_document_start`
+  - `G` with count → emit `{:goto_line, count}` (Vim's `42G`)
+  - Handle `g` prefix for future `ge`, `gE` etc.
 
-### 4. Convert file finder to a Source
-- **Files**: `lib/minga/picker/file_source.ex`, `test/minga/picker/file_source_test.exs`
+### 4. Add `f/F/t/T` find-char motions
+- **Files**: `lib/minga/motion.ex`, `lib/minga/mode/normal.ex`, `lib/minga/mode/state.ex`, `lib/minga/editor.ex`, `lib/minga/editor/state.ex`
 - **Changes**:
-  - Extract `open_file_finder/1`'s item-building logic into `Minga.Picker.FileSource.candidates/1` (delegates to `Minga.FileFind`).
-  - `on_select/2` opens the file (extracted from current `:find_file` Enter handler).
-  - `on_cancel/1` restores previous buffer.
-  - `preview?/1` returns false.
+  - Add `Motion.find_char_forward/3`, `find_char_backward/3`, `till_char_forward/3`, `till_char_backward/3`
+  - In Normal mode: `f/F/t/T` → set `pending_find: :f | :F | :t | :T` on Mode.State, next char completes the motion
+  - Emit `{:find_char, direction, char}` command
+  - Editor stores `last_find_char: {direction, char}` on EditorState for `;`/`,` repeat
+  - Add to OP mode and Visual mode too
 
-### 5. Generalize Editor picker handling
-- **Files**: `lib/minga/editor.ex`, `lib/minga/editor/state.ex`
+### 5. Add `;` and `,` repeat find-char
+- **Files**: `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
 - **Changes**:
-  - Replace `picker_kind` field with `picker_source` (the source module atom) in `EditorState`.
-  - Add `open_picker/3` helper: `open_picker(state, source_module, opts)` — calls `source.candidates(opts)`, builds `Picker.new(items, ...)`, stores source module on state.
-  - Refactor `handle_picker_key/3`:
-    - Enter → calls `state.picker_source.on_select(selected_item, state)`.
-    - Escape → calls `state.picker_source.on_cancel(state)`.
-    - Navigation (C-j/C-k/arrows) → if source has `preview?` returning true, call `on_select` as preview.
-    - Remove `picker_kind`-specific branching.
-  - Update `execute_command/2` for `:find_file` and `:buffer_list` to use `open_picker/3`.
-  - Remove `picker_kind` and `picker_prev_buffer` from `EditorState` — sources own their own cancel behavior via closure or state stored in the picker's items.
+  - `;` → emit `:repeat_find_char`, `,` → emit `:repeat_find_char_reverse`
+  - Editor looks up `last_find_char` from state and re-applies
 
-### 6. Add match highlighting to picker rendering
-- **Files**: `lib/minga/editor.ex` (in `maybe_render_picker/2`)
+### 6. Add `%` matching bracket
+- **Files**: `lib/minga/motion.ex`, `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
 - **Changes**:
-  - After computing visible items, call `Picker.match_positions/2` for each item's label against the current query.
-  - Render matched characters with a highlight color (e.g., `0xE5C07B` yellow) while non-matched characters use the normal text color.
-  - This requires splitting each label into segments and issuing multiple `encode_draw` calls per item (similar to how visual selection rendering works).
+  - `Motion.match_bracket/2` — find matching `()`, `[]`, `{}` from cursor
+  - Scan forward from cursor for first bracket char, then find its match (counting nesting)
+  - Wire as `:match_bracket` in Normal, Visual, and OP modes
 
-### 7. Add Command source (bonus — ships command palette, issue #15)
-- **Files**: `lib/minga/picker/command_source.ex`, `lib/minga/command/registry.ex` (if not exists), `lib/minga/keymap/defaults.ex`
+### 7. Add `{` / `}` paragraph motions
+- **Files**: `lib/minga/motion.ex`, `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
 - **Changes**:
-  - Create `Minga.Picker.CommandSource` implementing Source behaviour.
-  - `candidates/1` returns all registered commands with their keybinding annotations.
-  - `on_select/2` executes the command.
-  - Add `SPC :` keybinding in defaults (Doom's `M-x` equivalent).
-  - This validates the entire framework end-to-end with a third source.
+  - `Motion.paragraph_forward/2` — move to next blank line
+  - `Motion.paragraph_backward/2` — move to previous blank line
+  - Wire in Normal, Visual, OP modes
+
+### 8. Add `H/M/L` screen-relative motions
+- **Files**: `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
+- **Changes**:
+  - These need viewport info, so they emit `{:move_to_screen, :top | :middle | :bottom}`
+  - Editor computes target line from viewport and moves cursor
+  - Also add to Visual mode
+
+### 9. Add `W/B/E` WORD motions
+- **Files**: `lib/minga/motion.ex`, `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
+- **Changes**:
+  - `Motion.word_forward_big/2`, `word_backward_big/2`, `word_end_big/2`
+  - WORD = whitespace-delimited (non-whitespace runs), vs word = alphanumeric runs
+  - Wire in Normal, Visual, OP modes
+
+### 10. Add single-key editing commands
+- **Files**: `lib/minga/mode/normal.ex`, `lib/minga/editor.ex`
+- **Changes**:
+  - `x` → emit `:delete_at` (already exists in editor)
+  - `X` → emit `:delete_before` (already exists)
+  - `J` → emit `:join_lines` — Editor joins current line with next (delete newline at EOL)
+  - `r` + char → `pending_replace: true` in Mode.State, next char → `{:replace_char, char}`. Editor replaces char at cursor.
+  - `~` → emit `:toggle_case` — swap case of char at cursor, move right
+  - `>>` → emit `:indent_line`, `<<` → emit `:dedent_line` — add/remove leading indent (tab or spaces based on future config, default 2 spaces for now)
+  - `+` → emit `:next_line_first_non_blank`, `-` → emit `:prev_line_first_non_blank`
+
+### 11. Update Visual and Operator-Pending modes
+- **Files**: `lib/minga/mode/visual.ex`, `lib/minga/mode/operator_pending.ex`
+- **Changes**:
+  - Add all new motions to both modes: `$`, `^`, `G`, `gg`, `{`, `}`, `H`, `M`, `L`, `W`, `B`, `E`, `f/F/t/T`, `;`, `,`, `%`
+  - Visual mode already has `w/b/e` — fix inconsistency: Visual uses `:end_of_word` vs Normal's `:word_end`
+  - OP mode already has most motions — add: `^`, `{`, `}`, `H/M/L`, `W/B/E`, `f/F/t/T`, `;`, `,`, `%`
+
+### 12. Tests
+- **Files**: `test/minga/motion_test.exs` (expand), new test files as needed
+- **Changes**:
+  - Test all new `Motion` functions: `find_char_*`, `till_char_*`, `match_bracket`, `paragraph_*`, `word_*_big`
+  - Test `execute_command` for operator+motion combos (using headless harness or unit tests)
+  - Edge cases: empty buffer, cursor at boundaries, no match for `f/t/%`
 
 ## Testing
-- **Step 1**: Property-based tests for fuzzy matching (any substring of a label always scores > 0; exact match scores highest). Unit tests for orderless matching, `match_positions/2`, scoring sort order.
-- **Steps 3-4**: Unit tests for each source's `candidates/1` output shape and `on_select/on_cancel` behavior (using mock editor state).
-- **Step 5**: Existing editor integration tests should continue passing. The buffer picker and file finder behavior is unchanged from the user's perspective.
-- **Step 6**: Visual — needs manual verification in terminal.
-- **Step 7**: Unit test that command source returns all registered commands.
-- Run `mix test --warnings-as-errors` after each step.
+- Expand existing `test/minga/motion_test.exs` with new motion functions
+- Each new motion: test normal case, boundary cases (start/end of line, start/end of buffer), no-match cases
+- Operator+motion: test that `dw` deletes a word, `d$` deletes to EOL, `dG` deletes to end, etc.
+- Run `mix test --warnings-as-errors` after each step
 
 ## Risks & Open Questions
-- **Fuzzy scoring algorithm**: Starting simple (orderless substring with prefix bonus). If it feels wrong in practice, can swap in a proper fuzzy scorer (fzy/fzf algorithm) later without changing the API.
-- **Performance with large file lists**: The current `Picker.refilter/1` calls `Enum.filter` on every keystroke. For thousands of files this could lag. Mitigation: score+sort is still fast for <10k items; can add debouncing or async filtering later if needed.
-- **`picker_prev_buffer` removal**: Moving cancel behavior into sources means each source must capture restore state in its closure. Need to ensure this works cleanly with the GenServer state flow.
+- **`f/F/t/T` state management**: Needs a `pending_find` field on Mode.State + `last_find_char` on EditorState. Two separate state locations — acceptable since one is FSM-transient and one persists across commands.
+- **Operator+motion range direction**: When motion goes backward (`db`, `d{`), the range is (target, cursor) not (cursor, target). Need to sort positions.
+- **`>>` / `<<` indent size**: Hardcode 2 spaces initially. Will be configurable via issue #24 (per-language settings).
+- **Search (`/`, `?`, `n`, `N`, `*`, `#`)** and repeat (`.`) are deferred to separate issues — they're large enough to warrant their own planning.
 
-## GitHub Ticket
+## GitHub Tickets
+
+### Ticket 1: Wire existing motions and add operator+motion execution
 
 ```markdown
-# Users can navigate and select from filterable lists throughout the editor
+# Existing Vim motions execute correctly in the editor
+
+**Type:** Bug
+
+## What
+Word motions (`w`, `b`, `e`), line motions (`^`, `gg`, `G`), and operator+motion combos (`dw`, `c$`, `yG`) are bound in the mode FSM but silently do nothing — the editor's command execution layer doesn't handle them.
+
+## Why
+Users pressing `w` to jump forward a word, or `dw` to delete a word, get no response. These are among the most basic Vim commands and their absence makes the editor unusable for any real editing task.
+
+## Acceptance Criteria
+- `w` moves cursor to start of next word
+- `b` moves cursor to start of previous word
+- `e` moves cursor to end of current/next word
+- `^` moves to first non-blank character on line
+- `gg` moves to first line of file
+- `G` moves to last line of file
+- `dw` deletes from cursor to start of next word
+- `d$` deletes from cursor to end of line
+- `dG` deletes from cursor to end of file
+- `cw` deletes word and enters insert mode
+- `yy` yanks current line, `p` pastes it
+- All motions work with count prefixes (`3w`, `2dd`)
+
+### Developer Notes
+- `Minga.Motion` module already has the pure functions — this is purely a wiring issue
+- Add `execute_command` clauses for motion atoms and `{:delete_motion, motion}` tuples
+- Sort positions for backward motions before passing to `delete_range`
+```
+
+### Ticket 2: Find-char, bracket-match, paragraph, and screen motions
+
+```markdown
+# Users can navigate with find-char, bracket-match, paragraph, and screen motions
 
 **Type:** Feature
 
 ## What
-The editor needs a generic picker framework — a single UI component that powers every "choose one from a list" interaction: switching buffers, finding files, running commands, searching, and any future selection-based feature. Currently each picker use case is hardcoded with its own branching logic in the editor.
+Vim's mid-frequency navigation motions are missing: `f/F/t/T` (find character on line), `;/,` (repeat find), `%` (matching bracket), `{/}` (paragraph), `H/M/L` (screen position), and `W/B/E` (WORD motions).
 
 ## Why
-This is the highest-leverage infrastructure investment remaining. Once the picker framework exists with a simple behaviour interface, adding new interactive commands (command palette, grep results, help lookup, theme switching) becomes a ~10-line module each. Without it, every new picker feature requires modifying the editor's core key handling and rendering code.
+Without these, users are stuck with slow `hjkl` navigation or word-jumping. `f/t` are the fastest way to reach a specific character on a line, `%` is essential for code navigation, and `{/}` is how users move through prose and code blocks. These motions are used hundreds of times per editing session.
 
 ## Acceptance Criteria
-- Typing in the picker prompt narrows results using fuzzy/orderless matching (e.g., "b sw" matches "buffer-switch")
-- Matched characters are visually highlighted in each candidate
-- `Enter` selects the current candidate and performs the source-defined action
-- `Esc` cancels and restores previous state
-- `C-j`/`C-k` (or arrows) navigate the list; selection wraps at boundaries
-- Adding a new picker source requires only implementing a behaviour module — no changes to the editor core
-- Buffer switching (`SPC b b`) and file finding (`SPC f f`) continue to work identically from the user's perspective
-- A command palette (`SPC :`) is available, listing all registered commands with their keybindings
+- `f{char}` moves to next occurrence of char on current line; `F{char}` moves backward
+- `t{char}` moves to one before next occurrence; `T{char}` one after previous
+- `;` repeats last f/F/t/T in same direction; `,` repeats in reverse direction
+- `%` jumps to matching bracket/paren/brace under or after cursor
+- `{` moves to previous blank line; `}` moves to next blank line
+- `H` moves to top of visible screen; `M` to middle; `L` to bottom
+- `W/B/E` navigate by whitespace-delimited WORDs
+- All motions work with operators (`df.` deletes to next period, `ct"` changes to next quote, `y}` yanks to end of paragraph)
 
 ### Developer Notes
-- Evolve the existing `Minga.Picker` data structure — don't rewrite from scratch
-- Define `Minga.Picker.Source` behaviour with `candidates/1`, `on_select/2`, `on_cancel/1`
-- The picker remains a data structure on `EditorState`, not a separate process or FSM mode
-- Fuzzy matching: split query on spaces, each segment matches independently, sort by match quality
-- Defer the action menu (`C-o` for alternative actions) to a follow-up ticket
+- `f/F/t/T` need a pending-char intermediate state in Mode.State and Mode.OperatorPendingState
+- Store `last_find_char` on EditorState for `;/,` repeat
+- `H/M/L` emit viewport-relative commands — editor resolves to buffer position
+```
+
+### Ticket 3: Single-key editing commands
+
+```markdown
+# Users can use single-key editing commands (x, J, r, ~, >>, <<)
+
+**Type:** Feature
+
+## What
+Common single-key Vim editing commands are missing: `x` (delete char), `J` (join lines), `r` (replace char), `~` (toggle case), `>>` (indent), `<<` (dedent), `+/-` (next/prev line first non-blank).
+
+## Why
+These are the bread-and-butter editing shortcuts that make Vim efficient. `x` to delete a typo, `J` to join lines, `r` to fix a single character, and `>>` to fix indentation are used constantly.
+
+## Acceptance Criteria
+- `x` deletes character under cursor; `X` deletes character before cursor
+- `J` joins current line with next line (replaces newline with space)
+- `r{char}` replaces character under cursor with typed character, stays in normal mode
+- `~` toggles case of character under cursor and moves right
+- `>>` indents current line by one level; `<<` dedents by one level
+- `+` moves to first non-blank of next line; `-` moves to first non-blank of previous line
+- All work with count prefixes (`3x` deletes 3 chars, `3J` joins 3 lines, `5>>` indents 5 lines)
+
+### Developer Notes
+- `x` can reuse existing `:delete_at` command
+- `r` needs pending-char state like `f/F/t/T`
+- `>>` / `<<` use 2-space indent initially (configurable later via issue #24)
 ```

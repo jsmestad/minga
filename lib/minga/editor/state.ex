@@ -18,6 +18,9 @@ defmodule Minga.Editor.State do
   alias Minga.Picker
   alias Minga.WhichKey
 
+  @typedoc "Stored last find-char motion for ; and , repeat."
+  @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
+
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
   defstruct buffer: nil,
             buffers: [],
@@ -33,7 +36,8 @@ defmodule Minga.Editor.State do
             picker: nil,
             picker_source: nil,
             picker_restore: nil,
-            mouse_dragging: false
+            mouse_dragging: false,
+            last_find_char: nil
 
   @type t :: %__MODULE__{
           buffer: pid() | nil,
@@ -50,6 +54,7 @@ defmodule Minga.Editor.State do
           picker: Picker.t() | nil,
           picker_source: module() | nil,
           picker_restore: non_neg_integer() | nil,
-          mouse_dragging: boolean()
+          mouse_dragging: boolean(),
+          last_find_char: last_find_char()
         }
 end

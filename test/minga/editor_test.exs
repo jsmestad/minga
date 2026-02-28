@@ -97,7 +97,8 @@ defmodule Minga.EditorTest do
       {editor, buffer} = start_editor("hello")
       original = BufferServer.content(buffer)
 
-      send_key(editor, ?x)
+      # Use a key that is truly unbound (F13 codepoint)
+      send_key(editor, 57_376)
       assert BufferServer.content(buffer) == original
     end
 

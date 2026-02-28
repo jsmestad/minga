@@ -185,8 +185,42 @@ defmodule Minga.Mode.OperatorPending do
     execute_with_motion(state, :line_end)
   end
 
+  def handle_key({?^, 0}, %OPState{} = state) do
+    execute_with_motion(state, :first_non_blank)
+  end
+
   def handle_key({?G, 0}, %OPState{} = state) do
     execute_with_motion(state, :document_end)
+  end
+
+  # ── WORD motions ──────────────────────────────────────────────────────────
+
+  def handle_key({?W, 0}, %OPState{} = state) do
+    execute_with_motion(state, :word_forward_big)
+  end
+
+  def handle_key({?B, 0}, %OPState{} = state) do
+    execute_with_motion(state, :word_backward_big)
+  end
+
+  def handle_key({?E, 0}, %OPState{} = state) do
+    execute_with_motion(state, :word_end_big)
+  end
+
+  # ── Paragraph motions ─────────────────────────────────────────────────────
+
+  def handle_key({?{, 0}, %OPState{} = state) do
+    execute_with_motion(state, :paragraph_backward)
+  end
+
+  def handle_key({?}, 0}, %OPState{} = state) do
+    execute_with_motion(state, :paragraph_forward)
+  end
+
+  # ── Bracket matching ──────────────────────────────────────────────────────
+
+  def handle_key({?%, 0}, %OPState{} = state) do
+    execute_with_motion(state, :match_bracket)
   end
 
   # ── Double-operator: line-wise variants (dd / cc / yy) ───────────────────
