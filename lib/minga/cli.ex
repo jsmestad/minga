@@ -1,0 +1,73 @@
+defmodule Minga.CLI do
+  @moduledoc """
+  Command-line interface for Minga.
+
+  Parses arguments and launches the editor. Used by `mix minga <filename>`.
+  """
+
+  require Logger
+
+  @doc "Main entry point for the CLI."
+  @spec main([String.t()]) :: :ok
+  def main(args) do
+    case parse_args(args) do
+      {:file, path} ->
+        Logger.info("Opening file: #{path}")
+        open_editor(path)
+
+      :no_file ->
+        Logger.info("Starting with empty buffer")
+        open_editor(nil)
+
+      {:error, message} ->
+        IO.puts(:stderr, "Error: #{message}")
+        System.stop(1)
+    end
+
+    :ok
+  end
+
+  @spec parse_args([String.t()]) :: {:file, String.t()} | :no_file | {:error, String.t()}
+  defp parse_args([]), do: :no_file
+  defp parse_args(["--help" | _]), do: {:error, usage()}
+  defp parse_args(["-h" | _]), do: {:error, usage()}
+  defp parse_args([file_path | _]), do: {:file, file_path}
+
+  @spec usage() :: String.t()
+  defp usage do
+    """
+    Usage: mix minga [filename]
+
+    Options:
+      -h, --help    Show this help message
+
+    Examples:
+      mix minga README.md    Open a file
+      mix minga              Start with empty buffer
+    """
+  end
+
+  @spec open_editor(String.t() | nil) :: :ok
+  defp open_editor(file_path) do
+    # The Port Manager and Editor are started by the Application supervisor.
+    # We just need to tell the Editor to open the file.
+    case file_path do
+      nil ->
+        :ok
+
+      path ->
+        # Wait for the editor to be ready
+        Process.sleep(100)
+
+        case Process.whereis(Minga.Editor) do
+          nil ->
+            Logger.warning("Editor not running yet")
+
+          _pid ->
+            Minga.Editor.open_file(path)
+        end
+    end
+
+    :ok
+  end
+end
