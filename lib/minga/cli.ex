@@ -81,18 +81,29 @@ defmodule Minga.CLI do
         :ok
 
       path ->
-        # Wait for the editor to be ready
-        Process.sleep(100)
-
-        case Process.whereis(Minga.Editor) do
-          nil ->
-            Logger.debug("Editor not running yet")
-
-          _pid ->
+        case wait_for_editor(50, 20) do
+          :ok ->
             Minga.Editor.open_file(path)
+
+          :timeout ->
+            Logger.error("Editor process did not start in time")
         end
     end
 
     :ok
+  end
+
+  @spec wait_for_editor(non_neg_integer(), non_neg_integer()) :: :ok | :timeout
+  defp wait_for_editor(_interval, 0), do: :timeout
+
+  defp wait_for_editor(interval, retries) do
+    case Process.whereis(Minga.Editor) do
+      nil ->
+        Process.sleep(interval)
+        wait_for_editor(interval, retries - 1)
+
+      _pid ->
+        :ok
+    end
   end
 end

@@ -146,15 +146,52 @@ defmodule Minga.Port.Manager do
   @spec start_port(state()) :: state()
   defp start_port(state) do
     if File.exists?(state.renderer_path) do
+      env = tty_env()
+
       port =
         Port.open(
           {:spawn_executable, state.renderer_path},
-          [:binary, :exit_status, {:packet, 4}, :use_stdio]
+          [:binary, :exit_status, {:packet, 4}, :use_stdio, {:env, env}]
         )
 
       %{state | port: port}
     else
       state
+    end
+  end
+
+  # Detect the tty device path and pass it to the Zig renderer.
+  #
+  # When spawned as a BEAM Port, the child process loses access to /dev/tty
+  # because Erlang's erl_child_setup calls setsid().  We detect the real tty
+  # device path and pass it via the MINGA_TTY env var.
+  #
+  # Detection order:
+  #   1. MINGA_TTY env var (set by bin/minga shell wrapper or user)
+  #   2. `ps -o tty=` on the BEAM process (reads from kernel, not stdin)
+  #   3. Empty (Zig renderer falls back to /dev/tty — may fail)
+  @spec tty_env() :: [{charlist(), charlist()}]
+  defp tty_env do
+    tty_path = System.get_env("MINGA_TTY") || detect_tty()
+
+    case tty_path do
+      nil -> []
+      path -> [{~c"MINGA_TTY", String.to_charlist(path)}]
+    end
+  end
+
+  @spec detect_tty() :: String.t() | nil
+  defp detect_tty do
+    # `ps -o tty=` returns the controlling terminal's short name (e.g. "s003")
+    # from the kernel — works even though System.cmd's child has piped stdin.
+    with {output, 0} <- System.cmd("ps", ["-o", "tty=", "-p", to_string(:os.getpid())]),
+         tty_short = String.trim(output),
+         true <- tty_short != "" and tty_short != "??" do
+      # macOS: "s003" → "/dev/ttys003"
+      # Linux: "pts/3" → "/dev/pts/3"
+      "/dev/tty#{tty_short}"
+    else
+      _ -> nil
     end
   end
 

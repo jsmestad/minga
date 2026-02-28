@@ -19,6 +19,9 @@ defmodule Mix.Tasks.Minga do
   @impl true
   @spec run([String.t()]) :: :ok
   def run(args) do
+    # Enable the editor (Port Manager + Editor GenServer) before app.start
+    Application.put_env(:minga, :start_editor, true)
+
     # Ensure the application is started
     Mix.Task.run("app.start")
     Minga.CLI.main(args)

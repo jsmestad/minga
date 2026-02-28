@@ -50,6 +50,41 @@ fn sigquitHandler(_: c_int) callconv(.c) void {
     g_quit.store(true, .release);
 }
 
+// ── TTY initialization ────────────────────────────────────────────────────────
+
+/// Initializes a PosixTty, preferring the MINGA_TTY env var (set by the BEAM
+/// Port Manager) over the default /dev/tty.  This is necessary because Erlang's
+/// port spawning may disconnect the child from the controlling terminal.
+fn initTty(buffer: []u8) !vaxis.Tty {
+    const posix = std.posix;
+
+    // Try MINGA_TTY first (explicit device path from parent), then /dev/tty.
+    const tty_path: [*:0]const u8 = std.posix.getenvZ("MINGA_TTY") orelse "/dev/tty";
+    std.log.info("Opening tty: {s}", .{tty_path});
+
+    const fd = try posix.openZ(tty_path, .{ .ACCMODE = .RDWR }, 0);
+
+    // Make the terminal raw (same as PosixTty.init does internally).
+    const termios = try vaxis.Tty.makeRaw(fd);
+
+    // Note: we skip installing libvaxis's SIGWINCH handler here because
+    // installSignalHandlers() in main() installs our own handler that sets
+    // g_winch and is checked in the event loop.
+
+    const file = std.fs.File{ .handle = fd };
+
+    const tty: vaxis.Tty = .{
+        .fd = fd,
+        .termios = termios,
+        .tty_writer = .initStreaming(file, buffer),
+    };
+
+    // Set the global tty reference so vaxis.recover() works in panics.
+    vaxis.tty.global_tty = tty;
+
+    return tty;
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 /// Main entry point for the Minga renderer process.
@@ -62,7 +97,15 @@ pub fn main() !void {
 
     // 4 KiB write buffer for the TTY; libvaxis flushes it on each render.
     var tty_write_buf: [4096]u8 = undefined;
-    var tty = try vaxis.Tty.init(&tty_write_buf);
+
+    // When spawned as a BEAM Port, the child process may not have a controlling
+    // terminal (Erlang's port spawning can call setsid()), so /dev/tty fails
+    // with ENXIO.  The Port Manager passes the real tty device path (e.g.
+    // /dev/ttys003) via the MINGA_TTY environment variable.
+    var tty = initTty(&tty_write_buf) catch |err| {
+        std.log.err("Failed to initialize TTY: {}", .{err});
+        return err;
+    };
     defer tty.deinit();
 
     var vx = try vaxis.init(alloc, .{});
