@@ -98,6 +98,14 @@ fn addGuiBuildSteps(b: *std.Build, compile: *std.Build.Step.Compile) void {
     compile.root_module.linkFramework("CoreText", .{});
     compile.root_module.linkFramework("CoreGraphics", .{});
     compile.root_module.linkFramework("CoreFoundation", .{});
+    compile.root_module.linkFramework("Metal", .{});
+
+    compile.root_module.linkFramework("QuartzCore", .{});
+
+    // Metal shaders are compiled at runtime from source embedded in Swift.
+    // See MingaApp.swift setupMetal() for the compilation path.
+    // The shader source file (src/font/shaders.metal) is read by Zig at
+    // comptime and passed to Swift via a C-ABI function.
 
     // Link the Swift runtime and overlay libraries. On macOS, these live
     // in the SDK's /usr/lib/swift/ directory as .tbd stubs (the actual
@@ -114,6 +122,7 @@ fn addGuiBuildSteps(b: *std.Build, compile: *std.Build.Step.Compile) void {
         "swiftDispatch",
         "swiftIOKit",
         "swiftMetal",
+
         "swiftOSLog",
         "swiftQuartzCore",
         "swiftUniformTypeIdentifiers",

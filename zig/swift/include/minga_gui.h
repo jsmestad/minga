@@ -4,7 +4,7 @@
 /// AppKit events occur (key press, mouse, resize, window close).
 ///
 /// Zig → Swift: functions that Swift exports, Zig calls to bootstrap
-/// and control the AppKit application lifecycle.
+/// and control the AppKit application lifecycle and Metal rendering.
 
 #ifndef MINGA_GUI_H
 #define MINGA_GUI_H
@@ -36,6 +36,9 @@ void minga_on_resize(uint16_t width_cells, uint16_t height_cells);
 /// Called by Swift when the window is about to close.
 void minga_on_window_close(void);
 
+/// Returns a pointer to the embedded Metal shader source (null-terminated).
+const char* minga_get_shader_source(void);
+
 // ── Zig → Swift calls (Swift exports these) ──────────────────────────────────
 
 /// Starts the macOS GUI application. Creates NSApplication, window, view,
@@ -43,5 +46,36 @@ void minga_on_window_close(void);
 /// @param initial_width   Initial window width in pixels
 /// @param initial_height  Initial window height in pixels
 void minga_gui_start(uint16_t initial_width, uint16_t initial_height);
+
+/// Per-cell GPU data. Must match the Metal shader's CellData struct layout.
+struct MingaCellGPU {
+    float uv_origin[2];
+    float uv_size[2];
+    float glyph_size[2];
+    float glyph_offset[2];
+    float fg_color[3];
+    float bg_color[3];
+    float grid_pos[2];
+    float has_glyph;
+};
+
+/// Upload the glyph atlas texture to the GPU.
+/// @param data        Raw pixel data (grayscale, 1 byte per pixel)
+/// @param width       Atlas width in pixels
+/// @param height      Atlas height in pixels
+void minga_upload_atlas(const uint8_t* data, uint32_t width, uint32_t height);
+
+/// Render a frame with the given cell data.
+/// @param cells       Array of MingaCellGPU structs
+/// @param cell_count  Number of cells
+/// @param cell_width  Cell width in pixels
+/// @param cell_height Cell height in pixels
+/// @param cursor_col  Cursor column position
+/// @param cursor_row  Cursor row position
+/// @param cursor_visible  1 if cursor should be drawn, 0 otherwise
+void minga_render_frame(const struct MingaCellGPU* cells, uint32_t cell_count,
+                        float cell_width, float cell_height,
+                        uint16_t cursor_col, uint16_t cursor_row,
+                        uint8_t cursor_visible);
 
 #endif // MINGA_GUI_H

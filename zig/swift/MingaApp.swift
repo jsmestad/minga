@@ -1,22 +1,19 @@
-/// MingaApp.swift — AppKit window, view, and event handling for the Minga GUI backend.
+/// MingaApp.swift — AppKit window, Metal rendering, and event handling.
 ///
 /// This file is compiled by swiftc into a .o that Zig links against.
 /// Communication with Zig is via C-ABI functions declared in minga_gui.h.
 
 import AppKit
+import Metal
+import QuartzCore
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Hardcoded cell dimensions until font loading (#61) provides real metrics.
-private let cellWidth: CGFloat = 8.0
-private let cellHeight: CGFloat = 16.0
-
-/// Background color for the window (dark gray, matching typical editor themes).
-private let backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
+/// Background color for the editor (dark gray).
+private let bgColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
 
 // ── Modifier mapping ──────────────────────────────────────────────────────────
 
-/// Convert NSEvent modifier flags to the Minga protocol modifier bitmask.
 private func modifierBits(from flags: NSEvent.ModifierFlags) -> UInt8 {
     var mods: UInt8 = 0
     if flags.contains(.shift)   { mods |= 0x01 }
@@ -28,36 +25,22 @@ private func modifierBits(from flags: NSEvent.ModifierFlags) -> UInt8 {
 
 // ── Special key mapping ───────────────────────────────────────────────────────
 
-/// Map NSEvent function key codepoints to the codepoints that libvaxis uses
-/// (which match the Kitty keyboard protocol / Unicode PUA).
-private func mapSpecialKey(_ char: UInt16) -> UInt32? {
-    switch char {
-    case 0xF700: return 0x1B5B41  // Up arrow (not a real codepoint — we use vaxis encoding)
-    case 0xF701: return 0x1B5B42  // Down
-    case 0xF702: return 0x1B5B44  // Left
-    case 0xF703: return 0x1B5B43  // Right
-    default: return nil
-    }
-}
-
-/// Map special key codes to simple codepoints matching the Port protocol.
-/// These use the same values as libvaxis key constants.
 private func mapKeyCode(_ event: NSEvent) -> UInt32? {
     switch event.keyCode {
     case 36:  return 13    // Return
     case 48:  return 9     // Tab
     case 51:  return 127   // Backspace / Delete
     case 53:  return 27    // Escape
-    case 123: return 57419 // Left arrow (vaxis)
-    case 124: return 57421 // Right arrow (vaxis)
-    case 125: return 57424 // Down arrow (vaxis)
-    case 126: return 57422 // Up arrow (vaxis)
-    case 115: return 57360 // Home (vaxis)
-    case 119: return 57367 // End (vaxis)
-    case 116: return 57365 // Page Up (vaxis)
-    case 121: return 57366 // Page Down (vaxis)
-    case 117: return 57376 // Forward Delete (vaxis)
-    case 122: return 57364 // F1 (vaxis)
+    case 123: return 57419 // Left arrow
+    case 124: return 57421 // Right arrow
+    case 125: return 57424 // Down arrow
+    case 126: return 57422 // Up arrow
+    case 115: return 57360 // Home
+    case 119: return 57367 // End
+    case 116: return 57365 // Page Up
+    case 121: return 57366 // Page Down
+    case 117: return 57376 // Forward Delete
+    case 122: return 57364 // F1
     case 120: return 57365 // F2
     case 99:  return 57366 // F3
     case 118: return 57367 // F4
@@ -73,23 +56,67 @@ private func mapKeyCode(_ event: NSEvent) -> UInt32? {
     }
 }
 
+// ── Metal state (module-level so C callbacks can access) ──────────────────────
+
+private var metalDevice: MTLDevice?
+private var metalCommandQueue: MTLCommandQueue?
+private var metalLayer: CAMetalLayer?
+private var bgPipelineState: MTLRenderPipelineState?
+private var glyphPipelineState: MTLRenderPipelineState?
+private var atlasTexture: MTLTexture?
+private var currentCellWidth: Float = 8.0
+private var currentCellHeight: Float = 16.0
+private var currentView: MingaView?
+
 // ── MingaView ─────────────────────────────────────────────────────────────────
 
-/// Custom NSView that handles keyboard and mouse input for the editor.
 class MingaView: NSView {
-
-    // MARK: - First responder
+    var trackingArea: NSTrackingArea?
 
     override var acceptsFirstResponder: Bool { true }
-
-    /// Use flipped coordinates (origin at top-left) to match terminal convention.
     override var isFlipped: Bool { true }
 
-    // MARK: - Drawing
+    override var wantsUpdateLayer: Bool { true }
 
-    override func draw(_ dirtyRect: NSRect) {
-        backgroundColor.setFill()
-        dirtyRect.fill()
+    override func makeBackingLayer() -> CALayer {
+        let layer = CAMetalLayer()
+        layer.device = metalDevice
+        layer.pixelFormat = .bgra8Unorm
+        layer.contentsScale = self.window?.backingScaleFactor ?? 2.0
+        layer.framebufferOnly = true
+        metalLayer = layer
+        return layer
+    }
+
+    override func updateLayer() {
+        // Metal rendering is triggered by Zig via minga_render_frame.
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window = self.window {
+            metalLayer?.contentsScale = window.backingScaleFactor
+        }
+        updateTrackingArea()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        metalLayer?.drawableSize = convertToBacking(bounds.size)
+    }
+
+    private func updateTrackingArea() {
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
     }
 
     // MARK: - Keyboard
@@ -97,14 +124,11 @@ class MingaView: NSView {
     override func keyDown(with event: NSEvent) {
         let mods = modifierBits(from: event.modifierFlags)
 
-        // Try special key mapping first (arrows, function keys, etc.)
         if let codepoint = mapKeyCode(event) {
             minga_on_key_event(codepoint, mods)
             return
         }
 
-        // For regular characters, use the characters string.
-        // With ctrl held, use charactersIgnoringModifiers to get the base key.
         let chars: String?
         if event.modifierFlags.contains(.control) {
             chars = event.charactersIgnoringModifiers
@@ -112,26 +136,20 @@ class MingaView: NSView {
             chars = event.characters
         }
 
-        guard let characters = chars, !characters.isEmpty else {
-            return
-        }
+        guard let characters = chars, !characters.isEmpty else { return }
 
         for scalar in characters.unicodeScalars {
             minga_on_key_event(scalar.value, mods)
         }
     }
 
-    override func flagsChanged(with event: NSEvent) {
-        // We don't send standalone modifier presses to BEAM.
-        // Modifiers are captured as part of key/mouse events.
-    }
+    override func flagsChanged(with event: NSEvent) {}
 
     // MARK: - Mouse helpers
 
-    /// Convert a point in view coordinates to cell (row, col).
     private func cellPosition(from point: NSPoint) -> (row: Int16, col: Int16) {
-        let col = Int16(point.x / cellWidth)
-        let row = Int16(point.y / cellHeight)
+        let col = Int16(point.x / CGFloat(currentCellWidth))
+        let row = Int16(point.y / CGFloat(currentCellHeight))
         return (row, col)
     }
 
@@ -140,73 +158,59 @@ class MingaView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x00, mods, 0x00) // left, press
+        minga_on_mouse_event(row, col, 0x00, modifierBits(from: event.modifierFlags), 0x00)
     }
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x00, mods, 0x01) // left, release
+        minga_on_mouse_event(row, col, 0x00, modifierBits(from: event.modifierFlags), 0x01)
     }
 
     override func rightMouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x02, mods, 0x00) // right, press
+        minga_on_mouse_event(row, col, 0x02, modifierBits(from: event.modifierFlags), 0x00)
     }
 
     override func rightMouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x02, mods, 0x01) // right, release
+        minga_on_mouse_event(row, col, 0x02, modifierBits(from: event.modifierFlags), 0x01)
     }
-
-    // MARK: - Mouse movement
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x00, mods, 0x03) // left, drag
+        minga_on_mouse_event(row, col, 0x00, modifierBits(from: event.modifierFlags), 0x03)
     }
 
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
-        let mods = modifierBits(from: event.modifierFlags)
-        minga_on_mouse_event(row, col, 0x03, mods, 0x02) // none, motion
+        minga_on_mouse_event(row, col, 0x03, modifierBits(from: event.modifierFlags), 0x02)
     }
-
-    // MARK: - Scroll
 
     override func scrollWheel(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
         let mods = modifierBits(from: event.modifierFlags)
-
         if event.scrollingDeltaY > 0 {
-            minga_on_mouse_event(row, col, 0x40, mods, 0x00) // wheel_up, press
+            minga_on_mouse_event(row, col, 0x40, mods, 0x00)
         } else if event.scrollingDeltaY < 0 {
-            minga_on_mouse_event(row, col, 0x41, mods, 0x00) // wheel_down, press
+            minga_on_mouse_event(row, col, 0x41, mods, 0x00)
         }
-        // Horizontal scroll could be added later (0x42 right, 0x43 left)
     }
 }
 
 // ── MingaWindowDelegate ───────────────────────────────────────────────────────
 
-/// Handles window lifecycle events (resize, close).
 class MingaWindowDelegate: NSObject, NSWindowDelegate {
-
     func windowDidResize(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         let size = window.contentView?.bounds.size ?? window.frame.size
-        let cols = UInt16(size.width / cellWidth)
-        let rows = UInt16(size.height / cellHeight)
+        let cols = UInt16(size.width / CGFloat(currentCellWidth))
+        let rows = UInt16(size.height / CGFloat(currentCellHeight))
         if cols > 0 && rows > 0 {
             minga_on_resize(cols, rows)
         }
@@ -214,33 +218,79 @@ class MingaWindowDelegate: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         minga_on_window_close()
-        // Terminate the NSApp run loop. This unblocks minga_gui_start()
-        // and lets the Zig side clean up.
         NSApp.terminate(nil)
     }
 }
 
-// ── Entry point (called from Zig) ─────────────────────────────────────────────
+// ── Metal setup ───────────────────────────────────────────────────────────────
 
-/// Strong reference to the window delegate to prevent deallocation.
+private func setupMetal() -> Bool {
+    guard let device = MTLCreateSystemDefaultDevice() else {
+        NSLog("Metal is not supported on this device")
+        return false
+    }
+    metalDevice = device
+    metalCommandQueue = device.makeCommandQueue()
+
+    // Compile shaders from source embedded in Zig binary.
+    let shaderSource = String(cString: minga_get_shader_source())
+    do {
+        let library = try device.makeLibrary(source: shaderSource, options: nil)
+        return setupPipelines(device: device, library: library)
+    } catch {
+        NSLog("Failed to compile Metal shaders: \(error)")
+        return false
+    }
+}
+
+private func setupPipelines(device: MTLDevice, library: MTLLibrary) -> Bool {
+    // Background pipeline
+    let bgDesc = MTLRenderPipelineDescriptor()
+    bgDesc.vertexFunction = library.makeFunction(name: "bg_vertex")
+    bgDesc.fragmentFunction = library.makeFunction(name: "bg_fragment")
+    bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+
+    // Glyph pipeline (alpha blending)
+    let glyphDesc = MTLRenderPipelineDescriptor()
+    glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
+    glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
+    glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+    glyphDesc.colorAttachments[0].isBlendingEnabled = true
+    glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+    glyphDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+    glyphDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+    glyphDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+    do {
+        bgPipelineState = try device.makeRenderPipelineState(descriptor: bgDesc)
+        glyphPipelineState = try device.makeRenderPipelineState(descriptor: glyphDesc)
+        return true
+    } catch {
+        NSLog("Failed to create Metal pipeline: \(error)")
+        return false
+    }
+}
+
+// ── C-ABI exports for Zig ─────────────────────────────────────────────────────
+
 private var windowDelegate: MingaWindowDelegate?
 
-/// Starts the macOS GUI application. Called from Zig's GuiRuntime.run().
-/// Blocks on NSApp.run() until the application terminates.
 @_cdecl("minga_gui_start")
 public func mingaGuiStart(_ initialWidth: UInt16, _ initialHeight: UInt16) {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
 
-    // Create the window.
+    if !setupMetal() {
+        NSLog("Failed to initialize Metal")
+        return
+    }
+
     let contentRect = NSRect(
         x: 0, y: 0,
         width: CGFloat(initialWidth),
         height: CGFloat(initialHeight)
     )
-    let styleMask: NSWindow.StyleMask = [
-        .titled, .closable, .resizable, .miniaturizable
-    ]
+    let styleMask: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
     let window = NSWindow(
         contentRect: contentRect,
         styleMask: styleMask,
@@ -248,24 +298,135 @@ public func mingaGuiStart(_ initialWidth: UInt16, _ initialHeight: UInt16) {
         defer: false
     )
     window.title = "Minga"
-    window.minSize = NSSize(width: cellWidth * 20, height: cellHeight * 5)
+    window.minSize = NSSize(width: 160, height: 80)
     window.center()
 
-    // Create and set the custom view.
     let view = MingaView(frame: contentRect)
+    view.wantsLayer = true
     window.contentView = view
-    // Enable mouse moved events for mouseMoved handler.
     window.acceptsMouseMovedEvents = true
+    currentView = view
 
-    // Set window delegate.
     let delegate = MingaWindowDelegate()
-    windowDelegate = delegate  // prevent deallocation
+    windowDelegate = delegate
     window.delegate = delegate
 
-    // Show window and activate.
     window.makeKeyAndOrderFront(nil)
     app.activate(ignoringOtherApps: true)
-
-    // Run the event loop. This blocks until NSApp.terminate() is called.
     app.run()
+}
+
+@_cdecl("minga_upload_atlas")
+public func mingaUploadAtlas(_ data: UnsafePointer<UInt8>, _ width: UInt32, _ height: UInt32) {
+    guard let device = metalDevice else { return }
+
+    let desc = MTLTextureDescriptor.texture2DDescriptor(
+        pixelFormat: .r8Unorm,
+        width: Int(width),
+        height: Int(height),
+        mipmapped: false
+    )
+    desc.usage = .shaderRead
+
+    guard let texture = device.makeTexture(descriptor: desc) else { return }
+
+    texture.replace(
+        region: MTLRegionMake2D(0, 0, Int(width), Int(height)),
+        mipmapLevel: 0,
+        withBytes: data,
+        bytesPerRow: Int(width)
+    )
+
+    atlasTexture = texture
+}
+
+/// Uniforms buffer matching the Metal shader.
+private struct Uniforms {
+    var cellSize: SIMD2<Float>
+    var viewportSize: SIMD2<Float>
+}
+
+@_cdecl("minga_render_frame")
+public func mingaRenderFrame(
+    _ cells: UnsafePointer<MingaCellGPU>,
+    _ cellCount: UInt32,
+    _ cellWidth: Float,
+    _ cellHeight: Float,
+    _ cursorCol: UInt16,
+    _ cursorRow: UInt16,
+    _ cursorVisible: UInt8
+) {
+    guard let layer = metalLayer,
+          let commandQueue = metalCommandQueue,
+          let bgPipeline = bgPipelineState,
+          let glyphPipeline = glyphPipelineState,
+          let drawable = layer.nextDrawable() else {
+        return
+    }
+
+    currentCellWidth = cellWidth
+    currentCellHeight = cellHeight
+
+    let renderDesc = MTLRenderPassDescriptor()
+    renderDesc.colorAttachments[0].texture = drawable.texture
+    renderDesc.colorAttachments[0].loadAction = .clear
+    renderDesc.colorAttachments[0].storeAction = .store
+    renderDesc.colorAttachments[0].clearColor = bgColor
+
+    guard let commandBuffer = commandQueue.makeCommandBuffer(),
+          let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderDesc) else {
+        return
+    }
+
+    let count = Int(cellCount)
+    if count > 0 {
+        let drawableSize = layer.drawableSize
+        var uniforms = Uniforms(
+            cellSize: SIMD2<Float>(cellWidth * Float(layer.contentsScale),
+                                   cellHeight * Float(layer.contentsScale)),
+            viewportSize: SIMD2<Float>(Float(drawableSize.width),
+                                       Float(drawableSize.height))
+        )
+
+        let cellDataSize = count * MemoryLayout<MingaCellGPU>.stride
+
+        // Background pass
+        encoder.setRenderPipelineState(bgPipeline)
+        encoder.setVertexBytes(cells, length: cellDataSize, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
+                               instanceCount: count)
+
+        // Glyph pass (only if we have an atlas)
+        if let atlas = atlasTexture {
+            encoder.setRenderPipelineState(glyphPipeline)
+            encoder.setVertexBytes(cells, length: cellDataSize, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+            encoder.setFragmentTexture(atlas, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
+                                   instanceCount: count)
+        }
+
+        // Cursor overlay
+        if cursorVisible != 0 && count > 0 {
+            let cursorIdx = Int(cursorRow) * Int(ceil(drawableSize.width / Double(cellWidth * Float(layer.contentsScale)))) + Int(cursorCol)
+            if cursorIdx >= 0 && cursorIdx < count {
+                // Create a cursor cell — white block with alpha
+                var cursorCell = cells[cursorIdx]
+                cursorCell.fg_color = (1.0, 1.0, 1.0)
+                cursorCell.bg_color = (0.8, 0.8, 0.8)
+                cursorCell.has_glyph = 0.0  // background-only for cursor
+
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&cursorCell, length: MemoryLayout<MingaCellGPU>.stride, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
+                                       instanceCount: 1)
+            }
+        }
+    }
+
+    encoder.endEncoding()
+    commandBuffer.present(drawable)
+    commandBuffer.commit()
 }
