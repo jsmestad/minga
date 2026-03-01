@@ -246,7 +246,7 @@ defmodule Minga.Buffer.Server do
     initial_content = Keyword.get(opts, :content, "")
 
     case load_content(file_path, initial_content) do
-      {:ok, text, path, mtime} ->
+      {:ok, text, path, {mtime, size}} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Filetype.detect_from_content(path, first_line)
 
@@ -254,7 +254,8 @@ defmodule Minga.Buffer.Server do
           gap_buffer: GapBuffer.new(text),
           file_path: path,
           filetype: filetype,
-          mtime: mtime
+          mtime: mtime,
+          file_size: size
         }
 
         {:ok, state}
@@ -272,13 +273,16 @@ defmodule Minga.Buffer.Server do
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Filetype.detect_from_content(file_path, first_line)
 
+        {mtime, size} = file_stat_info(file_path)
+
         new_state = %{
           state
           | gap_buffer: GapBuffer.new(text),
             file_path: file_path,
             filetype: filetype,
             dirty: false,
-            mtime: file_mtime(file_path)
+            mtime: mtime,
+            file_size: size
         }
 
         {:reply, :ok, new_state}
@@ -328,15 +332,15 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:save, _from, state) do
-    disk_mtime = file_mtime(state.file_path)
+    {disk_mtime, disk_size} = file_stat_info(state.file_path)
 
-    if state.mtime != nil and disk_mtime != nil and disk_mtime > state.mtime do
+    if file_changed_on_disk?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
       case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
         :ok ->
-          new_mtime = file_mtime(state.file_path)
-          {:reply, :ok, %{state | dirty: false, mtime: new_mtime}}
+          {new_mtime, new_size} = file_stat_info(state.file_path)
+          {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -351,8 +355,8 @@ defmodule Minga.Buffer.Server do
   def handle_call(:force_save, _from, state) do
     case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
       :ok ->
-        new_mtime = file_mtime(state.file_path)
-        {:reply, :ok, %{state | dirty: false, mtime: new_mtime}}
+        {new_mtime, new_size} = file_stat_info(state.file_path)
+        {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -381,12 +385,15 @@ defmodule Minga.Buffer.Server do
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Filetype.detect_from_content(state.file_path, first_line)
 
+        {new_mtime, new_size} = file_stat_info(state.file_path)
+
         new_state = %{
           state
           | gap_buffer: new_buf,
             filetype: filetype,
             dirty: false,
-            mtime: file_mtime(state.file_path),
+            mtime: new_mtime,
+            file_size: new_size,
             undo_stack: [],
             redo_stack: []
         }
@@ -401,8 +408,10 @@ defmodule Minga.Buffer.Server do
   def handle_call({:save_as, file_path}, _from, state) do
     case write_file(file_path, GapBuffer.content(state.gap_buffer)) do
       :ok ->
-        new_mtime = file_mtime(file_path)
-        {:reply, :ok, %{state | file_path: file_path, dirty: false, mtime: new_mtime}}
+        {new_mtime, new_size} = file_stat_info(file_path)
+
+        {:reply, :ok,
+         %{state | file_path: file_path, dirty: false, mtime: new_mtime, file_size: new_size}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -539,23 +548,37 @@ defmodule Minga.Buffer.Server do
 
   # ── Private ──
 
+  @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
+
   @spec load_content(String.t() | nil, String.t()) ::
-          {:ok, String.t(), String.t() | nil, integer() | nil} | {:error, term()}
-  defp load_content(nil, initial_content), do: {:ok, initial_content, nil, nil}
+          {:ok, String.t(), String.t() | nil, file_meta()} | {:error, term()}
+  defp load_content(nil, initial_content), do: {:ok, initial_content, nil, {nil, nil}}
 
   defp load_content(file_path, _initial_content) do
     case File.read(file_path) do
-      {:ok, text} -> {:ok, text, file_path, file_mtime(file_path)}
-      {:error, :enoent} -> {:ok, "", file_path, nil}
+      {:ok, text} -> {:ok, text, file_path, file_stat_info(file_path)}
+      {:error, :enoent} -> {:ok, "", file_path, {nil, nil}}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec file_mtime(String.t()) :: integer() | nil
-  defp file_mtime(path) do
+  # Detects external changes by comparing mtime and file size.
+  # Same mtime + same size = no change (covers same-second writes that don't alter size).
+  # Different mtime OR different size = changed.
+  @spec file_changed_on_disk?(BufState.t(), integer() | nil, non_neg_integer() | nil) ::
+          boolean()
+  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: false
+  defp file_changed_on_disk?(_state, nil, _disk_size), do: false
+
+  defp file_changed_on_disk?(state, disk_mtime, disk_size) do
+    disk_mtime > state.mtime or disk_size != state.file_size
+  end
+
+  @spec file_stat_info(String.t()) :: {integer() | nil, non_neg_integer() | nil}
+  defp file_stat_info(path) do
     case File.stat(path, time: :posix) do
-      {:ok, %{mtime: mtime}} -> mtime
-      {:error, _} -> nil
+      {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
+      {:error, _} -> {nil, nil}
     end
   end
 

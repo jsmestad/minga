@@ -13,6 +13,7 @@ defmodule Minga.Buffer.State do
             filetype: :text,
             dirty: false,
             mtime: nil,
+            file_size: nil,
             undo_stack: [],
             redo_stack: []
 
@@ -22,6 +23,7 @@ defmodule Minga.Buffer.State do
           filetype: atom(),
           dirty: boolean(),
           mtime: integer() | nil,
+          file_size: non_neg_integer() | nil,
           undo_stack: [GapBuffer.t()],
           redo_stack: [GapBuffer.t()]
         }

@@ -42,7 +42,8 @@ defmodule Minga.Editor.State do
             change_recorder: ChangeRecorder.new(),
             autopair_enabled: true,
             line_numbers: :hybrid,
-            status_msg: nil
+            status_msg: nil,
+            pending_conflict: nil
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -67,6 +68,7 @@ defmodule Minga.Editor.State do
           change_recorder: ChangeRecorder.t(),
           autopair_enabled: boolean(),
           line_numbers: line_number_style(),
-          status_msg: String.t() | nil
+          status_msg: String.t() | nil,
+          pending_conflict: {pid(), String.t()} | nil
         }
 end

@@ -41,6 +41,7 @@ defmodule Minga.Command.Parser do
           | {:save_quit, []}
           | {:edit, String.t()}
           | {:force_edit, []}
+          | {:checktime, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:unknown, String.t()}
@@ -87,6 +88,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("q!"), do: {:force_quit, []}
   defp do_parse("wq"), do: {:save_quit, []}
   defp do_parse("e!"), do: {:force_edit, []}
+  defp do_parse("checktime"), do: {:checktime, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

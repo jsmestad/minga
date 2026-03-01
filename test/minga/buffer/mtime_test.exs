@@ -44,15 +44,15 @@ defmodule Minga.Buffer.MtimeTest do
   end
 
   @tag :tmp_dir
-  test ":w returns :file_changed when disk mtime is newer", %{tmp_dir: tmp_dir} do
+  test ":w returns :file_changed when file size differs on disk", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "conflict.txt")
     File.write!(path, "original")
 
     {:ok, buf} = BufferServer.start_link(file_path: path)
 
-    # Simulate external modification
-    :timer.sleep(1100)
-    File.write!(path, "externally modified")
+    # Simulate external modification — different size triggers detection
+    # even within the same second
+    File.write!(path, "externally modified with longer content")
 
     BufferServer.insert_char(buf, "x")
     result = BufferServer.save(buf)
@@ -64,15 +64,14 @@ defmodule Minga.Buffer.MtimeTest do
   end
 
   @tag :tmp_dir
-  test ":w! force-saves despite mtime mismatch", %{tmp_dir: tmp_dir} do
+  test ":w! force-saves despite file change on disk", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "force.txt")
     File.write!(path, "original")
 
     {:ok, buf} = BufferServer.start_link(file_path: path)
 
-    # Simulate external modification
-    :timer.sleep(1100)
-    File.write!(path, "externally modified")
+    # Simulate external modification — different size
+    File.write!(path, "externally modified with longer content")
 
     BufferServer.insert_char(buf, "forced")
     result = BufferServer.force_save(buf)
@@ -179,6 +178,17 @@ defmodule Minga.Buffer.MtimeTest do
     state = :sys.get_state(buf)
     assert state.mtime != nil
     assert File.exists?(path)
+  end
+
+  @tag :tmp_dir
+  test "opening a file records its size", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "sized.txt")
+    File.write!(path, "hello")
+
+    {:ok, buf} = BufferServer.start_link(file_path: path)
+    state = :sys.get_state(buf)
+
+    assert state.file_size == 5
   end
 
   @tag :tmp_dir

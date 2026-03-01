@@ -689,6 +689,11 @@ defmodule Minga.Editor.Commands do
     execute(state, :reload)
   end
 
+  def execute(state, {:execute_ex_command, {:checktime, []}}) do
+    Minga.FileWatcher.check_all()
+    state
+  end
+
   def execute(state, {:execute_ex_command, {:quit, []}}) do
     execute(state, :quit)
   end

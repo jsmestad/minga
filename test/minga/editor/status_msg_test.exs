@@ -26,7 +26,6 @@ defmodule Minga.Editor.StatusMsgTest do
     ctx = start_editor("original", file_path: path)
 
     # Simulate external modification (mtime must advance)
-    :timer.sleep(1100)
     File.write!(path, "externally modified")
 
     send_keys(ctx, ":w<CR>")
@@ -44,7 +43,6 @@ defmodule Minga.Editor.StatusMsgTest do
     ctx = start_editor("original", file_path: path)
 
     # Simulate external modification
-    :timer.sleep(1100)
     File.write!(path, "externally modified")
 
     send_keys(ctx, ":w!<CR>")

@@ -36,6 +36,7 @@ defmodule Minga.MixProject do
   defp deps do
     [
       {:burrito, "~> 1.5"},
+      {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

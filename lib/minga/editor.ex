@@ -20,6 +20,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
+  alias Minga.FileWatcher
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Port.Manager, as: PortManager
@@ -71,6 +72,7 @@ defmodule Minga.Editor do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     port_manager = Keyword.get(opts, :port_manager, PortManager)
+    file_watcher = Keyword.get(opts, :file_watcher)
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -82,6 +84,9 @@ defmodule Minga.Editor do
         :exit, _ -> Logger.warning("Could not subscribe to port manager")
       end
     end
+
+    # Register initial buffer with file watcher
+    maybe_watch_buffer(file_watcher, buffer)
 
     buffers = if buffer, do: [buffer], else: []
 
@@ -103,6 +108,7 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
+        maybe_watch_buffer(file_watcher_pid(), pid)
         new_state = Commands.add_buffer(state, pid)
         Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -129,6 +135,58 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  # ── Conflict prompt: intercept r/k before normal key handling ──
+  def handle_info(
+        {:minga_input, {:key_press, ?r, _mods}},
+        %{pending_conflict: {buf, _path}} = state
+      )
+      when is_pid(buf) do
+    BufferServer.reload(buf)
+    name = Path.basename(BufferServer.file_path(buf) || "buffer")
+
+    new_state = %{
+      state
+      | pending_conflict: nil,
+        status_msg: "#{name} reloaded (changed on disk)"
+    }
+
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info(
+        {:minga_input, {:key_press, ?k, _mods}},
+        %{pending_conflict: {buf, _path}} = state
+      )
+      when is_pid(buf) do
+    # Keep local edits — update stored mtime+size so the prompt doesn't repeat
+    buf_state = :sys.get_state(buf)
+
+    case File.stat(buf_state.file_path, time: :posix) do
+      {:ok, %{mtime: mtime, size: size}} ->
+        :sys.replace_state(buf, fn s -> %{s | mtime: mtime, file_size: size} end)
+
+      {:error, _} ->
+        :ok
+    end
+
+    new_state = %{state | pending_conflict: nil, status_msg: nil}
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:key_press, _cp, _mods}}, %{pending_conflict: {_, _}} = state) do
+    # Any other key while conflict prompt is active — ignore
+    {:noreply, state}
+  end
+
+  # ── File watcher notification ──
+  def handle_info({:file_changed_on_disk, path}, state) do
+    new_state = handle_file_change(state, path)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -420,6 +478,82 @@ defmodule Minga.Editor do
     case Commands.execute(state, cmd) do
       {s, {:dot_repeat, count}} -> replay_last_change(s, count)
       s -> s
+    end
+  end
+
+  # ── File watcher helpers ──────────────────────────────────────────────────
+
+  @spec handle_file_change(state(), String.t()) :: state()
+  defp handle_file_change(state, path) do
+    case find_buffer_for_path(state, path) do
+      nil ->
+        state
+
+      buf ->
+        buf_state = :sys.get_state(buf)
+        {disk_mtime, disk_size} = file_stat(path)
+
+        cond do
+          # Can't stat or no stored mtime — skip
+          disk_mtime == nil or buf_state.mtime == nil ->
+            state
+
+          # No change detected (same mtime AND same size)
+          disk_mtime == buf_state.mtime and disk_size == buf_state.file_size ->
+            state
+
+          # Unmodified buffer — silent reload
+          not buf_state.dirty ->
+            BufferServer.reload(buf)
+            name = Path.basename(path)
+            %{state | status_msg: "#{name} reloaded (changed on disk)"}
+
+          # Modified buffer — prompt user
+          true ->
+            name = Path.basename(path)
+
+            %{
+              state
+              | pending_conflict: {buf, path},
+                status_msg: "#{name} changed on disk. [r]eload / [k]eep"
+            }
+        end
+    end
+  end
+
+  @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
+  defp find_buffer_for_path(%{buffers: buffers}, path) do
+    expanded = Path.expand(path)
+
+    Enum.find(buffers, fn buf ->
+      Process.alive?(buf) and BufferServer.file_path(buf) == expanded
+    end)
+  end
+
+  @spec maybe_watch_buffer(GenServer.server() | nil, pid() | nil) :: :ok
+  defp maybe_watch_buffer(nil, _buf), do: :ok
+  defp maybe_watch_buffer(_watcher, nil), do: :ok
+
+  defp maybe_watch_buffer(watcher, buf) do
+    case BufferServer.file_path(buf) do
+      nil -> :ok
+      path -> FileWatcher.watch_path(watcher, path)
+    end
+  end
+
+  @spec file_watcher_pid() :: pid() | nil
+  defp file_watcher_pid do
+    case Process.whereis(FileWatcher) do
+      nil -> nil
+      pid -> pid
+    end
+  end
+
+  @spec file_stat(String.t()) :: {integer() | nil, non_neg_integer() | nil}
+  defp file_stat(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
+      {:error, _} -> {nil, nil}
     end
   end
 end
