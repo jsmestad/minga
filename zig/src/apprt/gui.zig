@@ -31,8 +31,8 @@ const DEFAULT_WINDOW_WIDTH: u16 = 800;
 const DEFAULT_WINDOW_HEIGHT: u16 = 600;
 
 /// Default font settings.
-const DEFAULT_FONT_NAME = "JetBrainsMono-Regular";
-const DEFAULT_FONT_SIZE: f64 = 14.0;
+const DEFAULT_FONT_NAME = "JetBrainsMonoNF-Regular";
+const DEFAULT_FONT_SIZE: f64 = 13.0;
 
 // ── Global runtime pointer ────────────────────────────────────────────────────
 
