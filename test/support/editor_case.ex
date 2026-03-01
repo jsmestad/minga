@@ -76,8 +76,9 @@ defmodule Minga.Test.EditorCase do
       )
 
     # Send ready event to trigger initial render
+    ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    :ok = HeadlessPort.await_frame(port)
+    :ok = HeadlessPort.collect_frame(ref)
 
     Map.merge(ctx, %{
       editor: editor,
@@ -93,8 +94,9 @@ defmodule Minga.Test.EditorCase do
   @doc "Sends a key press and waits for the next rendered frame."
   @spec send_key(editor_ctx(), non_neg_integer(), non_neg_integer()) :: :ok
   def send_key(%{editor: editor, port: port}, codepoint, mods \\ 0) do
+    ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    :ok = HeadlessPort.await_frame(port)
+    :ok = HeadlessPort.collect_frame(ref)
   end
 
   @doc "Sends each character in the string as a key press, waiting after each."

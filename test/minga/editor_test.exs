@@ -37,7 +37,7 @@ defmodule Minga.EditorTest do
   # Helper: send a key and wait for the GenServer to process it.
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    Process.sleep(30)
+    _ = :sys.get_state(editor)
   end
 
   # Helper: type a sequence of printable characters.
@@ -203,7 +203,7 @@ defmodule Minga.EditorTest do
       {editor, buffer} = start_editor("hello\nworld\nfoo")
       send_key(editor, ?i)
       send_key(editor, ?a)
-      Process.sleep(20)
+      _ = :sys.get_state(editor)
       send_key(editor, 127)
 
       assert BufferServer.content(buffer) == "hello\nworld\nfoo"
@@ -389,7 +389,7 @@ defmodule Minga.EditorTest do
       send_key(editor, ?:)
       send_key(editor, ?w)
       send_key(editor, 13)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
 
       assert File.exists?(path)
       assert File.read!(path) == "test content"
@@ -411,7 +411,7 @@ defmodule Minga.EditorTest do
       send_key(editor, ?:)
       send_key(editor, ?3)
       send_key(editor, 13)
-      Process.sleep(30)
+      _ = :sys.get_state(editor)
 
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 2
@@ -445,7 +445,7 @@ defmodule Minga.EditorTest do
         )
 
       send_key(editor, ?s, 0x02)
-      Process.sleep(100)
+      _ = :sys.get_state(editor)
 
       assert File.exists?(path)
       assert File.read!(path) == "ctrl-s test"
@@ -464,7 +464,7 @@ defmodule Minga.EditorTest do
     test "resize event updates viewport" do
       {editor, _buffer} = start_editor()
       send(editor, {:minga_input, {:resize, 120, 40}})
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
   end
@@ -473,7 +473,7 @@ defmodule Minga.EditorTest do
     test "ready event updates viewport" do
       {editor, _buffer} = start_editor()
       send(editor, {:minga_input, {:ready, 100, 30}})
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
   end
@@ -482,14 +482,14 @@ defmodule Minga.EditorTest do
     test "unknown messages are ignored" do
       {editor, _buffer} = start_editor()
       send(editor, :some_random_message)
-      Process.sleep(30)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
 
     test "stale whichkey timeout is ignored" do
       {editor, _buffer} = start_editor()
       send(editor, {:whichkey_timeout, make_ref()})
-      Process.sleep(30)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
   end
@@ -534,14 +534,14 @@ defmodule Minga.EditorTest do
     test "render cast doesn't crash with a buffer" do
       {editor, _buffer} = start_editor()
       Editor.render(editor)
-      Process.sleep(30)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
 
     test "render cast doesn't crash without a buffer" do
       editor = start_editor_no_buffer()
       Editor.render(editor)
-      Process.sleep(30)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
   end
@@ -577,7 +577,7 @@ defmodule Minga.EditorTest do
       {editor, buffer} = start_scroll_editor()
       # Move down first, then half-page up
       BufferServer.move_to(buffer, {10, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       send_key(editor, ?u, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 6
@@ -594,7 +594,7 @@ defmodule Minga.EditorTest do
     test "Ctrl+b moves cursor up by a full page" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {20, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       # content_rows = 8, so 20 - 8 = 12
       send_key(editor, ?b, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
@@ -604,7 +604,7 @@ defmodule Minga.EditorTest do
     test "Ctrl+d clamps to last line at buffer end" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {28, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       send_key(editor, ?d, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       # 30 lines (0-29), should clamp to line 29
@@ -614,7 +614,7 @@ defmodule Minga.EditorTest do
     test "Ctrl+u clamps to first line at buffer start" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {2, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       send_key(editor, ?u, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 0
@@ -625,7 +625,7 @@ defmodule Minga.EditorTest do
       {editor, buffer} = start_scroll_editor()
       # Put cursor at col 6 on line 29 (length 7, so col 6 is valid)
       BufferServer.move_to(buffer, {29, 6})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       # Page up to a shorter line — col should clamp
       send_key(editor, ?b, 0x02)
       {_line, col} = BufferServer.cursor(buffer)
@@ -638,22 +638,22 @@ defmodule Minga.EditorTest do
       {editor, _buffer} = start_editor()
       # SPC f f triggers find_file via leader keys
       send_key(editor, 32)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       send_key(editor, ?f)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       send_key(editor, ?f)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
 
     test "buffer_list doesn't crash" do
       {editor, _buffer} = start_editor()
       send_key(editor, 32)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       send_key(editor, ?b)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       send_key(editor, ?b)
-      Process.sleep(50)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
   end

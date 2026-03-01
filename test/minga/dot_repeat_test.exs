@@ -31,7 +31,7 @@ defmodule Minga.DotRepeatTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    Process.sleep(30)
+    _ = :sys.get_state(editor)
   end
 
   defp type_string(editor, text) do

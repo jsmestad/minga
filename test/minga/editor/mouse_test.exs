@@ -34,12 +34,12 @@ defmodule Minga.Editor.MouseTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    Process.sleep(30)
+    _ = :sys.get_state(editor)
   end
 
   defp send_mouse(editor, row, col, button, event_type, mods \\ 0) do
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type}})
-    Process.sleep(30)
+    _ = :sys.get_state(editor)
   end
 
   describe "mouse scroll" do
@@ -69,7 +69,7 @@ defmodule Minga.Editor.MouseTest do
     test "scroll down keeps cursor in place when it remains visible" do
       {editor, buffer} = start_mouse_editor()
       BufferServer.move_to(buffer, {5, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       send_mouse(editor, 0, 0, :wheel_down, :press)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 5
@@ -80,7 +80,7 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, 0, 0, :wheel_down, :press)
       BufferServer.move_to(buffer, {9, 0})
-      Process.sleep(10)
+      _ = :sys.get_state(editor)
       send_mouse(editor, 0, 0, :wheel_up, :press)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 9

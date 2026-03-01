@@ -111,7 +111,7 @@ defmodule Minga.Port.ManagerTest do
 
       ready_payload = <<0x03, 120::16, 40::16>>
       send(pid, {nil, {:data, ready_payload}})
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert Manager.ready?(name)
       assert Manager.terminal_size(name) == {120, 40}
@@ -127,7 +127,7 @@ defmodule Minga.Port.ManagerTest do
 
       resize_payload = <<0x02, 100::16, 50::16>>
       send(pid, {nil, {:data, resize_payload}})
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert Manager.terminal_size(name) == {100, 50}
 
@@ -142,7 +142,7 @@ defmodule Minga.Port.ManagerTest do
 
       key_payload = <<0x01, ?h::32, 0::8>>
       send(pid, {nil, {:data, key_payload}})
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert_receive {:minga_input, {:key_press, ?h, 0}}
       GenServer.stop(pid)
@@ -153,7 +153,7 @@ defmodule Minga.Port.ManagerTest do
       {:ok, pid} = Manager.start_link(name: name, renderer_path: "/nonexistent")
 
       send(pid, {nil, {:data, <<0xFF, 0x01>>}})
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert Process.alive?(pid)
       GenServer.stop(pid)
@@ -164,7 +164,7 @@ defmodule Minga.Port.ManagerTest do
       {:ok, pid} = Manager.start_link(name: name, renderer_path: "/nonexistent")
 
       send(pid, {nil, {:exit_status, 1}})
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert Process.alive?(pid)
       refute Manager.ready?(name)
@@ -184,7 +184,7 @@ defmodule Minga.Port.ManagerTest do
         end)
 
       Task.await(task)
-      Process.sleep(50)
+      _ = :sys.get_state(mgr)
 
       assert Process.alive?(mgr)
       GenServer.stop(mgr)
@@ -197,7 +197,7 @@ defmodule Minga.Port.ManagerTest do
       {:ok, pid} = Manager.start_link(name: name, renderer_path: "/nonexistent")
 
       send(pid, :totally_unknown)
-      Process.sleep(30)
+      _ = :sys.get_state(pid)
 
       assert Process.alive?(pid)
       GenServer.stop(pid)

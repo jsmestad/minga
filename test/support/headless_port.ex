@@ -124,8 +124,32 @@ defmodule Minga.Test.HeadlessPort do
   @spec await_frame(GenServer.server(), timeout()) :: :ok | {:error, :timeout}
   def await_frame(server, timeout \\ 1000) do
     ref = make_ref()
-    GenServer.cast(server, {:wait_for_frame, self(), ref})
+    :ok = GenServer.call(server, {:wait_for_frame, self(), ref})
 
+    receive do
+      {:frame_ready, ^ref} -> :ok
+    after
+      timeout -> {:error, :timeout}
+    end
+  end
+
+  @doc """
+  Registers a frame waiter synchronously, returning a ref.
+  Call this BEFORE triggering the action that causes a render,
+  then use `collect_frame/2` to wait for the frame.
+  """
+  @spec prepare_await(GenServer.server()) :: reference()
+  def prepare_await(server) do
+    ref = make_ref()
+    :ok = GenServer.call(server, {:wait_for_frame, self(), ref})
+    ref
+  end
+
+  @doc """
+  Waits for a frame using a ref from `prepare_await/1`.
+  """
+  @spec collect_frame(reference(), timeout()) :: :ok | {:error, :timeout}
+  def collect_frame(ref, timeout \\ 1000) do
     receive do
       {:frame_ready, ^ref} -> :ok
     after
@@ -225,16 +249,16 @@ defmodule Minga.Test.HeadlessPort do
      %{state | grid: blank_grid(state.width, state.height), cursor: {0, 0}, frame_count: 0}}
   end
 
+  def handle_call({:wait_for_frame, pid, ref}, _from, state) do
+    {:reply, :ok, %{state | waiters: [{pid, ref} | state.waiters]}}
+  end
+
   # ── send_commands — the core render capture ──
 
   @impl true
   def handle_cast({:send_commands, commands}, state) do
     new_state = Enum.reduce(commands, state, &apply_command/2)
     {:noreply, new_state}
-  end
-
-  def handle_cast({:wait_for_frame, pid, ref}, state) do
-    {:noreply, %{state | waiters: [{pid, ref} | state.waiters]}}
   end
 
   @impl true
