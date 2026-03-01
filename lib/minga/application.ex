@@ -31,7 +31,8 @@ defmodule Minga.Application do
     editor_children =
       if Application.get_env(:minga, :start_editor, false) or
            Burrito.Util.running_standalone?() do
-        [Minga.FileWatcher, Minga.Port.Manager, Minga.Editor]
+        backend = Application.get_env(:minga, :backend, :tui)
+        [Minga.FileWatcher, {Minga.Port.Manager, [backend: backend]}, Minga.Editor]
       else
         []
       end
