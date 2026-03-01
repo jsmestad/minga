@@ -143,8 +143,14 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     const render_width = if (bmp_width == 0) scaled_cell_w else bmp_width;
     const render_height = if (bmp_height == 0) scaled_cell_h else bmp_height;
 
-    // Reserve space in the atlas.
-    const region = try atlas.reserve(alloc, render_width, render_height);
+    // Reserve space in the atlas with 1px padding on each side to prevent
+    // texture bleeding when the GPU sampler reads near glyph edges.
+    // Font smoothing can also cause pixels to extend slightly beyond the
+    // bounding rect — the padding absorbs this.
+    const pad: u32 = 1;
+    const padded_width = render_width + pad * 2;
+    const padded_height = render_height + pad * 2;
+    const region = try atlas.reserve(alloc, padded_width, padded_height);
 
     // ── RGBA rasterization (standard macOS approach) ──
     // CoreText's font smoothing (LCD subpixel rendering) only works in an
@@ -223,12 +229,20 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         }
     }
 
-    // Write the rasterized data into the atlas.
-    atlas.set(region, buf);
+    // Write the rasterized data into the padded atlas region.
+    // The glyph data goes at (region.x + pad, region.y + pad), leaving
+    // a 1px zero border on all sides.
+    const glyph_region = Atlas.Region{
+        .x = region.x + pad,
+        .y = region.y + pad,
+        .width = render_width,
+        .height = render_height,
+    };
+    atlas.set(glyph_region, buf);
 
     return .{
-        .atlas_x = region.x,
-        .atlas_y = region.y,
+        .atlas_x = glyph_region.x,
+        .atlas_y = glyph_region.y,
         .width = render_width,
         .height = render_height,
         // Bearing offsets in point space (font is at point size).
