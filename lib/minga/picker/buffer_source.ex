@@ -57,6 +57,39 @@ defmodule Minga.Picker.BufferSource do
 
   def on_cancel(state), do: state
 
+  @impl true
+  @spec actions(Minga.Picker.item()) :: [Minga.Picker.Source.action_entry()]
+  def actions(_item) do
+    [{"Switch", :switch}, {"Kill", :kill}]
+  end
+
+  @impl true
+  @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
+  def on_action(:switch, item, state), do: on_select(item, state)
+
+  def on_action(:kill, {idx, _label, _desc}, %{buffers: buffers} = state)
+      when is_integer(idx) and idx < length(buffers) do
+    pid = Enum.at(buffers, idx)
+
+    if Process.alive?(pid) do
+      DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, pid)
+    end
+
+    new_buffers = List.delete_at(buffers, idx)
+
+    case new_buffers do
+      [] ->
+        state
+
+      _ ->
+        new_active = min(state.active_buffer, length(new_buffers) - 1)
+        new_pid = Enum.at(new_buffers, new_active)
+        %{state | buffers: new_buffers, active_buffer: new_active, buffer: new_pid}
+    end
+  end
+
+  def on_action(_action, _item, state), do: state
+
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()

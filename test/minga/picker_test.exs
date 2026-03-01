@@ -303,6 +303,74 @@ defmodule Minga.PickerTest do
     end
   end
 
+  describe "page_down/1" do
+    test "jumps down by max_visible items" do
+      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      picker = Picker.new(items, max_visible: 5)
+      assert picker.selected == 0
+
+      picker = Picker.page_down(picker)
+      assert picker.selected == 5
+
+      picker = Picker.page_down(picker)
+      assert picker.selected == 10
+    end
+
+    test "clamps to last item" do
+      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      picker = Picker.new(items, max_visible: 5)
+
+      # Jump 4 pages — should clamp to 19 (last item)
+      picker =
+        picker
+        |> Picker.page_down()
+        |> Picker.page_down()
+        |> Picker.page_down()
+        |> Picker.page_down()
+
+      assert picker.selected == 19
+    end
+
+    test "no-op on empty filtered list" do
+      picker = Picker.new(@items) |> Picker.filter("zzz")
+      assert Picker.page_down(picker).selected == 0
+    end
+  end
+
+  describe "page_up/1" do
+    test "jumps up by max_visible items" do
+      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      picker = Picker.new(items, max_visible: 5)
+
+      # Start at item 15
+      picker = Enum.reduce(1..15, picker, fn _, p -> Picker.move_down(p) end)
+      assert picker.selected == 15
+
+      picker = Picker.page_up(picker)
+      assert picker.selected == 10
+
+      picker = Picker.page_up(picker)
+      assert picker.selected == 5
+    end
+
+    test "clamps to first item" do
+      items = for i <- 1..20, do: {i, "item #{i}", "desc #{i}"}
+      picker = Picker.new(items, max_visible: 5)
+
+      # Start at item 3
+      picker = Enum.reduce(1..3, picker, fn _, p -> Picker.move_down(p) end)
+      assert picker.selected == 3
+
+      picker = Picker.page_up(picker)
+      assert picker.selected == 0
+    end
+
+    test "no-op on empty filtered list" do
+      picker = Picker.new(@items) |> Picker.filter("zzz")
+      assert Picker.page_up(picker).selected == 0
+    end
+  end
+
   describe "selection clamping on filter" do
     test "selection is clamped when filter reduces results" do
       picker = Picker.new(@items)

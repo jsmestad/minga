@@ -52,6 +52,7 @@ defmodule Minga.Editor.State do
             picker: nil,
             picker_source: nil,
             picker_restore: nil,
+            picker_action_menu: nil,
             mouse_dragging: false,
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
@@ -63,6 +64,10 @@ defmodule Minga.Editor.State do
             last_search_direction: :forward,
             marks: %{},
             last_jump_pos: nil
+
+  @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
+  @type picker_action_menu ::
+          {[Minga.Picker.Source.action_entry()], non_neg_integer()} | nil
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -83,6 +88,7 @@ defmodule Minga.Editor.State do
           picker: Picker.t() | nil,
           picker_source: module() | nil,
           picker_restore: non_neg_integer() | nil,
+          picker_action_menu: picker_action_menu(),
           mouse_dragging: boolean(),
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),

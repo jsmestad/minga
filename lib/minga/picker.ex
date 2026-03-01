@@ -121,6 +121,23 @@ defmodule Minga.Picker do
     %{picker | selected: sel - 1}
   end
 
+  @doc "Moves the selection down by one page (`max_visible` items), clamped to the last item."
+  @spec page_down(t()) :: t()
+  def page_down(%__MODULE__{filtered: []} = picker), do: picker
+
+  def page_down(%__MODULE__{selected: sel, filtered: filtered, max_visible: max} = picker) do
+    last = length(filtered) - 1
+    %{picker | selected: min(sel + max, last)}
+  end
+
+  @doc "Moves the selection up by one page (`max_visible` items), clamped to the first item."
+  @spec page_up(t()) :: t()
+  def page_up(%__MODULE__{filtered: []} = picker), do: picker
+
+  def page_up(%__MODULE__{selected: sel, max_visible: max} = picker) do
+    %{picker | selected: max(sel - max, 0)}
+  end
+
   # ── Accessors ───────────────────────────────────────────────────────────────
 
   @doc "Returns the currently selected item, or nil if no items match."

@@ -22,6 +22,7 @@ defmodule Minga.Editor.PickerUI do
   import Bitwise
 
   @ctrl Protocol.mod_ctrl()
+  @alt Protocol.mod_alt()
 
   @escape 27
   @enter 13
@@ -44,7 +45,10 @@ defmodule Minga.Editor.PickerUI do
         state
 
       _ ->
-        picker = Picker.new(items, title: source_module.title(), max_visible: 10)
+        # Use terminal height minus 3 (separator + prompt + at least 1 buffer line visible)
+        max_vis = state.viewport.rows - 3
+        max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+        picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
 
         # Clear whichkey state if active
         new_state =
@@ -72,7 +76,68 @@ defmodule Minga.Editor.PickerUI do
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           state() | {state(), action()}
+
+  # ── Action menu handlers (when C-o menu is open) ────────────────────────────
+
+  # Esc or C-g in action menu → close menu, return to picker
+  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, @escape, _mods) do
+    %{state | picker_action_menu: nil}
+  end
+
+  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, ?g, mods)
+      when band(mods, @ctrl) != 0 do
+    %{state | picker_action_menu: nil}
+  end
+
+  # Enter in action menu → execute selected action
+  def handle_key(
+        %{picker_action_menu: {actions, sel}, picker: picker, picker_source: source} = state,
+        @enter,
+        _mods
+      ) do
+    case {Enum.at(actions, sel), Picker.selected_item(picker)} do
+      {nil, _} ->
+        %{state | picker_action_menu: nil}
+
+      {_, nil} ->
+        %{state | picker_action_menu: nil}
+
+      {{_name, action_id}, item} ->
+        new_state = close(%{state | picker_action_menu: nil})
+        source.on_action(action_id, item, new_state)
+    end
+  end
+
+  # Arrow down / C-j / C-n in action menu → move selection down
+  def handle_key(%{picker_action_menu: {actions, sel}} = state, cp, mods)
+      when (cp == ?j and band(mods, @ctrl) != 0) or
+             (cp == ?n and band(mods, @ctrl) != 0) or
+             cp == @arrow_down do
+    new_sel = rem(sel + 1, length(actions))
+    %{state | picker_action_menu: {actions, new_sel}}
+  end
+
+  # Arrow up / C-k / C-p in action menu → move selection up
+  def handle_key(%{picker_action_menu: {actions, sel}} = state, cp, mods)
+      when (cp == ?k and band(mods, @ctrl) != 0) or
+             (cp == ?p and band(mods, @ctrl) != 0) or
+             cp == @arrow_up do
+    new_sel = if sel == 0, do: length(actions) - 1, else: sel - 1
+    %{state | picker_action_menu: {actions, new_sel}}
+  end
+
+  # Ignore all other keys while action menu is open
+  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, _cp, _mods), do: state
+
+  # ── Normal picker handlers ─────────────────────────────────────────────────
+
   def handle_key(%{picker_source: source} = state, @escape, _mods) do
+    new_state = source.on_cancel(state)
+    close(new_state)
+  end
+
+  # C-g → cancel (Emacs-style)
+  def handle_key(%{picker_source: source} = state, ?g, mods) when band(mods, @ctrl) != 0 do
     new_state = source.on_cancel(state)
     close(new_state)
   end
@@ -93,20 +158,55 @@ defmodule Minga.Editor.PickerUI do
     end
   end
 
-  # C-j or arrow down → move selection down
+  # C-j, C-n, or arrow down → move selection down
   def handle_key(%{picker: picker} = state, cp, mods)
-      when (cp == ?j and band(mods, @ctrl) != 0) or cp == @arrow_down do
+      when (cp == ?j and band(mods, @ctrl) != 0) or
+             (cp == ?n and band(mods, @ctrl) != 0) or
+             cp == @arrow_down do
     new_picker = Picker.move_down(picker)
     state = %{state | picker: new_picker}
     maybe_preview_selection(state)
   end
 
-  # C-k or arrow up → move selection up
+  # C-k, C-p, or arrow up → move selection up
   def handle_key(%{picker: picker} = state, cp, mods)
-      when (cp == ?k and band(mods, @ctrl) != 0) or cp == @arrow_up do
+      when (cp == ?k and band(mods, @ctrl) != 0) or
+             (cp == ?p and band(mods, @ctrl) != 0) or
+             cp == @arrow_up do
     new_picker = Picker.move_up(picker)
     state = %{state | picker: new_picker}
     maybe_preview_selection(state)
+  end
+
+  # C-v → page down
+  def handle_key(%{picker: picker} = state, ?v, mods) when band(mods, @ctrl) != 0 do
+    new_picker = Picker.page_down(picker)
+    state = %{state | picker: new_picker}
+    maybe_preview_selection(state)
+  end
+
+  # M-v (Alt+v) → page up
+  def handle_key(%{picker: picker} = state, ?v, mods) when band(mods, @alt) != 0 do
+    new_picker = Picker.page_up(picker)
+    state = %{state | picker: new_picker}
+    maybe_preview_selection(state)
+  end
+
+  # C-o → open action menu for the selected item
+  def handle_key(%{picker: picker, picker_source: source} = state, ?o, mods)
+      when band(mods, @ctrl) != 0 do
+    case Picker.selected_item(picker) do
+      nil ->
+        state
+
+      item ->
+        actions = Picker.Source.actions(source, item)
+
+        case actions do
+          [] -> state
+          actions -> %{state | picker_action_menu: {actions, 0}}
+        end
+    end
   end
 
   # Backspace
@@ -145,7 +245,7 @@ defmodule Minga.Editor.PickerUI do
           {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
   def render(%{picker: nil}, _viewport), do: {[], nil}
 
-  def render(%{picker: picker}, viewport) do
+  def render(%{picker: picker} = state, viewport) do
     {visible, selected_offset} = Picker.visible_items(picker)
     item_count = length(visible)
 
@@ -234,13 +334,18 @@ defmodule Minga.Editor.PickerUI do
     cursor_pos = {prompt_row, cursor_col}
 
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    {separator_cmd ++ item_commands ++ [prompt_cmd], cursor_pos}
+    all_cmds = separator_cmd ++ item_commands ++ [prompt_cmd]
+
+    # Render action menu overlay if open
+    action_cmds = render_action_menu(state, viewport, first_item_row, selected_offset)
+
+    {all_cmds ++ action_cmds, cursor_pos}
   end
 
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
-    %{state | picker: nil, picker_source: nil, picker_restore: nil}
+    %{state | picker: nil, picker_source: nil, picker_restore: nil, picker_action_menu: nil}
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
@@ -329,5 +434,88 @@ defmodule Minga.Editor.PickerUI do
       char = Enum.at(label_graphemes, pos)
       Protocol.encode_draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)
     end)
+  end
+
+  # Renders the C-o action menu popup overlay.
+  @spec render_action_menu(state(), term(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  defp render_action_menu(%{picker_action_menu: nil}, _viewport, _first_item_row, _sel_offset) do
+    []
+  end
+
+  defp render_action_menu(
+         %{picker_action_menu: {actions, menu_sel}},
+         viewport,
+         first_item_row,
+         selected_offset
+       ) do
+    # Position the action menu popup next to the selected picker item
+    menu_row_start = first_item_row + selected_offset
+    menu_col = div(viewport.cols, 3)
+    menu_width = min(30, viewport.cols - menu_col - 2)
+
+    border_fg = 0x61AFEF
+    menu_bg = 0x282C34
+    menu_fg = 0xABB2BF
+    menu_sel_bg = 0x3E4451
+    menu_sel_fg = 0xFFFFFF
+
+    # Header
+    header_text = String.pad_trailing(" Actions", menu_width)
+    header_row = menu_row_start
+
+    header_cmd =
+      if header_row >= 0 and header_row < viewport.rows do
+        [
+          Protocol.encode_draw(header_row, menu_col, header_text,
+            fg: border_fg,
+            bg: menu_bg,
+            bold: true
+          )
+        ]
+      else
+        []
+      end
+
+    # Action items
+    menu_colors = %{fg: menu_fg, sel_fg: menu_sel_fg, bg: menu_bg, sel_bg: menu_sel_bg}
+
+    action_cmds =
+      actions
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{name, _id}, idx} ->
+        render_action_item(
+          header_row + idx + 1,
+          menu_col,
+          menu_width,
+          name,
+          idx == menu_sel,
+          viewport.rows,
+          menu_colors
+        )
+      end)
+
+    header_cmd ++ action_cmds
+  end
+
+  @spec render_action_item(
+          integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          boolean(),
+          non_neg_integer(),
+          map()
+        ) :: [binary()]
+  defp render_action_item(row, _col, _width, _name, _is_sel, max_rows, _colors)
+       when row < 0 or row >= max_rows do
+    []
+  end
+
+  defp render_action_item(row, col, width, name, is_sel, _max_rows, colors) do
+    fg = if is_sel, do: colors.sel_fg, else: colors.fg
+    bg = if is_sel, do: colors.sel_bg, else: colors.bg
+    text = String.pad_trailing(" #{name}", width)
+
+    [Protocol.encode_draw(row, col, text, fg: fg, bg: bg, bold: is_sel)]
   end
 end

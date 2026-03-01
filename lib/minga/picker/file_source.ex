@@ -62,6 +62,32 @@ defmodule Minga.Picker.FileSource do
 
   def on_cancel(state), do: state
 
+  @impl true
+  @spec actions(Minga.Picker.item()) :: [Minga.Picker.Source.action_entry()]
+  def actions(_item) do
+    [{"Open", :open}, {"Delete", :delete}]
+  end
+
+  @impl true
+  @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
+  def on_action(:open, item, state), do: on_select(item, state)
+
+  def on_action(:delete, {rel_path, _label, _desc}, state) do
+    abs_path = Path.expand(rel_path)
+
+    case File.rm(abs_path) do
+      :ok ->
+        Logger.info("Deleted file: #{abs_path}")
+        state
+
+      {:error, reason} ->
+        Logger.error("Failed to delete file: #{inspect(reason)}")
+        state
+    end
+  end
+
+  def on_action(_action, _item, state), do: state
+
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
