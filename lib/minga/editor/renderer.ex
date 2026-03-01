@@ -221,6 +221,19 @@ defmodule Minga.Editor.Renderer do
   defp maybe_render_whichkey(_state, _viewport), do: []
 
   @spec render_minibuffer(state(), non_neg_integer(), pos_integer()) :: binary()
+  defp render_minibuffer(%{mode: :search, mode_state: ms}, row, cols) do
+    prefix = if ms.direction == :forward, do: "/", else: "?"
+    search_text = prefix <> ms.input
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(search_text, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
   defp render_minibuffer(%{mode: :command, mode_state: ms}, row, cols) do
     cmd_text = ":" <> ms.input
 
@@ -274,6 +287,21 @@ defmodule Minga.Editor.Renderer do
          _gutter_w
        ) do
     Protocol.encode_cursor(row, col)
+  end
+
+  defp resolve_cursor_command(
+         nil,
+         :search,
+         mode_state,
+         minibuffer_row,
+         _cur_line,
+         _cur_col,
+         _vp,
+         _gutter_w
+       ) do
+    # +1 for the "/" or "?" prefix
+    search_col = String.length(mode_state.input) + 1
+    Protocol.encode_cursor(minibuffer_row, search_col)
   end
 
   defp resolve_cursor_command(

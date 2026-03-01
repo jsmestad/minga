@@ -43,7 +43,9 @@ defmodule Minga.Editor.State do
             autopair_enabled: true,
             line_numbers: :hybrid,
             status_msg: nil,
-            pending_conflict: nil
+            pending_conflict: nil,
+            last_search_pattern: nil,
+            last_search_direction: :forward
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -69,6 +71,8 @@ defmodule Minga.Editor.State do
           autopair_enabled: boolean(),
           line_numbers: line_number_style(),
           status_msg: String.t() | nil,
-          pending_conflict: {pid(), String.t()} | nil
+          pending_conflict: {pid(), String.t()} | nil,
+          last_search_pattern: String.t() | nil,
+          last_search_direction: Minga.Search.direction()
         }
 end

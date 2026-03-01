@@ -28,7 +28,7 @@ defmodule Minga.Mode do
   """
 
   @typedoc "Available editor modes."
-  @type mode :: :normal | :insert | :visual | :operator_pending | :command | :replace
+  @type mode :: :normal | :insert | :visual | :operator_pending | :command | :replace | :search
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -47,6 +47,7 @@ defmodule Minga.Mode do
           | Minga.Mode.VisualState.t()
           | Minga.Mode.CommandState.t()
           | Minga.Mode.ReplaceState.t()
+          | Minga.Mode.SearchState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -106,6 +107,7 @@ defmodule Minga.Mode do
   def display(:operator_pending), do: "-- OPERATOR --"
   def display(:command), do: "-- COMMAND --"
   def display(:replace), do: "-- REPLACE --"
+  def display(:search), do: "-- SEARCH --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -115,6 +117,12 @@ defmodule Minga.Mode do
   @spec display(mode(), state()) :: String.t()
   def display(:visual, %Minga.Mode.VisualState{visual_type: :line}), do: "-- VISUAL LINE --"
   def display(:command, %Minga.Mode.CommandState{input: input}), do: ":" <> input
+
+  def display(:search, %Minga.Mode.SearchState{direction: dir, input: input}) do
+    prefix = if dir == :forward, do: "/", else: "?"
+    prefix <> input
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -126,6 +134,7 @@ defmodule Minga.Mode do
   defp mode_module(:operator_pending), do: Minga.Mode.OperatorPending
   defp mode_module(:command), do: Minga.Mode.Command
   defp mode_module(:replace), do: Minga.Mode.Replace
+  defp mode_module(:search), do: Minga.Mode.Search
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

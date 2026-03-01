@@ -23,7 +23,9 @@ defmodule Minga.Editor.Modeline do
     # black on yellow
     command: {0x000000, 0xECBE7B},
     # black on red/orange
-    replace: {0x000000, 0xFF6C6B}
+    replace: {0x000000, 0xFF6C6B},
+    # black on cyan
+    search: {0x000000, 0x46D9FF}
   }
 
   # Powerline separator characters
@@ -111,6 +113,7 @@ defmodule Minga.Editor.Modeline do
   @doc "Returns the cursor shape atom for the given mode."
   @spec cursor_shape(Mode.mode()) :: Protocol.cursor_shape()
   def cursor_shape(:insert), do: :beam
+  def cursor_shape(:search), do: :beam
   def cursor_shape(:replace), do: :underline
   def cursor_shape(_mode), do: :block
 
@@ -122,6 +125,7 @@ defmodule Minga.Editor.Modeline do
   defp mode_badge(:operator_pending, _state), do: "OPERATOR"
   defp mode_badge(:command, _state), do: "COMMAND"
   defp mode_badge(:replace, _state), do: "REPLACE"
+  defp mode_badge(:search, _state), do: "SEARCH"
 
   @spec filetype_label(atom()) :: String.t()
   defp filetype_label(:text), do: "Text"

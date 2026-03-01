@@ -397,6 +397,18 @@ defmodule Minga.Editor do
     end
   end
 
+  # Entering search mode: capture cursor for restore on Escape.
+  defp adjust_mode_state_on_transition(
+         %Minga.Mode.SearchState{} = mode_state,
+         old_mode,
+         :search,
+         %{buffer: buf}
+       )
+       when old_mode != :search and is_pid(buf) do
+    cursor = BufferServer.cursor(buf)
+    %{mode_state | original_cursor: cursor}
+  end
+
   # All other transitions: pass through.
   defp adjust_mode_state_on_transition(mode_state, _old_mode, _new_mode, _state), do: mode_state
 

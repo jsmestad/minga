@@ -501,6 +501,38 @@ defmodule Minga.Mode.Normal do
     {:continue, %{state | count: nil}}
   end
 
+  # ── Search ──────────────────────────────────────────────────────────────────
+
+  # / → enter search mode (forward)
+  def handle_key({?/, 0}, _state) do
+    {:transition, :search, %Minga.Mode.SearchState{direction: :forward}}
+  end
+
+  # ? → enter search mode (backward)
+  def handle_key({??, 0}, _state) do
+    {:transition, :search, %Minga.Mode.SearchState{direction: :backward}}
+  end
+
+  # n → search next
+  def handle_key({?n, 0}, state) do
+    {:execute, :search_next, state}
+  end
+
+  # N → search prev
+  def handle_key({?N, 0}, state) do
+    {:execute, :search_prev, state}
+  end
+
+  # * → search word under cursor forward
+  def handle_key({?*, 0}, state) do
+    {:execute, :search_word_under_cursor_forward, state}
+  end
+
+  # # → search word under cursor backward
+  def handle_key({?#, 0}, state) do
+    {:execute, :search_word_under_cursor_backward, state}
+  end
+
   # ── Command mode entry ────────────────────────────────────────────────────
 
   # `:` → enter command-line mode.
