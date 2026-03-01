@@ -87,6 +87,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :save)
   end
 
+  @doc "Force-saves the buffer, skipping mtime conflict detection."
+  @spec force_save(GenServer.server()) :: :ok | {:error, term()}
+  def force_save(server) do
+    GenServer.call(server, :force_save)
+  end
+
+  @doc "Reloads the buffer from disk, preserving cursor position (clamped). Clears undo/redo."
+  @spec reload(GenServer.server()) :: :ok | {:error, term()}
+  def reload(server) do
+    GenServer.call(server, :reload)
+  end
+
   @doc "Saves the buffer content to a specific file path."
   @spec save_as(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def save_as(server, file_path) when is_binary(file_path) do
@@ -234,14 +246,15 @@ defmodule Minga.Buffer.Server do
     initial_content = Keyword.get(opts, :content, "")
 
     case load_content(file_path, initial_content) do
-      {:ok, text, path} ->
+      {:ok, text, path, mtime} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Filetype.detect_from_content(path, first_line)
 
         state = %BufState{
           gap_buffer: GapBuffer.new(text),
           file_path: path,
-          filetype: filetype
+          filetype: filetype,
+          mtime: mtime
         }
 
         {:ok, state}
@@ -264,7 +277,8 @@ defmodule Minga.Buffer.Server do
           | gap_buffer: GapBuffer.new(text),
             file_path: file_path,
             filetype: filetype,
-            dirty: false
+            dirty: false,
+            mtime: file_mtime(file_path)
         }
 
         {:reply, :ok, new_state}
@@ -314,16 +328,81 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:save, _from, state) do
+    disk_mtime = file_mtime(state.file_path)
+
+    if state.mtime != nil and disk_mtime != nil and disk_mtime > state.mtime do
+      {:reply, {:error, :file_changed}, state}
+    else
+      case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
+        :ok ->
+          new_mtime = file_mtime(state.file_path)
+          {:reply, :ok, %{state | dirty: false, mtime: new_mtime}}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    end
+  end
+
+  def handle_call(:force_save, _from, %{file_path: nil} = state) do
+    {:reply, {:error, :no_file_path}, state}
+  end
+
+  def handle_call(:force_save, _from, state) do
     case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
-      :ok -> {:reply, :ok, %{state | dirty: false}}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      :ok ->
+        new_mtime = file_mtime(state.file_path)
+        {:reply, :ok, %{state | dirty: false, mtime: new_mtime}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:reload, _from, %{file_path: nil} = state) do
+    {:reply, {:error, :no_file_path}, state}
+  end
+
+  def handle_call(:reload, _from, state) do
+    case File.read(state.file_path) do
+      {:ok, text} ->
+        {line, col} = GapBuffer.cursor(state.gap_buffer)
+        new_buf = GapBuffer.new(text)
+        line_count = GapBuffer.line_count(new_buf)
+        clamped_line = min(line, line_count - 1)
+
+        clamped_col =
+          case GapBuffer.lines(new_buf, clamped_line, 1) do
+            [row] -> min(col, max(String.length(row) - 1, 0))
+            _ -> 0
+          end
+
+        new_buf = GapBuffer.move_to(new_buf, {clamped_line, clamped_col})
+        first_line = text |> String.split("\n", parts: 2) |> List.first("")
+        filetype = Filetype.detect_from_content(state.file_path, first_line)
+
+        new_state = %{
+          state
+          | gap_buffer: new_buf,
+            filetype: filetype,
+            dirty: false,
+            mtime: file_mtime(state.file_path),
+            undo_stack: [],
+            redo_stack: []
+        }
+
+        {:reply, :ok, new_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:save_as, file_path}, _from, state) do
     case write_file(file_path, GapBuffer.content(state.gap_buffer)) do
       :ok ->
-        {:reply, :ok, %{state | file_path: file_path, dirty: false}}
+        new_mtime = file_mtime(file_path)
+        {:reply, :ok, %{state | file_path: file_path, dirty: false, mtime: new_mtime}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -461,14 +540,22 @@ defmodule Minga.Buffer.Server do
   # ── Private ──
 
   @spec load_content(String.t() | nil, String.t()) ::
-          {:ok, String.t(), String.t() | nil} | {:error, term()}
-  defp load_content(nil, initial_content), do: {:ok, initial_content, nil}
+          {:ok, String.t(), String.t() | nil, integer() | nil} | {:error, term()}
+  defp load_content(nil, initial_content), do: {:ok, initial_content, nil, nil}
 
   defp load_content(file_path, _initial_content) do
     case File.read(file_path) do
-      {:ok, text} -> {:ok, text, file_path}
-      {:error, :enoent} -> {:ok, "", file_path}
+      {:ok, text} -> {:ok, text, file_path, file_mtime(file_path)}
+      {:error, :enoent} -> {:ok, "", file_path, nil}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec file_mtime(String.t()) :: integer() | nil
+  defp file_mtime(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} -> mtime
+      {:error, _} -> nil
     end
   end
 

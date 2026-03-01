@@ -136,7 +136,7 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, %{picker: picker} = state)
       when is_struct(picker, Minga.Picker) do
     new_state =
-      case PickerUI.handle_key(state, codepoint, modifiers) do
+      case PickerUI.handle_key(%{state | status_msg: nil}, codepoint, modifiers) do
         {s, {:execute_command, cmd}} -> dispatch_command(s, cmd)
         s -> s
       end
@@ -146,7 +146,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
-    new_state = handle_key(state, codepoint, modifiers)
+    new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
     Renderer.render(new_state)
     {:noreply, new_state}
   end

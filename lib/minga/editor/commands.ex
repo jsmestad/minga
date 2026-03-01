@@ -555,11 +555,47 @@ defmodule Minga.Editor.Commands do
 
   def execute(%{buffer: buf} = state, :save) do
     case BufferServer.save(buf) do
-      :ok -> :ok
-      {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
-    end
+      :ok ->
+        name = buffer_display_name(buf)
+        %{state | status_msg: "Wrote #{name}"}
 
-    state
+      {:error, :file_changed} ->
+        %{state | status_msg: "WARNING: File changed on disk. Use :w! to force save."}
+
+      {:error, :no_file_path} ->
+        %{state | status_msg: "No file name — use :w <filename>"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Save failed: #{inspect(reason)}"}
+    end
+  end
+
+  def execute(%{buffer: buf} = state, :force_save) do
+    case BufferServer.force_save(buf) do
+      :ok ->
+        name = buffer_display_name(buf)
+        %{state | status_msg: "Wrote #{name} (force)"}
+
+      {:error, :no_file_path} ->
+        %{state | status_msg: "No file name — use :w <filename>"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Force save failed: #{inspect(reason)}"}
+    end
+  end
+
+  def execute(%{buffer: buf} = state, :reload) do
+    case BufferServer.reload(buf) do
+      :ok ->
+        name = buffer_display_name(buf)
+        %{state | status_msg: "Reloaded #{name}"}
+
+      {:error, :no_file_path} ->
+        %{state | status_msg: "No file to reload"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Reload failed: #{inspect(reason)}"}
+    end
   end
 
   def execute(state, :quit) do
@@ -643,6 +679,14 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:execute_ex_command, {:save, []}}) do
     execute(state, :save)
+  end
+
+  def execute(state, {:execute_ex_command, {:force_save, []}}) do
+    execute(state, :force_save)
+  end
+
+  def execute(state, {:execute_ex_command, {:force_edit, []}}) do
+    execute(state, :reload)
   end
 
   def execute(state, {:execute_ex_command, {:quit, []}}) do
@@ -1205,5 +1249,13 @@ defmodule Minga.Editor.Commands do
     |> String.graphemes()
     |> Enum.take_while(&(&1 == " "))
     |> length()
+  end
+
+  @spec buffer_display_name(pid()) :: String.t()
+  defp buffer_display_name(buf) do
+    case BufferServer.file_path(buf) do
+      nil -> "[scratch]"
+      path -> Path.basename(path)
+    end
   end
 end

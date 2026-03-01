@@ -10,10 +10,12 @@ defmodule Minga.Command.Parser do
   | Input            | Result                         |
   |------------------|--------------------------------|
   | `w`              | `{:save, []}`                  |
+  | `w!`             | `{:force_save, []}`            |
   | `q`              | `{:quit, []}`                  |
   | `q!`             | `{:force_quit, []}`            |
   | `wq`             | `{:save_quit, []}`             |
   | `e <filename>`   | `{:edit, filename}`            |
+  | `e!`             | `{:force_edit, []}`            |
   | `<number>`       | `{:goto_line, number}`         |
   | anything else    | `{:unknown, original_string}`  |
   """
@@ -22,19 +24,23 @@ defmodule Minga.Command.Parser do
   Structured result of parsing a command-line string.
 
   * `{:save, []}` — write the current buffer to disk (`:w`)
+  * `{:force_save, []}` — force-write, skipping mtime check (`:w!`)
   * `{:quit, []}` — quit the editor (`:q`)
   * `{:force_quit, []}` — quit without saving (`:q!`)
   * `{:save_quit, []}` — save and quit (`:wq`)
   * `{:edit, filename}` — open a file (`:e filename`)
+  * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
   * `{:goto_line, n}` — jump to line *n* (`:<number>`)
   * `{:unknown, raw}` — unrecognised command
   """
   @type parsed ::
           {:save, []}
+          | {:force_save, []}
           | {:quit, []}
           | {:force_quit, []}
           | {:save_quit, []}
           | {:edit, String.t()}
+          | {:force_edit, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:unknown, String.t()}
@@ -57,6 +63,12 @@ defmodule Minga.Command.Parser do
       iex> Minga.Command.Parser.parse("42")
       {:goto_line, 42}
 
+      iex> Minga.Command.Parser.parse("w!")
+      {:force_save, []}
+
+      iex> Minga.Command.Parser.parse("e!")
+      {:force_edit, []}
+
       iex> Minga.Command.Parser.parse("xyz")
       {:unknown, "xyz"}
   """
@@ -70,9 +82,11 @@ defmodule Minga.Command.Parser do
 
   @spec do_parse(String.t()) :: parsed()
   defp do_parse("w"), do: {:save, []}
+  defp do_parse("w!"), do: {:force_save, []}
   defp do_parse("q"), do: {:quit, []}
   defp do_parse("q!"), do: {:force_quit, []}
   defp do_parse("wq"), do: {:save_quit, []}
+  defp do_parse("e!"), do: {:force_edit, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

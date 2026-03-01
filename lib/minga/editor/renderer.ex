@@ -157,28 +157,7 @@ defmodule Minga.Editor.Renderer do
     # ── Minibuffer (row N-1) — command input or messages ──
     minibuffer_row = viewport.rows - 1
 
-    minibuffer_command =
-      case state.mode do
-        :command ->
-          cmd_text = ":" <> state.mode_state.input
-
-          Protocol.encode_draw(
-            minibuffer_row,
-            0,
-            String.pad_trailing(cmd_text, viewport.cols),
-            fg: 0xEEEEEE,
-            bg: 0x000000
-          )
-
-        _ ->
-          Protocol.encode_draw(
-            minibuffer_row,
-            0,
-            String.duplicate(" ", viewport.cols),
-            fg: 0x888888,
-            bg: 0x000000
-          )
-      end
+    minibuffer_command = render_minibuffer(state, minibuffer_row, viewport.cols)
 
     # ── Picker overlay ──
     {picker_commands, picker_cursor} = PickerUI.render(state, viewport)
@@ -240,6 +219,39 @@ defmodule Minga.Editor.Renderer do
   end
 
   defp maybe_render_whichkey(_state, _viewport), do: []
+
+  @spec render_minibuffer(state(), non_neg_integer(), pos_integer()) :: binary()
+  defp render_minibuffer(%{mode: :command, mode_state: ms}, row, cols) do
+    cmd_text = ":" <> ms.input
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(cmd_text, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
+  defp render_minibuffer(%{status_msg: msg}, row, cols) when is_binary(msg) do
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(msg, cols),
+      fg: 0xFFCC00,
+      bg: 0x000000
+    )
+  end
+
+  defp render_minibuffer(_state, row, cols) do
+    Protocol.encode_draw(
+      row,
+      0,
+      String.duplicate(" ", cols),
+      fg: 0x888888,
+      bg: 0x000000
+    )
+  end
 
   @spec resolve_cursor_command(
           {non_neg_integer(), non_neg_integer()} | nil,
