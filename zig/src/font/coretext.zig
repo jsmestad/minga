@@ -152,6 +152,13 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     // This produces crisp 2x bitmaps instead of blurry 1x stretched glyphs.
     c.CGContextScaleCTM(ctx, @floatCast(scale), @floatCast(scale));
 
+    // Enable font smoothing — without this, CoreText renders thin/spindly
+    // glyphs in bitmap contexts. Font smoothing adds weight to strokes,
+    // matching the look of native macOS text rendering.
+    c.CGContextSetAllowsFontSmoothing(ctx, true);
+    c.CGContextSetShouldSmoothFonts(ctx, true);
+    c.CGContextSetShouldAntialias(ctx, true);
+
     // Set white foreground on black background for alpha extraction.
     c.CGContextSetGrayFillColor(ctx, 1.0, 1.0);
 
@@ -162,6 +169,18 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
 
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
+
+    // Apply gamma correction to boost glyph weight. CoreText in a grayscale
+    // context produces thin strokes; a gamma < 1.0 boosts midtones so text
+    // looks as heavy as native macOS rendering. 0.6 matches Terminal.app.
+    const gamma: f32 = 0.6;
+    for (buf[0..buf_size]) |*pixel| {
+        if (pixel.* > 0) {
+            const normalized: f32 = @as(f32, @floatFromInt(pixel.*)) / 255.0;
+            const corrected: f32 = std.math.pow(f32, normalized, gamma);
+            pixel.* = @intFromFloat(@round(corrected * 255.0));
+        }
+    }
 
     // Write the rasterized data into the atlas.
     atlas.set(region, buf);
