@@ -31,15 +31,18 @@ private func mapKeyCode(_ event: NSEvent) -> UInt32? {
     case 48:  return 9     // Tab
     case 51:  return 127   // Backspace / Delete
     case 53:  return 27    // Escape
-    case 123: return 57419 // Left arrow
-    case 124: return 57421 // Right arrow
-    case 125: return 57424 // Down arrow
-    case 126: return 57422 // Up arrow
+    // Arrow keys — Kitty keyboard protocol codepoints (must match Elixir modes)
+    case 123: return 57350 // Left arrow
+    case 124: return 57351 // Right arrow
+    case 125: return 57353 // Down arrow
+    case 126: return 57352 // Up arrow
+    // Navigation keys — Kitty protocol
     case 115: return 57360 // Home
     case 119: return 57367 // End
     case 116: return 57365 // Page Up
     case 121: return 57366 // Page Down
     case 117: return 57376 // Forward Delete
+    // Function keys — Kitty protocol
     case 122: return 57364 // F1
     case 120: return 57365 // F2
     case 99:  return 57366 // F3
@@ -128,10 +131,18 @@ class MingaView: NSView {
     override func keyDown(with event: NSEvent) {
         let mods = modifierBits(from: event.modifierFlags)
 
+        // Special keys (arrows, Enter, Escape, etc.) — send with full modifiers.
         if let codepoint = mapKeyCode(event) {
             minga_on_key_event(codepoint, mods)
             return
         }
+
+        // For text characters, use event.characters which already reflects
+        // Shift (e.g., Shift+; → ":"). Strip the Shift bit since the
+        // codepoint already encodes it — the editor matches on codepoint
+        // alone (e.g., `?:` with mods=0, not mods=shift).
+        // Keep Ctrl/Alt/Super since those modify behavior, not the character.
+        let textMods = mods & ~0x01  // Clear shift bit
 
         let chars: String?
         if event.modifierFlags.contains(.control) {
@@ -143,7 +154,7 @@ class MingaView: NSView {
         guard let characters = chars, !characters.isEmpty else { return }
 
         for scalar in characters.unicodeScalars {
-            minga_on_key_event(scalar.value, mods)
+            minga_on_key_event(scalar.value, textMods)
         }
     }
 
