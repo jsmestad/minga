@@ -105,6 +105,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:save_as, file_path})
   end
 
+  @doc "Replaces the entire buffer content, pushing the old content onto the undo stack."
+  @spec replace_content(GenServer.server(), String.t()) :: :ok
+  def replace_content(server, new_content) when is_binary(new_content) do
+    GenServer.call(server, {:replace_content, new_content})
+  end
+
   @doc "Returns the full text content of the buffer."
   @spec content(GenServer.server()) :: String.t()
   def content(server) do
@@ -416,6 +422,12 @@ defmodule Minga.Buffer.Server do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:replace_content, new_content}, _from, state) do
+    new_state = push_undo(state, state.gap_buffer)
+    new_buf = GapBuffer.new(new_content)
+    {:reply, :ok, mark_dirty(%{new_state | gap_buffer: new_buf})}
   end
 
   def handle_call(:content, _from, state) do

@@ -21,6 +21,10 @@ defmodule Minga.Editor.Renderer do
   @gutter_fg 0x555555
   @gutter_current_fg 0xBBC2CF
 
+  # Search match highlight: yellow-ish background with dark text
+  @search_highlight_fg 0x000000
+  @search_highlight_bg 0xECBE7B
+
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
@@ -42,6 +46,9 @@ defmodule Minga.Editor.Renderer do
 
   @typedoc "Column range of a selection on a single line."
   @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
+
+  @typedoc "A search match: `{line, col, length}` (absolute buffer coordinates)."
+  @type search_match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   @doc "Renders the no-buffer splash screen."
   @spec render(state()) :: :ok
@@ -88,6 +95,7 @@ defmodule Minga.Editor.Renderer do
     clear = [Protocol.encode_clear()]
 
     visual_selection = visual_selection_bounds(state, cursor)
+    search_matches = search_matches_for_lines(state, lines, first_line)
 
     # 4. Render gutter + content lines.
     {gutter_commands, line_commands} =
@@ -106,6 +114,7 @@ defmodule Minga.Editor.Renderer do
             buf_line,
             viewport,
             visual_selection,
+            search_matches,
             gutter_w,
             content_w
           )
@@ -400,6 +409,7 @@ defmodule Minga.Editor.Renderer do
           non_neg_integer(),
           Minga.Editor.Viewport.t(),
           visual_selection(),
+          [search_match()],
           non_neg_integer(),
           pos_integer()
         ) :: [binary()]
@@ -409,6 +419,7 @@ defmodule Minga.Editor.Renderer do
          buf_line,
          viewport,
          visual_selection,
+         search_matches,
          gutter_w,
          content_w
        ) do
@@ -420,9 +431,17 @@ defmodule Minga.Editor.Renderer do
       |> Enum.drop(viewport.left)
       |> Enum.take(content_w)
 
+    # Visual selection takes priority over search highlights.
     case selection_cols_for_line(buf_line, line_len, visual_selection) do
       nil ->
-        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
+        render_line_with_search(
+          visible_graphemes,
+          screen_row,
+          buf_line,
+          viewport,
+          search_matches,
+          gutter_w
+        )
 
       :full ->
         [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes), reverse: true)]
@@ -461,6 +480,139 @@ defmodule Minga.Editor.Renderer do
         ]
     end
   end
+
+  # Renders a line with search match highlighting. When no matches exist on
+  # this line, emits a single draw command. Otherwise, splits the visible
+  # graphemes into alternating normal/highlighted spans.
+  @spec render_line_with_search(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Editor.Viewport.t(),
+          [search_match()],
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_line_with_search(
+         visible_graphemes,
+         screen_row,
+         buf_line,
+         viewport,
+         matches,
+         gutter_w
+       ) do
+    highlight_set = build_highlight_set(matches, buf_line, viewport, visible_graphemes)
+
+    if MapSet.size(highlight_set) == 0 do
+      [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
+    else
+      render_highlighted_spans(
+        visible_graphemes,
+        viewport.left,
+        highlight_set,
+        screen_row,
+        gutter_w
+      )
+    end
+  end
+
+  @spec build_highlight_set(
+          [search_match()],
+          non_neg_integer(),
+          Minga.Editor.Viewport.t(),
+          [String.t()]
+        ) :: MapSet.t(non_neg_integer())
+  defp build_highlight_set(matches, buf_line, viewport, visible_graphemes) do
+    vis_start = viewport.left
+    vis_end = vis_start + length(visible_graphemes) - 1
+
+    matches
+    |> Enum.filter(fn {line, _col, _len} -> line == buf_line end)
+    |> Enum.flat_map(fn {_line, col, len} ->
+      Enum.to_list(max(col, vis_start)..min(col + len - 1, vis_end)//1)
+    end)
+    |> MapSet.new()
+  end
+
+  @spec render_highlighted_spans(
+          [String.t()],
+          non_neg_integer(),
+          MapSet.t(non_neg_integer()),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_highlighted_spans(visible_graphemes, vis_start, highlight_set, screen_row, gutter_w) do
+    visible_graphemes
+    |> Enum.with_index(vis_start)
+    |> chunk_by_highlight(highlight_set)
+    |> Enum.flat_map(fn {chars, abs_start_col, highlighted?} ->
+      encode_span(chars, abs_start_col, vis_start, highlighted?, screen_row, gutter_w)
+    end)
+  end
+
+  @spec encode_span(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp encode_span(chars, abs_start_col, vis_start, true, screen_row, gutter_w) do
+    screen_col = gutter_w + (abs_start_col - vis_start)
+
+    [
+      Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
+        fg: @search_highlight_fg,
+        bg: @search_highlight_bg
+      )
+    ]
+  end
+
+  defp encode_span(chars, abs_start_col, vis_start, false, screen_row, gutter_w) do
+    screen_col = gutter_w + (abs_start_col - vis_start)
+    [Protocol.encode_draw(screen_row, screen_col, Enum.join(chars))]
+  end
+
+  # Groups a list of `{grapheme, abs_col}` tuples into contiguous spans of
+  # highlighted or non-highlighted characters.
+  @spec chunk_by_highlight(
+          [{String.t(), non_neg_integer()}],
+          MapSet.t(non_neg_integer())
+        ) :: [{[String.t()], non_neg_integer(), boolean()}]
+  defp chunk_by_highlight(indexed_graphemes, highlight_set) do
+    indexed_graphemes
+    |> Enum.chunk_while(
+      nil,
+      fn {char, col}, acc ->
+        highlighted = MapSet.member?(highlight_set, col)
+
+        case acc do
+          nil ->
+            {:cont, {[char], col, highlighted}}
+
+          {chars, start_col, ^highlighted} ->
+            {:cont, {[char | chars], start_col, highlighted}}
+
+          {chars, start_col, prev_hl} ->
+            {:cont, {Enum.reverse(chars), start_col, prev_hl}, {[char], col, highlighted}}
+        end
+      end,
+      fn
+        nil -> {:cont, []}
+        {chars, start_col, hl} -> {:cont, {Enum.reverse(chars), start_col, hl}, nil}
+      end
+    )
+  end
+
+  # Computes search matches for the visible line range. Returns matches
+  # only when a search pattern is active (last_search_pattern is set).
+  @spec search_matches_for_lines(state(), [String.t()], non_neg_integer()) :: [search_match()]
+  defp search_matches_for_lines(%{last_search_pattern: pattern}, lines, first_line)
+       when is_binary(pattern) and pattern != "" do
+    Minga.Search.find_all_in_range(lines, pattern, first_line)
+  end
+
+  defp search_matches_for_lines(_state, _lines, _first_line), do: []
 
   @spec selection_cols_for_line(
           non_neg_integer(),

@@ -774,6 +774,20 @@ defmodule Minga.Editor.Commands do
     %{state | line_numbers: new_style}
   end
 
+  def execute(
+        %{buffer: buf} = state,
+        {:execute_ex_command, {:substitute, pattern, replacement, flags}}
+      ) do
+    global? = :global in flags
+    confirm? = :confirm in flags
+
+    if confirm? do
+      %{state | status_msg: "Confirm mode not yet supported, use /g"}
+    else
+      execute_substitute(state, buf, pattern, replacement, global?)
+    end
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Logger.debug("Unknown ex command: #{raw}")
     state
@@ -1068,6 +1082,39 @@ defmodule Minga.Editor.Commands do
   def execute(state, _cmd), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────────
+
+  @spec execute_substitute(state(), pid(), String.t(), String.t(), boolean()) :: state()
+  defp execute_substitute(state, buf, pattern, replacement, global?) do
+    content = BufferServer.content(buf)
+    {new_content, count} = Minga.Search.substitute(content, pattern, replacement, global?)
+
+    if count == 0 do
+      %{state | status_msg: "Pattern not found: #{pattern}"}
+    else
+      cursor = BufferServer.cursor(buf)
+      BufferServer.replace_content(buf, new_content)
+      # Restore cursor to a valid position after replacement.
+      {line, col} = cursor
+      total = BufferServer.line_count(buf)
+      safe_line = min(line, max(0, total - 1))
+
+      safe_col =
+        case BufferServer.get_lines(buf, safe_line, 1) do
+          [text] -> min(col, max(0, String.length(text) - 1))
+          _ -> 0
+        end
+
+      BufferServer.move_to(buf, {safe_line, safe_col})
+
+      msg =
+        case count do
+          1 -> "1 substitution"
+          n -> "#{n} substitutions"
+        end
+
+      %{state | status_msg: msg, last_search_pattern: pattern}
+    end
+  end
 
   # Apply a motion function (buf, pos) -> new_pos to the buffer's cursor.
   @spec apply_motion(pid(), (GapBuffer.t(), Minga.Motion.position() -> Minga.Motion.position())) ::

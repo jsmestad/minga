@@ -31,6 +31,7 @@ defmodule Minga.Command.Parser do
   * `{:edit, filename}` — open a file (`:e filename`)
   * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
   * `{:goto_line, n}` — jump to line *n* (`:<number>`)
+  * `{:substitute, pattern, replacement, flags}` — `:%s/old/new/flags`
   * `{:unknown, raw}` — unrecognised command
   """
   @type parsed ::
@@ -44,7 +45,11 @@ defmodule Minga.Command.Parser do
           | {:checktime, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
+          | {:substitute, String.t(), String.t(), [substitute_flag()]}
           | {:unknown, String.t()}
+
+  @typedoc "Flags for :%s substitution."
+  @type substitute_flag :: :global | :confirm
 
   @doc """
   Parses a command-line string (without the leading `:`) and returns a
@@ -99,6 +104,9 @@ defmodule Minga.Command.Parser do
   defp do_parse("set norelativenumber"), do: {:set, :norelativenumber}
   defp do_parse("set nornu"), do: {:set, :norelativenumber}
 
+  defp do_parse("%s" <> rest), do: parse_substitute(rest)
+  defp do_parse("s" <> rest), do: parse_substitute(rest)
+
   defp do_parse("e " <> rest) do
     filename = String.trim(rest)
 
@@ -114,5 +122,75 @@ defmodule Minga.Command.Parser do
       {n, ""} when n > 0 -> {:goto_line, n}
       _ -> {:unknown, input}
     end
+  end
+
+  # Parses the substitution part after `s` or `%s`.
+  # Expects `/pattern/replacement/flags` with `/` as delimiter.
+  @spec parse_substitute(String.t()) :: parsed()
+  defp parse_substitute(rest) do
+    case rest do
+      <<delimiter, tail::binary>> when delimiter in [?/, ?#, ?|] ->
+        parse_substitute_parts(tail, <<delimiter>>, [])
+
+      _ ->
+        {:unknown, "s" <> rest}
+    end
+  end
+
+  # First call: split out the pattern.
+  @spec parse_substitute_parts(String.t(), String.t(), [String.t()]) :: parsed()
+  defp parse_substitute_parts(input, delimiter, []) do
+    case split_on_unescaped(input, delimiter) do
+      {pattern, rest} ->
+        parse_substitute_parts(rest, delimiter, [pattern])
+
+      :no_match ->
+        {:unknown, "s" <> delimiter <> input}
+    end
+  end
+
+  # Second call: split out the replacement.
+  defp parse_substitute_parts(input, delimiter, [pattern]) do
+    case split_on_unescaped(input, delimiter) do
+      {replacement, rest} ->
+        {:substitute, pattern, replacement, parse_substitute_flags(rest)}
+
+      :no_match ->
+        # No trailing delimiter — remainder is the replacement, no flags.
+        {:substitute, pattern, input, []}
+    end
+  end
+
+  @spec split_on_unescaped(String.t(), String.t()) :: {String.t(), String.t()} | :no_match
+  defp split_on_unescaped(input, delimiter) do
+    do_split_unescaped(input, delimiter, [])
+  end
+
+  @spec do_split_unescaped(String.t(), String.t(), [String.t()]) ::
+          {String.t(), String.t()} | :no_match
+  defp do_split_unescaped("", _delimiter, _acc), do: :no_match
+
+  defp do_split_unescaped("\\" <> <<c::utf8, rest::binary>>, delimiter, acc) do
+    do_split_unescaped(rest, delimiter, [<<c::utf8>>, "\\" | acc])
+  end
+
+  defp do_split_unescaped(<<c::utf8, rest::binary>>, delimiter, acc) do
+    if <<c::utf8>> == delimiter do
+      {acc |> Enum.reverse() |> Enum.join(), rest}
+    else
+      do_split_unescaped(rest, delimiter, [<<c::utf8>> | acc])
+    end
+  end
+
+  @spec parse_substitute_flags(String.t()) :: [substitute_flag()]
+  defp parse_substitute_flags(flags_str) do
+    flags_str
+    |> String.graphemes()
+    |> Enum.flat_map(fn
+      "g" -> [:global]
+      "c" -> [:confirm]
+      _ -> []
+    end)
+    |> Enum.uniq()
   end
 end

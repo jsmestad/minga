@@ -132,4 +132,46 @@ defmodule Minga.SearchTest do
       assert nil == Search.word_at_cursor(buf, {0, 5})
     end
   end
+
+  # ── substitute/4 ──────────────────────────────────────────────────────────
+
+  describe "substitute/4 global" do
+    test "replaces all occurrences across lines" do
+      assert {"baz bar baz\nbaz", 3} =
+               Search.substitute("foo bar foo\nfoo", "foo", "baz", true)
+    end
+
+    test "returns 0 count when pattern not found" do
+      assert {"hello world", 0} = Search.substitute("hello world", "xyz", "abc", true)
+    end
+
+    test "handles empty replacement (deletion)" do
+      assert {" bar ", 2} = Search.substitute("foo bar foo", "foo", "", true)
+    end
+
+    test "handles replacement longer than pattern" do
+      assert {"hello hello", 1} = Search.substitute("hi hello", "hi", "hello", true)
+    end
+
+    test "handles multi-line content" do
+      content = "line one\nline two\nline three"
+      assert {"row one\nrow two\nrow three", 3} = Search.substitute(content, "line", "row", true)
+    end
+
+    test "handles unicode content" do
+      assert {"world café", 1} = Search.substitute("hello café", "hello", "world", true)
+    end
+  end
+
+  describe "substitute/4 non-global (first per line)" do
+    test "replaces only first occurrence per line" do
+      assert {"baz bar foo\nbaz", 2} =
+               Search.substitute("foo bar foo\nfoo", "foo", "baz", false)
+    end
+
+    test "replaces first on each line independently" do
+      content = "aa bb aa\naa cc aa"
+      assert {"xx bb aa\nxx cc aa", 2} = Search.substitute(content, "aa", "xx", false)
+    end
+  end
 end

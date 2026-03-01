@@ -176,6 +176,12 @@ defmodule Minga.Test.EditorCase do
     BufferServer.cursor(buffer)
   end
 
+  @doc "Returns the cell at a given screen row and col."
+  @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
+  def screen_cell(%{port: port}, row, col) do
+    HeadlessPort.get_cell(port, row, col)
+  end
+
   # ── Assertion helpers ────────────────────────────────────────────────────────
 
   @doc "Asserts that a screen row contains the expected text."

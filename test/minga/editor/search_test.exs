@@ -124,6 +124,69 @@ defmodule Minga.Editor.SearchTest do
     end
   end
 
+  describe ":%s substitution" do
+    test ":%s/old/new/g replaces all occurrences" do
+      ctx = start_editor("foo bar foo\nfoo baz")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/hello/g")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == "hello bar hello\nhello baz"
+      assert_minibuffer_contains(ctx, "3 substitutions")
+    end
+
+    test ":%s/old/new/ replaces first per line" do
+      ctx = start_editor("foo bar foo\nfoo baz foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/x/")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == "x bar foo\nx baz foo"
+      assert_minibuffer_contains(ctx, "2 substitutions")
+    end
+
+    test ":%s with no match shows error" do
+      ctx = start_editor("hello world")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/xyz/abc/g")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == "hello world"
+      assert_minibuffer_contains(ctx, "Pattern not found: xyz")
+    end
+
+    test ":%s/old//g deletes all occurrences" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo//g")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == " bar "
+    end
+
+    test ":%s/old/new/gc shows not-yet-supported message" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/gc")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == "foo bar foo"
+      assert_minibuffer_contains(ctx, "Confirm mode not yet supported")
+    end
+
+    test "substitution is undoable" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/g")
+      send_keys(ctx, "<CR>")
+
+      assert buffer_content(ctx) == "baz bar baz"
+
+      send_keys(ctx, "u")
+      assert buffer_content(ctx) == "foo bar foo"
+    end
+  end
+
   describe "search highlighting" do
     test "search pattern persists after confirmed search" do
       ctx = start_editor("foo bar foo")
@@ -136,6 +199,24 @@ defmodule Minga.Editor.SearchTest do
       # Should have moved to next occurrence
       {_line, col} = buffer_cursor(ctx)
       assert col >= 0
+    end
+
+    test "matches are highlighted with search background color" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, "/")
+      type_text(ctx, "foo")
+      send_keys(ctx, "<CR>")
+
+      # The gutter takes some columns; find where "foo" appears on screen.
+      # Both occurrences of "foo" should have the search highlight bg.
+      row_text = screen_row(ctx, 0)
+      # Find the first "f" in the row text
+      first_f = :binary.match(row_text, "f") |> elem(0)
+
+      cell = screen_cell(ctx, 0, first_f)
+
+      assert cell.bg == 0xECBE7B,
+             "Expected search highlight bg on first 'foo', got: #{inspect(cell)}"
     end
   end
 end

@@ -86,6 +86,38 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — substitute commands" do
+    test ":%s/old/new/g parses to {:substitute, ...}" do
+      assert {:substitute, "old", "new", [:global]} = Parser.parse("%s/old/new/g")
+    end
+
+    test ":s/old/new/ parses without flags" do
+      assert {:substitute, "old", "new", []} = Parser.parse("s/old/new/")
+    end
+
+    test ":%s/old/new/gc parses both flags" do
+      assert {:substitute, "old", "new", flags} = Parser.parse("%s/old/new/gc")
+      assert :global in flags
+      assert :confirm in flags
+    end
+
+    test ":%s/old/new parses without trailing delimiter" do
+      assert {:substitute, "old", "new", []} = Parser.parse("%s/old/new")
+    end
+
+    test "handles escaped delimiters in pattern" do
+      assert {:substitute, "a\\/b", "c", []} = Parser.parse("%s/a\\/b/c/")
+    end
+
+    test "handles empty replacement (delete)" do
+      assert {:substitute, "old", "", [:global]} = Parser.parse("%s/old//g")
+    end
+
+    test "handles alternate delimiter #" do
+      assert {:substitute, "old", "new", [:global]} = Parser.parse("%s#old#new#g")
+    end
+  end
+
   describe "parse/1 — unknown commands" do
     test "unrecognised command returns {:unknown, raw}" do
       assert {:unknown, "xyz"} = Parser.parse("xyz")

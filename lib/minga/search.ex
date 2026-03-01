@@ -126,6 +126,87 @@ defmodule Minga.Search do
     end
   end
 
+  # ── Substitution ──────────────────────────────────────────────────────────
+
+  @typedoc "Result of a substitution: new content and count of replacements."
+  @type substitute_result :: {String.t(), non_neg_integer()}
+
+  @doc """
+  Replaces occurrences of `pattern` with `replacement` in `content`.
+
+  When `global?` is `true`, replaces all occurrences. When `false`, replaces
+  only the first occurrence on each line (Vim `:s` default).
+
+  Returns `{new_content, replacement_count}`.
+
+  ## Examples
+
+      iex> Minga.Search.substitute("foo bar foo", "foo", "baz", true)
+      {"baz bar baz", 2}
+
+      iex> Minga.Search.substitute("foo bar foo", "foo", "baz", false)
+      {"baz bar foo", 1}
+
+      iex> Minga.Search.substitute("hello world", "xyz", "abc", true)
+      {"hello world", 0}
+  """
+  @spec substitute(String.t(), String.t(), String.t(), boolean()) :: substitute_result()
+  def substitute(content, pattern, replacement, global?) do
+    lines = String.split(content, "\n")
+
+    {new_lines, total_count} =
+      Enum.map_reduce(lines, 0, fn line, count ->
+        {new_line, line_count} = substitute_line(line, pattern, replacement, global?)
+        {new_line, count + line_count}
+      end)
+
+    {Enum.join(new_lines, "\n"), total_count}
+  end
+
+  @spec substitute_line(String.t(), String.t(), String.t(), boolean()) ::
+          {String.t(), non_neg_integer()}
+  defp substitute_line(line, pattern, replacement, global?) do
+    graphemes = String.graphemes(line)
+    pattern_graphemes = String.graphemes(pattern)
+    pattern_len = length(pattern_graphemes)
+
+    do_substitute_line(graphemes, pattern_graphemes, pattern_len, replacement, global?, [], 0)
+  end
+
+  @spec do_substitute_line(
+          [String.t()],
+          [String.t()],
+          non_neg_integer(),
+          String.t(),
+          boolean(),
+          [String.t()],
+          non_neg_integer()
+        ) :: {String.t(), non_neg_integer()}
+  defp do_substitute_line([], _pat, _pat_len, _rep, _global?, acc, count) do
+    {acc |> Enum.reverse() |> Enum.join(), count}
+  end
+
+  defp do_substitute_line(graphemes, pat, pat_len, rep, global?, acc, count) do
+    candidate = Enum.take(graphemes, pat_len)
+
+    if length(candidate) == pat_len and candidate == pat do
+      rest = Enum.drop(graphemes, pat_len)
+      new_acc = [rep | acc]
+
+      if global? do
+        do_substitute_line(rest, pat, pat_len, rep, true, new_acc, count + 1)
+      else
+        # Non-global: only replace first match, append remaining unchanged
+        remaining = Enum.join(rest)
+        result = [remaining | new_acc] |> Enum.reverse() |> Enum.join()
+        {result, count + 1}
+      end
+    else
+      [head | tail] = graphemes
+      do_substitute_line(tail, pat, pat_len, rep, global?, [head | acc], count)
+    end
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec find_forward([String.t()], String.t(), position(), non_neg_integer()) ::

@@ -111,6 +111,12 @@ defmodule Minga.Test.HeadlessPort do
     GenServer.call(server, :get_cursor_shape)
   end
 
+  @doc "Returns the cell at a given row and col."
+  @spec get_cell(GenServer.server(), non_neg_integer(), non_neg_integer()) :: cell()
+  def get_cell(server, row, col) do
+    GenServer.call(server, {:get_cell, row, col})
+  end
+
   @doc "Returns the total number of completed frames (batch_end count)."
   @spec frame_count(GenServer.server()) :: non_neg_integer()
   def frame_count(server) do
@@ -238,6 +244,15 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call(:get_cursor_shape, _from, state) do
     {:reply, state.cursor_shape, state}
+  end
+
+  def handle_call({:get_cell, row, col}, _from, state) do
+    cell =
+      state.grid
+      |> Enum.at(row, [])
+      |> Enum.at(col, %{char: " ", fg: 0xFFFFFF, bg: 0x000000, attrs: []})
+
+    {:reply, cell, state}
   end
 
   def handle_call(:frame_count, _from, state) do
