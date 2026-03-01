@@ -175,12 +175,13 @@ pub const GuiSurface = struct {
                         @as(f32, @floatFromInt(glyph.width)),
                         @as(f32, @floatFromInt(glyph.height)),
                     };
-                    // Font is at pixel size (points × scale), so ascent and
-                    // bearing offsets are already in drawable pixels — no scaling.
+                    // Font is at point size — scale bearing offsets to
+                    // drawable pixels for the Metal render pass.
+                    const scale: f32 = @floatCast(face.loader.scale);
                     const baseline_y: f32 = @floatCast(face.loader.ascent);
                     gpu.glyph_offset = .{
-                        @as(f32, @floatCast(glyph.offset_x)),
-                        baseline_y - @as(f32, @floatCast(glyph.offset_y)),
+                        @as(f32, @floatCast(glyph.offset_x)) * scale,
+                        (baseline_y - @as(f32, @floatCast(glyph.offset_y))) * scale,
                     };
                 } else |_| {}
             }
