@@ -163,10 +163,12 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     ) orelse return error.BitmapContextFailed;
     defer c.CGContextRelease(ctx);
 
-    // ── CoreText context settings (matching Ghostty) ──
-    // Font smoothing: allow it, and enable it for stroke weight.
+    // ── CoreText context settings (matching Ghostty + Zed) ──
+    // Font smoothing: allow but don't force. Both Ghostty (thicken=false
+    // default) and Zed (no explicit setting) leave smoothing OFF.
+    // Smoothing adds stroke weight but can cause artifacts at small sizes.
     c.CGContextSetAllowsFontSmoothing(ctx, true);
-    c.CGContextSetShouldSmoothFonts(ctx, true);
+    c.CGContextSetShouldSmoothFonts(ctx, false);
 
     // Subpixel positioning: ON for correct glyph placement.
     c.CGContextSetAllowsFontSubpixelPositioning(ctx, true);
