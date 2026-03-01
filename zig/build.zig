@@ -95,6 +95,9 @@ fn addGuiBuildSteps(b: *std.Build, compile: *std.Build.Step.Compile) void {
     // Link macOS frameworks.
     compile.root_module.linkFramework("AppKit", .{});
     compile.root_module.linkFramework("Foundation", .{});
+    compile.root_module.linkFramework("CoreText", .{});
+    compile.root_module.linkFramework("CoreGraphics", .{});
+    compile.root_module.linkFramework("CoreFoundation", .{});
 
     // Link the Swift runtime and overlay libraries. On macOS, these live
     // in the SDK's /usr/lib/swift/ directory as .tbd stubs (the actual
