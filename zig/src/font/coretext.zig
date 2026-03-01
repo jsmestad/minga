@@ -53,26 +53,33 @@ pub const GlyphInfo = struct {
 
 /// Load a font by name (e.g. "Menlo", "SF Mono") at the given point size.
 /// Falls back to the system monospace font if the named font isn't found.
-/// `scale` is the backing scale factor (2.0 for Retina) — glyph bitmaps
-/// are rasterized at this multiple of the point size for crisp rendering.
+///
+/// `scale` is the backing scale factor (2.0 for Retina). Following Ghostty's
+/// approach, we create the CTFont at `size × scale` (pixel size) so CoreText
+/// rasterizes at the correct resolution natively — no CGContextScaleCTM needed.
+/// Cell metrics are stored in point space (divided back by scale) for grid layout.
 pub fn init(alloc: Allocator, name: []const u8, size: f64, scale: f64) !CoreTextFont {
-    const ct_font = try createFont(name, size);
+    // Create font at pixel size (points × scale), matching Ghostty's approach.
+    // CoreText produces better hinting and stroke weight when the font object
+    // itself is at the target pixel size vs. using a CTM scale on the context.
+    const pixel_size = size * scale;
+    const ct_font = try createFont(name, pixel_size);
     errdefer c.CFRelease(ct_font);
 
-    // Compute cell metrics.
+    // Metrics from CTFont are now in pixel space (since font is at pixel_size).
+    // Divide by scale to get point-space values for grid layout.
     const ascent = c.CTFontGetAscent(ct_font);
     const descent = c.CTFontGetDescent(ct_font);
     const leading = c.CTFontGetLeading(ct_font);
-
-    // For monospace fonts, the advance of any glyph gives the cell width.
-    // Use 'M' as a representative glyph.
     const cell_width_f = getMonospaceAdvance(ct_font);
     const cell_height_f = ascent + descent + leading;
 
     return .{
         .ct_font = ct_font,
-        .cell_width = @intFromFloat(@ceil(cell_width_f)),
-        .cell_height = @intFromFloat(@ceil(cell_height_f)),
+        // Cell metrics in point space for grid layout.
+        .cell_width = @intFromFloat(@ceil(cell_width_f / scale)),
+        .cell_height = @intFromFloat(@ceil(cell_height_f / scale)),
+        // Ascent/descent in pixel space (used for baseline positioning).
         .ascent = ascent,
         .descent = descent,
         .leading = leading,
@@ -88,6 +95,12 @@ pub fn deinit(self: *CoreTextFont) void {
 
 /// Rasterize a single codepoint into the atlas. Returns glyph info with
 /// atlas coordinates and bearing offsets.
+///
+/// Follows Ghostty's proven CoreText approach:
+///   - Font is already at pixel size (points × scale), so no CTM scaling
+///   - Grayscale bitmap context (single-channel, no RGBA extraction)
+///   - Font smoothing allowed, subpixel positioning ON, quantization OFF
+///   - No gamma correction (font at pixel size produces correct weight)
 pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, codepoint: u32) !GlyphInfo {
     // Convert codepoint to glyph ID via CoreText.
     var utf16_buf: [2]u16 = undefined;
@@ -100,12 +113,12 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         &glyph_buf,
         @intCast(utf16_len),
     )) {
-        // Glyph not found — use .notdef (0).
         glyph_buf[0] = 0;
     }
     const glyph_id = glyph_buf[0];
 
-    // Get bounding rect for this glyph.
+    // Get bounding rect for this glyph. Since the font is at pixel size
+    // (points × scale), the rect is already in pixel coordinates.
     var bounding_rect: c.CGRect = undefined;
     _ = c.CTFontGetBoundingRectsForGlyphs(
         self.ct_font,
@@ -115,13 +128,12 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         1,
     );
 
-    // Calculate bitmap dimensions from bounding rect, scaled for Retina.
-    // Bounding rect is in point space; multiply by scale to get pixel dimensions.
-    const scale = self.scale;
-    const bmp_width: u32 = @intFromFloat(@ceil(bounding_rect.size.width * scale));
-    const bmp_height: u32 = @intFromFloat(@ceil(bounding_rect.size.height * scale));
+    // Bitmap dimensions are already in pixels (font is at pixel size).
+    const bmp_width: u32 = @intFromFloat(@ceil(bounding_rect.size.width));
+    const bmp_height: u32 = @intFromFloat(@ceil(bounding_rect.size.height));
 
-    // For empty glyphs (space, etc.), use scaled cell dimensions.
+    // For empty glyphs (space, etc.), use cell dimensions × scale.
+    const scale = self.scale;
     const scaled_cell_w: u32 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.cell_width)) * scale));
     const scaled_cell_h: u32 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.cell_height)) * scale));
     const render_width = if (bmp_width == 0) scaled_cell_w else bmp_width;
@@ -130,82 +142,57 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     // Reserve space in the atlas.
     const region = try atlas.reserve(alloc, render_width, render_height);
 
-    // Rasterize into an RGBA temporary buffer. CoreText uses a superior
-    // font rendering pipeline (LCD subpixel + smoothing) when drawing to
-    // an RGBA context vs. grayscale.  We draw white-on-black, then extract
-    // the green channel as our grayscale alpha value.
-    const rgba_stride = @as(usize, render_width) * 4;
-    const rgba_size = rgba_stride * render_height;
-    const rgba_buf = try alloc.alloc(u8, rgba_size);
-    defer alloc.free(rgba_buf);
-    @memset(rgba_buf, 0);
+    // Rasterize into a grayscale buffer. Following Ghostty's approach:
+    // single-channel context, font already at pixel size, no CTM scaling.
+    const buf_size = @as(usize, render_width) * render_height;
+    const buf = try alloc.alloc(u8, buf_size);
+    defer alloc.free(buf);
+    @memset(buf, 0);
 
-    const color_space = c.CGColorSpaceCreateDeviceRGB();
+    const color_space = c.CGColorSpaceCreateDeviceGray();
     defer c.CGColorSpaceRelease(color_space);
 
     const ctx = c.CGBitmapContextCreate(
-        rgba_buf.ptr,
+        buf.ptr,
         render_width,
         render_height,
         8, // bits per component
-        @intCast(rgba_stride), // 4 bytes per pixel
+        render_width, // 1 byte per pixel
         color_space,
-        c.kCGImageAlphaPremultipliedLast, // RGBA
+        c.kCGImageAlphaOnly, // Alpha-only: stores glyph coverage (matches Zed)
     ) orelse return error.BitmapContextFailed;
     defer c.CGContextRelease(ctx);
 
-    // Scale the context so CoreText rasterizes at Retina resolution.
-    c.CGContextScaleCTM(ctx, @floatCast(scale), @floatCast(scale));
-
-    // Enable full font smoothing — CoreText renders significantly better
-    // with LCD smoothing in an RGBA context.
+    // ── CoreText context settings (matching Ghostty) ──
+    // Font smoothing: allow it, and enable it for stroke weight.
     c.CGContextSetAllowsFontSmoothing(ctx, true);
     c.CGContextSetShouldSmoothFonts(ctx, true);
-    c.CGContextSetShouldAntialias(ctx, true);
+
+    // Subpixel positioning: ON for correct glyph placement.
     c.CGContextSetAllowsFontSubpixelPositioning(ctx, true);
     c.CGContextSetShouldSubpixelPositionFonts(ctx, true);
-    c.CGContextSetAllowsFontSubpixelQuantization(ctx, true);
-    c.CGContextSetShouldSubpixelQuantizeFonts(ctx, true);
+
+    // Subpixel quantization: OFF — we manage glyph positions ourselves.
+    c.CGContextSetAllowsFontSubpixelQuantization(ctx, false);
+    c.CGContextSetShouldSubpixelQuantizeFonts(ctx, false);
+
+    // Anti-aliasing: ON.
+    c.CGContextSetAllowsAntialiasing(ctx, true);
+    c.CGContextSetShouldAntialias(ctx, true);
 
     // White foreground on black background.
-    c.CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
+    c.CGContextSetGrayFillColor(ctx, 1.0, 1.0);
 
-    // Position the glyph in point space (pre-scale). The CTM scale
-    // transform converts these to pixel coordinates automatically.
+    // Position the glyph. Bounding rect origin is in pixel space
+    // (font is at pixel size), so we negate directly.
     const draw_x: c.CGFloat = -bounding_rect.origin.x;
     const draw_y: c.CGFloat = -bounding_rect.origin.y;
 
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
 
-    // Extract grayscale from RGBA: take max(R,G,B) for maximum glyph
-    // coverage across all subpixel channels, then apply gamma correction
-    // to boost stroke weight to match native macOS text rendering.
-    const buf_size = @as(usize, render_width) * render_height;
-    const buf = try alloc.alloc(u8, buf_size);
-    defer alloc.free(buf);
-
-    const gamma: f32 = 0.7;
-    for (0..render_height) |row| {
-        for (0..render_width) |col| {
-            const rgba_off = row * rgba_stride + col * 4;
-            const gray_off = row * @as(usize, render_width) + col;
-            // max(R,G,B) captures the best coverage from any channel.
-            const r = rgba_buf[rgba_off];
-            const g = rgba_buf[rgba_off + 1];
-            const b = rgba_buf[rgba_off + 2];
-            const v = @max(r, @max(g, b));
-            if (v > 0) {
-                const normalized: f32 = @as(f32, @floatFromInt(v)) / 255.0;
-                const corrected: f32 = std.math.pow(f32, normalized, gamma);
-                buf[gray_off] = @intFromFloat(@round(corrected * 255.0));
-            } else {
-                buf[gray_off] = 0;
-            }
-        }
-    }
-
-    // Write the rasterized data into the atlas.
+    // Write the rasterized data into the atlas. No post-processing needed —
+    // the font at pixel size with smoothing produces correct stroke weight.
     atlas.set(region, buf);
 
     return .{
@@ -213,6 +200,7 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         .atlas_y = region.y,
         .width = render_width,
         .height = render_height,
+        // Bearing offsets in pixel space (font is at pixel size).
         .offset_x = bounding_rect.origin.x,
         .offset_y = bounding_rect.origin.y + bounding_rect.size.height,
     };

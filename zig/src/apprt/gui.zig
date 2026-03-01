@@ -124,9 +124,6 @@ pub const GuiSurface = struct {
         const cell_h: f32 = @floatFromInt(face.cell_height);
         const atlas_size_f: f32 = @floatFromInt(face.atlas.size);
 
-        // Query Retina scale factor from the window.
-        const scale: f32 = c.minga_get_scale_factor();
-
         // Re-upload atlas if it changed.
         if (face.atlas.modified != self.atlas_version) {
             c.minga_upload_atlas(
@@ -178,11 +175,12 @@ pub const GuiSurface = struct {
                         @as(f32, @floatFromInt(glyph.width)),
                         @as(f32, @floatFromInt(glyph.height)),
                     };
-                    // Bearing offsets are in point space — scale to drawable pixels.
+                    // Font is at pixel size (points × scale), so ascent and
+                    // bearing offsets are already in drawable pixels — no scaling.
                     const baseline_y: f32 = @floatCast(face.loader.ascent);
                     gpu.glyph_offset = .{
-                        @as(f32, @floatCast(glyph.offset_x)) * scale,
-                        (baseline_y - @as(f32, @floatCast(glyph.offset_y))) * scale,
+                        @as(f32, @floatCast(glyph.offset_x)),
+                        baseline_y - @as(f32, @floatCast(glyph.offset_y)),
                     };
                 } else |_| {}
             }
