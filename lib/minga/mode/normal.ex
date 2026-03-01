@@ -145,6 +145,43 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_to_line_start, state}
   end
 
+  # ── Pending completions ────────────────────────────────────────────────────
+  # These MUST come before mode-transition and motion handlers so that pending
+  # state (e.g. pending_mark: :set) takes priority over normal key bindings.
+
+  # Complete set-mark: m + {a-z}
+  def handle_key({char, 0}, %ModeState{pending_mark: :set} = state)
+      when char in ?a..?z do
+    {:execute, {:set_mark, <<char::utf8>>}, %{state | pending_mark: nil}}
+  end
+
+  # Complete jump-to-mark-line: ' + {a-z}
+  def handle_key({char, 0}, %ModeState{pending_mark: :jump_line} = state)
+      when char in ?a..?z do
+    {:execute, {:jump_to_mark_line, <<char::utf8>>}, %{state | pending_mark: nil}}
+  end
+
+  # '' → jump to last jump position (line, first non-blank)
+  def handle_key({?', 0}, %ModeState{pending_mark: :jump_line} = state) do
+    {:execute, :jump_to_last_pos_line, %{state | pending_mark: nil}}
+  end
+
+  # Complete jump-to-mark-exact: ` + {a-z}
+  def handle_key({char, 0}, %ModeState{pending_mark: :jump_exact} = state)
+      when char in ?a..?z do
+    {:execute, {:jump_to_mark_exact, <<char::utf8>>}, %{state | pending_mark: nil}}
+  end
+
+  # `` → jump to last jump position (exact position)
+  def handle_key({?`, 0}, %ModeState{pending_mark: :jump_exact} = state) do
+    {:execute, :jump_to_last_pos_exact, %{state | pending_mark: nil}}
+  end
+
+  # Cancel pending mark on any other key
+  def handle_key(_key, %ModeState{pending_mark: kind} = state) when kind != nil do
+    {:continue, %{state | pending_mark: nil}}
+  end
+
   # ── Mode transitions ──────────────────────────────────────────────────────
 
   def handle_key({?i, 0}, state) do
@@ -487,6 +524,25 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({?r, mods}, state) when band(mods, @ctrl) != 0 do
     {:execute, :redo, state}
+  end
+
+  # ── Marks: starters ───────────────────────────────────────────────────────
+  # Completions are near the top (after count prefix) to take priority over
+  # regular motion/mode-transition bindings.
+
+  # m → start set-mark sequence
+  def handle_key({?m, 0}, state) do
+    {:continue, %{state | pending_mark: :set}}
+  end
+
+  # ' → start jump-to-mark-line sequence
+  def handle_key({?', 0}, state) do
+    {:continue, %{state | pending_mark: :jump_line}}
+  end
+
+  # ` → start jump-to-mark-exact sequence
+  def handle_key({?`, 0}, state) do
+    {:continue, %{state | pending_mark: :jump_exact}}
   end
 
   # ── Escape: already in Normal, clear count and cancel any leader sequence ──

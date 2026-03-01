@@ -16,10 +16,14 @@ defmodule Minga.Mode.State do
             leader_keys: [],
             pending_g: false,
             pending_find: nil,
-            pending_replace: false
+            pending_replace: false,
+            pending_mark: nil
 
   @typedoc "Pending find-char direction."
   @type find_direction :: :f | :F | :t | :T
+
+  @typedoc "Pending mark operation kind."
+  @type pending_mark_kind :: :set | :jump_line | :jump_exact
 
   @type t :: %__MODULE__{
           count: non_neg_integer() | nil,
@@ -27,6 +31,7 @@ defmodule Minga.Mode.State do
           leader_keys: [String.t()],
           pending_g: boolean(),
           pending_find: find_direction() | nil,
-          pending_replace: boolean()
+          pending_replace: boolean(),
+          pending_mark: pending_mark_kind() | nil
         }
 end

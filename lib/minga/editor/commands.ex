@@ -654,6 +654,71 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :paste_after), do: state
 
+  # ── Marks ─────────────────────────────────────────────────────────────────
+
+  def execute(%{buffer: buf, marks: marks} = state, {:set_mark, char})
+      when is_binary(char) and is_pid(buf) do
+    pos = BufferServer.cursor(buf)
+    buf_marks = Map.get(marks, buf, %{})
+    new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
+    %{state | marks: new_marks}
+  end
+
+  def execute(%{buffer: buf, marks: marks} = state, {:jump_to_mark_line, char})
+      when is_binary(char) and is_pid(buf) do
+    buf_marks = Map.get(marks, buf, %{})
+
+    case Map.get(buf_marks, char) do
+      nil ->
+        state
+
+      {mark_line, _mark_col} ->
+        current_pos = BufferServer.cursor(buf)
+        {content, _} = BufferServer.content_and_cursor(buf)
+        tmp_buf = GapBuffer.new(content)
+        target = Minga.Motion.first_non_blank(tmp_buf, {mark_line, 0})
+        BufferServer.move_to(buf, target)
+        save_jump_pos(state, current_pos, target)
+    end
+  end
+
+  def execute(%{buffer: buf, marks: marks} = state, {:jump_to_mark_exact, char})
+      when is_binary(char) and is_pid(buf) do
+    buf_marks = Map.get(marks, buf, %{})
+
+    case Map.get(buf_marks, char) do
+      nil ->
+        state
+
+      mark_pos ->
+        current_pos = BufferServer.cursor(buf)
+        BufferServer.move_to(buf, mark_pos)
+        save_jump_pos(state, current_pos, mark_pos)
+    end
+  end
+
+  def execute(%{buffer: buf, last_jump_pos: last_pos} = state, :jump_to_last_pos_line)
+      when is_pid(buf) and not is_nil(last_pos) do
+    current_pos = BufferServer.cursor(buf)
+    {last_line, _} = last_pos
+    {content, _} = BufferServer.content_and_cursor(buf)
+    tmp_buf = GapBuffer.new(content)
+    target = Minga.Motion.first_non_blank(tmp_buf, {last_line, 0})
+    BufferServer.move_to(buf, target)
+    %{state | last_jump_pos: current_pos}
+  end
+
+  def execute(state, :jump_to_last_pos_line), do: state
+
+  def execute(%{buffer: buf, last_jump_pos: last_pos} = state, :jump_to_last_pos_exact)
+      when is_pid(buf) and not is_nil(last_pos) do
+    current_pos = BufferServer.cursor(buf)
+    BufferServer.move_to(buf, last_pos)
+    %{state | last_jump_pos: current_pos}
+  end
+
+  def execute(state, :jump_to_last_pos_exact), do: state
+
   # ── Line-wise operators (dd / yy / cc / S) ────────────────────────────────
 
   def execute(%{buffer: buf} = state, :delete_line) do
@@ -1082,6 +1147,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, _cmd), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────────
+
+  # Only update last_jump_pos when the jump crosses a line boundary.
+  @spec save_jump_pos(state(), GapBuffer.position(), GapBuffer.position()) :: state()
+  defp save_jump_pos(state, {from_line, _} = from_pos, {to_line, _}) when from_line != to_line do
+    %{state | last_jump_pos: from_pos}
+  end
+
+  defp save_jump_pos(state, _from_pos, _to_pos), do: state
 
   @spec execute_substitute(state(), pid(), String.t(), String.t(), boolean()) :: state()
   defp execute_substitute(state, buf, pattern, replacement, global?) do

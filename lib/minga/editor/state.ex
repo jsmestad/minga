@@ -13,6 +13,7 @@ defmodule Minga.Editor.State do
   active buffer for backward compatibility with rendering and commands.
   """
 
+  alias Minga.Buffer.GapBuffer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Viewport
   alias Minga.Mode
@@ -21,6 +22,9 @@ defmodule Minga.Editor.State do
 
   @typedoc "Stored last find-char motion for ; and , repeat."
   @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
+
+  @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name (single letter)."
+  @type marks :: %{pid() => %{String.t() => GapBuffer.position()}}
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
   defstruct buffer: nil,
@@ -45,7 +49,9 @@ defmodule Minga.Editor.State do
             status_msg: nil,
             pending_conflict: nil,
             last_search_pattern: nil,
-            last_search_direction: :forward
+            last_search_direction: :forward,
+            marks: %{},
+            last_jump_pos: nil
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -73,6 +79,8 @@ defmodule Minga.Editor.State do
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,
           last_search_pattern: String.t() | nil,
-          last_search_direction: Minga.Search.direction()
+          last_search_direction: Minga.Search.direction(),
+          marks: marks(),
+          last_jump_pos: GapBuffer.position() | nil
         }
 end
