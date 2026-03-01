@@ -126,28 +126,23 @@ defmodule Minga.Mode.Normal do
     end
   end
 
-  # ── Count prefix accumulation ─────────────────────────────────────────────
-
-  # Digits 1-9 always start or extend the count.
-  def handle_key({digit, 0}, %ModeState{count: count} = state)
-      when digit in ?1..?9 do
-    digit_value = digit - ?0
-    new_count = if count, do: count * 10 + digit_value, else: digit_value
-    {:continue, %{state | count: new_count}}
-  end
-
-  # `0` continues an in-progress count; otherwise it's the "go to line start" motion.
-  def handle_key({?0, 0}, %ModeState{count: count} = state) when is_integer(count) do
-    {:continue, %{state | count: count * 10}}
-  end
-
-  def handle_key({?0, 0}, state) do
-    {:execute, :move_to_line_start, state}
-  end
-
   # ── Pending completions ────────────────────────────────────────────────────
-  # These MUST come before mode-transition and motion handlers so that pending
-  # state (e.g. pending_mark: :set) takes priority over normal key bindings.
+  # Placed FIRST (before count prefix and all other handlers) so that any
+  # pending multi-key sequence takes priority regardless of which codepoint
+  # the user presses next — including 0, digits, or normal motion keys.
+
+  # Complete register selection: " + valid register char
+  # Valid: a-z, A-Z, 0, +, _, " (unnamed)
+  def handle_key({char, 0}, %ModeState{pending_register: true} = state)
+      when char in ?a..?z or char in ?A..?Z or char == ?0 or
+             char == ?+ or char == ?_ or char == ?" do
+    {:execute, {:select_register, <<char::utf8>>}, %{state | pending_register: false}}
+  end
+
+  # Cancel register selection on any other key
+  def handle_key(_key, %ModeState{pending_register: true} = state) do
+    {:continue, %{state | pending_register: false}}
+  end
 
   # Complete set-mark: m + {a-z}
   def handle_key({char, 0}, %ModeState{pending_mark: :set} = state)
@@ -180,6 +175,25 @@ defmodule Minga.Mode.Normal do
   # Cancel pending mark on any other key
   def handle_key(_key, %ModeState{pending_mark: kind} = state) when kind != nil do
     {:continue, %{state | pending_mark: nil}}
+  end
+
+  # ── Count prefix accumulation ─────────────────────────────────────────────
+
+  # Digits 1-9 always start or extend the count.
+  def handle_key({digit, 0}, %ModeState{count: count} = state)
+      when digit in ?1..?9 do
+    digit_value = digit - ?0
+    new_count = if count, do: count * 10 + digit_value, else: digit_value
+    {:continue, %{state | count: new_count}}
+  end
+
+  # `0` continues an in-progress count; otherwise it's the "go to line start" motion.
+  def handle_key({?0, 0}, %ModeState{count: count} = state) when is_integer(count) do
+    {:continue, %{state | count: count * 10}}
+  end
+
+  def handle_key({?0, 0}, state) do
+    {:execute, :move_to_line_start, state}
   end
 
   # ── Mode transitions ──────────────────────────────────────────────────────
@@ -524,6 +538,13 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({?r, mods}, state) when band(mods, @ctrl) != 0 do
     {:execute, :redo, state}
+  end
+
+  # ── Register prefix ───────────────────────────────────────────────────────
+
+  # " → start register-selection sequence (completion is in the pending block above)
+  def handle_key({?", 0}, state) do
+    {:continue, %{state | pending_register: true}}
   end
 
   # ── Marks: starters ───────────────────────────────────────────────────────

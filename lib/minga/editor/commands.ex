@@ -20,6 +20,7 @@ defmodule Minga.Editor.Commands do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Clipboard
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
@@ -58,6 +59,13 @@ defmodule Minga.Editor.Commands do
   # (which calls handle_key/3, a GenServer-level function).
   def execute(state, {:dot_repeat, count}) do
     {state, {:dot_repeat, count}}
+  end
+
+  # Register selection — stores the chosen register name for the next op.
+  # `"` (unnamed) maps to the empty-string key; all others are stored as-is.
+  def execute(state, {:select_register, char}) when is_binary(char) do
+    name = if char == "\"", do: "", else: char
+    %{state | active_register: name}
   end
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
@@ -639,20 +647,32 @@ defmodule Minga.Editor.Commands do
 
   # ── Paste ─────────────────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf, register: text} = state, :paste_before) when is_binary(text) do
-    BufferServer.insert_char(buf, text)
-    state
+  def execute(%{buffer: buf} = state, :paste_before) do
+    {text, state} = get_register(state)
+
+    case text do
+      nil ->
+        state
+
+      t ->
+        BufferServer.insert_char(buf, t)
+        state
+    end
   end
 
-  def execute(state, :paste_before), do: state
+  def execute(%{buffer: buf} = state, :paste_after) do
+    {text, state} = get_register(state)
 
-  def execute(%{buffer: buf, register: text} = state, :paste_after) when is_binary(text) do
-    BufferServer.move(buf, :right)
-    BufferServer.insert_char(buf, text)
-    state
+    case text do
+      nil ->
+        state
+
+      t ->
+        BufferServer.move(buf, :right)
+        BufferServer.insert_char(buf, t)
+        state
+    end
   end
-
-  def execute(state, :paste_after), do: state
 
   # ── Marks ─────────────────────────────────────────────────────────────────
 
@@ -725,19 +745,19 @@ defmodule Minga.Editor.Commands do
     {line, _col} = BufferServer.cursor(buf)
     yanked = BufferServer.get_lines_content(buf, line, line)
     BufferServer.delete_lines(buf, line, line)
-    %{state | register: yanked <> "\n"}
+    put_register(state, yanked <> "\n", :delete)
   end
 
   def execute(%{buffer: buf} = state, :change_line) do
     {line, _col} = BufferServer.cursor(buf)
     {:ok, yanked} = BufferServer.clear_line(buf, line)
-    %{state | register: yanked <> "\n"}
+    put_register(state, yanked <> "\n", :delete)
   end
 
   def execute(%{buffer: buf} = state, :yank_line) do
     {line, _col} = BufferServer.cursor(buf)
     yanked = BufferServer.get_lines_content(buf, line, line)
-    %{state | register: yanked <> "\n"}
+    put_register(state, yanked <> "\n", :yank)
   end
 
   # ── Ex commands ───────────────────────────────────────────────────────────
@@ -882,7 +902,7 @@ defmodule Minga.Editor.Commands do
           text <> "\n"
       end
 
-    %{state | register: yanked}
+    put_register(state, yanked, :delete)
   end
 
   def execute(%{buffer: buf, mode_state: %VisualState{} = ms} = state, :yank_visual_selection) do
@@ -904,7 +924,7 @@ defmodule Minga.Editor.Commands do
       end
 
     Logger.debug("Yanked visual selection")
-    %{state | register: yanked}
+    put_register(state, yanked, :yank)
   end
 
   # ── Visual wrapping (auto-pair) ───────────────────────────────────────────
@@ -1148,6 +1168,91 @@ defmodule Minga.Editor.Commands do
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
+  # ── Register helpers ──────────────────────────────────────────────────────
+
+  # Writes text into the appropriate register(s) based on the active_register
+  # and the kind of operation (:yank or :delete).
+  #
+  # Rules:
+  #   "_"      → black hole: discard, change nothing
+  #   "+"      → system clipboard + unnamed
+  #   "A"–"Z"  → append text to the lowercase counterpart + unnamed + "0" if yank
+  #   "a"–"z"  → write named + unnamed + "0" if yank
+  #   "0"      → write "0" + unnamed (only makes sense if explicitly selected)
+  #   ""       → write unnamed + "0" if yank
+  #
+  # Always resets active_register to "" after the operation.
+  @spec put_register(state(), String.t(), :yank | :delete) :: state()
+  defp put_register(%{active_register: "_"} = state, _text, _kind) do
+    %{state | active_register: ""}
+  end
+
+  defp put_register(%{active_register: "+"} = state, text, kind) do
+    Clipboard.write(text)
+    state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
+  end
+
+  defp put_register(%{active_register: name} = state, text, kind)
+       when name >= "A" and name <= "Z" do
+    lower = String.downcase(name)
+    existing = Map.get(state.registers, lower, "")
+    appended = existing <> text
+
+    state
+    |> put_in_register(lower, appended)
+    |> write_unnamed(text)
+    |> maybe_write_yank(text, kind)
+    |> reset_active_register()
+  end
+
+  defp put_register(%{active_register: name} = state, text, kind)
+       when name >= "a" and name <= "z" do
+    state
+    |> put_in_register(name, text)
+    |> write_unnamed(text)
+    |> maybe_write_yank(text, kind)
+    |> reset_active_register()
+  end
+
+  defp put_register(state, text, kind) do
+    # Covers "" (unnamed), "0", or any other explicitly selected register.
+    name = if state.active_register == "", do: "", else: state.active_register
+
+    state
+    |> put_in_register(name, text)
+    |> maybe_write_yank(text, kind)
+    |> reset_active_register()
+  end
+
+  # Reads from the active_register (falling back to unnamed "").
+  # Returns {text_or_nil, updated_state} with active_register reset to "".
+  @spec get_register(state()) :: {String.t() | nil, state()}
+  defp get_register(%{active_register: "+"} = state) do
+    text = Clipboard.read()
+    {text, reset_active_register(state)}
+  end
+
+  defp get_register(%{active_register: name, registers: regs} = state) do
+    key = if name == "", do: "", else: name
+    text = Map.get(regs, key)
+    {text, reset_active_register(state)}
+  end
+
+  @spec put_in_register(state(), String.t(), String.t()) :: state()
+  defp put_in_register(state, name, text) do
+    %{state | registers: Map.put(state.registers, name, text)}
+  end
+
+  @spec write_unnamed(state(), String.t()) :: state()
+  defp write_unnamed(state, text), do: put_in_register(state, "", text)
+
+  @spec maybe_write_yank(state(), String.t(), :yank | :delete) :: state()
+  defp maybe_write_yank(state, text, :yank), do: put_in_register(state, "0", text)
+  defp maybe_write_yank(state, _text, :delete), do: state
+
+  @spec reset_active_register(state()) :: state()
+  defp reset_active_register(state), do: %{state | active_register: ""}
+
   # Only update last_jump_pos when the jump crosses a line boundary.
   @spec save_jump_pos(state(), GapBuffer.position(), GapBuffer.position()) :: state()
   defp save_jump_pos(state, {from_line, _} = from_pos, {to_line, _}) when from_line != to_line do
@@ -1214,11 +1319,11 @@ defmodule Minga.Editor.Commands do
       :delete ->
         text = BufferServer.get_range(buf, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
-        %{state | register: text}
+        put_register(state, text, :delete)
 
       :yank ->
         text = BufferServer.get_range(buf, start_pos, end_pos)
-        %{state | register: text}
+        put_register(state, text, :yank)
     end
   end
 
@@ -1308,12 +1413,12 @@ defmodule Minga.Editor.Commands do
       {:delete, {start_pos, end_pos}} ->
         text = BufferServer.get_range(buf, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
-        %{state | register: text}
+        put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
         text = BufferServer.get_range(buf, start_pos, end_pos)
         Logger.debug("Yanked text object: #{byte_size(text)} bytes")
-        %{state | register: text}
+        put_register(state, text, :yank)
     end
   end
 

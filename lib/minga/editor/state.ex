@@ -26,6 +26,16 @@ defmodule Minga.Editor.State do
   @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name (single letter)."
   @type marks :: %{pid() => %{String.t() => GapBuffer.position()}}
 
+  @typedoc """
+  Register store. Keys are register names:
+  - `\"\"` — unnamed (default)
+  - `\"0\"` — last yank
+  - `\"a\"`–`\"z\"` — named
+  - `\"+\"` — system clipboard (virtual; read/write via Minga.Clipboard)
+  - `\"_\"` — black hole (never stored)
+  """
+  @type registers :: %{String.t() => String.t()}
+
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
   defstruct buffer: nil,
             buffers: [],
@@ -37,7 +47,8 @@ defmodule Minga.Editor.State do
             whichkey_node: nil,
             whichkey_timer: nil,
             show_whichkey: false,
-            register: nil,
+            registers: %{},
+            active_register: "",
             picker: nil,
             picker_source: nil,
             picker_restore: nil,
@@ -67,7 +78,8 @@ defmodule Minga.Editor.State do
           whichkey_node: Minga.Keymap.Trie.node_t() | nil,
           whichkey_timer: WhichKey.timer_ref() | nil,
           show_whichkey: boolean(),
-          register: String.t() | nil,
+          registers: registers(),
+          active_register: String.t(),
           picker: Picker.t() | nil,
           picker_source: module() | nil,
           picker_restore: non_neg_integer() | nil,

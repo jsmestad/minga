@@ -17,7 +17,8 @@ defmodule Minga.Mode.State do
             pending_g: false,
             pending_find: nil,
             pending_replace: false,
-            pending_mark: nil
+            pending_mark: nil,
+            pending_register: false
 
   @typedoc "Pending find-char direction."
   @type find_direction :: :f | :F | :t | :T
@@ -32,6 +33,7 @@ defmodule Minga.Mode.State do
           pending_g: boolean(),
           pending_find: find_direction() | nil,
           pending_replace: boolean(),
-          pending_mark: pending_mark_kind() | nil
+          pending_mark: pending_mark_kind() | nil,
+          pending_register: boolean()
         }
 end
