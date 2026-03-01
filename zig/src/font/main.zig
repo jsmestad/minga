@@ -22,6 +22,9 @@ pub const Glyph = struct {
     /// Bearing offsets in point space (fractional precision preserved).
     offset_x: f64,
     offset_y: f64,
+    /// True if this is a color glyph (emoji) — the shader should sample
+    /// BGRA directly instead of using fg_color × alpha.
+    is_color: bool,
 };
 
 /// Font face with glyph cache. Thread-safe for concurrent lookups
@@ -44,8 +47,9 @@ pub const Face = struct {
         var loader = try CoreTextFont.init(alloc, name, size, scale);
         errdefer loader.deinit();
 
-        // Start with a 512×512 atlas (enough for ~500 glyphs at 14pt).
-        var atlas = try Atlas.init(alloc, 512, .grayscale);
+        // Start with a 512×512 BGRA atlas — supports both text (white+alpha)
+        // and color emoji (full BGRA).
+        var atlas = try Atlas.init(alloc, 512, .bgra);
         errdefer atlas.deinit(alloc);
 
         return .{
@@ -97,6 +101,7 @@ pub const Face = struct {
             .height = info.height,
             .offset_x = info.offset_x,
             .offset_y = info.offset_y,
+            .is_color = info.is_color,
         };
     }
 

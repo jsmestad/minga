@@ -65,11 +65,11 @@ struct MingaCellGPU {
     float bg_color[3];
     float grid_pos[2];
     float has_glyph;
-    float _padding;  /* Match Metal's 72-byte stride (float2 = 8-byte align) */
+    float is_color;  /* 1.0 for color emoji, 0.0 for text glyphs */
 };
 
 /// Upload the glyph atlas texture to the GPU.
-/// @param data        Raw pixel data (grayscale, 1 byte per pixel)
+/// @param data        Raw pixel data (BGRA, 4 bytes per pixel)
 /// @param width       Atlas width in pixels
 /// @param height      Atlas height in pixels
 void minga_upload_atlas(const uint8_t* data, uint32_t width, uint32_t height);

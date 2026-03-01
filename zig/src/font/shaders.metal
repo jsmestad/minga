@@ -35,8 +35,8 @@ struct CellData {
     /// 1.0 if this cell has a glyph to draw, 0.0 for background-only.
     float has_glyph;
 
-    /// Padding to align stride to 72 bytes (float2 requires 8-byte alignment).
-    float _padding;
+    /// 1.0 for color emoji (sample BGRA directly), 0.0 for text (fg × alpha).
+    float is_color;
 };
 
 /// Uniforms shared across all cells.
@@ -56,6 +56,7 @@ struct VertexOut {
     float3 bg_color;
     float  has_glyph;
     float  is_glyph_quad;  // 1.0 for glyph quad pass, 0.0 for bg pass
+    float  is_color;       // 1.0 for color emoji, 0.0 for text
 };
 
 // ── Background pass ───────────────────────────────────────────────────────────
@@ -140,11 +141,15 @@ vertex VertexOut glyph_vertex(
     out.bg_color = cell.bg_color;
     out.has_glyph = cell.has_glyph;
     out.is_glyph_quad = 1.0;
+    out.is_color = cell.is_color;
     return out;
 }
 
-/// Fragment shader for glyph quads. Samples the atlas texture and applies
-/// the foreground color, using the atlas value as alpha.
+/// Fragment shader for glyph quads.
+/// - Text glyphs: atlas stores (255,255,255, alpha) in BGRA — use .a as
+///   coverage and multiply by fg_color. Output is premultiplied.
+/// - Color emoji: atlas stores full BGRA — sample directly, already
+///   premultiplied by CoreText.
 fragment float4 glyph_fragment(
     VertexOut in [[stage_in]],
     texture2d<float> atlas [[texture(0)]]
@@ -154,11 +159,16 @@ fragment float4 glyph_fragment(
     }
 
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    float alpha = atlas.sample(s, in.tex_coord).r;
+    float4 texel = atlas.sample(s, in.tex_coord);
 
-    if (alpha < 0.01) {
-        discard_fragment();
+    if (in.is_color > 0.5) {
+        // Color emoji — BGRA already premultiplied from CoreText.
+        if (texel.a < 0.01) discard_fragment();
+        return texel;
+    } else {
+        // Text glyph — .a is the coverage (max of original RGB).
+        float alpha = texel.a;
+        if (alpha < 0.01) discard_fragment();
+        return float4(in.fg_color * alpha, alpha);
     }
-
-    return float4(in.fg_color * alpha, alpha);
 }

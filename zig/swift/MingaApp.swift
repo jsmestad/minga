@@ -363,8 +363,8 @@ public func mingaGuiStart(_ initialWidth: UInt16, _ initialHeight: UInt16) {
 
 @_cdecl("minga_upload_atlas")
 public func mingaUploadAtlas(_ data: UnsafePointer<UInt8>, _ width: UInt32, _ height: UInt32) {
-    // Copy the atlas data so it survives the dispatch to the main thread.
-    let byteCount = Int(width) * Int(height)
+    // Copy the BGRA atlas data so it survives the dispatch to the main thread.
+    let byteCount = Int(width) * Int(height) * 4  // BGRA = 4 bytes per pixel
     let dataCopy = UnsafeMutablePointer<UInt8>.allocate(capacity: byteCount)
     dataCopy.initialize(from: data, count: byteCount)
 
@@ -373,7 +373,7 @@ public func mingaUploadAtlas(_ data: UnsafePointer<UInt8>, _ width: UInt32, _ he
         guard let device = metalDevice else { return }
 
         let desc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .r8Unorm,
+            pixelFormat: .bgra8Unorm,
             width: Int(width),
             height: Int(height),
             mipmapped: false
@@ -386,7 +386,7 @@ public func mingaUploadAtlas(_ data: UnsafePointer<UInt8>, _ width: UInt32, _ he
             region: MTLRegionMake2D(0, 0, Int(width), Int(height)),
             mipmapLevel: 0,
             withBytes: dataCopy,
-            bytesPerRow: Int(width)
+            bytesPerRow: Int(width) * 4  // BGRA = 4 bytes per pixel
         )
 
         atlasTexture = texture

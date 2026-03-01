@@ -49,6 +49,10 @@ pub const GlyphInfo = struct {
     /// vertical wobble when scaled for Retina rendering.
     offset_x: f64,
     offset_y: f64,
+
+    /// True if this is a color glyph (emoji). The atlas stores full BGRA
+    /// for color glyphs vs. (255,255,255,alpha) for text glyphs.
+    is_color: bool,
 };
 
 /// Load a font by name (e.g. "Menlo", "SF Mono") at the given point size.
@@ -178,10 +182,25 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     const padded_height = render_height + pad * 2;
     const region = try atlas.reserve(alloc, padded_width, padded_height);
 
+    // Detect color emoji — check if the font has an 'sbix' (bitmap) table,
+    // which Apple Color Emoji uses.
+    const is_color = blk: {
+        const sbix_tag = c.CTFontCopyTable(
+            render_font,
+            @as(u32, @bitCast([4]u8{ 's', 'b', 'i', 'x' })),
+            c.kCTFontTableOptionNoOptions,
+        );
+        if (sbix_tag) |data| {
+            c.CFRelease(data);
+            break :blk true;
+        }
+        break :blk false;
+    };
+
     // ── RGBA rasterization (standard macOS approach) ──
-    // CoreText's font smoothing (LCD subpixel rendering) only works in an
-    // RGBA context. This is what makes macOS text look so good — every
-    // native app uses this exact pipeline.
+    // Both text glyphs and color emoji are rasterized to RGBA.
+    // Text: white on black + font smoothing → extract max(R,G,B) as alpha → store (255,255,255,alpha)
+    // Emoji: full color RGBA → store as-is in BGRA format for Metal
     const rgba_stride = @as(usize, render_width) * 4;
     const rgba_size = rgba_stride * render_height;
     const rgba_buf = try alloc.alloc(u8, rgba_size);
@@ -202,78 +221,88 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     ) orelse return error.BitmapContextFailed;
     defer c.CGContextRelease(ctx);
 
-    // Scale context for Retina — standard macOS approach.
-    // The font is at point size; the CTM handles pixel scaling.
+    // Scale context for Retina.
     c.CGContextScaleCTM(ctx, @floatCast(scale), @floatCast(scale));
 
-    // ── CoreText rendering settings (matching native macOS apps) ──
-    // Font smoothing: the key feature that makes macOS text beautiful.
-    // In an RGBA context, CoreText uses LCD subpixel rendering which
-    // produces thicker, crisper strokes than grayscale anti-aliasing.
+    // ── CoreText rendering settings ──
     c.CGContextSetAllowsFontSmoothing(ctx, true);
-    c.CGContextSetShouldSmoothFonts(ctx, true);
-
-    // Anti-aliasing: ON.
+    c.CGContextSetShouldSmoothFonts(ctx, !is_color); // No smoothing for emoji
     c.CGContextSetAllowsAntialiasing(ctx, true);
     c.CGContextSetShouldAntialias(ctx, true);
-
-    // Subpixel positioning: ON for correct glyph placement.
     c.CGContextSetAllowsFontSubpixelPositioning(ctx, true);
     c.CGContextSetShouldSubpixelPositionFonts(ctx, true);
-
-    // Subpixel quantization: OFF (we control glyph positions).
     c.CGContextSetAllowsFontSubpixelQuantization(ctx, false);
     c.CGContextSetShouldSubpixelQuantizeFonts(ctx, false);
 
-    // White foreground on black background.
-    c.CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
+    if (!is_color) {
+        // Text: white foreground, extract coverage as alpha.
+        c.CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
+    }
 
-    // Position the glyph in point space. The CTM scale converts to pixels.
+    // Position the glyph in point space.
     const draw_x: c.CGFloat = -bounding_rect.origin.x;
     const draw_y: c.CGFloat = -bounding_rect.origin.y;
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(render_font, &glyph_id, &position, 1, ctx);
 
-    // ── Extract max(R,G,B) from RGBA as single-channel alpha ──
-    // Font smoothing distributes coverage across R, G, B channels
-    // (subpixel rendering). max(R,G,B) captures the maximum coverage
-    // from any channel, preserving the full stroke weight that CoreText's
-    // LCD rendering produces. This is the standard technique for
-    // single-channel atlas extraction from subpixel-rendered text.
-    const buf_size = @as(usize, render_width) * render_height;
-    const buf = try alloc.alloc(u8, buf_size);
-    defer alloc.free(buf);
+    // ── Convert to BGRA atlas format ──
+    const bgra_stride = @as(usize, render_width) * 4;
+    const bgra_size = bgra_stride * render_height;
+    const bgra_buf = try alloc.alloc(u8, bgra_size);
+    defer alloc.free(bgra_buf);
 
-    for (0..render_height) |row| {
-        for (0..render_width) |col| {
-            const rgba_off = row * rgba_stride + col * 4;
-            const gray_off = row * @as(usize, render_width) + col;
-            const r = rgba_buf[rgba_off];
-            const g = rgba_buf[rgba_off + 1];
-            const b = rgba_buf[rgba_off + 2];
-            buf[gray_off] = @max(r, @max(g, b));
+    if (is_color) {
+        // Color emoji: convert RGBA (premultiplied) → BGRA (premultiplied).
+        for (0..render_height) |row| {
+            for (0..render_width) |col| {
+                const off = row * rgba_stride + col * 4;
+                const r = rgba_buf[off];
+                const g = rgba_buf[off + 1];
+                const b = rgba_buf[off + 2];
+                const a = rgba_buf[off + 3];
+                bgra_buf[off + 0] = b;
+                bgra_buf[off + 1] = g;
+                bgra_buf[off + 2] = r;
+                bgra_buf[off + 3] = a;
+            }
+        }
+    } else {
+        // Text glyph: extract max(R,G,B) as alpha, store white + alpha.
+        // Font smoothing distributes coverage across R,G,B channels —
+        // max captures the full stroke weight.
+        for (0..render_height) |row| {
+            for (0..render_width) |col| {
+                const off = row * rgba_stride + col * 4;
+                const r = rgba_buf[off];
+                const g = rgba_buf[off + 1];
+                const b = rgba_buf[off + 2];
+                const alpha = @max(r, @max(g, b));
+                // BGRA: white with computed alpha.
+                bgra_buf[off + 0] = 255;
+                bgra_buf[off + 1] = 255;
+                bgra_buf[off + 2] = 255;
+                bgra_buf[off + 3] = alpha;
+            }
         }
     }
 
     // Write the rasterized data into the padded atlas region.
-    // The glyph data goes at (region.x + pad, region.y + pad), leaving
-    // a 1px zero border on all sides.
     const glyph_region = Atlas.Region{
         .x = region.x + pad,
         .y = region.y + pad,
         .width = render_width,
         .height = render_height,
     };
-    atlas.set(glyph_region, buf);
+    atlas.set(glyph_region, bgra_buf);
 
     return .{
         .atlas_x = glyph_region.x,
         .atlas_y = glyph_region.y,
         .width = render_width,
         .height = render_height,
-        // Bearing offsets in point space (font is at point size).
         .offset_x = bounding_rect.origin.x,
         .offset_y = bounding_rect.origin.y + bounding_rect.size.height,
+        .is_color = is_color,
     };
 }
 
@@ -381,7 +410,7 @@ test "rasterize ASCII 'A' produces non-zero pixels" {
     var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
-    var atlas = try Atlas.init(std.testing.allocator, 256, .grayscale);
+    var atlas = try Atlas.init(std.testing.allocator, 256, .bgra);
     defer atlas.deinit(std.testing.allocator);
 
     const info = try font.rasterizeGlyph(&atlas, std.testing.allocator, 'A');
@@ -391,11 +420,13 @@ test "rasterize ASCII 'A' produces non-zero pixels" {
     try std.testing.expect(info.height > 0);
 
     // Check that at least one pixel in the atlas region is non-zero.
+    // BGRA atlas: 4 bytes per pixel, stride = atlas.size * 4.
+    const depth = atlas.format.depth();
     var has_nonzero = false;
     for (0..info.height) |row| {
-        const start = (info.atlas_y + @as(u32, @intCast(row))) * atlas.size + info.atlas_x;
-        for (atlas.data[start..][0..info.width]) |pixel| {
-            if (pixel != 0) {
+        const start = ((info.atlas_y + @as(u32, @intCast(row))) * atlas.size + info.atlas_x) * depth;
+        for (atlas.data[start..][0 .. info.width * depth]) |byte| {
+            if (byte != 0) {
                 has_nonzero = true;
                 break;
             }
@@ -409,7 +440,7 @@ test "rasterize space glyph succeeds" {
     var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
-    var atlas = try Atlas.init(std.testing.allocator, 256, .grayscale);
+    var atlas = try Atlas.init(std.testing.allocator, 256, .bgra);
     defer atlas.deinit(std.testing.allocator);
 
     // Space should rasterize without error (even if all pixels are zero).
@@ -422,7 +453,7 @@ test "rasterize all printable ASCII" {
     var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
-    var atlas = try Atlas.init(std.testing.allocator, 512, .grayscale);
+    var atlas = try Atlas.init(std.testing.allocator, 512, .bgra);
     defer atlas.deinit(std.testing.allocator);
 
     // Rasterize 0x20..0x7E (all printable ASCII).

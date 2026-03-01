@@ -74,13 +74,42 @@ defmodule Minga.Editor.Commands do
 
   # ── Cursor movement ───────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :move_left) do
-    BufferServer.move(buf, :left)
+  def execute(%{buffer: buf, mode: mode} = state, :move_left) do
+    if mode in [:insert, :replace] do
+      BufferServer.move(buf, :left)
+    else
+      # Vim normal/visual: h stops at column 0, never wraps to previous line
+      {_line, col} = BufferServer.cursor(buf)
+
+      if col > 0 do
+        BufferServer.move(buf, :left)
+      end
+    end
+
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_right) do
-    BufferServer.move(buf, :right)
+  def execute(%{buffer: buf, mode: mode} = state, :move_right) do
+    if mode in [:insert, :replace] do
+      BufferServer.move(buf, :right)
+    else
+      # Vim normal/visual: l stops at last char on line, never wraps to next line
+      {line, col} = BufferServer.cursor(buf)
+
+      line_len =
+        case BufferServer.get_lines(buf, line, 1) do
+          [text] -> String.length(text)
+          _ -> 0
+        end
+
+      # In normal mode, last valid column is line_len - 1 (cursor sits ON a char)
+      max_col = max(0, line_len - 1)
+
+      if col < max_col do
+        BufferServer.move(buf, :right)
+      end
+    end
+
     state
   end
 

@@ -49,8 +49,8 @@ const CellGPU = extern struct {
     bg_color: [3]f32 = .{ 0.12, 0.12, 0.14 },
     grid_pos: [2]f32 = .{ 0, 0 },
     has_glyph: f32 = 0,
-    /// Padding to match Metal's 72-byte stride (float2 has 8-byte alignment).
-    _padding: f32 = 0,
+    /// 1.0 for color emoji (sample BGRA directly), 0.0 for text (use fg × alpha).
+    is_color: f32 = 0,
 };
 
 // ── GuiSurface ────────────────────────────────────────────────────────────────
@@ -161,6 +161,7 @@ pub const GuiSurface = struct {
 
                 if (face.getGlyph(cp)) |glyph| {
                     gpu.has_glyph = 1.0;
+                    gpu.is_color = if (glyph.is_color) 1.0 else 0.0;
                     gpu.uv_origin = .{
                         @as(f32, @floatFromInt(glyph.atlas_x)) / atlas_size_f,
                         @as(f32, @floatFromInt(glyph.atlas_y)) / atlas_size_f,
@@ -169,8 +170,6 @@ pub const GuiSurface = struct {
                         @as(f32, @floatFromInt(glyph.width)) / atlas_size_f,
                         @as(f32, @floatFromInt(glyph.height)) / atlas_size_f,
                     };
-                    // Glyph bitmaps are already rasterized at Retina scale,
-                    // so width/height are in drawable pixels — no extra scaling.
                     gpu.glyph_size = .{
                         @as(f32, @floatFromInt(glyph.width)),
                         @as(f32, @floatFromInt(glyph.height)),
