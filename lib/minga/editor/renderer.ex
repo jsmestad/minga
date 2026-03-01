@@ -604,15 +604,75 @@ defmodule Minga.Editor.Renderer do
     )
   end
 
-  # Computes search matches for the visible line range. Returns matches
-  # only when a search pattern is active (last_search_pattern is set).
+  # Computes search matches for the visible line range.
+  #
+  # Priority: live search/substitute pattern > stored last_search_pattern.
   @spec search_matches_for_lines(state(), [String.t()], non_neg_integer()) :: [search_match()]
-  defp search_matches_for_lines(%{last_search_pattern: pattern}, lines, first_line)
-       when is_binary(pattern) and pattern != "" do
-    Minga.Search.find_all_in_range(lines, pattern, first_line)
+  defp search_matches_for_lines(state, lines, first_line) do
+    pattern = active_search_pattern(state)
+
+    if is_binary(pattern) and pattern != "" do
+      Minga.Search.find_all_in_range(lines, pattern, first_line)
+    else
+      []
+    end
   end
 
-  defp search_matches_for_lines(_state, _lines, _first_line), do: []
+  # Returns the pattern to highlight, checking live input first.
+  @spec active_search_pattern(state()) :: String.t() | nil
+  defp active_search_pattern(%{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}})
+       when input != "" do
+    input
+  end
+
+  defp active_search_pattern(%{
+         mode: :command,
+         mode_state: %Minga.Mode.CommandState{input: input}
+       }) do
+    extract_substitute_pattern(input)
+  end
+
+  defp active_search_pattern(%{last_search_pattern: pattern})
+       when is_binary(pattern) and pattern != "" do
+    pattern
+  end
+
+  defp active_search_pattern(_state), do: nil
+
+  # Extracts the search pattern from a partial substitute command input.
+  # Matches `%s/pattern...` or `s/pattern...` while the user is typing.
+  @spec extract_substitute_pattern(String.t()) :: String.t() | nil
+  defp extract_substitute_pattern(input) do
+    trimmed = String.trim_leading(input, "%")
+
+    case trimmed do
+      <<"s", delimiter, rest::binary>> when delimiter in [?/, ?#, ?|] ->
+        # Extract pattern up to the next unescaped delimiter (or end of input).
+        extract_until_delimiter(rest, <<delimiter>>, [])
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec extract_until_delimiter(String.t(), String.t(), [String.t()]) :: String.t() | nil
+  defp extract_until_delimiter("", _delimiter, acc) do
+    result = acc |> Enum.reverse() |> Enum.join()
+    if result == "", do: nil, else: result
+  end
+
+  defp extract_until_delimiter("\\" <> <<c::utf8, rest::binary>>, delimiter, acc) do
+    extract_until_delimiter(rest, delimiter, [<<c::utf8>>, "\\" | acc])
+  end
+
+  defp extract_until_delimiter(<<c::utf8, rest::binary>>, delimiter, acc) do
+    if <<c::utf8>> == delimiter do
+      result = acc |> Enum.reverse() |> Enum.join()
+      if result == "", do: nil, else: result
+    else
+      extract_until_delimiter(rest, delimiter, [<<c::utf8>> | acc])
+    end
+  end
 
   @spec selection_cols_for_line(
           non_neg_integer(),

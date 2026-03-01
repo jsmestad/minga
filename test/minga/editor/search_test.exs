@@ -218,5 +218,33 @@ defmodule Minga.Editor.SearchTest do
       assert cell.bg == 0xECBE7B,
              "Expected search highlight bg on first 'foo', got: #{inspect(cell)}"
     end
+
+    test "matches highlight live during incremental / search" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, "/")
+      type_text(ctx, "foo")
+
+      # Still in search mode — highlights should be visible
+      row_text = screen_row(ctx, 0)
+      first_f = :binary.match(row_text, "f") |> elem(0)
+      cell = screen_cell(ctx, 0, first_f)
+
+      assert cell.bg == 0xECBE7B,
+             "Expected live search highlight during / mode, got: #{inspect(cell)}"
+    end
+
+    test "matches highlight live while typing :%s/pattern" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo")
+
+      # Still in command mode typing the substitute — highlights should show
+      row_text = screen_row(ctx, 0)
+      first_f = :binary.match(row_text, "f") |> elem(0)
+      cell = screen_cell(ctx, 0, first_f)
+
+      assert cell.bg == 0xECBE7B,
+             "Expected live highlight during :%s typing, got: #{inspect(cell)}"
+    end
   end
 end
