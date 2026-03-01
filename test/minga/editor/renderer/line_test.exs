@@ -89,4 +89,26 @@ defmodule Minga.Editor.Renderer.LineTest do
       assert_row_contains(ctx, 7, "line 10")
     end
   end
+
+  describe "no file open" do
+    test "shows splash screen when no buffer is loaded" do
+      id = :erlang.unique_integer([:positive])
+      {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
+
+      {:ok, editor} =
+        Minga.Editor.start_link(
+          name: :"headless_nofile_#{id}",
+          port_manager: port,
+          buffer: nil,
+          width: 80,
+          height: 24
+        )
+
+      send(editor, {:minga_input, {:ready, 80, 24}})
+      :ok = HeadlessPort.await_frame(port)
+
+      row0 = HeadlessPort.get_row_text(port, 0)
+      assert String.contains?(row0, "Minga")
+    end
+  end
 end
