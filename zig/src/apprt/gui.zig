@@ -49,6 +49,8 @@ const CellGPU = extern struct {
     bg_color: [3]f32 = .{ 0.12, 0.12, 0.14 },
     grid_pos: [2]f32 = .{ 0, 0 },
     has_glyph: f32 = 0,
+    /// Padding to match Metal's 72-byte stride (float2 has 8-byte alignment).
+    _padding: f32 = 0,
 };
 
 // ── GuiSurface ────────────────────────────────────────────────────────────────
@@ -122,6 +124,9 @@ pub const GuiSurface = struct {
         const cell_h: f32 = @floatFromInt(face.cell_height);
         const atlas_size_f: f32 = @floatFromInt(face.atlas.size);
 
+        // Query Retina scale factor from the window.
+        const scale: f32 = c.minga_get_scale_factor();
+
         // Re-upload atlas if it changed.
         if (face.atlas.modified != self.atlas_version) {
             c.minga_upload_atlas(
@@ -167,15 +172,17 @@ pub const GuiSurface = struct {
                         @as(f32, @floatFromInt(glyph.width)) / atlas_size_f,
                         @as(f32, @floatFromInt(glyph.height)) / atlas_size_f,
                     };
+                    // Glyph bitmaps are already rasterized at Retina scale,
+                    // so width/height are in drawable pixels — no extra scaling.
                     gpu.glyph_size = .{
                         @as(f32, @floatFromInt(glyph.width)),
                         @as(f32, @floatFromInt(glyph.height)),
                     };
-                    // Bearing: offset_x is horizontal, offset_y is from baseline (top-down).
+                    // Bearing offsets are in point space — scale to drawable pixels.
                     const baseline_y: f32 = @floatCast(face.loader.ascent);
                     gpu.glyph_offset = .{
-                        @as(f32, @floatFromInt(glyph.offset_x)),
-                        baseline_y - @as(f32, @floatFromInt(glyph.offset_y)),
+                        @as(f32, @floatFromInt(glyph.offset_x)) * scale,
+                        (baseline_y - @as(f32, @floatFromInt(glyph.offset_y))) * scale,
                     };
                 } else |_| {}
             }
@@ -245,8 +252,11 @@ pub const GuiRuntime = struct {
     stdout_buf: [4096]u8 = undefined,
 
     pub fn init(alloc: std.mem.Allocator) !GuiRuntime {
-        // Load font first to get real cell metrics.
-        var face = try font_mod.Face.init(alloc, DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE);
+        // Load font at 2x for Retina. All modern Macs are Retina; the
+        // bitmaps in the atlas need to be 2x for crisp rendering in the
+        // Metal drawable which operates in backing (pixel) coordinates.
+        const retina_scale: f64 = 2.0;
+        var face = try font_mod.Face.init(alloc, DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE, retina_scale);
         errdefer face.deinit();
 
         // Pre-rasterize ASCII glyphs.
@@ -316,8 +326,23 @@ pub const GuiRuntime = struct {
         const len: u32 = @intCast(payload.len);
         var len_buf: [4]u8 = undefined;
         std.mem.writeInt(u32, &len_buf, len, .big);
-        try stdout_file.writeAll(&len_buf);
-        try stdout_file.writeAll(payload);
+        stdout_file.writeAll(&len_buf) catch |err| {
+            self.requestShutdown();
+            return err;
+        };
+        stdout_file.writeAll(payload) catch |err| {
+            self.requestShutdown();
+            return err;
+        };
+    }
+
+    /// Signal shutdown and terminate the AppKit run loop.
+    /// Safe to call from any thread.
+    fn requestShutdown(self: *GuiRuntime) void {
+        if (!self.quit.swap(true, .acq_rel)) {
+            // First time setting quit — terminate the NSApp run loop.
+            c.minga_gui_stop();
+        }
     }
 
     // ── Background stdin thread ───────────────────────────────────────────
@@ -341,7 +366,7 @@ pub const GuiRuntime = struct {
             if (pollfds[0].revents & std.posix.POLL.IN != 0) {
                 var len_buf: [4]u8 = undefined;
                 if (!try readExact(stdin_fd, &len_buf)) {
-                    self.quit.store(true, .release);
+                    self.requestShutdown();
                     break;
                 }
 
@@ -349,11 +374,15 @@ pub const GuiRuntime = struct {
                 if (msg_len == 0) continue;
                 if (msg_len > msg_buf.len) {
                     std.log.err("Port message too large: {} bytes", .{msg_len});
+                    self.requestShutdown();
                     break;
                 }
 
                 const payload = msg_buf[0..msg_len];
-                if (!try readExact(stdin_fd, payload)) break;
+                if (!try readExact(stdin_fd, payload)) {
+                    self.requestShutdown();
+                    break;
+                }
 
                 var offset: usize = 0;
                 while (offset < msg_len) {
@@ -371,7 +400,7 @@ pub const GuiRuntime = struct {
 
             const hup_mask: i16 = std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL;
             if (pollfds[0].revents & hup_mask != 0) {
-                self.quit.store(true, .release);
+                self.requestShutdown();
                 break;
             }
         }
@@ -382,24 +411,23 @@ pub const GuiRuntime = struct {
 
 export fn minga_on_key_event(codepoint: u32, modifiers: u8) void {
     const rt = g_runtime orelse return;
+    if (rt.quit.load(.acquire)) return;
     var buf: [6]u8 = undefined;
     const len = protocol.encodeKeyPress(&buf, codepoint, modifiers) catch return;
-    rt.writeStdout(buf[0..len]) catch |err| {
-        std.log.warn("failed to write key event: {}", .{err});
-    };
+    rt.writeStdout(buf[0..len]) catch return;
 }
 
 export fn minga_on_mouse_event(row: i16, col: i16, button: u8, modifiers: u8, event_type: u8) void {
     const rt = g_runtime orelse return;
+    if (rt.quit.load(.acquire)) return;
     var buf: [8]u8 = undefined;
     const len = protocol.encodeMouseEvent(&buf, row, col, button, modifiers, event_type) catch return;
-    rt.writeStdout(buf[0..len]) catch |err| {
-        std.log.warn("failed to write mouse event: {}", .{err});
-    };
+    rt.writeStdout(buf[0..len]) catch return;
 }
 
 export fn minga_on_resize(width_cells: u16, height_cells: u16) void {
     const rt = g_runtime orelse return;
+    if (rt.quit.load(.acquire)) return;
 
     rt.surface.resize(width_cells, height_cells) catch |err| {
         std.log.warn("failed to resize surface: {}", .{err});
@@ -408,9 +436,7 @@ export fn minga_on_resize(width_cells: u16, height_cells: u16) void {
 
     var buf: [5]u8 = undefined;
     const len = protocol.encodeResize(&buf, width_cells, height_cells) catch return;
-    rt.writeStdout(buf[0..len]) catch |err| {
-        std.log.warn("failed to write resize event: {}", .{err});
-    };
+    rt.writeStdout(buf[0..len]) catch return;
 }
 
 /// Returns a pointer to the embedded Metal shader source (null-terminated).
@@ -546,6 +572,6 @@ test "colorFromU24 converts correctly" {
 }
 
 test "CellGPU has expected size" {
-    // 17 floats × 4 bytes = 68 bytes.
-    try std.testing.expectEqual(@as(usize, 68), @sizeOf(CellGPU));
+    // 18 floats × 4 bytes = 72 bytes (includes padding for Metal float2 alignment).
+    try std.testing.expectEqual(@as(usize, 72), @sizeOf(CellGPU));
 }

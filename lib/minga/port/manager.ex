@@ -130,8 +130,15 @@ defmodule Minga.Port.Manager do
     end
   end
 
+  def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
+    Logger.info("Zig renderer exited normally")
+    maybe_stop_system(0)
+    {:noreply, %{state | port: nil, ready: false}}
+  end
+
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.error("Zig renderer exited with status #{status}")
+    maybe_stop_system(1)
     {:noreply, %{state | port: nil, ready: false}}
   end
 
@@ -219,6 +226,16 @@ defmodule Minga.Port.Manager do
       # distinct names.
       Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
     end
+  end
+
+  # Only stop the BEAM when running as a real editor (not in tests).
+  @spec maybe_stop_system(non_neg_integer()) :: :ok
+  defp maybe_stop_system(code) do
+    if Application.get_env(:minga, :start_editor) do
+      System.stop(code)
+    end
+
+    :ok
   end
 
   @spec renderer_binary_name(backend()) :: String.t()

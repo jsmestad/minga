@@ -21,12 +21,16 @@ const CoreTextFont = @This();
 /// Opaque CoreText font reference. Must be released with CFRelease.
 ct_font: c.CTFontRef,
 
-/// Cell metrics in pixels.
+/// Cell metrics in points (1x, for grid layout).
 cell_width: u32,
 cell_height: u32,
 ascent: f64,
 descent: f64,
 leading: f64,
+
+/// Backing scale factor for glyph rasterization (2.0 for Retina).
+/// Bitmaps in the atlas are rasterized at this scale.
+scale: f64,
 
 /// Allocator for rasterization scratch buffers.
 alloc: Allocator,
@@ -46,7 +50,9 @@ pub const GlyphInfo = struct {
 
 /// Load a font by name (e.g. "Menlo", "SF Mono") at the given point size.
 /// Falls back to the system monospace font if the named font isn't found.
-pub fn init(alloc: Allocator, name: []const u8, size: f64) !CoreTextFont {
+/// `scale` is the backing scale factor (2.0 for Retina) — glyph bitmaps
+/// are rasterized at this multiple of the point size for crisp rendering.
+pub fn init(alloc: Allocator, name: []const u8, size: f64, scale: f64) !CoreTextFont {
     const ct_font = try createFont(name, size);
     errdefer c.CFRelease(ct_font);
 
@@ -67,6 +73,7 @@ pub fn init(alloc: Allocator, name: []const u8, size: f64) !CoreTextFont {
         .ascent = ascent,
         .descent = descent,
         .leading = leading,
+        .scale = scale,
         .alloc = alloc,
     };
 }
@@ -105,13 +112,17 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         1,
     );
 
-    // Calculate bitmap dimensions from bounding rect.
-    const bmp_width: u32 = @intFromFloat(@ceil(bounding_rect.size.width));
-    const bmp_height: u32 = @intFromFloat(@ceil(bounding_rect.size.height));
+    // Calculate bitmap dimensions from bounding rect, scaled for Retina.
+    // Bounding rect is in point space; multiply by scale to get pixel dimensions.
+    const scale = self.scale;
+    const bmp_width: u32 = @intFromFloat(@ceil(bounding_rect.size.width * scale));
+    const bmp_height: u32 = @intFromFloat(@ceil(bounding_rect.size.height * scale));
 
-    // For empty glyphs (space, etc.), use cell dimensions.
-    const render_width = if (bmp_width == 0) self.cell_width else bmp_width;
-    const render_height = if (bmp_height == 0) self.cell_height else bmp_height;
+    // For empty glyphs (space, etc.), use scaled cell dimensions.
+    const scaled_cell_w: u32 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.cell_width)) * scale));
+    const scaled_cell_h: u32 = @intFromFloat(@ceil(@as(f64, @floatFromInt(self.cell_height)) * scale));
+    const render_width = if (bmp_width == 0) scaled_cell_w else bmp_width;
+    const render_height = if (bmp_height == 0) scaled_cell_h else bmp_height;
 
     // Reserve space in the atlas.
     const region = try atlas.reserve(alloc, render_width, render_height);
@@ -137,11 +148,15 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     ) orelse return error.BitmapContextFailed;
     defer c.CGContextRelease(ctx);
 
+    // Scale the context so CoreText rasterizes at Retina resolution.
+    // This produces crisp 2x bitmaps instead of blurry 1x stretched glyphs.
+    c.CGContextScaleCTM(ctx, @floatCast(scale), @floatCast(scale));
+
     // Set white foreground on black background for alpha extraction.
     c.CGContextSetGrayFillColor(ctx, 1.0, 1.0);
 
-    // Position the glyph. The origin is at the baseline, offset by the
-    // bounding rect origin.
+    // Position the glyph in point space (pre-scale). The CTM scale
+    // transform converts these to pixel coordinates automatically.
     const draw_x: c.CGFloat = -bounding_rect.origin.x;
     const draw_y: c.CGFloat = -bounding_rect.origin.y;
 
@@ -240,7 +255,7 @@ test "unicodeToUtf16 supplementary codepoint" {
 }
 
 test "load Menlo font" {
-    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0);
+    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
     // Menlo at 14pt should have reasonable cell dimensions.
@@ -254,7 +269,7 @@ test "load Menlo font" {
 
 test "load system fallback font" {
     // A nonsense name should fall back to system monospace.
-    var font = try CoreTextFont.init(std.testing.allocator, "NonexistentFont12345", 14.0);
+    var font = try CoreTextFont.init(std.testing.allocator, "NonexistentFont12345", 14.0, 1.0);
     defer font.deinit();
 
     try std.testing.expect(font.cell_width > 0);
@@ -262,7 +277,7 @@ test "load system fallback font" {
 }
 
 test "rasterize ASCII 'A' produces non-zero pixels" {
-    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0);
+    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
     var atlas = try Atlas.init(std.testing.allocator, 256, .grayscale);
@@ -290,7 +305,7 @@ test "rasterize ASCII 'A' produces non-zero pixels" {
 }
 
 test "rasterize space glyph succeeds" {
-    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0);
+    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
     var atlas = try Atlas.init(std.testing.allocator, 256, .grayscale);
@@ -303,7 +318,7 @@ test "rasterize space glyph succeeds" {
 }
 
 test "rasterize all printable ASCII" {
-    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0);
+    var font = try CoreTextFont.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer font.deinit();
 
     var atlas = try Atlas.init(std.testing.allocator, 512, .grayscale);

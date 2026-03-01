@@ -47,6 +47,14 @@ const char* minga_get_shader_source(void);
 /// @param initial_height  Initial window height in pixels
 void minga_gui_start(uint16_t initial_width, uint16_t initial_height);
 
+/// Stops the macOS GUI application. Dispatches NSApp.terminate() on the
+/// main thread. Safe to call from any thread (e.g., the stdin thread).
+void minga_gui_stop(void);
+
+/// Returns the backing scale factor (1.0 for non-Retina, 2.0 for Retina).
+/// Must be called after minga_gui_start has initialized the window.
+float minga_get_scale_factor(void);
+
 /// Per-cell GPU data. Must match the Metal shader's CellData struct layout.
 struct MingaCellGPU {
     float uv_origin[2];
@@ -57,6 +65,7 @@ struct MingaCellGPU {
     float bg_color[3];
     float grid_pos[2];
     float has_glyph;
+    float _padding;  /* Match Metal's 72-byte stride (float2 = 8-byte align) */
 };
 
 /// Upload the glyph atlas texture to the GPU.

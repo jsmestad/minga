@@ -68,6 +68,10 @@ private var currentCellWidth: Float = 8.0
 private var currentCellHeight: Float = 16.0
 private var currentView: MingaView?
 
+/// Reusable Metal buffer for cell data (avoids setVertexBytes 4KB limit).
+private var cellBuffer: MTLBuffer?
+private var cellBufferCapacity: Int = 0
+
 // ── MingaView ─────────────────────────────────────────────────────────────────
 
 class MingaView: NSView {
@@ -185,9 +189,18 @@ class MingaView: NSView {
         minga_on_mouse_event(row, col, 0x00, modifierBits(from: event.modifierFlags), 0x03)
     }
 
+    // Track last reported cell position to avoid flooding the Port
+    // with redundant mouse move events.
+    private static var lastMoveRow: Int16 = -1
+    private static var lastMoveCol: Int16 = -1
+
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let (row, col) = cellPosition(from: point)
+        // Only send if the cell position actually changed.
+        guard row != MingaView.lastMoveRow || col != MingaView.lastMoveCol else { return }
+        MingaView.lastMoveRow = row
+        MingaView.lastMoveCol = col
         minga_on_mouse_event(row, col, 0x03, modifierBits(from: event.modifierFlags), 0x02)
     }
 
@@ -220,6 +233,23 @@ class MingaWindowDelegate: NSObject, NSWindowDelegate {
         minga_on_window_close()
         NSApp.terminate(nil)
     }
+}
+
+// ── App termination (called from Zig) ─────────────────────────────────────────
+
+@_cdecl("minga_gui_stop")
+public func mingaGuiStop() {
+    DispatchQueue.main.async {
+        NSApp.terminate(nil)
+    }
+}
+
+/// Backing scale factor — set during window setup, read from background threads.
+private var backingScaleFactor: Float = 2.0
+
+@_cdecl("minga_get_scale_factor")
+public func mingaGetScaleFactor() -> Float {
+    return backingScaleFactor
 }
 
 // ── Metal setup ───────────────────────────────────────────────────────────────
@@ -312,32 +342,41 @@ public func mingaGuiStart(_ initialWidth: UInt16, _ initialHeight: UInt16) {
     window.delegate = delegate
 
     window.makeKeyAndOrderFront(nil)
+    backingScaleFactor = Float(window.backingScaleFactor)
     app.activate(ignoringOtherApps: true)
     app.run()
 }
 
 @_cdecl("minga_upload_atlas")
 public func mingaUploadAtlas(_ data: UnsafePointer<UInt8>, _ width: UInt32, _ height: UInt32) {
-    guard let device = metalDevice else { return }
+    // Copy the atlas data so it survives the dispatch to the main thread.
+    let byteCount = Int(width) * Int(height)
+    let dataCopy = UnsafeMutablePointer<UInt8>.allocate(capacity: byteCount)
+    dataCopy.initialize(from: data, count: byteCount)
 
-    let desc = MTLTextureDescriptor.texture2DDescriptor(
-        pixelFormat: .r8Unorm,
-        width: Int(width),
-        height: Int(height),
-        mipmapped: false
-    )
-    desc.usage = .shaderRead
+    DispatchQueue.main.async {
+        defer { dataCopy.deallocate() }
+        guard let device = metalDevice else { return }
 
-    guard let texture = device.makeTexture(descriptor: desc) else { return }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm,
+            width: Int(width),
+            height: Int(height),
+            mipmapped: false
+        )
+        desc.usage = .shaderRead
 
-    texture.replace(
-        region: MTLRegionMake2D(0, 0, Int(width), Int(height)),
-        mipmapLevel: 0,
-        withBytes: data,
-        bytesPerRow: Int(width)
-    )
+        guard let texture = device.makeTexture(descriptor: desc) else { return }
 
-    atlasTexture = texture
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, Int(width), Int(height)),
+            mipmapLevel: 0,
+            withBytes: dataCopy,
+            bytesPerRow: Int(width)
+        )
+
+        atlasTexture = texture
+    }
 }
 
 /// Uniforms buffer matching the Metal shader.
@@ -356,77 +395,98 @@ public func mingaRenderFrame(
     _ cursorRow: UInt16,
     _ cursorVisible: UInt8
 ) {
-    guard let layer = metalLayer,
-          let commandQueue = metalCommandQueue,
-          let bgPipeline = bgPipelineState,
-          let glyphPipeline = glyphPipelineState,
-          let drawable = layer.nextDrawable() else {
-        return
-    }
-
-    currentCellWidth = cellWidth
-    currentCellHeight = cellHeight
-
-    let renderDesc = MTLRenderPassDescriptor()
-    renderDesc.colorAttachments[0].texture = drawable.texture
-    renderDesc.colorAttachments[0].loadAction = .clear
-    renderDesc.colorAttachments[0].storeAction = .store
-    renderDesc.colorAttachments[0].clearColor = bgColor
-
-    guard let commandBuffer = commandQueue.makeCommandBuffer(),
-          let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderDesc) else {
-        return
-    }
-
+    // Copy cell data so it survives the dispatch to the main thread.
+    // The Zig caller's buffer may be reused immediately after this returns.
     let count = Int(cellCount)
-    if count > 0 {
-        let drawableSize = layer.drawableSize
-        var uniforms = Uniforms(
-            cellSize: SIMD2<Float>(cellWidth * Float(layer.contentsScale),
-                                   cellHeight * Float(layer.contentsScale)),
-            viewportSize: SIMD2<Float>(Float(drawableSize.width),
-                                       Float(drawableSize.height))
-        )
+    let cellsCopy = UnsafeMutablePointer<MingaCellGPU>.allocate(capacity: max(count, 1))
+    cellsCopy.initialize(from: cells, count: count)
 
-        let cellDataSize = count * MemoryLayout<MingaCellGPU>.stride
+    DispatchQueue.main.async {
+        defer { cellsCopy.deallocate() }
 
-        // Background pass
-        encoder.setRenderPipelineState(bgPipeline)
-        encoder.setVertexBytes(cells, length: cellDataSize, index: 0)
-        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
-                               instanceCount: count)
+        guard let device = metalDevice,
+              let layer = metalLayer,
+              let commandQueue = metalCommandQueue,
+              let bgPipeline = bgPipelineState,
+              let glyphPipeline = glyphPipelineState,
+              let drawable = layer.nextDrawable() else {
+            return
+        }
 
-        // Glyph pass (only if we have an atlas)
-        if let atlas = atlasTexture {
-            encoder.setRenderPipelineState(glyphPipeline)
-            encoder.setVertexBytes(cells, length: cellDataSize, index: 0)
+        currentCellWidth = cellWidth
+        currentCellHeight = cellHeight
+
+        let renderDesc = MTLRenderPassDescriptor()
+        renderDesc.colorAttachments[0].texture = drawable.texture
+        renderDesc.colorAttachments[0].loadAction = .clear
+        renderDesc.colorAttachments[0].storeAction = .store
+        renderDesc.colorAttachments[0].clearColor = bgColor
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderDesc) else {
+            return
+        }
+
+        if count > 0 {
+            let drawableSize = layer.drawableSize
+            var uniforms = Uniforms(
+                cellSize: SIMD2<Float>(cellWidth * Float(layer.contentsScale),
+                                       cellHeight * Float(layer.contentsScale)),
+                viewportSize: SIMD2<Float>(Float(drawableSize.width),
+                                           Float(drawableSize.height))
+            )
+
+            let cellDataSize = count * MemoryLayout<MingaCellGPU>.stride
+
+            // Ensure the reusable Metal buffer is large enough.
+            if cellBuffer == nil || cellBufferCapacity < cellDataSize {
+                let newCapacity = max(cellDataSize, 65536)  // At least 64KB
+                cellBuffer = device.makeBuffer(length: newCapacity, options: .storageModeShared)
+                cellBufferCapacity = newCapacity
+            }
+
+            guard let buffer = cellBuffer else { return }
+
+            // Copy cell data into the Metal buffer.
+            buffer.contents().copyMemory(from: cellsCopy, byteCount: cellDataSize)
+
+            // Background pass
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
-            encoder.setFragmentTexture(atlas, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
                                    instanceCount: count)
-        }
 
-        // Cursor overlay
-        if cursorVisible != 0 && count > 0 {
-            let cursorIdx = Int(cursorRow) * Int(ceil(drawableSize.width / Double(cellWidth * Float(layer.contentsScale)))) + Int(cursorCol)
-            if cursorIdx >= 0 && cursorIdx < count {
-                // Create a cursor cell — white block with alpha
-                var cursorCell = cells[cursorIdx]
-                cursorCell.fg_color = (1.0, 1.0, 1.0)
-                cursorCell.bg_color = (0.8, 0.8, 0.8)
-                cursorCell.has_glyph = 0.0  // background-only for cursor
-
-                encoder.setRenderPipelineState(bgPipeline)
-                encoder.setVertexBytes(&cursorCell, length: MemoryLayout<MingaCellGPU>.stride, index: 0)
+            // Glyph pass (only if we have an atlas)
+            if let atlas = atlasTexture {
+                encoder.setRenderPipelineState(glyphPipeline)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
                 encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.setFragmentTexture(atlas, index: 0)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
-                                       instanceCount: 1)
+                                       instanceCount: count)
+            }
+
+            // Cursor overlay
+            if cursorVisible != 0 {
+                let cursorIdx = Int(cursorRow) * Int(ceil(drawableSize.width / Double(cellWidth * Float(layer.contentsScale)))) + Int(cursorCol)
+                if cursorIdx >= 0 && cursorIdx < count {
+                    var cursorCell = cellsCopy[cursorIdx]
+                    cursorCell.fg_color = (1.0, 1.0, 1.0)
+                    cursorCell.bg_color = (0.8, 0.8, 0.8)
+                    cursorCell.has_glyph = 0.0
+
+                    encoder.setRenderPipelineState(bgPipeline)
+                    encoder.setVertexBytes(&cursorCell, length: MemoryLayout<MingaCellGPU>.stride, index: 0)
+                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
+                                           instanceCount: 1)
+                }
             }
         }
-    }
 
-    encoder.endEncoding()
-    commandBuffer.present(drawable)
-    commandBuffer.commit()
+        encoder.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
 }

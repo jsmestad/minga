@@ -58,6 +58,7 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     // Iterate over the text grapheme by grapheme and write each
                     // one as a separate cell.
                     var iter = vaxis.unicode.graphemeIterator(dt.text);
+
                     while (iter.next()) |grapheme| {
                         if (col >= surf_width) break;
 

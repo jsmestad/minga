@@ -37,8 +37,10 @@ pub const Face = struct {
     cell_height: u32,
 
     /// Initialize a font face. Loads the named font and creates an atlas.
-    pub fn init(alloc: Allocator, name: []const u8, size: f64) !Face {
-        var loader = try CoreTextFont.init(alloc, name, size);
+    /// `scale` is the backing scale factor (2.0 for Retina) — glyph bitmaps
+    /// are rasterized at this multiple for crisp rendering on HiDPI displays.
+    pub fn init(alloc: Allocator, name: []const u8, size: f64, scale: f64) !Face {
+        var loader = try CoreTextFont.init(alloc, name, size, scale);
         errdefer loader.deinit();
 
         // Start with a 512×512 atlas (enough for ~500 glyphs at 14pt).
@@ -110,7 +112,7 @@ pub const Face = struct {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test "Face init and deinit" {
-    var face = try Face.init(std.testing.allocator, "Menlo", 14.0);
+    var face = try Face.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer face.deinit();
 
     try std.testing.expect(face.cell_width > 0);
@@ -118,7 +120,7 @@ test "Face init and deinit" {
 }
 
 test "Face getGlyph returns consistent results" {
-    var face = try Face.init(std.testing.allocator, "Menlo", 14.0);
+    var face = try Face.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer face.deinit();
 
     const g1 = try face.getGlyph('A');
@@ -130,7 +132,7 @@ test "Face getGlyph returns consistent results" {
 }
 
 test "Face preloadAscii succeeds" {
-    var face = try Face.init(std.testing.allocator, "Menlo", 14.0);
+    var face = try Face.init(std.testing.allocator, "Menlo", 14.0, 1.0);
     defer face.deinit();
 
     try face.preloadAscii();

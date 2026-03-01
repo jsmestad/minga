@@ -8,6 +8,10 @@
 using namespace metal;
 
 /// Per-cell data uploaded from the CPU. One instance per cell.
+///
+/// Uses packed_float3 for color fields to match the C/Zig struct layout
+/// (12 bytes, no padding). MSL's float3 is 16-byte aligned and would
+/// cause a layout mismatch with the 68-byte CPU-side struct.
 struct CellData {
     /// Glyph UV coordinates in the atlas (normalized 0..1).
     float2 uv_origin;  // top-left corner
@@ -20,16 +24,19 @@ struct CellData {
     float2 glyph_offset;
 
     /// Foreground color (RGB, 0..1).
-    float3 fg_color;
+    packed_float3 fg_color;
 
     /// Background color (RGB, 0..1).
-    float3 bg_color;
+    packed_float3 bg_color;
 
     /// Grid position (column, row) — used to compute screen position.
     float2 grid_pos;
 
     /// 1.0 if this cell has a glyph to draw, 0.0 for background-only.
     float has_glyph;
+
+    /// Padding to align stride to 72 bytes (float2 requires 8-byte alignment).
+    float _padding;
 };
 
 /// Uniforms shared across all cells.
