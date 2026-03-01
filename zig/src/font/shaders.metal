@@ -153,7 +153,7 @@ fragment float4 glyph_fragment(
         discard_fragment();
     }
 
-    constexpr sampler s(mag_filter::linear, min_filter::linear);
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest);
     float alpha = atlas.sample(s, in.tex_coord).r;
 
     if (alpha < 0.01) {

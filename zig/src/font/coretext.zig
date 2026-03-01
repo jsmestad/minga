@@ -178,18 +178,30 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
 
-    // Extract green channel from RGBA into a single-channel grayscale buffer.
-    // Green gives the best perceptual match for LCD-rendered text.
+    // Extract grayscale from RGBA: take max(R,G,B) for maximum glyph
+    // coverage across all subpixel channels, then apply gamma correction
+    // to boost stroke weight to match native macOS text rendering.
     const buf_size = @as(usize, render_width) * render_height;
     const buf = try alloc.alloc(u8, buf_size);
     defer alloc.free(buf);
 
+    const gamma: f32 = 0.7;
     for (0..render_height) |row| {
         for (0..render_width) |col| {
             const rgba_off = row * rgba_stride + col * 4;
             const gray_off = row * @as(usize, render_width) + col;
-            // Green channel is at offset +1 in RGBA.
-            buf[gray_off] = rgba_buf[rgba_off + 1];
+            // max(R,G,B) captures the best coverage from any channel.
+            const r = rgba_buf[rgba_off];
+            const g = rgba_buf[rgba_off + 1];
+            const b = rgba_buf[rgba_off + 2];
+            const v = @max(r, @max(g, b));
+            if (v > 0) {
+                const normalized: f32 = @as(f32, @floatFromInt(v)) / 255.0;
+                const corrected: f32 = std.math.pow(f32, normalized, gamma);
+                buf[gray_off] = @intFromFloat(@round(corrected * 255.0));
+            } else {
+                buf[gray_off] = 0;
+            }
         }
     }
 
