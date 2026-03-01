@@ -1,265 +1,280 @@
-/// Renderer — translates port protocol commands into libvaxis draw calls.
+/// Renderer — translates port protocol commands into Surface draw calls.
 ///
-/// Receives decoded `RenderCommand` values from the protocol layer
-/// and applies them to a libvaxis window. Calls `vaxis.render()` on
-/// `batch_end` to flush changes to the terminal.
+/// Generic over a Surface type, enabling backend-independent rendering.
+/// The TUI backend provides a VaxisSurface; a future GPU backend would
+/// provide a MetalSurface, etc.
 ///
 /// Memory: grapheme byte slices from Port messages are short-lived (the
 /// message buffer is reused between commands). The renderer copies each
 /// grapheme into an arena that is reset after every `batch_end` render,
-/// ensuring the screen buffer's cell slices remain valid until render()
-/// finishes consuming them.
+/// ensuring cell grapheme slices remain valid until render() finishes.
 const std = @import("std");
 const vaxis = @import("vaxis");
 const protocol = @import("protocol.zig");
+const surface_mod = @import("surface.zig");
+const Cell = surface_mod.Cell;
 
-pub const Renderer = struct {
-    vx: *vaxis.Vaxis,
-    tty_writer: *std.Io.Writer,
-    arena: std.heap.ArenaAllocator,
+/// Creates a Renderer bound to a specific Surface implementation.
+///
+/// The Surface type must implement the interface defined in surface.zig:
+///   clear, writeCell, showCursor, setCursorShape, render, width, height
+pub fn Renderer(comptime SurfaceT: type) type {
+    // Validate the surface interface at comptime.
+    comptime surface_mod.assertSurface(SurfaceT);
 
-    /// Initialize a renderer bound to a vaxis instance and tty writer.
-    /// `alloc` backs the internal arena used for grapheme byte copies.
-    pub fn init(vx: *vaxis.Vaxis, tty_writer: *std.Io.Writer, alloc: std.mem.Allocator) Renderer {
-        return .{
-            .vx = vx,
-            .tty_writer = tty_writer,
-            .arena = std.heap.ArenaAllocator.init(alloc),
-        };
-    }
+    return struct {
+        const Self = @This();
 
-    /// Free all arena memory.
-    pub fn deinit(self: *Renderer) void {
-        self.arena.deinit();
-    }
+        surface: *SurfaceT,
+        arena: std.heap.ArenaAllocator,
 
-    /// Process a single render command.
-    pub fn handleCommand(self: *Renderer, cmd: protocol.RenderCommand) !void {
-        switch (cmd) {
-            .clear => {
-                const win = self.vx.window();
-                win.clear();
-                // Safe to discard pending grapheme copies when the screen is cleared.
-                _ = self.arena.reset(.retain_capacity);
-            },
+        /// Initialize a renderer bound to a surface.
+        /// `alloc` backs the internal arena used for grapheme byte copies.
+        pub fn init(s: *SurfaceT, alloc: std.mem.Allocator) Self {
+            return .{
+                .surface = s,
+                .arena = std.heap.ArenaAllocator.init(alloc),
+            };
+        }
 
-            .draw_text => |dt| {
-                const win = self.vx.window();
-                const style = buildStyle(dt.fg, dt.bg, dt.attrs);
-                var col: u16 = dt.col;
+        /// Free all arena memory.
+        pub fn deinit(self: *Self) void {
+            self.arena.deinit();
+        }
 
-                // Iterate over the text grapheme by grapheme and write each
-                // one as a separate cell. We copy grapheme bytes into the
-                // arena so they remain valid until the next batch_end render.
-                var iter = vaxis.unicode.graphemeIterator(dt.text);
-                while (iter.next()) |grapheme| {
-                    if (col >= win.width) break;
+        /// Process a single render command.
+        pub fn handleCommand(self: *Self, cmd: protocol.RenderCommand) !void {
+            switch (cmd) {
+                .clear => {
+                    self.surface.clear();
+                    // Safe to discard pending grapheme copies when the screen is cleared.
+                    _ = self.arena.reset(.retain_capacity);
+                },
 
-                    const raw = grapheme.bytes(dt.text);
+                .draw_text => |dt| {
+                    var col: u16 = dt.col;
+                    const surf_width = self.surface.width();
 
-                    // Copy bytes to arena-backed memory so the cell slice
-                    // outlives the message buffer.
-                    const stable = try self.arena.allocator().dupe(u8, raw);
+                    // Iterate over the text grapheme by grapheme and write each
+                    // one as a separate cell.
+                    var iter = vaxis.unicode.graphemeIterator(dt.text);
+                    while (iter.next()) |grapheme| {
+                        if (col >= surf_width) break;
 
-                    // Compute display width (0 → libvaxis measures at render time).
-                    const w: u16 = vaxis.gwidth.gwidth(stable, .wcwidth);
+                        const raw = grapheme.bytes(dt.text);
 
-                    win.writeCell(col, dt.row, .{
-                        .char = .{
+                        // Copy bytes to arena-backed memory so the cell slice
+                        // outlives the message buffer.
+                        const stable = try self.arena.allocator().dupe(u8, raw);
+
+                        // Compute display width.
+                        const w: u16 = vaxis.gwidth.gwidth(stable, .wcwidth);
+
+                        self.surface.writeCell(col, dt.row, .{
                             .grapheme = stable,
                             .width = @intCast(if (w == 0) 1 else w),
-                        },
-                        .style = style,
-                    });
+                            .fg = dt.fg,
+                            .bg = dt.bg,
+                            .attrs = dt.attrs,
+                        });
 
-                    // Advance column, guarding against wrapping on unreasonably
-                    // wide glyphs (practical terminal widths fit in u16).
-                    col +|= if (w == 0) 1 else w;
-                }
-            },
+                        col +|= if (w == 0) 1 else w;
+                    }
+                },
 
-            .set_cursor => |sc| {
-                const win = self.vx.window();
-                win.showCursor(sc.col, sc.row);
-            },
+                .set_cursor => |sc| {
+                    self.surface.showCursor(sc.col, sc.row);
+                },
 
-            .set_cursor_shape => |shape| {
-                const win = self.vx.window();
-                win.setCursorShape(switch (shape) {
-                    .block => .block,
-                    .beam => .beam,
-                    .underline => .underline,
-                });
-            },
+                .set_cursor_shape => |shape| {
+                    self.surface.setCursorShape(shape);
+                },
 
-            .batch_end => {
-                try self.vx.render(self.tty_writer);
-                // After render() all grapheme slices have been consumed —
-                // reset the arena for the next batch.
-                _ = self.arena.reset(.retain_capacity);
-            },
+                .batch_end => {
+                    try self.surface.render();
+                    // After render() all grapheme slices have been consumed —
+                    // reset the arena for the next batch.
+                    _ = self.arena.reset(.retain_capacity);
+                },
+            }
         }
+    };
+}
+
+// ── Mock Surface for testing ──────────────────────────────────────────────────
+
+/// A mock Surface that records calls for test verification.
+const MockSurface = struct {
+    clear_count: usize = 0,
+    render_count: usize = 0,
+    last_cursor_col: u16 = 0,
+    last_cursor_row: u16 = 0,
+    last_cursor_shape: surface_mod.CursorShape = .block,
+    cells_written: usize = 0,
+    last_cell: ?Cell = null,
+    mock_width: u16 = 80,
+    mock_height: u16 = 24,
+
+    pub fn clear(self: *MockSurface) void {
+        self.clear_count += 1;
+    }
+
+    pub fn writeCell(self: *MockSurface, _: u16, _: u16, cell: Cell) void {
+        self.cells_written += 1;
+        self.last_cell = cell;
+    }
+
+    pub fn showCursor(self: *MockSurface, col: u16, row: u16) void {
+        self.last_cursor_col = col;
+        self.last_cursor_row = row;
+    }
+
+    pub fn setCursorShape(self: *MockSurface, shape: surface_mod.CursorShape) void {
+        self.last_cursor_shape = shape;
+    }
+
+    pub fn render(self: *MockSurface) !void {
+        self.render_count += 1;
+    }
+
+    pub fn width(self: *MockSurface) u16 {
+        return self.mock_width;
+    }
+
+    pub fn height(self: *MockSurface) u16 {
+        return self.mock_height;
     }
 };
 
-/// Build a vaxis Style from protocol color/attribute values.
-fn buildStyle(fg: u24, bg: u24, attrs: u8) vaxis.Cell.Style {
-    var style: vaxis.Cell.Style = .{};
-
-    // Set foreground color (0 means "default" in the protocol).
-    if (fg != 0) {
-        style.fg = .{ .rgb = .{
-            @as(u8, @intCast((fg >> 16) & 0xFF)),
-            @as(u8, @intCast((fg >> 8) & 0xFF)),
-            @as(u8, @intCast(fg & 0xFF)),
-        } };
-    }
-
-    // Set background color.
-    if (bg != 0) {
-        style.bg = .{ .rgb = .{
-            @as(u8, @intCast((bg >> 16) & 0xFF)),
-            @as(u8, @intCast((bg >> 8) & 0xFF)),
-            @as(u8, @intCast(bg & 0xFF)),
-        } };
-    }
-
-    // Map attribute flags.
-    if (attrs & protocol.ATTR_BOLD != 0) style.bold = true;
-    if (attrs & protocol.ATTR_ITALIC != 0) style.italic = true;
-    if (attrs & protocol.ATTR_UNDERLINE != 0) style.ul_style = .single;
-    if (attrs & protocol.ATTR_REVERSE != 0) style.reverse = true;
-
-    return style;
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test "buildStyle with no attrs" {
-    const style = buildStyle(0xFFFFFF, 0x000000, 0);
-    try std.testing.expect(style.bold == false);
-    try std.testing.expect(style.italic == false);
+test "handleCommand clear calls surface.clear and resets arena" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.clear);
+    try std.testing.expectEqual(@as(usize, 1), mock.clear_count);
 }
 
-test "buildStyle with bold and italic" {
-    const style = buildStyle(0, 0, protocol.ATTR_BOLD | protocol.ATTR_ITALIC);
-    try std.testing.expect(style.bold == true);
-    try std.testing.expect(style.italic == true);
+test "handleCommand set_cursor calls surface.showCursor" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .set_cursor = .{ .row = 5, .col = 10 } });
+    try std.testing.expectEqual(@as(u16, 10), mock.last_cursor_col);
+    try std.testing.expectEqual(@as(u16, 5), mock.last_cursor_row);
 }
 
-test "buildStyle fg rgb encoding" {
-    const style = buildStyle(0xFF8040, 0, 0);
-    switch (style.fg) {
-        .rgb => |rgb| {
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[0]);
-            try std.testing.expectEqual(@as(u8, 0x80), rgb[1]);
-            try std.testing.expectEqual(@as(u8, 0x40), rgb[2]);
-        },
-        else => return error.UnexpectedColorKind,
-    }
+test "handleCommand set_cursor_shape calls surface.setCursorShape" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .set_cursor_shape = .beam });
+    try std.testing.expectEqual(surface_mod.CursorShape.beam, mock.last_cursor_shape);
 }
 
-test "buildStyle underline and reverse" {
-    const style = buildStyle(0, 0, protocol.ATTR_UNDERLINE | protocol.ATTR_REVERSE);
-    try std.testing.expect(style.ul_style == .single);
-    try std.testing.expect(style.reverse == true);
+test "handleCommand batch_end calls surface.render" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.batch_end);
+    try std.testing.expectEqual(@as(usize, 1), mock.render_count);
 }
 
-test "buildStyle with all attributes set (bold+italic+underline+reverse)" {
-    const all = protocol.ATTR_BOLD | protocol.ATTR_ITALIC | protocol.ATTR_UNDERLINE | protocol.ATTR_REVERSE;
-    const style = buildStyle(0, 0, all);
-    try std.testing.expect(style.bold == true);
-    try std.testing.expect(style.italic == true);
-    try std.testing.expect(style.ul_style == .single);
-    try std.testing.expect(style.reverse == true);
+test "handleCommand draw_text writes cells to surface" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0xFFFFFF,
+        .bg = 0x000000,
+        .attrs = 0,
+        .text = "hi",
+    } });
+    try std.testing.expectEqual(@as(usize, 2), mock.cells_written);
+    // Last cell should be 'i'
+    const cell = mock.last_cell.?;
+    try std.testing.expectEqualStrings("i", cell.grapheme);
+    try std.testing.expectEqual(@as(u24, 0xFFFFFF), cell.fg);
+    try std.testing.expectEqual(@as(u24, 0x000000), cell.bg);
 }
 
-test "buildStyle with only bg color (fg=0)" {
-    const style = buildStyle(0, 0x123456, 0);
-    // fg should remain default (not rgb)
-    try std.testing.expect(style.fg == .default);
-    switch (style.bg) {
-        .rgb => |rgb| {
-            try std.testing.expectEqual(@as(u8, 0x12), rgb[0]);
-            try std.testing.expectEqual(@as(u8, 0x34), rgb[1]);
-            try std.testing.expectEqual(@as(u8, 0x56), rgb[2]);
-        },
-        else => return error.UnexpectedColorKind,
-    }
+test "handleCommand draw_text respects surface width boundary" {
+    var mock = MockSurface{ .mock_width = 3 };
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0,
+        .bg = 0,
+        .attrs = 0,
+        .text = "abcde", // 5 chars but width is 3
+    } });
+    try std.testing.expectEqual(@as(usize, 3), mock.cells_written);
 }
 
-test "buildStyle with only fg color (bg=0)" {
-    const style = buildStyle(0xABCDEF, 0, 0);
-    switch (style.fg) {
-        .rgb => |rgb| {
-            try std.testing.expectEqual(@as(u8, 0xAB), rgb[0]);
-            try std.testing.expectEqual(@as(u8, 0xCD), rgb[1]);
-            try std.testing.expectEqual(@as(u8, 0xEF), rgb[2]);
-        },
-        else => return error.UnexpectedColorKind,
-    }
-    // bg should remain default
-    try std.testing.expect(style.bg == .default);
+test "handleCommand draw_text with empty text writes nothing" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0,
+        .bg = 0,
+        .attrs = 0,
+        .text = "",
+    } });
+    try std.testing.expectEqual(@as(usize, 0), mock.cells_written);
 }
 
-test "buildStyle default (all zeros) returns empty style" {
-    const style = buildStyle(0, 0, 0);
-    try std.testing.expect(style.fg == .default);
-    try std.testing.expect(style.bg == .default);
-    try std.testing.expect(style.bold == false);
-    try std.testing.expect(style.italic == false);
-    try std.testing.expect(style.ul_style == .off);
-    try std.testing.expect(style.reverse == false);
+test "handleCommand draw_text passes attrs through to cell" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    const attrs = protocol.ATTR_BOLD | protocol.ATTR_ITALIC;
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0,
+        .bg = 0,
+        .attrs = attrs,
+        .text = "x",
+    } });
+    const cell = mock.last_cell.?;
+    try std.testing.expectEqual(attrs, cell.attrs);
 }
 
-test "buildStyle max color values (0xFFFFFF fg and bg)" {
-    const style = buildStyle(0xFFFFFF, 0xFFFFFF, 0);
-    switch (style.fg) {
-        .rgb => |rgb| {
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[0]);
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[1]);
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[2]);
-        },
-        else => return error.UnexpectedColorKind,
-    }
-    switch (style.bg) {
-        .rgb => |rgb| {
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[0]);
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[1]);
-            try std.testing.expectEqual(@as(u8, 0xFF), rgb[2]);
-        },
-        else => return error.UnexpectedColorKind,
-    }
-}
+test "clear then draw_text then batch_end full sequence" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
 
-test "buildStyle bold only" {
-    const style = buildStyle(0, 0, protocol.ATTR_BOLD);
-    try std.testing.expect(style.bold == true);
-    try std.testing.expect(style.italic == false);
-    try std.testing.expect(style.ul_style == .off);
-    try std.testing.expect(style.reverse == false);
-}
+    try rend.handleCommand(.clear);
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0xABCDEF,
+        .bg = 0x123456,
+        .attrs = 0,
+        .text = "hello",
+    } });
+    try rend.handleCommand(.{ .set_cursor = .{ .row = 0, .col = 3 } });
+    try rend.handleCommand(.batch_end);
 
-test "buildStyle italic only" {
-    const style = buildStyle(0, 0, protocol.ATTR_ITALIC);
-    try std.testing.expect(style.bold == false);
-    try std.testing.expect(style.italic == true);
-    try std.testing.expect(style.ul_style == .off);
-    try std.testing.expect(style.reverse == false);
-}
-
-test "buildStyle underline only" {
-    const style = buildStyle(0, 0, protocol.ATTR_UNDERLINE);
-    try std.testing.expect(style.bold == false);
-    try std.testing.expect(style.italic == false);
-    try std.testing.expect(style.ul_style == .single);
-    try std.testing.expect(style.reverse == false);
-}
-
-test "buildStyle reverse only" {
-    const style = buildStyle(0, 0, protocol.ATTR_REVERSE);
-    try std.testing.expect(style.bold == false);
-    try std.testing.expect(style.italic == false);
-    try std.testing.expect(style.ul_style == .off);
-    try std.testing.expect(style.reverse == true);
+    try std.testing.expectEqual(@as(usize, 1), mock.clear_count);
+    try std.testing.expectEqual(@as(usize, 5), mock.cells_written);
+    try std.testing.expectEqual(@as(u16, 3), mock.last_cursor_col);
+    try std.testing.expectEqual(@as(usize, 1), mock.render_count);
 }
