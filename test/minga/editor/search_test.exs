@@ -247,7 +247,7 @@ defmodule Minga.Editor.SearchTest do
              "Expected live highlight during :%s typing, got: #{inspect(cell)}"
     end
 
-    test "live substitution preview shows replacement text" do
+    test "live substitution preview shows replacement text highlighted" do
       ctx = start_editor("foo bar foo")
       send_keys(ctx, ":")
       type_text(ctx, "%s/foo/hello/g")
@@ -260,6 +260,13 @@ defmodule Minga.Editor.SearchTest do
 
       assert String.contains?(row_text, "hello bar hello"),
              "Expected live preview of substitution, got: #{inspect(row_text)}"
+
+      # The replacement text "hello" should be highlighted in yellow
+      first_h = :binary.match(row_text, "h") |> elem(0)
+      cell = screen_cell(ctx, 0, first_h)
+
+      assert cell.bg == 0xECBE7B,
+             "Expected replacement text highlighted in yellow, got: #{inspect(cell)}"
     end
   end
 end

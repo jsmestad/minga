@@ -95,10 +95,15 @@ defmodule Minga.Editor.Renderer do
     clear = [Protocol.encode_clear()]
 
     # Apply live substitution preview if typing :%s/pattern/replacement
-    lines = maybe_substitute_preview(state, lines, first_line)
+    {lines, preview_matches} = maybe_substitute_preview(state, lines, first_line)
 
     visual_selection = visual_selection_bounds(state, cursor)
-    search_matches = search_matches_for_lines(state, lines, first_line)
+
+    search_matches =
+      case preview_matches do
+        [] -> search_matches_for_lines(state, lines, first_line)
+        _ -> preview_matches
+      end
 
     # 4. Render gutter + content lines.
     {gutter_commands, line_commands} =
@@ -610,28 +615,44 @@ defmodule Minga.Editor.Renderer do
   # Applies a live substitution preview when the user is typing a substitute
   # command with both pattern and replacement present. Replaces the visible
   # lines with the preview result without mutating the buffer.
-  @spec maybe_substitute_preview(state(), [String.t()], non_neg_integer()) :: [String.t()]
+  # Returns `{preview_lines, highlight_matches}`.
+  @spec maybe_substitute_preview(state(), [String.t()], non_neg_integer()) ::
+          {[String.t()], [search_match()]}
   defp maybe_substitute_preview(
          %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}},
          lines,
-         _first_line
+         first_line
        ) do
     case extract_substitute_parts(input) do
       {pattern, replacement} when is_binary(replacement) ->
-        # Detect global flag from trailing text after replacement
         global? = substitute_has_global_flag?(input)
-
-        Enum.map(lines, fn line ->
-          {new_line, _count} = Minga.Search.substitute_line(line, pattern, replacement, global?)
-          new_line
-        end)
+        substitute_preview_lines(lines, first_line, pattern, replacement, global?)
 
       _ ->
-        lines
+        {lines, []}
     end
   end
 
-  defp maybe_substitute_preview(_state, lines, _first_line), do: lines
+  defp maybe_substitute_preview(_state, lines, _first_line), do: {lines, []}
+
+  @spec substitute_preview_lines(
+          [String.t()],
+          non_neg_integer(),
+          String.t(),
+          String.t(),
+          boolean()
+        ) :: {[String.t()], [search_match()]}
+  defp substitute_preview_lines(lines, first_line, pattern, replacement, global?) do
+    lines
+    |> Enum.with_index(first_line)
+    |> Enum.map_reduce([], fn {line, line_num}, acc ->
+      {new_line, _count, spans} =
+        Minga.Search.substitute_line_with_spans(line, pattern, replacement, global?)
+
+      matches = Enum.map(spans, fn {col, len} -> {line_num, col, len} end)
+      {new_line, acc ++ matches}
+    end)
+  end
 
   # Checks if the substitute command input contains the /g flag.
   @spec substitute_has_global_flag?(String.t()) :: boolean()

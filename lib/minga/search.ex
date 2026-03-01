@@ -215,6 +215,64 @@ defmodule Minga.Search do
     end
   end
 
+  @typedoc "A replacement span: `{col, length}` in the substituted line."
+  @type replacement_span :: {non_neg_integer(), non_neg_integer()}
+
+  @doc """
+  Like `substitute_line/4` but also returns the column spans of the
+  replacement text in the resulting line, for highlighting.
+
+  Returns `{new_line, replacement_count, spans}`.
+
+  ## Examples
+
+      iex> Minga.Search.substitute_line_with_spans("foo bar foo", "foo", "hello", true)
+      {"hello bar hello", 2, [{0, 5}, {10, 5}]}
+  """
+  @spec substitute_line_with_spans(String.t(), String.t(), String.t(), boolean()) ::
+          {String.t(), non_neg_integer(), [replacement_span()]}
+  def substitute_line_with_spans(line, pattern, replacement, global?) do
+    graphemes = String.graphemes(line)
+    pat = String.graphemes(pattern)
+    spec = {pat, length(pat), replacement, String.length(replacement)}
+    {result, count, spans} = do_sub_spans(graphemes, spec, global?, [], 0, 0, [])
+    {result |> Enum.reverse() |> Enum.join(), count, Enum.reverse(spans)}
+  end
+
+  @typep sub_span_spec ::
+           {[String.t()], non_neg_integer(), String.t(), non_neg_integer()}
+
+  @spec do_sub_spans(
+          [String.t()],
+          sub_span_spec(),
+          boolean(),
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          [replacement_span()]
+        ) :: {[String.t()], non_neg_integer(), [replacement_span()]}
+  defp do_sub_spans([], _spec, _global?, acc, _col, count, spans) do
+    {acc, count, spans}
+  end
+
+  defp do_sub_spans(graphemes, {pat, pl, rep, rl} = spec, global?, acc, col, count, spans) do
+    candidate = Enum.take(graphemes, pl)
+
+    if length(candidate) == pl and candidate == pat do
+      rest = Enum.drop(graphemes, pl)
+
+      if global? do
+        do_sub_spans(rest, spec, true, [rep | acc], col + rl, count + 1, [{col, rl} | spans])
+      else
+        remaining = Enum.join(rest)
+        {[remaining, rep | acc], count + 1, [{col, rl} | spans]}
+      end
+    else
+      [head | tail] = graphemes
+      do_sub_spans(tail, spec, global?, [head | acc], col + 1, count, spans)
+    end
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec find_forward([String.t()], String.t(), position(), non_neg_integer()) ::
