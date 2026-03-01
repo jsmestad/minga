@@ -2,7 +2,7 @@ const std = @import("std");
 
 const BackendOption = enum {
     tui,
-    // gui,  // Future: native GUI backend
+    gui,
 };
 
 pub fn build(b: *std.Build) void {
@@ -31,6 +31,12 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("build_options", build_options.createModule());
+
+    // GUI backend: compile Swift, link AppKit/Foundation frameworks.
+    if (backend == .gui) {
+        addGuiBuildSteps(b, exe);
+    }
+
     b.installArtifact(exe);
 
     // Run step
@@ -52,7 +58,68 @@ pub fn build(b: *std.Build) void {
     });
     tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
     tests.root_module.addImport("build_options", build_options.createModule());
+
+    if (backend == .gui) {
+        addGuiBuildSteps(b, tests);
+    }
+
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+}
+
+/// Configure GUI-specific build steps: compile Swift → .o, link frameworks,
+/// add C include paths.
+fn addGuiBuildSteps(b: *std.Build, compile: *std.Build.Step.Compile) void {
+    // Compile Swift source to object file.
+    const swift_compile = b.addSystemCommand(&.{
+        "swiftc",
+        "-c",
+        "-parse-as-library",
+        "-emit-object",
+        "-o",
+    });
+    const swift_obj = swift_compile.addOutputFileArg("MingaApp.o");
+    swift_compile.addFileArg(b.path("swift/MingaApp.swift"));
+    swift_compile.addArgs(&.{
+        "-import-objc-header",
+    });
+    swift_compile.addFileArg(b.path("swift/include/minga_gui.h"));
+
+    // Link the Swift object file.
+    compile.root_module.addObjectFile(swift_obj);
+
+    // Add the bridging header include path so Zig can @cImport("minga_gui.h").
+    compile.root_module.addIncludePath(b.path("swift/include"));
+
+    // Link macOS frameworks.
+    compile.root_module.linkFramework("AppKit", .{});
+    compile.root_module.linkFramework("Foundation", .{});
+
+    // Link the Swift runtime and overlay libraries. On macOS, these live
+    // in the SDK's /usr/lib/swift/ directory as .tbd stubs (the actual
+    // dylibs are in the shared cache). Importing AppKit from Swift
+    // transitively pulls in all these overlay libraries.
+    compile.root_module.addLibraryPath(.{
+        .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/swift",
+    });
+    const swift_libs = [_][]const u8{
+        "swiftCore",
+        "swiftObjectiveC",
+        "swiftCoreFoundation",
+        "swiftCoreImage",
+        "swiftDispatch",
+        "swiftIOKit",
+        "swiftMetal",
+        "swiftOSLog",
+        "swiftQuartzCore",
+        "swiftUniformTypeIdentifiers",
+        "swiftXPC",
+        "swift_Builtin_float",
+        "swiftos",
+        "swiftsimd",
+    };
+    for (swift_libs) |lib| {
+        compile.root_module.linkSystemLibrary(lib, .{});
+    }
 }

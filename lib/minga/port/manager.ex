@@ -19,10 +19,14 @@ defmodule Minga.Port.Manager do
 
   require Logger
 
+  @typedoc "Renderer backend."
+  @type backend :: :tui | :gui
+
   @typedoc "Options for starting the port manager."
   @type start_opt ::
           {:name, GenServer.name()}
           | {:renderer_path, String.t()}
+          | {:backend, backend()}
 
   alias Minga.Port.Manager.State, as: PortState
 
@@ -67,7 +71,8 @@ defmodule Minga.Port.Manager do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path())
+    backend = Keyword.get(opts, :backend, :tui)
+    renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path(backend))
 
     state = %PortState{renderer_path: renderer_path}
     {:ok, start_port(state)}
@@ -198,16 +203,25 @@ defmodule Minga.Port.Manager do
     Enum.each(subscribers, &send(&1, message))
   end
 
-  @spec default_renderer_path() :: String.t()
-  defp default_renderer_path do
+  @spec default_renderer_path(backend()) :: String.t()
+  defp default_renderer_path(backend) do
+    binary_name = renderer_binary_name(backend)
+
     # In a release (or Burrito binary), the renderer lives in priv/
-    priv_path = Application.app_dir(:minga, "priv/minga-renderer")
+    priv_path = Application.app_dir(:minga, "priv/#{binary_name}")
 
     if File.exists?(priv_path) do
       priv_path
     else
-      # Dev/test fallback: compiled Zig binary in the source tree
+      # Dev/test fallback: compiled Zig binary in the source tree.
+      # Both backends produce "minga-renderer" in zig-out/bin (Zig build
+      # output name doesn't change), but we copy them to priv/ with
+      # distinct names.
       Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
     end
   end
+
+  @spec renderer_binary_name(backend()) :: String.t()
+  defp renderer_binary_name(:tui), do: "minga-renderer"
+  defp renderer_binary_name(:gui), do: "minga-renderer-gui"
 end

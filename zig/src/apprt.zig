@@ -7,7 +7,7 @@ const build_options = @import("build_options");
 
 pub const Backend = switch (build_options.backend) {
     .tui => @import("apprt/tui.zig"),
-    // Future: .gui => @import("apprt/gui.zig"),
+    .gui => @import("apprt/gui.zig"),
 };
 
 test {

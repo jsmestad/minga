@@ -12,38 +12,63 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @zig_dir "zig"
   @priv_dir "priv"
   @renderer_name "minga-renderer"
+  @renderer_gui_name "minga-renderer-gui"
 
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
   def run(_opts) do
     if File.dir?(@zig_dir) do
-      compile_zig()
+      with {:ok, []} <- compile_zig_backend("tui", @renderer_name) do
+        compile_zig_gui()
+      end
     else
       {:ok, []}
     end
   end
 
-  @spec compile_zig() :: {:ok, []} | {:error, []}
-  defp compile_zig do
-    Mix.shell().info("Compiling Zig renderer...")
+  @spec compile_zig_backend(String.t(), String.t()) :: {:ok, []} | {:error, []}
+  defp compile_zig_backend(backend, output_name) do
+    Mix.shell().info("Compiling Zig renderer (#{backend})...")
 
-    case System.cmd("zig", ["build"], cd: @zig_dir, stderr_to_stdout: true) do
+    args = ["build"] ++ if(backend != "tui", do: ["-Dbackend=#{backend}"], else: [])
+
+    case System.cmd("zig", args, cd: @zig_dir, stderr_to_stdout: true) do
       {_output, 0} ->
-        Mix.shell().info("Zig renderer compiled successfully")
-        copy_to_priv()
+        Mix.shell().info("Zig renderer (#{backend}) compiled successfully")
+        copy_to_priv(@renderer_name, output_name)
         {:ok, []}
 
       {output, _code} ->
-        Mix.shell().error("Zig compilation failed:\n#{output}")
+        Mix.shell().error("Zig compilation (#{backend}) failed:\n#{output}")
         {:error, []}
     end
   end
 
-  @spec copy_to_priv() :: :ok
-  defp copy_to_priv do
-    src = Path.join([@zig_dir, "zig-out", "bin", @renderer_name])
+  # Build the GUI backend if on macOS (requires AppKit/Swift).
+  # Failures are warnings, not errors — GUI is optional.
+  @spec compile_zig_gui() :: {:ok, []} | {:error, []}
+  defp compile_zig_gui do
+    case :os.type() do
+      {:unix, :darwin} ->
+        case compile_zig_backend("gui", @renderer_gui_name) do
+          {:ok, []} ->
+            {:ok, []}
+
+          {:error, _} ->
+            Mix.shell().info("GUI backend failed to compile (optional, continuing)")
+            {:ok, []}
+        end
+
+      _ ->
+        {:ok, []}
+    end
+  end
+
+  @spec copy_to_priv(String.t(), String.t()) :: :ok
+  defp copy_to_priv(src_name, dest_name) do
+    src = Path.join([@zig_dir, "zig-out", "bin", src_name])
     File.mkdir_p!(@priv_dir)
-    dest = Path.join(@priv_dir, @renderer_name)
+    dest = Path.join(@priv_dir, dest_name)
 
     if File.exists?(src) do
       File.cp!(src, dest)

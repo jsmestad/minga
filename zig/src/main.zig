@@ -7,22 +7,33 @@
 /// The backend is selected at build time via `-Dbackend=tui` (default).
 /// Each backend owns its event loop and rendering surface.
 const std = @import("std");
-const vaxis = @import("vaxis");
+const build_options = @import("build_options");
 pub const protocol = @import("protocol.zig");
 pub const renderer = @import("renderer.zig");
 pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 
+// Vaxis is only needed for the TUI panic recovery path.
+const vaxis = if (build_options.backend == .tui) @import("vaxis") else struct {};
+
 // ── Panic handler ─────────────────────────────────────────────────────────────
-// Restores terminal state via libvaxis's global tty reference before printing
-// the panic message. Covers crashes that bypass defer.
+// Restores terminal state (TUI only) before printing the panic message.
 
 fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
-    vaxis.recover();
+    if (build_options.backend == .tui) {
+        vaxis.recover();
+    }
     std.debug.defaultPanic(msg, ret_addr);
 }
 
 pub const panic = std.debug.FullPanic(panicImpl);
+
+// ── Runtime type selection ────────────────────────────────────────────────────
+
+const Runtime = switch (build_options.backend) {
+    .tui => apprt.Backend.TuiRuntime,
+    .gui => apprt.Backend.GuiRuntime,
+};
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -31,7 +42,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    var runtime = try apprt.Backend.TuiRuntime.init(alloc);
+    var runtime = try Runtime.init(alloc);
     defer runtime.deinit();
     try runtime.run();
 }
