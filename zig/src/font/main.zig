@@ -19,8 +19,9 @@ pub const Glyph = struct {
     width: u32,
     height: u32,
     /// Bearing offsets for positioning relative to the baseline.
-    offset_x: i32,
-    offset_y: i32,
+    /// Bearing offsets in point space (fractional precision preserved).
+    offset_x: f64,
+    offset_y: f64,
 };
 
 /// Font face with glyph cache. Thread-safe for concurrent lookups

@@ -79,11 +79,13 @@ void minga_upload_atlas(const uint8_t* data, uint32_t width, uint32_t height);
 /// @param cell_count  Number of cells
 /// @param cell_width  Cell width in pixels
 /// @param cell_height Cell height in pixels
+/// @param grid_width  Grid width in columns (for cursor index calculation)
 /// @param cursor_col  Cursor column position
 /// @param cursor_row  Cursor row position
 /// @param cursor_visible  1 if cursor should be drawn, 0 otherwise
 void minga_render_frame(const struct MingaCellGPU* cells, uint32_t cell_count,
                         float cell_width, float cell_height,
+                        uint16_t grid_width,
                         uint16_t cursor_col, uint16_t cursor_row,
                         uint8_t cursor_visible);
 

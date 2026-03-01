@@ -43,9 +43,12 @@ pub const GlyphInfo = struct {
     width: u32,
     height: u32,
 
-    /// Bearing offsets for positioning.
-    offset_x: i32,
-    offset_y: i32,
+    /// Bearing offsets for positioning (in point space, fractional).
+    /// Stored as floats to preserve sub-pixel precision — truncating to
+    /// integers causes per-glyph rounding errors that create visible
+    /// vertical wobble when scaled for Retina rendering.
+    offset_x: f64,
+    offset_y: f64,
 };
 
 /// Load a font by name (e.g. "Menlo", "SF Mono") at the given point size.
@@ -127,40 +130,45 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     // Reserve space in the atlas.
     const region = try atlas.reserve(alloc, render_width, render_height);
 
-    // Rasterize into a temporary buffer.
-    const buf_size = @as(usize, render_width) * render_height;
-    const buf = try alloc.alloc(u8, buf_size);
-    defer alloc.free(buf);
-    @memset(buf, 0);
+    // Rasterize into an RGBA temporary buffer. CoreText uses a superior
+    // font rendering pipeline (LCD subpixel + smoothing) when drawing to
+    // an RGBA context vs. grayscale.  We draw white-on-black, then extract
+    // the green channel as our grayscale alpha value.
+    const rgba_stride = @as(usize, render_width) * 4;
+    const rgba_size = rgba_stride * render_height;
+    const rgba_buf = try alloc.alloc(u8, rgba_size);
+    defer alloc.free(rgba_buf);
+    @memset(rgba_buf, 0);
 
-    // Create a bitmap context and draw the glyph.
-    const color_space = c.CGColorSpaceCreateDeviceGray();
+    const color_space = c.CGColorSpaceCreateDeviceRGB();
     defer c.CGColorSpaceRelease(color_space);
 
     const ctx = c.CGBitmapContextCreate(
-        buf.ptr,
+        rgba_buf.ptr,
         render_width,
         render_height,
         8, // bits per component
-        render_width, // bytes per row (1 byte per pixel)
+        @intCast(rgba_stride), // 4 bytes per pixel
         color_space,
-        c.kCGImageAlphaNone,
+        c.kCGImageAlphaPremultipliedLast, // RGBA
     ) orelse return error.BitmapContextFailed;
     defer c.CGContextRelease(ctx);
 
     // Scale the context so CoreText rasterizes at Retina resolution.
-    // This produces crisp 2x bitmaps instead of blurry 1x stretched glyphs.
     c.CGContextScaleCTM(ctx, @floatCast(scale), @floatCast(scale));
 
-    // Enable font smoothing — without this, CoreText renders thin/spindly
-    // glyphs in bitmap contexts. Font smoothing adds weight to strokes,
-    // matching the look of native macOS text rendering.
+    // Enable full font smoothing — CoreText renders significantly better
+    // with LCD smoothing in an RGBA context.
     c.CGContextSetAllowsFontSmoothing(ctx, true);
     c.CGContextSetShouldSmoothFonts(ctx, true);
     c.CGContextSetShouldAntialias(ctx, true);
+    c.CGContextSetAllowsFontSubpixelPositioning(ctx, true);
+    c.CGContextSetShouldSubpixelPositionFonts(ctx, true);
+    c.CGContextSetAllowsFontSubpixelQuantization(ctx, true);
+    c.CGContextSetShouldSubpixelQuantizeFonts(ctx, true);
 
-    // Set white foreground on black background for alpha extraction.
-    c.CGContextSetGrayFillColor(ctx, 1.0, 1.0);
+    // White foreground on black background.
+    c.CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
 
     // Position the glyph in point space (pre-scale). The CTM scale
     // transform converts these to pixel coordinates automatically.
@@ -170,15 +178,18 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
 
-    // Apply gamma correction to boost glyph weight. CoreText in a grayscale
-    // context produces thin strokes; a gamma < 1.0 boosts midtones so text
-    // looks as heavy as native macOS rendering. 0.6 matches Terminal.app.
-    const gamma: f32 = 0.6;
-    for (buf[0..buf_size]) |*pixel| {
-        if (pixel.* > 0) {
-            const normalized: f32 = @as(f32, @floatFromInt(pixel.*)) / 255.0;
-            const corrected: f32 = std.math.pow(f32, normalized, gamma);
-            pixel.* = @intFromFloat(@round(corrected * 255.0));
+    // Extract green channel from RGBA into a single-channel grayscale buffer.
+    // Green gives the best perceptual match for LCD-rendered text.
+    const buf_size = @as(usize, render_width) * render_height;
+    const buf = try alloc.alloc(u8, buf_size);
+    defer alloc.free(buf);
+
+    for (0..render_height) |row| {
+        for (0..render_width) |col| {
+            const rgba_off = row * rgba_stride + col * 4;
+            const gray_off = row * @as(usize, render_width) + col;
+            // Green channel is at offset +1 in RGBA.
+            buf[gray_off] = rgba_buf[rgba_off + 1];
         }
     }
 
@@ -190,8 +201,8 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
         .atlas_y = region.y,
         .width = render_width,
         .height = render_height,
-        .offset_x = @intFromFloat(@floor(bounding_rect.origin.x)),
-        .offset_y = @intFromFloat(@floor(bounding_rect.origin.y + bounding_rect.size.height)),
+        .offset_x = bounding_rect.origin.x,
+        .offset_y = bounding_rect.origin.y + bounding_rect.size.height,
     };
 }
 

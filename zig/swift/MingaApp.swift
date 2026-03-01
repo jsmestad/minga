@@ -391,6 +391,7 @@ public func mingaRenderFrame(
     _ cellCount: UInt32,
     _ cellWidth: Float,
     _ cellHeight: Float,
+    _ gridWidth: UInt16,
     _ cursorCol: UInt16,
     _ cursorRow: UInt16,
     _ cursorVisible: UInt8
@@ -469,7 +470,7 @@ public func mingaRenderFrame(
 
             // Cursor overlay
             if cursorVisible != 0 {
-                let cursorIdx = Int(cursorRow) * Int(ceil(drawableSize.width / Double(cellWidth * Float(layer.contentsScale)))) + Int(cursorCol)
+                let cursorIdx = Int(cursorRow) * Int(gridWidth) + Int(cursorCol)
                 if cursorIdx >= 0 && cursorIdx < count {
                     var cursorCell = cellsCopy[cursorIdx]
                     cursorCell.fg_color = (1.0, 1.0, 1.0)

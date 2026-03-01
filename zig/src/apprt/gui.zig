@@ -181,8 +181,8 @@ pub const GuiSurface = struct {
                     // Bearing offsets are in point space — scale to drawable pixels.
                     const baseline_y: f32 = @floatCast(face.loader.ascent);
                     gpu.glyph_offset = .{
-                        @as(f32, @floatFromInt(glyph.offset_x)) * scale,
-                        (baseline_y - @as(f32, @floatFromInt(glyph.offset_y))) * scale,
+                        @as(f32, @floatCast(glyph.offset_x)) * scale,
+                        (baseline_y - @as(f32, @floatCast(glyph.offset_y))) * scale,
                     };
                 } else |_| {}
             }
@@ -196,6 +196,7 @@ pub const GuiSurface = struct {
             @intCast(count),
             cell_w,
             cell_h,
+            self.grid_width,
             self.cursor_col,
             self.cursor_row,
             if (self.cursor_visible) 1 else 0,
