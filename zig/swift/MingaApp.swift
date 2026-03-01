@@ -296,8 +296,11 @@ private func setupPipelines(device: MTLDevice, library: MTLLibrary) -> Bool {
     glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
     glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
     glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+    // Premultiplied alpha blending — the fragment shader outputs
+    // rgb = fg_color * alpha (premultiplied), so use .one for source RGB.
+    // Using .sourceAlpha would double-multiply → alpha² → thin text.
     glyphDesc.colorAttachments[0].isBlendingEnabled = true
-    glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+    glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .one
     glyphDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
     glyphDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
     glyphDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha

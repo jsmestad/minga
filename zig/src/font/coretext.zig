@@ -202,11 +202,12 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
     c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
 
-    // ── Extract luminance from RGBA as single-channel alpha ──
+    // ── Extract max(R,G,B) from RGBA as single-channel alpha ──
     // Font smoothing distributes coverage across R, G, B channels
-    // (subpixel rendering). We extract perceived luminance using the
-    // standard Rec. 709 formula — this preserves the stroke weight
-    // that font smoothing adds.
+    // (subpixel rendering). max(R,G,B) captures the maximum coverage
+    // from any channel, preserving the full stroke weight that CoreText's
+    // LCD rendering produces. This is the standard technique for
+    // single-channel atlas extraction from subpixel-rendered text.
     const buf_size = @as(usize, render_width) * render_height;
     const buf = try alloc.alloc(u8, buf_size);
     defer alloc.free(buf);
@@ -218,12 +219,7 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
             const r = rgba_buf[rgba_off];
             const g = rgba_buf[rgba_off + 1];
             const b = rgba_buf[rgba_off + 2];
-            // Rec. 709 luminance — perceptually accurate brightness.
-            // This preserves the font weight from LCD subpixel rendering.
-            const lum: f32 = 0.2126 * @as(f32, @floatFromInt(r)) +
-                0.7152 * @as(f32, @floatFromInt(g)) +
-                0.0722 * @as(f32, @floatFromInt(b));
-            buf[gray_off] = @intFromFloat(@min(lum, 255.0));
+            buf[gray_off] = @max(r, @max(g, b));
         }
     }
 
