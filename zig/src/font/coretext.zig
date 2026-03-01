@@ -112,20 +112,46 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     var glyph_buf: [2]c.CGGlyph = undefined;
     const utf16_len = unicodeToUtf16(codepoint, &utf16_buf);
 
+    // Try the primary font first. If it doesn't have the glyph (e.g. emoji),
+    // use CTFontCreateForString to find a fallback font (Apple Color Emoji, etc.).
+    var render_font = self.ct_font;
+    var owns_fallback = false;
+
     if (!c.CTFontGetGlyphsForCharacters(
         self.ct_font,
         &utf16_buf,
         &glyph_buf,
         @intCast(utf16_len),
     )) {
-        glyph_buf[0] = 0;
+        // Primary font doesn't have this glyph — ask CoreText for a fallback.
+        const cf_str = c.CFStringCreateWithCharacters(null, &utf16_buf, @intCast(utf16_len));
+        if (cf_str) |s| {
+            defer c.CFRelease(s);
+            const range = c.CFRange{ .location = 0, .length = @intCast(utf16_len) };
+            const fallback = c.CTFontCreateForString(self.ct_font, s, range);
+            if (fallback) |fb| {
+                if (c.CTFontGetGlyphsForCharacters(fb, &utf16_buf, &glyph_buf, @intCast(utf16_len))) {
+                    render_font = fb;
+                    owns_fallback = true;
+                } else {
+                    c.CFRelease(fb);
+                    glyph_buf[0] = 0;
+                }
+            } else {
+                glyph_buf[0] = 0;
+            }
+        } else {
+            glyph_buf[0] = 0;
+        }
     }
+    defer if (owns_fallback) c.CFRelease(render_font);
+
     const glyph_id = glyph_buf[0];
 
-    // Get bounding rect in point space (font is at point size).
+    // Get bounding rect in point space. Use render_font (may be fallback).
     var bounding_rect: c.CGRect = undefined;
     _ = c.CTFontGetBoundingRectsForGlyphs(
-        self.ct_font,
+        render_font,
         c.kCTFontOrientationDefault,
         &glyph_id,
         &bounding_rect,
@@ -206,7 +232,7 @@ pub fn rasterizeGlyph(self: *CoreTextFont, atlas: *Atlas, alloc: Allocator, code
     const draw_x: c.CGFloat = -bounding_rect.origin.x;
     const draw_y: c.CGFloat = -bounding_rect.origin.y;
     var position = c.CGPoint{ .x = draw_x, .y = draw_y };
-    c.CTFontDrawGlyphs(self.ct_font, &glyph_id, &position, 1, ctx);
+    c.CTFontDrawGlyphs(render_font, &glyph_id, &position, 1, ctx);
 
     // ── Extract max(R,G,B) from RGBA as single-channel alpha ──
     // Font smoothing distributes coverage across R, G, B channels
