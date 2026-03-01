@@ -11,8 +11,6 @@ defmodule Minga.FileFind do
   All paths are returned relative to the given root directory.
   """
 
-  require Logger
-
   @typedoc "A file discovery strategy."
   @type strategy :: :fd | :git | :find | :none
 
@@ -28,11 +26,22 @@ defmodule Minga.FileFind do
   """
   @spec list_files(String.t()) :: result()
   def list_files(root \\ File.cwd!()) do
-    case detect_strategy(root) do
-      :fd -> list_with_fd(root)
-      :git -> list_with_git(root)
-      :find -> list_with_find(root)
-      :none -> {:error, "No file-finding tool available. Install `fd` or `git` for best results."}
+    if File.dir?(root) do
+      case detect_strategy(root) do
+        :fd ->
+          list_with_fd(root)
+
+        :git ->
+          list_with_git(root)
+
+        :find ->
+          list_with_find(root)
+
+        :none ->
+          {:error, "No file-finding tool available. Install `fd` or `git` for best results."}
+      end
+    else
+      {:error, "Directory not found: #{root}"}
     end
   end
 
@@ -60,18 +69,7 @@ defmodule Minga.FileFind do
         {:ok, parse_lines(output)}
 
       {error, _code} ->
-        Logger.warning("fd failed: #{error}")
-        # Fall through to next strategy
-        fallback_without_fd(root)
-    end
-  end
-
-  @spec fallback_without_fd(String.t()) :: result()
-  defp fallback_without_fd(root) do
-    cond do
-      git_repo?(root) && executable_available?("git") -> list_with_git(root)
-      executable_available?("find") -> list_with_find(root)
-      true -> {:error, "File listing failed and no fallback available."}
+        {:error, "fd failed: #{String.trim(error)}"}
     end
   end
 
@@ -84,13 +82,7 @@ defmodule Minga.FileFind do
         {:ok, parse_lines(output)}
 
       {error, _code} ->
-        Logger.warning("git ls-files failed: #{error}")
-
-        if executable_available?("find") do
-          list_with_find(root)
-        else
-          {:error, "git ls-files failed: #{error}"}
-        end
+        {:error, "git ls-files failed: #{String.trim(error)}"}
     end
   end
 
