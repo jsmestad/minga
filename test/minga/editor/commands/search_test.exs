@@ -1,4 +1,4 @@
-defmodule Minga.Editor.SearchTest do
+defmodule Minga.Editor.Commands.SearchTest do
   use Minga.Test.EditorCase, async: true
 
   describe "forward search with /" do

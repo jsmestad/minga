@@ -1,4 +1,4 @@
-defmodule Minga.Editor.MarksTest do
+defmodule Minga.Editor.Commands.MarksTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
