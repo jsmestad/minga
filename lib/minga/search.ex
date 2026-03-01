@@ -163,9 +163,17 @@ defmodule Minga.Search do
     {Enum.join(new_lines, "\n"), total_count}
   end
 
+  @doc """
+  Substitutes occurrences of `pattern` with `replacement` in a single line.
+
+  When `global?` is `true`, replaces all occurrences. When `false`, replaces
+  only the first occurrence.
+
+  Returns `{new_line, replacement_count}`.
+  """
   @spec substitute_line(String.t(), String.t(), String.t(), boolean()) ::
           {String.t(), non_neg_integer()}
-  defp substitute_line(line, pattern, replacement, global?) do
+  def substitute_line(line, pattern, replacement, global?) do
     graphemes = String.graphemes(line)
     pattern_graphemes = String.graphemes(pattern)
     pattern_len = length(pattern_graphemes)

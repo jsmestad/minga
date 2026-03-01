@@ -246,5 +246,20 @@ defmodule Minga.Editor.SearchTest do
       assert cell.bg == 0xECBE7B,
              "Expected live highlight during :%s typing, got: #{inspect(cell)}"
     end
+
+    test "live substitution preview shows replacement text" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/hello/g")
+
+      # Buffer is NOT modified yet (still in command mode)
+      assert buffer_content(ctx) == "foo bar foo"
+
+      # But the screen should show the preview
+      row_text = screen_row(ctx, 0)
+
+      assert String.contains?(row_text, "hello bar hello"),
+             "Expected live preview of substitution, got: #{inspect(row_text)}"
+    end
   end
 end
