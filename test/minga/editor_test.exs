@@ -116,6 +116,71 @@ defmodule Minga.EditorTest do
       {_, col} = BufferServer.cursor(buffer)
       assert col == 4
     end
+
+    test "l at end of line does not wrap to next line" do
+      {editor, buffer} = start_editor("hi\nworld")
+      # Move to last char of "hi" (col 1)
+      send_key(editor, ?$)
+      assert BufferServer.cursor(buffer) == {0, 1}
+
+      # Pressing l again should NOT wrap to line 1
+      send_key(editor, ?l)
+      assert BufferServer.cursor(buffer) == {0, 1}
+    end
+
+    test "h at start of line does not wrap to previous line" do
+      {editor, buffer} = start_editor("hello\nworld")
+      # Move to beginning of line 1
+      send_key(editor, ?j)
+      assert BufferServer.cursor(buffer) == {1, 0}
+
+      # Pressing h should NOT wrap to line 0
+      send_key(editor, ?h)
+      assert BufferServer.cursor(buffer) == {1, 0}
+    end
+
+    test "right arrow at end of line does not wrap to next line" do
+      {editor, buffer} = start_editor("ab\ncd")
+      # Move to last char of "ab" (col 1)
+      send_key(editor, ?$)
+      assert BufferServer.cursor(buffer) == {0, 1}
+
+      # Right arrow should NOT wrap
+      send_key(editor, 57_351)
+      assert BufferServer.cursor(buffer) == {0, 1}
+    end
+
+    test "left arrow at start of line does not wrap to previous line" do
+      {editor, buffer} = start_editor("ab\ncd")
+      send_key(editor, ?j)
+      assert BufferServer.cursor(buffer) == {1, 0}
+
+      # Left arrow should NOT wrap
+      send_key(editor, 57_350)
+      assert BufferServer.cursor(buffer) == {1, 0}
+    end
+
+    test "l does not go past last character on line in normal mode" do
+      {editor, buffer} = start_editor("abc\ndef")
+      # Pressing l 10 times should stop at col 2 (last char of "abc")
+      for _ <- 1..10, do: send_key(editor, ?l)
+      assert BufferServer.cursor(buffer) == {0, 2}
+    end
+
+    test "l and h wrap across lines in insert mode" do
+      {editor, buffer} = start_editor("ab\ncd")
+      # Enter insert mode, move to end of first line
+      send_key(editor, ?i)
+      # Move right past "a", "b", then past newline into line 1
+      send_key(editor, 57_351)
+      send_key(editor, 57_351)
+      send_key(editor, 57_351)
+      assert BufferServer.cursor(buffer) == {1, 0}
+
+      # Move left back across newline to line 0
+      send_key(editor, 57_350)
+      assert BufferServer.cursor(buffer) == {0, 2}
+    end
   end
 
   describe "Normal mode — count prefix" do
