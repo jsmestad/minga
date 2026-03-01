@@ -12,7 +12,6 @@ defmodule Minga.Editor.Renderer do
   * `Renderer.Line`            — line content and selection rendering
   * `Renderer.SearchHighlight` — search/substitute highlight overlays
   * `Renderer.Minibuffer`      — command/search/status line
-  * `Renderer.WhichKey`        — which-key popup
   """
 
   alias Minga.Buffer.GapBuffer
@@ -23,13 +22,13 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.SearchHighlight
-  alias Minga.Editor.Renderer.WhichKey, as: WhichKeyRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.WhichKey
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -199,7 +198,7 @@ defmodule Minga.Editor.Renderer do
         gutter_w
       )
 
-    whichkey_commands = WhichKeyRenderer.render(state, viewport)
+    whichkey_commands = render_whichkey(state, viewport)
 
     all_commands =
       clear ++
@@ -306,4 +305,23 @@ defmodule Minga.Editor.Renderer do
        ) do
     Protocol.encode_cursor(cursor_line - viewport.top, gutter_w + cursor_col - viewport.left)
   end
+
+  @spec render_whichkey(state(), Viewport.t()) :: [binary()]
+  defp render_whichkey(%{show_whichkey: true, whichkey_node: node}, viewport)
+       when is_map(node) do
+    bindings = WhichKey.bindings_from_node(node)
+    lines = WhichKey.render_popup(bindings)
+
+    popup_row = max(0, viewport.rows - 3 - length(lines))
+
+    ([Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
+       lines)
+    |> Enum.with_index(popup_row + 1)
+    |> Enum.map(fn {line_text, row} ->
+      padded = String.pad_trailing(line_text, viewport.cols)
+      Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
+    end)
+  end
+
+  defp render_whichkey(_state, _viewport), do: []
 end
