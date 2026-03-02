@@ -30,6 +30,11 @@ fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
 
 pub const panic = std.debug.FullPanic(panicImpl);
 
+// Suppress vaxis debug log messages (they bleed into the terminal).
+pub const std_options = std.Options{
+    .log_level = .info,
+};
+
 // ── Runtime type selection ────────────────────────────────────────────────────
 
 const Runtime = switch (build_options.backend) {
