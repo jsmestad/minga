@@ -132,9 +132,10 @@ defmodule Minga.Editor do
       {:ok, pid} ->
         maybe_watch_buffer(file_watcher_pid(), pid)
         new_state = Commands.add_buffer(state, pid)
-        new_state = HighlightBridge.setup_for_buffer(new_state)
         new_state = log_message(new_state, "Opened: #{file_path}")
         Renderer.render(new_state)
+        # Setup highlighting asynchronously — don't block first paint
+        send(self(), :setup_highlight)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -252,6 +253,13 @@ defmodule Minga.Editor do
   def handle_info({:whichkey_timeout, _ref}, state) do
     # Stale timer — ignore.
     {:noreply, state}
+  end
+
+  # ── Highlight setup (async, after first paint) ────────────────────────────────
+
+  def handle_info(:setup_highlight, state) do
+    new_state = HighlightBridge.setup_for_buffer(state)
+    {:noreply, new_state}
   end
 
   # ── Highlight events from Zig ────────────────────────────────────────────────
@@ -544,15 +552,17 @@ defmodule Minga.Editor do
 
   # ── Command execution ────────────────────────────────────────────────────────
 
-  # Dispatches a command through Commands.execute/2, handling action tuples.
   # Re-parse buffer for syntax highlighting after content-mutating keys.
-  # We check a process dictionary flag set by BufferServer mutations to avoid
-  # reparsing on pure cursor movements.
+  # Only reparse when content likely changed:
+  # - In insert/replace mode (every keystroke mutates)
+  # - Just left insert/replace mode (final mutation before return to normal)
   @spec maybe_reparse(state(), Mode.mode()) :: state()
-  defp maybe_reparse(state, _old_mode) do
-    buffer_changed = Process.delete(:__buffer_content_changed__) == true
+  defp maybe_reparse(state, old_mode) do
+    content_likely_changed =
+      state.mode in [:insert, :replace] or
+        old_mode in [:insert, :replace]
 
-    if buffer_changed and state.highlight.capture_names != [] do
+    if content_likely_changed and state.highlight.capture_names != [] do
       HighlightBridge.request_reparse(state)
     else
       state
