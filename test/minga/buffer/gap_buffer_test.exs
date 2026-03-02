@@ -100,7 +100,7 @@ defmodule Minga.Buffer.GapBufferTest do
       assert GapBuffer.cursor(GapBuffer.new("hello")) == {0, 0}
     end
 
-    test "reflects position after moving right" do
+    test "reflects position after moving right (ASCII)" do
       buf = GapBuffer.new("hello") |> GapBuffer.move(:right) |> GapBuffer.move(:right)
       assert GapBuffer.cursor(buf) == {0, 2}
     end
@@ -142,15 +142,18 @@ defmodule Minga.Buffer.GapBufferTest do
       assert GapBuffer.cursor(buf) == {1, 0}
     end
 
-    test "inserts unicode emoji" do
+    test "inserts unicode emoji — byte_col reflects byte size" do
       buf = GapBuffer.new("hi") |> GapBuffer.insert_char("🥨")
       assert GapBuffer.content(buf) == "🥨hi"
-      assert GapBuffer.cursor(buf) == {0, 1}
+      # 🥨 is 4 bytes
+      assert GapBuffer.cursor(buf) == {0, 4}
     end
 
     test "inserts multi-byte CJK character" do
       buf = GapBuffer.new("hi") |> GapBuffer.insert_char("日")
       assert GapBuffer.content(buf) == "日hi"
+      # 日 is 3 bytes
+      assert GapBuffer.cursor(buf) == {0, 3}
     end
 
     test "inserts into empty buffer" do
@@ -260,6 +263,12 @@ defmodule Minga.Buffer.GapBufferTest do
       buf = GapBuffer.new("ab\ncd") |> GapBuffer.move_to({0, 2}) |> GapBuffer.move(:right)
       assert GapBuffer.cursor(buf) == {1, 0}
     end
+
+    test "moves by byte size for multi-byte characters" do
+      buf = GapBuffer.new("🥨ab") |> GapBuffer.move(:right)
+      # 🥨 is 4 bytes
+      assert GapBuffer.cursor(buf) == {0, 4}
+    end
   end
 
   describe "move/2 :up" do
@@ -307,7 +316,7 @@ defmodule Minga.Buffer.GapBufferTest do
       assert GapBuffer.cursor(buf) == {1, 0}
     end
 
-    test "clamps column to end of line" do
+    test "clamps column to end of line (byte size)" do
       buf = GapBuffer.new("abc\ndef") |> GapBuffer.move_to({0, 99})
       assert GapBuffer.cursor(buf) == {0, 3}
     end
@@ -316,6 +325,76 @@ defmodule Minga.Buffer.GapBufferTest do
       text = "hello\nworld"
       buf = GapBuffer.new(text) |> GapBuffer.move_to({1, 3})
       assert GapBuffer.content(buf) == text
+    end
+
+    test "clamps to grapheme boundary for multi-byte chars" do
+      # "café" — é is 2 bytes (0xC3 0xA9), byte_size is 5
+      buf = GapBuffer.new("café") |> GapBuffer.move_to({0, 4})
+      # byte 4 is in the middle of é (which starts at byte 3)
+      # Should clamp to byte 3 (start of é)
+      assert GapBuffer.cursor(buf) == {0, 3}
+    end
+  end
+
+  # ── Grapheme/byte conversion ──
+
+  describe "grapheme_col/2" do
+    test "ASCII: byte col equals grapheme col" do
+      buf = GapBuffer.new("hello")
+      assert GapBuffer.grapheme_col(buf, {0, 3}) == 3
+    end
+
+    test "multi-byte: byte col larger than grapheme col" do
+      # "café" — é is 2 bytes
+      buf = GapBuffer.new("café")
+      # byte_col 3 = start of é = grapheme col 3
+      assert GapBuffer.grapheme_col(buf, {0, 3}) == 3
+      # byte_col 5 (end) = 4 graphemes
+      assert GapBuffer.grapheme_col(buf, {0, 5}) == 4
+    end
+
+    test "emoji: 4-byte char" do
+      buf = GapBuffer.new("🥨ab")
+      # byte 0 = grapheme 0
+      assert GapBuffer.grapheme_col(buf, {0, 0}) == 0
+      # byte 4 = past emoji = grapheme 1
+      assert GapBuffer.grapheme_col(buf, {0, 4}) == 1
+      # byte 5 = grapheme 2
+      assert GapBuffer.grapheme_col(buf, {0, 5}) == 2
+    end
+  end
+
+  describe "byte_col_for_grapheme/2" do
+    test "ASCII: grapheme index equals byte offset" do
+      assert GapBuffer.byte_col_for_grapheme("hello", 3) == 3
+    end
+
+    test "multi-byte: grapheme 4 of café is byte 5" do
+      assert GapBuffer.byte_col_for_grapheme("café", 4) == 5
+    end
+
+    test "emoji: grapheme 1 of 🥨ab is byte 4" do
+      assert GapBuffer.byte_col_for_grapheme("🥨ab", 1) == 4
+    end
+  end
+
+  describe "last_grapheme_byte_offset/1" do
+    test "empty string returns 0" do
+      assert GapBuffer.last_grapheme_byte_offset("") == 0
+    end
+
+    test "ASCII string" do
+      assert GapBuffer.last_grapheme_byte_offset("hello") == 4
+    end
+
+    test "multi-byte last char" do
+      # "café" — é starts at byte 3
+      assert GapBuffer.last_grapheme_byte_offset("café") == 3
+    end
+
+    test "emoji last char" do
+      # "hi🥨" — 🥨 starts at byte 2
+      assert GapBuffer.last_grapheme_byte_offset("hi🥨") == 2
     end
   end
 
@@ -369,7 +448,6 @@ defmodule Minga.Buffer.GapBufferTest do
       text = "cafe\u0301"
       buf = GapBuffer.new(text)
       assert GapBuffer.line_count(buf) == 1
-      # Content preserves the original representation (NFD)
       assert GapBuffer.content(buf) == text
     end
 
@@ -378,9 +456,12 @@ defmodule Minga.Buffer.GapBufferTest do
       assert GapBuffer.content(buf) == "!🇩🇪"
     end
 
-    test "cursor position counts graphemes not bytes" do
+    test "cursor position uses byte offsets" do
       buf = GapBuffer.new("🥨ab") |> GapBuffer.move(:right)
-      assert GapBuffer.cursor(buf) == {0, 1}
+      # 🥨 is 4 bytes, so cursor_col = 4
+      assert GapBuffer.cursor(buf) == {0, 4}
+      # But grapheme_col is 1
+      assert GapBuffer.grapheme_col(buf, GapBuffer.cursor(buf)) == 1
     end
   end
 
@@ -388,18 +469,14 @@ defmodule Minga.Buffer.GapBufferTest do
 
   describe "property: insert/delete round-trip" do
     property "inserting then deleting before restores the buffer" do
-      # Use :ascii to avoid combining characters (variation selectors, tag chars)
-      # that merge with adjacent graphemes, making insert+delete not round-trip
-      # at the grapheme level. The gap buffer is correct — this is a Unicode
-      # grapheme clustering issue.
       check all(
               text <- string(:ascii, min_length: 0, max_length: 100),
               char <- string(:ascii, length: 1),
-              pos <- integer(0..max(String.length(text), 1))
+              pos <- integer(0..max(byte_size("") + 100, 1))
             ) do
         buf = GapBuffer.new(text)
-        clamped_pos = min(pos, String.length(text))
-        line_col = offset_to_position(text, clamped_pos)
+        clamped_pos = min(pos, byte_size(text))
+        line_col = byte_offset_to_position(text, clamped_pos)
 
         buf =
           buf
@@ -441,13 +518,13 @@ defmodule Minga.Buffer.GapBufferTest do
             GapBuffer.move(acc, dir)
           end)
 
-        {line, col} = GapBuffer.cursor(buf)
+        {line, byte_col} = GapBuffer.cursor(buf)
         max_line = GapBuffer.line_count(buf) - 1
         assert line >= 0 and line <= max_line
 
         current_line = GapBuffer.line_at(buf, line)
-        max_col = String.length(current_line)
-        assert col >= 0 and col <= max_col
+        max_col = byte_size(current_line)
+        assert byte_col >= 0 and byte_col <= max_col
       end
     end
   end
@@ -591,6 +668,7 @@ defmodule Minga.Buffer.GapBufferTest do
 
   # Verifies that the cached cursor_line, cursor_col, and line_count fields
   # match values recomputed from the raw buffer content.
+  # cursor_col is now a byte offset within the current line.
   @spec assert_cache_valid(GapBuffer.t()) :: :ok
   defp assert_cache_valid(%GapBuffer{
          before: before,
@@ -600,9 +678,9 @@ defmodule Minga.Buffer.GapBufferTest do
          line_count: lc
        }) do
     # Recompute cursor from `before`
-    lines_before = String.split(before, "\n")
+    lines_before = :binary.split(before, "\n", [:global])
     expected_line = length(lines_before) - 1
-    expected_col = lines_before |> List.last() |> String.length()
+    expected_col = lines_before |> List.last() |> byte_size()
 
     # Recompute line_count from full content
     text = before <> after_
@@ -610,7 +688,7 @@ defmodule Minga.Buffer.GapBufferTest do
     expected_lc =
       case text do
         "" -> 1
-        _ -> text |> String.graphemes() |> Enum.count(&(&1 == "\n")) |> Kernel.+(1)
+        _ -> length(:binary.matches(text, "\n")) + 1
       end
 
     assert cl == expected_line,
@@ -625,14 +703,13 @@ defmodule Minga.Buffer.GapBufferTest do
     :ok
   end
 
-  @spec offset_to_position(String.t(), non_neg_integer()) :: GapBuffer.position()
-  defp offset_to_position(text, char_offset) do
-    graphemes = String.graphemes(text)
-    before_cursor = Enum.take(graphemes, char_offset)
-    before_text = Enum.join(before_cursor)
-    lines = String.split(before_text, "\n")
+  # Convert a byte offset in text to a {line, byte_col} position.
+  @spec byte_offset_to_position(String.t(), non_neg_integer()) :: GapBuffer.position()
+  defp byte_offset_to_position(text, byte_offset) do
+    before_cursor = binary_part(text, 0, min(byte_offset, byte_size(text)))
+    lines = :binary.split(before_cursor, "\n", [:global])
     line = length(lines) - 1
-    col = lines |> List.last() |> String.length()
+    col = lines |> List.last() |> byte_size()
     {line, col}
   end
 end

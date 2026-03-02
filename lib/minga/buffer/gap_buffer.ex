@@ -3,7 +3,7 @@ defmodule Minga.Buffer.GapBuffer do
   A gap buffer implementation for text editing.
 
   The gap buffer stores text as two binaries: `before` contains all text
-  before the cursor (in natural order), and `after_` contains all text
+  before the cursor (in natural order), and `after` contains all text
   after the cursor (in natural order). The "gap" is the conceptual space
   between them where insertions happen in O(1).
 
@@ -12,7 +12,18 @@ defmodule Minga.Buffer.GapBuffer do
   (where n is the distance moved). For an interactive editor where the
   cursor moves incrementally, this is ideal.
 
-  All positions are zero-indexed `{line, col}` tuples.
+  ## Byte-indexed positions
+
+  All positions are zero-indexed `{line, byte_col}` tuples, where `byte_col`
+  is the byte offset within the line. For ASCII content (the common case),
+  byte offset equals grapheme index. For multi-byte UTF-8 characters,
+  byte offset is larger (e.g., `é` = 2 bytes, emoji = 4+ bytes).
+
+  This representation enables O(1) `binary_part` slicing throughout the
+  editor and aligns with tree-sitter's byte-offset model.
+
+  Use `grapheme_col/2` to convert a byte-indexed position to a display
+  column for rendering.
 
   ## Examples
 
@@ -36,8 +47,13 @@ defmodule Minga.Buffer.GapBuffer do
           line_count: pos_integer()
         }
 
-  @typedoc "A zero-indexed {line, col} position in the buffer."
-  @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
+  @typedoc """
+  A zero-indexed `{line, byte_col}` position in the buffer.
+
+  `byte_col` is the byte offset within the line's UTF-8 binary.
+  For ASCII text, this equals the character/grapheme index.
+  """
+  @type position :: {line :: non_neg_integer(), byte_col :: non_neg_integer()}
 
   @typedoc "A direction for cursor movement."
   @type direction :: :left | :right | :up | :down
@@ -128,7 +144,7 @@ defmodule Minga.Buffer.GapBuffer do
     |> Enum.slice(start, count)
   end
 
-  @doc "Returns the current cursor position as a `{line, col}` tuple."
+  @doc "Returns the current cursor position as a `{line, byte_col}` tuple."
   @spec cursor(t()) :: position()
   def cursor(%__MODULE__{cursor_line: line, cursor_col: col}), do: {line, col}
 
@@ -139,24 +155,51 @@ defmodule Minga.Buffer.GapBuffer do
   end
 
   @doc """
-  Returns the grapheme offset of a `{line, col}` position in the buffer content.
+  Returns the byte offset of a `{line, byte_col}` position in the buffer content.
   """
   @spec position_to_offset(t(), position()) :: non_neg_integer()
   def position_to_offset(%__MODULE__{} = buf, {line, col})
       when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
     text = content(buf)
-    all_lines = String.split(text, "\n")
-    grapheme_offset_for(all_lines, line, col)
+    all_lines = :binary.split(text, "\n", [:global])
+    byte_offset_for(all_lines, line, col)
   end
 
   @doc """
-  Converts a grapheme offset in the buffer content to a `{line, col}` position.
+  Converts a byte offset in the buffer content to a `{line, byte_col}` position.
   Clamps to valid bounds.
   """
   @spec offset_to_position(t(), non_neg_integer()) :: position()
   def offset_to_position(%__MODULE__{} = buf, offset) when is_integer(offset) and offset >= 0 do
     text = content(buf)
     do_offset_to_position(text, offset, 0, 0)
+  end
+
+  @doc """
+  Converts a `{line, byte_col}` position to a grapheme (display) column.
+
+  Counts graphemes in the line text from byte 0 to `byte_col`.
+  Used by the renderer to convert byte positions to screen columns.
+  """
+  @spec grapheme_col(t(), position()) :: non_neg_integer()
+  def grapheme_col(%__MODULE__{} = buf, {line, byte_col}) do
+    case line_at(buf, line) do
+      nil -> 0
+      text -> grapheme_count_in_bytes(text, byte_col)
+    end
+  end
+
+  @doc """
+  Converts a grapheme column to a byte column for the given line.
+
+  Walks graphemes until `grapheme_index` graphemes have been counted,
+  returning the byte offset at that point. Used by motions that need
+  to reason about character positions.
+  """
+  @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()
+  def byte_col_for_grapheme(line_text, grapheme_index)
+      when is_binary(line_text) and is_integer(grapheme_index) and grapheme_index >= 0 do
+    do_byte_col_for_grapheme(line_text, grapheme_index, 0)
   end
 
   # ── Mutations ──
@@ -210,14 +253,14 @@ defmodule Minga.Buffer.GapBuffer do
   def delete_before(%__MODULE__{before: ""} = buf), do: buf
 
   def delete_before(
-        %__MODULE__{before: before, cursor_line: line, cursor_col: col, line_count: lc} = buf
+        %__MODULE__{before: before, cursor_line: line, cursor_col: _col, line_count: lc} = buf
       ) do
     {new_before, removed} = pop_last_grapheme(before)
 
     {new_line, new_col, new_lc} =
       case removed do
-        "\n" -> {line - 1, col_in_last_line(new_before), lc - 1}
-        _ -> {line, col - 1, lc}
+        "\n" -> {line - 1, byte_col_in_last_line(new_before), lc - 1}
+        _ -> {line, byte_size(new_before) - byte_offset_of_last_newline(new_before), lc}
       end
 
     %{buf | before: new_before, cursor_line: new_line, cursor_col: new_col, line_count: new_lc}
@@ -248,7 +291,7 @@ defmodule Minga.Buffer.GapBuffer do
   def move(%__MODULE__{} = buf, :down), do: move_down(buf)
 
   @doc """
-  Moves the cursor to an exact `{line, col}` position.
+  Moves the cursor to an exact `{line, byte_col}` position.
 
   Line and column are clamped to valid buffer bounds.
 
@@ -264,22 +307,26 @@ defmodule Minga.Buffer.GapBuffer do
       when is_integer(target_line) and target_line >= 0 and
              is_integer(target_col) and target_col >= 0 do
     text = content(buf)
-    all_lines = String.split(text, "\n")
+    all_lines = :binary.split(text, "\n", [:global])
 
     # Clamp line to valid range
     max_line = length(all_lines) - 1
     line = min(target_line, max_line)
 
-    # Clamp col to valid range for that line (grapheme count)
+    # Clamp col to valid range for that line (byte size)
     line_text = Enum.at(all_lines, line)
-    max_col = String.length(line_text)
+    max_col = byte_size(line_text)
     col = min(target_col, max_col)
 
-    # Calculate grapheme offset from start of text
-    grapheme_offset = grapheme_offset_for(all_lines, line, col)
+    # Clamp to grapheme boundary (don't land in the middle of a multi-byte char)
+    col = clamp_to_grapheme_boundary(line_text, col)
 
-    # Split at grapheme position (not byte position)
-    {before, after_} = split_at_grapheme(text, grapheme_offset)
+    # Calculate byte offset from start of text
+    byte_off = byte_offset_for(all_lines, line, col)
+
+    # Split at byte position (O(1) binary_part)
+    before = binary_part(text, 0, byte_off)
+    after_ = binary_part(text, byte_off, byte_size(text) - byte_off)
 
     %{buf | before: before, after: after_, cursor_line: line, cursor_col: col}
   end
@@ -293,15 +340,18 @@ defmodule Minga.Buffer.GapBuffer do
   @spec content_range(t(), position(), position()) :: String.t()
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
     text = content(buf)
-    all_lines = String.split(text, "\n")
-    total_graphemes = String.length(text)
-    from_off = grapheme_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = grapheme_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+    all_lines = :binary.split(text, "\n", [:global])
+    text_size = byte_size(text)
+    from_off = byte_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = byte_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
     {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
-    extract_count = min(end_off - start_off + 1, total_graphemes - start_off)
-    {_, rest} = split_at_grapheme(text, start_off)
-    {extracted, _} = split_at_grapheme(rest, extract_count)
-    extracted
+
+    # end_off points to the start of the last character. Find its byte length.
+    remaining = binary_part(text, end_off, text_size - end_off)
+    char_len = next_grapheme_byte_size(remaining)
+    extract_len = min(end_off - start_off + char_len, text_size - start_off)
+
+    binary_part(text, start_off, extract_len)
   end
 
   @doc """
@@ -312,20 +362,23 @@ defmodule Minga.Buffer.GapBuffer do
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
     text = content(buf)
-    all_lines = String.split(text, "\n")
-    total_graphemes = String.length(text)
-    from_off = grapheme_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = grapheme_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+    all_lines = :binary.split(text, "\n", [:global])
+    text_size = byte_size(text)
+    from_off = byte_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = byte_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
 
     {start_off, end_off, cursor_pos} =
       if from_off <= to_off,
         do: {from_off, to_off, from_pos},
         else: {to_off, from_off, to_pos}
 
-    # Inclusive: delete end_off - start_off + 1 graphemes, clamped to buffer length.
-    delete_count = min(end_off - start_off + 1, total_graphemes - start_off)
-    {before_text, rest} = split_at_grapheme(text, start_off)
-    {_, after_text} = split_at_grapheme(rest, delete_count)
+    # end_off points to the start of the last character. Find its byte length.
+    remaining = binary_part(text, end_off, text_size - end_off)
+    char_len = next_grapheme_byte_size(remaining)
+    delete_end = min(end_off + char_len, text_size)
+
+    before_text = binary_part(text, 0, start_off)
+    after_text = binary_part(text, delete_end, text_size - delete_end)
     new_text = before_text <> after_text
     move_to(new(new_text), cursor_pos)
   end
@@ -339,14 +392,19 @@ defmodule Minga.Buffer.GapBuffer do
   @spec get_range(t(), position(), position()) :: String.t()
   def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
     text = content(buf)
-    graphemes = String.graphemes(text)
-    all_lines = String.split(text, "\n")
+    all_lines = :binary.split(text, "\n", [:global])
+    text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
-    s_off = grapheme_offset_for(all_lines, elem(s, 0), elem(s, 1))
-    e_off = grapheme_offset_for(all_lines, elem(e, 0), elem(e, 1))
+    s_off = byte_offset_for(all_lines, elem(s, 0), elem(s, 1))
+    e_off = byte_offset_for(all_lines, elem(e, 0), elem(e, 1))
 
-    graphemes |> Enum.slice(s_off..e_off) |> Enum.join()
+    # e_off points to the start of the last character. Find its byte length.
+    remaining = binary_part(text, e_off, text_size - e_off)
+    char_len = next_grapheme_byte_size(remaining)
+    extract_len = min(e_off - s_off + char_len, text_size - s_off)
+
+    binary_part(text, s_off, extract_len)
   end
 
   @doc """
@@ -413,9 +471,8 @@ defmodule Minga.Buffer.GapBuffer do
         {"", move_to(buf, {line_num, 0})}
 
       text ->
-        line_len = String.length(text)
         start_pos = {line_num, 0}
-        end_pos = {line_num, line_len - 1}
+        end_pos = {line_num, last_grapheme_byte_offset(text)}
         new_buf = delete_range(buf, start_pos, end_pos)
         {text, new_buf}
     end
@@ -435,20 +492,32 @@ defmodule Minga.Buffer.GapBuffer do
     {before <> after_, {line, col}}
   end
 
+  # ── Byte/grapheme conversion utilities ──
+
+  @doc """
+  Returns the byte offset of the first byte of the last grapheme in `text`.
+  Returns 0 for empty strings.
+  """
+  @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
+  def last_grapheme_byte_offset(""), do: 0
+
+  def last_grapheme_byte_offset(text) when is_binary(text) do
+    {offset, _size} = find_last_grapheme_offset(text, 0)
+    offset
+  end
+
   # ── Private helpers ──
 
   @spec move_left(t()) :: t()
   defp move_left(%__MODULE__{before: ""} = buf), do: buf
 
-  defp move_left(
-         %__MODULE__{before: before, after: after_, cursor_line: line, cursor_col: col} = buf
-       ) do
+  defp move_left(%__MODULE__{before: before, after: after_, cursor_line: line} = buf) do
     {new_before, char} = pop_last_grapheme(before)
 
     {new_line, new_col} =
       case char do
-        "\n" -> {line - 1, col_in_last_line(new_before)}
-        _ -> {line, col - 1}
+        "\n" -> {line - 1, byte_col_in_last_line(new_before)}
+        _ -> {line, byte_size(new_before) - byte_offset_of_last_newline(new_before)}
       end
 
     %{buf | before: new_before, after: char <> after_, cursor_line: new_line, cursor_col: new_col}
@@ -465,7 +534,7 @@ defmodule Minga.Buffer.GapBuffer do
         %{buf | before: before <> "\n", after: rest, cursor_line: line + 1, cursor_col: 0}
 
       {grapheme, rest} ->
-        %{buf | before: before <> grapheme, after: rest, cursor_col: col + 1}
+        %{buf | before: before <> grapheme, after: rest, cursor_col: col + byte_size(grapheme)}
 
       nil ->
         buf
@@ -488,7 +557,7 @@ defmodule Minga.Buffer.GapBuffer do
   end
 
   # Computes new cursor position and line_count after inserting `text` at the current cursor.
-  # Handles multi-line inserts by counting newlines in the inserted text.
+  # Uses byte_size for column tracking.
   @spec compute_cursor_after_insert(
           non_neg_integer(),
           non_neg_integer(),
@@ -496,23 +565,37 @@ defmodule Minga.Buffer.GapBuffer do
           String.t()
         ) :: {non_neg_integer(), non_neg_integer(), pos_integer()}
   defp compute_cursor_after_insert(line, col, lc, text) do
-    case String.split(text, "\n") do
-      [single] ->
-        {line, col + String.length(single), lc}
+    newline_count = count_newlines(text)
 
-      chunks ->
-        newline_count = length(chunks) - 1
-        {line + newline_count, String.length(List.last(chunks)), lc + newline_count}
+    case newline_count do
+      0 ->
+        {line, col + byte_size(text), lc}
+
+      _ ->
+        # Find byte_size of content after the last newline
+        matches = :binary.matches(text, "\n")
+        {last_newline_pos, _len} = List.last(matches)
+        last_line_bytes = byte_size(text) - last_newline_pos - 1
+        {line + newline_count, last_line_bytes, lc + newline_count}
     end
   end
 
-  # Returns the grapheme column of the position after the last `\n` in `str`,
-  # i.e. the column you'd be at if the cursor were at the end of `str`.
-  @spec col_in_last_line(String.t()) :: non_neg_integer()
-  defp col_in_last_line(""), do: 0
+  # Returns the byte column of the position after the last `\n` in `str`,
+  # i.e. the byte offset within the current line if the cursor were at the end of `str`.
+  @spec byte_col_in_last_line(String.t()) :: non_neg_integer()
+  defp byte_col_in_last_line(""), do: 0
 
-  defp col_in_last_line(str) do
-    str |> String.split("\n") |> List.last() |> String.length()
+  defp byte_col_in_last_line(str) do
+    byte_size(str) - byte_offset_of_last_newline(str)
+  end
+
+  # Returns the byte offset just past the last `\n` in `str`, or 0 if no newline.
+  @spec byte_offset_of_last_newline(String.t()) :: non_neg_integer()
+  defp byte_offset_of_last_newline(str) do
+    case :binary.matches(str, "\n") do
+      [] -> 0
+      matches -> elem(List.last(matches), 0) + 1
+    end
   end
 
   # Splits off the last grapheme from a string, preserving exact binary representation.
@@ -545,21 +628,19 @@ defmodule Minga.Buffer.GapBuffer do
     end
   end
 
+  # Converts a byte offset to {line, byte_col} by scanning for newlines.
   @spec do_offset_to_position(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           position()
-  defp do_offset_to_position("", _offset, line, col), do: {line, col}
   defp do_offset_to_position(_text, 0, line, col), do: {line, col}
+  defp do_offset_to_position("", _offset, line, col), do: {line, col}
 
-  defp do_offset_to_position(text, offset, line, col) do
-    case String.next_grapheme(text) do
-      {"\n", rest} ->
+  defp do_offset_to_position(text, offset, line, col) when offset > 0 do
+    case text do
+      <<"\n", rest::binary>> ->
         do_offset_to_position(rest, offset - 1, line + 1, 0)
 
-      {_ch, rest} ->
+      <<_byte, rest::binary>> ->
         do_offset_to_position(rest, offset - 1, line, col + 1)
-
-      nil ->
-        {line, col}
     end
   end
 
@@ -573,35 +654,99 @@ defmodule Minga.Buffer.GapBuffer do
     length(:binary.matches(str, "\n"))
   end
 
-  @spec grapheme_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::
+  # Computes the byte offset from start of text for a {line, byte_col} position.
+  @spec byte_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
-  defp grapheme_offset_for(all_lines, target_line, target_col) do
-    # Count graphemes in all complete lines before target_line (including \n)
-    graphemes_before =
+  defp byte_offset_for(all_lines, target_line, target_col) do
+    bytes_before =
       all_lines
       |> Enum.take(target_line)
-      |> Enum.reduce(0, fn line, acc -> acc + String.length(line) + 1 end)
+      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
 
-    # Add graphemes for the partial column in the target line
-    graphemes_before + target_col
+    bytes_before + target_col
   end
 
-  # Split a string at a grapheme position, preserving exact binary representation
-  @spec split_at_grapheme(String.t(), non_neg_integer()) :: {String.t(), String.t()}
-  defp split_at_grapheme(str, 0), do: {"", str}
+  # Returns the byte size of the next grapheme in `text`, or 0 for empty.
+  @spec next_grapheme_byte_size(String.t()) :: non_neg_integer()
+  defp next_grapheme_byte_size(""), do: 0
 
-  defp split_at_grapheme(str, count) do
-    do_split_at_grapheme(str, count, "")
+  defp next_grapheme_byte_size(text) do
+    case String.next_grapheme_size(text) do
+      {size, _rest} -> size
+      nil -> 0
+    end
   end
 
-  @spec do_split_at_grapheme(String.t(), non_neg_integer(), String.t()) ::
-          {String.t(), String.t()}
-  defp do_split_at_grapheme(str, 0, acc), do: {acc, str}
+  # Clamp a byte offset to the nearest grapheme boundary (don't land mid-character).
+  @spec clamp_to_grapheme_boundary(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp clamp_to_grapheme_boundary(_text, 0), do: 0
 
-  defp do_split_at_grapheme(str, remaining, acc) do
-    case String.next_grapheme(str) do
-      {grapheme, rest} -> do_split_at_grapheme(rest, remaining - 1, acc <> grapheme)
-      nil -> {acc, ""}
+  defp clamp_to_grapheme_boundary(text, target_byte) when target_byte >= byte_size(text) do
+    byte_size(text)
+  end
+
+  defp clamp_to_grapheme_boundary(text, target_byte) do
+    do_clamp_to_grapheme_boundary(text, target_byte, 0)
+  end
+
+  @spec do_clamp_to_grapheme_boundary(String.t(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_clamp_to_grapheme_boundary(text, target_byte, current_byte) do
+    case String.next_grapheme_size(text) do
+      {size, _rest} when current_byte + size > target_byte ->
+        # The next grapheme would overshoot — stay at current_byte
+        current_byte
+
+      {size, rest} ->
+        do_clamp_to_grapheme_boundary(rest, target_byte, current_byte + size)
+
+      nil ->
+        current_byte
+    end
+  end
+
+  # Count graphemes in the first `byte_count` bytes of `text`.
+  @spec grapheme_count_in_bytes(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp grapheme_count_in_bytes(_text, 0), do: 0
+
+  defp grapheme_count_in_bytes(text, byte_count) do
+    do_grapheme_count_in_bytes(text, byte_count, 0, 0)
+  end
+
+  @spec do_grapheme_count_in_bytes(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp do_grapheme_count_in_bytes(_text, byte_count, bytes_seen, grapheme_count)
+       when bytes_seen >= byte_count do
+    grapheme_count
+  end
+
+  defp do_grapheme_count_in_bytes(text, byte_count, bytes_seen, grapheme_count) do
+    case String.next_grapheme_size(text) do
+      {size, rest} ->
+        do_grapheme_count_in_bytes(rest, byte_count, bytes_seen + size, grapheme_count + 1)
+
+      nil ->
+        grapheme_count
+    end
+  end
+
+  # Convert grapheme index to byte offset within a line.
+  @spec do_byte_col_for_grapheme(String.t(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_byte_col_for_grapheme(_text, 0, byte_offset), do: byte_offset
+
+  defp do_byte_col_for_grapheme(text, remaining, byte_offset) do
+    case String.next_grapheme_size(text) do
+      {size, rest} ->
+        do_byte_col_for_grapheme(rest, remaining - 1, byte_offset + size)
+
+      nil ->
+        byte_offset
     end
   end
 end
