@@ -16,6 +16,7 @@ defmodule Minga.Editor.Renderer do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -66,19 +67,26 @@ defmodule Minga.Editor.Renderer do
   end
 
   def render(state) do
-    # 1. Get cursor (O(1) with cached gap buffer) for viewport scrolling.
-    cursor = BufferServer.cursor(state.buf.buffer)
-    viewport = Viewport.scroll_to_cursor(state.viewport, cursor)
+    # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
+    #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
+    {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buf.buffer)
+    cursor = {cursor_line, cursor_byte_col}
+    viewport = Viewport.scroll_to_cursor(state.viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
     # 2. Fetch all remaining render data in a single GenServer call.
     snapshot = BufferServer.render_snapshot(state.buf.buffer, first_line, visible_rows)
     lines = snapshot.lines
-    {cursor_line, cursor_col} = snapshot.cursor
+    {cursor_line, _cursor_byte_col} = snapshot.cursor
     line_count = snapshot.line_count
 
-    # 3. Compute gutter dimensions and re-check horizontal scroll.
+    # 3. Convert cursor byte_col → grapheme col using current line text.
+    #    This is the render boundary: all downstream code uses grapheme columns.
+    cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
+    cursor_col = Unicode.grapheme_col(cursor_line_text, cursor_byte_col)
+
+    # 4. Compute gutter dimensions and horizontal scroll in grapheme units.
     line_number_style = state.line_numbers
 
     gutter_w =
@@ -86,12 +94,7 @@ defmodule Minga.Editor.Renderer do
 
     content_w = max(viewport.cols - gutter_w, 1)
 
-    viewport =
-      if cursor_col >= viewport.left + content_w do
-        %{viewport | left: cursor_col - content_w + 1}
-      else
-        viewport
-      end
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, cursor_col})
 
     clear = [Protocol.encode_clear()]
 
@@ -99,7 +102,7 @@ defmodule Minga.Editor.Renderer do
     {lines, preview_matches} =
       SearchHighlight.maybe_substitute_preview(state, lines, first_line)
 
-    visual_selection = visual_selection_bounds(state, cursor)
+    visual_selection = visual_selection_grapheme_bounds(state, cursor, lines, first_line)
 
     search_matches =
       case preview_matches do
@@ -242,6 +245,43 @@ defmodule Minga.Editor.Renderer do
   end
 
   defp visual_selection_bounds(_state, _cursor), do: nil
+
+  # Converts byte-indexed visual selection positions to grapheme columns for rendering.
+  @spec visual_selection_grapheme_bounds(
+          state(),
+          GapBuffer.position(),
+          [String.t()],
+          non_neg_integer()
+        ) :: visual_selection()
+  defp visual_selection_grapheme_bounds(state, cursor, lines, first_line) do
+    case visual_selection_bounds(state, cursor) do
+      nil -> nil
+      {:line, _, _} = sel -> sel
+
+      {:char, {sl, sc}, {el, ec}} ->
+        {:char,
+         {sl, byte_col_to_grapheme(lines, sl, sc, first_line)},
+         {el, byte_col_to_grapheme(lines, el, ec, first_line)}}
+    end
+  end
+
+  @spec byte_col_to_grapheme([String.t()], non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp byte_col_to_grapheme(lines, line, byte_col, first_line) do
+    line_text = cursor_line_text(lines, line, first_line)
+    Unicode.grapheme_col(line_text, byte_col)
+  end
+
+  @spec cursor_line_text([String.t()], non_neg_integer(), non_neg_integer()) :: String.t()
+  defp cursor_line_text(lines, cursor_line, first_line) do
+    index = cursor_line - first_line
+
+    if index >= 0 and index < length(lines) do
+      Enum.at(lines, index)
+    else
+      ""
+    end
+  end
 
   @spec sort_positions(GapBuffer.position(), GapBuffer.position()) ::
           {GapBuffer.position(), GapBuffer.position()}
