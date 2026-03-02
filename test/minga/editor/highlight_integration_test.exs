@@ -139,6 +139,44 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     end
   end
 
+  describe "highlight cache across buffer switches" do
+    @tag :tmp_dir
+    test "switching back to a previously highlighted buffer restores cached spans",
+         %{tmp_dir: tmp_dir} do
+      path1 = Path.join(tmp_dir, "a.ex")
+      path2 = Path.join(tmp_dir, "b.ex")
+      File.write!(path1, "defmodule A do\nend\n")
+      File.write!(path2, "defmodule B do\nend\n")
+
+      ctx = start_editor("defmodule A do\nend\n", file_path: path1)
+
+      # Inject highlights for file1
+      spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+      assert state.highlight.spans == spans_a
+
+      # Open file2 and switch to it
+      send_keys(ctx, ":e #{path2}<CR>")
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+      assert state.highlight.spans == [], "File2 should start with empty spans"
+
+      # Switch back to file1 — should restore cached highlights instantly
+      send_keys(ctx, "<Space>bn")
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.highlight.spans == spans_a,
+             "Expected cached spans from file1 to be restored, got: #{inspect(state.highlight.spans)}"
+    end
+  end
+
   describe "highlight setup timing" do
     test "new editor has empty highlights before :ready" do
       id = :erlang.unique_integer([:positive])

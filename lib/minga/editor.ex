@@ -272,6 +272,15 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
     new_state = HighlightBridge.handle_spans(state, version, spans)
+
+    # Cache the updated highlights for this buffer
+    new_state =
+      if new_state.buf.buffer do
+        put_in(new_state.highlight_cache[new_state.buf.buffer], new_state.highlight)
+      else
+        new_state
+      end
+
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -553,13 +562,29 @@ defmodule Minga.Editor do
 
   # ── Command execution ────────────────────────────────────────────────────────
 
-  # Detect active buffer change and reset highlights + trigger async setup.
+  # Detect active buffer change: save old highlights to cache, restore or setup new.
   @spec maybe_reset_highlight(state(), pid() | nil) :: state()
   defp maybe_reset_highlight(state, old_buffer) do
-    if state.buf.buffer != old_buffer and state.buf.buffer != nil do
-      # Buffer changed — clear stale highlights and setup asynchronously
-      send(self(), :setup_highlight)
-      %{state | highlight: Minga.Highlight.new()}
+    new_buffer = state.buf.buffer
+
+    if new_buffer != old_buffer and new_buffer != nil do
+      # Save current highlights for the old buffer
+      cache =
+        if old_buffer != nil and state.highlight.capture_names != [] do
+          Map.put(state.highlight_cache, old_buffer, state.highlight)
+        else
+          state.highlight_cache
+        end
+
+      # Restore cached highlights for the new buffer, or setup fresh
+      case Map.get(cache, new_buffer) do
+        nil ->
+          send(self(), :setup_highlight)
+          %{state | highlight: Minga.Highlight.new(), highlight_cache: cache}
+
+        cached ->
+          %{state | highlight: cached, highlight_cache: cache}
+      end
     else
       state
     end
