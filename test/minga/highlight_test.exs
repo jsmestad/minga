@@ -164,8 +164,10 @@ defmodule Minga.HighlightTest do
       assert [{"def", []}, {" foo", []}] = result
     end
 
-    test "overlapping spans are deduplicated (first wins)" do
+    test "overlapping spans are deduplicated (last wins for same range)" do
       # Tree-sitter often returns overlapping captures for the same node
+      # (e.g. "@" matches both @attribute and @comment.doc).
+      # Later patterns in the query are more specific and should win.
       hl = %Highlight{
         version: 1,
         spans: [
@@ -185,8 +187,8 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "defmodule Foo do"
 
-      # First span wins for the overlapping region
-      assert [{"defmodule", [fg: 0xFF0000]}, {" Foo do", []}] = result
+      # Last span wins for the overlapping region (tree-sitter priority)
+      assert [{"defmodule", [fg: 0x00FF00]}, {" Foo do", []}] = result
     end
 
     test "partially overlapping spans don't duplicate text" do

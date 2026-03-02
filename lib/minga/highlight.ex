@@ -108,12 +108,15 @@ defmodule Minga.Highlight do
       when is_binary(line_text) and is_integer(line_start_byte) and line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
 
-    # Find spans that overlap this line
+    # Find spans that overlap this line.
+    # When multiple spans cover the same byte range, keep the last one
+    # (tree-sitter query priority: later patterns override earlier ones).
     overlapping =
       hl.spans
       |> Enum.filter(fn span ->
         span.start_byte < line_end_byte and span.end_byte > line_start_byte
       end)
+      |> deduplicate_spans()
       |> Enum.sort_by(& &1.start_byte)
 
     case overlapping do
@@ -195,6 +198,16 @@ defmodule Minga.Highlight do
 
       do_build(line_text, line_start, line_end, rest, hl, span_end_in_line, acc)
     end
+  end
+
+  # When multiple spans cover the exact same byte range, keep only the last one.
+  # Tree-sitter queries apply patterns in order — later patterns are more specific.
+  @spec deduplicate_spans([Minga.Port.Protocol.highlight_span()]) ::
+          [Minga.Port.Protocol.highlight_span()]
+  defp deduplicate_spans(spans) do
+    spans
+    |> Enum.group_by(fn span -> {span.start_byte, span.end_byte} end)
+    |> Enum.flat_map(fn {_range, group} -> [List.last(group)] end)
   end
 
   @spec resolve_style(t(), non_neg_integer()) :: Minga.Port.Protocol.style()
