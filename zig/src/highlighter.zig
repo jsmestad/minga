@@ -45,7 +45,8 @@ pub const Highlighter = struct {
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     allocator: std.mem.Allocator,
 
-    /// Initialize with compiled-in grammars registered and queries pre-compiled.
+    /// Initialize with compiled-in grammars registered.
+    /// Queries are compiled lazily on first use via setLanguage.
     pub fn init(allocator: std.mem.Allocator) !Highlighter {
         const parser = c.ts_parser_new() orelse return error.ParserCreateFailed;
 
@@ -56,28 +57,10 @@ pub const Highlighter = struct {
             .allocator = allocator,
         };
 
-        // Register all compiled-in grammars and pre-compile their queries.
+        // Register all compiled-in grammars (no query compilation yet).
         inline for (builtin_grammars) |entry| {
             if (entry.func()) |lang| {
                 hl.languages.put(allocator, entry.name, lang) catch {};
-
-                // Pre-compile the embedded highlight query if available.
-                if (entry.query) |query_source| {
-                    var error_offset: u32 = 0;
-                    var error_type: c.TSQueryError = c.TSQueryErrorNone;
-
-                    if (c.ts_query_new(
-                        lang,
-                        query_source.ptr,
-                        @intCast(query_source.len),
-                        &error_offset,
-                        &error_type,
-                    )) |compiled| {
-                        hl.query_cache.put(allocator, entry.name, compiled) catch {};
-                    } else {
-                        std.log.warn("Pre-compile failed for {s} at offset {d}", .{ entry.name, error_offset });
-                    }
-                }
             }
         }
 
@@ -110,8 +93,25 @@ pub const Highlighter = struct {
             c.ts_tree_delete(t);
             self.tree = null;
         }
-        // Restore cached query for this language, or clear
-        self.query = self.query_cache.get(name);
+        // Restore cached query, or lazily compile from embedded source
+        if (self.query_cache.get(name)) |cached| {
+            self.query = cached;
+        } else {
+            self.query = null;
+            // Try to compile from embedded query source
+            inline for (builtin_grammars) |entry| {
+                if (std.mem.eql(u8, entry.name, name)) {
+                    if (entry.query) |query_source| {
+                        var err_off: u32 = 0;
+                        var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                        if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
+                            self.query = compiled;
+                            self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+                        }
+                    }
+                }
+            }
+        }
         return true;
     }
 
