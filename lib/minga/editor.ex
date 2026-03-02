@@ -17,6 +17,7 @@ defmodule Minga.Editor do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
+  alias Minga.Editor.HighlightBridge
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
@@ -131,6 +132,7 @@ defmodule Minga.Editor do
       {:ok, pid} ->
         maybe_watch_buffer(file_watcher_pid(), pid)
         new_state = Commands.add_buffer(state, pid)
+        new_state = HighlightBridge.setup_for_buffer(new_state)
         new_state = log_message(new_state, "Opened: #{file_path}")
         Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -230,6 +232,7 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
+    new_state = maybe_reparse(new_state, state.mode)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -248,6 +251,23 @@ defmodule Minga.Editor do
 
   def handle_info({:whichkey_timeout, _ref}, state) do
     # Stale timer — ignore.
+    {:noreply, state}
+  end
+
+  # ── Highlight events from Zig ────────────────────────────────────────────────
+
+  def handle_info({:minga_input, {:highlight_names, names}}, state) do
+    new_state = HighlightBridge.handle_names(state, names)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
+    new_state = HighlightBridge.handle_spans(state, version, spans)
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:grammar_loaded, _success, _name}}, state) do
     {:noreply, state}
   end
 
@@ -525,6 +545,18 @@ defmodule Minga.Editor do
   # ── Command execution ────────────────────────────────────────────────────────
 
   # Dispatches a command through Commands.execute/2, handling action tuples.
+  # Re-parse buffer for syntax highlighting after content-mutating keys.
+  # Insert/replace mode keys always mutate; normal mode may mutate via operators
+  # (d, c, p, etc.) — cheaply request re-parse whenever highlighting is active.
+  @spec maybe_reparse(state(), Mode.mode()) :: state()
+  defp maybe_reparse(state, _old_mode) do
+    if state.highlight.capture_names != [] do
+      HighlightBridge.request_reparse(state)
+    else
+      state
+    end
+  end
+
   @spec dispatch_command(state(), Mode.command()) :: state()
   defp dispatch_command(state, cmd) do
     case Commands.execute(state, cmd) do

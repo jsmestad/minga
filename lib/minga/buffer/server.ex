@@ -551,6 +551,11 @@ defmodule Minga.Buffer.Server do
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
     buf = state.gap_buffer
 
+    first_line_byte_offset =
+      buf
+      |> GapBuffer.lines(0, first_line)
+      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+
     snapshot = %{
       cursor: GapBuffer.cursor(buf),
       line_count: GapBuffer.line_count(buf),
@@ -559,7 +564,8 @@ defmodule Minga.Buffer.Server do
       filetype: state.filetype,
       dirty: state.dirty,
       name: state.name,
-      read_only: state.read_only
+      read_only: state.read_only,
+      first_line_byte_offset: first_line_byte_offset
     }
 
     {:reply, snapshot, state}

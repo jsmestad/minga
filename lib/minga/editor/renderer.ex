@@ -108,29 +108,39 @@ defmodule Minga.Editor.Renderer do
       end
 
     # 4. Build render context (invariant per frame) and render lines.
+    highlight =
+      if state.highlight.capture_names != [], do: state.highlight, else: nil
+
     render_ctx = %Context{
       viewport: viewport,
       visual_selection: visual_selection,
       search_matches: search_matches,
       gutter_w: gutter_w,
       content_w: content_w,
-      confirm_match: SearchHighlight.current_confirm_match(state)
+      confirm_match: SearchHighlight.current_confirm_match(state),
+      highlight: highlight
     }
 
-    {gutter_commands, line_commands} =
+    {gutter_commands, line_commands, _byte_offset} =
       lines
       |> Enum.with_index()
-      |> Enum.reduce({[], []}, fn {line_text, screen_row}, {gutters, contents} ->
-        buf_line = first_line + screen_row
+      |> Enum.reduce(
+        {[], [], snapshot.first_line_byte_offset},
+        fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
+          buf_line = first_line + screen_row
 
-        gutter_cmd =
-          Gutter.render_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
+          gutter_cmd =
+            Gutter.render_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
 
-        content_cmds = LineRenderer.render(line_text, screen_row, buf_line, render_ctx)
+          content_cmds =
+            LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
 
-        new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
-        {new_gutters, contents ++ content_cmds}
-      end)
+          new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
+          next_byte_offset = byte_offset + byte_size(line_text) + 1
+
+          {new_gutters, contents ++ content_cmds, next_byte_offset}
+        end
+      )
 
     gutter_commands = Enum.reverse(gutter_commands)
 

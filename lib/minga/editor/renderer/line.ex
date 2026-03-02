@@ -5,14 +5,16 @@ defmodule Minga.Editor.Renderer.Line do
 
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.SearchHighlight
+  alias Minga.Highlight
   alias Minga.Port.Protocol
 
   @typedoc "Column range of a selection on a single line."
   @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
 
   @doc "Renders a single buffer line into draw commands."
-  @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t()) :: [binary()]
-  def render(line_text, screen_row, buf_line, %Context{} = ctx) do
+  @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t(), non_neg_integer()) ::
+          [binary()]
+  def render(line_text, screen_row, buf_line, %Context{} = ctx, line_byte_offset \\ 0) do
     graphemes = String.graphemes(line_text)
     line_len = length(graphemes)
 
@@ -22,6 +24,9 @@ defmodule Minga.Editor.Renderer.Line do
       |> Enum.take(ctx.content_w)
 
     case selection_cols_for_line(buf_line, line_len, ctx.visual_selection) do
+      nil when ctx.highlight != nil ->
+        render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
+
       nil ->
         SearchHighlight.render_line_with_search(
           visible_graphemes,
@@ -122,4 +127,60 @@ defmodule Minga.Editor.Renderer.Line do
 
   defp selection_cols_for_line(_buf_line, _line_len, {:char, _start_pos, _end_pos}),
     do: :full
+
+  # ── Syntax highlighting ──────────────────────────────────────────────────────
+
+  @spec render_highlighted_line(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) ::
+          [binary()]
+  defp render_highlighted_line(line_text, screen_row, ctx, line_byte_offset) do
+    segments = Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
+
+    # Apply horizontal scroll: track grapheme column, skip segments before
+    # viewport.left, clip segments that straddle the boundary.
+    left = ctx.viewport.left
+    max_col = ctx.content_w
+
+    {commands, _screen_col, _buf_col} =
+      Enum.reduce(segments, {[], 0, 0}, fn {text, style}, {cmds, screen_col, buf_col} ->
+        seg_width = String.length(text)
+        seg_end = buf_col + seg_width
+
+        cond do
+          # Entire segment is before viewport — skip
+          seg_end <= left ->
+            {cmds, screen_col, seg_end}
+
+          # Entire segment is past viewport right edge — skip
+          screen_col >= max_col ->
+            {cmds, screen_col, seg_end}
+
+          true ->
+            # Clip to viewport left boundary
+            drop = max(0, left - buf_col)
+            graphemes = String.graphemes(text) |> Enum.drop(drop)
+
+            # Clip to viewport right boundary
+            take = max_col - screen_col
+            graphemes = Enum.take(graphemes, take)
+            visible_text = Enum.join(graphemes)
+            visible_width = length(graphemes)
+
+            if visible_width > 0 do
+              cmd =
+                Protocol.encode_draw(
+                  screen_row,
+                  ctx.gutter_w + screen_col,
+                  visible_text,
+                  style
+                )
+
+              {[cmd | cmds], screen_col + visible_width, seg_end}
+            else
+              {cmds, screen_col, seg_end}
+            end
+        end
+      end)
+
+    Enum.reverse(commands)
+  end
 end

@@ -26,6 +26,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.Search
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.Viewport
+  alias Minga.Highlight
   alias Minga.Mode
 
   @typedoc "Stored last find-char motion for ; and , repeat."
@@ -56,7 +57,9 @@ defmodule Minga.Editor.State do
             pending_conflict: nil,
             marks: %{},
             last_jump_pos: nil,
-            macro_recorder: MacroRecorder.new()
+            macro_recorder: MacroRecorder.new(),
+            highlight: Highlight.new(),
+            highlight_version: 0
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -77,7 +80,9 @@ defmodule Minga.Editor.State do
           pending_conflict: {pid(), String.t()} | nil,
           marks: marks(),
           last_jump_pos: GapBuffer.position() | nil,
-          macro_recorder: MacroRecorder.t()
+          macro_recorder: MacroRecorder.t(),
+          highlight: Highlight.t(),
+          highlight_version: non_neg_integer()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

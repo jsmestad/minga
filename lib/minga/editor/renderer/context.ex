@@ -13,6 +13,7 @@ defmodule Minga.Editor.Renderer.Context do
 
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.Viewport
+  alias Minga.Highlight
 
   @enforce_keys [:viewport, :gutter_w, :content_w]
   defstruct viewport: nil,
@@ -20,7 +21,8 @@ defmodule Minga.Editor.Renderer.Context do
             search_matches: [],
             gutter_w: 0,
             content_w: 0,
-            confirm_match: nil
+            confirm_match: nil,
+            highlight: nil
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -41,6 +43,7 @@ defmodule Minga.Editor.Renderer.Context do
           search_matches: [SearchHighlight.search_match()],
           gutter_w: non_neg_integer(),
           content_w: pos_integer(),
-          confirm_match: SearchHighlight.search_match() | nil
+          confirm_match: SearchHighlight.search_match() | nil,
+          highlight: Highlight.t() | nil
         }
 end

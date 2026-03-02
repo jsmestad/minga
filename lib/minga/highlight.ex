@@ -165,28 +165,36 @@ defmodule Minga.Highlight do
     span_start_in_line = max(span.start_byte - line_start, 0)
     span_end_in_line = min(span.end_byte - line_start, line_len)
 
-    # Gap before this span
-    acc =
-      if span_start_in_line > pos do
-        gap = binary_part(line_text, pos, span_start_in_line - pos)
-        [{gap, []} | acc]
-      else
-        acc
-      end
+    # Skip spans that are entirely behind our current position (overlapping)
+    if span_end_in_line <= pos or span_start_in_line >= line_len do
+      do_build(line_text, line_start, line_end, rest, hl, pos, acc)
+    else
+      # Adjust start to not overlap with already-rendered text
+      effective_start = max(span_start_in_line, pos)
 
-    # The highlighted segment
-    style = resolve_style(hl, span.capture_id)
-    seg_len = span_end_in_line - span_start_in_line
+      # Gap before this span
+      acc =
+        if effective_start > pos do
+          gap = binary_part(line_text, pos, effective_start - pos)
+          [{gap, []} | acc]
+        else
+          acc
+        end
 
-    acc =
-      if seg_len > 0 do
-        segment = binary_part(line_text, span_start_in_line, seg_len)
-        [{segment, style} | acc]
-      else
-        acc
-      end
+      # The highlighted segment
+      style = resolve_style(hl, span.capture_id)
+      seg_len = span_end_in_line - effective_start
 
-    do_build(line_text, line_start, line_end, rest, hl, span_end_in_line, acc)
+      acc =
+        if seg_len > 0 do
+          segment = binary_part(line_text, effective_start, seg_len)
+          [{segment, style} | acc]
+        else
+          acc
+        end
+
+      do_build(line_text, line_start, line_end, rest, hl, span_end_in_line, acc)
+    end
   end
 
   @spec resolve_style(t(), non_neg_integer()) :: Minga.Port.Protocol.style()

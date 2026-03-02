@@ -164,6 +164,47 @@ defmodule Minga.HighlightTest do
       assert [{"def", []}, {" foo", []}] = result
     end
 
+    test "overlapping spans are deduplicated (first wins)" do
+      # Tree-sitter often returns overlapping captures for the same node
+      hl = %Highlight{
+        version: 1,
+        spans: [
+          %{start_byte: 0, end_byte: 9, capture_id: 0},
+          %{start_byte: 0, end_byte: 9, capture_id: 1}
+        ],
+        capture_names: ["keyword", "keyword.function"],
+        theme: %{
+          "keyword" => [fg: 0xFF0000],
+          "keyword.function" => [fg: 0x00FF00]
+        }
+      }
+
+      result = Highlight.styles_for_line(hl, "defmodule Foo do", 0)
+
+      # Should NOT produce "defmodule" twice
+      all_text = Enum.map_join(result, fn {text, _} -> text end)
+      assert all_text == "defmodule Foo do"
+
+      # First span wins for the overlapping region
+      assert [{"defmodule", [fg: 0xFF0000]}, {" Foo do", []}] = result
+    end
+
+    test "partially overlapping spans don't duplicate text" do
+      hl = %Highlight{
+        version: 1,
+        spans: [
+          %{start_byte: 0, end_byte: 5, capture_id: 0},
+          %{start_byte: 3, end_byte: 8, capture_id: 1}
+        ],
+        capture_names: ["keyword", "string"],
+        theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
+      }
+
+      result = Highlight.styles_for_line(hl, "hello world", 0)
+      all_text = Enum.map_join(result, fn {text, _} -> text end)
+      assert all_text == "hello world"
+    end
+
     test "with line_start_byte offset" do
       # "def foo\nbar baz" — line 2 starts at byte 8
       hl = %Highlight{
