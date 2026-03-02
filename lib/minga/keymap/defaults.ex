@@ -30,6 +30,10 @@ defmodule Minga.Keymap.Defaults do
     # ── Command palette ──────────────────────────────────────────────────────
     {[{?:, @none}], :command_palette, "Execute command"},
 
+    # ── Search ─────────────────────────────────────────────────────────────────
+    {[{?s, @none}, {?p, @none}], :search_project, "Search project"},
+    {[{?/, @none}], :search_project, "Search project"},
+
     # ── File ──────────────────────────────────────────────────────────────────
     {[{?f, @none}, {?f, @none}], :find_file, "Find file"},
     {[{?f, @none}, {?s, @none}], :save, "Save file"},
@@ -60,6 +64,7 @@ defmodule Minga.Keymap.Defaults do
 
   # Group prefix descriptions shown in which-key at the SPC level.
   @group_prefixes [
+    {[{?s, @none}], "+search"},
     {[{?f, @none}], "+file"},
     {[{?b, @none}], "+buffer"},
     {[{?w, @none}], "+window"},

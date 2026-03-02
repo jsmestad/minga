@@ -170,6 +170,12 @@ defmodule Minga.Test.EditorCase do
     BufferServer.content(buffer)
   end
 
+  @doc "Returns the current editor mode."
+  @spec editor_mode(editor_ctx()) :: atom()
+  def editor_mode(%{editor: editor}) do
+    :sys.get_state(editor).mode
+  end
+
   @doc "Returns the buffer cursor position."
   @spec buffer_cursor(editor_ctx()) :: {non_neg_integer(), non_neg_integer()}
   def buffer_cursor(%{buffer: buffer}) do

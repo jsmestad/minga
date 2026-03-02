@@ -63,7 +63,8 @@ defmodule Minga.Editor.State do
             last_search_pattern: nil,
             last_search_direction: :forward,
             marks: %{},
-            last_jump_pos: nil
+            last_jump_pos: nil,
+            project_search_results: []
 
   @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
   @type picker_action_menu ::
@@ -99,6 +100,7 @@ defmodule Minga.Editor.State do
           last_search_pattern: String.t() | nil,
           last_search_direction: Minga.Search.direction(),
           marks: marks(),
-          last_jump_pos: GapBuffer.position() | nil
+          last_jump_pos: GapBuffer.position() | nil,
+          project_search_results: [Minga.ProjectSearch.match()]
         }
 end

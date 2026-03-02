@@ -280,8 +280,10 @@ defmodule Minga.Editor do
     # After commands have executed (they may need the old mode_state, e.g.
     # VisualState for delete_visual_selection), clean up the mode_state
     # if we've transitioned back to Normal from a different mode.
+    # Skip cleanup if a command changed the mode to something other than
+    # what the FSM transition requested (e.g. substitute confirm, search prompt).
     after_commands =
-      if new_mode == :normal and old_mode != :normal do
+      if new_mode == :normal and old_mode != :normal and after_commands.mode == :normal do
         case after_commands.mode_state do
           %Mode.State{} -> after_commands
           _ -> %{after_commands | mode_state: Mode.initial_state()}

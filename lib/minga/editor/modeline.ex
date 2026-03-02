@@ -126,6 +126,8 @@ defmodule Minga.Editor.Modeline do
   defp mode_badge(:command, _state), do: "COMMAND"
   defp mode_badge(:replace, _state), do: "REPLACE"
   defp mode_badge(:search, _state), do: "SEARCH"
+  defp mode_badge(:search_prompt, _state), do: "SEARCH"
+  defp mode_badge(:substitute_confirm, _state), do: "SUBSTITUTE"
 
   @spec filetype_label(atom()) :: String.t()
   defp filetype_label(:text), do: "Text"

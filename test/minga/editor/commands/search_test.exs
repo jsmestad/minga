@@ -164,14 +164,70 @@ defmodule Minga.Editor.Commands.SearchTest do
       assert buffer_content(ctx) == " bar "
     end
 
-    test ":%s/old/new/gc shows not-yet-supported message" do
+    test ":%s/old/new/gc enters substitute confirm mode" do
       ctx = start_editor("foo bar foo")
       send_keys(ctx, ":")
       type_text(ctx, "%s/foo/baz/gc")
       send_keys(ctx, "<CR>")
 
+      # Content unchanged until confirmations are applied
       assert buffer_content(ctx) == "foo bar foo"
-      assert_minibuffer_contains(ctx, "Confirm mode not yet supported")
+      assert editor_mode(ctx) == :substitute_confirm
+    end
+
+    test ":%s/old/new/gc with y on all matches replaces all" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/gc")
+      send_keys(ctx, "<CR>")
+
+      # Two matches: accept both
+      send_keys(ctx, "y")
+      send_keys(ctx, "y")
+
+      assert buffer_content(ctx) == "baz bar baz"
+      assert editor_mode(ctx) == :normal
+    end
+
+    test ":%s/old/new/gc with n skips matches" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/gc")
+      send_keys(ctx, "<CR>")
+
+      # Skip first, accept second
+      send_keys(ctx, "n")
+      send_keys(ctx, "y")
+
+      assert buffer_content(ctx) == "foo bar baz"
+      assert editor_mode(ctx) == :normal
+    end
+
+    test ":%s/old/new/gc with q stops early" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/gc")
+      send_keys(ctx, "<CR>")
+
+      # Accept first, then quit
+      send_keys(ctx, "y")
+      send_keys(ctx, "q")
+
+      assert buffer_content(ctx) == "baz bar foo"
+      assert editor_mode(ctx) == :normal
+    end
+
+    test ":%s/old/new/gc with a accepts all remaining" do
+      ctx = start_editor("foo bar foo")
+      send_keys(ctx, ":")
+      type_text(ctx, "%s/foo/baz/gc")
+      send_keys(ctx, "<CR>")
+
+      # Accept all from the start
+      send_keys(ctx, "a")
+
+      assert buffer_content(ctx) == "baz bar baz"
+      assert editor_mode(ctx) == :normal
     end
 
     test "substitution is undoable" do

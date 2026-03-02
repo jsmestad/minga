@@ -28,7 +28,16 @@ defmodule Minga.Mode do
   """
 
   @typedoc "Available editor modes."
-  @type mode :: :normal | :insert | :visual | :operator_pending | :command | :replace | :search
+  @type mode ::
+          :normal
+          | :insert
+          | :visual
+          | :operator_pending
+          | :command
+          | :replace
+          | :search
+          | :search_prompt
+          | :substitute_confirm
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -48,6 +57,8 @@ defmodule Minga.Mode do
           | Minga.Mode.CommandState.t()
           | Minga.Mode.ReplaceState.t()
           | Minga.Mode.SearchState.t()
+          | Minga.Mode.SearchPromptState.t()
+          | Minga.Mode.SubstituteConfirmState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -108,6 +119,8 @@ defmodule Minga.Mode do
   def display(:command), do: "-- COMMAND --"
   def display(:replace), do: "-- REPLACE --"
   def display(:search), do: "-- SEARCH --"
+  def display(:search_prompt), do: "-- SEARCH PROJECT --"
+  def display(:substitute_confirm), do: "-- SUBSTITUTE --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -123,6 +136,16 @@ defmodule Minga.Mode do
     prefix <> input
   end
 
+  def display(:search_prompt, %Minga.Mode.SearchPromptState{input: input}) do
+    "Search: " <> input
+  end
+
+  def display(:substitute_confirm, %Minga.Mode.SubstituteConfirmState{} = s) do
+    current = s.current + 1
+    total = length(s.matches)
+    "replace with #{s.replacement}? [y/n/a/q] (#{current} of #{total})"
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -135,6 +158,8 @@ defmodule Minga.Mode do
   defp mode_module(:command), do: Minga.Mode.Command
   defp mode_module(:replace), do: Minga.Mode.Replace
   defp mode_module(:search), do: Minga.Mode.Search
+  defp mode_module(:search_prompt), do: Minga.Mode.SearchPrompt
+  defp mode_module(:substitute_confirm), do: Minga.Mode.SubstituteConfirm
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

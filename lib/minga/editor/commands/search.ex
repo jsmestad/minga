@@ -6,9 +6,11 @@ defmodule Minga.Editor.Commands.Search do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
   alias Minga.Mode.SearchState
+  alias Minga.ProjectSearch
 
   @type state :: EditorState.t()
 
@@ -159,6 +161,122 @@ defmodule Minga.Editor.Commands.Search do
     end
   end
 
+  def execute(%{mode_state: %{input: query}} = state, :confirm_project_search)
+      when is_binary(query) and query != "" do
+    case ProjectSearch.search(query) do
+      {:ok, [], _truncated?} ->
+        %{state | status_msg: "No results for: #{query}"}
+
+      {:ok, matches, truncated?} ->
+        msg = if truncated?, do: "Results truncated to 10,000", else: nil
+
+        state = %{state | project_search_results: matches}
+        state = PickerUI.open(state, Minga.Picker.ProjectSearchSource)
+        if msg, do: %{state | status_msg: msg}, else: state
+
+      {:error, msg} ->
+        %{state | status_msg: msg}
+    end
+  end
+
+  def execute(state, :confirm_project_search) do
+    %{state | status_msg: "Empty search query"}
+  end
+
+  # Advance cursor to current match during substitute confirm
+  def execute(
+        %{buffer: buf, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        :substitute_confirm_advance
+      ) do
+    case Enum.at(ms.matches, ms.current) do
+      {line, col, _len} -> BufferServer.move_to(buf, {line, col})
+      _ -> :ok
+    end
+
+    state
+  end
+
+  def execute(state, :substitute_confirm_advance), do: state
+
+  # Apply accepted substitutions from confirm mode
+  def execute(
+        %{buffer: buf, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        :apply_substitute_confirm
+      ) do
+    accepted_set = MapSet.new(ms.accepted)
+    accepted_count = MapSet.size(accepted_set)
+    total = length(ms.matches)
+
+    if accepted_count == 0 do
+      %{state | status_msg: "No substitutions made"}
+    else
+      # Apply replacements in reverse order to preserve positions
+      sorted_indices =
+        ms.accepted
+        |> Enum.sort(:desc)
+
+      new_content =
+        Enum.reduce(sorted_indices, ms.original_content, fn idx, content ->
+          {line, col, len} = Enum.at(ms.matches, idx)
+          replace_match(content, line, col, len, ms.replacement)
+        end)
+
+      BufferServer.replace_content(buf, new_content)
+
+      # Restore cursor to a safe position
+      cursor_line = elem(hd(ms.matches), 0)
+      total_lines = BufferServer.line_count(buf)
+      safe_line = min(cursor_line, max(0, total_lines - 1))
+      BufferServer.move_to(buf, {safe_line, 0})
+
+      msg =
+        if accepted_count == 1,
+          do: "1 substitution",
+          else: "#{accepted_count} of #{total} substitutions"
+
+      %{state | status_msg: msg, last_search_pattern: ms.pattern}
+    end
+  end
+
+  def execute(state, :apply_substitute_confirm), do: state
+
+  @doc "Starts substitute confirm mode by finding all matches and transitioning."
+  @spec start_substitute_confirm(state(), pid(), String.t(), String.t(), boolean()) :: state()
+  def start_substitute_confirm(state, buf, pattern, replacement, global?) do
+    content = BufferServer.content(buf)
+    lines = String.split(content, "\n")
+    all_matches = Minga.Search.find_all_in_range(lines, pattern, 0)
+
+    # When not global, keep only the first match per line
+    matches =
+      if global? do
+        all_matches
+      else
+        all_matches
+        |> Enum.group_by(fn {line, _col, _len} -> line end)
+        |> Enum.flat_map(fn {_line, line_matches} -> [hd(line_matches)] end)
+        |> Enum.sort()
+      end
+
+    case matches do
+      [] ->
+        %{state | status_msg: "Pattern not found: #{pattern}"}
+
+      _ ->
+        {first_line, first_col, _len} = hd(matches)
+        BufferServer.move_to(buf, {first_line, first_col})
+
+        ms = %Minga.Mode.SubstituteConfirmState{
+          matches: matches,
+          pattern: pattern,
+          replacement: replacement,
+          original_content: content
+        }
+
+        %{state | mode: :substitute_confirm, mode_state: ms, last_search_pattern: pattern}
+    end
+  end
+
   @doc "Executes a `:substitute` ex-command against the buffer."
   @spec execute_substitute(state(), pid(), String.t(), String.t(), boolean()) :: state()
   def execute_substitute(state, buf, pattern, replacement, global?) do
@@ -185,5 +303,30 @@ defmodule Minga.Editor.Commands.Search do
       msg = if count == 1, do: "1 substitution", else: "#{count} substitutions"
       %{state | status_msg: msg, last_search_pattern: pattern}
     end
+  end
+
+  # ── Private helpers ────────────────────────────────────────────────────────
+
+  # Replace a match at a specific line/col/length in content string.
+  @spec replace_match(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) ::
+          String.t()
+  defp replace_match(content, match_line, match_col, match_len, replacement) do
+    lines = String.split(content, "\n")
+
+    new_lines =
+      List.update_at(lines, match_line, fn line ->
+        graphemes = String.graphemes(line)
+        before = Enum.take(graphemes, match_col) |> Enum.join()
+        after_match = Enum.drop(graphemes, match_col + match_len) |> Enum.join()
+        before <> replacement <> after_match
+      end)
+
+    Enum.join(new_lines, "\n")
   end
 end

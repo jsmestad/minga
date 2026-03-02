@@ -38,6 +38,7 @@ defmodule Minga.Command.Registry do
     {:undo, "Undo the last change"},
     {:redo, "Redo the last undone change"},
     {:find_file, "Find file in project"},
+    {:search_project, "Search across project files"},
     {:buffer_list, "Switch buffer"},
     {:buffer_next, "Next buffer"},
     {:buffer_prev, "Previous buffer"},

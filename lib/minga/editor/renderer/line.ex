@@ -3,78 +3,45 @@ defmodule Minga.Editor.Renderer.Line do
   Line content rendering with visual selection and search highlight support.
   """
 
+  alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.SearchHighlight
-  alias Minga.Editor.Viewport
   alias Minga.Port.Protocol
-
-  @typedoc """
-  Represents the bounds of a visual selection for rendering.
-
-  * `nil` — no active selection
-  * `{:char, start_pos, end_pos}` — characterwise selection
-  * `{:line, start_line, end_line}` — linewise selection
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
 
   @typedoc "Column range of a selection on a single line."
   @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
 
-  @typedoc "A search match: `{line, col, length}` (absolute buffer coordinates)."
-  @type search_match :: SearchHighlight.search_match()
-
   @doc "Renders a single buffer line into draw commands."
-  @spec render(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Viewport.t(),
-          visual_selection(),
-          [search_match()],
-          non_neg_integer(),
-          pos_integer()
-        ) :: [binary()]
-  def render(
-        line_text,
-        screen_row,
-        buf_line,
-        viewport,
-        visual_selection,
-        search_matches,
-        gutter_w,
-        content_w
-      ) do
+  @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t()) :: [binary()]
+  def render(line_text, screen_row, buf_line, %Context{} = ctx) do
     graphemes = String.graphemes(line_text)
     line_len = length(graphemes)
 
     visible_graphemes =
       graphemes
-      |> Enum.drop(viewport.left)
-      |> Enum.take(content_w)
+      |> Enum.drop(ctx.viewport.left)
+      |> Enum.take(ctx.content_w)
 
-    case selection_cols_for_line(buf_line, line_len, visual_selection) do
+    case selection_cols_for_line(buf_line, line_len, ctx.visual_selection) do
       nil ->
         SearchHighlight.render_line_with_search(
           visible_graphemes,
           screen_row,
           buf_line,
-          viewport,
-          search_matches,
-          gutter_w
+          ctx.viewport,
+          ctx.search_matches,
+          ctx.gutter_w,
+          ctx.confirm_match
         )
 
       :full ->
-        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes), reverse: true)]
+        [Protocol.encode_draw(screen_row, ctx.gutter_w, Enum.join(visible_graphemes), reverse: true)]
 
       {sel_start, sel_end} ->
         render_partial_selection(
           visible_graphemes,
           screen_row,
-          gutter_w,
-          viewport.left,
+          ctx.gutter_w,
+          ctx.viewport.left,
           sel_start,
           sel_end
         )
@@ -128,7 +95,7 @@ defmodule Minga.Editor.Renderer.Line do
   @spec selection_cols_for_line(
           non_neg_integer(),
           non_neg_integer(),
-          visual_selection()
+          Context.visual_selection()
         ) :: line_selection()
   defp selection_cols_for_line(_buf_line, _line_len, nil), do: nil
 

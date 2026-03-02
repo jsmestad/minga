@@ -18,6 +18,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
+  alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.Renderer.Minibuffer
@@ -105,7 +106,16 @@ defmodule Minga.Editor.Renderer do
         _ -> preview_matches
       end
 
-    # 4. Render gutter + content lines.
+    # 4. Build render context (invariant per frame) and render lines.
+    render_ctx = %Context{
+      viewport: viewport,
+      visual_selection: visual_selection,
+      search_matches: search_matches,
+      gutter_w: gutter_w,
+      content_w: content_w,
+      confirm_match: SearchHighlight.current_confirm_match(state)
+    }
+
     {gutter_commands, line_commands} =
       lines
       |> Enum.with_index()
@@ -115,17 +125,7 @@ defmodule Minga.Editor.Renderer do
         gutter_cmd =
           Gutter.render_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
 
-        content_cmds =
-          LineRenderer.render(
-            line_text,
-            screen_row,
-            buf_line,
-            viewport,
-            visual_selection,
-            search_matches,
-            gutter_w,
-            content_w
-          )
+        content_cmds = LineRenderer.render(line_text, screen_row, buf_line, render_ctx)
 
         new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
         {new_gutters, contents ++ content_cmds}

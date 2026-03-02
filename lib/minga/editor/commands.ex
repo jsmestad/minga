@@ -67,6 +67,10 @@ defmodule Minga.Editor.Commands do
     PickerUI.open(state, Minga.Picker.FileSource)
   end
 
+  def execute(state, :search_project) do
+    %{state | mode: :search_prompt, mode_state: %Minga.Mode.SearchPromptState{}}
+  end
+
   # Dot-repeat: return a tagged tuple so the GenServer can call replay_last_change/2.
   def execute(state, {:dot_repeat, count}) do
     {state, {:dot_repeat, count}}
@@ -238,6 +242,15 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :search_word_under_cursor_backward),
     do: Search.execute(state, :search_word_under_cursor_backward)
+
+  def execute(state, :confirm_project_search),
+    do: Search.execute(state, :confirm_project_search)
+
+  def execute(state, :substitute_confirm_advance),
+    do: Search.execute(state, :substitute_confirm_advance)
+
+  def execute(state, :apply_substitute_confirm),
+    do: Search.execute(state, :apply_substitute_confirm)
 
   # ── Marks ─────────────────────────────────────────────────────────────────
 

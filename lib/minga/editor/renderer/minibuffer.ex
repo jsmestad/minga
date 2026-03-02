@@ -21,6 +21,32 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  def render(%{mode: :search_prompt, mode_state: ms}, row, cols) do
+    prompt_text = "Search: " <> ms.input
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(prompt_text, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
+  def render(%{mode: :substitute_confirm, mode_state: ms}, row, cols) do
+    current = ms.current + 1
+    total = length(ms.matches)
+    prompt = "replace with #{ms.replacement}? [y/n/a/q] (#{current} of #{total})"
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(prompt, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
   def render(%{mode: :command, mode_state: ms}, row, cols) do
     cmd_text = ":" <> ms.input
 

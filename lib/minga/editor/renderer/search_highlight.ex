@@ -10,6 +10,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
 
   @search_highlight_fg 0x000000
   @search_highlight_bg 0xECBE7B
+  @confirm_current_bg 0xFF6C6B
 
   @typedoc "A search match: `{line, col, length}` (absolute buffer coordinates)."
   @type search_match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
@@ -56,7 +57,8 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           Viewport.t(),
           [search_match()],
-          non_neg_integer()
+          non_neg_integer(),
+          search_match() | nil
         ) :: [binary()]
   def render_line_with_search(
         visible_graphemes,
@@ -64,17 +66,20 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
         buf_line,
         viewport,
         matches,
-        gutter_w
+        gutter_w,
+        confirm_match \\ nil
       ) do
     highlight_set = build_highlight_set(matches, buf_line, viewport, visible_graphemes)
+    confirm_set = build_confirm_set(confirm_match, buf_line, viewport, visible_graphemes)
 
-    if MapSet.size(highlight_set) == 0 do
+    if MapSet.size(highlight_set) == 0 and MapSet.size(confirm_set) == 0 do
       [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
     else
       render_highlighted_spans(
         visible_graphemes,
         viewport.left,
         highlight_set,
+        confirm_set,
         screen_row,
         gutter_w
       )
@@ -149,12 +154,31 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     extract_substitute_pattern(input)
   end
 
+  defp active_search_pattern(%{
+         mode: :substitute_confirm,
+         mode_state: %Minga.Mode.SubstituteConfirmState{pattern: pattern}
+       })
+       when pattern != "" do
+    pattern
+  end
+
   defp active_search_pattern(%{last_search_pattern: pattern})
        when is_binary(pattern) and pattern != "" do
     pattern
   end
 
   defp active_search_pattern(_state), do: nil
+
+  @doc "Returns the current match being confirmed, or nil."
+  @spec current_confirm_match(state()) :: search_match() | nil
+  def current_confirm_match(%{
+        mode: :substitute_confirm,
+        mode_state: %Minga.Mode.SubstituteConfirmState{} = ms
+      }) do
+    Enum.at(ms.matches, ms.current)
+  end
+
+  def current_confirm_match(_state), do: nil
 
   @spec extract_substitute_pattern(String.t()) :: String.t() | nil
   defp extract_substitute_pattern(input) do
@@ -230,6 +254,26 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     end
   end
 
+  @spec build_confirm_set(
+          search_match() | nil,
+          non_neg_integer(),
+          Viewport.t(),
+          [String.t()]
+        ) :: MapSet.t(non_neg_integer())
+  defp build_confirm_set(nil, _buf_line, _viewport, _visible_graphemes), do: MapSet.new()
+
+  defp build_confirm_set({line, col, len}, buf_line, viewport, visible_graphemes) do
+    if line == buf_line do
+      vis_start = viewport.left
+      vis_end = vis_start + length(visible_graphemes) - 1
+
+      Enum.to_list(max(col, vis_start)..min(col + len - 1, vis_end)//1)
+      |> MapSet.new()
+    else
+      MapSet.new()
+    end
+  end
+
   @spec build_highlight_set(
           [search_match()],
           non_neg_integer(),
@@ -252,27 +296,48 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           [String.t()],
           non_neg_integer(),
           MapSet.t(non_neg_integer()),
+          MapSet.t(non_neg_integer()),
           non_neg_integer(),
           non_neg_integer()
         ) :: [binary()]
-  defp render_highlighted_spans(visible_graphemes, vis_start, highlight_set, screen_row, gutter_w) do
+  defp render_highlighted_spans(
+         visible_graphemes,
+         vis_start,
+         highlight_set,
+         confirm_set,
+         screen_row,
+         gutter_w
+       ) do
     visible_graphemes
     |> Enum.with_index(vis_start)
-    |> chunk_by_highlight(highlight_set)
-    |> Enum.flat_map(fn {chars, abs_start_col, highlighted?} ->
-      encode_span(chars, abs_start_col, vis_start, highlighted?, screen_row, gutter_w)
+    |> chunk_by_highlight_type(highlight_set, confirm_set)
+    |> Enum.flat_map(fn {chars, abs_start_col, hl_type} ->
+      encode_span(chars, abs_start_col, vis_start, hl_type, screen_row, gutter_w)
     end)
   end
+
+  @typep highlight_type :: :none | :search | :confirm
 
   @spec encode_span(
           [String.t()],
           non_neg_integer(),
           non_neg_integer(),
-          boolean(),
+          highlight_type(),
           non_neg_integer(),
           non_neg_integer()
         ) :: [binary()]
-  defp encode_span(chars, abs_start_col, vis_start, true, screen_row, gutter_w) do
+  defp encode_span(chars, abs_start_col, vis_start, :confirm, screen_row, gutter_w) do
+    screen_col = gutter_w + (abs_start_col - vis_start)
+
+    [
+      Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
+        fg: @search_highlight_fg,
+        bg: @confirm_current_bg
+      )
+    ]
+  end
+
+  defp encode_span(chars, abs_start_col, vis_start, :search, screen_row, gutter_w) do
     screen_col = gutter_w + (abs_start_col - vis_start)
 
     [
@@ -283,31 +348,37 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     ]
   end
 
-  defp encode_span(chars, abs_start_col, vis_start, false, screen_row, gutter_w) do
+  defp encode_span(chars, abs_start_col, vis_start, :none, screen_row, gutter_w) do
     screen_col = gutter_w + (abs_start_col - vis_start)
     [Protocol.encode_draw(screen_row, screen_col, Enum.join(chars))]
   end
 
-  @spec chunk_by_highlight(
+  @spec chunk_by_highlight_type(
           [{String.t(), non_neg_integer()}],
+          MapSet.t(non_neg_integer()),
           MapSet.t(non_neg_integer())
-        ) :: [{[String.t()], non_neg_integer(), boolean()}]
-  defp chunk_by_highlight(indexed_graphemes, highlight_set) do
+        ) :: [{[String.t()], non_neg_integer(), highlight_type()}]
+  defp chunk_by_highlight_type(indexed_graphemes, highlight_set, confirm_set) do
     indexed_graphemes
     |> Enum.chunk_while(
       nil,
       fn {char, col}, acc ->
-        highlighted = MapSet.member?(highlight_set, col)
+        hl_type =
+          cond do
+            MapSet.member?(confirm_set, col) -> :confirm
+            MapSet.member?(highlight_set, col) -> :search
+            true -> :none
+          end
 
         case acc do
           nil ->
-            {:cont, {[char], col, highlighted}}
+            {:cont, {[char], col, hl_type}}
 
-          {chars, start_col, ^highlighted} ->
-            {:cont, {[char | chars], start_col, highlighted}}
+          {chars, start_col, ^hl_type} ->
+            {:cont, {[char | chars], start_col, hl_type}}
 
           {chars, start_col, prev_hl} ->
-            {:cont, {Enum.reverse(chars), start_col, prev_hl}, {[char], col, highlighted}}
+            {:cont, {Enum.reverse(chars), start_col, prev_hl}, {[char], col, hl_type}}
         end
       end,
       fn

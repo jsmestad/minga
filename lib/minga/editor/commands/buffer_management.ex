@@ -189,7 +189,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     confirm? = :confirm in flags
 
     if confirm? do
-      %{state | status_msg: "Confirm mode not yet supported, use /g"}
+      SearchCommands.start_substitute_confirm(state, buf, pattern, replacement, global?)
     else
       SearchCommands.execute_substitute(state, buf, pattern, replacement, global?)
     end
