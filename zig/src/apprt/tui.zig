@@ -167,6 +167,7 @@ pub const TuiRuntime = struct {
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
+        self.hl.startPrewarm();
 
         // Stdout (Port protocol channel).
         var stdout_buf: [4096]u8 = undefined;

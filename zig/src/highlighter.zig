@@ -70,12 +70,15 @@ pub const Highlighter = struct {
             }
         }
 
-        // Pre-compile queries on a background thread (skip in tests).
-        if (!builtin.is_test) {
-            hl.prewarm_thread = std.Thread.spawn(.{}, prewarmQueries, .{&hl}) catch null;
-        }
-
         return hl;
+    }
+
+    /// Start background pre-compilation of all embedded queries.
+    /// Must be called after the Highlighter is at its final memory location
+    /// (not inside init, which returns by value).
+    pub fn startPrewarm(self: *Highlighter) void {
+        if (builtin.is_test) return;
+        self.prewarm_thread = std.Thread.spawn(.{}, prewarmQueries, .{self}) catch null;
     }
 
     /// Background thread: pre-compiles all embedded queries into the cache.
