@@ -35,7 +35,7 @@ defmodule Minga.Motion.Line do
     case GapBuffer.line_at(buf, line) do
       nil -> {line, 0}
       "" -> {line, 0}
-      text -> {line, max(0, String.length(text) - 1)}
+      text -> {line, GapBuffer.last_grapheme_byte_offset(text)}
     end
   end
 
@@ -61,12 +61,12 @@ defmodule Minga.Motion.Line do
     end
   end
 
-  # Walk the binary to find first non-blank, avoiding String.graphemes allocation.
+  # Walk the binary to find first non-blank, tracking byte offset.
   @spec find_first_non_blank(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp find_first_non_blank(text, col) do
+  defp find_first_non_blank(text, byte_col) do
     case String.next_grapheme(text) do
-      {g, rest} when g in [" ", "\t"] -> find_first_non_blank(rest, col + 1)
-      {_g, _rest} -> col
+      {g, rest} when g in [" ", "\t"] -> find_first_non_blank(rest, byte_col + byte_size(g))
+      {_g, _rest} -> byte_col
       nil -> 0
     end
   end

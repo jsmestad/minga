@@ -1,12 +1,15 @@
 defmodule Minga.Motion.Char do
   @moduledoc """
   Character find motions (`f`/`F`/`t`/`T`) and bracket matching (`%`).
+
+  All positions use byte-indexed columns. Character search functions
+  track byte offsets while scanning graphemes.
   """
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Motion.Helpers
 
-  @typedoc "A zero-indexed {line, col} cursor position."
+  @typedoc "A zero-indexed {line, byte_col} cursor position."
   @type position :: GapBuffer.position()
 
   @bracket_pairs %{
@@ -39,9 +42,10 @@ defmodule Minga.Motion.Char do
         {line, col}
 
       text ->
-        case find_in_binary(text, char, col + 1, 0) do
+        # Search starting after current byte_col
+        case find_forward_byte(text, char, col) do
           nil -> {line, col}
-          idx -> {line, idx}
+          byte_col -> {line, byte_col}
         end
     end
   end
@@ -63,11 +67,9 @@ defmodule Minga.Motion.Char do
         {line, col}
 
       text ->
-        graphemes = text |> String.graphemes() |> List.to_tuple()
-
-        case rfind_in_tuple(graphemes, char, col - 1) do
+        case find_backward_byte(text, char, col) do
           nil -> {line, col}
-          idx -> {line, idx}
+          byte_col -> {line, byte_col}
         end
     end
   end
@@ -85,8 +87,14 @@ defmodule Minga.Motion.Char do
   @spec till_char_forward(GapBuffer.t(), position(), String.t()) :: position()
   def till_char_forward(%GapBuffer{} = buf, {line, col}, char) do
     case find_char_forward(buf, {line, col}, char) do
-      {^line, ^col} -> {line, col}
-      {^line, found_col} -> {line, max(col, found_col - 1)}
+      {^line, ^col} ->
+        {line, col}
+
+      {^line, found_col} ->
+        # Move to the grapheme before found_col
+        line_text = GapBuffer.line_at(buf, line) || ""
+        prev_byte = prev_grapheme_byte_offset(line_text, found_col)
+        {line, max(col, prev_byte)}
     end
   end
 
@@ -103,8 +111,14 @@ defmodule Minga.Motion.Char do
   @spec till_char_backward(GapBuffer.t(), position(), String.t()) :: position()
   def till_char_backward(%GapBuffer{} = buf, {line, col}, char) do
     case find_char_backward(buf, {line, col}, char) do
-      {^line, ^col} -> {line, col}
-      {^line, found_col} -> {line, min(col, found_col + 1)}
+      {^line, ^col} ->
+        {line, col}
+
+      {^line, found_col} ->
+        # Move to the grapheme after found_col
+        line_text = GapBuffer.line_at(buf, line) || ""
+        next_byte = next_grapheme_byte_offset(line_text, found_col)
+        {line, min(col, next_byte)}
     end
   end
 
@@ -124,18 +138,19 @@ defmodule Minga.Motion.Char do
   @spec match_bracket(GapBuffer.t(), position()) :: position()
   def match_bracket(%GapBuffer{} = buf, {line, col} = pos) do
     current_line_text = GapBuffer.line_at(buf, line) || ""
-    line_graphemes = current_line_text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(current_line_text)
+    g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
-    case find_bracket_on_line(line_graphemes, col, tuple_size(line_graphemes)) do
+    case find_bracket_on_line(graphemes, g_col, tuple_size(graphemes)) do
       nil -> pos
-      bracket_col -> do_match_bracket(buf, pos, line_graphemes, bracket_col)
+      bracket_g_idx -> do_match_bracket(buf, pos, graphemes, byte_offsets, bracket_g_idx)
     end
   end
 
-  @spec do_match_bracket(GapBuffer.t(), position(), tuple(), non_neg_integer()) ::
+  @spec do_match_bracket(GapBuffer.t(), position(), tuple(), tuple(), non_neg_integer()) ::
           position()
-  defp do_match_bracket(buf, {line, col} = pos, line_graphemes, bracket_col) do
-    bracket_char = elem(line_graphemes, bracket_col)
+  defp do_match_bracket(buf, {line, col} = pos, line_graphemes, line_byte_offsets, bracket_g_idx) do
+    bracket_char = elem(line_graphemes, bracket_g_idx)
 
     case Map.get(@bracket_pairs, bracket_char) do
       nil ->
@@ -143,29 +158,52 @@ defmodule Minga.Motion.Char do
 
       {open, close, direction} ->
         text = GapBuffer.content(buf)
-        graphemes = text |> String.graphemes() |> List.to_tuple()
-        all_lines = String.split(text, "\n")
-        abs_offset = Helpers.offset_for(all_lines, line, col) - col + bracket_col
+        {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
+        all_lines = :binary.split(text, "\n", [:global])
+        g_col = Helpers.byte_offset_to_grapheme_index(line_byte_offsets, col)
+        byte_off = Helpers.offset_for(all_lines, line, col)
+        g_offset = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
+        abs_g_offset = g_offset - g_col + bracket_g_idx
 
-        case scan_for_match(graphemes, abs_offset, open, close, direction) do
-          nil -> pos
-          match_offset -> GapBuffer.offset_to_position(buf, match_offset)
+        case scan_for_match(graphemes, abs_g_offset, open, close, direction) do
+          nil ->
+            pos
+
+          match_g_idx ->
+            match_byte =
+              Helpers.grapheme_index_to_byte_offset(byte_offsets, match_g_idx, byte_size(text))
+
+            GapBuffer.offset_to_position(buf, match_byte)
         end
     end
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
-  # Walk forward through the binary, tracking grapheme index.
-  @spec find_in_binary(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+  # Find char forward in text, starting after `after_byte_col`. Returns byte offset or nil.
+  @spec find_forward_byte(String.t(), String.t(), non_neg_integer()) :: non_neg_integer() | nil
+  defp find_forward_byte(text, char, after_byte_col) do
+    do_find_forward_byte(text, char, after_byte_col, 0, false)
+  end
+
+  @spec do_find_forward_byte(
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) ::
           non_neg_integer() | nil
-  defp find_in_binary(text, char, from, current_idx) do
+  defp do_find_forward_byte(text, char, after_byte_col, current_byte, past_start) do
     case String.next_grapheme(text) do
       {g, rest} ->
-        if current_idx >= from and g == char do
-          current_idx
+        g_size = byte_size(text) - byte_size(rest)
+        new_past = past_start or current_byte >= after_byte_col
+
+        if new_past and current_byte > after_byte_col and g == char do
+          current_byte
         else
-          find_in_binary(rest, char, from, current_idx + 1)
+          do_find_forward_byte(rest, char, after_byte_col, current_byte + g_size, new_past)
         end
 
       nil ->
@@ -173,15 +211,90 @@ defmodule Minga.Motion.Char do
     end
   end
 
-  # Reverse find in a tuple.
-  @spec rfind_in_tuple(tuple(), String.t(), integer()) :: non_neg_integer() | nil
-  defp rfind_in_tuple(_graphemes, _char, to) when to < 0, do: nil
+  # Find char backward in text, before `before_byte_col`. Returns byte offset or nil.
+  @spec find_backward_byte(String.t(), String.t(), non_neg_integer()) :: non_neg_integer() | nil
+  defp find_backward_byte(text, char, before_byte_col) do
+    # Build list of {byte_offset, grapheme} for positions before before_byte_col
+    do_find_backward_byte(text, char, before_byte_col, 0, nil)
+  end
 
-  defp rfind_in_tuple(graphemes, char, to) do
-    if elem(graphemes, to) == char do
-      to
-    else
-      rfind_in_tuple(graphemes, char, to - 1)
+  @spec do_find_backward_byte(
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) ::
+          non_neg_integer() | nil
+  defp do_find_backward_byte(text, char, before_byte_col, current_byte, last_match) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+
+        new_match =
+          if current_byte < before_byte_col and g == char, do: current_byte, else: last_match
+
+        do_find_backward_byte(rest, char, before_byte_col, current_byte + g_size, new_match)
+
+      nil ->
+        last_match
+    end
+  end
+
+  # Get byte offset of grapheme before the one at `byte_col`.
+  @spec prev_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp prev_grapheme_byte_offset(_text, 0), do: 0
+
+  defp prev_grapheme_byte_offset(text, byte_col) do
+    do_prev_grapheme_byte_offset(text, byte_col, 0, 0)
+  end
+
+  @spec do_prev_grapheme_byte_offset(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp do_prev_grapheme_byte_offset(text, target, current_byte, _prev_byte) do
+    case String.next_grapheme(text) do
+      {_g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+        next_byte = current_byte + g_size
+
+        if next_byte >= target do
+          current_byte
+        else
+          do_prev_grapheme_byte_offset(rest, target, next_byte, current_byte)
+        end
+
+      nil ->
+        current_byte
+    end
+  end
+
+  # Get byte offset of grapheme after the one at `byte_col`.
+  @spec next_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp next_grapheme_byte_offset(text, byte_col) do
+    do_next_grapheme_byte_offset(text, byte_col, 0)
+  end
+
+  @spec do_next_grapheme_byte_offset(String.t(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_next_grapheme_byte_offset(text, target, current_byte) do
+    case String.next_grapheme(text) do
+      {_g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+        next_byte = current_byte + g_size
+
+        if current_byte >= target do
+          next_byte
+        else
+          do_next_grapheme_byte_offset(rest, target, next_byte)
+        end
+
+      nil ->
+        current_byte
     end
   end
 

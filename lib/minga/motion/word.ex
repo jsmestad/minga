@@ -4,12 +4,16 @@ defmodule Minga.Motion.Word do
 
   Implements Vim's `w`/`b`/`e` (word-boundary) and `W`/`B`/`E`
   (whitespace-only boundary) motions.
+
+  Internally, motions scan grapheme tuples for character classification,
+  then convert the resulting grapheme index to a byte offset via a
+  parallel byte-offset lookup table.
   """
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Motion.Helpers
 
-  @typedoc "A zero-indexed {line, col} cursor position."
+  @typedoc "A zero-indexed {line, byte_col} cursor position."
   @type position :: GapBuffer.position()
 
   # ── word motions (w / b / e) ──────────────────────────────────────────────
@@ -26,16 +30,21 @@ defmodule Minga.Motion.Word do
   @spec word_forward(GapBuffer.t(), position()) :: position()
   def word_forward(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
     if total == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
-      new_offset = do_word_forward(graphemes, offset, total - 1)
-      GapBuffer.offset_to_position(buf, new_offset)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
+      new_g_idx = do_word_forward(graphemes, g_idx, total - 1)
+
+      new_byte_off =
+        Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+      GapBuffer.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -51,19 +60,24 @@ defmodule Minga.Motion.Word do
   @spec word_backward(GapBuffer.t(), position()) :: position()
   def word_backward(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
 
     if tuple_size(graphemes) == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
 
-      if offset == 0 do
+      if g_idx == 0 do
         {0, 0}
       else
-        new_offset = do_word_backward(graphemes, offset - 1)
-        GapBuffer.offset_to_position(buf, new_offset)
+        new_g_idx = do_word_backward(graphemes, g_idx - 1)
+
+        new_byte_off =
+          Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+        GapBuffer.offset_to_position(buf, new_byte_off)
       end
     end
   end
@@ -80,16 +94,21 @@ defmodule Minga.Motion.Word do
   @spec word_end(GapBuffer.t(), position()) :: position()
   def word_end(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
     if total == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
-      new_offset = do_word_end(graphemes, offset, total - 1)
-      GapBuffer.offset_to_position(buf, new_offset)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
+      new_g_idx = do_word_end(graphemes, g_idx, total - 1)
+
+      new_byte_off =
+        Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+      GapBuffer.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -107,16 +126,21 @@ defmodule Minga.Motion.Word do
   @spec word_forward_big(GapBuffer.t(), position()) :: position()
   def word_forward_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
     if total == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
-      new_offset = do_word_forward_big(graphemes, offset, total - 1)
-      GapBuffer.offset_to_position(buf, new_offset)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
+      new_g_idx = do_word_forward_big(graphemes, g_idx, total - 1)
+
+      new_byte_off =
+        Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+      GapBuffer.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -132,19 +156,24 @@ defmodule Minga.Motion.Word do
   @spec word_backward_big(GapBuffer.t(), position()) :: position()
   def word_backward_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
 
     if tuple_size(graphemes) == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
 
-      if offset == 0 do
+      if g_idx == 0 do
         {0, 0}
       else
-        new_offset = do_word_backward_big(graphemes, offset - 1)
-        GapBuffer.offset_to_position(buf, new_offset)
+        new_g_idx = do_word_backward_big(graphemes, g_idx - 1)
+
+        new_byte_off =
+          Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+        GapBuffer.offset_to_position(buf, new_byte_off)
       end
     end
   end
@@ -161,16 +190,21 @@ defmodule Minga.Motion.Word do
   @spec word_end_big(GapBuffer.t(), position()) :: position()
   def word_end_big(%GapBuffer{} = buf, {line, col} = pos) do
     text = GapBuffer.content(buf)
-    graphemes = text |> String.graphemes() |> List.to_tuple()
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
     if total == 0 do
       pos
     else
-      all_lines = String.split(text, "\n")
-      offset = Helpers.offset_for(all_lines, line, col)
-      new_offset = do_word_end_big(graphemes, offset, total - 1)
-      GapBuffer.offset_to_position(buf, new_offset)
+      all_lines = :binary.split(text, "\n", [:global])
+      byte_off = Helpers.offset_for(all_lines, line, col)
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, byte_off)
+      new_g_idx = do_word_end_big(graphemes, g_idx, total - 1)
+
+      new_byte_off =
+        Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
+
+      GapBuffer.offset_to_position(buf, new_byte_off)
     end
   end
 
