@@ -25,6 +25,13 @@ pub const HighlightResult = struct {
 /// Compiled-in grammar language function type.
 const LanguageFn = *const fn () callconv(.c) ?*const c.TSLanguage;
 
+/// Built-in grammar entry with optional embedded highlight query.
+const BuiltinGrammar = struct {
+    name: []const u8,
+    func: LanguageFn,
+    query: ?[]const u8 = null,
+};
+
 /// Tree-sitter highlighter. Owns a parser, optional tree, and query.
 /// Grammar languages are registered at init time (compiled-in) or
 /// loaded dynamically via `loadGrammar`.
@@ -38,7 +45,7 @@ pub const Highlighter = struct {
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     allocator: std.mem.Allocator,
 
-    /// Initialize with compiled-in grammars registered.
+    /// Initialize with compiled-in grammars registered and queries pre-compiled.
     pub fn init(allocator: std.mem.Allocator) !Highlighter {
         const parser = c.ts_parser_new() orelse return error.ParserCreateFailed;
 
@@ -49,10 +56,28 @@ pub const Highlighter = struct {
             .allocator = allocator,
         };
 
-        // Register all compiled-in grammars.
+        // Register all compiled-in grammars and pre-compile their queries.
         inline for (builtin_grammars) |entry| {
             if (entry.func()) |lang| {
                 hl.languages.put(allocator, entry.name, lang) catch {};
+
+                // Pre-compile the embedded highlight query if available.
+                if (entry.query) |query_source| {
+                    var error_offset: u32 = 0;
+                    var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+                    if (c.ts_query_new(
+                        lang,
+                        query_source.ptr,
+                        @intCast(query_source.len),
+                        &error_offset,
+                        &error_type,
+                    )) |compiled| {
+                        hl.query_cache.put(allocator, entry.name, compiled) catch {};
+                    } else {
+                        std.log.warn("Pre-compile failed for {s} at offset {d}", .{ entry.name, error_offset });
+                    }
+                }
             }
         }
 
@@ -216,11 +241,6 @@ pub const Highlighter = struct {
 
 // ── Compiled-in grammar registry ──────────────────────────────────────────
 
-const BuiltinGrammar = struct {
-    name: []const u8,
-    func: LanguageFn,
-};
-
 // Extern declarations for all compiled-in grammars.
 extern fn tree_sitter_elixir() ?*const c.TSLanguage;
 extern fn tree_sitter_heex() ?*const c.TSLanguage;
@@ -247,31 +267,33 @@ extern fn tree_sitter_python() ?*const c.TSLanguage;
 extern fn tree_sitter_kotlin() ?*const c.TSLanguage;
 extern fn tree_sitter_gleam() ?*const c.TSLanguage;
 
+const query_dir = "queries/";
+
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = &tree_sitter_elixir },
-    .{ .name = "heex", .func = &tree_sitter_heex },
-    .{ .name = "json", .func = &tree_sitter_json },
-    .{ .name = "yaml", .func = &tree_sitter_yaml },
-    .{ .name = "toml", .func = &tree_sitter_toml },
-    .{ .name = "markdown", .func = &tree_sitter_markdown },
-    .{ .name = "markdown_inline", .func = &tree_sitter_markdown_inline },
-    .{ .name = "ruby", .func = &tree_sitter_ruby },
-    .{ .name = "javascript", .func = &tree_sitter_javascript },
-    .{ .name = "typescript", .func = &tree_sitter_typescript },
-    .{ .name = "tsx", .func = &tree_sitter_tsx },
-    .{ .name = "go", .func = &tree_sitter_go },
-    .{ .name = "rust", .func = &tree_sitter_rust },
-    .{ .name = "zig", .func = &tree_sitter_zig },
-    .{ .name = "erlang", .func = &tree_sitter_erlang },
-    .{ .name = "bash", .func = &tree_sitter_bash },
-    .{ .name = "c", .func = &tree_sitter_c },
-    .{ .name = "cpp", .func = &tree_sitter_cpp },
-    .{ .name = "html", .func = &tree_sitter_html },
-    .{ .name = "css", .func = &tree_sitter_css },
-    .{ .name = "lua", .func = &tree_sitter_lua },
-    .{ .name = "python", .func = &tree_sitter_python },
-    .{ .name = "kotlin", .func = &tree_sitter_kotlin },
-    .{ .name = "gleam", .func = &tree_sitter_gleam },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = @embedFile(query_dir ++ "elixir/highlights.scm") },
+    .{ .name = "heex", .func = tree_sitter_heex },
+    .{ .name = "json", .func = tree_sitter_json, .query = @embedFile(query_dir ++ "json/highlights.scm") },
+    .{ .name = "yaml", .func = tree_sitter_yaml, .query = @embedFile(query_dir ++ "yaml/highlights.scm") },
+    .{ .name = "toml", .func = tree_sitter_toml, .query = @embedFile(query_dir ++ "toml/highlights.scm") },
+    .{ .name = "markdown", .func = tree_sitter_markdown, .query = @embedFile(query_dir ++ "markdown/highlights.scm") },
+    .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = @embedFile(query_dir ++ "markdown_inline/highlights.scm") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = @embedFile(query_dir ++ "ruby/highlights.scm") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = @embedFile(query_dir ++ "javascript/highlights.scm") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = @embedFile(query_dir ++ "typescript/highlights.scm") },
+    .{ .name = "tsx", .func = tree_sitter_tsx, .query = @embedFile(query_dir ++ "tsx/highlights.scm") },
+    .{ .name = "go", .func = tree_sitter_go, .query = @embedFile(query_dir ++ "go/highlights.scm") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = @embedFile(query_dir ++ "rust/highlights.scm") },
+    .{ .name = "zig", .func = tree_sitter_zig, .query = @embedFile(query_dir ++ "zig/highlights.scm") },
+    .{ .name = "erlang", .func = tree_sitter_erlang, .query = @embedFile(query_dir ++ "erlang/highlights.scm") },
+    .{ .name = "bash", .func = tree_sitter_bash, .query = @embedFile(query_dir ++ "bash/highlights.scm") },
+    .{ .name = "c", .func = tree_sitter_c, .query = @embedFile(query_dir ++ "c/highlights.scm") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = @embedFile(query_dir ++ "cpp/highlights.scm") },
+    .{ .name = "html", .func = tree_sitter_html, .query = @embedFile(query_dir ++ "html/highlights.scm") },
+    .{ .name = "css", .func = tree_sitter_css, .query = @embedFile(query_dir ++ "css/highlights.scm") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = @embedFile(query_dir ++ "lua/highlights.scm") },
+    .{ .name = "python", .func = tree_sitter_python, .query = @embedFile(query_dir ++ "python/highlights.scm") },
+    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = @embedFile(query_dir ++ "kotlin/highlights.scm") },
+    .{ .name = "gleam", .func = tree_sitter_gleam, .query = @embedFile(query_dir ++ "gleam/highlights.scm") },
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -349,18 +371,21 @@ test "highlighter: parse JSON" {
     try std.testing.expect(hl.tree != null);
 }
 
-test "highlighter: setLanguage invalidates tree and query" {
+test "highlighter: setLanguage invalidates tree, restores cached query" {
     var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
 
     try std.testing.expect(hl.setLanguage("elixir"));
     try hl.parse("defmodule Foo do end");
     try std.testing.expect(hl.tree != null);
+    // Elixir has a pre-compiled query from init
+    try std.testing.expect(hl.query != null);
 
-    // Switching language should clear tree
+    // Switching language should clear tree but restore cached query
     try std.testing.expect(hl.setLanguage("json"));
     try std.testing.expect(hl.tree == null);
-    try std.testing.expect(hl.query == null);
+    // JSON also has a pre-compiled query
+    try std.testing.expect(hl.query != null);
 }
 
 test "highlighter: markdown query compiles and highlights" {
@@ -394,19 +419,17 @@ test "highlighter: query cache restores on language switch" {
     var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
 
-    // Set up elixir with a query
+    // Elixir has a pre-compiled query from init
     try std.testing.expect(hl.setLanguage("elixir"));
-    const q = "(identifier) @variable";
-    try hl.setHighlightQuery(q);
     try std.testing.expect(hl.query != null);
-    const cached_query = hl.query;
+    const elixir_query = hl.query;
 
-    // Switch to json — query should be null (no cache for json yet)
-    try std.testing.expect(hl.setLanguage("json"));
+    // HEEx has no pre-compiled query
+    try std.testing.expect(hl.setLanguage("heex"));
     try std.testing.expect(hl.query == null);
 
     // Switch back to elixir — query should be restored from cache
     try std.testing.expect(hl.setLanguage("elixir"));
     try std.testing.expect(hl.query != null);
-    try std.testing.expect(hl.query == cached_query);
+    try std.testing.expect(hl.query == elixir_query);
 }

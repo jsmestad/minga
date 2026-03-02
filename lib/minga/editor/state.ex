@@ -60,8 +60,7 @@ defmodule Minga.Editor.State do
             macro_recorder: MacroRecorder.new(),
             highlight: Highlight.new(),
             highlight_version: 0,
-            highlight_cache: %{},
-            highlight_languages_ready: MapSet.new()
+            highlight_cache: %{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -85,8 +84,7 @@ defmodule Minga.Editor.State do
           macro_recorder: MacroRecorder.t(),
           highlight: Highlight.t(),
           highlight_version: non_neg_integer(),
-          highlight_cache: %{pid() => Highlight.t()},
-          highlight_languages_ready: MapSet.t(String.t())
+          highlight_cache: %{pid() => Highlight.t()}
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
