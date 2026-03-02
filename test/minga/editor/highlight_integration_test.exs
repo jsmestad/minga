@@ -80,6 +80,75 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     end
   end
 
+  describe "picker (SPC f f) resets highlights" do
+    @tag :tmp_dir
+    test "selecting a file via picker clears stale highlights", %{tmp_dir: tmp_dir} do
+      path1 = Path.join(tmp_dir, "aaa.ex")
+      path2 = Path.join(tmp_dir, "bbb.ex")
+      File.write!(path1, "defmodule A do\nend\n")
+      File.write!(path2, "defmodule B do\nend\n")
+
+      ctx = start_editor("defmodule A do\nend\n", file_path: path1)
+
+      # Inject highlights for file1
+      spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+      assert state.highlight.spans == spans_a
+
+      # Open file2 via SPC f f picker
+      send_keys(ctx, "<Space>ff")
+      Process.sleep(50)
+
+      # Type enough to match bbb.ex, then Enter
+      type_text(ctx, "bbb")
+      send_key(ctx, 13)
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.highlight.spans == [],
+             "Stale spans from file1 persisted after SPC f f to file2"
+    end
+
+    @tag :tmp_dir
+    test "picker caches highlights for previous buffer", %{tmp_dir: tmp_dir} do
+      path1 = Path.join(tmp_dir, "aaa.ex")
+      path2 = Path.join(tmp_dir, "bbb.ex")
+      File.write!(path1, "defmodule A do\nend\n")
+      File.write!(path2, "defmodule B do\nend\n")
+
+      ctx = start_editor("defmodule A do\nend\n", file_path: path1)
+
+      # Inject highlights for file1
+      spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      Process.sleep(50)
+
+      buf1_pid = :sys.get_state(ctx.editor).buf.buffer
+
+      # Switch to file2 via picker
+      send_keys(ctx, "<Space>ff")
+      Process.sleep(50)
+      type_text(ctx, "bbb")
+      send_key(ctx, 13)
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+
+      # Verify cache was populated for file1
+      assert Map.has_key?(state.highlight_cache, buf1_pid),
+             "Expected file1 highlights to be cached after picker switch"
+
+      cached = state.highlight_cache[buf1_pid]
+      assert cached.spans == spans_a
+    end
+  end
+
   describe "stale spans produce valid output" do
     test "styles_for_line with mismatched spans on Unicode line" do
       # Simulates: spans from auto_pair.ex applied to editor.ex content
@@ -136,6 +205,39 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert String.valid?(all_text)
       assert all_text == line
       assert [{"─", [fg: 0x888888]}, {"─", []}] = segments
+    end
+  end
+
+  describe ":e restores cached highlights" do
+    @tag :tmp_dir
+    test ":e back to previously highlighted file uses cache", %{tmp_dir: tmp_dir} do
+      path1 = Path.join(tmp_dir, "file1.ex")
+      path2 = Path.join(tmp_dir, "file2.ex")
+      File.write!(path1, "defmodule A do\nend\n")
+      File.write!(path2, "defmodule B do\nend\n")
+
+      ctx = start_editor("defmodule A do\nend\n", file_path: path1)
+
+      # Inject highlights for file1
+      spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      Process.sleep(50)
+
+      # Switch to file2
+      send_keys(ctx, ":e #{path2}<CR>")
+      Process.sleep(50)
+
+      assert :sys.get_state(ctx.editor).highlight.spans == []
+
+      # Switch back to file1 via :e (should already be in buffer list)
+      send_keys(ctx, ":e #{path1}<CR>")
+      Process.sleep(50)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.highlight.spans == spans_a,
+             "Expected cached spans restored via :e, got: #{inspect(state.highlight.spans)}"
     end
   end
 
