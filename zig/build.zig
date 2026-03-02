@@ -37,6 +37,40 @@ pub fn build(b: *std.Build) void {
     ts_lib.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     ts_lib.root_module.link_libc = true;
 
+    // ── Grammar static libraries ───────────────────────────────────────
+    const Grammar = struct { name: []const u8, has_scanner: bool };
+    const grammars = [_]Grammar{
+        .{ .name = "elixir", .has_scanner = true },
+        .{ .name = "heex", .has_scanner = false },
+        .{ .name = "json", .has_scanner = false },
+        .{ .name = "yaml", .has_scanner = true },
+        .{ .name = "toml", .has_scanner = true },
+        .{ .name = "markdown", .has_scanner = true },
+        .{ .name = "markdown_inline", .has_scanner = true },
+        .{ .name = "ruby", .has_scanner = true },
+        .{ .name = "javascript", .has_scanner = true },
+        .{ .name = "typescript", .has_scanner = true },
+        .{ .name = "tsx", .has_scanner = true },
+        .{ .name = "go", .has_scanner = false },
+        .{ .name = "rust", .has_scanner = true },
+        .{ .name = "zig", .has_scanner = false },
+        .{ .name = "erlang", .has_scanner = false },
+        .{ .name = "bash", .has_scanner = true },
+        .{ .name = "c", .has_scanner = false },
+        .{ .name = "cpp", .has_scanner = true },
+        .{ .name = "html", .has_scanner = true },
+        .{ .name = "css", .has_scanner = true },
+        .{ .name = "lua", .has_scanner = true },
+        .{ .name = "python", .has_scanner = true },
+        .{ .name = "kotlin", .has_scanner = true },
+        .{ .name = "gleam", .has_scanner = true },
+    };
+
+    var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
+    for (grammars, 0..) |g, i| {
+        grammar_libs[i] = addGrammar(b, target, optimize, g.name, g.has_scanner);
+    }
+
     // Main executable
     const exe = b.addExecutable(.{
         .name = "minga-renderer",
@@ -50,6 +84,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("build_options", build_options.createModule());
     exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     exe.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| exe.linkLibrary(gl);
 
     // GUI backend: compile Swift, link AppKit/Foundation frameworks.
     if (backend == .gui) {
@@ -79,6 +114,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("build_options", build_options.createModule());
     tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     tests.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| tests.linkLibrary(gl);
 
     if (backend == .gui) {
         addGuiBuildSteps(b, tests);
@@ -87,6 +123,46 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+}
+
+/// Build a static library for a tree-sitter grammar.
+/// Each grammar has `src/parser.c` and optionally `src/scanner.c`.
+fn addGrammar(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    name: []const u8,
+    has_scanner: bool,
+) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .name = b.fmt("ts-grammar-{s}", .{name}),
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    lib.root_module.link_libc = true;
+
+    const grammar_dir = b.fmt("vendor/grammars/{s}/src", .{name});
+    lib.root_module.addIncludePath(b.path(grammar_dir));
+    lib.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+
+    // parser.c
+    lib.root_module.addCSourceFile(.{
+        .file = b.path(b.fmt("vendor/grammars/{s}/src/parser.c", .{name})),
+        .flags = &.{"-std=c11"},
+    });
+
+    // scanner.c (optional)
+    if (has_scanner) {
+        lib.root_module.addCSourceFile(.{
+            .file = b.path(b.fmt("vendor/grammars/{s}/src/scanner.c", .{name})),
+            .flags = &.{"-std=c11"},
+        });
+    }
+
+    return lib;
 }
 
 /// Configure GUI-specific build steps: compile Swift → .o, link frameworks,
