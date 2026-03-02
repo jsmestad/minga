@@ -53,7 +53,7 @@ defmodule Minga.Editor.Renderer do
 
   @doc "Renders the no-buffer splash screen."
   @spec render(state()) :: :ok
-  def render(%{buffer: nil} = state) do
+  def render(%{buf: %{buffer: nil}} = state) do
     commands = [
       Protocol.encode_clear(),
       Protocol.encode_draw(0, 0, "Minga v#{Minga.version()} — No file open"),
@@ -67,13 +67,13 @@ defmodule Minga.Editor.Renderer do
 
   def render(state) do
     # 1. Get cursor (O(1) with cached gap buffer) for viewport scrolling.
-    cursor = BufferServer.cursor(state.buffer)
+    cursor = BufferServer.cursor(state.buf.buffer)
     viewport = Viewport.scroll_to_cursor(state.viewport, cursor)
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
     # 2. Fetch all remaining render data in a single GenServer call.
-    snapshot = BufferServer.render_snapshot(state.buffer, first_line, visible_rows)
+    snapshot = BufferServer.render_snapshot(state.buf.buffer, first_line, visible_rows)
     lines = snapshot.lines
     {cursor_line, cursor_col} = snapshot.cursor
     line_count = snapshot.line_count
@@ -147,8 +147,8 @@ defmodule Minga.Editor.Renderer do
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     line_count = snapshot.line_count
-    buf_count = length(state.buffers)
-    buf_index = state.active_buffer + 1
+    buf_count = length(state.buf.buffers)
+    buf_index = state.buf.active_buffer + 1
     modeline_row = viewport.rows - 2
 
     filetype = Map.get(snapshot, :filetype, :text)
@@ -177,7 +177,7 @@ defmodule Minga.Editor.Renderer do
 
     # ── Cursor placement + shape ──
     cursor_shape_command =
-      if state.picker do
+      if state.picker_ui.picker do
         Protocol.encode_cursor_shape(:beam)
       else
         Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
@@ -304,7 +304,7 @@ defmodule Minga.Editor.Renderer do
   end
 
   @spec render_whichkey(state(), Viewport.t()) :: [binary()]
-  defp render_whichkey(%{show_whichkey: true, whichkey_node: node}, viewport)
+  defp render_whichkey(%{whichkey: %{show: true, node: node}}, viewport)
        when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     lines = WhichKey.render_popup(bindings)

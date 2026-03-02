@@ -10,6 +10,7 @@ defmodule Minga.Picker.BufferSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
 
   @impl true
   @spec title() :: String.t()
@@ -21,7 +22,7 @@ defmodule Minga.Picker.BufferSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{buffers: buffers}) do
+  def candidates(%{buf: %{buffers: buffers}}) do
     buffers
     |> Enum.with_index()
     |> Enum.reject(fn {buf, _idx} ->
@@ -45,7 +46,7 @@ defmodule Minga.Picker.BufferSource do
 
   @impl true
   @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_restore: restore_idx} = state) when is_integer(restore_idx) do
+  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
     switch_to_buffer(state, restore_idx)
   end
 
@@ -61,8 +62,14 @@ defmodule Minga.Picker.BufferSource do
   @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
   def on_action(:switch, item, state), do: on_select(item, state)
 
-  def on_action(:kill, {idx, _label, _desc}, %{buffers: buffers} = state)
+  def on_action(
+        :kill,
+        {idx, _label, _desc},
+        %{buf: %Minga.Editor.State.Buffers{buffers: buffers} = bs} = state
+      )
       when is_integer(idx) and idx < length(buffers) do
+    alias Minga.Editor.State.Buffers
+
     pid = Enum.at(buffers, idx)
 
     if Process.alive?(pid) do
@@ -76,9 +83,9 @@ defmodule Minga.Picker.BufferSource do
         state
 
       _ ->
-        new_active = min(state.active_buffer, length(new_buffers) - 1)
-        new_pid = Enum.at(new_buffers, new_active)
-        %{state | buffers: new_buffers, active_buffer: new_active, buffer: new_pid}
+        new_active = min(bs.active_buffer, length(new_buffers) - 1)
+        new_bs = %Buffers{bs | buffers: new_buffers}
+        %{state | buf: Buffers.switch_to(new_bs, new_active)}
     end
   end
 
@@ -87,15 +94,9 @@ defmodule Minga.Picker.BufferSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
-    len = Enum.count(buffers)
-    idx = rem(idx, len)
-    idx = if idx < 0, do: idx + len, else: idx
-    pid = Enum.at(buffers, idx)
-    %{state | active_buffer: idx, buffer: pid}
+  defp switch_to_buffer(%{buf: bs} = state, idx) do
+    %{state | buf: Buffers.switch_to(bs, idx)}
   end
-
-  defp switch_to_buffer(state, _idx), do: state
 
   @spec display_name(pid()) :: String.t()
   defp display_name(buf) do

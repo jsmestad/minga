@@ -9,6 +9,7 @@ defmodule Minga.Picker.FileSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
 
   require Logger
 
@@ -56,7 +57,7 @@ defmodule Minga.Picker.FileSource do
 
   @impl true
   @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_restore: restore_idx} = state) when is_integer(restore_idx) do
+  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
     switch_to_buffer(state, restore_idx)
   end
 
@@ -91,7 +92,7 @@ defmodule Minga.Picker.FileSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: buffers}, file_path) do
+  defp find_buffer_by_path(%{buf: %{buffers: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)
@@ -106,20 +107,12 @@ defmodule Minga.Picker.FileSource do
   end
 
   @spec add_buffer(map(), pid()) :: map()
-  defp add_buffer(state, pid) do
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    buffers = state.buffers ++ [pid]
-    %{state | buffers: buffers, active_buffer: Enum.count(buffers) - 1, buffer: pid}
+  defp add_buffer(%{buf: bs} = state, pid) do
+    %{state | buf: Buffers.add(bs, pid)}
   end
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
-    len = Enum.count(buffers)
-    idx = rem(idx, len)
-    idx = if idx < 0, do: idx + len, else: idx
-    pid = Enum.at(buffers, idx)
-    %{state | active_buffer: idx, buffer: pid}
+  defp switch_to_buffer(%{buf: bs} = state, idx) do
+    %{state | buf: Buffers.switch_to(bs, idx)}
   end
-
-  defp switch_to_buffer(state, _idx), do: state
 end

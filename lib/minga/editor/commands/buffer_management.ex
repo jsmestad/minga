@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Search, as: SearchCommands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
   alias Minga.Mode
 
   require Logger
@@ -21,7 +22,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :save) do
+  def execute(%{buf: %{buffer: buf}} = state, :save) do
     case BufferServer.save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -38,7 +39,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffer: buf} = state, :force_save) do
+  def execute(%{buf: %{buffer: buf}} = state, :force_save) do
     case BufferServer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -52,7 +53,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffer: buf} = state, :reload) do
+  def execute(%{buf: %{buffer: buf}} = state, :reload) do
     case BufferServer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -82,7 +83,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, :kill_buffer), do: remove_current_buffer(state)
 
   def execute(state, :new_buffer) do
-    n = next_new_buffer_number(state.buffers)
+    n = next_new_buffer_number(state.buf.buffers)
     name = "[new #{n}]"
 
     case DynamicSupervisor.start_child(
@@ -98,12 +99,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{scratch_buffer: nil} = state, :view_scratch) do
+  def execute(%{buf: %{scratch_buffer: nil}} = state, :view_scratch) do
     %{state | status_msg: "No scratch buffer"}
   end
 
-  def execute(%{scratch_buffer: scratch_buf} = state, :view_scratch) do
-    idx = Enum.find_index(state.buffers, &(&1 == scratch_buf))
+  def execute(%{buf: %{scratch_buffer: scratch_buf}} = state, :view_scratch) do
+    idx = Enum.find_index(state.buf.buffers, &(&1 == scratch_buf))
 
     case idx do
       nil ->
@@ -114,18 +115,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{messages_buffer: nil} = state, :view_messages) do
+  def execute(%{buf: %{messages_buffer: nil}} = state, :view_messages) do
     %{state | status_msg: "No messages buffer"}
   end
 
-  def execute(%{messages_buffer: msg_buf} = state, :view_messages) do
+  def execute(%{buf: %{messages_buffer: msg_buf}} = state, :view_messages) do
     # Add messages buffer to buffer list if not already there, then switch to it
-    idx = Enum.find_index(state.buffers, &(&1 == msg_buf))
+    idx = Enum.find_index(state.buf.buffers, &(&1 == msg_buf))
 
     case idx do
       nil ->
-        new_state = Commands.add_buffer(state, msg_buf)
-        new_state
+        Commands.add_buffer(state, msg_buf)
 
       i ->
         switch_to_buffer(state, i)
@@ -199,7 +199,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffer: buf} = state, {:execute_ex_command, {:goto_line, line_num}}) do
+  def execute(%{buf: %{buffer: buf}} = state, {:execute_ex_command, {:goto_line, line_num}}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
     state
@@ -234,7 +234,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(
-        %{buffer: buf} = state,
+        %{buf: %{buffer: buf}} = state,
         {:execute_ex_command, {:substitute, pattern, replacement, flags}}
       ) do
     global? = :global in flags
@@ -259,25 +259,19 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Private buffer helpers ────────────────────────────────────────────────
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
-  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
-    len = Enum.count(buffers)
-    idx = rem(idx, len)
-    idx = if idx < 0, do: idx + len, else: idx
-    pid = Enum.at(buffers, idx)
-    %{state | active_buffer: idx, buffer: pid}
+  defp switch_to_buffer(%{buf: bs} = state, idx) do
+    %{state | buf: Buffers.switch_to(bs, idx)}
   end
 
-  defp switch_to_buffer(state, _idx), do: state
-
   @spec next_buffer(state()) :: state()
-  defp next_buffer(%{buffers: [_, _ | _] = buffers, active_buffer: idx} = state) do
+  defp next_buffer(%{buf: %{buffers: [_, _ | _] = buffers, active_buffer: idx}} = state) do
     switch_to_buffer(state, rem(idx + 1, Enum.count(buffers)))
   end
 
   defp next_buffer(state), do: state
 
   @spec prev_buffer(state()) :: state()
-  defp prev_buffer(%{buffers: [_, _ | _] = buffers, active_buffer: idx} = state) do
+  defp prev_buffer(%{buf: %{buffers: [_, _ | _] = buffers, active_buffer: idx}} = state) do
     len = Enum.count(buffers)
     new_idx = if idx == 0, do: len - 1, else: idx - 1
     switch_to_buffer(state, new_idx)
@@ -288,7 +282,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec remove_current_buffer(state()) :: state()
 
   # Active buffer is scratch (not in buffer list) — clear it
-  defp remove_current_buffer(%{buffers: [], buffer: buf, scratch_buffer: buf} = state)
+  defp remove_current_buffer(%{buf: %{buffers: [], buffer: buf, scratch_buffer: buf}} = state)
        when is_pid(buf) do
     :sys.replace_state(buf, fn s ->
       %{
@@ -303,7 +297,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
     %{state | status_msg: "Buffer is persistent — content cleared"}
   end
 
-  defp remove_current_buffer(%{buffers: [_ | _] = buffers, active_buffer: idx} = state) do
+  defp remove_current_buffer(
+         %{buf: %{buffers: [_ | _] = buffers, active_buffer: idx} = bs} = state
+       ) do
     buf = Enum.at(buffers, idx)
 
     # Check if persistent — if so, recreate instead of removing
@@ -330,13 +326,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
       case new_buffers do
         [] ->
           # Fall back to scratch buffer if available
-          fallback = Map.get(state, :scratch_buffer)
-          %{state | buffers: [], active_buffer: 0, buffer: fallback}
+          fallback = bs.scratch_buffer
+          %{state | buf: %{bs | buffers: [], active_buffer: 0, buffer: fallback}}
 
         _ ->
           new_idx = min(idx, Enum.count(new_buffers) - 1)
           new_active = Enum.at(new_buffers, new_idx)
-          %{state | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+
+          %{
+            state
+            | buf: %{bs | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+          }
       end
     end
   end
@@ -344,7 +344,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp remove_current_buffer(state), do: state
 
   @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: buffers}, file_path) do
+  defp find_buffer_by_path(%{buf: %{buffers: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)

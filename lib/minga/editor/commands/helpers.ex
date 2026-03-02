@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
   alias Minga.Mode.State, as: ModeState
   alias Minga.TextObject
@@ -27,23 +28,23 @@ defmodule Minga.Editor.Commands.Helpers do
   # ── Register helpers ────────────────────────────────────────────────────────
 
   @doc """
-  Writes `text` into the appropriate register(s) based on `active_register`
+  Writes `text` into the appropriate register(s) based on `reg.active`
   and the operation kind (`:yank` or `:delete`).
   """
   @spec put_register(state(), String.t(), :yank | :delete) :: state()
-  def put_register(%{active_register: "_"} = state, _text, _kind) do
-    %{state | active_register: ""}
+  def put_register(%{reg: %{active: "_"}} = state, _text, _kind) do
+    reset_active_register(state)
   end
 
-  def put_register(%{active_register: "+"} = state, text, kind) do
+  def put_register(%{reg: %{active: "+"}} = state, text, kind) do
     Clipboard.write(text)
     state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
   end
 
-  def put_register(%{active_register: name} = state, text, kind)
+  def put_register(%{reg: %{active: name} = reg} = state, text, kind)
       when name >= "A" and name <= "Z" do
     lower = String.downcase(name)
-    existing = Map.get(state.registers, lower, "")
+    existing = Registers.get(reg, lower) || ""
     appended = existing <> text
 
     state
@@ -53,7 +54,7 @@ defmodule Minga.Editor.Commands.Helpers do
     |> reset_active_register()
   end
 
-  def put_register(%{active_register: name} = state, text, kind)
+  def put_register(%{reg: %{active: name}} = state, text, kind)
       when name >= "a" and name <= "z" do
     state
     |> put_in_register(name, text)
@@ -63,7 +64,7 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   def put_register(state, text, kind) do
-    name = if state.active_register == "", do: "", else: state.active_register
+    name = if state.reg.active == "", do: "", else: state.reg.active
 
     state
     |> put_in_register(name, text)
@@ -73,20 +74,20 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc "Reads from the active register, falling back to the unnamed register."
   @spec get_register(state()) :: {String.t() | nil, state()}
-  def get_register(%{active_register: "+"} = state) do
+  def get_register(%{reg: %{active: "+"}} = state) do
     text = Clipboard.read()
     {text, reset_active_register(state)}
   end
 
-  def get_register(%{active_register: name, registers: regs} = state) do
-    key = if name == "", do: "", else: name
-    text = Map.get(regs, key)
+  def get_register(%{reg: reg} = state) do
+    key = if reg.active == "", do: "", else: reg.active
+    text = Registers.get(reg, key)
     {text, reset_active_register(state)}
   end
 
   @spec put_in_register(state(), String.t(), String.t()) :: state()
   def put_in_register(state, name, text) do
-    %{state | registers: Map.put(state.registers, name, text)}
+    %{state | reg: Registers.put(state.reg, name, text)}
   end
 
   @spec write_unnamed(state(), String.t()) :: state()
@@ -97,7 +98,7 @@ defmodule Minga.Editor.Commands.Helpers do
   def maybe_write_yank(state, _text, :delete), do: state
 
   @spec reset_active_register(state()) :: state()
-  def reset_active_register(state), do: %{state | active_register: ""}
+  def reset_active_register(state), do: %{state | reg: Registers.reset_active(state.reg)}
 
   # ── Positional helpers ──────────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
-  def apply_text_object(%{buffer: buf} = state, modifier, spec, action) do
+  def apply_text_object(%{buf: %{buffer: buf}} = state, modifier, spec, action) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     range = compute_text_object_range(tmp_buf, cursor, modifier, spec)

@@ -15,9 +15,10 @@ defmodule Minga.Editor.PickerUI do
   """
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Picker, as: PickerState
+  alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Picker
   alias Minga.Port.Protocol
-  alias Minga.WhichKey
 
   import Bitwise
 
@@ -52,18 +53,19 @@ defmodule Minga.Editor.PickerUI do
 
         # Clear whichkey state if active
         new_state =
-          if state.whichkey_timer do
-            WhichKey.cancel_timeout(state.whichkey_timer)
-            %{state | whichkey_node: nil, whichkey_timer: nil, show_whichkey: false}
+          if state.whichkey.timer do
+            %{state | whichkey: WhichKeyState.clear(state.whichkey)}
           else
             state
           end
 
         %{
           new_state
-          | picker: picker,
-            picker_source: source_module,
-            picker_restore: state.active_buffer
+          | picker_ui: %PickerState{
+              picker: picker,
+              source: source_module,
+              restore: state.buf.active_buffer
+            }
         }
     end
   end
@@ -80,69 +82,69 @@ defmodule Minga.Editor.PickerUI do
   # ── Action menu handlers (when C-o menu is open) ────────────────────────────
 
   # Esc or C-g in action menu → close menu, return to picker
-  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, @escape, _mods) do
-    %{state | picker_action_menu: nil}
+  def handle_key(%{picker_ui: %{action_menu: {_actions, _sel}}} = state, @escape, _mods) do
+    put_in(state.picker_ui.action_menu, nil)
   end
 
-  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, ?g, mods)
+  def handle_key(%{picker_ui: %{action_menu: {_actions, _sel}}} = state, ?g, mods)
       when band(mods, @ctrl) != 0 do
-    %{state | picker_action_menu: nil}
+    put_in(state.picker_ui.action_menu, nil)
   end
 
   # Enter in action menu → execute selected action
   def handle_key(
-        %{picker_action_menu: {actions, sel}, picker: picker, picker_source: source} = state,
+        %{picker_ui: %{action_menu: {actions, sel}, picker: picker, source: source}} = state,
         @enter,
         _mods
       ) do
     case {Enum.at(actions, sel), Picker.selected_item(picker)} do
       {nil, _} ->
-        %{state | picker_action_menu: nil}
+        put_in(state.picker_ui.action_menu, nil)
 
       {_, nil} ->
-        %{state | picker_action_menu: nil}
+        put_in(state.picker_ui.action_menu, nil)
 
       {{_name, action_id}, item} ->
-        new_state = close(%{state | picker_action_menu: nil})
+        new_state = close(put_in(state.picker_ui.action_menu, nil))
         source.on_action(action_id, item, new_state)
     end
   end
 
   # Arrow down / C-j / C-n in action menu → move selection down
-  def handle_key(%{picker_action_menu: {actions, sel}} = state, cp, mods)
+  def handle_key(%{picker_ui: %{action_menu: {actions, sel}}} = state, cp, mods)
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
     new_sel = rem(sel + 1, length(actions))
-    %{state | picker_action_menu: {actions, new_sel}}
+    put_in(state.picker_ui.action_menu, {actions, new_sel})
   end
 
   # Arrow up / C-k / C-p in action menu → move selection up
-  def handle_key(%{picker_action_menu: {actions, sel}} = state, cp, mods)
+  def handle_key(%{picker_ui: %{action_menu: {actions, sel}}} = state, cp, mods)
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
     new_sel = if sel == 0, do: length(actions) - 1, else: sel - 1
-    %{state | picker_action_menu: {actions, new_sel}}
+    put_in(state.picker_ui.action_menu, {actions, new_sel})
   end
 
   # Ignore all other keys while action menu is open
-  def handle_key(%{picker_action_menu: {_actions, _sel}} = state, _cp, _mods), do: state
+  def handle_key(%{picker_ui: %{action_menu: {_actions, _sel}}} = state, _cp, _mods), do: state
 
   # ── Normal picker handlers ─────────────────────────────────────────────────
 
-  def handle_key(%{picker_source: source} = state, @escape, _mods) do
+  def handle_key(%{picker_ui: %{source: source}} = state, @escape, _mods) do
     new_state = source.on_cancel(state)
     close(new_state)
   end
 
   # C-g → cancel (Emacs-style)
-  def handle_key(%{picker_source: source} = state, ?g, mods) when band(mods, @ctrl) != 0 do
+  def handle_key(%{picker_ui: %{source: source}} = state, ?g, mods) when band(mods, @ctrl) != 0 do
     new_state = source.on_cancel(state)
     close(new_state)
   end
 
-  def handle_key(%{picker: picker, picker_source: source} = state, @enter, _mods) do
+  def handle_key(%{picker_ui: %{picker: picker, source: source}} = state, @enter, _mods) do
     case Picker.selected_item(picker) do
       nil ->
         close(state)
@@ -159,41 +161,43 @@ defmodule Minga.Editor.PickerUI do
   end
 
   # C-j, C-n, or arrow down → move selection down
-  def handle_key(%{picker: picker} = state, cp, mods)
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, cp, mods)
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
     new_picker = Picker.move_down(picker)
-    state = %{state | picker: new_picker}
+    state = %{state | picker_ui: %{pui | picker: new_picker}}
     maybe_preview_selection(state)
   end
 
   # C-k, C-p, or arrow up → move selection up
-  def handle_key(%{picker: picker} = state, cp, mods)
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, cp, mods)
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
     new_picker = Picker.move_up(picker)
-    state = %{state | picker: new_picker}
+    state = %{state | picker_ui: %{pui | picker: new_picker}}
     maybe_preview_selection(state)
   end
 
   # C-v → page down
-  def handle_key(%{picker: picker} = state, ?v, mods) when band(mods, @ctrl) != 0 do
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, ?v, mods)
+      when band(mods, @ctrl) != 0 do
     new_picker = Picker.page_down(picker)
-    state = %{state | picker: new_picker}
+    state = %{state | picker_ui: %{pui | picker: new_picker}}
     maybe_preview_selection(state)
   end
 
   # M-v (Alt+v) → page up
-  def handle_key(%{picker: picker} = state, ?v, mods) when band(mods, @alt) != 0 do
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, ?v, mods)
+      when band(mods, @alt) != 0 do
     new_picker = Picker.page_up(picker)
-    state = %{state | picker: new_picker}
+    state = %{state | picker_ui: %{pui | picker: new_picker}}
     maybe_preview_selection(state)
   end
 
   # C-o → open action menu for the selected item
-  def handle_key(%{picker: picker, picker_source: source} = state, ?o, mods)
+  def handle_key(%{picker_ui: %{picker: picker, source: source}} = state, ?o, mods)
       when band(mods, @ctrl) != 0 do
     case Picker.selected_item(picker) do
       nil ->
@@ -204,20 +208,21 @@ defmodule Minga.Editor.PickerUI do
 
         case actions do
           [] -> state
-          actions -> %{state | picker_action_menu: {actions, 0}}
+          actions -> put_in(state.picker_ui.action_menu, {actions, 0})
         end
     end
   end
 
   # Backspace
-  def handle_key(%{picker: picker} = state, cp, _mods) when cp in [8, 127] do
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, cp, _mods)
+      when cp in [8, 127] do
     new_picker = Picker.backspace(picker)
-    state = %{state | picker: new_picker}
+    state = %{state | picker_ui: %{pui | picker: new_picker}}
     maybe_preview_selection(state)
   end
 
   # Printable characters → filter
-  def handle_key(%{picker: picker} = state, codepoint, 0)
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, codepoint, 0)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char =
       try do
@@ -232,7 +237,7 @@ defmodule Minga.Editor.PickerUI do
 
       c ->
         new_picker = Picker.type_char(picker, c)
-        state = %{state | picker: new_picker}
+        state = %{state | picker_ui: %{pui | picker: new_picker}}
         maybe_preview_selection(state)
     end
   end
@@ -243,9 +248,9 @@ defmodule Minga.Editor.PickerUI do
   @doc "Renders the picker overlay. Returns `{commands, cursor_pos | nil}`."
   @spec render(state(), term()) ::
           {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
-  def render(%{picker: nil}, _viewport), do: {[], nil}
+  def render(%{picker_ui: %{picker: nil}}, _viewport), do: {[], nil}
 
-  def render(%{picker: picker} = state, viewport) do
+  def render(%{picker_ui: %{picker: picker}} = state, viewport) do
     {visible, selected_offset} = Picker.visible_items(picker)
     item_count = length(visible)
 
@@ -345,14 +350,14 @@ defmodule Minga.Editor.PickerUI do
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
-    %{state | picker: nil, picker_source: nil, picker_restore: nil, picker_action_menu: nil}
+    %{state | picker_ui: %PickerState{}}
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # Preview: temporarily apply the source's on_select for the highlighted item.
   @spec maybe_preview_selection(state()) :: state()
-  defp maybe_preview_selection(%{picker: picker, picker_source: source} = state) do
+  defp maybe_preview_selection(%{picker_ui: %{picker: picker, source: source}} = state) do
     if Picker.Source.preview?(source) do
       case Picker.selected_item(picker) do
         nil -> state
@@ -438,12 +443,12 @@ defmodule Minga.Editor.PickerUI do
 
   # Renders the C-o action menu popup overlay.
   @spec render_action_menu(state(), term(), non_neg_integer(), non_neg_integer()) :: [binary()]
-  defp render_action_menu(%{picker_action_menu: nil}, _viewport, _first_item_row, _sel_offset) do
+  defp render_action_menu(%{picker_ui: %{action_menu: nil}}, _vp, _first_item_row, _sel_offset) do
     []
   end
 
   defp render_action_menu(
-         %{picker_action_menu: {actions, menu_sel}},
+         %{picker_ui: %{action_menu: {actions, menu_sel}}},
          viewport,
          first_item_row,
          selected_offset

@@ -35,42 +35,42 @@ defmodule Minga.Editor.RegistersTest do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?a)
-      assert state(editor).active_register == "a"
+      assert state(editor).reg.active == "a"
     end
 
     test ~S["A selects register A for appending] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?A)
-      assert state(editor).active_register == "A"
+      assert state(editor).reg.active == "A"
     end
 
     test ~S["0 selects the yank register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?0)
-      assert state(editor).active_register == "0"
+      assert state(editor).reg.active == "0"
     end
 
     test ~S["_ selects the black-hole register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?_)
-      assert state(editor).active_register == "_"
+      assert state(editor).reg.active == "_"
     end
 
     test ~S["" selects the unnamed register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?")
-      assert state(editor).active_register == ""
+      assert state(editor).reg.active == ""
     end
 
     test "invalid register char cancels selection" do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?!)
-      assert state(editor).active_register == ""
+      assert state(editor).reg.active == ""
     end
 
     test "active_register resets to empty after an operation" do
@@ -80,7 +80,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?a)
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert state(editor).active_register == ""
+      assert state(editor).reg.active == ""
     end
   end
 
@@ -97,9 +97,9 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.registers, "a") == "hello\n"
-      assert Map.get(s.registers, "0") == "hello\n"
-      assert Map.get(s.registers, "") == "hello\n"
+      assert Map.get(s.reg.registers, "a") == "hello\n"
+      assert Map.get(s.reg.registers, "0") == "hello\n"
+      assert Map.get(s.reg.registers, "") == "hello\n"
     end
 
     test ~S["ayy / "ap round-trip pastes from register a] do
@@ -134,8 +134,8 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.registers, "a") == "hello\n"
-      assert Map.get(s.registers, "b") == "world\n"
+      assert Map.get(s.reg.registers, "a") == "hello\n"
+      assert Map.get(s.reg.registers, "b") == "world\n"
     end
   end
 
@@ -158,7 +158,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.registers, "a") == "hello\nworld\n"
+      assert Map.get(s.reg.registers, "a") == "hello\nworld\n"
     end
 
     test "appending to an empty register is the same as writing" do
@@ -170,7 +170,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
       send_key(editor, ?y)
 
-      assert Map.get(state(editor).registers, "a") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "a") == "hello\n"
     end
   end
 
@@ -183,15 +183,15 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).registers, "0") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "0") == "hello\n"
 
       BufferServer.move_to(buffer, {1, 0})
       send_key(editor, ?d)
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.registers, "0") == "hello\n"
-      assert Map.get(s.registers, "") == "world\n"
+      assert Map.get(s.reg.registers, "0") == "hello\n"
+      assert Map.get(s.reg.registers, "") == "world\n"
     end
 
     test "consecutive deletes do not update 0" do
@@ -207,7 +207,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
       send_key(editor, ?d)
 
-      assert Map.get(state(editor).registers, "0") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "0") == "hello\n"
     end
   end
 
@@ -220,7 +220,7 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).registers, "") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "") == "hello\n"
 
       BufferServer.move_to(buffer, {1, 0})
       send_key(editor, ?")
@@ -229,9 +229,9 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.registers, "") == "hello\n"
-      assert Map.get(s.registers, "0") == "hello\n"
-      refute Map.has_key?(s.registers, "_")
+      assert Map.get(s.reg.registers, "") == "hello\n"
+      assert Map.get(s.reg.registers, "0") == "hello\n"
+      refute Map.has_key?(s.reg.registers, "_")
     end
 
     test ~S["_yy yanks into black hole — registers unchanged] do
@@ -240,14 +240,14 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      previous_unnamed = Map.get(state(editor).registers, "")
+      previous_unnamed = Map.get(state(editor).reg.registers, "")
 
       send_key(editor, ?")
       send_key(editor, ?_)
       send_key(editor, ?y)
       send_key(editor, ?y)
 
-      assert Map.get(state(editor).registers, "") == previous_unnamed
+      assert Map.get(state(editor).reg.registers, "") == previous_unnamed
     end
   end
 
@@ -259,7 +259,7 @@ defmodule Minga.Editor.RegistersTest do
       BufferServer.move_to(buffer, {0, 0})
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).registers, "") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "") == "hello\n"
     end
 
     test "dd without prefix writes to unnamed" do
@@ -267,7 +267,7 @@ defmodule Minga.Editor.RegistersTest do
       BufferServer.move_to(buffer, {0, 0})
       send_key(editor, ?d)
       send_key(editor, ?d)
-      assert Map.get(state(editor).registers, "") == "hello\n"
+      assert Map.get(state(editor).reg.registers, "") == "hello\n"
     end
 
     test "p pastes from unnamed when no register selected" do
@@ -314,8 +314,8 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.registers, "") == "world\n"
-      assert Map.get(s.registers, "a") == "hello\n"
+      assert Map.get(s.reg.registers, "") == "world\n"
+      assert Map.get(s.reg.registers, "a") == "hello\n"
 
       # "ap should paste "hello" from register a
       send_key(editor, ?")

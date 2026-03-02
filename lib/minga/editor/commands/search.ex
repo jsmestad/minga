@@ -17,7 +17,7 @@ defmodule Minga.Editor.Commands.Search do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{buffer: buf, mode_state: %SearchState{} = ms} = state,
+        %{buf: %{buffer: buf}, mode_state: %SearchState{} = ms} = state,
         :incremental_search
       ) do
     if ms.input == "" do
@@ -38,28 +38,29 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffer: buf, mode_state: %SearchState{} = ms} = state,
+        %{buf: %{buffer: buf}, mode_state: %SearchState{} = ms} = state,
         :confirm_search
       ) do
     content = BufferServer.content(buf)
 
     case Minga.Search.find_next(content, ms.input, ms.original_cursor, ms.direction) do
       nil ->
-        %{
-          state
-          | last_search_pattern: ms.input,
-            last_search_direction: ms.direction,
-            status_msg: "Pattern not found: #{ms.input}"
-        }
+        state
+        |> put_in_search(:last_pattern, ms.input)
+        |> put_in_search(:last_direction, ms.direction)
+        |> Map.put(:status_msg, "Pattern not found: #{ms.input}")
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
-        %{state | last_search_pattern: ms.input, last_search_direction: ms.direction}
+
+        state
+        |> put_in_search(:last_pattern, ms.input)
+        |> put_in_search(:last_direction, ms.direction)
     end
   end
 
   def execute(
-        %{buffer: buf, mode_state: %SearchState{} = ms} = state,
+        %{buf: %{buffer: buf}, mode_state: %SearchState{} = ms} = state,
         :cancel_search
       ) do
     BufferServer.move_to(buf, ms.original_cursor)
@@ -67,7 +68,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffer: buf, last_search_pattern: pattern, last_search_direction: dir} = state,
+        %{buf: %{buffer: buf}, search: %{last_pattern: pattern, last_direction: dir}} = state,
         :search_next
       )
       when is_binary(pattern) do
@@ -89,7 +90,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffer: buf, last_search_pattern: pattern, last_search_direction: dir} = state,
+        %{buf: %{buffer: buf}, search: %{last_pattern: pattern, last_direction: dir}} = state,
         :search_prev
       )
       when is_binary(pattern) do
@@ -111,7 +112,7 @@ defmodule Minga.Editor.Commands.Search do
     %{state | status_msg: "No previous search pattern"}
   end
 
-  def execute(%{buffer: buf} = state, :search_word_under_cursor_forward) do
+  def execute(%{buf: %{buffer: buf}} = state, :search_word_under_cursor_forward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
@@ -122,21 +123,22 @@ defmodule Minga.Editor.Commands.Search do
       word ->
         case Minga.Search.find_next(content, word, cursor, :forward) do
           nil ->
-            %{
-              state
-              | last_search_pattern: word,
-                last_search_direction: :forward,
-                status_msg: "Pattern not found: #{word}"
-            }
+            state
+            |> put_in_search(:last_pattern, word)
+            |> put_in_search(:last_direction, :forward)
+            |> Map.put(:status_msg, "Pattern not found: #{word}")
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
-            %{state | last_search_pattern: word, last_search_direction: :forward}
+
+            state
+            |> put_in_search(:last_pattern, word)
+            |> put_in_search(:last_direction, :forward)
         end
     end
   end
 
-  def execute(%{buffer: buf} = state, :search_word_under_cursor_backward) do
+  def execute(%{buf: %{buffer: buf}} = state, :search_word_under_cursor_backward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
 
@@ -147,16 +149,17 @@ defmodule Minga.Editor.Commands.Search do
       word ->
         case Minga.Search.find_next(content, word, cursor, :backward) do
           nil ->
-            %{
-              state
-              | last_search_pattern: word,
-                last_search_direction: :backward,
-                status_msg: "Pattern not found: #{word}"
-            }
+            state
+            |> put_in_search(:last_pattern, word)
+            |> put_in_search(:last_direction, :backward)
+            |> Map.put(:status_msg, "Pattern not found: #{word}")
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
-            %{state | last_search_pattern: word, last_search_direction: :backward}
+
+            state
+            |> put_in_search(:last_pattern, word)
+            |> put_in_search(:last_direction, :backward)
         end
     end
   end
@@ -170,7 +173,7 @@ defmodule Minga.Editor.Commands.Search do
       {:ok, matches, truncated?} ->
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
-        state = %{state | project_search_results: matches}
+        state = put_in(state.search.project_results, matches)
         state = PickerUI.open(state, Minga.Picker.ProjectSearchSource)
         if msg, do: %{state | status_msg: msg}, else: state
 
@@ -185,7 +188,7 @@ defmodule Minga.Editor.Commands.Search do
 
   # Advance cursor to current match during substitute confirm
   def execute(
-        %{buffer: buf, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        %{buf: %{buffer: buf}, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
         :substitute_confirm_advance
       ) do
     case Enum.at(ms.matches, ms.current) do
@@ -200,7 +203,7 @@ defmodule Minga.Editor.Commands.Search do
 
   # Apply accepted substitutions from confirm mode
   def execute(
-        %{buffer: buf, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        %{buf: %{buffer: buf}, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
         :apply_substitute_confirm
       ) do
     accepted_set = MapSet.new(ms.accepted)
@@ -234,7 +237,9 @@ defmodule Minga.Editor.Commands.Search do
           do: "1 substitution",
           else: "#{accepted_count} of #{total} substitutions"
 
-      %{state | status_msg: msg, last_search_pattern: ms.pattern}
+      state
+      |> put_in_search(:last_pattern, ms.pattern)
+      |> Map.put(:status_msg, msg)
     end
   end
 
@@ -273,7 +278,9 @@ defmodule Minga.Editor.Commands.Search do
           original_content: content
         }
 
-        %{state | mode: :substitute_confirm, mode_state: ms, last_search_pattern: pattern}
+        state
+        |> put_in_search(:last_pattern, pattern)
+        |> Map.merge(%{mode: :substitute_confirm, mode_state: ms})
     end
   end
 
@@ -301,11 +308,23 @@ defmodule Minga.Editor.Commands.Search do
       BufferServer.move_to(buf, {safe_line, safe_col})
 
       msg = if count == 1, do: "1 substitution", else: "#{count} substitutions"
-      %{state | status_msg: msg, last_search_pattern: pattern}
+
+      state
+      |> put_in_search(:last_pattern, pattern)
+      |> Map.put(:status_msg, msg)
     end
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec put_in_search(state(), atom(), term()) :: state()
+  defp put_in_search(state, :last_pattern, value) do
+    %{state | search: Minga.Editor.State.Search.record_pattern(state.search, value)}
+  end
+
+  defp put_in_search(state, :last_direction, value) do
+    %{state | search: %{state.search | last_direction: value}}
+  end
 
   # Replace a match at a specific line/col/length in content string.
   @spec replace_match(

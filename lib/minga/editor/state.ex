@@ -5,21 +5,28 @@ defmodule Minga.Editor.State do
   Holds references to the buffer list, port manager, viewport, modal FSM
   state, which-key popup state, and the yank register.
 
-  ## Buffer management
+  ## Composed sub-structs
 
-  The editor tracks multiple open buffers in a list (`buffers`) with an
-  `active_buffer` index pointing to the currently displayed buffer.
-  The convenience field `buffer` is kept in sync as the pid of the
-  active buffer for backward compatibility with rendering and commands.
+  Related fields are grouped into internal sub-structs to keep the top-level
+  struct manageable:
+
+  * `Minga.Editor.State.Buffers`   — buffer list, active buffer, special buffers
+  * `Minga.Editor.State.Picker`    — picker instance, source, restore index
+  * `Minga.Editor.State.WhichKey`  — which-key popup node, timer, visibility
+  * `Minga.Editor.State.Search`    — last search pattern/direction, project results
+  * `Minga.Editor.State.Registers` — named registers and active register selection
   """
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Picker
+  alias Minga.Editor.State.Registers
+  alias Minga.Editor.State.Search
+  alias Minga.Editor.State.WhichKey
   alias Minga.Editor.Viewport
   alias Minga.Mode
-  alias Minga.Picker
-  alias Minga.WhichKey
 
   @typedoc "Stored last find-char motion for ; and , repeat."
   @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
@@ -27,33 +34,19 @@ defmodule Minga.Editor.State do
   @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name (single letter)."
   @type marks :: %{pid() => %{String.t() => GapBuffer.position()}}
 
-  @typedoc """
-  Register store. Keys are register names:
-  - `\"\"` — unnamed (default)
-  - `\"0\"` — last yank
-  - `\"a\"`–`\"z\"` — named
-  - `\"+\"` — system clipboard (virtual; read/write via Minga.Clipboard)
-  - `\"_\"` — black hole (never stored)
-  """
-  @type registers :: %{String.t() => String.t()}
+  @typedoc "Line number display style."
+  @type line_number_style :: :hybrid | :absolute | :relative | :none
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
-  defstruct buffer: nil,
-            buffers: [],
-            active_buffer: 0,
-            port_manager: nil,
+  defstruct port_manager: nil,
             viewport: nil,
             mode: :normal,
             mode_state: nil,
-            whichkey_node: nil,
-            whichkey_timer: nil,
-            show_whichkey: false,
-            registers: %{},
-            active_register: "",
-            picker: nil,
-            picker_source: nil,
-            picker_restore: nil,
-            picker_action_menu: nil,
+            buf: %Buffers{},
+            picker_ui: %Picker{},
+            whichkey: %WhichKey{},
+            search: %Search{},
+            reg: %Registers{},
             mouse_dragging: false,
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
@@ -61,39 +54,20 @@ defmodule Minga.Editor.State do
             line_numbers: :hybrid,
             status_msg: nil,
             pending_conflict: nil,
-            last_search_pattern: nil,
-            last_search_direction: :forward,
             marks: %{},
             last_jump_pos: nil,
-            project_search_results: [],
-            messages_buffer: nil,
-            scratch_buffer: nil,
             macro_recorder: MacroRecorder.new()
 
-  @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
-  @type picker_action_menu ::
-          {[Minga.Picker.Source.action_entry()], non_neg_integer()} | nil
-
-  @typedoc "Line number display style."
-  @type line_number_style :: :hybrid | :absolute | :relative | :none
-
   @type t :: %__MODULE__{
-          buffer: pid() | nil,
-          buffers: [pid()],
-          active_buffer: non_neg_integer(),
           port_manager: GenServer.server() | nil,
           viewport: Viewport.t(),
           mode: Mode.mode(),
           mode_state: Mode.state(),
-          whichkey_node: Minga.Keymap.Trie.node_t() | nil,
-          whichkey_timer: WhichKey.timer_ref() | nil,
-          show_whichkey: boolean(),
-          registers: registers(),
-          active_register: String.t(),
-          picker: Picker.t() | nil,
-          picker_source: module() | nil,
-          picker_restore: non_neg_integer() | nil,
-          picker_action_menu: picker_action_menu(),
+          buf: Buffers.t(),
+          picker_ui: Picker.t(),
+          whichkey: WhichKey.t(),
+          search: Search.t(),
+          reg: Registers.t(),
           mouse_dragging: boolean(),
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
@@ -101,13 +75,22 @@ defmodule Minga.Editor.State do
           line_numbers: line_number_style(),
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,
-          last_search_pattern: String.t() | nil,
-          last_search_direction: Minga.Search.direction(),
           marks: marks(),
           last_jump_pos: GapBuffer.position() | nil,
-          project_search_results: [Minga.ProjectSearch.match()],
-          messages_buffer: pid() | nil,
-          scratch_buffer: pid() | nil,
           macro_recorder: MacroRecorder.t()
         }
+
+  # ── Convenience accessors ─────────────────────────────────────────────────
+
+  @doc "Returns the active buffer pid."
+  @spec buffer(t()) :: pid() | nil
+  def buffer(%__MODULE__{buf: %{buffer: b}}), do: b
+
+  @doc "Returns the buffer list."
+  @spec buffers(t()) :: [pid()]
+  def buffers(%__MODULE__{buf: %{buffers: bs}}), do: bs
+
+  @doc "Returns the active buffer index."
+  @spec active_buffer(t()) :: non_neg_integer()
+  def active_buffer(%__MODULE__{buf: %{active_buffer: idx}}), do: idx
 end

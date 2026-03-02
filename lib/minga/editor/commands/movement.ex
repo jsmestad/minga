@@ -17,7 +17,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── h / l (mode-aware) ────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf, mode: mode} = state, :move_left) do
+  def execute(%{buf: %{buffer: buf}, mode: mode} = state, :move_left) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
@@ -28,7 +28,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffer: buf, mode: mode} = state, :move_right) do
+  def execute(%{buf: %{buffer: buf}, mode: mode} = state, :move_right) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
@@ -47,25 +47,25 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_up) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_up) do
     BufferServer.move(buf, :up)
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_down) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_down) do
     BufferServer.move(buf, :down)
     state
   end
 
   # ── Line start / end ──────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :move_to_line_start) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_to_line_start) do
     {line, _col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_to_line_end) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_to_line_end) do
     {line, _col} = BufferServer.cursor(buf)
 
     end_col =
@@ -80,66 +80,66 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Word motions (small) ───────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :word_forward) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_forward) do
     Helpers.apply_motion(buf, &Minga.Motion.word_forward/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :word_backward) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_backward) do
     Helpers.apply_motion(buf, &Minga.Motion.word_backward/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :word_end) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_end) do
     Helpers.apply_motion(buf, &Minga.Motion.word_end/2)
     state
   end
 
   # ── Word motions (WORD / big) ─────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :word_forward_big) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_forward_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_forward_big/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :word_backward_big) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_backward_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_backward_big/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :word_end_big) do
+  def execute(%{buf: %{buffer: buf}} = state, :word_end_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_end_big/2)
     state
   end
 
   # ── Line / document navigation ─────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :move_to_first_non_blank) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_to_first_non_blank) do
     Helpers.apply_motion(buf, &Minga.Motion.first_non_blank/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_to_document_start) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_to_document_start) do
     content = BufferServer.content(buf)
     new_pos = Minga.Motion.document_start(GapBuffer.new(content))
     BufferServer.move_to(buf, new_pos)
     state
   end
 
-  def execute(%{buffer: buf} = state, :move_to_document_end) do
+  def execute(%{buf: %{buffer: buf}} = state, :move_to_document_end) do
     content = BufferServer.content(buf)
     new_pos = Minga.Motion.document_end(GapBuffer.new(content))
     BufferServer.move_to(buf, new_pos)
     state
   end
 
-  def execute(%{buffer: buf} = state, {:goto_line, line_num}) do
+  def execute(%{buf: %{buffer: buf}} = state, {:goto_line, line_num}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
     state
   end
 
-  def execute(%{buffer: buf} = state, :next_line_first_non_blank) do
+  def execute(%{buf: %{buffer: buf}} = state, :next_line_first_non_blank) do
     {content, {line, _col}} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     total = GapBuffer.line_count(tmp_buf)
@@ -149,7 +149,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffer: buf} = state, :prev_line_first_non_blank) do
+  def execute(%{buf: %{buffer: buf}} = state, :prev_line_first_non_blank) do
     {content, {line, _col}} = BufferServer.content_and_cursor(buf)
     tmp_buf = GapBuffer.new(content)
     prev_line = max(line - 1, 0)
@@ -160,12 +160,12 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Find-char motions ─────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, {:find_char, dir, char}) do
+  def execute(%{buf: %{buffer: buf}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
     %{state | last_find_char: {dir, char}}
   end
 
-  def execute(%{last_find_char: {dir, char}, buffer: buf} = state, :repeat_find_char) do
+  def execute(%{last_find_char: {dir, char}, buf: %{buffer: buf}} = state, :repeat_find_char) do
     Helpers.apply_find_char(buf, dir, char)
     state
   end
@@ -173,7 +173,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :repeat_find_char), do: state
 
   def execute(
-        %{last_find_char: {dir, char}, buffer: buf} = state,
+        %{last_find_char: {dir, char}, buf: %{buffer: buf}} = state,
         :repeat_find_char_reverse
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)
@@ -185,26 +185,26 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Bracket matching ──────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :match_bracket) do
+  def execute(%{buf: %{buffer: buf}} = state, :match_bracket) do
     Helpers.apply_motion(buf, &Minga.Motion.match_bracket/2)
     state
   end
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf} = state, :paragraph_forward) do
+  def execute(%{buf: %{buffer: buf}} = state, :paragraph_forward) do
     Helpers.apply_motion(buf, &Minga.Motion.paragraph_forward/2)
     state
   end
 
-  def execute(%{buffer: buf} = state, :paragraph_backward) do
+  def execute(%{buf: %{buffer: buf}} = state, :paragraph_backward) do
     Helpers.apply_motion(buf, &Minga.Motion.paragraph_backward/2)
     state
   end
 
   # ── Screen-relative motions ───────────────────────────────────────────────
 
-  def execute(%{buffer: buf, viewport: vp} = state, {:move_to_screen, position}) do
+  def execute(%{buf: %{buffer: buf}, viewport: vp} = state, {:move_to_screen, position}) do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
     total_lines = BufferServer.line_count(buf)
@@ -222,22 +222,22 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Page scrolling ────────────────────────────────────────────────────────
 
-  def execute(%{buffer: buf, viewport: vp} = state, :half_page_down) do
+  def execute(%{buf: %{buffer: buf}, viewport: vp} = state, :half_page_down) do
     Helpers.page_move(buf, vp, div(Viewport.content_rows(vp), 2))
     state
   end
 
-  def execute(%{buffer: buf, viewport: vp} = state, :half_page_up) do
+  def execute(%{buf: %{buffer: buf}, viewport: vp} = state, :half_page_up) do
     Helpers.page_move(buf, vp, -div(Viewport.content_rows(vp), 2))
     state
   end
 
-  def execute(%{buffer: buf, viewport: vp} = state, :page_down) do
+  def execute(%{buf: %{buffer: buf}, viewport: vp} = state, :page_down) do
     Helpers.page_move(buf, vp, Viewport.content_rows(vp))
     state
   end
 
-  def execute(%{buffer: buf, viewport: vp} = state, :page_up) do
+  def execute(%{buf: %{buffer: buf}, viewport: vp} = state, :page_up) do
     Helpers.page_move(buf, vp, -Viewport.content_rows(vp))
     state
   end

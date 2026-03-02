@@ -106,15 +106,17 @@ defmodule Minga.Editor do
     active_idx = if active_buf && buffers != [], do: 0, else: 0
 
     state = %EditorState{
-      buffer: active_buf,
-      buffers: buffers,
-      active_buffer: active_idx,
+      buf: %Minga.Editor.State.Buffers{
+        buffer: active_buf,
+        buffers: buffers,
+        active_buffer: active_idx,
+        messages_buffer: messages_buf,
+        scratch_buffer: scratch_buf
+      },
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
       mode: :normal,
-      mode_state: Mode.initial_state(),
-      messages_buffer: messages_buf,
-      scratch_buffer: scratch_buf
+      mode_state: Mode.initial_state()
     }
 
     state = log_message(state, "Editor started")
@@ -211,7 +213,10 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, %{picker: picker} = state)
+  def handle_info(
+        {:minga_input, {:key_press, codepoint, modifiers}},
+        %{picker_ui: %{picker: picker}} = state
+      )
       when is_struct(picker, Minga.Picker) do
     new_state =
       case PickerUI.handle_key(%{state | status_msg: nil}, codepoint, modifiers) do
@@ -235,8 +240,8 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:whichkey_timeout, ref}, %{whichkey_timer: ref} = state) do
-    new_state = %{state | show_whichkey: true}
+  def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
+    new_state = put_in(state.whichkey.show, true)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -257,8 +262,8 @@ defmodule Minga.Editor do
   # Global bindings — processed before the Mode FSM.
   # Ctrl+S → save (works in any mode).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buffer do
-      case BufferServer.save(state.buffer) do
+    if state.buf.buffer do
+      case BufferServer.save(state.buf.buffer) do
         :ok -> :ok
         {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
       end
@@ -289,8 +294,8 @@ defmodule Minga.Editor do
 
     # Guard: block insert/replace transitions on read-only buffers.
     {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and state.buffer != nil and
-           BufferServer.read_only?(state.buffer) do
+      if new_mode in [:insert, :replace] and state.buf.buffer != nil and
+           BufferServer.read_only?(state.buf.buffer) do
         {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
       else
         {new_mode, commands, new_mode_state, state}
@@ -330,8 +335,8 @@ defmodule Minga.Editor do
       nil ->
         after_commands
 
-      updates ->
-        Map.merge(after_commands, updates)
+      %Minga.Editor.State.WhichKey{} = wk ->
+        %{after_commands | whichkey: wk}
     end
   end
 
@@ -417,7 +422,7 @@ defmodule Minga.Editor do
   # Entering visual mode: capture cursor as selection anchor.
   @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) ::
           Mode.state()
-  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buffer: buf})
+  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buf: %{buffer: buf}})
        when old_mode != :visual and is_pid(buf) do
     anchor = BufferServer.cursor(buf)
     %{mode_state | visual_anchor: anchor}
@@ -437,7 +442,7 @@ defmodule Minga.Editor do
          %Minga.Mode.SearchState{} = mode_state,
          old_mode,
          :search,
-         %{buffer: buf}
+         %{buf: %{buffer: buf}}
        )
        when old_mode != :search and is_pid(buf) do
     cursor = BufferServer.cursor(buf)
@@ -570,7 +575,7 @@ defmodule Minga.Editor do
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
-  defp find_buffer_for_path(%{buffers: buffers}, path) do
+  defp find_buffer_for_path(%{buf: %{buffers: buffers}}, path) do
     expanded = Path.expand(path)
 
     Enum.find(buffers, fn buf ->
@@ -692,9 +697,9 @@ defmodule Minga.Editor do
 
   @doc false
   @spec log_message(state(), String.t()) :: state()
-  defp log_message(%{messages_buffer: nil} = state, _text), do: state
+  defp log_message(%{buf: %{messages_buffer: nil}} = state, _text), do: state
 
-  defp log_message(%{messages_buffer: buf} = state, text) do
+  defp log_message(%{buf: %{messages_buffer: buf}} = state, text) do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
     BufferServer.append(buf, "[#{time}] #{text}\n")
 

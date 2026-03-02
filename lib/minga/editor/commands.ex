@@ -38,6 +38,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
   alias Minga.Mode
   alias Minga.WhichKey
 
@@ -80,44 +81,44 @@ defmodule Minga.Editor.Commands do
   # `"` (unnamed) maps to the empty-string key; all others are stored as-is.
   def execute(state, {:select_register, char}) when is_binary(char) do
     name = if char == "\"", do: "", else: char
-    %{state | active_register: name}
+    put_in(state.reg.active, name)
   end
 
   # ── Leader / which-key (no buffer required) ───────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    Process.put(:__leader_update__, %{
-      whichkey_node: node,
-      whichkey_timer: timer,
-      show_whichkey: false
+    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
+      node: node,
+      timer: timer,
+      show: false
     })
 
     state
   end
 
   def execute(state, {:leader_progress, node}) do
-    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    Process.put(:__leader_update__, %{
-      whichkey_node: node,
-      whichkey_timer: timer,
-      show_whichkey: state.show_whichkey
+    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
+      node: node,
+      timer: timer,
+      show: state.whichkey.show
     })
 
     state
   end
 
   def execute(state, :leader_cancel) do
-    if state.whichkey_timer, do: WhichKey.cancel_timeout(state.whichkey_timer)
+    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
 
-    Process.put(:__leader_update__, %{
-      whichkey_node: nil,
-      whichkey_timer: nil,
-      show_whichkey: false
+    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
+      node: nil,
+      timer: nil,
+      show: false
     })
 
     state
@@ -125,7 +126,7 @@ defmodule Minga.Editor.Commands do
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
-  def execute(%{buffer: nil} = state, _cmd), do: state
+  def execute(%{buf: %{buffer: nil}} = state, _cmd), do: state
 
   # ── Movement ──────────────────────────────────────────────────────────────
 
@@ -346,9 +347,6 @@ defmodule Minga.Editor.Commands do
   @doc "Adds a new buffer to the list and makes it active."
   @spec add_buffer(state(), pid()) :: state()
   def add_buffer(state, pid) do
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    buffers = state.buffers ++ [pid]
-    idx = Enum.count(buffers) - 1
-    %{state | buffers: buffers, active_buffer: idx, buffer: pid}
+    %{state | buf: Buffers.add(state.buf, pid)}
   end
 end

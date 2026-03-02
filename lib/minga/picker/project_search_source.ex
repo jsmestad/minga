@@ -9,6 +9,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
 
   require Logger
 
@@ -22,7 +23,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{project_search_results: results}) when is_list(results) do
+  def candidates(%{search: %{project_results: results}}) when is_list(results) do
     results
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
@@ -36,7 +37,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({idx, _label, _desc}, %{project_search_results: results} = state)
+  def on_select({idx, _label, _desc}, %{search: %{project_results: results}} = state)
       when is_integer(idx) do
     case Enum.at(results, idx) do
       nil -> state
@@ -75,14 +76,14 @@ defmodule Minga.Picker.ProjectSearchSource do
   @spec jump_to_buffer(map(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: map()
   defp jump_to_buffer(state, buf_idx, line, col) do
     new_state = switch_to_buffer(state, buf_idx)
-    pid = Enum.at(state.buffers, buf_idx)
+    pid = Enum.at(state.buf.buffers, buf_idx)
     BufferServer.move_to(pid, {line, col})
     new_state
   end
 
   @impl true
   @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_restore: restore_idx} = state) when is_integer(restore_idx) do
+  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
     switch_to_buffer(state, restore_idx)
   end
 
@@ -91,7 +92,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: buffers}, file_path) do
+  defp find_buffer_by_path(%{buf: %{buffers: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)
@@ -106,20 +107,12 @@ defmodule Minga.Picker.ProjectSearchSource do
   end
 
   @spec add_buffer(map(), pid()) :: map()
-  defp add_buffer(state, pid) do
-    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    buffers = state.buffers ++ [pid]
-    %{state | buffers: buffers, active_buffer: Enum.count(buffers) - 1, buffer: pid}
+  defp add_buffer(%{buf: bs} = state, pid) do
+    %{state | buf: Buffers.add(bs, pid)}
   end
 
   @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buffers: [_ | _] = buffers} = state, idx) do
-    len = Enum.count(buffers)
-    idx = rem(idx, len)
-    idx = if idx < 0, do: idx + len, else: idx
-    pid = Enum.at(buffers, idx)
-    %{state | active_buffer: idx, buffer: pid}
+  defp switch_to_buffer(%{buf: bs} = state, idx) do
+    %{state | buf: Buffers.switch_to(bs, idx)}
   end
-
-  defp switch_to_buffer(state, _idx), do: state
 end

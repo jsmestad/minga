@@ -156,7 +156,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     pattern
   end
 
-  defp active_search_pattern(%{last_search_pattern: pattern})
+  defp active_search_pattern(%{search: %{last_pattern: pattern}})
        when is_binary(pattern) and pattern != "" do
     pattern
   end

@@ -14,7 +14,7 @@ defmodule Minga.Editor.Commands.Marks do
 
   @spec execute(state(), Mode.command()) :: state()
 
-  def execute(%{buffer: buf, marks: marks} = state, {:set_mark, char})
+  def execute(%{buf: %{buffer: buf}, marks: marks} = state, {:set_mark, char})
       when is_binary(char) and is_pid(buf) do
     pos = BufferServer.cursor(buf)
     buf_marks = Map.get(marks, buf, %{})
@@ -22,7 +22,7 @@ defmodule Minga.Editor.Commands.Marks do
     %{state | marks: new_marks}
   end
 
-  def execute(%{buffer: buf, marks: marks} = state, {:jump_to_mark_line, char})
+  def execute(%{buf: %{buffer: buf}, marks: marks} = state, {:jump_to_mark_line, char})
       when is_binary(char) and is_pid(buf) do
     buf_marks = Map.get(marks, buf, %{})
 
@@ -40,7 +40,7 @@ defmodule Minga.Editor.Commands.Marks do
     end
   end
 
-  def execute(%{buffer: buf, marks: marks} = state, {:jump_to_mark_exact, char})
+  def execute(%{buf: %{buffer: buf}, marks: marks} = state, {:jump_to_mark_exact, char})
       when is_binary(char) and is_pid(buf) do
     buf_marks = Map.get(marks, buf, %{})
 
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.Marks do
     end
   end
 
-  def execute(%{buffer: buf, last_jump_pos: last_pos} = state, :jump_to_last_pos_line)
+  def execute(%{buf: %{buffer: buf}, last_jump_pos: last_pos} = state, :jump_to_last_pos_line)
       when is_pid(buf) and not is_nil(last_pos) do
     current_pos = BufferServer.cursor(buf)
     {last_line, _} = last_pos
@@ -68,7 +68,7 @@ defmodule Minga.Editor.Commands.Marks do
 
   def execute(state, :jump_to_last_pos_line), do: state
 
-  def execute(%{buffer: buf, last_jump_pos: last_pos} = state, :jump_to_last_pos_exact)
+  def execute(%{buf: %{buffer: buf}, last_jump_pos: last_pos} = state, :jump_to_last_pos_exact)
       when is_pid(buf) and not is_nil(last_pos) do
     current_pos = BufferServer.cursor(buf)
     BufferServer.move_to(buf, last_pos)

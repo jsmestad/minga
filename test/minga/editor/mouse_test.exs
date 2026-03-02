@@ -42,6 +42,8 @@ defmodule Minga.Editor.MouseTest do
     _ = :sys.get_state(editor)
   end
 
+  defp state(editor), do: :sys.get_state(editor)
+
   describe "mouse scroll" do
     defp start_mouse_editor do
       content = Enum.map_join(0..29, "\n", &"line #{&1}")
@@ -229,6 +231,9 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, 0, 8, :left, :release)
       {_line, col} = BufferServer.cursor(buffer)
       assert col == 8
+      s = state(editor)
+      assert s.mode == :visual
+      assert s.mouse_dragging == false
       send_key(editor, ?y)
       assert Process.alive?(editor)
     end
@@ -237,7 +242,9 @@ defmodule Minga.Editor.MouseTest do
       {editor, _buffer} = start_editor("hello world")
       send_mouse(editor, 0, 3, :left, :press)
       send_mouse(editor, 0, 3, :left, :release)
-      assert Process.alive?(editor)
+      s = state(editor)
+      assert s.mode == :normal
+      assert s.mouse_dragging == false
     end
 
     test "drag clamps to buffer bounds" do
