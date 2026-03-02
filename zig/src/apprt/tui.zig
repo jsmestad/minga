@@ -12,6 +12,7 @@ const vaxis = @import("vaxis");
 const protocol = @import("../protocol.zig");
 const renderer_mod = @import("../renderer.zig");
 const surface_mod = @import("../surface.zig");
+const highlighter_mod = @import("../highlighter.zig");
 const Cell = surface_mod.Cell;
 
 // ── VaxisSurface ──────────────────────────────────────────────────────────────
@@ -119,6 +120,7 @@ pub const TuiRuntime = struct {
     vx: vaxis.Vaxis,
     surface: VaxisSurface,
     rend: renderer_mod.Renderer(VaxisSurface),
+    hl: highlighter_mod.Highlighter,
     tty_write_buf: [4096]u8,
 
     /// Initialize the TUI runtime: open TTY, set up vaxis, enter alt screen.
@@ -150,9 +152,10 @@ pub const TuiRuntime = struct {
         // Install signal handlers.
         installSignalHandlers();
 
-        // Initialize surface and renderer (they'll get proper pointers in run()).
+        // Initialize surface, renderer, and highlighter.
         self.surface = .{ .vx = &self.vx, .tty_writer = self.tty.writer() };
         self.rend = renderer_mod.Renderer(VaxisSurface).init(&self.surface, alloc);
+        self.hl = try highlighter_mod.Highlighter.init(alloc);
 
         return self;
     }
@@ -182,6 +185,7 @@ pub const TuiRuntime = struct {
 
     /// Clean up: free renderer, vaxis, and restore terminal.
     pub fn deinit(self: *TuiRuntime) void {
+        self.hl.deinit();
         self.rend.deinit();
         self.vx.deinit(self.alloc, self.tty.writer());
         self.tty.deinit();
@@ -235,9 +239,18 @@ pub const TuiRuntime = struct {
                         std.log.warn("protocol decode error at offset {}: {}", .{ offset, err });
                         break;
                     };
-                    self.rend.handleCommand(cmd) catch |err| {
-                        std.log.warn("renderer error: {}", .{err});
-                    };
+                    switch (cmd) {
+                        .set_language, .parse_buffer, .set_highlight_query, .load_grammar => {
+                            self.handleHighlightCommand(cmd, stdout) catch |err| {
+                                std.log.warn("highlight error: {}", .{err});
+                            };
+                        },
+                        else => {
+                            self.rend.handleCommand(cmd) catch |err| {
+                                std.log.warn("renderer error: {}", .{err});
+                            };
+                        },
+                    }
                     offset += protocol.commandSize(remaining);
                 }
             }
@@ -269,6 +282,64 @@ pub const TuiRuntime = struct {
                     };
                 }
             }
+        }
+    }
+
+    /// Dispatch a highlight-related command to the Highlighter and send responses.
+    fn handleHighlightCommand(self: *TuiRuntime, cmd: protocol.RenderCommand, stdout: *std.Io.Writer) !void {
+        switch (cmd) {
+            .set_language => |name| {
+                if (!self.hl.setLanguage(name)) {
+                    std.log.warn("unknown language: {s}", .{name});
+                }
+            },
+            .parse_buffer => |pb| {
+                self.hl.parse(pb.source) catch |err| {
+                    std.log.warn("parse failed: {}", .{err});
+                    return;
+                };
+
+                // If a query is loaded, run highlighting and send results
+                if (self.hl.query != null) {
+                    var result = self.hl.highlight() catch |err| {
+                        std.log.warn("highlight failed: {}", .{err});
+                        return;
+                    };
+                    defer result.deinit();
+
+                    // Send capture names first
+                    const names_buf = try protocol.encodeHighlightNames(self.alloc, result.capture_names);
+                    defer self.alloc.free(names_buf);
+                    try protocol.writeMessage(stdout, names_buf);
+
+                    // Send spans with version
+                    const spans_buf = try protocol.encodeHighlightSpans(self.alloc, pb.version, result.spans);
+                    defer self.alloc.free(spans_buf);
+                    try protocol.writeMessage(stdout, spans_buf);
+
+                    try stdout.flush();
+                }
+            },
+            .set_highlight_query => |source| {
+                self.hl.setHighlightQuery(source) catch |err| {
+                    std.log.warn("query compile failed: {}", .{err});
+                };
+            },
+            .load_grammar => |lg| {
+                self.hl.loadGrammar(lg.name, lg.path) catch |err| {
+                    std.log.warn("grammar load failed: {}", .{err});
+                    var rbuf: [260]u8 = undefined;
+                    const rlen = protocol.encodeGrammarLoaded(&rbuf, false, lg.name) catch return;
+                    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+                    try stdout.flush();
+                    return;
+                };
+                var rbuf: [260]u8 = undefined;
+                const rlen = try protocol.encodeGrammarLoaded(&rbuf, true, lg.name);
+                try protocol.writeMessage(stdout, rbuf[0..rlen]);
+                try stdout.flush();
+            },
+            else => {},
         }
     }
 

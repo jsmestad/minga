@@ -50,6 +50,17 @@ defmodule Minga.Port.Protocol do
   @op_batch_end 0x13
   @op_set_cursor_shape 0x15
 
+  # Highlight commands (BEAM → Zig)
+  @op_set_language 0x20
+  @op_parse_buffer 0x21
+  @op_set_highlight_query 0x22
+  @op_load_grammar 0x23
+
+  # Highlight responses (Zig → BEAM)
+  @op_highlight_spans 0x30
+  @op_highlight_names 0x31
+  @op_grammar_loaded 0x32
+
   # Cursor shapes
   @cursor_block 0x00
   @cursor_beam 0x01
@@ -107,9 +118,19 @@ defmodule Minga.Port.Protocol do
           | {:ready, width :: pos_integer(), height :: pos_integer()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type()}
+          | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
+          | {:highlight_names, [String.t()]}
+          | {:grammar_loaded, success :: boolean(), name :: String.t()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
+
+  @typedoc "A highlight span from tree-sitter."
+  @type highlight_span :: %{
+          start_byte: non_neg_integer(),
+          end_byte: non_neg_integer(),
+          capture_id: non_neg_integer()
+        }
 
   @typedoc "Text style attributes."
   @type style :: [
@@ -181,6 +202,33 @@ defmodule Minga.Port.Protocol do
   def encode_cursor_shape(:beam), do: <<@op_set_cursor_shape, @cursor_beam>>
   def encode_cursor_shape(:underline), do: <<@op_set_cursor_shape, @cursor_underline>>
 
+  # ── Encoding: highlight commands (BEAM → Zig) ──
+
+  @doc "Encodes a set_language command."
+  @spec encode_set_language(String.t()) :: binary()
+  def encode_set_language(name) when is_binary(name) do
+    <<@op_set_language, byte_size(name)::16, name::binary>>
+  end
+
+  @doc "Encodes a parse_buffer command with a version counter."
+  @spec encode_parse_buffer(non_neg_integer(), String.t()) :: binary()
+  def encode_parse_buffer(version, source)
+      when is_integer(version) and version >= 0 and is_binary(source) do
+    <<@op_parse_buffer, version::32, byte_size(source)::32, source::binary>>
+  end
+
+  @doc "Encodes a set_highlight_query command."
+  @spec encode_set_highlight_query(String.t()) :: binary()
+  def encode_set_highlight_query(query) when is_binary(query) do
+    <<@op_set_highlight_query, byte_size(query)::32, query::binary>>
+  end
+
+  @doc "Encodes a load_grammar command."
+  @spec encode_load_grammar(String.t(), String.t()) :: binary()
+  def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
+    <<@op_load_grammar, byte_size(name)::16, name::binary, byte_size(path)::16, path::binary>>
+  end
+
   # ── Decoding (Zig → BEAM) ──
 
   @doc "Decodes an input event from a binary payload."
@@ -203,6 +251,24 @@ defmodule Minga.Port.Protocol do
     {:ok,
      {:mouse_event, row, col, decode_mouse_button(button), mods,
       decode_mouse_event_type(event_type)}}
+  end
+
+  def decode_event(<<@op_highlight_spans, version::32, count::32, rest::binary>>) do
+    case decode_spans(rest, count, []) do
+      {:ok, spans} -> {:ok, {:highlight_spans, version, spans}}
+      :error -> {:error, :malformed}
+    end
+  end
+
+  def decode_event(<<@op_highlight_names, count::16, rest::binary>>) do
+    case decode_names(rest, count, []) do
+      {:ok, names} -> {:ok, {:highlight_names, names}}
+      :error -> {:error, :malformed}
+    end
+  end
+
+  def decode_event(<<@op_grammar_loaded, success::8, name_len::16, name::binary-size(name_len)>>) do
+    {:ok, {:grammar_loaded, success == 1, name}}
   end
 
   def decode_event(<<opcode::8, _rest::binary>>)
@@ -300,6 +366,32 @@ defmodule Minga.Port.Protocol do
     |> then(fn a -> if (attrs &&& @attr_reverse) != 0, do: [:reverse | a], else: a end)
     |> Enum.reverse()
   end
+
+  # ── Highlight helpers ──
+
+  @spec decode_spans(binary(), non_neg_integer(), [highlight_span()]) ::
+          {:ok, [highlight_span()]} | :error
+  defp decode_spans(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_spans(
+         <<start_byte::32, end_byte::32, capture_id::16, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    span = %{start_byte: start_byte, end_byte: end_byte, capture_id: capture_id}
+    decode_spans(rest, remaining - 1, [span | acc])
+  end
+
+  defp decode_spans(_rest, _remaining, _acc), do: :error
+
+  @spec decode_names(binary(), non_neg_integer(), [String.t()]) :: {:ok, [String.t()]} | :error
+  defp decode_names(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_names(<<name_len::16, name::binary-size(name_len), rest::binary>>, remaining, acc) do
+    decode_names(rest, remaining - 1, [name | acc])
+  end
+
+  defp decode_names(_rest, _remaining, _acc), do: :error
 
   # ── Mouse helpers ──
 
