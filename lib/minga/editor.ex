@@ -134,8 +134,6 @@ defmodule Minga.Editor do
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         Renderer.render(new_state)
-        # Setup highlighting asynchronously — don't block first paint
-        send(self(), :setup_highlight)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -155,6 +153,8 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
     Renderer.render(new_state)
+    # Setup highlighting after first paint with correct viewport
+    send(self(), :setup_highlight)
     {:noreply, new_state}
   end
 
@@ -255,7 +255,7 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # ── Highlight setup (async, after first paint) ────────────────────────────────
+  # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
     new_state = HighlightBridge.setup_for_buffer(state)
