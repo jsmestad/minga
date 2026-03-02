@@ -10,8 +10,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Search, as: SearchCommands
   alias Minga.Editor.PickerUI
+  alias Minga.Editor.HighlightBridge
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
+  alias Minga.Highlight
   alias Minga.Mode
 
   require Logger
@@ -260,7 +262,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(%{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
+    new_state = %{state | buf: Buffers.switch_to(bs, idx), highlight: Highlight.new()}
+    HighlightBridge.setup_for_buffer(new_state)
   end
 
   @spec next_buffer(state()) :: state()
