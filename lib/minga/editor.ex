@@ -221,12 +221,15 @@ defmodule Minga.Editor do
         %{picker_ui: %{picker: picker}} = state
       )
       when is_struct(picker, Minga.Picker) do
+    old_buffer = state.buf.buffer
+
     new_state =
       case PickerUI.handle_key(%{state | status_msg: nil}, codepoint, modifiers) do
         {s, {:execute_command, cmd}} -> dispatch_command(s, cmd)
         s -> s
       end
 
+    new_state = maybe_reset_highlight(new_state, old_buffer)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
