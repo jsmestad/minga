@@ -24,22 +24,16 @@ defmodule Minga.Picker.BufferSource do
   def candidates(%{buffers: buffers}) do
     buffers
     |> Enum.with_index()
+    |> Enum.reject(fn {buf, _idx} ->
+      Process.alive?(buf) and BufferServer.unlisted?(buf)
+    end)
     |> Enum.map(fn {buf, idx} ->
-      name =
-        case BufferServer.file_path(buf) do
-          nil -> "[scratch]"
-          path -> Path.basename(path)
-        end
-
-      desc =
-        case BufferServer.file_path(buf) do
-          nil -> ""
-          path -> path
-        end
-
+      name = display_name(buf)
+      desc = BufferServer.file_path(buf) || ""
       dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
+      ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
 
-      {idx, name <> dirty, desc}
+      {idx, name <> dirty <> ro, desc}
     end)
   end
 
@@ -102,4 +96,12 @@ defmodule Minga.Picker.BufferSource do
   end
 
   defp switch_to_buffer(state, _idx), do: state
+
+  @spec display_name(pid()) :: String.t()
+  defp display_name(buf) do
+    case BufferServer.buffer_name(buf) do
+      nil -> Path.basename(BufferServer.file_path(buf) || "[scratch]")
+      name -> name
+    end
+  end
 end

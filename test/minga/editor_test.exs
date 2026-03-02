@@ -135,4 +135,48 @@ defmodule Minga.EditorTest do
       assert Process.alive?(editor)
     end
   end
+
+  describe "read-only buffer guard" do
+    test "entering insert mode on read-only buffer stays in normal mode" do
+      {:ok, buffer} = BufferServer.start_link(content: "read only", read_only: true)
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_ro_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10
+        )
+
+      # Try pressing 'i' to enter insert mode
+      send(editor, {:minga_input, {:key_press, ?i, 0}})
+      Process.sleep(20)
+
+      state = :sys.get_state(editor)
+      assert state.mode == :normal
+      assert state.status_msg == "Buffer is read-only"
+    end
+
+    test "entering replace mode on read-only buffer stays in normal mode" do
+      {:ok, buffer} = BufferServer.start_link(content: "read only", read_only: true)
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_ro2_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10
+        )
+
+      # Try pressing 'R' to enter replace mode
+      send(editor, {:minga_input, {:key_press, ?R, 0}})
+      Process.sleep(20)
+
+      state = :sys.get_state(editor)
+      assert state.mode == :normal
+      assert state.status_msg == "Buffer is read-only"
+    end
+  end
 end

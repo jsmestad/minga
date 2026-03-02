@@ -279,12 +279,18 @@ defmodule Minga.Editor.Commands.Helpers do
     if char == up, do: String.downcase(char), else: up
   end
 
-  @doc "Returns a human-readable name for the buffer (basename or `[scratch]`)."
+  @doc "Returns a human-readable name for the buffer (buffer name, basename, or `[scratch]`)."
   @spec buffer_display_name(pid()) :: String.t()
   def buffer_display_name(buf) do
-    case BufferServer.file_path(buf) do
-      nil -> "[scratch]"
-      path -> Path.basename(path)
+    case BufferServer.buffer_name(buf) do
+      nil ->
+        case BufferServer.file_path(buf) do
+          nil -> "[scratch]"
+          path -> Path.basename(path)
+        end
+
+      name ->
+        name
     end
   end
 end

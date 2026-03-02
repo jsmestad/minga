@@ -177,6 +177,33 @@ defmodule Minga.Mode.Normal do
     {:continue, %{state | pending_mark: nil}}
   end
 
+  # Complete macro register selection: q + {a-z} → start recording
+  def handle_key({char, 0}, %ModeState{pending_macro_register: true} = state)
+      when char in ?a..?z do
+    {:execute, {:start_macro_recording, <<char::utf8>>}, %{state | pending_macro_register: false}}
+  end
+
+  # Cancel macro register selection on any other key
+  def handle_key(_key, %ModeState{pending_macro_register: true} = state) do
+    {:continue, %{state | pending_macro_register: false}}
+  end
+
+  # Complete macro replay: @ + {a-z} → replay macro
+  def handle_key({char, 0}, %ModeState{pending_macro_replay: true} = state)
+      when char in ?a..?z do
+    {:execute, {:replay_macro, <<char::utf8>>}, %{state | pending_macro_replay: false}}
+  end
+
+  # @@ → replay last macro
+  def handle_key({?@, 0}, %ModeState{pending_macro_replay: true} = state) do
+    {:execute, :replay_last_macro, %{state | pending_macro_replay: false}}
+  end
+
+  # Cancel macro replay selection on any other key
+  def handle_key(_key, %ModeState{pending_macro_replay: true} = state) do
+    {:continue, %{state | pending_macro_replay: false}}
+  end
+
   # ── Count prefix accumulation ─────────────────────────────────────────────
 
   # Digits 1-9 always start or extend the count.
@@ -520,6 +547,21 @@ defmodule Minga.Mode.Normal do
   # - — prev line first non-blank
   def handle_key({?-, 0}, state) do
     {:execute, :prev_line_first_non_blank, state}
+  end
+
+  # ── Macro recording / replay ─────────────────────────────────────────────
+
+  # q — toggle macro recording or start register selection
+  # Note: this is only reached when NOT in pending_macro_register (handled above)
+  def handle_key({?q, 0}, state) do
+    # If currently recording, this is handled at the editor level via
+    # :stop_macro_recording. We emit it as a command.
+    {:execute, :toggle_macro_recording, %{state | pending_macro_register: false}}
+  end
+
+  # @ — start macro replay register selection
+  def handle_key({?@, 0}, state) do
+    {:continue, %{state | pending_macro_replay: true}}
   end
 
   # ── Dot repeat ──────────────────────────────────────────────────────────

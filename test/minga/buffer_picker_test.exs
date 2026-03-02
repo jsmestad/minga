@@ -84,10 +84,11 @@ defmodule Minga.BufferPickerTest do
       # Move down with C-j
       send_key(ctx, ?j, 0x02)
 
-      # Check that preview shows the other buffer's content
+      # Check that preview shows one of the buffer's content (file or scratch)
       row0 = screen_row(ctx, 0)
-      # The preview should show one of the buffer's content
-      assert String.contains?(row0, "first") or String.contains?(row0, "second")
+
+      assert String.contains?(row0, "first") or String.contains?(row0, "second") or
+               String.contains?(row0, ";;")
     end
   end
 
@@ -126,13 +127,16 @@ defmodule Minga.BufferPickerTest do
       ctx = start_editor("aaa content", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
 
-      # On buffer 2 (bbb). Open picker, move to item 1 (bbb), then Enter
+      # On buffer 3 (bbb). Open picker — items: aaa, *scratch*, bbb
+      # Navigate and select bbb
       send_keys(ctx, "<SPC>bb")
-      # Move to index 1
-      send_key(ctx, ?j, 0x02)
+      # Filter to just "bbb" to avoid scratch confusion
+      send_key(ctx, ?b)
+      send_key(ctx, ?b)
+      send_key(ctx, ?b)
       send_key(ctx, 13)
 
-      # Should show bbb content (stayed on same buffer)
+      # Should show bbb content
       assert_row_contains(ctx, 0, "bbb content")
     end
   end

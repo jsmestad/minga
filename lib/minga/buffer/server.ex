@@ -26,6 +26,10 @@ defmodule Minga.Buffer.Server do
           {:file_path, String.t()}
           | {:content, String.t()}
           | {:name, GenServer.name()}
+          | {:buffer_name, String.t()}
+          | {:read_only, boolean()}
+          | {:unlisted, boolean()}
+          | {:persistent, boolean()}
 
   alias Minga.Buffer.State, as: BufState
 
@@ -154,6 +158,36 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :filetype)
   end
 
+  @doc "Returns the buffer name (e.g. `*Messages*`), or `nil` for file buffers."
+  @spec buffer_name(GenServer.server()) :: String.t() | nil
+  def buffer_name(server) do
+    GenServer.call(server, :buffer_name)
+  end
+
+  @doc "Returns whether the buffer is read-only."
+  @spec read_only?(GenServer.server()) :: boolean()
+  def read_only?(server) do
+    GenServer.call(server, :read_only?)
+  end
+
+  @doc "Returns whether the buffer is unlisted (hidden from buffer picker)."
+  @spec unlisted?(GenServer.server()) :: boolean()
+  def unlisted?(server) do
+    GenServer.call(server, :unlisted?)
+  end
+
+  @doc "Returns whether the buffer is persistent (auto-recreated on kill)."
+  @spec persistent?(GenServer.server()) :: boolean()
+  def persistent?(server) do
+    GenServer.call(server, :persistent?)
+  end
+
+  @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
+  @spec append(GenServer.server(), String.t()) :: :ok
+  def append(server, text) when is_binary(text) do
+    GenServer.call(server, {:append, text})
+  end
+
   @typedoc "All data needed to render a single frame, fetched in one GenServer call."
   @type render_snapshot :: %{
           cursor: GapBuffer.position(),
@@ -161,7 +195,9 @@ defmodule Minga.Buffer.Server do
           lines: [String.t()],
           file_path: String.t() | nil,
           filetype: atom(),
-          dirty: boolean()
+          dirty: boolean(),
+          name: String.t() | nil,
+          read_only: boolean()
         }
 
   @doc """
@@ -261,7 +297,11 @@ defmodule Minga.Buffer.Server do
           file_path: path,
           filetype: filetype,
           mtime: mtime,
-          file_size: size
+          file_size: size,
+          name: Keyword.get(opts, :buffer_name),
+          read_only: Keyword.get(opts, :read_only, false),
+          unlisted: Keyword.get(opts, :unlisted, false),
+          persistent: Keyword.get(opts, :persistent, false)
         }
 
         {:ok, state}
@@ -298,9 +338,17 @@ defmodule Minga.Buffer.Server do
     end
   end
 
+  def handle_call({:insert_char, _char}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
   def handle_call({:insert_char, char}, _from, state) do
     new_buf = GapBuffer.insert_char(state.gap_buffer, char)
     {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+  end
+
+  def handle_call(:delete_before, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
   end
 
   def handle_call(:delete_before, _from, state) do
@@ -311,6 +359,10 @@ defmodule Minga.Buffer.Server do
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
     end
+  end
+
+  def handle_call(:delete_at, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
   end
 
   def handle_call(:delete_at, _from, state) do
@@ -424,6 +476,10 @@ defmodule Minga.Buffer.Server do
     end
   end
 
+  def handle_call({:replace_content, _new_content}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
   def handle_call({:replace_content, new_content}, _from, state) do
     new_state = push_undo(state, state.gap_buffer)
     new_buf = GapBuffer.new(new_content)
@@ -458,6 +514,40 @@ defmodule Minga.Buffer.Server do
     {:reply, state.filetype, state}
   end
 
+  def handle_call(:buffer_name, _from, state) do
+    {:reply, state.name, state}
+  end
+
+  def handle_call(:read_only?, _from, state) do
+    {:reply, state.read_only, state}
+  end
+
+  def handle_call(:unlisted?, _from, state) do
+    {:reply, state.unlisted, state}
+  end
+
+  def handle_call(:persistent?, _from, state) do
+    {:reply, state.persistent, state}
+  end
+
+  def handle_call({:append, text}, _from, state) do
+    content = GapBuffer.content(state.gap_buffer)
+    new_content = content <> text
+    new_buf = GapBuffer.new(new_content)
+    # Move cursor to end
+    line_count = GapBuffer.line_count(new_buf)
+    last_line = max(0, line_count - 1)
+
+    last_col =
+      case GapBuffer.lines(new_buf, last_line, 1) do
+        [row] -> max(0, String.length(row) - 1)
+        _ -> 0
+      end
+
+    new_buf = GapBuffer.move_to(new_buf, {last_line, last_col})
+    {:reply, :ok, %{state | gap_buffer: new_buf}}
+  end
+
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
     buf = state.gap_buffer
 
@@ -467,7 +557,9 @@ defmodule Minga.Buffer.Server do
       lines: GapBuffer.lines(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
-      dirty: state.dirty
+      dirty: state.dirty,
+      name: state.name,
+      read_only: state.read_only
     }
 
     {:reply, snapshot, state}
@@ -476,6 +568,10 @@ defmodule Minga.Buffer.Server do
   def handle_call({:content_range, from_pos, to_pos}, _from, state) do
     text = GapBuffer.content_range(state.gap_buffer, from_pos, to_pos)
     {:reply, text, state}
+  end
+
+  def handle_call({:delete_range, _from_pos, _to_pos}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
   end
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
@@ -498,6 +594,10 @@ defmodule Minga.Buffer.Server do
     {:reply, result, state}
   end
 
+  def handle_call({:delete_lines, _start_line, _end_line}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
     new_buf = GapBuffer.delete_lines(state.gap_buffer, start_line, end_line)
 
@@ -510,6 +610,10 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:content_and_cursor, _from, state) do
     {:reply, GapBuffer.content_and_cursor(state.gap_buffer), state}
+  end
+
+  def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
   end
 
   def handle_call({:clear_line, line}, _from, state) do

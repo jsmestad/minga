@@ -205,4 +205,87 @@ defmodule Minga.Buffer.ServerTest do
       assert Server.line_count(pid) == 3
     end
   end
+
+  describe "special buffer properties" do
+    test "buffer_name returns nil by default" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert Server.buffer_name(pid) == nil
+    end
+
+    test "buffer_name returns the configured name" do
+      {:ok, pid} = Server.start_link(content: "", buffer_name: "*Messages*")
+      assert Server.buffer_name(pid) == "*Messages*"
+    end
+
+    test "read_only? returns false by default" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert Server.read_only?(pid) == false
+    end
+
+    test "read-only buffer rejects insert_char" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.insert_char(pid, "x") == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "read-only buffer rejects delete_before" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      Server.move(pid, :right)
+      assert Server.delete_before(pid) == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "read-only buffer rejects delete_at" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.delete_at(pid) == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "read-only buffer rejects replace_content" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.replace_content(pid, "new") == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "read-only buffer rejects delete_range" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.delete_range(pid, {0, 0}, {0, 3}) == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "read-only buffer rejects delete_lines" do
+      {:ok, pid} = Server.start_link(content: "a\nb\nc", read_only: true)
+      assert Server.delete_lines(pid, 0, 0) == {:error, :read_only}
+      assert Server.content(pid) == "a\nb\nc"
+    end
+
+    test "read-only buffer rejects clear_line" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.clear_line(pid, 0) == {:error, :read_only}
+      assert Server.content(pid) == "hello"
+    end
+
+    test "append bypasses read-only" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert Server.append(pid, "\nworld") == :ok
+      assert Server.content(pid) == "hello\nworld"
+    end
+
+    test "unlisted? returns configured value" do
+      {:ok, pid} = Server.start_link(content: "", unlisted: true)
+      assert Server.unlisted?(pid) == true
+    end
+
+    test "persistent? returns configured value" do
+      {:ok, pid} = Server.start_link(content: "", persistent: true)
+      assert Server.persistent?(pid) == true
+    end
+
+    test "render_snapshot includes name and read_only" do
+      {:ok, pid} = Server.start_link(content: "hi", buffer_name: "*test*", read_only: true)
+      snap = Server.render_snapshot(pid, 0, 10)
+      assert snap.name == "*test*"
+      assert snap.read_only == true
+    end
+  end
 end

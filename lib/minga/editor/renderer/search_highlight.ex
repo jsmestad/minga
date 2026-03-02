@@ -282,7 +282,12 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     merge_spans(search_spans, confirm_spans)
   end
 
-  @spec confirm_span(search_match() | nil, non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec confirm_span(
+          search_match() | nil,
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           [highlight_span()]
   defp confirm_span(nil, _buf_line, _vis_start, _vis_end), do: []
 

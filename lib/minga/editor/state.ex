@@ -15,6 +15,7 @@ defmodule Minga.Editor.State do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Editor.ChangeRecorder
+  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Picker
@@ -64,7 +65,10 @@ defmodule Minga.Editor.State do
             last_search_direction: :forward,
             marks: %{},
             last_jump_pos: nil,
-            project_search_results: []
+            project_search_results: [],
+            messages_buffer: nil,
+            scratch_buffer: nil,
+            macro_recorder: MacroRecorder.new()
 
   @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
   @type picker_action_menu ::
@@ -101,6 +105,9 @@ defmodule Minga.Editor.State do
           last_search_direction: Minga.Search.direction(),
           marks: marks(),
           last_jump_pos: GapBuffer.position() | nil,
-          project_search_results: [Minga.ProjectSearch.match()]
+          project_search_results: [Minga.ProjectSearch.match()],
+          messages_buffer: pid() | nil,
+          scratch_buffer: pid() | nil,
+          macro_recorder: MacroRecorder.t()
         }
 end

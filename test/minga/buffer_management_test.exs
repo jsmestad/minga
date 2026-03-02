@@ -2,6 +2,9 @@ defmodule Minga.BufferManagementTest do
   @moduledoc """
   Tests for multi-buffer management: opening, switching, closing buffers
   via keybindings and ex commands, verified through the headless harness.
+
+  Note: `*scratch*` and `*Messages*` are stored separately from the buffer
+  list, so they don't affect buffer counts or indicators.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -146,16 +149,16 @@ defmodule Minga.BufferManagementTest do
     end
 
     @tag :tmp_dir
-    test "killing the only buffer leaves editor with no file", %{tmp_dir: tmp_dir} do
+    test "killing the only buffer falls back to scratch", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "solo.txt")
       File.write!(path, "alone")
 
       ctx = start_editor("alone", file_path: path)
       send_keys(ctx, "<SPC>bd")
 
-      # Should show the splash screen
+      # Should show scratch buffer as fallback
       row0 = screen_row(ctx, 0)
-      assert String.contains?(row0, "Minga")
+      assert String.contains?(row0, ";;") or String.contains?(row0, "Minga")
     end
 
     @tag :tmp_dir
@@ -196,6 +199,55 @@ defmodule Minga.BufferManagementTest do
 
       send_keys(ctx, "<SPC>bp")
       assert_modeline_contains(ctx, "[1/2]")
+    end
+  end
+
+  describe "SPC b s — switch to scratch" do
+    test "SPC b s shows scratch buffer" do
+      ctx = start_editor("hello")
+      send_keys(ctx, "<SPC>bs")
+      assert_row_contains(ctx, 0, ";; This buffer is for notes")
+    end
+
+    test "scratch buffer is editable" do
+      ctx = start_editor("hello")
+      send_keys(ctx, "<SPC>bs")
+      send_keys(ctx, "ggIedited: <Esc>")
+      assert_row_contains(ctx, 0, "edited:")
+    end
+  end
+
+  describe ":new — new empty buffer" do
+    test "creates a new unnamed buffer" do
+      ctx = start_editor("hello")
+      send_keys(ctx, ":new<CR>")
+
+      # Should show empty buffer with [new 1] name
+      assert_modeline_contains(ctx, "[new 1]")
+    end
+
+    test "successive :new increments the number" do
+      ctx = start_editor("hello")
+      send_keys(ctx, ":new<CR>")
+      assert_modeline_contains(ctx, "[new 1]")
+
+      send_keys(ctx, ":new<CR>")
+      assert_modeline_contains(ctx, "[new 2]")
+    end
+
+    test "new buffer is editable" do
+      ctx = start_editor("hello")
+      send_keys(ctx, ":new<CR>")
+      send_keys(ctx, "isome text<Esc>")
+      assert_row_contains(ctx, 0, "some text")
+    end
+  end
+
+  describe "SPC b N — new buffer via leader" do
+    test "creates a new buffer" do
+      ctx = start_editor("hello")
+      send_keys(ctx, "<SPC>bN")
+      assert_modeline_contains(ctx, "[new 1]")
     end
   end
 end

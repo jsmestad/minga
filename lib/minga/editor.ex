@@ -13,9 +13,11 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
+  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer
@@ -90,15 +92,32 @@ defmodule Minga.Editor do
 
     buffers = if buffer, do: [buffer], else: []
 
+    # Start special buffers (stored separately, not in buffer list)
+    {messages_buf, scratch_buf} = start_special_buffers()
+
+    # When no file is open, show scratch as the active buffer
+    {active_buf, buffers} =
+      case {buffer, scratch_buf} do
+        {nil, pid} when is_pid(pid) -> {pid, []}
+        {pid, _} when is_pid(pid) -> {pid, buffers}
+        _ -> {nil, buffers}
+      end
+
+    active_idx = if active_buf && buffers != [], do: 0, else: 0
+
     state = %EditorState{
-      buffer: buffer,
+      buffer: active_buf,
       buffers: buffers,
-      active_buffer: 0,
+      active_buffer: active_idx,
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
       mode: :normal,
-      mode_state: Mode.initial_state()
+      mode_state: Mode.initial_state(),
+      messages_buffer: messages_buf,
+      scratch_buffer: scratch_buf
     }
+
+    state = log_message(state, "Editor started")
 
     {:ok, state}
   end
@@ -110,6 +129,7 @@ defmodule Minga.Editor do
       {:ok, pid} ->
         maybe_watch_buffer(file_watcher_pid(), pid)
         new_state = Commands.add_buffer(state, pid)
+        new_state = log_message(new_state, "Opened: #{file_path}")
         Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -262,6 +282,19 @@ defmodule Minga.Editor do
     # ── Change recording ─────────────────────────────────────────────────
     # Record keys for dot repeat, unless we're currently replaying.
     state = maybe_record_change(state, old_mode, new_mode, commands, key)
+
+    # ── Macro recording ──────────────────────────────────────────────────
+    # Record keys into macro register if actively recording (and not replaying).
+    state = maybe_record_macro_key(state, key, commands)
+
+    # Guard: block insert/replace transitions on read-only buffers.
+    {new_mode, commands, new_mode_state, state} =
+      if new_mode in [:insert, :replace] and state.buffer != nil and
+           BufferServer.read_only?(state.buffer) do
+        {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
+      else
+        {new_mode, commands, new_mode_state, state}
+      end
 
     # When transitioning INTO visual or command mode, adjust mode_state.
     new_mode_state =
@@ -491,6 +524,7 @@ defmodule Minga.Editor do
   defp dispatch_command(state, cmd) do
     case Commands.execute(state, cmd) do
       {s, {:dot_repeat, count}} -> replay_last_change(s, count)
+      {s, {:replay_macro, register}} -> replay_macro(s, register)
       s -> s
     end
   end
@@ -569,5 +603,116 @@ defmodule Minga.Editor do
       {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
       {:error, _} -> {nil, nil}
     end
+  end
+
+  # ── Macro recording helpers ───────────────────────────────────────────────
+
+  @spec maybe_record_macro_key(
+          state(),
+          {non_neg_integer(), non_neg_integer()},
+          [Mode.command()]
+        ) :: state()
+  defp maybe_record_macro_key(%{macro_recorder: %{replaying: true}} = state, _key, _cmds),
+    do: state
+
+  defp maybe_record_macro_key(%{macro_recorder: rec} = state, key, commands) do
+    case MacroRecorder.recording?(rec) do
+      {true, _reg} ->
+        # Don't record the `q` that stops recording
+        has_stop? = Enum.any?(commands, &match?(:toggle_macro_recording, &1))
+
+        if has_stop? do
+          state
+        else
+          %{state | macro_recorder: MacroRecorder.record_key(rec, key)}
+        end
+
+      false ->
+        state
+    end
+  end
+
+  @spec replay_macro(state(), String.t()) :: state()
+  defp replay_macro(%{macro_recorder: rec} = state, register) do
+    case MacroRecorder.get_macro(rec, register) do
+      nil ->
+        state
+
+      keys ->
+        rec = MacroRecorder.start_replay(rec)
+        state = %{state | macro_recorder: rec}
+
+        state =
+          Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
+            handle_key(acc, codepoint, modifiers)
+          end)
+
+        rec = MacroRecorder.stop_replay(state.macro_recorder)
+        %{state | macro_recorder: rec}
+    end
+  end
+
+  # ── Special buffers ──────────────────────────────────────────────────────
+
+  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
+  defp start_special_buffers do
+    messages_buf =
+      case DynamicSupervisor.start_child(
+             Minga.Buffer.Supervisor,
+             {BufferServer,
+              content: "",
+              buffer_name: "*Messages*",
+              read_only: true,
+              unlisted: true,
+              persistent: true}
+           ) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
+
+    scratch_content =
+      ";; This buffer is for notes you don't want to save.\n;; It will persist across buffer switches.\n\n"
+
+    scratch_buf =
+      case DynamicSupervisor.start_child(
+             Minga.Buffer.Supervisor,
+             {BufferServer,
+              content: scratch_content, buffer_name: "*scratch*", unlisted: true, persistent: true}
+           ) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
+
+    {messages_buf, scratch_buf}
+  end
+
+  # ── Message logging ──────────────────────────────────────────────────────
+
+  @max_messages_lines 1000
+
+  @doc false
+  @spec log_message(state(), String.t()) :: state()
+  defp log_message(%{messages_buffer: nil} = state, _text), do: state
+
+  defp log_message(%{messages_buffer: buf} = state, text) do
+    time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
+    BufferServer.append(buf, "[#{time}] #{text}\n")
+
+    # Trim to max lines
+    line_count = BufferServer.line_count(buf)
+
+    if line_count > @max_messages_lines do
+      excess = line_count - @max_messages_lines
+      # Read remaining content and replace
+      content = BufferServer.content(buf)
+      lines = String.split(content, "\n")
+      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
+      # Direct state manipulation to bypass read-only for trim
+      :sys.replace_state(buf, fn s ->
+        %{s | gap_buffer: GapBuffer.new(trimmed)}
+      end)
+    end
+
+    state
   end
 end

@@ -4,6 +4,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   ex-command dispatch, and line number style cycling.
   """
 
+  alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
@@ -79,6 +80,57 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, :buffer_next), do: next_buffer(state)
   def execute(state, :buffer_prev), do: prev_buffer(state)
   def execute(state, :kill_buffer), do: remove_current_buffer(state)
+
+  def execute(state, :new_buffer) do
+    n = next_new_buffer_number(state.buffers)
+    name = "[new #{n}]"
+
+    case DynamicSupervisor.start_child(
+           Minga.Buffer.Supervisor,
+           {BufferServer, content: "", buffer_name: name}
+         ) do
+      {:ok, pid} ->
+        Commands.add_buffer(state, pid)
+
+      {:error, reason} ->
+        Logger.error("Failed to create buffer: #{inspect(reason)}")
+        state
+    end
+  end
+
+  def execute(%{scratch_buffer: nil} = state, :view_scratch) do
+    %{state | status_msg: "No scratch buffer"}
+  end
+
+  def execute(%{scratch_buffer: scratch_buf} = state, :view_scratch) do
+    idx = Enum.find_index(state.buffers, &(&1 == scratch_buf))
+
+    case idx do
+      nil ->
+        Commands.add_buffer(state, scratch_buf)
+
+      i ->
+        switch_to_buffer(state, i)
+    end
+  end
+
+  def execute(%{messages_buffer: nil} = state, :view_messages) do
+    %{state | status_msg: "No messages buffer"}
+  end
+
+  def execute(%{messages_buffer: msg_buf} = state, :view_messages) do
+    # Add messages buffer to buffer list if not already there, then switch to it
+    idx = Enum.find_index(state.buffers, &(&1 == msg_buf))
+
+    case idx do
+      nil ->
+        new_state = Commands.add_buffer(state, msg_buf)
+        new_state
+
+      i ->
+        switch_to_buffer(state, i)
+    end
+  end
 
   # ── Line number style ─────────────────────────────────────────────────────
 
@@ -195,6 +247,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
+  def execute(state, {:execute_ex_command, {:new_buffer, []}}) do
+    execute(state, :new_buffer)
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Logger.debug("Unknown ex command: #{raw}")
     state
@@ -230,20 +286,58 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp prev_buffer(state), do: state
 
   @spec remove_current_buffer(state()) :: state()
+
+  # Active buffer is scratch (not in buffer list) — clear it
+  defp remove_current_buffer(%{buffers: [], buffer: buf, scratch_buffer: buf} = state)
+       when is_pid(buf) do
+    :sys.replace_state(buf, fn s ->
+      %{
+        s
+        | gap_buffer:
+            GapBuffer.new(
+              ";; This buffer is for notes you don't want to save.\n;; It will persist across buffer switches.\n\n"
+            )
+      }
+    end)
+
+    %{state | status_msg: "Buffer is persistent — content cleared"}
+  end
+
   defp remove_current_buffer(%{buffers: [_ | _] = buffers, active_buffer: idx} = state) do
     buf = Enum.at(buffers, idx)
-    if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
 
-    new_buffers = List.delete_at(buffers, idx)
+    # Check if persistent — if so, recreate instead of removing
+    if buf && Process.alive?(buf) && BufferServer.persistent?(buf) do
+      # Clear buffer content instead of killing it
+      buf_state = :sys.get_state(buf)
 
-    case new_buffers do
-      [] ->
-        %{state | buffers: [], active_buffer: 0, buffer: nil}
+      initial =
+        if buf_state.name == "*scratch*",
+          do:
+            ";; This buffer is for notes you don't want to save.\n;; It will persist across buffer switches.\n\n",
+          else: ""
 
-      _ ->
-        new_idx = min(idx, Enum.count(new_buffers) - 1)
-        new_active = Enum.at(new_buffers, new_idx)
-        %{state | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+      :sys.replace_state(buf, fn s ->
+        %{s | gap_buffer: GapBuffer.new(initial)}
+      end)
+
+      %{state | status_msg: "Buffer is persistent — content cleared"}
+    else
+      if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
+
+      new_buffers = List.delete_at(buffers, idx)
+
+      case new_buffers do
+        [] ->
+          # Fall back to scratch buffer if available
+          fallback = Map.get(state, :scratch_buffer)
+          %{state | buffers: [], active_buffer: 0, buffer: fallback}
+
+        _ ->
+          new_idx = min(idx, Enum.count(new_buffers) - 1)
+          new_active = Enum.at(new_buffers, new_idx)
+          %{state | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+      end
     end
   end
 
@@ -254,5 +348,28 @@ defmodule Minga.Editor.Commands.BufferManagement do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)
+  end
+
+  @spec next_new_buffer_number([pid()]) :: pos_integer()
+  defp next_new_buffer_number(buffers) do
+    existing =
+      buffers
+      |> Enum.filter(&Process.alive?/1)
+      |> Enum.map(&BufferServer.buffer_name/1)
+      |> Enum.flat_map(fn
+        "[new " <> rest ->
+          case Integer.parse(String.trim_trailing(rest, "]")) do
+            {n, ""} -> [n]
+            _ -> []
+          end
+
+        _ ->
+          []
+      end)
+
+    case existing do
+      [] -> 1
+      nums -> Enum.max(nums) + 1
+    end
   end
 end

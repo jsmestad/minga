@@ -47,7 +47,7 @@ defmodule Minga.Editor.Commands do
   @type state :: EditorState.t()
 
   @typedoc "Action the GenServer must dispatch after execute/2."
-  @type action :: {:dot_repeat, non_neg_integer() | nil}
+  @type action :: {:dot_repeat, non_neg_integer() | nil} | {:replay_macro, String.t()}
 
   @doc """
   Executes a single command against the editor state.
@@ -273,6 +273,59 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :cycle_line_numbers),
     do: BufferManagement.execute(state, :cycle_line_numbers)
+
+  def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
+  def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
+  def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
+
+  # ── Macro recording ──────────────────────────────────────────────────────
+
+  def execute(state, :toggle_macro_recording) do
+    alias Minga.Editor.MacroRecorder
+
+    case MacroRecorder.recording?(state.macro_recorder) do
+      {true, _reg} ->
+        # Stop recording
+        rec = MacroRecorder.stop_recording(state.macro_recorder)
+        %{state | macro_recorder: rec, status_msg: "Recorded macro"}
+
+      false ->
+        # Enter pending state for register selection
+        %{state | mode_state: %{state.mode_state | pending_macro_register: true}}
+    end
+  end
+
+  def execute(state, {:start_macro_recording, register}) do
+    alias Minga.Editor.MacroRecorder
+
+    rec =
+      state.macro_recorder
+      |> MacroRecorder.start_recording(register)
+      |> Map.put(:last_register, register)
+
+    %{state | macro_recorder: rec}
+  end
+
+  def execute(state, {:replay_macro, register}) do
+    alias Minga.Editor.MacroRecorder
+
+    case MacroRecorder.get_macro(state.macro_recorder, register) do
+      nil ->
+        %{state | status_msg: "No macro in register @#{register}"}
+
+      _keys ->
+        rec = %{state.macro_recorder | last_register: register}
+        {%{state | macro_recorder: rec}, {:replay_macro, register}}
+    end
+  end
+
+  def execute(%{macro_recorder: %{last_register: nil}} = state, :replay_last_macro) do
+    %{state | status_msg: "No previous macro"}
+  end
+
+  def execute(%{macro_recorder: %{last_register: reg}} = state, :replay_last_macro) do
+    {state, {:replay_macro, reg}}
+  end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
 

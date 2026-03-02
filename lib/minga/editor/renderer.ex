@@ -16,6 +16,7 @@ defmodule Minga.Editor.Renderer do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.Context
@@ -143,12 +144,7 @@ defmodule Minga.Editor.Renderer do
       end
 
     # ── Modeline (row N-2) ──
-    file_name =
-      case snapshot.file_path do
-        nil -> "[scratch]"
-        path -> Path.basename(path)
-      end
-
+    file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     line_count = snapshot.line_count
     buf_count = length(state.buffers)
@@ -168,7 +164,8 @@ defmodule Minga.Editor.Renderer do
         cursor_col: cursor_col,
         line_count: line_count,
         buf_index: buf_index,
-        buf_count: buf_count
+        buf_count: buf_count,
+        macro_recording: MacroRecorder.recording?(state.macro_recorder)
       })
 
     # ── Minibuffer (row N-1) ──
@@ -324,4 +321,21 @@ defmodule Minga.Editor.Renderer do
   end
 
   defp render_whichkey(_state, _viewport), do: []
+
+  @spec snapshot_display_name(map()) :: String.t()
+  defp snapshot_display_name(%{name: name} = snapshot) when is_binary(name) do
+    ro = if Map.get(snapshot, :read_only, false), do: " [RO]", else: ""
+    name <> ro
+  end
+
+  defp snapshot_display_name(snapshot) do
+    base =
+      case snapshot.file_path do
+        nil -> "[scratch]"
+        path -> Path.basename(path)
+      end
+
+    ro = if Map.get(snapshot, :read_only, false), do: " [RO]", else: ""
+    base <> ro
+  end
 end

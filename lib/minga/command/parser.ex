@@ -30,6 +30,7 @@ defmodule Minga.Command.Parser do
   * `{:save_quit, []}` — save and quit (`:wq`)
   * `{:edit, filename}` — open a file (`:e filename`)
   * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
+  * `{:new_buffer, []}` — create a new empty buffer (`:new` / `:enew`)
   * `{:goto_line, n}` — jump to line *n* (`:<number>`)
   * `{:substitute, pattern, replacement, flags}` — `:%s/old/new/flags`
   * `{:unknown, raw}` — unrecognised command
@@ -43,6 +44,7 @@ defmodule Minga.Command.Parser do
           | {:edit, String.t()}
           | {:force_edit, []}
           | {:checktime, []}
+          | {:new_buffer, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
@@ -94,6 +96,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("wq"), do: {:save_quit, []}
   defp do_parse("e!"), do: {:force_edit, []}
   defp do_parse("checktime"), do: {:checktime, []}
+  defp do_parse("new"), do: {:new_buffer, []}
+  defp do_parse("enew"), do: {:new_buffer, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

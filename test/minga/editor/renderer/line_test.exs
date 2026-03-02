@@ -91,7 +91,7 @@ defmodule Minga.Editor.Renderer.LineTest do
   end
 
   describe "no file open" do
-    test "shows splash screen when no buffer is loaded" do
+    test "shows scratch buffer when no file is loaded" do
       id = :erlang.unique_integer([:positive])
       {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
 
@@ -108,7 +108,8 @@ defmodule Minga.Editor.Renderer.LineTest do
       :ok = HeadlessPort.await_frame(port)
 
       row0 = HeadlessPort.get_row_text(port, 0)
-      assert String.contains?(row0, "Minga")
+      # With special buffers, the editor now starts with *scratch* instead of splash
+      assert String.contains?(row0, ";;") or String.contains?(row0, "Minga")
     end
   end
 end

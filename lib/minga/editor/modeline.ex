@@ -42,7 +42,8 @@ defmodule Minga.Editor.Modeline do
           cursor_col: non_neg_integer(),
           line_count: non_neg_integer(),
           buf_index: pos_integer(),
-          buf_count: non_neg_integer()
+          buf_count: non_neg_integer(),
+          macro_recording: {true, String.t()} | false
         }
 
   @doc "Renders the modeline at the given row using the provided data."
@@ -57,7 +58,14 @@ defmodule Minga.Editor.Modeline do
     # Build segments
     mode_segment = " #{mode_badge(data.mode, data.mode_state)} "
     buf_indicator = if data.buf_count > 1, do: " [#{data.buf_index}/#{data.buf_count}]", else: ""
-    file_segment = " #{data.file_name}#{data.dirty_marker}#{buf_indicator} "
+
+    macro_indicator =
+      case Map.get(data, :macro_recording, false) do
+        {true, reg} -> " recording @#{reg}"
+        _ -> ""
+      end
+
+    file_segment = " #{data.file_name}#{data.dirty_marker}#{buf_indicator}#{macro_indicator} "
     filetype_segment = " #{filetype_label(data.filetype)} "
 
     percent =

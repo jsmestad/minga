@@ -34,7 +34,11 @@ defmodule Minga.Editor.Renderer.Line do
         )
 
       :full ->
-        [Protocol.encode_draw(screen_row, ctx.gutter_w, Enum.join(visible_graphemes), reverse: true)]
+        [
+          Protocol.encode_draw(screen_row, ctx.gutter_w, Enum.join(visible_graphemes),
+            reverse: true
+          )
+        ]
 
       {sel_start, sel_end} ->
         render_partial_selection(

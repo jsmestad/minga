@@ -15,7 +15,11 @@ defmodule Minga.Buffer.State do
             mtime: nil,
             file_size: nil,
             undo_stack: [],
-            redo_stack: []
+            redo_stack: [],
+            name: nil,
+            read_only: false,
+            unlisted: false,
+            persistent: false
 
   @type t :: %__MODULE__{
           gap_buffer: GapBuffer.t(),
@@ -25,7 +29,11 @@ defmodule Minga.Buffer.State do
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
           undo_stack: [GapBuffer.t()],
-          redo_stack: [GapBuffer.t()]
+          redo_stack: [GapBuffer.t()],
+          name: String.t() | nil,
+          read_only: boolean(),
+          unlisted: boolean(),
+          persistent: boolean()
         }
 
   @max_undo_stack 1000
