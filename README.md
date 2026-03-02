@@ -1,55 +1,145 @@
 # 🥨 Minga
 
-A BEAM-powered modal text editor with Doom Emacs-style keybindings.
+**A text editor that never loses your work — built on the technology that keeps
+phone networks running.**
 
-Minga uses the Erlang VM's actor model for fault-tolerant editor internals and
-a Zig terminal renderer for high-performance TUI output. If the renderer
-crashes, the supervisor restarts it — no data loss, no corrupted state.
+Minga is a modal terminal editor (think Vim-style editing) powered by a
+surprising pairing: the Erlang virtual machine for editor logic and Zig for
+terminal rendering. The result is an editor with crash resilience baked into
+its DNA.
 
-## Status
+## Why Minga?
 
-🚧 **Early development** — building the walking skeleton.
+### The problem with editors
 
-## Architecture
+Text editors are single-process programs. When something crashes (a bad
+plugin, a rendering glitch, a corrupted state) your whole editor goes down.
+Unsaved work, gone. You restart, reopen, re-navigate, re-remember what you
+were doing.
+
+### What if the editor could crash… and keep going?
+
+Minga runs as **two OS processes** with full fault isolation:
 
 ```
-BEAM (Elixir)                    Zig (libvaxis)
-─────────────                    ──────────────
-Buffer GenServer (gap buffer)    Terminal rendering
-Modal FSM (Normal/Insert/Visual) Raw input capture
-Keymap trie + Which-Key popups   Screen drawing
-Command registry                 Floating panels
-Editor orchestration
-Supervisor tree ("Stamm")
+BEAM (Elixir/Erlang VM)              Zig + libvaxis
+───────────────────────              ──────────────
+Your buffers, undo history,          Terminal rendering
+modes, keybindings, commands,        Input capture
+search, file picker, marks,          Screen drawing
+syntax highlighting                  Floating panels
 
-        ◄── input events ──┐
-        ── render cmds ────►│
-           (Port protocol)  │
+         ◄── keyboard events ──┐
+         ── render commands ───►│
+            (Port protocol)    │
 ```
 
-Two OS processes. Full fault isolation. Zero NIFs.
+The Erlang VM (the BEAM) was designed to run telephone switches,
+systems
+that literally cannot go down. It uses lightweight isolated processes
+with supervision trees that detect failures and restart components
+automatically. If the renderer crashes? The supervisor restarts it. Your
+buffers, cursor position, undo history: untouched. No data loss. No
+corrupted state.
 
-## Prerequisites
+This isn't theoretical. It's how Erlang has worked in telecom, banking, and
+messaging infrastructure for 30+ years. Minga just points that reliability at
+a text editor.
+
+### Why hasn't anyone done this before?
+
+Because the BEAM doesn't talk to terminals. It's a server-side VM, great at
+concurrency but terrible at drawing characters on your screen. So Minga doesn't
+try. It delegates rendering to a Zig binary compiled against
+[libvaxis](https://github.com/rockorager/libvaxis), a modern terminal UI
+library. Zero NIFs. Zero shared memory. Just a clean binary protocol between
+two processes that each do what they're best at.
+
+## Features
+
+Minga aims to bring the best of modern modal editing together:
+
+- **Vim-style modal editing:** Normal, Insert, Visual, Operator-Pending,
+  Replace, and Search modes with the motions and operators you already know
+  (`d`, `c`, `y`, `w`, `b`, `e`, `iw`, `i"`, `a{`, and many more)
+- **Space-leader keybindings:** organized mnemonic commands behind `SPC`:
+  `SPC f f` to find files, `SPC b b` to switch buffers, `SPC s p` to search
+  your project. Discoverable via Which-Key popup that shows you what's
+  available as you type
+- **Tree-sitter syntax highlighting:** 24 languages compiled in (Elixir,
+  Ruby, TypeScript, Go, Rust, Python, Zig, and more), with user-overridable
+  highlight queries
+- **Fuzzy file finder and buffer switcher:** built-in pickers with
+  incremental search
+- **Persistent undo:** your undo history survives buffer switches
+- **Fault-tolerant by design:** OTP supervision means components restart
+  independently
+- **Built for the agentic era:** AI coding agents spawn unreliable external
+  processes. Minga's supervision model makes agent crashes recoverable events
+  instead of editor-killing disasters (see [Architecture](docs/ARCHITECTURE.md))
+
+### Current status
+
+🚧 **Early development.** Minga is usable for editing but is not yet a daily
+driver. Core editing, navigation, and syntax highlighting work. We're building
+toward split windows, LSP support, and a plugin system.
+
+See the [Roadmap](ROADMAP.md) for the full feature grid and what's coming next.
+If you want to help shape what a BEAM-powered editor can be, now is a great
+time to jump in.
+
+## Quick start
+
+### Prerequisites
 
 - Elixir 1.19+ / OTP 28+
 - Zig 0.15+
-- See `.tool-versions` for exact versions
+- See `.tool-versions` for exact pinned versions
 
-## Build
+### Build & run
 
 ```bash
-# Install dependencies
+# Clone and build
+git clone https://github.com/justinsmestad/minga.git
+cd minga
 mix deps.get
-
-# Compile (builds both Elixir and Zig)
-mix compile
+mix compile        # Builds both Elixir and Zig
 
 # Run tests
-mix test            # Elixir tests
-cd zig && zig build test  # Zig tests
+mix test                       # 1,393 Elixir tests
+cd zig && zig build test       # 105 Zig tests
 
-# Launch (once implemented)
+# Launch
 mix minga path/to/file
+```
+
+## Architecture deep dive
+
+For the curious, here's what makes Minga tick:
+
+| Layer | Technology | Responsibility |
+|-------|-----------|----------------|
+| **Editor core** | Elixir on the BEAM | Gap buffer, modes, motions, operators, text objects, keymap trie, command registry, undo/redo, syntax highlight orchestration |
+| **Renderer** | Zig + libvaxis | Terminal drawing, keyboard input, tree-sitter parsing, floating panels |
+| **Protocol** | Length-prefixed binary over stdin/stdout | Typed opcodes for render commands (BEAM→Zig) and input events (Zig→BEAM) |
+| **Supervision** | OTP supervisor tree | Automatic restart of crashed components with preserved editor state |
+
+The BEAM side is a set of GenServers (one per buffer, one for the editor
+orchestrator, one for the port manager) all supervised. The Zig side is a
+single-threaded event loop that reads port commands, renders frames, and
+forwards keyboard input. Tree-sitter runs in the Zig process with
+pre-compiled queries for instant highlighting on file open.
+
+## Contributing
+
+Minga is open to contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for
+setup, testing, and how to add new commands, motions, and render features.
+
+```bash
+# Before committing
+mix lint                          # Format + Credo + compile warnings
+mix test --warnings-as-errors     # Tests
+mix dialyzer                      # Typespec consistency
 ```
 
 ## License
@@ -58,4 +148,4 @@ MIT
 
 ---
 
-*Created with 🥨 in Munich.*
+*Created with 🥨 in Colorado.*

@@ -4,6 +4,8 @@
 
 Minga is a BEAM-powered modal text editor with a Zig terminal renderer.
 Read `PLAN.md` for full architecture and implementation roadmap.
+Read `ROADMAP.md` for the current feature grid and planned work.
+Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
 
 ## Tech Stack
 
@@ -143,6 +145,16 @@ stdin/stdout of the Zig process. The Zig process uses `/dev/tty` for
 terminal I/O (not stdout).
 
 See `PLAN.md` § "Port Protocol" for the full message specification.
+
+## Keeping Documentation Updated
+
+When implementing features, completing planned work, or changing architecture:
+
+- **`ROADMAP.md`** — Update the feature grid status (📋→🚧→✅) when starting
+  or finishing work. Add new rows for features not yet listed.
+- **`docs/ARCHITECTURE.md`** — Update when adding new process types,
+  protocol opcodes, or changing supervision structure.
+- **`docs/PERFORMANCE.md`** — Mark optimizations as completed when done.
 
 ## Adding New Features
 

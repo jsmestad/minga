@@ -437,13 +437,11 @@ column display, and visual selection bounds all use grapheme-indexed columns.
 - Test: very long lines → horizontal scroll with highlights
 - Property-based: random edits preserve highlight/buffer consistency
 
-#### 4. User-customizable queries (polish)
-Query override from `~/.config/minga/queries/{lang}/highlights.scm` works
-on the Elixir side (`Grammar.read_query/1` checks user dir first), but the
-Zig side now uses `@embedFile` for built-in queries. If a user provides a
-custom query, the Elixir side needs to send it via `set_highlight_query`
-which will override the pre-compiled one. Currently untested path — needs
-integration test and possibly a `:reload_highlights` command.
+#### ~~4. User-customizable queries~~ ✅ DONE
+HighlightBridge detects user query files at
+`~/.config/minga/queries/{lang}/highlights.scm` and sends them via
+`set_highlight_query` to override built-in queries. Added `:reload-highlights`
+(`:rh`) command to re-trigger setup. 5 tests.
 
 #### 5. HEEx highlight queries
 HEEx grammar is compiled in but has no highlight query. Write
