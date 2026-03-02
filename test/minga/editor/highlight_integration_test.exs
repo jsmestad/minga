@@ -29,14 +29,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
       )
 
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans != [], "Pre-condition: file1 should have spans"
 
       # Open second file via :e — triggers buffer switch
       send_keys(ctx, ":e #{path2}<CR>")
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -55,7 +53,6 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Open second file
       send_keys(ctx, ":e #{path2}<CR>")
-      Process.sleep(50)
 
       # Inject spans for file2
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
@@ -65,13 +62,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
       )
 
-      Process.sleep(50)
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans != [], "Pre-condition: file2 should have spans"
 
       # Switch to previous buffer via SPC b n
       send_keys(ctx, "<Space>bn")
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -94,19 +89,16 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans == spans_a
 
       # Open file2 via SPC f f picker
       send_keys(ctx, "<Space>ff")
-      Process.sleep(50)
 
       # Type enough to match bbb.ex, then Enter
       type_text(ctx, "bbb")
       send_key(ctx, 13)
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -127,16 +119,13 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
-      Process.sleep(50)
 
       buf1_pid = :sys.get_state(ctx.editor).buf.buffer
 
       # Switch to file2 via picker
       send_keys(ctx, "<Space>ff")
-      Process.sleep(50)
       type_text(ctx, "bbb")
       send_key(ctx, 13)
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -222,17 +211,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
-      Process.sleep(50)
 
       # Switch to file2
       send_keys(ctx, ":e #{path2}<CR>")
-      Process.sleep(50)
 
       assert :sys.get_state(ctx.editor).highlight.spans == []
 
       # Switch back to file1 via :e (should already be in buffer list)
       send_keys(ctx, ":e #{path1}<CR>")
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -256,21 +242,18 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans == spans_a
 
       # Open file2 and switch to it
       send_keys(ctx, ":e #{path2}<CR>")
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans == [], "File2 should start with empty spans"
 
       # Switch back to file1 — should restore cached highlights instantly
       send_keys(ctx, "<Space>bn")
-      Process.sleep(50)
 
       state = :sys.get_state(ctx.editor)
 
@@ -324,6 +307,178 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       assert state.highlight.capture_names == ["new_keyword", "new_string"]
       assert length(state.highlight.spans) == 1
+    end
+  end
+
+  describe "normal-mode operator reparse" do
+    test "dd triggers highlight reparse" do
+      ctx = start_editor("line one\nline two\nline three")
+
+      # Inject highlights so reparse path is active
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}]}})
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      # dd deletes the current line
+      send_keys(ctx, "dd")
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after > version_before,
+             "Expected highlight_version to increment after dd (#{version_before} → #{version_after})"
+    end
+
+    test "x triggers highlight reparse" do
+      ctx = start_editor("hello")
+
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      send_key(ctx, ?x)
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after > version_before,
+             "Expected highlight_version to increment after x"
+    end
+
+    test "p (paste) triggers highlight reparse" do
+      ctx = start_editor("hello world")
+
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      # Yank a word first (yw), then paste
+      send_keys(ctx, "yw")
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      send_key(ctx, ?p)
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after > version_before,
+             "Expected highlight_version to increment after p"
+    end
+
+    test "undo triggers highlight reparse" do
+      ctx = start_editor("hello world")
+
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      # Make a change first
+      send_key(ctx, ?x)
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      # Undo
+      send_key(ctx, ?u)
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after > version_before,
+             "Expected highlight_version to increment after undo"
+    end
+
+    test "motion-only keys do not trigger reparse" do
+      ctx = start_editor("hello world\nsecond line")
+
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      # Pure motions: h, j, k, l, w
+      send_keys(ctx, "llljkw")
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after == version_before,
+             "Expected highlight_version unchanged after motions (#{version_before} → #{version_after})"
+    end
+  end
+
+  describe "edge cases" do
+    @tag :tmp_dir
+    test "unsupported filetype renders without crash", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "test.xyz")
+      File.write!(path, "just plain text")
+      ctx = start_editor("just plain text", file_path: path)
+
+      # Should render normally with no highlights
+      assert_row_contains(ctx, 0, "just plain text")
+
+      state = :sys.get_state(ctx.editor)
+      assert state.highlight.capture_names == []
+      assert state.highlight.spans == []
+    end
+
+    test "empty file renders without crash" do
+      ctx = start_editor("")
+
+      # Should show empty first line and tildes
+      state = :sys.get_state(ctx.editor)
+      assert state.highlight.spans == []
+    end
+
+    test "file with syntax errors still renders partial highlights" do
+      # Incomplete Elixir — defmodule without end
+      _content = "defmodule Broken do\n  def foo, do: :\nno end here"
+
+      hl = %Highlight{
+        version: 1,
+        spans: [
+          %{start_byte: 0, end_byte: 9, capture_id: 0},
+          %{start_byte: 22, end_byte: 25, capture_id: 1}
+        ],
+        capture_names: ["keyword", "function"],
+        theme: %{"keyword" => [fg: 0xFF0000], "function" => [fg: 0x00FF00]}
+      }
+
+      # First line: "defmodule Broken do" — span 0-9 covers "defmodule"
+      segments = Highlight.styles_for_line(hl, "defmodule Broken do", 0)
+      all_text = Enum.map_join(segments, fn {text, _} -> text end)
+      assert all_text == "defmodule Broken do"
+
+      # "defmodule" should have keyword style
+      {first_text, first_style} = hd(segments)
+      assert first_text == "defmodule"
+      assert first_style[:fg] == 0xFF0000
+    end
+
+    test "styles_for_line with empty line returns single empty segment" do
+      hl = %Highlight{
+        version: 1,
+        spans: [%{start_byte: 0, end_byte: 10, capture_id: 0}],
+        capture_names: ["keyword"],
+        theme: %{"keyword" => [fg: 0xFF0000]}
+      }
+
+      segments = Highlight.styles_for_line(hl, "", 5)
+      assert segments == []
+    end
+  end
+
+  describe "insert mode reparse" do
+    test "typing in insert mode triggers reparse" do
+      ctx = start_editor("hello")
+
+      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
+      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      version_before = :sys.get_state(ctx.editor).highlight_version
+
+      send_key(ctx, ?i)
+      send_key(ctx, ?a)
+
+      version_after = :sys.get_state(ctx.editor).highlight_version
+
+      assert version_after > version_before,
+             "Expected highlight_version to increment after insert mode typing"
     end
   end
 
