@@ -3,23 +3,345 @@ const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
 
+/// A highlight span: byte range + capture index.
+pub const Span = struct {
+    start_byte: u32,
+    end_byte: u32,
+    capture_id: u16,
+};
+
+/// Result of a highlight operation.
+pub const HighlightResult = struct {
+    spans: []Span,
+    capture_names: [][]const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *HighlightResult) void {
+        self.allocator.free(self.spans);
+        self.allocator.free(self.capture_names);
+    }
+};
+
+/// Compiled-in grammar language function type.
+const LanguageFn = *const fn () callconv(.c) ?*const c.TSLanguage;
+
 /// Tree-sitter highlighter. Owns a parser, optional tree, and query.
 /// Grammar languages are registered at init time (compiled-in) or
 /// loaded dynamically via `loadGrammar`.
 pub const Highlighter = struct {
     parser: *c.TSParser,
+    tree: ?*c.TSTree = null,
+    query: ?*c.TSQuery = null,
+    current_language: ?*const c.TSLanguage = null,
+    languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
+    allocator: std.mem.Allocator,
 
-    pub fn init() !Highlighter {
+    /// Initialize with compiled-in grammars registered.
+    pub fn init(allocator: std.mem.Allocator) !Highlighter {
         const parser = c.ts_parser_new() orelse return error.ParserCreateFailed;
-        return .{ .parser = parser };
+
+        var hl = Highlighter{
+            .parser = parser,
+            .languages = .empty,
+            .allocator = allocator,
+        };
+
+        // Register all compiled-in grammars.
+        inline for (builtin_grammars) |entry| {
+            if (entry.func()) |lang| {
+                hl.languages.put(allocator, entry.name, lang) catch {};
+            }
+        }
+
+        return hl;
     }
 
+    /// Free all resources.
     pub fn deinit(self: *Highlighter) void {
+        if (self.query) |q| c.ts_query_delete(q);
+        if (self.tree) |t| c.ts_tree_delete(t);
         c.ts_parser_delete(self.parser);
+        self.languages.deinit(self.allocator);
+    }
+
+    /// Set the active language by name. Returns false if not found.
+    pub fn setLanguage(self: *Highlighter, name: []const u8) bool {
+        const lang = self.languages.get(name) orelse return false;
+        _ = c.ts_parser_set_language(self.parser, lang);
+        self.current_language = lang;
+        // Invalidate existing tree and query since language changed
+        if (self.tree) |t| {
+            c.ts_tree_delete(t);
+            self.tree = null;
+        }
+        if (self.query) |q| {
+            c.ts_query_delete(q);
+            self.query = null;
+        }
+        return true;
+    }
+
+    /// Compile a highlight query (.scm source) for the current language.
+    pub fn setHighlightQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+
+        // Delete old query
+        if (self.query) |q| c.ts_query_delete(q);
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        self.query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.err("Query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+    }
+
+    /// Parse source text. Full re-parse (no incremental).
+    pub fn parse(self: *Highlighter, source: []const u8) !void {
+        if (self.tree) |t| c.ts_tree_delete(t);
+
+        self.tree = c.ts_parser_parse_string(
+            self.parser,
+            null,
+            source.ptr,
+            @intCast(source.len),
+        ) orelse return error.ParseFailed;
+    }
+
+    /// Run highlight query on the current tree, returning spans.
+    pub fn highlight(self: *Highlighter) !HighlightResult {
+        const tree = self.tree orelse return error.NoTree;
+        const query = self.query orelse return error.NoQuery;
+        const alloc = self.allocator;
+
+        const root = c.ts_tree_root_node(tree);
+        const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(cursor);
+
+        c.ts_query_cursor_exec(cursor, query, root);
+
+        // Collect spans
+        var spans: std.ArrayListUnmanaged(Span) = .empty;
+        errdefer spans.deinit(alloc);
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..match.capture_count];
+            for (captures) |cap| {
+                const node = cap.node;
+                const start = c.ts_node_start_byte(node);
+                const end = c.ts_node_end_byte(node);
+                try spans.append(alloc, .{
+                    .start_byte = start,
+                    .end_byte = end,
+                    .capture_id = @intCast(cap.index),
+                });
+            }
+        }
+
+        // Collect capture names
+        const pattern_count = c.ts_query_capture_count(query);
+        const names = try alloc.alloc([]const u8, pattern_count);
+        for (0..pattern_count) |i| {
+            var length: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(query, @intCast(i), &length);
+            names[i] = name_ptr[0..length];
+        }
+
+        return .{
+            .spans = try spans.toOwnedSlice(alloc),
+            .capture_names = names,
+            .allocator = alloc,
+        };
+    }
+
+    /// Dynamically load a grammar from a shared library.
+    /// The library must export `tree_sitter_{name}() -> *TSLanguage`.
+    pub fn loadGrammar(self: *Highlighter, name: []const u8, lib_path: []const u8) !void {
+        var buf: [256]u8 = undefined;
+        const symbol_name = std.fmt.bufPrint(&buf, "tree_sitter_{s}", .{name}) catch
+            return error.NameTooLong;
+
+        // Null-terminate for dlopen/dlsym
+        var path_buf: [4096]u8 = undefined;
+        if (lib_path.len >= path_buf.len) return error.PathTooLong;
+        @memcpy(path_buf[0..lib_path.len], lib_path);
+        path_buf[lib_path.len] = 0;
+
+        var lib = std.DynLib.open(path_buf[0..lib_path.len :0]) catch
+            return error.LibraryLoadFailed;
+
+        // Null-terminate symbol name
+        var sym_buf: [256]u8 = undefined;
+        @memcpy(sym_buf[0..symbol_name.len], symbol_name);
+        sym_buf[symbol_name.len] = 0;
+
+        const func = lib.lookup(LanguageFn, sym_buf[0..symbol_name.len :0]) orelse
+            return error.SymbolNotFound;
+
+        const lang = func() orelse return error.LanguageInitFailed;
+
+        // Note: we intentionally don't close the DynLib — the language
+        // struct points into the library's memory and must stay loaded.
+
+        try self.languages.put(self.allocator, name, lang);
     }
 };
 
-test "tree-sitter smoke test: parser creates and destroys" {
-    var hl = try Highlighter.init();
+// ── Compiled-in grammar registry ──────────────────────────────────────────
+
+const BuiltinGrammar = struct {
+    name: []const u8,
+    func: LanguageFn,
+};
+
+// Extern declarations for all compiled-in grammars.
+extern fn tree_sitter_elixir() ?*const c.TSLanguage;
+extern fn tree_sitter_heex() ?*const c.TSLanguage;
+extern fn tree_sitter_json() ?*const c.TSLanguage;
+extern fn tree_sitter_yaml() ?*const c.TSLanguage;
+extern fn tree_sitter_toml() ?*const c.TSLanguage;
+extern fn tree_sitter_markdown() ?*const c.TSLanguage;
+extern fn tree_sitter_markdown_inline() ?*const c.TSLanguage;
+extern fn tree_sitter_ruby() ?*const c.TSLanguage;
+extern fn tree_sitter_javascript() ?*const c.TSLanguage;
+extern fn tree_sitter_typescript() ?*const c.TSLanguage;
+extern fn tree_sitter_tsx() ?*const c.TSLanguage;
+extern fn tree_sitter_go() ?*const c.TSLanguage;
+extern fn tree_sitter_rust() ?*const c.TSLanguage;
+extern fn tree_sitter_zig() ?*const c.TSLanguage;
+extern fn tree_sitter_erlang() ?*const c.TSLanguage;
+extern fn tree_sitter_bash() ?*const c.TSLanguage;
+extern fn tree_sitter_c() ?*const c.TSLanguage;
+extern fn tree_sitter_cpp() ?*const c.TSLanguage;
+extern fn tree_sitter_html() ?*const c.TSLanguage;
+extern fn tree_sitter_css() ?*const c.TSLanguage;
+extern fn tree_sitter_lua() ?*const c.TSLanguage;
+extern fn tree_sitter_python() ?*const c.TSLanguage;
+extern fn tree_sitter_kotlin() ?*const c.TSLanguage;
+extern fn tree_sitter_gleam() ?*const c.TSLanguage;
+
+const builtin_grammars = [_]BuiltinGrammar{
+    .{ .name = "elixir", .func = &tree_sitter_elixir },
+    .{ .name = "heex", .func = &tree_sitter_heex },
+    .{ .name = "json", .func = &tree_sitter_json },
+    .{ .name = "yaml", .func = &tree_sitter_yaml },
+    .{ .name = "toml", .func = &tree_sitter_toml },
+    .{ .name = "markdown", .func = &tree_sitter_markdown },
+    .{ .name = "markdown_inline", .func = &tree_sitter_markdown_inline },
+    .{ .name = "ruby", .func = &tree_sitter_ruby },
+    .{ .name = "javascript", .func = &tree_sitter_javascript },
+    .{ .name = "typescript", .func = &tree_sitter_typescript },
+    .{ .name = "tsx", .func = &tree_sitter_tsx },
+    .{ .name = "go", .func = &tree_sitter_go },
+    .{ .name = "rust", .func = &tree_sitter_rust },
+    .{ .name = "zig", .func = &tree_sitter_zig },
+    .{ .name = "erlang", .func = &tree_sitter_erlang },
+    .{ .name = "bash", .func = &tree_sitter_bash },
+    .{ .name = "c", .func = &tree_sitter_c },
+    .{ .name = "cpp", .func = &tree_sitter_cpp },
+    .{ .name = "html", .func = &tree_sitter_html },
+    .{ .name = "css", .func = &tree_sitter_css },
+    .{ .name = "lua", .func = &tree_sitter_lua },
+    .{ .name = "python", .func = &tree_sitter_python },
+    .{ .name = "kotlin", .func = &tree_sitter_kotlin },
+    .{ .name = "gleam", .func = &tree_sitter_gleam },
+};
+
+// ── Tests ─────────────────────────────────────────────────────────────────
+
+test "highlighter: init registers all grammars" {
+    var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
+
+    try std.testing.expect(hl.languages.count() == 24);
+    try std.testing.expect(hl.languages.get("elixir") != null);
+    try std.testing.expect(hl.languages.get("zig") != null);
+    try std.testing.expect(hl.languages.get("nonexistent") == null);
+}
+
+test "highlighter: setLanguage" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try std.testing.expect(hl.current_language != null);
+    try std.testing.expect(!hl.setLanguage("nonexistent"));
+}
+
+test "highlighter: parse Elixir source" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try hl.parse("defmodule Foo do\n  def bar, do: :ok\nend\n");
+
+    try std.testing.expect(hl.tree != null);
+}
+
+test "highlighter: parse and highlight Elixir" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+
+    const source = "defmodule Foo do\n  def bar, do: :ok\nend\n";
+    try hl.parse(source);
+
+    // Minimal Elixir highlight query for testing
+    const query_source =
+        \\(call target: (identifier) @keyword
+        \\  (#match? @keyword "^(defmodule|def|defp|do|end)$"))
+        \\(atom) @string.special.symbol
+    ;
+    try hl.setHighlightQuery(query_source);
+
+    var result = try hl.highlight();
+    defer result.deinit();
+
+    // Should have some spans and capture names
+    try std.testing.expect(result.spans.len > 0);
+    try std.testing.expect(result.capture_names.len > 0);
+
+    // Verify at least one span covers "defmodule" (bytes 0-9)
+    var found_defmodule = false;
+    for (result.spans) |span| {
+        if (span.start_byte == 0 and span.end_byte == 9) {
+            found_defmodule = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_defmodule);
+}
+
+test "highlighter: parse JSON" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("json"));
+    try hl.parse("{\"key\": 42}");
+    try std.testing.expect(hl.tree != null);
+}
+
+test "highlighter: setLanguage invalidates tree and query" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try hl.parse("defmodule Foo do end");
+    try std.testing.expect(hl.tree != null);
+
+    // Switching language should clear tree
+    try std.testing.expect(hl.setLanguage("json"));
+    try std.testing.expect(hl.tree == null);
+    try std.testing.expect(hl.query == null);
 }
