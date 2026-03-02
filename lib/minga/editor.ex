@@ -546,11 +546,13 @@ defmodule Minga.Editor do
 
   # Dispatches a command through Commands.execute/2, handling action tuples.
   # Re-parse buffer for syntax highlighting after content-mutating keys.
-  # Insert/replace mode keys always mutate; normal mode may mutate via operators
-  # (d, c, p, etc.) — cheaply request re-parse whenever highlighting is active.
+  # We check a process dictionary flag set by BufferServer mutations to avoid
+  # reparsing on pure cursor movements.
   @spec maybe_reparse(state(), Mode.mode()) :: state()
   defp maybe_reparse(state, _old_mode) do
-    if state.highlight.capture_names != [] do
+    buffer_changed = Process.delete(:__buffer_content_changed__) == true
+
+    if buffer_changed and state.highlight.capture_names != [] do
       HighlightBridge.request_reparse(state)
     else
       state
