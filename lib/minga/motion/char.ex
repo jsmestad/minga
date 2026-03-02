@@ -7,6 +7,7 @@ defmodule Minga.Motion.Char do
   """
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Unicode
   alias Minga.Motion.Helpers
 
   @typedoc "A zero-indexed {line, byte_col} cursor position."
@@ -93,7 +94,7 @@ defmodule Minga.Motion.Char do
       {^line, found_col} ->
         # Move to the grapheme before found_col
         line_text = GapBuffer.line_at(buf, line) || ""
-        prev_byte = prev_grapheme_byte_offset(line_text, found_col)
+        prev_byte = Unicode.prev_grapheme_byte_offset(line_text, found_col)
         {line, max(col, prev_byte)}
     end
   end
@@ -117,7 +118,7 @@ defmodule Minga.Motion.Char do
       {^line, found_col} ->
         # Move to the grapheme after found_col
         line_text = GapBuffer.line_at(buf, line) || ""
-        next_byte = next_grapheme_byte_offset(line_text, found_col)
+        next_byte = Unicode.next_grapheme_byte_offset(line_text, found_col)
         {line, min(col, next_byte)}
     end
   end
@@ -238,63 +239,6 @@ defmodule Minga.Motion.Char do
 
       nil ->
         last_match
-    end
-  end
-
-  # Get byte offset of grapheme before the one at `byte_col`.
-  @spec prev_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp prev_grapheme_byte_offset(_text, 0), do: 0
-
-  defp prev_grapheme_byte_offset(text, byte_col) do
-    do_prev_grapheme_byte_offset(text, byte_col, 0, 0)
-  end
-
-  @spec do_prev_grapheme_byte_offset(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          non_neg_integer()
-  defp do_prev_grapheme_byte_offset(text, target, current_byte, _prev_byte) do
-    case String.next_grapheme(text) do
-      {_g, rest} ->
-        g_size = byte_size(text) - byte_size(rest)
-        next_byte = current_byte + g_size
-
-        if next_byte >= target do
-          current_byte
-        else
-          do_prev_grapheme_byte_offset(rest, target, next_byte, current_byte)
-        end
-
-      nil ->
-        current_byte
-    end
-  end
-
-  # Get byte offset of grapheme after the one at `byte_col`.
-  @spec next_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp next_grapheme_byte_offset(text, byte_col) do
-    do_next_grapheme_byte_offset(text, byte_col, 0)
-  end
-
-  @spec do_next_grapheme_byte_offset(String.t(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp do_next_grapheme_byte_offset(text, target, current_byte) do
-    case String.next_grapheme(text) do
-      {_g, rest} ->
-        g_size = byte_size(text) - byte_size(rest)
-        next_byte = current_byte + g_size
-
-        if current_byte >= target do
-          next_byte
-        else
-          do_next_grapheme_byte_offset(rest, target, next_byte)
-        end
-
-      nil ->
-        current_byte
     end
   end
 

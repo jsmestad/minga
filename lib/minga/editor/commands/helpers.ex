@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Clipboard
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
@@ -267,7 +268,7 @@ defmodule Minga.Editor.Commands.Helpers do
     target_col =
       case BufferServer.get_lines(buf, target_line, 1) do
         [text] when byte_size(text) > 0 ->
-          min(col, GapBuffer.last_grapheme_byte_offset(text))
+          min(col, Unicode.last_grapheme_byte_offset(text))
 
         _ ->
           0

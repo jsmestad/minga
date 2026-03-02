@@ -6,6 +6,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
@@ -36,7 +37,7 @@ defmodule Minga.Editor.Commands.Movement do
 
       max_col =
         case BufferServer.get_lines(buf, line, 1) do
-          [text] when byte_size(text) > 0 -> GapBuffer.last_grapheme_byte_offset(text)
+          [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
           _ -> 0
         end
 
@@ -69,7 +70,7 @@ defmodule Minga.Editor.Commands.Movement do
 
     end_col =
       case BufferServer.get_lines(buf, line, 1) do
-        [text] when byte_size(text) > 0 -> GapBuffer.last_grapheme_byte_offset(text)
+        [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
         _ -> 0
       end
 

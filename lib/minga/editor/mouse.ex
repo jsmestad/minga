@@ -8,8 +8,8 @@ defmodule Minga.Editor.Mouse do
   GenServer state struct is returned unchanged or updated.
   """
 
-  alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
@@ -233,7 +233,7 @@ defmodule Minga.Editor.Mouse do
   defp clamp_col_to_line(buf, line, col) do
     case BufferServer.get_lines(buf, line, 1) do
       [text] when byte_size(text) > 0 ->
-        min(col, GapBuffer.last_grapheme_byte_offset(text))
+        min(col, Unicode.last_grapheme_byte_offset(text))
 
       _ ->
         0
@@ -261,7 +261,7 @@ defmodule Minga.Editor.Mouse do
     target_col =
       case BufferServer.get_lines(buf, target_line, 1) do
         [text] when byte_size(text) > 0 ->
-          min(col, GapBuffer.last_grapheme_byte_offset(text))
+          min(col, Unicode.last_grapheme_byte_offset(text))
 
         _ ->
           0

@@ -4,6 +4,7 @@ defmodule Minga.Motion.Line do
   """
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
   @type position :: GapBuffer.position()
@@ -35,7 +36,7 @@ defmodule Minga.Motion.Line do
     case GapBuffer.line_at(buf, line) do
       nil -> {line, 0}
       "" -> {line, 0}
-      text -> {line, GapBuffer.last_grapheme_byte_offset(text)}
+      text -> {line, Unicode.last_grapheme_byte_offset(text)}
     end
   end
 

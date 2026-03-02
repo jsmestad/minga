@@ -25,6 +25,7 @@ defmodule Minga.Operator do
   """
 
   alias Minga.Buffer.{GapBuffer, Server}
+  alias Minga.Buffer.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
   @type position :: GapBuffer.position()
@@ -121,7 +122,7 @@ defmodule Minga.Operator do
       # Only line in the buffer — delete from col 0 through last byte of last grapheme.
       # If the line is empty, delete_range handles it gracefully (delete_count clamped to 0).
       total_lines == 1 ->
-        last_col = if line_len == 0, do: 0, else: GapBuffer.last_grapheme_byte_offset(line_text)
+        last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
         {{0, 0}, {0, last_col}}
 
       # Last line — also consume the preceding newline so no orphan line remains.
@@ -133,7 +134,7 @@ defmodule Minga.Operator do
           |> then(&(&1 || ""))
 
         prev_len = byte_size(prev_text)
-        last_col = if line_len == 0, do: 0, else: GapBuffer.last_grapheme_byte_offset(line_text)
+        last_col = if line_len == 0, do: 0, else: Unicode.last_grapheme_byte_offset(line_text)
         {{line_index - 1, prev_len}, {line_index, last_col}}
 
       # Any other line — include the trailing newline using byte_col == byte_size(line).

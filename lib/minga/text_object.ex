@@ -32,6 +32,7 @@ defmodule Minga.TextObject do
   """
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Unicode
   alias Minga.Motion.Helpers
 
   @typedoc "A zero-indexed `{line, byte_col}` position."
@@ -459,9 +460,9 @@ defmodule Minga.TextObject do
   @spec advance_position(GapBuffer.t(), position()) :: position() | nil
   defp advance_position(buffer, {line, col}) do
     text = GapBuffer.line_at(buffer, line) || ""
-    next_byte = next_grapheme_byte_col(text, col)
+    next_byte = Unicode.next_grapheme_byte_offset(text, col)
 
-    if next_byte != nil and next_byte < byte_size(text) do
+    if next_byte > col and next_byte < byte_size(text) do
       {line, next_byte}
     else
       next_line = line + 1
@@ -481,44 +482,14 @@ defmodule Minga.TextObject do
     prev_text = GapBuffer.line_at(buffer, line - 1) || ""
 
     if byte_size(prev_text) > 0 do
-      {line - 1, GapBuffer.last_grapheme_byte_offset(prev_text)}
+      {line - 1, Unicode.last_grapheme_byte_offset(prev_text)}
     else
       {line - 1, 0}
     end
   end
 
-  defp retreat_position(_buffer, {line, col}) do
-    # This shouldn't be called with col that isn't a grapheme boundary,
-    # but prev_grapheme_byte_col handles it.
-    {line, prev_grapheme_byte_col(col)}
+  defp retreat_position(buffer, {line, col}) do
+    text = GapBuffer.line_at(buffer, line) || ""
+    {line, Unicode.prev_grapheme_byte_offset(text, col)}
   end
-
-  # Returns byte offset of the next grapheme after `byte_col`, or nil if at end.
-  @spec next_grapheme_byte_col(String.t(), non_neg_integer()) :: non_neg_integer() | nil
-  defp next_grapheme_byte_col(text, byte_col) do
-    if byte_col >= byte_size(text) do
-      nil
-    else
-      after_col = binary_part(text, byte_col, byte_size(text) - byte_col)
-
-      case String.next_grapheme(after_col) do
-        {g, _rest} -> byte_col + byte_size(g)
-        nil -> nil
-      end
-    end
-  end
-
-  # Returns byte offset of the grapheme before the one at `byte_col`.
-  # Simple approach: for now just byte_col - 1 works for ASCII;
-  # for multi-byte we'd need to scan. Use the gap buffer helper.
-  @spec prev_grapheme_byte_col(non_neg_integer()) :: non_neg_integer()
-  defp prev_grapheme_byte_col(0), do: 0
-  # For single-byte chars (ASCII), col - 1 is correct.
-  # For multi-byte, the caller should ensure byte_col is on a grapheme boundary.
-  # A proper implementation would scan from the start, but retreat_position
-  # is only called from inner_parens which works with positions from
-  # flatten_with_byte_positions (always on grapheme boundaries).
-  # For robustness, we subtract 1 — worst case lands mid-grapheme which
-  # clamp_to_grapheme_boundary in GapBuffer would fix.
-  defp prev_grapheme_byte_col(col), do: col - 1
 end
