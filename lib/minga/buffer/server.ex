@@ -146,6 +146,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :dirty?)
   end
 
+  @doc "Returns the buffer's mutation version counter (increments on every content change)."
+  @spec version(GenServer.server()) :: non_neg_integer()
+  def version(server) do
+    GenServer.call(server, :version)
+  end
+
   @doc "Returns the file path associated with this buffer, if any."
   @spec file_path(GenServer.server()) :: String.t() | nil
   def file_path(server) do
@@ -506,6 +512,10 @@ defmodule Minga.Buffer.Server do
     {:reply, state.dirty, state}
   end
 
+  def handle_call(:version, _from, state) do
+    {:reply, state.version, state}
+  end
+
   def handle_call(:file_path, _from, state) do
     {:reply, state.file_path, state}
   end
@@ -638,13 +648,14 @@ defmodule Minga.Buffer.Server do
         {:reply, :ok, state}
 
       [prev_buf | rest_undo] ->
-        new_state = %{
-          state
-          | gap_buffer: prev_buf,
-            undo_stack: rest_undo,
-            redo_stack: [state.gap_buffer | state.redo_stack],
-            dirty: true
-        }
+        new_state =
+          %{
+            state
+            | gap_buffer: prev_buf,
+              undo_stack: rest_undo,
+              redo_stack: [state.gap_buffer | state.redo_stack]
+          }
+          |> mark_dirty()
 
         {:reply, :ok, new_state}
     end
@@ -656,13 +667,14 @@ defmodule Minga.Buffer.Server do
         {:reply, :ok, state}
 
       [next_buf | rest_redo] ->
-        new_state = %{
-          state
-          | gap_buffer: next_buf,
-            redo_stack: rest_redo,
-            undo_stack: [state.gap_buffer | state.undo_stack],
-            dirty: true
-        }
+        new_state =
+          %{
+            state
+            | gap_buffer: next_buf,
+              redo_stack: rest_redo,
+              undo_stack: [state.gap_buffer | state.undo_stack]
+          }
+          |> mark_dirty()
 
         {:reply, :ok, new_state}
     end
@@ -716,7 +728,7 @@ defmodule Minga.Buffer.Server do
   end
 
   @spec mark_dirty(state()) :: state()
-  defp mark_dirty(state), do: %{state | dirty: true}
+  defp mark_dirty(state), do: %{state | dirty: true, version: state.version + 1}
 
   @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}
   defp write_file(file_path, content) do

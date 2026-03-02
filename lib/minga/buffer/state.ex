@@ -12,6 +12,7 @@ defmodule Minga.Buffer.State do
             file_path: nil,
             filetype: :text,
             dirty: false,
+            version: 0,
             mtime: nil,
             file_size: nil,
             undo_stack: [],
@@ -26,6 +27,7 @@ defmodule Minga.Buffer.State do
           file_path: String.t() | nil,
           filetype: atom(),
           dirty: boolean(),
+          version: non_neg_integer(),
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
           undo_stack: [GapBuffer.t()],
@@ -40,7 +42,7 @@ defmodule Minga.Buffer.State do
 
   @doc "Marks the buffer as having unsaved changes."
   @spec mark_dirty(t()) :: t()
-  def mark_dirty(%__MODULE__{} = state), do: %{state | dirty: true}
+  def mark_dirty(%__MODULE__{} = state), do: %{state | dirty: true, version: state.version + 1}
 
   @doc """
   Pushes the current gap buffer onto the undo stack and replaces it with

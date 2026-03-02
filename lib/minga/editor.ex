@@ -235,9 +235,10 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
+    buf_version_before = buffer_version(state)
     new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
     new_state = maybe_reset_highlight(new_state, state.buf.buffer)
-    new_state = maybe_reparse(new_state, state.mode)
+    new_state = maybe_reparse(new_state, buf_version_before)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -594,21 +595,23 @@ defmodule Minga.Editor do
   end
 
   # Re-parse buffer for syntax highlighting after content-mutating keys.
-  # Only reparse when content likely changed:
-  # - In insert/replace mode (every keystroke mutates)
-  # - Just left insert/replace mode (final mutation before return to normal)
-  @spec maybe_reparse(state(), Mode.mode()) :: state()
-  defp maybe_reparse(state, old_mode) do
-    content_likely_changed =
-      state.mode in [:insert, :replace] or
-        old_mode in [:insert, :replace]
+  # Compares the buffer's mutation version before/after key handling to detect
+  # any content change — covers insert mode, normal-mode operators (dd, p, x,
+  # >>, <<, etc.), undo/redo, and any other mutation path.
+  @spec maybe_reparse(state(), non_neg_integer()) :: state()
+  defp maybe_reparse(state, version_before) do
+    content_changed = buffer_version(state) != version_before
 
-    if content_likely_changed and state.highlight.capture_names != [] do
+    if content_changed and state.highlight.capture_names != [] do
       HighlightBridge.request_reparse(state)
     else
       state
     end
   end
+
+  @spec buffer_version(state()) :: non_neg_integer()
+  defp buffer_version(%{buf: %{buffer: nil}}), do: 0
+  defp buffer_version(%{buf: %{buffer: buf}}), do: BufferServer.version(buf)
 
   @spec dispatch_command(state(), Mode.command()) :: state()
   defp dispatch_command(state, cmd) do
