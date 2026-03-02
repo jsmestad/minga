@@ -45,8 +45,8 @@ pub const Highlighter = struct {
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     allocator: std.mem.Allocator,
 
-    /// Initialize with compiled-in grammars registered.
-    /// Queries are compiled lazily on first use via setLanguage.
+    /// Initialize with compiled-in grammars registered and queries pre-compiled.
+    /// With ReleaseFast C optimization, all 23 queries compile in ~200ms total.
     pub fn init(allocator: std.mem.Allocator) !Highlighter {
         const parser = c.ts_parser_new() orelse return error.ParserCreateFailed;
 
@@ -57,10 +57,18 @@ pub const Highlighter = struct {
             .allocator = allocator,
         };
 
-        // Register all compiled-in grammars (no query compilation yet).
+        // Register all compiled-in grammars and pre-compile their queries.
         inline for (builtin_grammars) |entry| {
             if (entry.func()) |lang| {
                 hl.languages.put(allocator, entry.name, lang) catch {};
+
+                if (entry.query) |query_source| {
+                    var err_off: u32 = 0;
+                    var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                    if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
+                        hl.query_cache.put(allocator, entry.name, compiled) catch {};
+                    }
+                }
             }
         }
 

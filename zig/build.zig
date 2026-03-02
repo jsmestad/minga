@@ -21,12 +21,16 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(BackendOption, "backend", backend);
 
     // ── Tree-sitter static library ────────────────────────────────────────
+    // Always optimize vendored C code — query compilation is 100x slower
+    // in debug mode, and we never debug third-party C libraries.
+    const c_optimize: std.builtin.OptimizeMode = .ReleaseFast;
+
     const ts_lib = b.addLibrary(.{
         .name = "tree-sitter",
         .linkage = .static,
         .root_module = b.createModule(.{
             .target = target,
-            .optimize = optimize,
+            .optimize = c_optimize,
         }),
     });
     ts_lib.root_module.addCSourceFile(.{
@@ -74,7 +78,7 @@ pub fn build(b: *std.Build) void {
 
     var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
     for (grammars, 0..) |g, i| {
-        grammar_libs[i] = addGrammar(b, target, optimize, g.name, g.has_scanner, g.scanner_extra_flags);
+        grammar_libs[i] = addGrammar(b, target, c_optimize, g.name, g.has_scanner, g.scanner_extra_flags);
     }
 
     // Main executable
