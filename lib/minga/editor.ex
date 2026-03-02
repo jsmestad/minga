@@ -233,6 +233,7 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
+    new_state = maybe_reset_highlight(new_state, state.buf.buffer)
     new_state = maybe_reparse(new_state, state.mode)
     Renderer.render(new_state)
     {:noreply, new_state}
@@ -551,6 +552,18 @@ defmodule Minga.Editor do
   end
 
   # ── Command execution ────────────────────────────────────────────────────────
+
+  # Detect active buffer change and reset highlights + trigger async setup.
+  @spec maybe_reset_highlight(state(), pid() | nil) :: state()
+  defp maybe_reset_highlight(state, old_buffer) do
+    if state.buf.buffer != old_buffer and state.buf.buffer != nil do
+      # Buffer changed — clear stale highlights and setup asynchronously
+      send(self(), :setup_highlight)
+      %{state | highlight: Minga.Highlight.new()}
+    else
+      state
+    end
+  end
 
   # Re-parse buffer for syntax highlighting after content-mutating keys.
   # Only reparse when content likely changed:
