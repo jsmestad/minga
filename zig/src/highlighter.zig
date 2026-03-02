@@ -33,7 +33,9 @@ pub const Highlighter = struct {
     tree: ?*c.TSTree = null,
     query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
+    current_language_name: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
+    query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     allocator: std.mem.Allocator,
 
     /// Initialize with compiled-in grammars registered.
@@ -43,6 +45,7 @@ pub const Highlighter = struct {
         var hl = Highlighter{
             .parser = parser,
             .languages = .empty,
+            .query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -58,51 +61,65 @@ pub const Highlighter = struct {
 
     /// Free all resources.
     pub fn deinit(self: *Highlighter) void {
-        if (self.query) |q| c.ts_query_delete(q);
+        // Free all cached queries
+        var qit = self.query_cache.iterator();
+        while (qit.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.query_cache.deinit(self.allocator);
+
         if (self.tree) |t| c.ts_tree_delete(t);
         c.ts_parser_delete(self.parser);
         self.languages.deinit(self.allocator);
     }
 
     /// Set the active language by name. Returns false if not found.
+    /// Restores the cached query for this language if available.
     pub fn setLanguage(self: *Highlighter, name: []const u8) bool {
         const lang = self.languages.get(name) orelse return false;
         _ = c.ts_parser_set_language(self.parser, lang);
         self.current_language = lang;
-        // Invalidate existing tree and query since language changed
+        self.current_language_name = name;
+        // Invalidate existing tree since language changed
         if (self.tree) |t| {
             c.ts_tree_delete(t);
             self.tree = null;
         }
-        if (self.query) |q| {
-            c.ts_query_delete(q);
-            self.query = null;
-        }
+        // Restore cached query for this language, or clear
+        self.query = self.query_cache.get(name);
         return true;
     }
 
     /// Compile a highlight query (.scm source) for the current language.
+    /// Caches the compiled query so subsequent `setLanguage` calls restore it.
     pub fn setHighlightQuery(self: *Highlighter, source: []const u8) !void {
         const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        // Delete old query
-        if (self.query) |q| c.ts_query_delete(q);
+        // If we already have a cached query for this language, skip recompilation
+        if (self.query_cache.get(name)) |cached| {
+            self.query = cached;
+            return;
+        }
 
         var error_offset: u32 = 0;
         var error_type: c.TSQueryError = c.TSQueryErrorNone;
 
-        self.query = c.ts_query_new(
+        const new_query = c.ts_query_new(
             lang,
             source.ptr,
             @intCast(source.len),
             &error_offset,
             &error_type,
         ) orelse {
-            std.log.err("Query compile error at offset {d}, type {d}", .{
+            std.log.warn("Query compile error at offset {d}, type {d}", .{
                 error_offset, error_type,
             });
             return error.QueryCompileFailed;
         };
+
+        self.query = new_query;
+        self.query_cache.put(self.allocator, name, new_query) catch {};
     }
 
     /// Parse source text. Full re-parse (no incremental).
@@ -344,4 +361,52 @@ test "highlighter: setLanguage invalidates tree and query" {
     try std.testing.expect(hl.setLanguage("json"));
     try std.testing.expect(hl.tree == null);
     try std.testing.expect(hl.query == null);
+}
+
+test "highlighter: markdown query compiles and highlights" {
+    // Requires tree-sitter >= 0.25.0 (ABI 15 support)
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("markdown"));
+
+    const query_source =
+        \\[
+        \\  (atx_h1_marker)
+        \\  (atx_h2_marker)
+        \\  (atx_h3_marker)
+        \\] @punctuation.special
+        \\(fenced_code_block) @text.literal
+        \\(link_destination) @text.uri
+    ;
+    try hl.setHighlightQuery(query_source);
+
+    const source = "# Hello\n\n```\ncode\n```\n";
+    try hl.parse(source);
+
+    var result = try hl.highlight();
+    defer result.deinit();
+
+    try std.testing.expect(result.spans.len > 0);
+}
+
+test "highlighter: query cache restores on language switch" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    // Set up elixir with a query
+    try std.testing.expect(hl.setLanguage("elixir"));
+    const q = "(identifier) @variable";
+    try hl.setHighlightQuery(q);
+    try std.testing.expect(hl.query != null);
+    const cached_query = hl.query;
+
+    // Switch to json — query should be null (no cache for json yet)
+    try std.testing.expect(hl.setLanguage("json"));
+    try std.testing.expect(hl.query == null);
+
+    // Switch back to elixir — query should be restored from cache
+    try std.testing.expect(hl.setLanguage("elixir"));
+    try std.testing.expect(hl.query != null);
+    try std.testing.expect(hl.query == cached_query);
 }

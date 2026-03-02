@@ -38,12 +38,18 @@ pub fn build(b: *std.Build) void {
     ts_lib.root_module.link_libc = true;
 
     // ── Grammar static libraries ───────────────────────────────────────
-    const Grammar = struct { name: []const u8, has_scanner: bool };
+    const Grammar = struct {
+        name: []const u8,
+        has_scanner: bool,
+        /// Extra C flags for the scanner (e.g. to suppress UB in vendored code).
+        scanner_extra_flags: []const []const u8 = &.{},
+    };
     const grammars = [_]Grammar{
         .{ .name = "elixir", .has_scanner = true },
         .{ .name = "heex", .has_scanner = false },
         .{ .name = "json", .has_scanner = false },
-        .{ .name = "yaml", .has_scanner = true },
+        // YAML scanner casts char* to int16_t* without alignment guarantees.
+        .{ .name = "yaml", .has_scanner = true, .scanner_extra_flags = &.{"-fno-sanitize=undefined"} },
         .{ .name = "toml", .has_scanner = true },
         .{ .name = "markdown", .has_scanner = true },
         .{ .name = "markdown_inline", .has_scanner = true },
@@ -68,7 +74,7 @@ pub fn build(b: *std.Build) void {
 
     var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
     for (grammars, 0..) |g, i| {
-        grammar_libs[i] = addGrammar(b, target, optimize, g.name, g.has_scanner);
+        grammar_libs[i] = addGrammar(b, target, optimize, g.name, g.has_scanner, g.scanner_extra_flags);
     }
 
     // Main executable
@@ -133,6 +139,7 @@ fn addGrammar(
     optimize: std.builtin.OptimizeMode,
     name: []const u8,
     has_scanner: bool,
+    scanner_extra_flags: []const []const u8,
 ) *std.Build.Step.Compile {
     const lib = b.addLibrary(.{
         .name = b.fmt("ts-grammar-{s}", .{name}),
@@ -156,9 +163,18 @@ fn addGrammar(
 
     // scanner.c (optional)
     if (has_scanner) {
+        // Build flags: always -std=c11, plus any grammar-specific extras
+        var flag_buf: [8][]const u8 = undefined;
+        flag_buf[0] = "-std=c11";
+        var flag_count: usize = 1;
+        for (scanner_extra_flags) |f| {
+            flag_buf[flag_count] = f;
+            flag_count += 1;
+        }
+
         lib.root_module.addCSourceFile(.{
             .file = b.path(b.fmt("vendor/grammars/{s}/src/scanner.c", .{name})),
-            .flags = &.{"-std=c11"},
+            .flags = flag_buf[0..flag_count],
         });
     }
 

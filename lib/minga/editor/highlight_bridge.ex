@@ -27,28 +27,61 @@ defmodule Minga.Editor.HighlightBridge do
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
-        case Grammar.read_query(language) do
-          {:ok, query} ->
-            version = state.highlight_version + 1
-            content = BufferServer.content(state.buf.buffer)
+        already_loaded = MapSet.member?(state.highlight_languages_ready, language)
 
-            commands = [
-              Protocol.encode_set_language(language),
-              Protocol.encode_set_highlight_query(query),
-              Protocol.encode_parse_buffer(version, content)
-            ]
-
-            PortManager.send_commands(state.port_manager, commands)
-
-            %{state | highlight: Highlight.new(), highlight_version: version}
-
-          {:error, _} ->
-            %{state | highlight: Highlight.new()}
+        if already_loaded do
+          # Language + query already compiled on Zig side — just re-parse
+          send_parse_only(state, language)
+        else
+          # First time for this language — send language + query + parse
+          send_full_setup(state, language)
         end
 
       :unsupported ->
         %{state | highlight: Highlight.new()}
     end
+  end
+
+  @spec send_full_setup(EditorState.t(), String.t()) :: EditorState.t()
+  defp send_full_setup(state, language) do
+    case Grammar.read_query(language) do
+      {:ok, query} ->
+        version = state.highlight_version + 1
+        content = BufferServer.content(state.buf.buffer)
+
+        commands = [
+          Protocol.encode_set_language(language),
+          Protocol.encode_set_highlight_query(query),
+          Protocol.encode_parse_buffer(version, content)
+        ]
+
+        PortManager.send_commands(state.port_manager, commands)
+
+        %{
+          state
+          | highlight: Highlight.new(),
+            highlight_version: version,
+            highlight_languages_ready: MapSet.put(state.highlight_languages_ready, language)
+        }
+
+      {:error, _} ->
+        %{state | highlight: Highlight.new()}
+    end
+  end
+
+  @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
+  defp send_parse_only(state, language) do
+    version = state.highlight_version + 1
+    content = BufferServer.content(state.buf.buffer)
+
+    commands = [
+      Protocol.encode_set_language(language),
+      Protocol.encode_parse_buffer(version, content)
+    ]
+
+    PortManager.send_commands(state.port_manager, commands)
+
+    %{state | highlight: Highlight.new(), highlight_version: version}
   end
 
   @doc """
