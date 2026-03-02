@@ -36,7 +36,8 @@ defmodule Minga.SearchTest do
     end
 
     test "handles unicode patterns" do
-      assert {0, 5} = Search.find_next("café café", "café", {0, 0}, :forward)
+      # "café" is 5 bytes (é = 2), so second café starts at byte 6
+      assert {0, 6} = Search.find_next("café café", "café", {0, 0}, :forward)
     end
 
     test "finds second occurrence when cursor is at first" do

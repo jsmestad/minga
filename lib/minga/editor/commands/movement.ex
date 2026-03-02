@@ -34,13 +34,12 @@ defmodule Minga.Editor.Commands.Movement do
     else
       {line, col} = BufferServer.cursor(buf)
 
-      line_len =
+      max_col =
         case BufferServer.get_lines(buf, line, 1) do
-          [text] -> String.length(text)
+          [text] when byte_size(text) > 0 -> GapBuffer.last_grapheme_byte_offset(text)
           _ -> 0
         end
 
-      max_col = max(0, line_len - 1)
       if col < max_col, do: BufferServer.move(buf, :right)
     end
 
@@ -70,8 +69,8 @@ defmodule Minga.Editor.Commands.Movement do
 
     end_col =
       case BufferServer.get_lines(buf, line, 1) do
-        [text] -> max(0, String.length(text) - 1)
-        [] -> 0
+        [text] when byte_size(text) > 0 -> GapBuffer.last_grapheme_byte_offset(text)
+        _ -> 0
       end
 
     BufferServer.move_to(buf, {line, end_col})

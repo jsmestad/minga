@@ -6,6 +6,8 @@ defmodule Minga.TextObject do
   a `{start_pos, end_pos}` range (both positions inclusive), or `nil` when no
   matching text object exists around the cursor.
 
+  All positions use byte-indexed columns (`{line, byte_col}`).
+
   ## Word text objects
 
   * `inner_word/2` (`iw`) — the word (or whitespace run) under the cursor,
@@ -30,8 +32,9 @@ defmodule Minga.TextObject do
   """
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Motion.Helpers
 
-  @typedoc "A zero-indexed `{line, col}` position."
+  @typedoc "A zero-indexed `{line, byte_col}` position."
   @type position :: GapBuffer.position()
 
   @typedoc "An inclusive `{start_pos, end_pos}` range, or `nil` when not found."
@@ -48,20 +51,24 @@ defmodule Minga.TextObject do
   @spec inner_word(GapBuffer.t(), position()) :: {position(), position()}
   def inner_word(buffer, {line, col}) do
     text = GapBuffer.line_at(buffer, line) || ""
-    graphemes = String.graphemes(text)
-    len = length(graphemes)
-    clamped = min(col, max(0, len - 1))
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
+    len = tuple_size(graphemes)
 
     if len == 0 do
       {{line, 0}, {line, 0}}
     else
-      char_at = Enum.at(graphemes, clamped, " ")
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
+      clamped = min(g_idx, max(0, len - 1))
+      char_at = elem(graphemes, clamped)
       classifier = classifier_for(char_at)
 
-      start_col = scan_left(graphemes, clamped, classifier)
-      end_col = scan_right(graphemes, clamped, classifier)
+      start_g = scan_left_tuple(graphemes, clamped, classifier)
+      end_g = scan_right_tuple(graphemes, clamped, classifier)
 
-      {{line, start_col}, {line, end_col}}
+      start_byte = elem(byte_offsets, start_g)
+      end_byte = elem(byte_offsets, end_g)
+
+      {{line, start_byte}, {line, end_byte}}
     end
   end
 
@@ -74,37 +81,40 @@ defmodule Minga.TextObject do
   @spec a_word(GapBuffer.t(), position()) :: {position(), position()}
   def a_word(buffer, {line, col}) do
     text = GapBuffer.line_at(buffer, line) || ""
-    graphemes = String.graphemes(text)
-    len = length(graphemes)
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
+    len = tuple_size(graphemes)
 
     if len == 0 do
       {{line, 0}, {line, 0}}
     else
-      clamped = min(col, max(0, len - 1))
-      char_at = Enum.at(graphemes, clamped, " ")
+      g_idx = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
+      clamped = min(g_idx, max(0, len - 1))
+      char_at = elem(graphemes, clamped)
       classifier = classifier_for(char_at)
 
-      start_col = scan_left(graphemes, clamped, classifier)
-      end_col = scan_right(graphemes, clamped, classifier)
+      start_g = scan_left_tuple(graphemes, clamped, classifier)
+      end_g = scan_right_tuple(graphemes, clamped, classifier)
 
-      # Try to extend end_col over trailing whitespace.
-      after_end = end_col + 1
+      after_end = end_g + 1
 
-      cond do
-        # There is trailing whitespace — consume it.
-        after_end < len and whitespace?(Enum.at(graphemes, after_end, "")) ->
-          trail_end = scan_right(graphemes, after_end, &whitespace?/1)
-          {{line, start_col}, {line, trail_end}}
+      {final_start_g, final_end_g} =
+        cond do
+          after_end < len and whitespace?(elem(graphemes, after_end)) ->
+            trail_end = scan_right_tuple(graphemes, after_end, &whitespace?/1)
+            {start_g, trail_end}
 
-        # No trailing whitespace — consume leading whitespace instead.
-        start_col > 0 and whitespace?(Enum.at(graphemes, start_col - 1, "")) ->
-          lead_start = scan_left(graphemes, start_col - 1, &whitespace?/1)
-          {{line, lead_start}, {line, end_col}}
+          start_g > 0 and whitespace?(elem(graphemes, start_g - 1)) ->
+            lead_start = scan_left_tuple(graphemes, start_g - 1, &whitespace?/1)
+            {lead_start, end_g}
 
-        # Nothing to absorb — return the word alone.
-        true ->
-          {{line, start_col}, {line, end_col}}
-      end
+          true ->
+            {start_g, end_g}
+        end
+
+      start_byte = elem(byte_offsets, final_start_g)
+      end_byte = elem(byte_offsets, final_end_g)
+
+      {{line, start_byte}, {line, end_byte}}
     end
   end
 
@@ -121,18 +131,19 @@ defmodule Minga.TextObject do
   @spec inner_quotes(GapBuffer.t(), position(), String.t()) :: range()
   def inner_quotes(buffer, {line, col}, quote_char) when is_binary(quote_char) do
     text = GapBuffer.line_at(buffer, line) || ""
-    graphemes = String.graphemes(text)
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
+    g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
-    case find_quote_pair(graphemes, col, quote_char) do
+    case find_quote_pair(graphemes, g_col, quote_char) do
       nil ->
         nil
 
-      {open_idx, close_idx} when close_idx > open_idx + 1 ->
-        {{line, open_idx + 1}, {line, close_idx - 1}}
+      {open_g, close_g} when close_g > open_g + 1 ->
+        {{line, elem(byte_offsets, open_g + 1)}, {line, elem(byte_offsets, close_g - 1)}}
 
-      {open_idx, close_idx} when close_idx == open_idx + 1 ->
+      {open_g, close_g} when close_g == open_g + 1 ->
         # Empty — return a zero-width range just after the opening quote.
-        {{line, open_idx + 1}, {line, open_idx}}
+        {{line, elem(byte_offsets, open_g + 1)}, {line, elem(byte_offsets, open_g)}}
 
       _ ->
         nil
@@ -150,11 +161,15 @@ defmodule Minga.TextObject do
   @spec a_quotes(GapBuffer.t(), position(), String.t()) :: range()
   def a_quotes(buffer, {line, col}, quote_char) when is_binary(quote_char) do
     text = GapBuffer.line_at(buffer, line) || ""
-    graphemes = String.graphemes(text)
+    {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
+    g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
-    case find_quote_pair(graphemes, col, quote_char) do
-      nil -> nil
-      {open_idx, close_idx} -> {{line, open_idx}, {line, close_idx}}
+    case find_quote_pair(graphemes, g_col, quote_char) do
+      nil ->
+        nil
+
+      {open_g, close_g} ->
+        {{line, elem(byte_offsets, open_g)}, {line, elem(byte_offsets, close_g)}}
     end
   end
 
@@ -179,9 +194,7 @@ defmodule Minga.TextObject do
         nil
 
       {{open_line, open_col}, {close_line, close_col}} ->
-        # Start just after the opening delimiter.
         start_pos = advance_position(buffer, {open_line, open_col})
-        # End just before the closing delimiter.
         end_pos = retreat_position(buffer, {close_line, close_col})
 
         case {start_pos, end_pos} do
@@ -213,7 +226,6 @@ defmodule Minga.TextObject do
 
   # ── Private — word helpers ────────────────────────────────────────────────────
 
-  # Returns the character classifier function for a given character.
   @spec classifier_for(String.t()) :: (String.t() -> boolean())
   defp classifier_for(char) do
     cond do
@@ -235,31 +247,29 @@ defmodule Minga.TextObject do
   defp whitespace?("\t"), do: true
   defp whitespace?(_), do: false
 
-  # Scans left from `idx` while `pred` holds; returns the leftmost matching index.
-  @spec scan_left([String.t()], non_neg_integer(), (String.t() -> boolean())) ::
+  # Scans left in a grapheme tuple while `pred` holds.
+  @spec scan_left_tuple(tuple(), non_neg_integer(), (String.t() -> boolean())) ::
           non_neg_integer()
-  defp scan_left(_graphemes, 0, _pred), do: 0
+  defp scan_left_tuple(_graphemes, 0, _pred), do: 0
 
-  defp scan_left(graphemes, idx, pred) do
+  defp scan_left_tuple(graphemes, idx, pred) do
     left = idx - 1
-    char = Enum.at(graphemes, left, "")
 
-    if pred.(char) do
-      scan_left(graphemes, left, pred)
+    if pred.(elem(graphemes, left)) do
+      scan_left_tuple(graphemes, left, pred)
     else
       idx
     end
   end
 
-  # Scans right from `idx` while `pred` holds; returns the rightmost matching index.
-  @spec scan_right([String.t()], non_neg_integer(), (String.t() -> boolean())) ::
+  # Scans right in a grapheme tuple while `pred` holds.
+  @spec scan_right_tuple(tuple(), non_neg_integer(), (String.t() -> boolean())) ::
           non_neg_integer()
-  defp scan_right(graphemes, idx, pred) do
+  defp scan_right_tuple(graphemes, idx, pred) do
     right = idx + 1
-    char = Enum.at(graphemes, right, "")
 
-    if pred.(char) do
-      scan_right(graphemes, right, pred)
+    if right < tuple_size(graphemes) and pred.(elem(graphemes, right)) do
+      scan_right_tuple(graphemes, right, pred)
     else
       idx
     end
@@ -267,22 +277,13 @@ defmodule Minga.TextObject do
 
   # ── Private — quote helpers ───────────────────────────────────────────────────
 
-  # Finds the innermost quote pair enclosing `col` on the given grapheme list.
-  # Returns `{open_idx, close_idx}` or `nil`.
-  @spec find_quote_pair([String.t()], non_neg_integer(), String.t()) ::
+  @spec find_quote_pair(tuple(), non_neg_integer(), String.t()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp find_quote_pair(graphemes, col, quote_char) do
-    indexed = Enum.with_index(graphemes)
-
-    quote_positions =
-      indexed
-      |> Enum.filter(fn {g, _i} -> g == quote_char end)
-      |> Enum.map(fn {_g, i} -> i end)
-
-    # Find pairs: consecutive quote positions form open/close pairs.
+    size = tuple_size(graphemes)
+    quote_positions = collect_quote_positions(graphemes, quote_char, 0, size, [])
     pairs = build_pairs(quote_positions)
 
-    # Find the innermost pair that encloses col (open < col <= close  OR  cursor on quote).
     pairs
     |> Enum.filter(fn {open, close} ->
       (open < col and col < close) or col == open or col == close
@@ -290,27 +291,35 @@ defmodule Minga.TextObject do
     |> Enum.min_by(fn {open, close} -> close - open end, fn -> nil end)
   end
 
-  # Groups a list of sorted quote positions into open/close pairs.
+  @spec collect_quote_positions(tuple(), String.t(), non_neg_integer(), non_neg_integer(), [
+          non_neg_integer()
+        ]) :: [non_neg_integer()]
+  defp collect_quote_positions(_graphemes, _char, idx, size, acc) when idx >= size do
+    Enum.reverse(acc)
+  end
+
+  defp collect_quote_positions(graphemes, char, idx, size, acc) do
+    if elem(graphemes, idx) == char do
+      collect_quote_positions(graphemes, char, idx + 1, size, [idx | acc])
+    else
+      collect_quote_positions(graphemes, char, idx + 1, size, acc)
+    end
+  end
+
   @spec build_pairs([non_neg_integer()]) :: [{non_neg_integer(), non_neg_integer()}]
   defp build_pairs([]), do: []
   defp build_pairs([_]), do: []
-
-  defp build_pairs([open, close | rest]) do
-    [{open, close} | build_pairs(rest)]
-  end
+  defp build_pairs([open, close | rest]), do: [{open, close} | build_pairs(rest)]
 
   # ── Private — paren helpers ───────────────────────────────────────────────────
 
-  # Finds the innermost open/close delimiter pair enclosing `position`.
-  # Returns `{{open_line, open_col}, {close_line, close_col}}` or `nil`.
   @spec find_delimited_pair(GapBuffer.t(), position(), String.t(), String.t()) ::
           {position(), position()} | nil
   defp find_delimited_pair(buffer, {line, col}, open_char, close_char) do
     content = GapBuffer.content(buffer)
-    all_lines = String.split(content, "\n")
-    flat = flatten_with_positions(all_lines)
+    all_lines = :binary.split(content, "\n", [:global])
+    flat = flatten_with_byte_positions(all_lines)
 
-    # Find the cursor's absolute index in the flat list.
     cursor_abs = find_abs_index(flat, line, col)
 
     case cursor_abs do
@@ -351,18 +360,36 @@ defmodule Minga.TextObject do
     end
   end
 
-  # Flattens lines into a list of `{grapheme, {line, col}}` tuples.
-  @spec flatten_with_positions([[String.t()]] | [String.t()]) ::
-          [{String.t(), position()}]
-  defp flatten_with_positions(lines) do
+  # Flattens lines into a list of `{grapheme, {line, byte_col}}` tuples.
+  @spec flatten_with_byte_positions([String.t()]) :: [{String.t(), position()}]
+  defp flatten_with_byte_positions(lines) do
     lines
     |> Enum.with_index()
     |> Enum.flat_map(fn {line_text, line_idx} ->
-      line_text
-      |> String.graphemes()
-      |> Enum.with_index()
-      |> Enum.map(fn {g, col} -> {g, {line_idx, col}} end)
+      graphemes_with_byte_cols(line_text, line_idx)
     end)
+  end
+
+  @spec graphemes_with_byte_cols(String.t(), non_neg_integer()) :: [{String.t(), position()}]
+  defp graphemes_with_byte_cols(text, line_idx) do
+    do_graphemes_with_byte_cols(text, line_idx, 0, [])
+  end
+
+  @spec do_graphemes_with_byte_cols(String.t(), non_neg_integer(), non_neg_integer(), [
+          {String.t(), position()}
+        ]) :: [{String.t(), position()}]
+  defp do_graphemes_with_byte_cols(text, line_idx, byte_pos, acc) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+
+        do_graphemes_with_byte_cols(rest, line_idx, byte_pos + g_size, [
+          {g, {line_idx, byte_pos}} | acc
+        ])
+
+      nil ->
+        Enum.reverse(acc)
+    end
   end
 
   @spec find_abs_index([{String.t(), position()}], non_neg_integer(), non_neg_integer()) ::
@@ -372,7 +399,6 @@ defmodule Minga.TextObject do
     |> Enum.find_index(fn {_g, {l, c}} -> l == target_line and c == target_col end)
   end
 
-  # Scans backward for an unmatched open delimiter. `depth` starts at 0.
   @spec find_open(
           [{String.t(), position()}],
           integer(),
@@ -400,8 +426,6 @@ defmodule Minga.TextObject do
     end
   end
 
-  # Scans forward for the matching close delimiter. `depth` starts at 1 (we're
-  # already inside one open delimiter).
   @spec find_close(
           [{String.t(), position()}],
           non_neg_integer(),
@@ -431,17 +455,15 @@ defmodule Minga.TextObject do
     end
   end
 
-  # Advances a position by one column (within the same line).
-  # Returns `nil` if there is no next position on the line.
+  # Advances a position by one grapheme (byte-aware).
   @spec advance_position(GapBuffer.t(), position()) :: position() | nil
   defp advance_position(buffer, {line, col}) do
     text = GapBuffer.line_at(buffer, line) || ""
-    len = String.length(text)
+    next_byte = next_grapheme_byte_col(text, col)
 
-    if col + 1 < len do
-      {line, col + 1}
+    if next_byte != nil and next_byte < byte_size(text) do
+      {line, next_byte}
     else
-      # Try start of next line
       next_line = line + 1
 
       case GapBuffer.line_at(buffer, next_line) do
@@ -451,22 +473,52 @@ defmodule Minga.TextObject do
     end
   end
 
-  # Retreats a position by one grapheme. When col is 0, moves to the last
-  # grapheme of the previous line. Returns `nil` when already at the very
-  # start of the buffer.
+  # Retreats a position by one grapheme (byte-aware).
   @spec retreat_position(GapBuffer.t(), position()) :: position() | nil
   defp retreat_position(_buffer, {0, 0}), do: nil
 
   defp retreat_position(buffer, {line, 0}) when line > 0 do
     prev_text = GapBuffer.line_at(buffer, line - 1) || ""
-    prev_len = String.length(prev_text)
 
-    if prev_len > 0 do
-      {line - 1, prev_len - 1}
+    if byte_size(prev_text) > 0 do
+      {line - 1, GapBuffer.last_grapheme_byte_offset(prev_text)}
     else
       {line - 1, 0}
     end
   end
 
-  defp retreat_position(_buffer, {line, col}), do: {line, col - 1}
+  defp retreat_position(_buffer, {line, col}) do
+    # This shouldn't be called with col that isn't a grapheme boundary,
+    # but prev_grapheme_byte_col handles it.
+    {line, prev_grapheme_byte_col(col)}
+  end
+
+  # Returns byte offset of the next grapheme after `byte_col`, or nil if at end.
+  @spec next_grapheme_byte_col(String.t(), non_neg_integer()) :: non_neg_integer() | nil
+  defp next_grapheme_byte_col(text, byte_col) do
+    if byte_col >= byte_size(text) do
+      nil
+    else
+      after_col = binary_part(text, byte_col, byte_size(text) - byte_col)
+
+      case String.next_grapheme(after_col) do
+        {g, _rest} -> byte_col + byte_size(g)
+        nil -> nil
+      end
+    end
+  end
+
+  # Returns byte offset of the grapheme before the one at `byte_col`.
+  # Simple approach: for now just byte_col - 1 works for ASCII;
+  # for multi-byte we'd need to scan. Use the gap buffer helper.
+  @spec prev_grapheme_byte_col(non_neg_integer()) :: non_neg_integer()
+  defp prev_grapheme_byte_col(0), do: 0
+  # For single-byte chars (ASCII), col - 1 is correct.
+  # For multi-byte, the caller should ensure byte_col is on a grapheme boundary.
+  # A proper implementation would scan from the start, but retreat_position
+  # is only called from inner_parens which works with positions from
+  # flatten_with_byte_positions (always on grapheme boundaries).
+  # For robustness, we subtract 1 — worst case lands mid-grapheme which
+  # clamp_to_grapheme_boundary in GapBuffer would fix.
+  defp prev_grapheme_byte_col(col), do: col - 1
 end

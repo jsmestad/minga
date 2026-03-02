@@ -108,35 +108,35 @@ defmodule Minga.Operator do
   # Returns {from_pos, to_pos} covering the entire line at `line_index`
   # using INCLUSIVE range semantics — both endpoints included.
   #
-  # In GapBuffer's flat grapheme layout, the newline between line N and N+1
-  # sits at grapheme offset == grapheme_offset_for(lines, N, String.length(lineN)).
-  # Passing col == line_len as the inclusive end therefore includes the newline.
+  # Positions use byte-indexed columns. The newline between line N and N+1
+  # sits at byte_col == byte_size(lineN). Passing col == byte_size as the
+  # inclusive end therefore includes the newline.
   @spec line_range(GenServer.server(), non_neg_integer()) :: {position(), position()}
   defp line_range(server, line_index) do
     total_lines = Server.line_count(server)
     line_text = Server.get_lines(server, line_index, 1) |> List.first() |> then(&(&1 || ""))
-    line_len = String.length(line_text)
+    line_len = byte_size(line_text)
 
     cond do
-      # Only line in the buffer — delete from col 0 through last char.
+      # Only line in the buffer — delete from col 0 through last byte of last grapheme.
       # If the line is empty, delete_range handles it gracefully (delete_count clamped to 0).
       total_lines == 1 ->
-        last_col = max(0, line_len - 1)
+        last_col = if line_len == 0, do: 0, else: GapBuffer.last_grapheme_byte_offset(line_text)
         {{0, 0}, {0, last_col}}
 
       # Last line — also consume the preceding newline so no orphan line remains.
-      # The newline lives at col == prev_len on the previous line.
+      # The newline lives at byte_col == byte_size(prev_text) on the previous line.
       line_index >= total_lines - 1 ->
         prev_text =
           Server.get_lines(server, line_index - 1, 1)
           |> List.first()
           |> then(&(&1 || ""))
 
-        prev_len = String.length(prev_text)
-        last_col = if line_len == 0, do: 0, else: line_len - 1
+        prev_len = byte_size(prev_text)
+        last_col = if line_len == 0, do: 0, else: GapBuffer.last_grapheme_byte_offset(line_text)
         {{line_index - 1, prev_len}, {line_index, last_col}}
 
-      # Any other line — include the trailing newline using col == line_len.
+      # Any other line — include the trailing newline using byte_col == byte_size(line).
       true ->
         {{line_index, 0}, {line_index, line_len}}
     end

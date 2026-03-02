@@ -6,15 +6,17 @@ defmodule Minga.Search do
   they take content strings or line lists and return positions. No buffer
   or process state is mutated.
 
+  All positions use byte-indexed columns.
+
   ## Match representation
 
-  A match is a `{line, col, length}` tuple where `line` and `col` are
-  zero-indexed and `length` is the number of graphemes matched.
+  A match is a `{line, byte_col, byte_length}` tuple where `line` and
+  `byte_col` are zero-indexed.
   """
 
   alias Minga.Buffer.GapBuffer
 
-  @typedoc "A match: `{line, col, grapheme_length}`."
+  @typedoc "A match: `{line, byte_col, byte_length}`."
   @type match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
   @typedoc "Search direction."
@@ -30,7 +32,7 @@ defmodule Minga.Search do
   `direction`. Wraps around the buffer if no match is found between cursor
   and the end (or start for backward).
 
-  Returns `{line, col}` of the match start, or `nil` if no match exists.
+  Returns `{line, byte_col}` of the match start, or `nil` if no match exists.
 
   ## Examples
 
@@ -47,12 +49,12 @@ defmodule Minga.Search do
   def find_next(_content, "", _cursor, _direction), do: nil
 
   def find_next(content, pattern, cursor, :forward) do
-    lines = String.split(content, "\n")
+    lines = :binary.split(content, "\n", [:global])
     find_forward(lines, pattern, cursor, length(lines))
   end
 
   def find_next(content, pattern, cursor, :backward) do
-    lines = String.split(content, "\n")
+    lines = :binary.split(content, "\n", [:global])
     find_backward(lines, pattern, cursor, length(lines))
   end
 
@@ -64,7 +66,7 @@ defmodule Minga.Search do
   `first_line` is the buffer line number of the first element in `lines`,
   used to compute absolute line numbers in the returned matches.
 
-  Returns a list of `{line, col, length}` tuples.
+  Returns a list of `{line, byte_col, byte_length}` tuples.
 
   ## Examples
 
@@ -75,13 +77,41 @@ defmodule Minga.Search do
   def find_all_in_range(_lines, "", _first_line), do: []
 
   def find_all_in_range(lines, pattern, first_line) do
-    pattern_len = String.length(pattern)
+    pattern_byte_len = byte_size(pattern)
 
     lines
     |> Enum.with_index(first_line)
     |> Enum.flat_map(fn {line_text, line_num} ->
-      find_all_in_line(line_text, pattern, pattern_len, line_num, 0, [])
+      find_all_overlapping(line_text, pattern, pattern_byte_len, line_num, 0, [])
     end)
+  end
+
+  @spec find_all_overlapping(
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [match()]
+        ) :: [match()]
+  defp find_all_overlapping(line, pattern, pat_len, line_num, start, acc) do
+    if start + pat_len > byte_size(line) do
+      Enum.reverse(acc)
+    else
+      searchable = binary_part(line, start, byte_size(line) - start)
+
+      case :binary.match(searchable, pattern) do
+        :nomatch ->
+          Enum.reverse(acc)
+
+        {pos, _len} ->
+          abs_pos = start + pos
+
+          find_all_overlapping(line, pattern, pat_len, line_num, abs_pos + 1, [
+            {line_num, abs_pos, pat_len} | acc
+          ])
+      end
+    end
   end
 
   # ── Word at cursor ──────────────────────────────────────────────────────
@@ -104,22 +134,17 @@ defmodule Minga.Search do
   """
   @spec word_at_cursor(GapBuffer.t(), position()) :: String.t() | nil
   def word_at_cursor(%GapBuffer{} = buf, {line, col}) do
-    lines = String.split(GapBuffer.content(buf), "\n")
+    lines = :binary.split(GapBuffer.content(buf), "\n", [:global])
 
     case Enum.at(lines, line) do
       nil ->
         nil
 
       text ->
-        graphemes = String.graphemes(text)
-
-        if col < length(graphemes) and word_char?(Enum.at(graphemes, col)) do
-          start_col = find_word_start(graphemes, col)
-          end_col = find_word_end(graphemes, col, length(graphemes))
-
-          graphemes
-          |> Enum.slice(start_col..end_col)
-          |> Enum.join()
+        if col < byte_size(text) and word_char_at?(text, col) do
+          start_byte = find_word_start_byte(text, col)
+          end_byte = find_word_end_byte(text, col)
+          binary_part(text, start_byte, end_byte - start_byte + 1)
         else
           nil
         end
@@ -152,7 +177,7 @@ defmodule Minga.Search do
   """
   @spec substitute(String.t(), String.t(), String.t(), boolean()) :: substitute_result()
   def substitute(content, pattern, replacement, global?) do
-    lines = String.split(content, "\n")
+    lines = :binary.split(content, "\n", [:global])
 
     {new_lines, total_count} =
       Enum.map_reduce(lines, 0, fn line, count ->
@@ -174,48 +199,44 @@ defmodule Minga.Search do
   @spec substitute_line(String.t(), String.t(), String.t(), boolean()) ::
           {String.t(), non_neg_integer()}
   def substitute_line(line, pattern, replacement, global?) do
-    graphemes = String.graphemes(line)
-    pattern_graphemes = String.graphemes(pattern)
-    pattern_len = length(pattern_graphemes)
+    case global? do
+      true ->
+        matches = :binary.matches(line, pattern)
+        do_substitute_all(line, matches, byte_size(pattern), replacement, 0, 0, [])
 
-    do_substitute_line(graphemes, pattern_graphemes, pattern_len, replacement, global?, [], 0)
-  end
+      false ->
+        case :binary.match(line, pattern) do
+          :nomatch ->
+            {line, 0}
 
-  @spec do_substitute_line(
-          [String.t()],
-          [String.t()],
-          non_neg_integer(),
-          String.t(),
-          boolean(),
-          [String.t()],
-          non_neg_integer()
-        ) :: {String.t(), non_neg_integer()}
-  defp do_substitute_line([], _pat, _pat_len, _rep, _global?, acc, count) do
-    {acc |> Enum.reverse() |> Enum.join(), count}
-  end
-
-  defp do_substitute_line(graphemes, pat, pat_len, rep, global?, acc, count) do
-    candidate = Enum.take(graphemes, pat_len)
-
-    if length(candidate) == pat_len and candidate == pat do
-      rest = Enum.drop(graphemes, pat_len)
-      new_acc = [rep | acc]
-
-      if global? do
-        do_substitute_line(rest, pat, pat_len, rep, true, new_acc, count + 1)
-      else
-        # Non-global: only replace first match, append remaining unchanged
-        remaining = Enum.join(rest)
-        result = [remaining | new_acc] |> Enum.reverse() |> Enum.join()
-        {result, count + 1}
-      end
-    else
-      [head | tail] = graphemes
-      do_substitute_line(tail, pat, pat_len, rep, global?, [head | acc], count)
+          {pos, len} ->
+            before = binary_part(line, 0, pos)
+            after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
+            {before <> replacement <> after_match, 1}
+        end
     end
   end
 
-  @typedoc "A replacement span: `{col, length}` in the substituted line."
+  @spec do_substitute_all(
+          String.t(),
+          [{non_neg_integer(), non_neg_integer()}],
+          non_neg_integer(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          iolist()
+        ) :: {String.t(), non_neg_integer()}
+  defp do_substitute_all(line, [], _pat_len, _rep, prev_end, count, acc) do
+    final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
+    {final |> Enum.reverse() |> IO.iodata_to_binary(), count}
+  end
+
+  defp do_substitute_all(line, [{pos, len} | rest], pat_len, rep, prev_end, count, acc) do
+    before = binary_part(line, prev_end, pos - prev_end)
+    do_substitute_all(line, rest, pat_len, rep, pos + len, count + 1, [rep, before | acc])
+  end
+
+  @typedoc "A replacement span: `{byte_col, byte_length}` in the substituted line."
   @type replacement_span :: {non_neg_integer(), non_neg_integer()}
 
   @doc """
@@ -232,46 +253,72 @@ defmodule Minga.Search do
   @spec substitute_line_with_spans(String.t(), String.t(), String.t(), boolean()) ::
           {String.t(), non_neg_integer(), [replacement_span()]}
   def substitute_line_with_spans(line, pattern, replacement, global?) do
-    graphemes = String.graphemes(line)
-    pat = String.graphemes(pattern)
-    spec = {pat, length(pat), replacement, String.length(replacement)}
-    {result, count, spans} = do_sub_spans(graphemes, spec, global?, [], 0, 0, [])
-    {result |> Enum.reverse() |> Enum.join(), count, Enum.reverse(spans)}
-  end
+    rep_len = byte_size(replacement)
 
-  @typep sub_span_spec ::
-           {[String.t()], non_neg_integer(), String.t(), non_neg_integer()}
+    case global? do
+      true ->
+        matches = :binary.matches(line, pattern)
+        do_sub_spans_all(line, matches, byte_size(pattern), replacement, rep_len, 0, 0, [], [])
 
-  @spec do_sub_spans(
-          [String.t()],
-          sub_span_spec(),
-          boolean(),
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          [replacement_span()]
-        ) :: {[String.t()], non_neg_integer(), [replacement_span()]}
-  defp do_sub_spans([], _spec, _global?, acc, _col, count, spans) do
-    {acc, count, spans}
-  end
+      false ->
+        case :binary.match(line, pattern) do
+          :nomatch ->
+            {line, 0, []}
 
-  defp do_sub_spans(graphemes, {pat, pl, rep, rl} = spec, global?, acc, col, count, spans) do
-    candidate = Enum.take(graphemes, pl)
-
-    if length(candidate) == pl and candidate == pat do
-      rest = Enum.drop(graphemes, pl)
-
-      if global? do
-        do_sub_spans(rest, spec, true, [rep | acc], col + rl, count + 1, [{col, rl} | spans])
-      else
-        remaining = Enum.join(rest)
-        {[remaining, rep | acc], count + 1, [{col, rl} | spans]}
-      end
-    else
-      [head | tail] = graphemes
-      do_sub_spans(tail, spec, global?, [head | acc], col + 1, count, spans)
+          {pos, len} ->
+            before = binary_part(line, 0, pos)
+            after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
+            {before <> replacement <> after_match, 1, [{pos, rep_len}]}
+        end
     end
   end
+
+  @spec do_sub_spans_all(
+          String.t(),
+          [{non_neg_integer(), non_neg_integer()}],
+          non_neg_integer(),
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          iolist(),
+          [replacement_span()]
+        ) :: {String.t(), non_neg_integer(), [replacement_span()]}
+  defp do_sub_spans_all(line, [], _pat_len, _rep, _rep_len, prev_end, count, acc, spans) do
+    final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
+    {final |> Enum.reverse() |> IO.iodata_to_binary(), count, Enum.reverse(spans)}
+  end
+
+  defp do_sub_spans_all(
+         line,
+         [{pos, len} | rest],
+         pat_len,
+         rep,
+         rep_len,
+         prev_end,
+         count,
+         acc,
+         spans
+       ) do
+    before = binary_part(line, prev_end, pos - prev_end)
+    new_output_pos = prev_output_pos(acc) + byte_size(before)
+    new_span = {new_output_pos, rep_len}
+
+    do_sub_spans_all(
+      line,
+      rest,
+      pat_len,
+      rep,
+      rep_len,
+      pos + len,
+      count + 1,
+      [rep, before | acc],
+      [new_span | spans]
+    )
+  end
+
+  @spec prev_output_pos(iolist()) :: non_neg_integer()
+  defp prev_output_pos(acc), do: IO.iodata_length(Enum.reverse(acc))
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -288,7 +335,6 @@ defmodule Minga.Search do
   @spec find_backward([String.t()], String.t(), position(), non_neg_integer()) ::
           position() | nil
   defp find_backward(lines, pattern, {cur_line, cur_col}, total) do
-    # Search backward from cursor to start, then wrap from end to cursor
     case search_backward_from(lines, pattern, cur_line, cur_col - 1) do
       nil -> search_backward_from(lines, pattern, total - 1, :end)
       pos -> pos
@@ -301,18 +347,22 @@ defmodule Minga.Search do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) ::
-          position() | nil
+        ) :: position() | nil
   defp search_from(_lines, _pattern, line, _col, total) when line >= total, do: nil
 
   defp search_from(lines, pattern, line, col, total) do
     line_text = Enum.at(lines, line)
-    graphemes = String.graphemes(line_text)
-    start_col = max(col, 0)
+    start_byte = max(col, 0)
 
-    case find_in_graphemes(graphemes, pattern, start_col) do
-      nil -> search_from(lines, pattern, line + 1, 0, total)
-      found_col -> {line, found_col}
+    if start_byte >= byte_size(line_text) do
+      search_from(lines, pattern, line + 1, 0, total)
+    else
+      searchable = binary_part(line_text, start_byte, byte_size(line_text) - start_byte)
+
+      case :binary.match(searchable, pattern) do
+        {pos, _len} -> {line, start_byte + pos}
+        :nomatch -> search_from(lines, pattern, line + 1, 0, total)
+      end
     end
   end
 
@@ -321,140 +371,57 @@ defmodule Minga.Search do
           String.t(),
           non_neg_integer(),
           non_neg_integer() | :end
-        ) ::
-          position() | nil
+        ) :: position() | nil
   defp search_backward_from(_lines, _pattern, line, _col) when line < 0, do: nil
 
   defp search_backward_from(lines, pattern, line, max_col) do
     line_text = Enum.at(lines, line)
-    graphemes = String.graphemes(line_text)
 
-    actual_max =
+    upper =
       case max_col do
-        :end -> length(graphemes) - 1
-        n -> n
+        :end -> byte_size(line_text)
+        n -> min(n + byte_size(pattern), byte_size(line_text))
       end
 
-    case rfind_in_graphemes(graphemes, pattern, actual_max) do
-      nil -> search_backward_from(lines, pattern, line - 1, :end)
-      found_col -> {line, found_col}
-    end
-  end
-
-  @spec find_in_graphemes([String.t()], String.t(), non_neg_integer()) ::
-          non_neg_integer() | nil
-  defp find_in_graphemes(graphemes, pattern, start_col) do
-    pattern_graphemes = String.graphemes(pattern)
-    pattern_len = length(pattern_graphemes)
-    line_len = length(graphemes)
-
-    do_find_in_graphemes(graphemes, pattern_graphemes, pattern_len, start_col, line_len)
-  end
-
-  @spec do_find_in_graphemes(
-          [String.t()],
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer() | nil
-  defp do_find_in_graphemes(_graphemes, _pattern, pattern_len, col, line_len)
-       when col + pattern_len > line_len,
-       do: nil
-
-  defp do_find_in_graphemes(graphemes, pattern_graphemes, pattern_len, col, line_len) do
-    candidate = Enum.slice(graphemes, col, pattern_len)
-
-    if candidate == pattern_graphemes do
-      col
+    if upper <= 0 do
+      search_backward_from(lines, pattern, line - 1, :end)
     else
-      do_find_in_graphemes(graphemes, pattern_graphemes, pattern_len, col + 1, line_len)
+      searchable = binary_part(line_text, 0, upper)
+
+      case :binary.matches(searchable, pattern) do
+        [] ->
+          search_backward_from(lines, pattern, line - 1, :end)
+
+        matches ->
+          {last_pos, _len} = List.last(matches)
+          {line, last_pos}
+      end
     end
   end
 
-  @spec rfind_in_graphemes([String.t()], String.t(), non_neg_integer()) ::
-          non_neg_integer() | nil
-  defp rfind_in_graphemes(_graphemes, _pattern, max_col) when max_col < 0, do: nil
+  # ── Private — word helpers ────────────────────────────────────────────────
 
-  defp rfind_in_graphemes(graphemes, pattern, max_col) do
-    pattern_graphemes = String.graphemes(pattern)
-    pattern_len = length(pattern_graphemes)
-
-    do_rfind_in_graphemes(graphemes, pattern_graphemes, pattern_len, max_col)
-  end
-
-  @spec do_rfind_in_graphemes(
-          [String.t()],
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer() | nil
-  defp do_rfind_in_graphemes(_graphemes, _pattern, _pattern_len, col) when col < 0, do: nil
-
-  defp do_rfind_in_graphemes(graphemes, pattern_graphemes, pattern_len, col) do
-    candidate = Enum.slice(graphemes, col, pattern_len)
-
-    if candidate == pattern_graphemes do
-      col
-    else
-      do_rfind_in_graphemes(graphemes, pattern_graphemes, pattern_len, col - 1)
-    end
-  end
-
-  @spec find_all_in_line(
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          [match()]
-        ) :: [match()]
-  defp find_all_in_line(line_text, pattern, pattern_len, line_num, start_col, acc) do
-    graphemes = String.graphemes(line_text)
-
-    case find_in_graphemes(graphemes, pattern, start_col) do
-      nil ->
-        Enum.reverse(acc)
-
-      col ->
-        find_all_in_line(
-          line_text,
-          pattern,
-          pattern_len,
-          line_num,
-          col + 1,
-          [{line_num, col, pattern_len} | acc]
-        )
-    end
-  end
-
-  @spec word_char?(String.t() | nil) :: boolean()
-  defp word_char?(nil), do: false
-
-  defp word_char?(g) when byte_size(g) > 0 do
-    <<c, _::binary>> = g
+  @spec word_char_at?(String.t(), non_neg_integer()) :: boolean()
+  defp word_char_at?(text, byte_col) do
+    <<c>> = binary_part(text, byte_col, 1)
     (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or (c >= ?0 and c <= ?9) or c == ?_
   end
 
-  defp word_char?(_), do: false
+  @spec find_word_start_byte(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp find_word_start_byte(_text, 0), do: 0
 
-  @spec find_word_start([String.t()], non_neg_integer()) :: non_neg_integer()
-  defp find_word_start(_graphemes, 0), do: 0
-
-  defp find_word_start(graphemes, col) do
-    if word_char?(Enum.at(graphemes, col - 1)) do
-      find_word_start(graphemes, col - 1)
+  defp find_word_start_byte(text, col) do
+    if col > 0 and word_char_at?(text, col - 1) do
+      find_word_start_byte(text, col - 1)
     else
       col
     end
   end
 
-  @spec find_word_end([String.t()], non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp find_word_end(_graphemes, col, len) when col + 1 >= len, do: col
-
-  defp find_word_end(graphemes, col, len) do
-    if word_char?(Enum.at(graphemes, col + 1)) do
-      find_word_end(graphemes, col + 1, len)
+  @spec find_word_end_byte(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp find_word_end_byte(text, col) do
+    if col + 1 < byte_size(text) and word_char_at?(text, col + 1) do
+      find_word_end_byte(text, col + 1)
     else
       col
     end

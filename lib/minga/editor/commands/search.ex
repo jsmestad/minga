@@ -301,8 +301,11 @@ defmodule Minga.Editor.Commands.Search do
 
       safe_col =
         case BufferServer.get_lines(buf, safe_line, 1) do
-          [text] -> min(col, max(0, String.length(text) - 1))
-          _ -> 0
+          [text] when byte_size(text) > 0 ->
+            min(col, GapBuffer.last_grapheme_byte_offset(text))
+
+          _ ->
+            0
         end
 
       BufferServer.move_to(buf, {safe_line, safe_col})
@@ -340,9 +343,11 @@ defmodule Minga.Editor.Commands.Search do
 
     new_lines =
       List.update_at(lines, match_line, fn line ->
-        graphemes = String.graphemes(line)
-        before = Enum.take(graphemes, match_col) |> Enum.join()
-        after_match = Enum.drop(graphemes, match_col + match_len) |> Enum.join()
+        before = binary_part(line, 0, match_col)
+
+        after_match =
+          binary_part(line, match_col + match_len, byte_size(line) - match_col - match_len)
+
         before <> replacement <> after_match
       end)
 

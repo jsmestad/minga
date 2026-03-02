@@ -165,16 +165,23 @@ defmodule Minga.AutoPair do
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
-  # Returns the grapheme at {line, col}, or nil if out of bounds.
+  # Returns the grapheme at {line, byte_col}, or nil if out of bounds.
   @spec char_at(GapBuffer.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
-  defp char_at(buffer, line, col) do
+  defp char_at(buffer, line, byte_col) do
     case GapBuffer.line_at(buffer, line) do
       nil ->
         nil
 
+      text when byte_col >= byte_size(text) ->
+        nil
+
       text ->
-        graphemes = String.graphemes(text)
-        Enum.at(graphemes, col)
+        rest = binary_part(text, byte_col, byte_size(text) - byte_col)
+
+        case String.next_grapheme(rest) do
+          {g, _} -> g
+          nil -> nil
+        end
     end
   end
 
@@ -182,8 +189,42 @@ defmodule Minga.AutoPair do
   @spec char_before(GapBuffer.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
   defp char_before(_buffer, _line, 0), do: nil
 
-  defp char_before(buffer, line, col) do
-    char_at(buffer, line, col - 1)
+  defp char_before(buffer, line, byte_col) do
+    case GapBuffer.line_at(buffer, line) do
+      nil ->
+        nil
+
+      text ->
+        # Find grapheme whose byte offset is just before byte_col
+        find_grapheme_before(text, byte_col)
+    end
+  end
+
+  @spec find_grapheme_before(String.t(), non_neg_integer()) :: String.t() | nil
+  defp find_grapheme_before(text, target_byte) do
+    do_find_grapheme_before(text, target_byte, 0, nil)
+  end
+
+  @spec do_find_grapheme_before(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t() | nil
+        ) ::
+          String.t() | nil
+  defp do_find_grapheme_before(text, target, current_byte, prev_g) do
+    if current_byte >= target do
+      prev_g
+    else
+      case String.next_grapheme(text) do
+        {g, rest} ->
+          g_size = byte_size(text) - byte_size(rest)
+          do_find_grapheme_before(rest, target, current_byte + g_size, g)
+
+        nil ->
+          prev_g
+      end
+    end
   end
 
   # Returns true if the grapheme is a word character (alphanumeric or underscore).

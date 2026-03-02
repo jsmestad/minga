@@ -266,8 +266,11 @@ defmodule Minga.Editor.Commands.Helpers do
 
     target_col =
       case BufferServer.get_lines(buf, target_line, 1) do
-        [text] -> min(col, max(0, String.length(text) - 1))
-        [] -> 0
+        [text] when byte_size(text) > 0 ->
+          min(col, GapBuffer.last_grapheme_byte_offset(text))
+
+        _ ->
+          0
       end
 
     BufferServer.move_to(buf, {target_line, target_col})

@@ -90,7 +90,7 @@ defmodule Minga.Editor.Commands.Editing do
 
     end_col =
       case BufferServer.get_lines(buf, line, 1) do
-        [text] -> String.length(text)
+        [text] -> byte_size(text)
         [] -> 0
       end
 
@@ -120,18 +120,21 @@ defmodule Minga.Editor.Commands.Editing do
           [] -> ""
         end
 
-      end_col = String.length(current_line)
+      end_col = byte_size(current_line)
       BufferServer.move_to(buf, {line, end_col})
       BufferServer.delete_at(buf)
 
-      next_line =
+      # After deleting the newline, the joined line contains current + next content.
+      joined_line =
         case BufferServer.get_lines(buf, line, 1) do
           [text] -> text
           [] -> ""
         end
 
-      trimmed = String.trim_leading(String.slice(next_line, end_col, String.length(next_line)))
-      spaces_to_delete = String.length(next_line) - end_col - String.length(trimmed)
+      # The part after the original end is the next line's content.
+      suffix = binary_part(joined_line, end_col, byte_size(joined_line) - end_col)
+      trimmed = String.trim_leading(suffix)
+      spaces_to_delete = byte_size(suffix) - byte_size(trimmed)
 
       for _ <- 1..max(spaces_to_delete, 0)//1 do
         BufferServer.delete_at(buf)
@@ -156,14 +159,18 @@ defmodule Minga.Editor.Commands.Editing do
     {line, col} = BufferServer.cursor(buf)
 
     case BufferServer.get_lines(buf, line, 1) do
-      [text] ->
-        graphemes = String.graphemes(text)
+      [text] when col < byte_size(text) ->
+        # Extract grapheme at byte_col
+        rest = binary_part(text, col, byte_size(text) - col)
 
-        if col < length(graphemes) do
-          char = Enum.at(graphemes, col)
-          toggled = Helpers.toggle_char_case(char)
-          BufferServer.delete_at(buf)
-          BufferServer.insert_char(buf, toggled)
+        case String.next_grapheme(rest) do
+          {char, _} ->
+            toggled = Helpers.toggle_char_case(char)
+            BufferServer.delete_at(buf)
+            BufferServer.insert_char(buf, toggled)
+
+          nil ->
+            :ok
         end
 
       _ ->
@@ -183,9 +190,13 @@ defmodule Minga.Editor.Commands.Editing do
 
     original =
       case BufferServer.get_lines(buf, line, 1) do
-        [text] ->
-          graphemes = String.graphemes(text)
-          if col < length(graphemes), do: Enum.at(graphemes, col), else: " "
+        [text] when col < byte_size(text) ->
+          rest = binary_part(text, col, byte_size(text) - col)
+
+          case String.next_grapheme(rest) do
+            {g, _} -> g
+            nil -> " "
+          end
 
         _ ->
           " "
@@ -430,10 +441,9 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   @spec count_leading_spaces(String.t()) :: non_neg_integer()
-  defp count_leading_spaces(text) do
-    text
-    |> String.graphemes()
-    |> Enum.take_while(&(&1 == " "))
-    |> length()
-  end
+  defp count_leading_spaces(text), do: do_count_leading_spaces(text, 0)
+
+  @spec do_count_leading_spaces(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
+  defp do_count_leading_spaces(_, n), do: n
 end
