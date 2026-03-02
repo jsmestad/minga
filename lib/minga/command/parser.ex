@@ -98,6 +98,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("checktime"), do: {:checktime, []}
   defp do_parse("new"), do: {:new_buffer, []}
   defp do_parse("enew"), do: {:new_buffer, []}
+  defp do_parse("reload-highlights"), do: {:reload_highlights, []}
+  defp do_parse("rh"), do: {:reload_highlights, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

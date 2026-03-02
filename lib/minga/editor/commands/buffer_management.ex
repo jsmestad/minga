@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Search, as: SearchCommands
+  alias Minga.Editor.HighlightBridge
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
@@ -249,6 +250,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:new_buffer, []}}) do
     execute(state, :new_buffer)
+  end
+
+  def execute(state, {:execute_ex_command, {:reload_highlights, []}}) do
+    HighlightBridge.setup_for_buffer(state)
   end
 
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do

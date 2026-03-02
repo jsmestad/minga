@@ -40,14 +40,40 @@ defmodule Minga.Editor.HighlightBridge do
     version = state.highlight_version + 1
     content = BufferServer.content(state.buf.buffer)
 
-    commands = [
-      Protocol.encode_set_language(language),
-      Protocol.encode_parse_buffer(version, content)
-    ]
+    query_override = user_query_override(language)
+
+    commands =
+      [Protocol.encode_set_language(language)] ++
+        query_override ++
+        [Protocol.encode_parse_buffer(version, content)]
 
     PortManager.send_commands(state.port_manager, commands)
 
     %{state | highlight: Highlight.new(), highlight_version: version}
+  end
+
+  # Returns a list with a set_highlight_query command if the user has a custom
+  # query file for this language, or an empty list to use the Zig built-in.
+  @spec user_query_override(String.t()) :: [binary()]
+  defp user_query_override(language) do
+    user_path = user_query_path(language)
+
+    if user_path != nil and File.exists?(user_path) do
+      case File.read(user_path) do
+        {:ok, query_text} -> [Protocol.encode_set_highlight_query(query_text)]
+        {:error, _} -> []
+      end
+    else
+      []
+    end
+  end
+
+  @spec user_query_path(String.t()) :: String.t() | nil
+  defp user_query_path(language) do
+    case System.user_home() do
+      nil -> nil
+      home -> Path.join([home, ".config", "minga", "queries", language, "highlights.scm"])
+    end
   end
 
   @doc """
