@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
@@ -43,10 +44,15 @@ pub const Highlighter = struct {
     current_language_name: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
-    /// Initialize with compiled-in grammars registered and queries pre-compiled.
-    /// With ReleaseFast C optimization, all 23 queries compile in ~200ms total.
+    /// Tracks background pre-compilation state.
+    prewarm_thread: ?std.Thread = null,
+    prewarm_done: std.atomic.Value(bool) = .init(false),
+
+    /// Initialize with compiled-in grammars registered.
+    /// Spawns a background thread to pre-compile all embedded queries.
     pub fn init(allocator: std.mem.Allocator) !Highlighter {
         const parser = c.ts_parser_new() orelse return error.ParserCreateFailed;
 
@@ -57,26 +63,72 @@ pub const Highlighter = struct {
             .allocator = allocator,
         };
 
-        // Register all compiled-in grammars and pre-compile their queries.
+        // Register all compiled-in grammars (instant).
         inline for (builtin_grammars) |entry| {
             if (entry.func()) |lang| {
                 hl.languages.put(allocator, entry.name, lang) catch {};
-
-                if (entry.query) |query_source| {
-                    var err_off: u32 = 0;
-                    var err_type: c.TSQueryError = c.TSQueryErrorNone;
-                    if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
-                        hl.query_cache.put(allocator, entry.name, compiled) catch {};
-                    }
-                }
             }
+        }
+
+        // Pre-compile queries on a background thread (skip in tests).
+        if (!builtin.is_test) {
+            hl.prewarm_thread = std.Thread.spawn(.{}, prewarmQueries, .{&hl}) catch null;
         }
 
         return hl;
     }
 
+    /// Background thread: pre-compiles all embedded queries into the cache.
+    fn prewarmQueries(self: *Highlighter) void {
+        inline for (builtin_grammars) |entry| {
+            if (entry.query) |query_source| {
+                self.prewarmOne(entry.name, query_source);
+            }
+        }
+        self.prewarm_done.store(true, .release);
+    }
+
+    fn prewarmOne(self: *Highlighter, name: []const u8, query_source: []const u8) void {
+        // Check if already compiled (e.g. by a setLanguage call on the main thread)
+        {
+            self.cache_mutex.lock();
+            defer self.cache_mutex.unlock();
+            if (self.query_cache.get(name) != null) return;
+        }
+
+        const lang = self.languages.get(name) orelse return;
+        var err_off: u32 = 0;
+        var err_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        // Compile without holding the lock (this is the expensive part)
+        const compiled = c.ts_query_new(
+            lang,
+            query_source.ptr,
+            @intCast(query_source.len),
+            &err_off,
+            &err_type,
+        ) orelse return;
+
+        // Insert into cache under lock
+        {
+            self.cache_mutex.lock();
+            defer self.cache_mutex.unlock();
+            // Double-check: main thread may have compiled it while we worked
+            if (self.query_cache.get(name) != null) {
+                c.ts_query_delete(compiled);
+            } else {
+                self.query_cache.put(self.allocator, name, compiled) catch {
+                    c.ts_query_delete(compiled);
+                };
+            }
+        }
+    }
+
     /// Free all resources.
     pub fn deinit(self: *Highlighter) void {
+        // Wait for background pre-compilation to finish
+        if (self.prewarm_thread) |t| t.join();
+
         // Free all cached queries
         var qit = self.query_cache.iterator();
         while (qit.next()) |entry| {
@@ -101,20 +153,26 @@ pub const Highlighter = struct {
             c.ts_tree_delete(t);
             self.tree = null;
         }
-        // Restore cached query, or lazily compile from embedded source
-        if (self.query_cache.get(name)) |cached| {
-            self.query = cached;
-        } else {
-            self.query = null;
-            // Try to compile from embedded query source
-            inline for (builtin_grammars) |entry| {
-                if (std.mem.eql(u8, entry.name, name)) {
-                    if (entry.query) |query_source| {
-                        var err_off: u32 = 0;
-                        var err_type: c.TSQueryError = c.TSQueryErrorNone;
-                        if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
-                            self.query = compiled;
-                            self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+        // Restore cached query (may have been pre-compiled on background thread),
+        // or lazily compile from embedded source.
+        {
+            self.cache_mutex.lock();
+            defer self.cache_mutex.unlock();
+
+            if (self.query_cache.get(name)) |cached| {
+                self.query = cached;
+            } else {
+                self.query = null;
+                // Try to compile from embedded query source
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.query) |query_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
+                                self.query = compiled;
+                                self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
                         }
                     }
                 }
@@ -128,6 +186,9 @@ pub const Highlighter = struct {
     pub fn setHighlightQuery(self: *Highlighter, source: []const u8) !void {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
 
         // If we already have a cached query for this language, skip recompilation
         if (self.query_cache.get(name)) |cached| {
