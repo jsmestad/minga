@@ -97,6 +97,9 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     // reset the arena for the next batch.
                     _ = self.arena.reset(.retain_capacity);
                 },
+
+                // Highlight commands are handled by the event loop, not the renderer.
+                .set_language, .parse_buffer, .set_highlight_query, .load_grammar => {},
             }
         }
     };

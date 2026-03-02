@@ -30,6 +30,17 @@ pub const OP_CLEAR: u8 = 0x12;
 pub const OP_BATCH_END: u8 = 0x13;
 pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
 
+// Highlight commands (BEAM → Zig)
+pub const OP_SET_LANGUAGE: u8 = 0x20;
+pub const OP_PARSE_BUFFER: u8 = 0x21;
+pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
+pub const OP_LOAD_GRAMMAR: u8 = 0x23;
+
+// Highlight responses (Zig → BEAM)
+pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
+pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
+pub const OP_GRAMMAR_LOADED: u8 = 0x32;
+
 // ── Cursor shapes ──
 
 pub const CURSOR_BLOCK: u8 = 0x00;
@@ -82,6 +93,21 @@ pub const RenderCommand = union(enum) {
     set_cursor_shape: CursorShape,
     clear: void,
     batch_end: void,
+    // Highlight commands
+    set_language: []const u8,
+    parse_buffer: ParseBuffer,
+    set_highlight_query: []const u8,
+    load_grammar: LoadGrammar,
+};
+
+pub const ParseBuffer = struct {
+    version: u32,
+    source: []const u8,
+};
+
+pub const LoadGrammar = struct {
+    name: []const u8,
+    path: []const u8,
 };
 
 pub const DrawText = struct {
@@ -158,6 +184,62 @@ pub fn writeMessage(writer: anytype, payload: []const u8) !void {
     try writer.writeAll(payload);
 }
 
+// ── Encoding: highlight responses (Zig → BEAM) ──
+
+/// Encodes highlight_spans: opcode(1) + version(4) + count(4) + spans(count * 10)
+/// Each span: start_byte:u32, end_byte:u32, capture_id:u16
+pub fn encodeHighlightSpans(allocator: std.mem.Allocator, version: u32, spans: []const @import("highlighter.zig").Span) ![]u8 {
+    const header_size = 1 + 4 + 4; // opcode + version + count
+    const span_size = 10; // 4 + 4 + 2
+    const total = header_size + spans.len * span_size;
+    const buf = try allocator.alloc(u8, total);
+
+    buf[0] = OP_HIGHLIGHT_SPANS;
+    std.mem.writeInt(u32, buf[1..5], version, .big);
+    std.mem.writeInt(u32, buf[5..9], @intCast(spans.len), .big);
+
+    for (spans, 0..) |span, i| {
+        const off = header_size + i * span_size;
+        std.mem.writeInt(u32, buf[off..][0..4], span.start_byte, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], span.end_byte, .big);
+        std.mem.writeInt(u16, buf[off + 8 ..][0..2], span.capture_id, .big);
+    }
+
+    return buf;
+}
+
+/// Encodes highlight_names: opcode(1) + count(2) + (name_len:2 + name) for each
+pub fn encodeHighlightNames(allocator: std.mem.Allocator, names: []const []const u8) ![]u8 {
+    var total: usize = 1 + 2; // opcode + count
+    for (names) |name| {
+        total += 2 + name.len;
+    }
+
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_HIGHLIGHT_NAMES;
+    std.mem.writeInt(u16, buf[1..3], @intCast(names.len), .big);
+
+    var off: usize = 3;
+    for (names) |name| {
+        std.mem.writeInt(u16, buf[off..][0..2], @intCast(name.len), .big);
+        @memcpy(buf[off + 2 .. off + 2 + name.len], name);
+        off += 2 + name.len;
+    }
+
+    return buf;
+}
+
+/// Encodes grammar_loaded: opcode(1) + success:u8 + name_len:2 + name
+pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
+    const total = 4 + name.len;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_GRAMMAR_LOADED;
+    buf[1] = if (success) 1 else 0;
+    std.mem.writeInt(u16, buf[2..4], @intCast(name.len), .big);
+    @memcpy(buf[4 .. 4 + name.len], name);
+    return total;
+}
+
 // ── Decoding (BEAM → Zig) ──
 
 /// Decodes a render command from a binary payload.
@@ -201,6 +283,45 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             const shape = std.meta.intToEnum(CursorShape, rest[0]) catch return error.Malformed;
             return .{ .set_cursor_shape = shape };
         },
+        OP_SET_LANGUAGE => {
+            // name_len:2, name
+            if (rest.len < 2) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[0..2], .big);
+            if (rest.len < 2 + name_len) return error.Malformed;
+            return .{ .set_language = rest[2 .. 2 + name_len] };
+        },
+        OP_PARSE_BUFFER => {
+            // version:4, source_len:4, source
+            if (rest.len < 8) return error.Malformed;
+            const version = std.mem.readInt(u32, rest[0..4], .big);
+            const source_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + source_len) return error.Malformed;
+            return .{ .parse_buffer = .{
+                .version = version,
+                .source = rest[8 .. 8 + source_len],
+            } };
+        },
+        OP_SET_HIGHLIGHT_QUERY => {
+            // query_len:4, query
+            if (rest.len < 4) return error.Malformed;
+            const query_len = std.mem.readInt(u32, rest[0..4], .big);
+            if (rest.len < 4 + query_len) return error.Malformed;
+            return .{ .set_highlight_query = rest[4 .. 4 + query_len] };
+        },
+        OP_LOAD_GRAMMAR => {
+            // name_len:2, name, path_len:2, path
+            if (rest.len < 2) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[0..2], .big);
+            if (rest.len < 2 + name_len + 2) return error.Malformed;
+            const name = rest[2 .. 2 + name_len];
+            const path_off = 2 + name_len;
+            const path_len = std.mem.readInt(u16, rest[path_off..][0..2], .big);
+            if (rest.len < path_off + 2 + path_len) return error.Malformed;
+            return .{ .load_grammar = .{
+                .name = name,
+                .path = rest[path_off + 2 .. path_off + 2 + path_len],
+            } };
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -229,6 +350,29 @@ pub fn commandSize(payload: []const u8) usize {
             if (payload.len < 14) break :blk payload.len;
             const text_len = std.mem.readInt(u16, payload[12..14], .big);
             break :blk 14 + text_len;
+        },
+        OP_SET_LANGUAGE => blk: {
+            if (payload.len < 3) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[1..3], .big);
+            break :blk 3 + name_len;
+        },
+        OP_PARSE_BUFFER => blk: {
+            if (payload.len < 9) break :blk payload.len;
+            const source_len = std.mem.readInt(u32, payload[5..9], .big);
+            break :blk 9 + source_len;
+        },
+        OP_SET_HIGHLIGHT_QUERY => blk: {
+            if (payload.len < 5) break :blk payload.len;
+            const query_len = std.mem.readInt(u32, payload[1..5], .big);
+            break :blk 5 + query_len;
+        },
+        OP_LOAD_GRAMMAR => blk: {
+            if (payload.len < 3) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[1..3], .big);
+            const path_off: usize = 3 + name_len;
+            if (payload.len < path_off + 2) break :blk payload.len;
+            const path_len = std.mem.readInt(u16, payload[path_off..][0..2], .big);
+            break :blk path_off + 2 + path_len;
         },
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
@@ -821,4 +965,135 @@ test "encodeResize byte layout: self-consistent encoding" {
     const height_back = std.mem.readInt(u16, buf[3..5], .big);
     try std.testing.expectEqual(@as(u16, 0x0102), width_back);
     try std.testing.expectEqual(@as(u16, 0x0304), height_back);
+}
+
+// ── Highlight protocol tests ──────────────────────────────────────────────────
+
+test "decode set_language" {
+    // opcode(1) + name_len:2 + "elixir"(6) = 9 bytes
+    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06 } ++ "elixir".*;
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .set_language);
+    try std.testing.expectEqualStrings("elixir", cmd.set_language);
+}
+
+test "decode set_language truncated returns malformed" {
+    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06, 'e', 'l' }; // only 2 of 6 name bytes
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode parse_buffer" {
+    // opcode(1) + version:4 + source_len:4 + "hello"(5) = 14 bytes
+    const data = [_]u8{
+        OP_PARSE_BUFFER,
+        0x00, 0x00, 0x00, 0x01, // version = 1
+        0x00, 0x00, 0x00, 0x05, // source_len = 5
+    } ++ "hello".*;
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .parse_buffer => |pb| {
+            try std.testing.expectEqual(@as(u32, 1), pb.version);
+            try std.testing.expectEqualStrings("hello", pb.source);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "decode set_highlight_query" {
+    const query = "(atom) @string";
+    var data: [1 + 4 + query.len]u8 = undefined;
+    data[0] = OP_SET_HIGHLIGHT_QUERY;
+    std.mem.writeInt(u32, data[1..5], query.len, .big);
+    @memcpy(data[5..], query);
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .set_highlight_query);
+    try std.testing.expectEqualStrings(query, cmd.set_highlight_query);
+}
+
+test "decode load_grammar" {
+    // opcode + name_len:2 + "lua"(3) + path_len:2 + "/tmp/lua.so"(11)
+    const data = [_]u8{ OP_LOAD_GRAMMAR, 0x00, 0x03 } ++ "lua".* ++ [_]u8{ 0x00, 0x0B } ++ "/tmp/lua.so".*;
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .load_grammar => |lg| {
+            try std.testing.expectEqualStrings("lua", lg.name);
+            try std.testing.expectEqualStrings("/tmp/lua.so", lg.path);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "commandSize: set_language" {
+    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06 } ++ "elixir".*;
+    try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
+}
+
+test "commandSize: parse_buffer" {
+    const data = [_]u8{
+        OP_PARSE_BUFFER,
+        0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x03,
+    } ++ "abc".*;
+    try std.testing.expectEqual(@as(usize, 12), commandSize(&data));
+}
+
+test "commandSize: set_highlight_query" {
+    var data: [1 + 4 + 5]u8 = undefined;
+    data[0] = OP_SET_HIGHLIGHT_QUERY;
+    std.mem.writeInt(u32, data[1..5], 5, .big);
+    @memcpy(data[5..10], "query");
+    try std.testing.expectEqual(@as(usize, 10), commandSize(&data));
+}
+
+test "commandSize: load_grammar" {
+    const data = [_]u8{ OP_LOAD_GRAMMAR, 0x00, 0x03 } ++ "lua".* ++ [_]u8{ 0x00, 0x04 } ++ "path".*;
+    try std.testing.expectEqual(@as(usize, 12), commandSize(&data));
+}
+
+test "encodeHighlightSpans round-trip" {
+    const hl = @import("highlighter.zig");
+    const spans = [_]hl.Span{
+        .{ .start_byte = 0, .end_byte = 9, .capture_id = 0 },
+        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1 },
+    };
+    const buf = try encodeHighlightSpans(std.testing.allocator, 42, &spans);
+    defer std.testing.allocator.free(buf);
+
+    try std.testing.expectEqual(OP_HIGHLIGHT_SPANS, buf[0]);
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, buf[1..5], .big));
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, buf[5..9], .big));
+    // First span
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[9..13], .big));
+    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, buf[13..17], .big));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[17..19], .big));
+    // Second span
+    try std.testing.expectEqual(@as(u32, 10), std.mem.readInt(u32, buf[19..23], .big));
+    try std.testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buf[23..27], .big));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[27..29], .big));
+}
+
+test "encodeHighlightNames round-trip" {
+    const names = [_][]const u8{ "keyword", "string" };
+    const buf = try encodeHighlightNames(std.testing.allocator, &names);
+    defer std.testing.allocator.free(buf);
+
+    try std.testing.expectEqual(OP_HIGHLIGHT_NAMES, buf[0]);
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, buf[1..3], .big));
+    // "keyword" (7)
+    try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, buf[3..5], .big));
+    try std.testing.expectEqualStrings("keyword", buf[5..12]);
+    // "string" (6)
+    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, buf[12..14], .big));
+    try std.testing.expectEqualStrings("string", buf[14..20]);
+}
+
+test "encodeGrammarLoaded" {
+    var buf: [20]u8 = undefined;
+    const len = try encodeGrammarLoaded(&buf, true, "elixir");
+    try std.testing.expectEqual(@as(usize, 10), len);
+    try std.testing.expectEqual(OP_GRAMMAR_LOADED, buf[0]);
+    try std.testing.expectEqual(@as(u8, 1), buf[1]);
+    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, buf[2..4], .big));
+    try std.testing.expectEqualStrings("elixir", buf[4..10]);
 }
