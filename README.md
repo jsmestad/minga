@@ -141,6 +141,7 @@ pre-compiled queries for instant highlighting on file open.
 
 ## Coming from another editor?
 
+- **[For AI-assisted developers](docs/FOR-AI-CODERS.md):** Using Claude Code, Cursor, Copilot, or Aider? Your editor wasn't designed for agents. Minga was.
 - **[For Neovim users](docs/FOR-NEOVIM-USERS.md):** Same modal editing, better runtime. Why the BEAM solves problems Neovim can't fix without a rewrite.
 - **[For Emacs users](docs/FOR-EMACS-USERS.md):** Same depth of customization, none of the single-threaded pain. Elixir is Minga's Elisp.
 
