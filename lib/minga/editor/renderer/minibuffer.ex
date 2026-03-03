@@ -59,6 +59,18 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  def render(%{mode: :eval, mode_state: ms}, row, cols) do
+    eval_text = "Eval: " <> ms.input
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(eval_text, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
   def render(%{status_msg: msg}, row, cols) when is_binary(msg) do
     Protocol.encode_draw(
       row,

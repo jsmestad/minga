@@ -42,6 +42,11 @@ defmodule Minga.Mode.NormalTest do
       assert {:transition, :command, _} = Normal.handle_key({?:, 0}, fresh_state())
     end
 
+    test "Alt+: enters eval mode" do
+      # Alt modifier = 0x04
+      assert {:transition, :eval, _} = Normal.handle_key({?:, 0x04}, fresh_state())
+    end
+
     test "v enters characterwise visual mode" do
       {:transition, :visual, state} = Normal.handle_key({?v, 0}, fresh_state())
       assert state.visual_type == :char

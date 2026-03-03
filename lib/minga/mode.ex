@@ -34,6 +34,7 @@ defmodule Minga.Mode do
           | :visual
           | :operator_pending
           | :command
+          | :eval
           | :replace
           | :search
           | :search_prompt
@@ -55,6 +56,7 @@ defmodule Minga.Mode do
           | Minga.Mode.OperatorPendingState.t()
           | Minga.Mode.VisualState.t()
           | Minga.Mode.CommandState.t()
+          | Minga.Mode.EvalState.t()
           | Minga.Mode.ReplaceState.t()
           | Minga.Mode.SearchState.t()
           | Minga.Mode.SearchPromptState.t()
@@ -120,6 +122,7 @@ defmodule Minga.Mode do
   def display(:replace), do: "-- REPLACE --"
   def display(:search), do: "-- SEARCH --"
   def display(:search_prompt), do: "-- SEARCH PROJECT --"
+  def display(:eval), do: "-- EVAL --"
   def display(:substitute_confirm), do: "-- SUBSTITUTE --"
 
   @doc """
@@ -130,6 +133,7 @@ defmodule Minga.Mode do
   @spec display(mode(), state()) :: String.t()
   def display(:visual, %Minga.Mode.VisualState{visual_type: :line}), do: "-- VISUAL LINE --"
   def display(:command, %Minga.Mode.CommandState{input: input}), do: ":" <> input
+  def display(:eval, %Minga.Mode.EvalState{input: input}), do: "Eval: " <> input
 
   def display(:search, %Minga.Mode.SearchState{direction: dir, input: input}) do
     prefix = if dir == :forward, do: "/", else: "?"
@@ -156,6 +160,7 @@ defmodule Minga.Mode do
   defp mode_module(:visual), do: Minga.Mode.Visual
   defp mode_module(:operator_pending), do: Minga.Mode.OperatorPending
   defp mode_module(:command), do: Minga.Mode.Command
+  defp mode_module(:eval), do: Minga.Mode.Eval
   defp mode_module(:replace), do: Minga.Mode.Replace
   defp mode_module(:search), do: Minga.Mode.Search
   defp mode_module(:search_prompt), do: Minga.Mode.SearchPrompt

@@ -25,6 +25,7 @@ defmodule Minga.Application do
     base_children = [
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+      {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry
     ]
 

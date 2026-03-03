@@ -28,6 +28,7 @@ defmodule Minga.Editor do
   alias Minga.FileWatcher
   alias Minga.Mode
   alias Minga.Mode.CommandState
+  alias Minga.Mode.EvalState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
@@ -500,6 +501,15 @@ defmodule Minga.Editor do
     case mode_state do
       %CommandState{} -> mode_state
       _ -> %CommandState{}
+    end
+  end
+
+  # Entering eval mode: ensure EvalState.
+  defp adjust_mode_state_on_transition(mode_state, old_mode, :eval, _state)
+       when old_mode != :eval do
+    case mode_state do
+      %EvalState{} -> mode_state
+      _ -> %EvalState{}
     end
   end
 

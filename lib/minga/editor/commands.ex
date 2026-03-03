@@ -31,6 +31,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Editing
+  alias Minga.Editor.Commands.Eval
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
@@ -123,6 +124,10 @@ defmodule Minga.Editor.Commands do
 
     state
   end
+
+  # ── Eval ───────────────────────────────────────────────────────────────────
+
+  def execute(state, {:eval_expression, _} = cmd), do: Eval.execute(state, cmd)
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 

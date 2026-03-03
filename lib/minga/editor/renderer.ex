@@ -722,6 +722,21 @@ defmodule Minga.Editor.Renderer do
 
   defp resolve_cursor_command(
          nil,
+         :eval,
+         mode_state,
+         minibuffer_row,
+         _cur_line,
+         _cur_col,
+         _vp,
+         _gutter_w
+       ) do
+    # "Eval: " prefix is 6 characters
+    eval_col = String.length(mode_state.input) + 6
+    Protocol.encode_cursor(minibuffer_row, eval_col)
+  end
+
+  defp resolve_cursor_command(
+         nil,
          _mode,
          _mode_state,
          _mb_row,

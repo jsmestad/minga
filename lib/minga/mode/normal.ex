@@ -75,6 +75,7 @@ defmodule Minga.Mode.Normal do
 
   # Modifier flags (mirrors Minga.Port.Protocol)
   @ctrl 0x02
+  @alt 0x04
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_352
@@ -650,6 +651,13 @@ defmodule Minga.Mode.Normal do
   # # → search word under cursor backward
   def handle_key({?#, 0}, state) do
     {:execute, :search_word_under_cursor_backward, state}
+  end
+
+  # ── Eval mode entry ────────────────────────────────────────────────────────
+
+  # `Alt+:` (M-:) → enter eval mode.
+  def handle_key({?:, mods}, state) when band(mods, @alt) != 0 do
+    {:transition, :eval, state}
   end
 
   # ── Command mode entry ────────────────────────────────────────────────────
