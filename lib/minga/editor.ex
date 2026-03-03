@@ -18,6 +18,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
   alias Minga.Editor.HighlightBridge
+  alias Minga.Editor.LspBridge
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
@@ -146,6 +147,9 @@ defmodule Minga.Editor do
 
     state = log_message(state, "Editor started")
 
+    # Subscribe to diagnostic changes for re-rendering gutter signs
+    Minga.Diagnostics.subscribe()
+
     {:ok, state}
   end
 
@@ -157,6 +161,7 @@ defmodule Minga.Editor do
         maybe_watch_buffer(file_watcher_pid(), pid)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
+        new_state = lsp_buffer_opened(new_state, pid)
         Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -358,6 +363,18 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:grammar_loaded, _success, _name}}, state) do
+    {:noreply, state}
+  end
+
+  # LSP debounced didChange timer fired — flush the change notification
+  def handle_info({:lsp_did_change, buffer_pid}, state) do
+    new_lsp = LspBridge.flush_did_change(state.lsp, buffer_pid)
+    {:noreply, %{state | lsp: new_lsp}}
+  end
+
+  # Diagnostics changed — re-render to update gutter signs and minibuffer hint
+  def handle_info({:diagnostics_changed, _uri}, state) do
+    Renderer.render(state)
     {:noreply, state}
   end
 
@@ -679,6 +696,13 @@ defmodule Minga.Editor do
   defp maybe_reparse(state, version_before) do
     content_changed = buffer_version(state) != version_before
 
+    state =
+      if content_changed do
+        lsp_buffer_changed(state)
+      else
+        state
+      end
+
     if content_changed and state.highlight.capture_names != [] do
       HighlightBridge.request_reparse(state)
     else
@@ -692,11 +716,16 @@ defmodule Minga.Editor do
 
   @spec dispatch_command(state(), Mode.command()) :: state()
   defp dispatch_command(state, cmd) do
-    case Commands.execute(state, cmd) do
-      {s, {:dot_repeat, count}} -> replay_last_change(s, count)
-      {s, {:replay_macro, register}} -> replay_macro(s, register)
-      s -> s
-    end
+    old_buffer = state.buf.buffer
+
+    result =
+      case Commands.execute(state, cmd) do
+        {s, {:dot_repeat, count}} -> replay_last_change(s, count)
+        {s, {:replay_macro, register}} -> replay_macro(s, register)
+        s -> s
+      end
+
+    lsp_after_command(result, cmd, old_buffer)
   end
 
   # ── File watcher helpers ──────────────────────────────────────────────────
@@ -901,4 +930,58 @@ defmodule Minga.Editor do
       end)
     end)
   end
+
+  # ── LSP lifecycle helpers ────────────────────────────────────────────────
+
+  @spec lsp_buffer_opened(state(), pid()) :: state()
+  defp lsp_buffer_opened(state, buffer_pid) do
+    new_lsp = LspBridge.on_buffer_open(state.lsp, buffer_pid)
+    %{state | lsp: new_lsp}
+  end
+
+  @spec lsp_buffer_changed(state()) :: state()
+  defp lsp_buffer_changed(%{buf: %{buffer: nil}} = state), do: state
+
+  defp lsp_buffer_changed(%{buf: %{buffer: buf}} = state) do
+    new_lsp = LspBridge.on_buffer_change(state.lsp, buf)
+    %{state | lsp: new_lsp}
+  end
+
+  @spec lsp_after_command(state(), Mode.command(), pid() | nil) :: state()
+  defp lsp_after_command(state, cmd, old_buffer) do
+    state
+    |> lsp_after_save(cmd)
+    |> lsp_after_kill(cmd, old_buffer)
+  end
+
+  @spec lsp_after_save(state(), Mode.command()) :: state()
+  defp lsp_after_save(%{buf: %{buffer: buf}} = state, cmd) when is_pid(buf) do
+    if cmd in [
+         :save,
+         :force_save,
+         {:execute_ex_command, {:save, []}},
+         {:execute_ex_command, {:save_quit, []}}
+       ] do
+      new_lsp = LspBridge.on_buffer_save(state.lsp, buf)
+      %{state | lsp: new_lsp}
+    else
+      state
+    end
+  end
+
+  defp lsp_after_save(state, _cmd), do: state
+
+  @spec lsp_after_kill(state(), Mode.command(), pid() | nil) :: state()
+  defp lsp_after_kill(state, cmd, old_buffer)
+       when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
+    # The old buffer was closed — notify LSP if it changed
+    if state.buf.buffer != old_buffer do
+      new_lsp = LspBridge.on_buffer_close(state.lsp, old_buffer)
+      %{state | lsp: new_lsp}
+    else
+      state
+    end
+  end
+
+  defp lsp_after_kill(state, _cmd, _old_buffer), do: state
 end

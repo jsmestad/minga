@@ -20,6 +20,7 @@ defmodule Minga.Editor.State do
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
+  alias Minga.Editor.LspBridge
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker
@@ -66,6 +67,7 @@ defmodule Minga.Editor.State do
             highlight: Highlight.new(),
             highlight_version: 0,
             highlight_cache: %{},
+            lsp: LspBridge.new(),
             window_tree: nil,
             windows: %{},
             active_window: 1,
@@ -96,6 +98,7 @@ defmodule Minga.Editor.State do
           highlight: Highlight.t(),
           highlight_version: non_neg_integer(),
           highlight_cache: %{pid() => Highlight.t()},
+          lsp: LspBridge.t(),
           window_tree: WindowTree.t() | nil,
           windows: %{Window.id() => Window.t()},
           active_window: Window.id(),

@@ -17,6 +17,8 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Diagnostics
+  alias Minga.Editor.LspBridge
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -137,7 +139,8 @@ defmodule Minga.Editor.Renderer do
       gutter_w: gutter_w,
       content_w: content_w,
       confirm_match: SearchHighlight.current_confirm_match(state),
-      highlight: highlight
+      highlight: highlight,
+      diagnostic_signs: diagnostic_signs_for_buffer(state)
     }
 
     {gutter_commands, line_commands, _byte_offset} =
@@ -519,7 +522,8 @@ defmodule Minga.Editor.Renderer do
       gutter_w: frame.gutter_w,
       content_w: frame.content_w,
       confirm_match: SearchHighlight.current_confirm_match(state),
-      highlight: highlight
+      highlight: highlight,
+      diagnostic_signs: diagnostic_signs_for_window(state, window)
     }
   end
 
@@ -612,6 +616,24 @@ defmodule Minga.Editor.Renderer do
       end
     else
       []
+    end
+  end
+
+  @spec diagnostic_signs_for_buffer(state()) :: %{non_neg_integer() => atom()}
+  defp diagnostic_signs_for_buffer(%{buf: %{buffer: buf}}) when is_pid(buf) do
+    case BufferServer.file_path(buf) do
+      nil -> %{}
+      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
+    end
+  end
+
+  defp diagnostic_signs_for_buffer(_state), do: %{}
+
+  @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
+  defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
+    case BufferServer.file_path(buf) do
+      nil -> %{}
+      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
     end
   end
 

@@ -26,7 +26,9 @@ defmodule Minga.Application do
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
-      Minga.Command.Registry
+      Minga.Command.Registry,
+      Minga.Diagnostics,
+      Minga.LSP.Supervisor
     ]
 
     editor_children =
