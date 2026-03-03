@@ -69,6 +69,9 @@ defmodule Minga.Editor.Renderer do
   end
 
   def render(state) do
+    # Keep active window's cursor in sync before rendering
+    state = EditorState.sync_active_window_cursor(state)
+
     if EditorState.split?(state) do
       render_split(state)
     else
@@ -336,8 +339,8 @@ defmodule Minga.Editor.Renderer do
         ) :: {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
   defp render_window_content(state, window, win_viewport, {row_off, col_off}, is_active) do
     buffer = window.buffer
-    {cursor_line, cursor_byte_col} = BufferServer.cursor(buffer)
-    cursor = {cursor_line, cursor_byte_col}
+    cursor = window_cursor(window, is_active)
+    {cursor_line, cursor_byte_col} = cursor
 
     # Each window reserves 1 row at the bottom for its own modeline.
     # The global minibuffer is excluded from the layout rect, so we only
@@ -514,6 +517,11 @@ defmodule Minga.Editor.Renderer do
         other
     end)
   end
+
+  # Active window reads live cursor from buffer; inactive windows use stored cursor.
+  @spec window_cursor(Window.t(), boolean()) :: {non_neg_integer(), non_neg_integer()}
+  defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
+  defp window_cursor(window, false), do: window.cursor
 
   # ── Split-mode viewport helpers (1 row for modeline only) ────────────────────
 

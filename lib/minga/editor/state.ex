@@ -18,6 +18,7 @@ defmodule Minga.Editor.State do
   """
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Buffers
@@ -148,6 +149,28 @@ defmodule Minga.Editor.State do
         %{state | windows: Map.put(windows, id, %{window | buffer: buf.buffer})}
 
       _ ->
+        state
+    end
+  end
+
+  @doc """
+  Snapshots the active buffer's cursor into the active window struct.
+
+  Call this before rendering split views so inactive windows have a fresh
+  cursor position for the active window when it becomes inactive later.
+  """
+  @spec sync_active_window_cursor(t()) :: t()
+  def sync_active_window_cursor(%__MODULE__{buf: %{buffer: nil}} = state), do: state
+
+  def sync_active_window_cursor(
+        %__MODULE__{windows: windows, active_window: id, buf: %{buffer: buf}} = state
+      ) do
+    case Map.fetch(windows, id) do
+      {:ok, window} ->
+        cursor = BufferServer.cursor(buf)
+        %{state | windows: Map.put(windows, id, %{window | cursor: cursor})}
+
+      :error ->
         state
     end
   end

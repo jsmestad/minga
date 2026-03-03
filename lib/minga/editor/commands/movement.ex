@@ -274,7 +274,13 @@ defmodule Minga.Editor.Commands.Movement do
   @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
   defp apply_split(state, new_tree, active_id, new_id) do
     active_window = Map.fetch!(state.windows, active_id)
-    new_window = Window.new(new_id, active_window.buffer, 24, 80)
+    cursor = BufferServer.cursor(active_window.buffer)
+
+    # New window gets a copy of the current cursor position
+    new_window = Window.new(new_id, active_window.buffer, 24, 80, cursor)
+
+    # Also snapshot the current cursor into the active window
+    state = EditorState.update_window(state, active_id, &%{&1 | cursor: cursor})
 
     state = %{
       state
@@ -304,7 +310,15 @@ defmodule Minga.Editor.Commands.Movement do
 
     case WindowTree.focus_neighbor(state.window_tree, state.active_window, direction, screen) do
       {:ok, neighbor_id} ->
+        # Save current cursor into outgoing window
+        current_cursor = BufferServer.cursor(state.buf.buffer)
+
+        state =
+          EditorState.update_window(state, state.active_window, &%{&1 | cursor: current_cursor})
+
+        # Switch to new window and restore its cursor into the buffer
         window = Map.fetch!(state.windows, neighbor_id)
+        BufferServer.move_to(window.buffer, window.cursor)
 
         %{
           state
@@ -327,6 +341,9 @@ defmodule Minga.Editor.Commands.Movement do
         remaining = WindowTree.leaves(new_tree)
         new_active = hd(remaining)
         new_active_window = Map.fetch!(state.windows, new_active)
+
+        # Restore the surviving window's cursor into the buffer
+        BufferServer.move_to(new_active_window.buffer, new_active_window.cursor)
 
         %{
           state
