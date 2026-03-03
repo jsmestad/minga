@@ -139,6 +139,11 @@ single-threaded event loop that reads port commands, renders frames, and
 forwards keyboard input. Tree-sitter runs in the Zig process with
 pre-compiled queries for instant highlighting on file open.
 
+## Coming from another editor?
+
+- **[For Neovim users](docs/FOR-NEOVIM-USERS.md):** Same modal editing, better runtime. Why the BEAM solves problems Neovim can't fix without a rewrite.
+- **[For Emacs users](docs/ELIXIR-AS-ELISP.md)** — Elixir is Minga's Elisp. Point-by-point comparison of runtime extensibility.
+
 ## Contributing
 
 Minga is open to contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for
