@@ -35,7 +35,8 @@ defmodule Minga.MixProject do
 
   defp deps do
     [
-      {:burrito, "~> 1.5"},
+      # TODO: revert to {:burrito, "~> 1.6"} once released (fix in ba67b5c)
+      {:burrito, github: "burrito-elixir/burrito", branch: "main"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
