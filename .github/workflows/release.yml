@@ -9,8 +9,8 @@ permissions:
 
 env:
   MIX_ENV: prod
-  ELIXIR_VERSION: "1.19.4"
-  OTP_VERSION: "28.2"
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.3.3"
   ZIG_VERSION: "0.15.2"
 
 jobs:

@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     });
     ts_lib.root_module.addCSourceFile(.{
         .file = b.path("vendor/tree-sitter/src/lib.c"),
-        .flags = &.{"-std=c11"},
+        .flags = &.{ "-std=c11", "-D_GNU_SOURCE" },
     });
     ts_lib.root_module.addIncludePath(b.path("vendor/tree-sitter/src"));
     ts_lib.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
