@@ -152,6 +152,10 @@ mix dialyzer                      # Typespec consistency
 
 MIT
 
+## Acknowledgements
+
+A heartfelt thank you to [Henrik Lissner](https://github.com/hlissner) and all contributors to [Doom Emacs](https://github.com/doomemacs/doomemacs). Its keybinding design, leader-key UX, and relentless focus on making a powerful editor feel fast and discoverable were a direct inspiration for Minga's command model.
+
 ---
 
 *Created with 🥨 in Colorado.*
