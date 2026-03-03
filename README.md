@@ -1,12 +1,12 @@
 # 🥨 Minga
 
-**A text editor that never loses your work — built on the technology that keeps
-phone networks running.**
+**A modal text editor where components crash and restart — without losing
+your work.**
 
-Minga is a modal terminal editor (think Vim-style editing) powered by a
-surprising pairing: the Erlang virtual machine for editor logic and Zig for
-terminal rendering. The result is an editor with crash resilience baked into
-its DNA.
+Minga is a terminal editor powered by a surprising pairing: the Erlang
+virtual machine for editor logic and Zig for terminal rendering. Every buffer,
+every subsystem is an isolated process. When something breaks, it restarts
+itself. Your undo history, cursor position, unsaved changes — untouched.
 
 ## Why Minga?
 
