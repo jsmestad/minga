@@ -201,7 +201,7 @@ Current status and planned features. Updated as development progresses.
 Roughly in priority order:
 
 1. ~~**Split windows**~~ — ✅ Done
-2. **LSP client** — Code intelligence via Language Server Protocol (completion, go-to-definition, diagnostics)
+2. **LSP client (diagnostics)** — 🚧 Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename pending.
 3. **Plugin system** — Elixir-based plugins that run as supervised processes
 4. **Additional themes** — Theme loading from disk, runtime switching
 5. **Visual block mode** — Column selection and editing

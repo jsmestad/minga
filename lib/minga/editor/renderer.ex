@@ -357,20 +357,15 @@ defmodule Minga.Editor.Renderer do
           boolean()
         ) :: {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
   defp render_window_content(state, window, win_viewport, {row_off, col_off}, is_active) do
-    buffer = window.buffer
     cursor = window_cursor(window, is_active)
     {cursor_line, cursor_byte_col} = cursor
 
-    # Each window reserves 1 row at the bottom for its own modeline.
-    # The global minibuffer is excluded from the layout rect, so we only
-    # subtract 1 here (not the standard footer_rows of 2).
     visible_rows = max(win_viewport.rows - 1, 1)
     viewport = scroll_to_cursor_modeline_only(win_viewport, {cursor_line, 0})
     {first_line, _} = visible_range_modeline_only(viewport)
 
-    snapshot = BufferServer.render_snapshot(buffer, first_line, visible_rows)
+    snapshot = BufferServer.render_snapshot(window.buffer, first_line, visible_rows)
     lines = snapshot.lines
-    line_count = snapshot.line_count
 
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
     cursor_col = Unicode.grapheme_col(cursor_line_text, cursor_byte_col)
@@ -378,92 +373,42 @@ defmodule Minga.Editor.Renderer do
     line_number_style = state.line_numbers
 
     gutter_w =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+      if line_number_style == :none, do: 0, else: Viewport.gutter_width(snapshot.line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
     viewport = scroll_to_cursor_modeline_only(viewport, {cursor_line, cursor_col})
 
-    # Only show visual selection in the active window
-    visual_selection =
-      if is_active do
-        visual_selection_grapheme_bounds(state, cursor, lines, first_line)
-      else
-        nil
-      end
+    alias Minga.Editor.Renderer.WindowFrame
 
-    # Use the correct highlight state for this window's buffer:
-    # active buffer → state.highlight, other buffers → cached highlights
-    highlight_for_buffer =
-      if window.buffer == state.buf.buffer do
-        state.highlight
-      else
-        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.new())
-      end
-
-    highlight =
-      if highlight_for_buffer.capture_names != [], do: highlight_for_buffer, else: nil
-
-    render_ctx = %Context{
+    frame = %WindowFrame{
       viewport: viewport,
-      visual_selection: visual_selection,
-      search_matches: SearchHighlight.search_matches_for_lines(state, lines, first_line),
       gutter_w: gutter_w,
       content_w: content_w,
-      confirm_match: SearchHighlight.current_confirm_match(state),
-      highlight: highlight
+      cursor: cursor,
+      lines: lines,
+      first_line: first_line,
+      is_active: is_active
     }
 
-    {gutter_commands, line_commands, _byte_offset} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce(
-        {[], [], snapshot.first_line_byte_offset},
-        fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
-          buf_line = first_line + screen_row
+    render_ctx = build_window_render_ctx(state, window, frame)
 
-          sign_w =
-            if render_ctx.diagnostic_signs == %{},
-              do: 0,
-              else: Gutter.sign_column_width()
-
-          sign_cmd =
-            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
-
-          gutter_cmd =
-            Gutter.render_number(
-              screen_row,
-              sign_w,
-              buf_line,
-              cursor_line,
-              gutter_w - sign_w,
-              line_number_style
-            )
-
-          content_cmds =
-            LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
-
-          # Offset all commands by window position
-          gutter_cmds =
-            (List.wrap(sign_cmd) ++ List.wrap(gutter_cmd))
-            |> offset_commands(row_off, col_off)
-
-          content_cmds = offset_commands(content_cmds, row_off, col_off)
-
-          {gutters ++ gutter_cmds, contents ++ content_cmds,
-           byte_offset + byte_size(line_text) + 1}
-        end
+    {gutter_commands, line_commands} =
+      render_window_lines(
+        lines,
+        first_line,
+        cursor_line,
+        gutter_w,
+        line_number_style,
+        render_ctx,
+        row_off,
+        col_off
       )
 
     tilde_commands =
-      if length(lines) < visible_rows do
-        for row <- length(lines)..(visible_rows - 1) do
-          Protocol.encode_draw(row + row_off, col_off + gutter_w, "~", fg: 0x555555)
-        end
-      else
-        []
-      end
+      render_tildes(lines, visible_rows, gutter_w, row_off, col_off)
 
     # Per-window modeline (Doom Emacs style — each window has its own)
+    line_count = snapshot.line_count
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     filetype = Map.get(snapshot, :filetype, :text)
@@ -553,6 +498,122 @@ defmodule Minga.Editor.Renderer do
   @spec prepend_if([binary()], binary() | []) :: [binary()]
   defp prepend_if(list, []), do: list
   defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
+
+  @spec build_window_render_ctx(state(), Window.t(), Minga.Editor.Renderer.WindowFrame.t()) ::
+          Context.t()
+  defp build_window_render_ctx(state, window, frame) do
+    visual_selection =
+      if frame.is_active do
+        visual_selection_grapheme_bounds(state, frame.cursor, frame.lines, frame.first_line)
+      else
+        nil
+      end
+
+    highlight = window_highlight(state, window)
+
+    %Context{
+      viewport: frame.viewport,
+      visual_selection: visual_selection,
+      search_matches:
+        SearchHighlight.search_matches_for_lines(state, frame.lines, frame.first_line),
+      gutter_w: frame.gutter_w,
+      content_w: frame.content_w,
+      confirm_match: SearchHighlight.current_confirm_match(state),
+      highlight: highlight
+    }
+  end
+
+  @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
+  defp window_highlight(state, window) do
+    hl =
+      if window.buffer == state.buf.buffer do
+        state.highlight
+      else
+        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.new())
+      end
+
+    if hl.capture_names != [], do: hl, else: nil
+  end
+
+  @spec render_window_lines(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Gutter.line_number_style(),
+          Context.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {[binary()], [binary()]}
+  defp render_window_lines(
+         lines,
+         first_line,
+         cursor_line,
+         gutter_w,
+         line_number_style,
+         render_ctx,
+         row_off,
+         col_off
+       ) do
+    {gutters, contents, _byte_offset} =
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce(
+        {[], [], 0},
+        fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
+          buf_line = first_line + screen_row
+
+          sign_w =
+            if render_ctx.diagnostic_signs == %{},
+              do: 0,
+              else: Gutter.sign_column_width()
+
+          sign_cmd =
+            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
+
+          gutter_cmd =
+            Gutter.render_number(
+              screen_row,
+              sign_w,
+              buf_line,
+              cursor_line,
+              gutter_w - sign_w,
+              line_number_style
+            )
+
+          content_cmds =
+            LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
+
+          gutter_cmds =
+            (List.wrap(sign_cmd) ++ List.wrap(gutter_cmd))
+            |> offset_commands(row_off, col_off)
+
+          content_cmds = offset_commands(content_cmds, row_off, col_off)
+
+          {gutters ++ gutter_cmds, contents ++ content_cmds,
+           byte_offset + byte_size(line_text) + 1}
+        end
+      )
+
+    {gutters, contents}
+  end
+
+  @spec render_tildes(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_tildes(lines, visible_rows, gutter_w, row_off, col_off) do
+    if length(lines) < visible_rows do
+      for row <- length(lines)..(visible_rows - 1) do
+        Protocol.encode_draw(row + row_off, col_off + gutter_w, "~", fg: 0x555555)
+      end
+    else
+      []
+    end
+  end
 
   # Only offsets draw_text commands (opcode 0x10) — cursor commands are handled separately.
   @spec offset_commands([binary()], non_neg_integer(), non_neg_integer()) :: [binary()]
