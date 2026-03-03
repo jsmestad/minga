@@ -1,12 +1,13 @@
 # 🥨 Minga
 
-**A modal text editor where components crash and restart — without losing
-your work.**
+**A modal text editor built for the age of AI agents, where any process can
+crash without taking down your editor.**
 
-Minga is a terminal editor powered by a surprising pairing: the Erlang
-virtual machine for editor logic and Zig for terminal rendering. Every buffer,
-every subsystem is an isolated process. When something breaks, it restarts
-itself. Your undo history, cursor position, unsaved changes — untouched.
+AI coding agents are rewriting your files, spawning subprocesses, and racing
+against your keystrokes. Most editors bolt this on and hope nothing breaks.
+Minga was designed from the ground up with isolated, supervised processes.
+When an agent hangs, a plugin crashes, or a renderer glitches, it restarts
+itself. Your buffers, undo history, and unsaved work stay untouched.
 
 ## Why Minga?
 
