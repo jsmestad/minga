@@ -2,7 +2,8 @@
 
 > **Looking for the full Emacs-to-Minga pitch?** See
 > [For Emacs Users](FOR-EMACS-USERS.md). This document is the technical
-> deep-dive on Elisp vs Elixir extensibility.
+> deep-dive proving Elixir matches Elisp's extensibility, and where it's
+> stronger.
 
 A detailed comparison of Elisp and Elixir as editor extension languages.
 proof that Elixir on the BEAM matches every property that makes Emacs
