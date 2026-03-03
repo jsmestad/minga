@@ -69,9 +69,12 @@ defmodule Minga.Editor.Mouse do
 
   # ── Left drag — separator resize or visual selection ──
 
-  def handle(%{resize_dragging: {dir, sep_pos}} = state, _row, col, :left, :drag)
-      when dir == :vertical do
-    handle_separator_drag(state, dir, sep_pos, col)
+  def handle(%{resize_dragging: {:vertical, sep_pos}} = state, _row, col, :left, :drag) do
+    handle_separator_drag(state, :vertical, sep_pos, col)
+  end
+
+  def handle(%{resize_dragging: {:horizontal, sep_pos}} = state, row, _col, :left, :drag) do
+    handle_separator_drag(state, :horizontal, sep_pos, row)
   end
 
   def handle(%{mouse_dragging: true, mouse_anchor: anchor} = state, row, col, :left, :drag) do

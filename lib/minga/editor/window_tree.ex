@@ -320,18 +320,23 @@ defmodule Minga.Editor.WindowTree do
          row,
          col
        ) do
-    # Horizontal splits don't have explicit separator rows (modelines serve
-    # as dividers), so we don't hit-test for them here.
     top_height = clamp_size(size, height)
     bottom_height = max(height - top_height, 1)
 
-    find_separator(top, {rect_row, rect_col, width, top_height}, row, col) ||
-      find_separator(
-        bottom,
-        {rect_row + top_height, rect_col, width, bottom_height},
-        row,
-        col
-      )
+    # The top pane's modeline row is the drag handle for horizontal resize.
+    modeline_row = rect_row + top_height - 1
+
+    if row == modeline_row and col >= rect_col and col < rect_col + width do
+      {:horizontal, modeline_row}
+    else
+      find_separator(top, {rect_row, rect_col, width, top_height}, row, col) ||
+        find_separator(
+          bottom,
+          {rect_row + top_height, rect_col, width, bottom_height},
+          row,
+          col
+        )
+    end
   end
 
   # ── Resize ─────────────────────────────────────────────────────────────────
@@ -384,7 +389,32 @@ defmodule Minga.Editor.WindowTree do
   defp do_resize(
          {:split, :horizontal, left, right, size},
          {rect_row, rect_col, width, height},
-         search_dir,
+         :horizontal,
+         separator_pos,
+         new_pos
+       ) do
+    top_height = clamp_size(size, height)
+    modeline_row = rect_row + top_height - 1
+
+    if modeline_row == separator_pos do
+      # This is the split to resize — new_pos is the desired modeline row.
+      # The top pane height = (new_pos - rect_row + 1) to keep modeline at new_pos.
+      new_top_height = max(min(new_pos - rect_row + 1, height - 1), 1)
+      {:ok, {:split, :horizontal, left, right, new_top_height}}
+    else
+      bottom_height = max(height - top_height, 1)
+      top_rect = {rect_row, rect_col, width, top_height}
+      bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
+      node = {:split, :horizontal, left, right, size}
+
+      recurse_resize_children(node, top_rect, bottom_rect, :horizontal, separator_pos, new_pos)
+    end
+  end
+
+  defp do_resize(
+         {:split, :horizontal, left, right, size},
+         {rect_row, rect_col, width, height},
+         :vertical,
          separator_pos,
          new_pos
        ) do
@@ -394,7 +424,7 @@ defmodule Minga.Editor.WindowTree do
     bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
     node = {:split, :horizontal, left, right, size}
 
-    recurse_resize_children(node, top_rect, bottom_rect, search_dir, separator_pos, new_pos)
+    recurse_resize_children(node, top_rect, bottom_rect, :vertical, separator_pos, new_pos)
   end
 
   # Recurse into both children of a split looking for the separator to resize.
