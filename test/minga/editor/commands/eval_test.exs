@@ -2,6 +2,8 @@ defmodule Minga.Editor.Commands.EvalTest do
   @moduledoc false
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Eval
   alias Minga.Editor.State, as: EditorState
@@ -69,7 +71,17 @@ defmodule Minga.Editor.Commands.EvalTest do
   describe "error handling" do
     test "syntax error returns formatted error on status line" do
       state = build_state()
-      result = Eval.execute(state, {:eval_expression, "1 +"})
+
+      result =
+        capture_io(:stderr, fn ->
+          send(self(), {:result, Eval.execute(state, {:eval_expression, "1 +"})})
+        end)
+        |> then(fn _io ->
+          receive do
+            {:result, r} -> r
+          end
+        end)
+
       assert result.status_msg =~ "**"
     end
 
@@ -81,7 +93,17 @@ defmodule Minga.Editor.Commands.EvalTest do
 
     test "undefined variable returns error" do
       state = build_state()
-      result = Eval.execute(state, {:eval_expression, "undefined_var"})
+
+      result =
+        capture_io(:stderr, fn ->
+          send(self(), {:result, Eval.execute(state, {:eval_expression, "undefined_var"})})
+        end)
+        |> then(fn _io ->
+          receive do
+            {:result, r} -> r
+          end
+        end)
+
       assert result.status_msg =~ "**"
     end
 
