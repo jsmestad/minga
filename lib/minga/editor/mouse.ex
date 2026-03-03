@@ -13,6 +13,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Mode
   alias Minga.Mode.VisualState
@@ -58,9 +59,99 @@ defmodule Minga.Editor.Mouse do
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
-  # ── Left click (press) — focuses window, moves cursor, records drag anchor ──
+  # ── Left click (press) — separator resize, window focus, or cursor move ──
 
   def handle(state, row, col, :left, :press) do
+    state
+    |> maybe_start_separator_drag(row, col)
+    |> maybe_handle_content_click(row, col)
+  end
+
+  # ── Left drag — separator resize or visual selection ──
+
+  def handle(%{resize_dragging: {dir, sep_pos}} = state, _row, col, :left, :drag)
+      when dir == :vertical do
+    handle_separator_drag(state, dir, sep_pos, col)
+  end
+
+  def handle(%{mouse_dragging: true, mouse_anchor: anchor} = state, row, col, :left, :drag) do
+    state =
+      state
+      |> maybe_auto_scroll(row)
+      |> move_to_mouse_pos(row, col)
+
+    # Enter visual mode on first drag movement
+    enter_visual_if_needed(state, anchor)
+  end
+
+  # ── Left release — finalize separator resize, click, or drag ──
+
+  def handle(%{resize_dragging: {_, _}} = state, _row, _col, :left, :release) do
+    %{state | resize_dragging: nil}
+  end
+
+  def handle(%{mouse_dragging: true, mode: :visual} = state, _row, _col, :left, :release) do
+    %{state | mouse_dragging: false, mouse_anchor: nil}
+  end
+
+  def handle(%{mouse_dragging: true} = state, _row, _col, :left, :release) do
+    %{state | mouse_dragging: false, mouse_anchor: nil}
+  end
+
+  # Ignore all other mouse events (right click, middle click, motion, etc.)
+  def handle(state, _row, _col, _button, _type), do: state
+
+  # ── Separator resize helpers ──────────────────────────────────────────────
+
+  # If the click is on a separator, start a resize drag and return state
+  # with resize_dragging set. Otherwise return state unchanged.
+  @spec maybe_start_separator_drag(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp maybe_start_separator_drag(%{window_tree: nil} = state, _row, _col), do: state
+
+  defp maybe_start_separator_drag(state, row, col) do
+    screen = EditorState.screen_rect(state)
+
+    case WindowTree.separator_at(state.window_tree, screen, row, col) do
+      {:ok, {dir, sep_pos}} ->
+        %{state | resize_dragging: {dir, sep_pos}}
+
+      :error ->
+        state
+    end
+  end
+
+  # If a resize drag was started, skip content click handling.
+  @spec maybe_handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp maybe_handle_content_click(%{resize_dragging: {_, _}} = state, _row, _col), do: state
+  defp maybe_handle_content_click(state, row, col), do: handle_content_click(state, row, col)
+
+  @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
+          state()
+  defp handle_separator_drag(state, dir, sep_pos, new_pos) do
+    screen = EditorState.screen_rect(state)
+
+    case WindowTree.resize_at(state.window_tree, screen, dir, sep_pos, new_pos) do
+      {:ok, new_tree} ->
+        state = %{state | window_tree: new_tree, resize_dragging: {dir, new_pos}}
+        resize_windows_to_layout(state)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec resize_windows_to_layout(state()) :: state()
+  defp resize_windows_to_layout(state) do
+    screen = EditorState.screen_rect(state)
+    layouts = WindowTree.layout(state.window_tree, screen)
+
+    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+      EditorState.update_window(acc, id, &Window.resize(&1, height, width))
+    end)
+  end
+
+  @spec handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp handle_content_click(state, row, col) do
     state = maybe_focus_window_at(state, row, col)
 
     case mouse_to_buffer_pos(state, row, col) do
@@ -80,31 +171,6 @@ defmodule Minga.Editor.Mouse do
         })
     end
   end
-
-  # ── Left drag — starts or extends visual selection ──
-
-  def handle(%{mouse_dragging: true, mouse_anchor: anchor} = state, row, col, :left, :drag) do
-    state =
-      state
-      |> maybe_auto_scroll(row)
-      |> move_to_mouse_pos(row, col)
-
-    # Enter visual mode on first drag movement
-    enter_visual_if_needed(state, anchor)
-  end
-
-  # ── Left release — finalize click or drag ──
-
-  def handle(%{mouse_dragging: true, mode: :visual} = state, _row, _col, :left, :release) do
-    %{state | mouse_dragging: false, mouse_anchor: nil}
-  end
-
-  def handle(%{mouse_dragging: true} = state, _row, _col, :left, :release) do
-    %{state | mouse_dragging: false, mouse_anchor: nil}
-  end
-
-  # Ignore all other mouse events (right click, middle click, motion, etc.)
-  def handle(state, _row, _col, _button, _type), do: state
 
   # Focus the window under the mouse click (split mode only).
   @spec maybe_focus_window_at(state(), non_neg_integer(), non_neg_integer()) :: state()

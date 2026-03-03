@@ -53,6 +53,7 @@ defmodule Minga.Editor.State do
             reg: %Registers{},
             mouse_dragging: false,
             mouse_anchor: nil,
+            resize_dragging: nil,
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
             autopair_enabled: true,
@@ -82,6 +83,7 @@ defmodule Minga.Editor.State do
           reg: Registers.t(),
           mouse_dragging: boolean(),
           mouse_anchor: {non_neg_integer(), non_neg_integer()} | nil,
+          resize_dragging: {WindowTree.direction(), non_neg_integer()} | nil,
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
           autopair_enabled: boolean(),
@@ -126,7 +128,7 @@ defmodule Minga.Editor.State do
   @spec split?(t()) :: boolean()
   def split?(%__MODULE__{window_tree: nil}), do: false
   def split?(%__MODULE__{window_tree: {:leaf, _}}), do: false
-  def split?(%__MODULE__{window_tree: {:split, _, _, _}}), do: true
+  def split?(%__MODULE__{window_tree: {:split, _, _, _, _}}), do: true
 
   @doc "Returns the screen rect for layout computation, excluding the global minibuffer row."
   @spec screen_rect(t()) :: WindowTree.rect()

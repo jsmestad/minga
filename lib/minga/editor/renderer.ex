@@ -484,19 +484,26 @@ defmodule Minga.Editor.Renderer do
   @spec collect_separator_cols(WindowTree.t(), WindowTree.rect()) :: [non_neg_integer()]
   defp collect_separator_cols({:leaf, _}, _rect), do: []
 
-  defp collect_separator_cols({:split, :vertical, left, right}, {row, col, width, height}) do
-    left_width = div(width - 1, 2)
+  defp collect_separator_cols(
+         {:split, :vertical, left, right, size},
+         {row, col, width, height}
+       ) do
+    usable = width - 1
+    left_width = WindowTree.clamp_size(size, usable)
+    right_width = max(usable - left_width, 1)
     separator_col = col + left_width
-    right_width = width - left_width - 1
 
     [separator_col] ++
       collect_separator_cols(left, {row, col, left_width, height}) ++
       collect_separator_cols(right, {row, separator_col + 1, right_width, height})
   end
 
-  defp collect_separator_cols({:split, :horizontal, top, bottom}, {row, col, width, height}) do
-    top_height = div(height, 2)
-    bottom_height = height - top_height
+  defp collect_separator_cols(
+         {:split, :horizontal, top, bottom, size},
+         {row, col, width, height}
+       ) do
+    top_height = WindowTree.clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
 
     collect_separator_cols(top, {row, col, width, top_height}) ++
       collect_separator_cols(bottom, {row + top_height, col, width, bottom_height})

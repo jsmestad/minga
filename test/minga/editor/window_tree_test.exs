@@ -54,14 +54,14 @@ defmodule Minga.Editor.WindowTreeTest do
     test "vertical split" do
       tree = WindowTree.new(1)
 
-      assert {:ok, {:split, :vertical, {:leaf, 1}, {:leaf, 2}}} =
+      assert {:ok, {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0}} =
                WindowTree.split(tree, 1, :vertical, 2)
     end
 
     test "horizontal split" do
       tree = WindowTree.new(1)
 
-      assert {:ok, {:split, :horizontal, {:leaf, 1}, {:leaf, 2}}} =
+      assert {:ok, {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0}} =
                WindowTree.split(tree, 1, :horizontal, 2)
     end
 
@@ -73,14 +73,16 @@ defmodule Minga.Editor.WindowTreeTest do
       {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
       {:ok, tree} = WindowTree.split(tree, 2, :horizontal, 3)
 
-      assert {:split, :vertical, {:leaf, 1}, {:split, :horizontal, {:leaf, 2}, {:leaf, 3}}} = tree
+      assert {:split, :vertical, {:leaf, 1}, {:split, :horizontal, {:leaf, 2}, {:leaf, 3}, 0}, 0} =
+               tree
     end
 
     test "nested split on left child" do
       {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
       {:ok, tree} = WindowTree.split(tree, 1, :horizontal, 3)
 
-      assert {:split, :vertical, {:split, :horizontal, {:leaf, 1}, {:leaf, 3}}, {:leaf, 2}} = tree
+      assert {:split, :vertical, {:split, :horizontal, {:leaf, 1}, {:leaf, 3}, 0}, {:leaf, 2}, 0} =
+               tree
     end
   end
 
@@ -109,7 +111,7 @@ defmodule Minga.Editor.WindowTreeTest do
       {:ok, tree} = WindowTree.split(tree, 2, :horizontal, 3)
 
       # Close window 2, window 3 should take its place
-      assert {:ok, {:split, :vertical, {:leaf, 1}, {:leaf, 3}}} =
+      assert {:ok, {:split, :vertical, {:leaf, 1}, {:leaf, 3}, 0}} =
                WindowTree.close(tree, 2)
     end
 

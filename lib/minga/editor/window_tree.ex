@@ -24,8 +24,15 @@ defmodule Minga.Editor.WindowTree do
   @typedoc "A screen rectangle: {row, col, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
 
-  @typedoc "The tree structure."
-  @type t :: {:leaf, Window.id()} | {:split, direction(), t(), t()}
+  @typedoc """
+  The tree structure.
+
+  Split nodes carry a `size` — the number of columns (vertical) or rows
+  (horizontal) allocated to the first child. The second child gets the
+  remainder minus any separator. A size of 0 means "split evenly" and is
+  resolved during layout.
+  """
+  @type t :: {:leaf, Window.id()} | {:split, direction(), t(), t(), non_neg_integer()}
 
   @typedoc "Navigation direction for focus movement."
   @type nav_direction :: :left | :right | :up | :down
@@ -57,19 +64,19 @@ defmodule Minga.Editor.WindowTree do
   end
 
   defp do_split({:leaf, id}, id, direction, new_id) do
-    {:ok, {:split, direction, {:leaf, id}, {:leaf, new_id}}}
+    {:ok, {:split, direction, {:leaf, id}, {:leaf, new_id}, 0}}
   end
 
   defp do_split({:leaf, _other}, _target, _dir, _new_id), do: :not_found
 
-  defp do_split({:split, dir, left, right}, target, split_dir, new_id) do
+  defp do_split({:split, dir, left, right, ratio}, target, split_dir, new_id) do
     case do_split(left, target, split_dir, new_id) do
       {:ok, new_left} ->
-        {:ok, {:split, dir, new_left, right}}
+        {:ok, {:split, dir, new_left, right, ratio}}
 
       :not_found ->
         case do_split(right, target, split_dir, new_id) do
-          {:ok, new_right} -> {:ok, {:split, dir, left, new_right}}
+          {:ok, new_right} -> {:ok, {:split, dir, left, new_right, ratio}}
           :not_found -> :not_found
         end
     end
@@ -87,7 +94,7 @@ defmodule Minga.Editor.WindowTree do
   @spec close(t(), Window.id()) :: {:ok, t()} | :error
   def close({:leaf, _id}, _target), do: :error
 
-  def close({:split, _dir, _left, _right} = tree, target) do
+  def close({:split, _dir, _left, _right, _ratio} = tree, target) do
     case do_close(tree, target) do
       {:ok, _} = result -> result
       :not_found -> :error
@@ -96,17 +103,17 @@ defmodule Minga.Editor.WindowTree do
 
   defp do_close({:leaf, _}, _target), do: :not_found
 
-  defp do_close({:split, _dir, {:leaf, id}, right}, id), do: {:ok, right}
-  defp do_close({:split, _dir, left, {:leaf, id}}, id), do: {:ok, left}
+  defp do_close({:split, _dir, {:leaf, id}, right, _ratio}, id), do: {:ok, right}
+  defp do_close({:split, _dir, left, {:leaf, id}, _ratio}, id), do: {:ok, left}
 
-  defp do_close({:split, dir, left, right}, target) do
+  defp do_close({:split, dir, left, right, ratio}, target) do
     case do_close(left, target) do
       {:ok, new_left} ->
-        {:ok, {:split, dir, new_left, right}}
+        {:ok, {:split, dir, new_left, right, ratio}}
 
       :not_found ->
         case do_close(right, target) do
-          {:ok, new_right} -> {:ok, {:split, dir, left, new_right}}
+          {:ok, new_right} -> {:ok, {:split, dir, left, new_right, ratio}}
           :not_found -> :not_found
         end
     end
@@ -117,19 +124,19 @@ defmodule Minga.Editor.WindowTree do
   @doc "Returns all window ids in the tree, left-to-right / top-to-bottom order."
   @spec leaves(t()) :: [Window.id()]
   def leaves({:leaf, id}), do: [id]
-  def leaves({:split, _dir, left, right}), do: leaves(left) ++ leaves(right)
+  def leaves({:split, _dir, left, right, _ratio}), do: leaves(left) ++ leaves(right)
 
   @doc "Returns the number of leaves (windows) in the tree."
   @spec count(t()) :: pos_integer()
   def count({:leaf, _}), do: 1
-  def count({:split, _dir, left, right}), do: count(left) + count(right)
+  def count({:split, _dir, left, right, _ratio}), do: count(left) + count(right)
 
   @doc "Returns true if the given window id exists in the tree."
   @spec member?(t(), Window.id()) :: boolean()
   def member?({:leaf, id}, id), do: true
   def member?({:leaf, _}, _target), do: false
 
-  def member?({:split, _dir, left, right}, target),
+  def member?({:split, _dir, left, right, _ratio}, target),
     do: member?(left, target) or member?(right, target)
 
   # ── Layout ────────────────────────────────────────────────────────────────
@@ -149,10 +156,11 @@ defmodule Minga.Editor.WindowTree do
 
   def layout({:leaf, id}, rect), do: [{id, rect}]
 
-  def layout({:split, :vertical, left, right}, {row, col, width, height}) do
+  def layout({:split, :vertical, left, right, size}, {row, col, width, height}) do
     # Reserve 1 column for the vertical separator
-    left_width = div(width - 1, 2)
-    right_width = width - left_width - 1
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    right_width = max(usable - left_width, 1)
     separator_col = col + left_width
 
     left_layouts = layout(left, {row, col, left_width, height})
@@ -161,15 +169,24 @@ defmodule Minga.Editor.WindowTree do
     left_layouts ++ right_layouts
   end
 
-  def layout({:split, :horizontal, top, bottom}, {row, col, width, height}) do
-    top_height = div(height, 2)
-    bottom_height = height - top_height
+  def layout({:split, :horizontal, top, bottom, size}, {row, col, width, height}) do
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
 
     top_layouts = layout(top, {row, col, width, top_height})
     bottom_layouts = layout(bottom, {row + top_height, col, width, bottom_height})
 
     top_layouts ++ bottom_layouts
   end
+
+  @doc """
+  Resolves a split size: 0 means "half", otherwise clamp to [1, total-1].
+
+  Used by layout and renderer to consistently compute child dimensions.
+  """
+  @spec clamp_size(non_neg_integer(), pos_integer()) :: pos_integer()
+  def clamp_size(0, total), do: div(total, 2)
+  def clamp_size(size, total), do: max(min(size, total - 1), 1)
 
   # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -249,6 +266,163 @@ defmodule Minga.Editor.WindowTree do
          end) do
       {id, rect} -> {:ok, id, rect}
       nil -> :error
+    end
+  end
+
+  # ── Separator hit testing ──────────────────────────────────────────────────
+
+  @doc """
+  Tests whether a screen coordinate is on a separator.
+
+  Returns `{:ok, :vertical | :horizontal, separator_position}` or `:error`.
+  For vertical splits, `separator_position` is the column; for horizontal,
+  it's the row. The position is used to identify which split node to resize.
+  """
+  @spec separator_at(t(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, {direction(), non_neg_integer()}} | :error
+  def separator_at(tree, screen_rect, row, col) do
+    case find_separator(tree, screen_rect, row, col) do
+      nil -> :error
+      result -> {:ok, result}
+    end
+  end
+
+  @spec find_separator(t(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {direction(), non_neg_integer()} | nil
+  defp find_separator({:leaf, _}, _rect, _row, _col), do: nil
+
+  defp find_separator(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         row,
+         col
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    sep_col = rect_col + left_width
+
+    if col == sep_col and row >= rect_row and row < rect_row + height do
+      {:vertical, sep_col}
+    else
+      find_separator(left, {rect_row, rect_col, left_width, height}, row, col) ||
+        find_separator(
+          right,
+          {rect_row, sep_col + 1, max(usable - left_width, 1), height},
+          row,
+          col
+        )
+    end
+  end
+
+  defp find_separator(
+         {:split, :horizontal, top, bottom, size},
+         {rect_row, rect_col, width, height},
+         row,
+         col
+       ) do
+    # Horizontal splits don't have explicit separator rows (modelines serve
+    # as dividers), so we don't hit-test for them here.
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+
+    find_separator(top, {rect_row, rect_col, width, top_height}, row, col) ||
+      find_separator(
+        bottom,
+        {rect_row + top_height, rect_col, width, bottom_height},
+        row,
+        col
+      )
+  end
+
+  # ── Resize ─────────────────────────────────────────────────────────────────
+
+  @doc """
+  Resizes the split that owns the separator at `separator_pos` to place
+  that separator at `new_pos`. Only resizes vertical splits (by column)
+  for now.
+
+  Returns `{:ok, new_tree}` or `:error` if no matching split is found.
+  """
+  @spec resize_at(t(), rect(), direction(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t()} | :error
+  def resize_at(tree, screen_rect, direction, separator_pos, new_pos) do
+    case do_resize(tree, screen_rect, direction, separator_pos, new_pos) do
+      {:ok, _} = result -> result
+      :not_found -> :error
+    end
+  end
+
+  @spec do_resize(t(), rect(), direction(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, t()} | :not_found
+  defp do_resize({:leaf, _}, _rect, _dir, _sep, _new), do: :not_found
+
+  defp do_resize(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         :vertical,
+         separator_pos,
+         new_pos
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    sep_col = rect_col + left_width
+
+    if sep_col == separator_pos do
+      # This is the split to resize — new_pos is the desired separator column
+      new_left_width = max(min(new_pos - rect_col, usable - 1), 1)
+      {:ok, {:split, :vertical, left, right, new_left_width}}
+    else
+      left_rect = {rect_row, rect_col, left_width, height}
+      right_rect = {rect_row, sep_col + 1, max(usable - left_width, 1), height}
+
+      node = {:split, :vertical, left, right, size}
+
+      recurse_resize_children(node, left_rect, right_rect, :vertical, separator_pos, new_pos)
+    end
+  end
+
+  defp do_resize(
+         {:split, :horizontal, left, right, size},
+         {rect_row, rect_col, width, height},
+         search_dir,
+         separator_pos,
+         new_pos
+       ) do
+    top_height = clamp_size(size, height)
+    bottom_height = max(height - top_height, 1)
+    top_rect = {rect_row, rect_col, width, top_height}
+    bottom_rect = {rect_row + top_height, rect_col, width, bottom_height}
+    node = {:split, :horizontal, left, right, size}
+
+    recurse_resize_children(node, top_rect, bottom_rect, search_dir, separator_pos, new_pos)
+  end
+
+  # Recurse into both children of a split looking for the separator to resize.
+  @spec recurse_resize_children(
+          t(),
+          rect(),
+          rect(),
+          direction(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {:ok, t()} | :not_found
+  defp recurse_resize_children(
+         {:split, dir, left, right, size},
+         left_rect,
+         right_rect,
+         search_dir,
+         sep_pos,
+         new_pos
+       ) do
+    case do_resize(left, left_rect, search_dir, sep_pos, new_pos) do
+      {:ok, new_left} ->
+        {:ok, {:split, dir, new_left, right, size}}
+
+      :not_found ->
+        case do_resize(right, right_rect, search_dir, sep_pos, new_pos) do
+          {:ok, new_right} -> {:ok, {:split, dir, left, new_right, size}}
+          :not_found -> :not_found
+        end
     end
   end
 end
