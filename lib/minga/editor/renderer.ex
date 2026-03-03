@@ -471,20 +471,23 @@ defmodule Minga.Editor.Renderer do
     {commands, cursor_info}
   end
 
-  # Renders vertical separator lines for vertical splits.
+  # Renders vertical separator lines for vertical splits, scoped to each
+  # split's row range (not the full screen height).
   @spec render_separators(WindowTree.t(), WindowTree.rect(), pos_integer()) :: [binary()]
-  defp render_separators(tree, screen_rect, total_rows) do
-    separator_cols = collect_separator_cols(tree, screen_rect)
+  defp render_separators(tree, screen_rect, _total_rows) do
+    separators = collect_separators(tree, screen_rect)
 
-    for col <- separator_cols, row <- 0..(total_rows - 1) do
+    for {col, start_row, end_row} <- separators, row <- start_row..end_row do
       Protocol.encode_draw(row, col, "│", fg: 0x555555)
     end
   end
 
-  @spec collect_separator_cols(WindowTree.t(), WindowTree.rect()) :: [non_neg_integer()]
-  defp collect_separator_cols({:leaf, _}, _rect), do: []
+  @typep separator_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
-  defp collect_separator_cols(
+  @spec collect_separators(WindowTree.t(), WindowTree.rect()) :: [separator_span()]
+  defp collect_separators({:leaf, _}, _rect), do: []
+
+  defp collect_separators(
          {:split, :vertical, left, right, size},
          {row, col, width, height}
        ) do
@@ -493,20 +496,20 @@ defmodule Minga.Editor.Renderer do
     right_width = max(usable - left_width, 1)
     separator_col = col + left_width
 
-    [separator_col] ++
-      collect_separator_cols(left, {row, col, left_width, height}) ++
-      collect_separator_cols(right, {row, separator_col + 1, right_width, height})
+    [{separator_col, row, row + height - 1}] ++
+      collect_separators(left, {row, col, left_width, height}) ++
+      collect_separators(right, {row, separator_col + 1, right_width, height})
   end
 
-  defp collect_separator_cols(
+  defp collect_separators(
          {:split, :horizontal, top, bottom, size},
          {row, col, width, height}
        ) do
     top_height = WindowTree.clamp_size(size, height)
     bottom_height = max(height - top_height, 1)
 
-    collect_separator_cols(top, {row, col, width, top_height}) ++
-      collect_separator_cols(bottom, {row + top_height, col, width, bottom_height})
+    collect_separators(top, {row, col, width, top_height}) ++
+      collect_separators(bottom, {row + top_height, col, width, bottom_height})
   end
 
   # Offsets draw command row/col positions by the given amounts.
