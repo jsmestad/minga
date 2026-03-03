@@ -152,4 +152,40 @@ defmodule Minga.Keymap.DefaultsTest do
       end
     end
   end
+
+  describe "normal_bindings/0" do
+    test "returns a non-empty map" do
+      bindings = Defaults.normal_bindings()
+      assert is_map(bindings)
+      assert map_size(bindings) > 0
+    end
+
+    test "contains core movement keys" do
+      bindings = Defaults.normal_bindings()
+      assert {_, _} = bindings[{?h, 0}]
+      assert {_, _} = bindings[{?j, 0}]
+      assert {_, _} = bindings[{?k, 0}]
+      assert {_, _} = bindings[{?l, 0}]
+    end
+
+    test "contains Ctrl+ bindings" do
+      bindings = Defaults.normal_bindings()
+      assert {_, _} = bindings[{?d, 0x02}]
+      assert {_, _} = bindings[{?u, 0x02}]
+    end
+
+    test "contains operator keys" do
+      bindings = Defaults.normal_bindings()
+      assert {_, _} = bindings[{?d, 0}]
+      assert {_, _} = bindings[{?c, 0}]
+      assert {_, _} = bindings[{?y, 0}]
+    end
+
+    test "each entry is {command_atom, description_string}" do
+      for {_key, {command, description}} <- Defaults.normal_bindings() do
+        assert is_atom(command)
+        assert is_binary(description)
+      end
+    end
+  end
 end

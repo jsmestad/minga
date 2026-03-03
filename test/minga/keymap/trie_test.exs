@@ -253,4 +253,41 @@ defmodule Minga.Keymap.TrieTest do
       assert key(?s, @ctrl) in keys
     end
   end
+
+  describe "lookup_sequence/2" do
+    test "single-key command returns command with description" do
+      trie = Trie.new()
+      trie = Trie.bind(trie, [key(?j)], :move_down, "Move cursor down")
+
+      assert {:command, :move_down, "Move cursor down"} =
+               Trie.lookup_sequence(trie, [key(?j)])
+    end
+
+    test "multi-key command returns command with description" do
+      trie = Trie.new()
+      trie = Trie.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+
+      assert {:command, :document_start, "Go to first line"} =
+               Trie.lookup_sequence(trie, [key(?g), key(?g)])
+    end
+
+    test "partial sequence returns prefix" do
+      trie = Trie.new()
+      trie = Trie.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+
+      assert {:prefix, _node} = Trie.lookup_sequence(trie, [key(?g)])
+    end
+
+    test "unbound sequence returns not_found" do
+      trie = Trie.new()
+      trie = Trie.bind(trie, [key(?j)], :move_down, "Move cursor down")
+
+      assert :not_found = Trie.lookup_sequence(trie, [key(?z)])
+    end
+
+    test "empty sequence returns not_found" do
+      trie = Trie.new()
+      assert :not_found = Trie.lookup_sequence(trie, [])
+    end
+  end
 end

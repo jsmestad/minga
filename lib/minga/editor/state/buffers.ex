@@ -11,14 +11,16 @@ defmodule Minga.Editor.State.Buffers do
           buffers: [pid()],
           active_buffer: non_neg_integer(),
           messages_buffer: pid() | nil,
-          scratch_buffer: pid() | nil
+          scratch_buffer: pid() | nil,
+          help_buffer: pid() | nil
         }
 
   defstruct buffer: nil,
             buffers: [],
             active_buffer: 0,
             messages_buffer: nil,
-            scratch_buffer: nil
+            scratch_buffer: nil,
+            help_buffer: nil
 
   @doc "Appends a buffer pid and makes it active."
   @spec add(t(), pid()) :: t()

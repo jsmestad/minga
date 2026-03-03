@@ -92,6 +92,90 @@ defmodule Minga.Mode.Normal do
   """
   @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
 
+  # ── Describe key (SPC h k) ───────────────────────────────────────────────
+  # Must be before leader key handling so SPC in describe-key mode doesn't
+  # trigger the normal leader sequence.
+
+  # Escape cancels describe-key
+  def handle_key({@escape, _mods}, %ModeState{pending_describe_key: true} = state) do
+    {:continue,
+     %{state | pending_describe_key: false, describe_key_leader_node: nil, describe_key_keys: []}}
+  end
+
+  # SPC while in describe-key (not already walking leader trie) → start walking leader trie
+  def handle_key(
+        {@space, 0},
+        %ModeState{pending_describe_key: true, describe_key_leader_node: nil} = state
+      ) do
+    leader_trie = Defaults.leader_trie()
+
+    {:continue, %{state | describe_key_leader_node: leader_trie, describe_key_keys: ["SPC"]}}
+  end
+
+  # Key while walking leader trie in describe-key mode
+  def handle_key(
+        key,
+        %ModeState{pending_describe_key: true, describe_key_leader_node: node} = state
+      )
+      when is_map(node) do
+    formatted = WhichKey.format_key(key)
+    keys_so_far = [formatted | state.describe_key_keys]
+
+    case Trie.lookup(node, key) do
+      {:command, command} ->
+        child = node.children[key]
+        description = child.description || ""
+        key_str = keys_so_far |> Enum.reverse() |> Enum.join(" ")
+
+        {:execute, {:describe_key_result, key_str, command, description},
+         %{
+           state
+           | pending_describe_key: false,
+             describe_key_leader_node: nil,
+             describe_key_keys: []
+         }}
+
+      {:prefix, sub_node} ->
+        {:continue, %{state | describe_key_leader_node: sub_node, describe_key_keys: keys_so_far}}
+
+      :not_found ->
+        key_str = keys_so_far |> Enum.reverse() |> Enum.join(" ")
+
+        {:execute, {:describe_key_not_found, key_str},
+         %{
+           state
+           | pending_describe_key: false,
+             describe_key_leader_node: nil,
+             describe_key_keys: []
+         }}
+    end
+  end
+
+  # Any other key while in describe-key (not leader) → look up in normal bindings
+  def handle_key(key, %ModeState{pending_describe_key: true} = state) do
+    formatted = WhichKey.format_key(key)
+
+    case Map.fetch(Defaults.normal_bindings(), key) do
+      {:ok, {command, description}} ->
+        {:execute, {:describe_key_result, formatted, command, description},
+         %{
+           state
+           | pending_describe_key: false,
+             describe_key_leader_node: nil,
+             describe_key_keys: []
+         }}
+
+      :error ->
+        {:execute, {:describe_key_not_found, formatted},
+         %{
+           state
+           | pending_describe_key: false,
+             describe_key_leader_node: nil,
+             describe_key_keys: []
+         }}
+    end
+  end
+
   # ── Leader key handling ───────────────────────────────────────────────────
 
   # SPC pressed while not in leader mode → start leader sequence.

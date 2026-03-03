@@ -20,7 +20,10 @@ defmodule Minga.Mode.State do
             pending_mark: nil,
             pending_register: false,
             pending_macro_register: false,
-            pending_macro_replay: false
+            pending_macro_replay: false,
+            pending_describe_key: false,
+            describe_key_leader_node: nil,
+            describe_key_keys: []
 
   @typedoc "Pending find-char direction."
   @type find_direction :: :f | :F | :t | :T
@@ -38,6 +41,9 @@ defmodule Minga.Mode.State do
           pending_mark: pending_mark_kind() | nil,
           pending_register: boolean(),
           pending_macro_register: boolean(),
-          pending_macro_replay: boolean()
+          pending_macro_replay: boolean(),
+          pending_describe_key: boolean(),
+          describe_key_leader_node: Trie.node_t() | nil,
+          describe_key_keys: [String.t()]
         }
 end

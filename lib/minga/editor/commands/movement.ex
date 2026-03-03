@@ -256,7 +256,10 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(state, :window_close), do: close_window(state)
 
-  def execute(state, :describe_key), do: state
+  def execute(state, :describe_key) do
+    new_mode_state = %{state.mode_state | pending_describe_key: true}
+    %{state | mode_state: new_mode_state, status_msg: "Press key to describe:"}
+  end
 
   @spec split_window(state(), WindowTree.direction()) :: state()
   defp split_window(%{window_tree: nil} = state, _direction), do: state

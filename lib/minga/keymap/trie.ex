@@ -165,6 +165,52 @@ defmodule Minga.Keymap.Trie do
   end
 
   @doc """
+  Looks up a full key sequence in the trie, walking node by node.
+
+  Returns one of:
+
+  * `{:command, atom(), String.t()}` — the sequence maps to a command with its description
+  * `{:prefix, node_t()}` — the sequence is a valid prefix (more keys needed)
+  * `:not_found` — no match at some point in the sequence
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Trie.new()
+      iex> trie = Minga.Keymap.Trie.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
+      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?g, 0}, {?g, 0}])
+      {:command, :document_start, "Go to first line"}
+      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?g, 0}])
+      {:prefix, %Minga.Keymap.Trie.Node{children: %{{103, 0} => %Minga.Keymap.Trie.Node{children: %{}, command: :document_start, description: "Go to first line"}}, command: nil, description: nil}}
+      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?z, 0}])
+      :not_found
+  """
+  @spec lookup_sequence(node_t(), [key()]) ::
+          {:command, atom(), String.t()} | {:prefix, node_t()} | :not_found
+  def lookup_sequence(_node, []), do: :not_found
+
+  def lookup_sequence(node, [key]) do
+    case lookup(node, key) do
+      {:command, command} ->
+        child = node.children[key]
+        {:command, command, child.description || ""}
+
+      {:prefix, _} = prefix ->
+        prefix
+
+      :not_found ->
+        :not_found
+    end
+  end
+
+  def lookup_sequence(node, [key | rest]) do
+    case lookup(node, key) do
+      {:prefix, child} -> lookup_sequence(child, rest)
+      {:command, _} -> :not_found
+      :not_found -> :not_found
+    end
+  end
+
+  @doc """
   Returns the direct children of a trie node for which-key display.
 
   Each entry is a `{key, label}` tuple where `label` is either the

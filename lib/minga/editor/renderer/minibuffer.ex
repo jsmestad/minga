@@ -71,6 +71,26 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  def render(
+        %{mode: :normal, mode_state: %{pending_describe_key: true, describe_key_keys: keys}},
+        row,
+        cols
+      ) do
+    prompt =
+      case keys do
+        [] -> "Press key to describe:"
+        _ -> "Press key to describe: " <> (keys |> Enum.reverse() |> Enum.join(" ")) <> " …"
+      end
+
+    Protocol.encode_draw(
+      row,
+      0,
+      String.pad_trailing(prompt, cols),
+      fg: 0xEEEEEE,
+      bg: 0x000000
+    )
+  end
+
   def render(%{status_msg: msg}, row, cols) when is_binary(msg) do
     Protocol.encode_draw(
       row,

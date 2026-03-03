@@ -32,6 +32,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Editing
   alias Minga.Editor.Commands.Eval
+  alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
@@ -128,6 +129,11 @@ defmodule Minga.Editor.Commands do
   # ── Eval ───────────────────────────────────────────────────────────────────
 
   def execute(state, {:eval_expression, _} = cmd), do: Eval.execute(state, cmd)
+
+  # ── Help ───────────────────────────────────────────────────────────────────
+
+  def execute(state, {:describe_key_result, _, _, _} = cmd), do: Help.execute(state, cmd)
+  def execute(state, {:describe_key_not_found, _} = cmd), do: Help.execute(state, cmd)
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
