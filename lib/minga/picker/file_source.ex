@@ -9,7 +9,7 @@ defmodule Minga.Picker.FileSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State, as: EditorState
 
   require Logger
 
@@ -43,7 +43,7 @@ defmodule Minga.Picker.FileSource do
       nil ->
         case start_buffer(abs_path) do
           {:ok, pid} ->
-            add_buffer(state, pid)
+            EditorState.add_buffer(state, pid)
 
           {:error, reason} ->
             Logger.error("Failed to open file: #{inspect(reason)}")
@@ -51,14 +51,14 @@ defmodule Minga.Picker.FileSource do
         end
 
       idx ->
-        switch_to_buffer(state, idx)
+        EditorState.switch_buffer(state, idx)
     end
   end
 
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    switch_to_buffer(state, restore_idx)
+    EditorState.switch_buffer(state, restore_idx)
   end
 
   def on_cancel(state), do: state
@@ -104,15 +104,5 @@ defmodule Minga.Picker.FileSource do
       Minga.Buffer.Supervisor,
       {BufferServer, file_path: file_path}
     )
-  end
-
-  @spec add_buffer(map(), pid()) :: map()
-  defp add_buffer(%{buf: bs} = state, pid) do
-    %{state | buf: Buffers.add(bs, pid)}
-  end
-
-  @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
   end
 end

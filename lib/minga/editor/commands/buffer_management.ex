@@ -13,7 +13,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.HighlightBridge
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Buffers
+
   alias Minga.Mode
 
   require Logger
@@ -277,10 +277,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Private buffer helpers ────────────────────────────────────────────────
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
-  defp switch_to_buffer(%{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
-    |> EditorState.sync_active_window_buffer()
-  end
+  defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
 
   @spec next_buffer(state()) :: state()
   defp next_buffer(%{buf: %{buffers: [_, _ | _] = buffers, active_buffer: idx}} = state) do

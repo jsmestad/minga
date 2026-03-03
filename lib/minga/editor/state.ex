@@ -158,6 +158,30 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
+  Adds a new buffer and makes it the active buffer for the current window.
+
+  Centralizes `Buffers.add` + window sync so callers don't need to remember
+  to call `sync_active_window_buffer/1`.
+  """
+  @spec add_buffer(t(), pid()) :: t()
+  def add_buffer(%__MODULE__{buf: bs} = state, pid) do
+    %{state | buf: Buffers.add(bs, pid)}
+    |> sync_active_window_buffer()
+  end
+
+  @doc """
+  Switches to the buffer at `idx`, making it active for the current window.
+
+  Centralizes `Buffers.switch_to` + window sync so callers don't need to
+  remember to call `sync_active_window_buffer/1`.
+  """
+  @spec switch_buffer(t(), non_neg_integer()) :: t()
+  def switch_buffer(%__MODULE__{buf: bs} = state, idx) do
+    %{state | buf: Buffers.switch_to(bs, idx)}
+    |> sync_active_window_buffer()
+  end
+
+  @doc """
   Snapshots the active buffer's cursor into the active window struct.
 
   Call this before rendering split views so inactive windows have a fresh

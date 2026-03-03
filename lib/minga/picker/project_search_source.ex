@@ -9,7 +9,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State, as: EditorState
 
   require Logger
 
@@ -63,7 +63,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   defp open_new_buffer(state, abs_path, line, col) do
     case start_buffer(abs_path) do
       {:ok, pid} ->
-        new_state = add_buffer(state, pid)
+        new_state = EditorState.add_buffer(state, pid)
         BufferServer.move_to(pid, {line, col})
         new_state
 
@@ -75,7 +75,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @spec jump_to_buffer(map(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: map()
   defp jump_to_buffer(state, buf_idx, line, col) do
-    new_state = switch_to_buffer(state, buf_idx)
+    new_state = EditorState.switch_buffer(state, buf_idx)
     pid = Enum.at(state.buf.buffers, buf_idx)
     BufferServer.move_to(pid, {line, col})
     new_state
@@ -84,7 +84,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    switch_to_buffer(state, restore_idx)
+    EditorState.switch_buffer(state, restore_idx)
   end
 
   def on_cancel(state), do: state
@@ -104,15 +104,5 @@ defmodule Minga.Picker.ProjectSearchSource do
       Minga.Buffer.Supervisor,
       {BufferServer, file_path: file_path}
     )
-  end
-
-  @spec add_buffer(map(), pid()) :: map()
-  defp add_buffer(%{buf: bs} = state, pid) do
-    %{state | buf: Buffers.add(bs, pid)}
-  end
-
-  @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
   end
 end

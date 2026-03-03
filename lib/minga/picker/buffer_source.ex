@@ -10,6 +10,7 @@ defmodule Minga.Picker.BufferSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
 
   @impl true
@@ -41,13 +42,13 @@ defmodule Minga.Picker.BufferSource do
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
   def on_select({idx, _label, _desc}, state) do
-    switch_to_buffer(state, idx)
+    EditorState.switch_buffer(state, idx)
   end
 
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    switch_to_buffer(state, restore_idx)
+    EditorState.switch_buffer(state, restore_idx)
   end
 
   def on_cancel(state), do: state
@@ -85,18 +86,15 @@ defmodule Minga.Picker.BufferSource do
       _ ->
         new_active = min(bs.active_buffer, length(new_buffers) - 1)
         new_bs = %Buffers{bs | buffers: new_buffers}
+
         %{state | buf: Buffers.switch_to(new_bs, new_active)}
+        |> EditorState.sync_active_window_buffer()
     end
   end
 
   def on_action(_action, _item, state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec switch_to_buffer(map(), non_neg_integer()) :: map()
-  defp switch_to_buffer(%{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
-  end
 
   @spec display_name(pid()) :: String.t()
   defp display_name(buf) do

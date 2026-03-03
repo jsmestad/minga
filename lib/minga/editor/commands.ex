@@ -38,7 +38,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Buffers
+
   alias Minga.Mode
   alias Minga.WhichKey
 
@@ -347,8 +347,5 @@ defmodule Minga.Editor.Commands do
 
   @doc "Adds a new buffer to the list and makes it active."
   @spec add_buffer(state(), pid()) :: state()
-  def add_buffer(state, pid) do
-    %{state | buf: Buffers.add(state.buf, pid)}
-    |> EditorState.sync_active_window_buffer()
-  end
+  def add_buffer(state, pid), do: EditorState.add_buffer(state, pid)
 end
