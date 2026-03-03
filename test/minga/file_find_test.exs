@@ -52,9 +52,9 @@ defmodule Minga.FileFindTest do
     end
 
     test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
-      git_dir = Path.join(tmp_dir, ".git")
-      File.mkdir_p!(git_dir)
-      File.write!(Path.join(git_dir, "HEAD"), "ref: refs/heads/main")
+      # Initialize a real git repo so git ls-files works if selected
+      System.cmd("git", ["init"], cd: tmp_dir)
+      System.cmd("git", ["add", "."], cd: tmp_dir)
 
       {:ok, files} = FileFind.list_files(tmp_dir)
       refute Enum.any?(files, &String.starts_with?(&1, ".git/"))

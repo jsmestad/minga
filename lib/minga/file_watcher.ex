@@ -184,6 +184,10 @@ defmodule Minga.FileWatcher do
         FileSystem.subscribe(pid)
         pid
 
+      :ignore ->
+        Logger.warning("File watcher not supported on this platform")
+        nil
+
       {:error, reason} ->
         Logger.error("Failed to start file watcher: #{inspect(reason)}")
         nil
