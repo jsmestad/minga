@@ -98,8 +98,9 @@ Current status and planned features. Updated as development progresses.
 | `SPC b N` | New empty buffer | ✅ |
 | `SPC s p` / `SPC /` | Search project (ripgrep) | ✅ |
 | `SPC t l` | Toggle line number style | ✅ |
-| `SPC w h/j/k/l` | Window navigation | 📋 | Keybindings defined, not yet wired |
-| `SPC w v` / `SPC w s` | Vertical / horizontal split | 📋 | Keybindings defined, not yet wired |
+| `SPC w h/j/k/l` | Window navigation | ✅ | Directional focus movement |
+| `SPC w v` / `SPC w s` | Vertical / horizontal split | ✅ | Nested splits supported |
+| `SPC w d` | Close window | ✅ | Last window protected |
 | `SPC h k` | Describe key | 📋 | Stubbed |
 | `SPC q q` | Quit | ✅ |
 
@@ -177,7 +178,7 @@ Current status and planned features. Updated as development progresses.
 | Picker with fuzzy matching | ✅ | Used for files, buffers, commands, search results |
 | Viewport scrolling | ✅ | Vertical and horizontal |
 | Mouse support | ✅ | Click to position cursor |
-| Split windows | 📋 | Keybindings defined, implementation pending |
+| Split windows | ✅ | Vertical, horizontal, nested; `SPC w` navigation |
 | Floating windows | 📋 | Zig renderer supports panels |
 | Tab bar | 💭 | |
 
@@ -199,7 +200,7 @@ Current status and planned features. Updated as development progresses.
 
 Roughly in priority order:
 
-1. **Split windows** — Vertical and horizontal splits with `SPC w` navigation
+1. ~~**Split windows**~~ — ✅ Done
 2. **LSP client** — Code intelligence via Language Server Protocol (completion, go-to-definition, diagnostics)
 3. **Plugin system** — Elixir-based plugins that run as supervised processes
 4. **Additional themes** — Theme loading from disk, runtime switching
