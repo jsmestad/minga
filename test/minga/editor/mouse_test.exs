@@ -120,10 +120,14 @@ defmodule Minga.Editor.MouseTest do
   end
 
   describe "mouse click-to-position" do
+    # Gutter width for ≤99 lines = 3 (2 digits + 1 space).
+    # Screen col = gutter_width + buffer_col.
+    @gutter 3
+
     test "left click moves cursor to clicked position" do
       {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
-      send_mouse(editor, 1, 3, :left, :press)
-      send_mouse(editor, 1, 3, :left, :release)
+      send_mouse(editor, 1, @gutter + 3, :left, :press)
+      send_mouse(editor, 1, @gutter + 3, :left, :release)
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 3
@@ -186,8 +190,8 @@ defmodule Minga.Editor.MouseTest do
       {editor, buffer} = start_editor("hello\nworld\nfoo")
       send_key(editor, ?v)
       send_key(editor, ?l)
-      send_mouse(editor, 1, 2, :left, :press)
-      send_mouse(editor, 1, 2, :left, :release)
+      send_mouse(editor, 1, @gutter + 2, :left, :press)
+      send_mouse(editor, 1, @gutter + 2, :left, :release)
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
@@ -196,8 +200,8 @@ defmodule Minga.Editor.MouseTest do
     test "left click in command mode cancels command, returns to normal" do
       {editor, buffer} = start_editor("hello\nworld")
       send_key(editor, ?:)
-      send_mouse(editor, 1, 2, :left, :press)
-      send_mouse(editor, 1, 2, :left, :release)
+      send_mouse(editor, 1, @gutter + 2, :left, :press)
+      send_mouse(editor, 1, @gutter + 2, :left, :release)
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
@@ -206,8 +210,8 @@ defmodule Minga.Editor.MouseTest do
     test "left click in insert mode moves cursor, stays functional" do
       {editor, buffer} = start_editor("hello\nworld")
       send_key(editor, ?i)
-      send_mouse(editor, 1, 2, :left, :press)
-      send_mouse(editor, 1, 2, :left, :release)
+      send_mouse(editor, 1, @gutter + 2, :left, :press)
+      send_mouse(editor, 1, @gutter + 2, :left, :release)
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
@@ -217,8 +221,8 @@ defmodule Minga.Editor.MouseTest do
   describe "mouse drag selection" do
     test "left press + drag creates visual selection" do
       {editor, buffer} = start_editor("hello world foo")
-      send_mouse(editor, 0, 2, :left, :press)
-      send_mouse(editor, 0, 8, :left, :drag)
+      send_mouse(editor, 0, @gutter + 2, :left, :press)
+      send_mouse(editor, 0, @gutter + 8, :left, :drag)
       {line, col} = BufferServer.cursor(buffer)
       assert line == 0
       assert col == 8
@@ -226,9 +230,9 @@ defmodule Minga.Editor.MouseTest do
 
     test "release after drag keeps visual selection active" do
       {editor, buffer} = start_editor("hello world foo")
-      send_mouse(editor, 0, 2, :left, :press)
-      send_mouse(editor, 0, 8, :left, :drag)
-      send_mouse(editor, 0, 8, :left, :release)
+      send_mouse(editor, 0, @gutter + 2, :left, :press)
+      send_mouse(editor, 0, @gutter + 8, :left, :drag)
+      send_mouse(editor, 0, @gutter + 8, :left, :release)
       {_line, col} = BufferServer.cursor(buffer)
       assert col == 8
       s = state(editor)

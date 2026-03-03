@@ -132,6 +132,12 @@ defmodule Minga.Editor.Mouse do
     end
   end
 
+  # Returns the gutter width for the current line_numbers setting.
+  @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
+  defp gutter_width(state, total_lines) do
+    if state.line_numbers == :none, do: 0, else: Viewport.gutter_width(total_lines)
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # Scroll the viewport by `delta` lines without moving the cursor.
@@ -195,13 +201,69 @@ defmodule Minga.Editor.Mouse do
   # modeline, minibuffer, or beyond the buffer content (tilde rows).
   @spec mouse_to_buffer_pos(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos(%{buf: %{buffer: buf}, viewport: vp}, row, col) do
+  defp mouse_to_buffer_pos(state, row, col) do
+    if EditorState.split?(state) do
+      mouse_to_buffer_pos_split(state, row, col)
+    else
+      mouse_to_buffer_pos_single(state, row, col)
+    end
+  end
+
+  @spec mouse_to_buffer_pos_single(state(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp mouse_to_buffer_pos_single(%{buf: %{buffer: buf}, viewport: vp} = state, row, col) do
+    total_lines = BufferServer.line_count(buf)
+    gutter_w = gutter_width(state, total_lines)
     visible_rows = Viewport.content_rows(vp)
     target_line = row + vp.top
-    target_col = col + vp.left
-    total_lines = BufferServer.line_count(buf)
+    target_col = max(col - gutter_w, 0) + vp.left
 
     resolve_buffer_pos(buf, row, visible_rows, target_line, target_col, total_lines)
+  end
+
+  @spec mouse_to_buffer_pos_split(state(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp mouse_to_buffer_pos_split(state, row, col) do
+    screen = EditorState.screen_rect(state)
+
+    case WindowTree.window_at(state.window_tree, screen, row, col) do
+      {:ok, id, {win_row, win_col, _win_w, win_h}} ->
+        window = Map.fetch!(state.windows, id)
+        buf = window.buffer
+        total_lines = BufferServer.line_count(buf)
+        gutter_w = gutter_width(state, total_lines)
+
+        # Translate screen coords to window-local coords
+        local_row = row - win_row
+        local_col = max(col - win_col - gutter_w, 0)
+
+        # Content rows = window height minus 1 for modeline
+        visible_rows = max(win_h - 1, 1)
+
+        # Compute scroll offset from the window's cursor (same as renderer)
+        {cursor_line, _} = window.cursor
+        scroll_top = split_scroll_top(win_h, cursor_line)
+        target_line = local_row + scroll_top
+
+        resolve_buffer_pos(buf, local_row, visible_rows, target_line, local_col, total_lines)
+
+      :error ->
+        nil
+    end
+  end
+
+  # Computes the scroll top for a split window, given height and cursor line.
+  # Reserves 1 row for the per-window modeline. Matches the renderer's
+  # scroll_to_cursor_modeline_only logic (with a fresh viewport, top is always 0).
+  @spec split_scroll_top(pos_integer(), non_neg_integer()) :: non_neg_integer()
+  defp split_scroll_top(win_height, cursor_line) do
+    visible_rows = max(win_height - 1, 1)
+
+    if cursor_line >= visible_rows do
+      cursor_line - visible_rows + 1
+    else
+      0
+    end
   end
 
   # Click on modeline or minibuffer
