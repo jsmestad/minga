@@ -290,6 +290,64 @@ defmodule Minga.Buffer.UnicodeTest do
     end
   end
 
+  # ── display_col/2 ───────────────────────────────────────────────────────
+
+  describe "display_col/2" do
+    test "ASCII: display col equals byte col equals grapheme col" do
+      assert Unicode.display_col("hello", 0) == 0
+      assert Unicode.display_col("hello", 3) == 3
+      assert Unicode.display_col("hello", 5) == 5
+    end
+
+    test "CJK: each character contributes 2 display columns" do
+      # "你好世界" — 3 bytes each, 2 display cols each
+      assert Unicode.display_col("你好世界", 0) == 0
+      assert Unicode.display_col("你好世界", 3) == 2
+      assert Unicode.display_col("你好世界", 6) == 4
+      assert Unicode.display_col("你好世界", 9) == 6
+      assert Unicode.display_col("你好世界", 12) == 8
+    end
+
+    test "emoji: 2 display columns" do
+      # "🎉" is 4 bytes, 2 display cols
+      assert Unicode.display_col("🎉x", 0) == 0
+      assert Unicode.display_col("🎉x", 4) == 2
+      assert Unicode.display_col("🎉x", 5) == 3
+    end
+
+    test "combining mark: 0 additional display columns" do
+      # "e\u0301" (é via combining acute) = 3 bytes total, 1 display col
+      text = "e\u0301x"
+      assert Unicode.display_col(text, 0) == 0
+      # After the base grapheme "e\u0301" (3 bytes) → 1 display col
+      assert Unicode.display_col(text, 3) == 1
+      # After "x" (1 byte) → 2 display cols
+      assert Unicode.display_col(text, 4) == 2
+    end
+
+    test "mixed ASCII and CJK" do
+      # "hi你" — h(1 byte/1 col), i(1 byte/1 col), 你(3 bytes/2 cols)
+      assert Unicode.display_col("hi你", 0) == 0
+      assert Unicode.display_col("hi你", 1) == 1
+      assert Unicode.display_col("hi你", 2) == 2
+      assert Unicode.display_col("hi你", 5) == 4
+    end
+
+    test "at 0 always returns 0" do
+      assert Unicode.display_col("anything", 0) == 0
+      assert Unicode.display_col("你好", 0) == 0
+    end
+
+    test "pure ASCII: display_col matches grapheme_col for all positions" do
+      text = "hello world"
+
+      for byte_col <- 0..byte_size(text) do
+        assert Unicode.display_col(text, byte_col) == Unicode.grapheme_col(text, byte_col),
+               "Mismatch at byte_col=#{byte_col}"
+      end
+    end
+  end
+
   # ── byte_col_for_grapheme/2 ──────────────────────────────────────────────
 
   describe "byte_col_for_grapheme/2" do

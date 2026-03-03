@@ -99,12 +99,14 @@ defmodule Minga.Editor.Renderer do
     {cursor_line, _cursor_byte_col} = snapshot.cursor
     line_count = snapshot.line_count
 
-    # 3. Convert cursor byte_col → grapheme col using current line text.
-    #    This is the render boundary: all downstream code uses grapheme columns.
+    # 3. Convert cursor byte_col → display col using current line text.
+    #    This is the render boundary: all downstream code uses display columns
+    #    (terminal columns). Wide chars (CJK, emoji) count as 2; combining
+    #    marks count as 0.
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
-    cursor_col = Unicode.grapheme_col(cursor_line_text, cursor_byte_col)
+    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
-    # 4. Compute gutter dimensions and horizontal scroll in grapheme units.
+    # 4. Compute gutter dimensions and horizontal scroll in display columns.
     line_number_style = state.line_numbers
 
     gutter_w =
@@ -371,7 +373,7 @@ defmodule Minga.Editor.Renderer do
     lines = snapshot.lines
 
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
-    cursor_col = Unicode.grapheme_col(cursor_line_text, cursor_byte_col)
+    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
     line_number_style = state.line_numbers
 
@@ -759,21 +761,43 @@ defmodule Minga.Editor.Renderer do
         sel
 
       {:char, {sl, sc}, {el, ec}} ->
-        {:char, {sl, byte_col_to_grapheme(lines, sl, sc, first_line)},
-         {el, byte_col_to_grapheme(lines, el, ec, first_line)}}
+        {
+          :char,
+          {sl, byte_col_to_display(lines, sl, sc, first_line)},
+          # End is exclusive: first display column *after* the last selected grapheme,
+          # so selection width = end - start with no +1 needed for wide chars.
+          {el, byte_col_to_display_end(lines, el, ec, first_line)}
+        }
     end
   end
 
-  @spec byte_col_to_grapheme(
+  # Converts a byte column to the inclusive display column where the grapheme starts.
+  @spec byte_col_to_display(
           [String.t()],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) ::
           non_neg_integer()
-  defp byte_col_to_grapheme(lines, line, byte_col, first_line) do
+  defp byte_col_to_display(lines, line, byte_col, first_line) do
     line_text = cursor_line_text(lines, line, first_line)
-    Unicode.grapheme_col(line_text, byte_col)
+    Unicode.display_col(line_text, byte_col)
+  end
+
+  # Converts a byte column to the exclusive display column (first column AFTER the
+  # grapheme at byte_col). Used for selection end positions so that:
+  #   selection display width = end_exclusive - start_inclusive
+  @spec byte_col_to_display_end(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp byte_col_to_display_end(lines, line, byte_col, first_line) do
+    line_text = cursor_line_text(lines, line, first_line)
+    next_byte = Unicode.next_grapheme_byte_offset(line_text, byte_col)
+    Unicode.display_col(line_text, next_byte)
   end
 
   @spec cursor_line_text([String.t()], non_neg_integer(), non_neg_integer()) :: String.t()
@@ -826,7 +850,7 @@ defmodule Minga.Editor.Renderer do
          _vp,
          _gutter_w
        ) do
-    search_col = String.length(mode_state.input) + 1
+    search_col = Unicode.display_width(mode_state.input) + 1
     Protocol.encode_cursor(minibuffer_row, search_col)
   end
 
@@ -840,7 +864,7 @@ defmodule Minga.Editor.Renderer do
          _vp,
          _gutter_w
        ) do
-    cmd_col = String.length(mode_state.input) + 1
+    cmd_col = Unicode.display_width(mode_state.input) + 1
     Protocol.encode_cursor(minibuffer_row, cmd_col)
   end
 
@@ -854,8 +878,8 @@ defmodule Minga.Editor.Renderer do
          _vp,
          _gutter_w
        ) do
-    # "Eval: " prefix is 6 characters
-    eval_col = String.length(mode_state.input) + 6
+    # "Eval: " prefix is 6 display columns
+    eval_col = Unicode.display_width(mode_state.input) + 6
     Protocol.encode_cursor(minibuffer_row, eval_col)
   end
 

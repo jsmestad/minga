@@ -324,6 +324,48 @@ defmodule Minga.Buffer.Unicode do
   end
 
   @doc """
+  Converts a byte column to a display column by summing grapheme display
+  widths for the first `byte_col` bytes of `text`.
+
+  Unlike `grapheme_col/2`, which counts graphemes (each +1), this function
+  accounts for wide characters (CJK, emoji: +2) and zero-width characters
+  (combining marks: +0). Use this at the rendering boundary wherever a
+  screen column position is needed.
+
+  ## Examples
+
+      iex> Minga.Buffer.Unicode.display_col("hello", 3)
+      3
+
+      iex> Minga.Buffer.Unicode.display_col("你好世界", 6)
+      4
+
+      iex> Minga.Buffer.Unicode.display_col("café", 4)
+      3
+  """
+  @spec display_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  def display_col(_text, 0), do: 0
+
+  def display_col(text, byte_col) do
+    do_display_col(text, byte_col, 0, 0)
+  end
+
+  @spec do_display_col(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_display_col(_text, target, current, width) when current >= target, do: width
+
+  defp do_display_col(text, target, current, width) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+        do_display_col(rest, target, current + g_size, width + grapheme_width(g))
+
+      nil ->
+        width
+    end
+  end
+
+  @doc """
   Returns the display width (terminal columns) of a string.
 
   Most graphemes are 1 column wide. CJK characters and some emoji are 2
@@ -435,47 +477,6 @@ defmodule Minga.Buffer.Unicode do
   defp codepoint_width(cp) when cp in 0xFFE8..0xFFEE, do: 1
   # Everything else is 1 column
   defp codepoint_width(_), do: 1
-
-  @doc """
-  Converts a byte column to a display column by summing grapheme display
-  widths for the first `byte_col` bytes of `text`.
-
-  Unlike `grapheme_col/2`, which counts graphemes (each +1), this function
-  accounts for wide characters (CJK, emoji: +2) and zero-width characters
-  (combining marks: +0).
-
-  ## Examples
-
-      iex> Minga.Buffer.Unicode.display_col("hello", 3)
-      3
-
-      iex> Minga.Buffer.Unicode.display_col("你好世界", 6)
-      4
-
-      iex> Minga.Buffer.Unicode.display_col("café", 4)
-      3
-  """
-  @spec display_col(String.t(), non_neg_integer()) :: non_neg_integer()
-  def display_col(_text, 0), do: 0
-
-  def display_col(text, byte_col) do
-    do_display_col(text, byte_col, 0, 0)
-  end
-
-  @spec do_display_col(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp do_display_col(_text, target, current, width) when current >= target, do: width
-
-  defp do_display_col(text, target, current, width) do
-    case String.next_grapheme(text) do
-      {g, rest} ->
-        g_size = byte_size(text) - byte_size(rest)
-        do_display_col(rest, target, current + g_size, width + grapheme_width(g))
-
-      nil ->
-        width
-    end
-  end
 
   @doc """
   Converts a grapheme (display) column to a byte column.

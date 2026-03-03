@@ -19,6 +19,7 @@ defmodule Minga.Buffer.Server do
   use GenServer
 
   alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Unicode
   alias Minga.Filetype
 
   @typedoc "Options for starting a buffer server."
@@ -441,8 +442,12 @@ defmodule Minga.Buffer.Server do
 
         clamped_col =
           case GapBuffer.lines(new_buf, clamped_line, 1) do
-            [row] -> min(col, max(String.length(row) - 1, 0))
-            _ -> 0
+            [row] ->
+              # col is a byte offset; clamp to last valid grapheme boundary
+              Unicode.clamp_to_grapheme_boundary(row, min(col, byte_size(row)))
+
+            _ ->
+              0
           end
 
         new_buf = GapBuffer.move_to(new_buf, {clamped_line, clamped_col})
@@ -550,7 +555,8 @@ defmodule Minga.Buffer.Server do
 
     last_col =
       case GapBuffer.lines(new_buf, last_line, 1) do
-        [row] -> max(0, String.length(row) - 1)
+        # last_grapheme_byte_offset returns 0 for empty rows, which is correct
+        [row] -> Unicode.last_grapheme_byte_offset(row)
         _ -> 0
       end
 

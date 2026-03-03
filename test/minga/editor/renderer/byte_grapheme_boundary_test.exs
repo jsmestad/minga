@@ -25,7 +25,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
     end
 
     test "cursor is at correct screen column with emoji" do
-      # "a🎉b" — 🎉 is 4 bytes, so after it byte_col=5 but grapheme_col=2
+      # "a🎉b" — 🎉 is 4 bytes and 2 display columns wide
       ctx = start_editor("a🎉b")
 
       send_key(ctx, ?$)
@@ -33,8 +33,8 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
 
-      # 3 graphemes: a, 🎉, b — cursor on 'b' at grapheme index 2
-      assert col == gutter_w + 2
+      # Display columns: a=1, 🎉=2, b=1 — 'b' is at display col 3 (not grapheme 2)
+      assert col == gutter_w + 3
     end
 
     test "cursor placement with multiple multi-byte characters" do

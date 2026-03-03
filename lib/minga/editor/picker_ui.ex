@@ -14,6 +14,7 @@ defmodule Minga.Editor.PickerUI do
   The caller (`Editor`) is responsible for dispatching that action.
   """
 
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
@@ -275,7 +276,10 @@ defmodule Minga.Editor.PickerUI do
       " #{title} " <>
         String.duplicate(
           "─",
-          max(0, viewport.cols - String.length(title) - String.length(filter_info) - 4)
+          max(
+            0,
+            viewport.cols - Unicode.display_width(title) - Unicode.display_width(filter_info) - 4
+          )
         ) <> " #{filter_info} "
 
     separator_cmd =
@@ -335,7 +339,7 @@ defmodule Minga.Editor.PickerUI do
         bg: prompt_bg
       )
 
-    cursor_col = String.length(prompt_text)
+    cursor_col = Unicode.display_width(prompt_text)
     cursor_pos = {prompt_row, cursor_col}
 
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
@@ -383,7 +387,7 @@ defmodule Minga.Editor.PickerUI do
     row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
 
     label_text = " " <> label
-    avail_for_desc = max(0, cols - String.length(label_text) - 2)
+    avail_for_desc = max(0, cols - Unicode.display_width(label_text) - 2)
 
     desc_display =
       if desc != "" and avail_for_desc > 10,
@@ -394,7 +398,10 @@ defmodule Minga.Editor.PickerUI do
       label_text <>
         String.duplicate(
           " ",
-          max(1, cols - String.length(label_text) - String.length(desc_display) - 1)
+          max(
+            1,
+            cols - Unicode.display_width(label_text) - Unicode.display_width(desc_display) - 1
+          )
         ) <> desc_display <> " "
 
     row_text = String.slice(row_text, 0, cols)
@@ -410,7 +417,7 @@ defmodule Minga.Editor.PickerUI do
 
     desc_cmds =
       if desc_display != "" do
-        desc_start = cols - String.length(desc_display) - 1
+        desc_start = cols - Unicode.display_width(desc_display) - 1
         [Protocol.encode_draw(row, desc_start, desc_display, fg: colors.dim_fg, bg: row_bg)]
       else
         []

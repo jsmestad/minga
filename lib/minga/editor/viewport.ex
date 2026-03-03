@@ -10,7 +10,16 @@ defmodule Minga.Editor.Viewport do
   @enforce_keys [:top, :left, :rows, :cols]
   defstruct [:top, :left, :rows, :cols]
 
-  @typedoc "A viewport representing the visible terminal region."
+  @typedoc """
+  A viewport representing the visible terminal region.
+
+  * `top`  — first visible buffer line (0-indexed)
+  * `left` — first visible **display column** (0-indexed, in terminal columns).
+             Wide characters (CJK, emoji) occupy 2 display columns, so
+             horizontal scroll advances by display columns, not grapheme counts.
+  * `rows` — total terminal rows (including footer)
+  * `cols` — total terminal columns
+  """
   @type t :: %__MODULE__{
           top: non_neg_integer(),
           left: non_neg_integer(),
@@ -33,9 +42,10 @@ defmodule Minga.Editor.Viewport do
   @doc """
   Scrolls the viewport to keep the cursor visible.
 
-  Returns a new viewport adjusted so that the cursor position
-  `{line, col}` is within the visible area. Reserves footer rows
-  for the modeline and minibuffer.
+  Returns a new viewport adjusted so that the cursor position `{line, col}`
+  is within the visible area. `col` must be a **display column** (terminal
+  columns, not grapheme count) — wide characters count as 2. Reserves footer
+  rows for the modeline and minibuffer.
   """
   @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}) :: t()
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do

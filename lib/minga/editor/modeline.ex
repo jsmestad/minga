@@ -7,6 +7,7 @@ defmodule Minga.Editor.Modeline do
   or any mutable state — pure `data → commands` transformation.
   """
 
+  alias Minga.Buffer.Unicode
   alias Minga.Mode
   alias Minga.Port.Protocol
 
@@ -97,10 +98,14 @@ defmodule Minga.Editor.Modeline do
     ]
 
     left_width =
-      Enum.reduce(left_segments, 0, fn {text, _, _, _}, acc -> acc + String.length(text) end)
+      Enum.reduce(left_segments, 0, fn {text, _, _, _}, acc ->
+        acc + Unicode.display_width(text)
+      end)
 
     right_width =
-      Enum.reduce(right_segments, 0, fn {text, _, _, _}, acc -> acc + String.length(text) end)
+      Enum.reduce(right_segments, 0, fn {text, _, _, _}, acc ->
+        acc + Unicode.display_width(text)
+      end)
 
     fill_width = max(0, cols - left_width - right_width)
 
@@ -112,7 +117,7 @@ defmodule Minga.Editor.Modeline do
     {commands, _} =
       Enum.reduce(all_segments, {[], 0}, fn {text, fg, bg, opts}, {cmds, col} ->
         cmd = Protocol.encode_draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
-        {[cmd | cmds], col + String.length(text)}
+        {[cmd | cmds], col + Unicode.display_width(text)}
       end)
 
     Enum.reverse(commands)
