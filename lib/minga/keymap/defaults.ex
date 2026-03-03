@@ -54,6 +54,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?w, @none}, {?l, @none}], :window_right, "Window right"},
     {[{?w, @none}, {?v, @none}], :split_vertical, "Vertical split"},
     {[{?w, @none}, {?s, @none}], :split_horizontal, "Horizontal split"},
+    {[{?w, @none}, {?d, @none}], :window_close, "Close window"},
 
     # ── Quit ──────────────────────────────────────────────────────────────────
     {[{?q, @none}, {?q, @none}], :quit, "Quit editor"},

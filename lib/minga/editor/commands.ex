@@ -178,6 +178,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, :window_down), do: Movement.execute(state, :window_down)
   def execute(state, :split_vertical), do: Movement.execute(state, :split_vertical)
   def execute(state, :split_horizontal), do: Movement.execute(state, :split_horizontal)
+  def execute(state, :window_close), do: Movement.execute(state, :window_close)
   def execute(state, :describe_key), do: Movement.execute(state, :describe_key)
 
   # ── Editing ───────────────────────────────────────────────────────────────

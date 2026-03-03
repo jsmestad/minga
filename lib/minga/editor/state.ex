@@ -26,6 +26,8 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.Search
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
   alias Minga.Highlight
   alias Minga.Mode
 
@@ -60,7 +62,11 @@ defmodule Minga.Editor.State do
             macro_recorder: MacroRecorder.new(),
             highlight: Highlight.new(),
             highlight_version: 0,
-            highlight_cache: %{}
+            highlight_cache: %{},
+            window_tree: nil,
+            windows: %{},
+            active_window: 1,
+            next_window_id: 2
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -84,7 +90,11 @@ defmodule Minga.Editor.State do
           macro_recorder: MacroRecorder.t(),
           highlight: Highlight.t(),
           highlight_version: non_neg_integer(),
-          highlight_cache: %{pid() => Highlight.t()}
+          highlight_cache: %{pid() => Highlight.t()},
+          window_tree: WindowTree.t() | nil,
+          windows: %{Window.id() => Window.t()},
+          active_window: Window.id(),
+          next_window_id: Window.id()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -100,4 +110,37 @@ defmodule Minga.Editor.State do
   @doc "Returns the active buffer index."
   @spec active_buffer(t()) :: non_neg_integer()
   def active_buffer(%__MODULE__{buf: %{active_buffer: idx}}), do: idx
+
+  # ── Window accessors ──────────────────────────────────────────────────────
+
+  @doc "Returns the active window struct, or nil if windows aren't initialized."
+  @spec active_window_struct(t()) :: Window.t() | nil
+  def active_window_struct(%__MODULE__{windows: windows, active_window: id}) do
+    Map.get(windows, id)
+  end
+
+  @doc "Returns true if the editor has more than one window."
+  @spec split?(t()) :: boolean()
+  def split?(%__MODULE__{window_tree: nil}), do: false
+  def split?(%__MODULE__{window_tree: {:leaf, _}}), do: false
+  def split?(%__MODULE__{window_tree: {:split, _, _, _}}), do: true
+
+  @doc "Returns the screen rect for layout computation: {0, 0, cols, rows}."
+  @spec screen_rect(t()) :: WindowTree.rect()
+  def screen_rect(%__MODULE__{viewport: vp}) do
+    {0, 0, vp.cols, vp.rows}
+  end
+
+  @doc """
+  Updates the window struct for the given window id.
+
+  Applies the given function to the window and stores the result.
+  """
+  @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
+  def update_window(%__MODULE__{windows: windows} = state, id, fun) when is_function(fun, 1) do
+    case Map.fetch(windows, id) do
+      {:ok, window} -> %{state | windows: Map.put(windows, id, fun.(window))}
+      :error -> state
+    end
+  end
 end

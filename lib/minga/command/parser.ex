@@ -100,6 +100,11 @@ defmodule Minga.Command.Parser do
   defp do_parse("enew"), do: {:new_buffer, []}
   defp do_parse("reload-highlights"), do: {:reload_highlights, []}
   defp do_parse("rh"), do: {:reload_highlights, []}
+  defp do_parse("vsplit"), do: {:split_vertical, []}
+  defp do_parse("vs"), do: {:split_vertical, []}
+  defp do_parse("split"), do: {:split_horizontal, []}
+  defp do_parse("sp"), do: {:split_horizontal, []}
+  defp do_parse("close"), do: {:window_close, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

@@ -23,6 +23,8 @@ defmodule Minga.Editor do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
   alias Minga.FileWatcher
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -106,8 +108,25 @@ defmodule Minga.Editor do
 
     active_idx = if active_buf && buffers != [], do: 0, else: 0
 
+    viewport = Viewport.new(height, width)
+
+    # Initialize the window tree with a single window
+    initial_window_id = 1
+
+    alias Minga.Editor.State.Buffers
+
+    initial_window =
+      if active_buf do
+        Window.new(initial_window_id, active_buf, height, width)
+      else
+        nil
+      end
+
+    windows =
+      if initial_window, do: %{initial_window_id => initial_window}, else: %{}
+
     state = %EditorState{
-      buf: %Minga.Editor.State.Buffers{
+      buf: %Buffers{
         buffer: active_buf,
         buffers: buffers,
         active_buffer: active_idx,
@@ -115,9 +134,13 @@ defmodule Minga.Editor do
         scratch_buffer: scratch_buf
       },
       port_manager: port_manager,
-      viewport: Viewport.new(height, width),
+      viewport: viewport,
       mode: :normal,
-      mode_state: Mode.initial_state()
+      mode_state: Mode.initial_state(),
+      window_tree: WindowTree.new(initial_window_id),
+      windows: windows,
+      active_window: initial_window_id,
+      next_window_id: initial_window_id + 1
     }
 
     state = log_message(state, "Editor started")
@@ -160,6 +183,7 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
+    new_state = resize_all_windows(new_state)
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -807,5 +831,21 @@ defmodule Minga.Editor do
     end
 
     state
+  end
+
+  # ── Window resize ────────────────────────────────────────────────────────
+
+  @spec resize_all_windows(state()) :: state()
+  defp resize_all_windows(%{window_tree: nil} = state), do: state
+
+  defp resize_all_windows(state) do
+    screen = EditorState.screen_rect(state)
+    layouts = WindowTree.layout(state.window_tree, screen)
+
+    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+      EditorState.update_window(acc, id, fn window ->
+        Window.resize(window, height, width)
+      end)
+    end)
   end
 end

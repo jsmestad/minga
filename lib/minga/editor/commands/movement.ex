@@ -10,6 +10,8 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
   alias Minga.Mode
 
   @type state :: EditorState.t()
@@ -242,13 +244,100 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  # ── Unimplemented window stubs ────────────────────────────────────────────
+  # ── Window commands ────────────────────────────────────────────────────────
 
-  def execute(state, :window_left), do: state
-  def execute(state, :window_right), do: state
-  def execute(state, :window_up), do: state
-  def execute(state, :window_down), do: state
-  def execute(state, :split_vertical), do: state
-  def execute(state, :split_horizontal), do: state
+  def execute(state, :window_left), do: navigate_window(state, :left)
+  def execute(state, :window_right), do: navigate_window(state, :right)
+  def execute(state, :window_up), do: navigate_window(state, :up)
+  def execute(state, :window_down), do: navigate_window(state, :down)
+
+  def execute(state, :split_vertical), do: split_window(state, :vertical)
+  def execute(state, :split_horizontal), do: split_window(state, :horizontal)
+
+  def execute(state, :window_close), do: close_window(state)
+
   def execute(state, :describe_key), do: state
+
+  @spec split_window(state(), WindowTree.direction()) :: state()
+  defp split_window(%{window_tree: nil} = state, _direction), do: state
+
+  defp split_window(state, direction) do
+    active_id = state.active_window
+    new_id = state.next_window_id
+
+    case WindowTree.split(state.window_tree, active_id, direction, new_id) do
+      {:ok, new_tree} -> apply_split(state, new_tree, active_id, new_id)
+      :error -> state
+    end
+  end
+
+  @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
+  defp apply_split(state, new_tree, active_id, new_id) do
+    active_window = Map.fetch!(state.windows, active_id)
+    new_window = Window.new(new_id, active_window.buffer, 24, 80)
+
+    state = %{
+      state
+      | window_tree: new_tree,
+        windows: Map.put(state.windows, new_id, new_window),
+        next_window_id: new_id + 1
+    }
+
+    resize_windows_to_layout(state)
+  end
+
+  @spec resize_windows_to_layout(state()) :: state()
+  defp resize_windows_to_layout(state) do
+    screen = EditorState.screen_rect(state)
+    layouts = WindowTree.layout(state.window_tree, screen)
+
+    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+      EditorState.update_window(acc, id, &Window.resize(&1, height, width))
+    end)
+  end
+
+  @spec navigate_window(state(), WindowTree.nav_direction()) :: state()
+  defp navigate_window(%{window_tree: nil} = state, _direction), do: state
+
+  defp navigate_window(state, direction) do
+    screen = EditorState.screen_rect(state)
+
+    case WindowTree.focus_neighbor(state.window_tree, state.active_window, direction, screen) do
+      {:ok, neighbor_id} ->
+        window = Map.fetch!(state.windows, neighbor_id)
+
+        %{
+          state
+          | active_window: neighbor_id,
+            buf: %{state.buf | buffer: window.buffer}
+        }
+
+      :error ->
+        state
+    end
+  end
+
+  @spec close_window(state()) :: state()
+  defp close_window(%{window_tree: nil} = state), do: state
+
+  defp close_window(state) do
+    case WindowTree.close(state.window_tree, state.active_window) do
+      {:ok, new_tree} ->
+        old_id = state.active_window
+        remaining = WindowTree.leaves(new_tree)
+        new_active = hd(remaining)
+        new_active_window = Map.fetch!(state.windows, new_active)
+
+        %{
+          state
+          | window_tree: new_tree,
+            windows: Map.delete(state.windows, old_id),
+            active_window: new_active,
+            buf: %{state.buf | buffer: new_active_window.buffer}
+        }
+
+      :error ->
+        %{state | status_msg: "Cannot close the last window"}
+    end
+  end
 end
