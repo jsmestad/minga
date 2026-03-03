@@ -230,4 +230,25 @@ defmodule Minga.Editor.WindowTree do
     {id, _rect, _dist} = Enum.min_by(candidates, fn {_id, _rect, dist} -> dist end)
     id
   end
+
+  # ── Hit testing ────────────────────────────────────────────────────────────
+
+  @doc """
+  Finds which window contains the given screen coordinate.
+
+  Returns `{:ok, window_id, {row, col, width, height}}` or `:error` if the
+  coordinate is outside any window rect (e.g. on a separator).
+  """
+  @spec window_at(t(), rect(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, Window.id(), rect()} | :error
+  def window_at(tree, screen_rect, row, col) do
+    layouts = layout(tree, screen_rect)
+
+    case Enum.find(layouts, fn {_id, {r, c, w, h}} ->
+           row >= r and row < r + h and col >= c and col < c + w
+         end) do
+      {id, rect} -> {:ok, id, rect}
+      nil -> :error
+    end
+  end
 end

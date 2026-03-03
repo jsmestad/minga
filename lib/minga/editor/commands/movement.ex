@@ -309,25 +309,8 @@ defmodule Minga.Editor.Commands.Movement do
     screen = EditorState.screen_rect(state)
 
     case WindowTree.focus_neighbor(state.window_tree, state.active_window, direction, screen) do
-      {:ok, neighbor_id} ->
-        # Save current cursor into outgoing window
-        current_cursor = BufferServer.cursor(state.buf.buffer)
-
-        state =
-          EditorState.update_window(state, state.active_window, &%{&1 | cursor: current_cursor})
-
-        # Switch to new window and restore its cursor into the buffer
-        window = Map.fetch!(state.windows, neighbor_id)
-        BufferServer.move_to(window.buffer, window.cursor)
-
-        %{
-          state
-          | active_window: neighbor_id,
-            buf: %{state.buf | buffer: window.buffer}
-        }
-
-      :error ->
-        state
+      {:ok, neighbor_id} -> EditorState.focus_window(state, neighbor_id)
+      :error -> state
     end
   end
 

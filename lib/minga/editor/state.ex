@@ -176,6 +176,44 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
+  Switches focus to the given window, saving the current cursor to the
+  outgoing window and restoring the target window's stored cursor.
+
+  No-op if `target_id` is already the active window or windows aren't set up.
+  """
+  @spec focus_window(t(), Window.id()) :: t()
+  def focus_window(%__MODULE__{active_window: active} = state, target_id)
+      when target_id == active,
+      do: state
+
+  def focus_window(%__MODULE__{buf: %{buffer: nil}} = state, _target_id), do: state
+
+  def focus_window(
+        %__MODULE__{windows: windows, active_window: old_id, buf: buf} = state,
+        target_id
+      ) do
+    case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
+      {{:ok, old_win}, {:ok, target_win}} ->
+        # Save current cursor to outgoing window
+        current_cursor = BufferServer.cursor(buf.buffer)
+        windows = Map.put(windows, old_id, %{old_win | cursor: current_cursor})
+
+        # Restore target window's cursor into its buffer
+        BufferServer.move_to(target_win.buffer, target_win.cursor)
+
+        %{
+          state
+          | windows: windows,
+            active_window: target_id,
+            buf: %{buf | buffer: target_win.buffer}
+        }
+
+      _ ->
+        state
+    end
+  end
+
+  @doc """
   Updates the window struct for the given window id.
 
   Applies the given function to the window and stores the result.

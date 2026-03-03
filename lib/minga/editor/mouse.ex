@@ -13,6 +13,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.WindowTree
   alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Protocol
@@ -57,9 +58,11 @@ defmodule Minga.Editor.Mouse do
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
-  # ── Left click (press) — sets position and starts potential drag ──
+  # ── Left click (press) — focuses window, sets position, starts potential drag ──
 
   def handle(state, row, col, :left, :press) do
+    state = maybe_focus_window_at(state, row, col)
+
     case mouse_to_buffer_pos(state, row, col) do
       nil ->
         state
@@ -115,6 +118,19 @@ defmodule Minga.Editor.Mouse do
 
   # Ignore all other mouse events (right click, middle click, motion, etc.)
   def handle(state, _row, _col, _button, _type), do: state
+
+  # Focus the window under the mouse click (split mode only).
+  @spec maybe_focus_window_at(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp maybe_focus_window_at(%{window_tree: nil} = state, _row, _col), do: state
+
+  defp maybe_focus_window_at(state, row, col) do
+    screen = EditorState.screen_rect(state)
+
+    case WindowTree.window_at(state.window_tree, screen, row, col) do
+      {:ok, id, _rect} -> EditorState.focus_window(state, id)
+      :error -> state
+    end
+  end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
