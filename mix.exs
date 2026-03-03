@@ -19,7 +19,51 @@ defmodule Minga.MixProject do
       # Docs
       name: "Minga",
       source_url: "https://github.com/jsmestad/minga",
-      docs: [main: "readme", extras: ["README.md", "PLAN.md"]]
+      docs: [
+        main: "readme",
+        extras: ["README.md", "PLAN.md", "ROADMAP.md"],
+        groups_for_modules: [
+          "Public API": [
+            Minga.API
+          ],
+          Editor: [
+            Minga.Editor,
+            Minga.Editor.Commands,
+            Minga.Editor.Viewport,
+            Minga.Editor.Window,
+            Minga.Editor.WindowTree
+          ],
+          Buffer: [
+            Minga.Buffer.GapBuffer,
+            Minga.Buffer.Server
+          ],
+          Modes: [
+            Minga.Mode,
+            Minga.Mode.Normal,
+            Minga.Mode.Insert,
+            Minga.Mode.Visual,
+            Minga.Mode.Command,
+            Minga.Mode.Eval,
+            Minga.Mode.OperatorPending,
+            Minga.Mode.Replace,
+            Minga.Mode.Search
+          ],
+          Keymap: [
+            Minga.Keymap.Trie,
+            Minga.Keymap.Defaults,
+            Minga.WhichKey
+          ],
+          "Port Protocol": [
+            Minga.Port.Protocol,
+            Minga.Port.Manager
+          ],
+          Commands: [
+            Minga.Command,
+            Minga.Command.Registry,
+            Minga.Command.Parser
+          ]
+        ]
+      ]
     ]
   end
 
