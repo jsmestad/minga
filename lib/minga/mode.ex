@@ -44,7 +44,8 @@ defmodule Minga.Mode do
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
   tagged tuple carrying an argument (e.g. `{:insert_char, \"x\"}`).
   """
-  @type command :: atom() | {atom(), term()} | {atom(), term(), term()} | {atom(), term(), term(), term()}
+  @type command ::
+          atom() | {atom(), term()} | {atom(), term(), term()} | {atom(), term(), term(), term()}
 
   @typedoc """
   FSM-level state. The base `Mode.State` struct carries shared fields (count,

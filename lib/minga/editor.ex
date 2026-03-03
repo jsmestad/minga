@@ -165,6 +165,49 @@ defmodule Minga.Editor do
     end
   end
 
+  def handle_call(:api_active_buffer, _from, %{buf: %{buffer: nil}} = state) do
+    {:reply, {:error, :no_buffer}, state}
+  end
+
+  def handle_call(:api_active_buffer, _from, %{buf: %{buffer: buf}} = state) do
+    {:reply, {:ok, buf}, state}
+  end
+
+  def handle_call(:api_mode, _from, state) do
+    {:reply, state.mode, state}
+  end
+
+  def handle_call(:api_save, _from, %{buf: %{buffer: nil}} = state) do
+    {:reply, {:error, :no_buffer}, state}
+  end
+
+  def handle_call(:api_save, _from, %{buf: %{buffer: buf}} = state) do
+    result = BufferServer.save(buf)
+
+    new_state =
+      case result do
+        :ok ->
+          log_message(state, "Saved: #{Commands.Helpers.buffer_display_name(buf)}")
+
+        _ ->
+          state
+      end
+
+    Renderer.render(new_state)
+    {:reply, result, new_state}
+  end
+
+  def handle_call({:api_execute_command, cmd}, _from, state) do
+    new_state = dispatch_command(state, cmd)
+    Renderer.render(new_state)
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call({:api_log_message, text}, _from, state) do
+    new_state = log_message(state, text)
+    {:reply, :ok, new_state}
+  end
+
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast(:render, state) do
