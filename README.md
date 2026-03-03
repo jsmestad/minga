@@ -9,6 +9,14 @@ Minga was designed from the ground up with isolated, supervised processes.
 When an agent hangs, a plugin crashes, or a renderer glitches, it restarts
 itself. Your buffers, undo history, and unsaved work stay untouched.
 
+Minga combines the modal editing of Neovim, the runtime flexibility of Emacs,
+and a modern architecture: **Elixir on the BEAM VM** for editor logic and
+**Zig** for terminal rendering. Vim users get the motions, operators, and
+text objects they think in. Emacs users get a living, mutable runtime where
+you can redefine commands, override keybindings, and customize any buffer's
+behavior, all without restarting. And unlike either, every component is an
+isolated process that can crash and recover independently.
+
 ## Why Minga?
 
 ### The problem with editors
