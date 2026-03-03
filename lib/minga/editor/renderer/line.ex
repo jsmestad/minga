@@ -142,45 +142,42 @@ defmodule Minga.Editor.Renderer.Line do
 
     {commands, _screen_col, _buf_col} =
       Enum.reduce(segments, {[], 0, 0}, fn {text, style}, {cmds, screen_col, buf_col} ->
-        seg_width = String.length(text)
-        seg_end = buf_col + seg_width
+        seg_end = buf_col + String.length(text)
 
         cond do
-          # Entire segment is before viewport — skip
-          seg_end <= left ->
-            {cmds, screen_col, seg_end}
-
-          # Entire segment is past viewport right edge — skip
-          screen_col >= max_col ->
-            {cmds, screen_col, seg_end}
-
-          true ->
-            # Clip to viewport left boundary
-            drop = max(0, left - buf_col)
-            graphemes = String.graphemes(text) |> Enum.drop(drop)
-
-            # Clip to viewport right boundary
-            take = max_col - screen_col
-            graphemes = Enum.take(graphemes, take)
-            visible_text = Enum.join(graphemes)
-            visible_width = length(graphemes)
-
-            if visible_width > 0 do
-              cmd =
-                Protocol.encode_draw(
-                  screen_row,
-                  ctx.gutter_w + screen_col,
-                  visible_text,
-                  style
-                )
-
-              {[cmd | cmds], screen_col + visible_width, seg_end}
-            else
-              {cmds, screen_col, seg_end}
-            end
+          seg_end <= left -> {cmds, screen_col, seg_end}
+          screen_col >= max_col -> {cmds, screen_col, seg_end}
+          true -> clip_and_draw(text, style, screen_row, ctx, cmds, screen_col, buf_col, seg_end)
         end
       end)
 
     Enum.reverse(commands)
+  end
+
+  @spec clip_and_draw(
+          String.t(),
+          Protocol.style(),
+          non_neg_integer(),
+          Context.t(),
+          [binary()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {[binary()], non_neg_integer(), non_neg_integer()}
+  defp clip_and_draw(text, style, screen_row, ctx, cmds, screen_col, buf_col, seg_end) do
+    drop = max(0, ctx.viewport.left - buf_col)
+
+    graphemes =
+      text |> String.graphemes() |> Enum.drop(drop) |> Enum.take(ctx.content_w - screen_col)
+
+    visible_text = Enum.join(graphemes)
+    visible_width = length(graphemes)
+
+    if visible_width > 0 do
+      cmd = Protocol.encode_draw(screen_row, ctx.gutter_w + screen_col, visible_text, style)
+      {[cmd | cmds], screen_col + visible_width, seg_end}
+    else
+      {cmds, screen_col, seg_end}
+    end
   end
 end

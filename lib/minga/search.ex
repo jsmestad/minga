@@ -258,7 +258,17 @@ defmodule Minga.Search do
     case global? do
       true ->
         matches = :binary.matches(line, pattern)
-        do_sub_spans_all(line, matches, byte_size(pattern), replacement, rep_len, 0, 0, [], [])
+
+        sub_acc = %{
+          rep: replacement,
+          rep_len: rep_len,
+          prev_end: 0,
+          count: 0,
+          output: [],
+          spans: []
+        }
+
+        do_sub_spans_all(line, matches, sub_acc)
 
       false ->
         case :binary.match(line, pattern) do
@@ -273,52 +283,40 @@ defmodule Minga.Search do
     end
   end
 
-  @spec do_sub_spans_all(
-          String.t(),
-          [{non_neg_integer(), non_neg_integer()}],
-          non_neg_integer(),
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          iolist(),
-          [replacement_span()]
-        ) :: {String.t(), non_neg_integer(), [replacement_span()]}
-  defp do_sub_spans_all(line, [], _pat_len, _rep, _rep_len, prev_end, count, acc, spans) do
-    final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
-    {final |> Enum.reverse() |> IO.iodata_to_binary(), count, Enum.reverse(spans)}
+  @typep sub_acc :: %{
+           rep: String.t(),
+           rep_len: non_neg_integer(),
+           prev_end: non_neg_integer(),
+           count: non_neg_integer(),
+           output: iolist(),
+           spans: [replacement_span()]
+         }
+
+  @spec do_sub_spans_all(String.t(), [{non_neg_integer(), non_neg_integer()}], sub_acc()) ::
+          {String.t(), non_neg_integer(), [replacement_span()]}
+  defp do_sub_spans_all(line, [], acc) do
+    final = [binary_part(line, acc.prev_end, byte_size(line) - acc.prev_end) | acc.output]
+    {final |> Enum.reverse() |> IO.iodata_to_binary(), acc.count, Enum.reverse(acc.spans)}
   end
 
-  defp do_sub_spans_all(
-         line,
-         [{pos, len} | rest],
-         pat_len,
-         rep,
-         rep_len,
-         prev_end,
-         count,
-         acc,
-         spans
-       ) do
-    before = binary_part(line, prev_end, pos - prev_end)
-    new_output_pos = prev_output_pos(acc) + byte_size(before)
-    new_span = {new_output_pos, rep_len}
+  defp do_sub_spans_all(line, [{pos, len} | rest], acc) do
+    before = binary_part(line, acc.prev_end, pos - acc.prev_end)
+    new_output_pos = output_byte_size(acc.output) + byte_size(before)
+    new_span = {new_output_pos, acc.rep_len}
 
-    do_sub_spans_all(
-      line,
-      rest,
-      pat_len,
-      rep,
-      rep_len,
-      pos + len,
-      count + 1,
-      [rep, before | acc],
-      [new_span | spans]
-    )
+    new_acc = %{
+      acc
+      | prev_end: pos + len,
+        count: acc.count + 1,
+        output: [acc.rep, before | acc.output],
+        spans: [new_span | acc.spans]
+    }
+
+    do_sub_spans_all(line, rest, new_acc)
   end
 
-  @spec prev_output_pos(iolist()) :: non_neg_integer()
-  defp prev_output_pos(acc), do: IO.iodata_length(Enum.reverse(acc))
+  @spec output_byte_size(iolist()) :: non_neg_integer()
+  defp output_byte_size(acc), do: IO.iodata_length(Enum.reverse(acc))
 
   # ── Private helpers ────────────────────────────────────────────────────────
 

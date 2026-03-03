@@ -8,6 +8,8 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Highlight.Grammar
+
   alias Minga.Command.Parser
 
   describe "parser recognizes reload-highlights" do
@@ -29,7 +31,11 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
       # Inject highlights
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
+      )
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans != []
@@ -54,7 +60,11 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       ctx = start_editor("defmodule Bar do\nend\n", file_path: path)
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
+      )
 
       version_before = :sys.get_state(ctx.editor).highlight_version
 
@@ -71,7 +81,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       # We can't easily test the actual ~/.config path in CI, but we can
       # verify the Grammar.query_path logic by checking that priv path
       # is returned when no user override exists
-      path = Minga.Highlight.Grammar.query_path("elixir")
+      path = Grammar.query_path("elixir")
       assert path != nil
       assert String.contains?(path, "priv/queries/elixir/highlights.scm")
     end

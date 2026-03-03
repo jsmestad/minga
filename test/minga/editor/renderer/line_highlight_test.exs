@@ -166,7 +166,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
       cmds = LineRenderer.render("hello world", 0, 0, ctx, 0)
 
       # Should render without errors (basic unstyled line)
-      assert length(cmds) >= 1
+      assert cmds != []
       first = decode_draw(Enum.at(cmds, 0))
       assert String.contains?(first.text, "hello")
     end

@@ -115,9 +115,7 @@ defmodule Minga.Highlight.Theme do
   end
 
   @spec fallback_lookup(t(), String.t()) :: Minga.Port.Protocol.style()
-  defp fallback_lookup(_theme, name) when not is_binary(name), do: []
-
-  defp fallback_lookup(theme, name) do
+  defp fallback_lookup(theme, name) when is_binary(name) do
     case String.split(name, ".") do
       [_single] ->
         []

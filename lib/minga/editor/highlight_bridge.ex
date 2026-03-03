@@ -43,8 +43,7 @@ defmodule Minga.Editor.HighlightBridge do
     query_override = user_query_override(language)
 
     commands =
-      [Protocol.encode_set_language(language)] ++
-        query_override ++
+      [Protocol.encode_set_language(language) | query_override] ++
         [Protocol.encode_parse_buffer(version, content)]
 
     PortManager.send_commands(state.port_manager, commands)

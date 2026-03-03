@@ -71,6 +71,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       ctx = start_editor("émoji")
 
       ml = modeline(ctx)
+
       assert String.contains?(ml, "1:1"),
              "Expected modeline to show column 1, got: #{inspect(ml)}"
     end
@@ -151,6 +152,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key(ctx, ?$)
 
       ml = modeline(ctx)
+
       assert String.contains?(ml, "1:5"),
              "Expected modeline to show column 5, got: #{inspect(ml)}"
     end

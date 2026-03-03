@@ -8,8 +8,13 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Editor
   alias Minga.Editor.HighlightBridge
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Viewport
   alias Minga.Highlight
+  alias Minga.Mode
+  alias Minga.Test.HeadlessPort
 
   describe "buffer switch resets highlights" do
     @tag :tmp_dir
@@ -28,7 +33,6 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         ctx.editor,
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
       )
-
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.spans != [], "Pre-condition: file1 should have spans"
@@ -265,11 +269,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   describe "highlight setup timing" do
     test "new editor has empty highlights before :ready" do
       id = :erlang.unique_integer([:positive])
-      {:ok, port} = Minga.Test.HeadlessPort.start_link(width: 80, height: 24)
+      {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
       {:ok, buffer} = BufferServer.start_link(content: "defmodule Foo do\nend\n")
 
       {:ok, editor} =
-        Minga.Editor.start_link(
+        Editor.start_link(
           name: :"hl_timing_#{id}",
           port_manager: port,
           buffer: buffer,
@@ -316,7 +320,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Inject highlights so reparse path is active
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}]}}
+      )
 
       version_before = :sys.get_state(ctx.editor).highlight_version
 
@@ -333,7 +341,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("hello")
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
+      )
 
       version_before = :sys.get_state(ctx.editor).highlight_version
 
@@ -349,7 +361,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("hello world")
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
+      )
 
       # Yank a word first (yw), then paste
       send_keys(ctx, "yw")
@@ -368,7 +384,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("hello world")
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
+      )
 
       # Make a change first
       send_key(ctx, ?x)
@@ -388,7 +408,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("hello world\nsecond line")
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
+      )
 
       version_before = :sys.get_state(ctx.editor).highlight_version
 
@@ -468,7 +492,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("hello")
 
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}})
+
+      send(
+        ctx.editor,
+        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
+      )
 
       version_before = :sys.get_state(ctx.editor).highlight_version
 
@@ -485,11 +513,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   # ── Helpers ──
 
   defp base_state do
-    %Minga.Editor.State{
+    %EditorState{
       port_manager: nil,
-      viewport: Minga.Editor.Viewport.new(24, 80),
+      viewport: Viewport.new(24, 80),
       mode: :normal,
-      mode_state: Minga.Mode.initial_state()
+      mode_state: Mode.initial_state()
     }
   end
 end

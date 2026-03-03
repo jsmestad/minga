@@ -3,15 +3,17 @@ defmodule Minga.Editor.HighlightBridgeTest do
 
   alias Minga.Editor.HighlightBridge
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Viewport
+  alias Minga.Mode
 
   # Minimal state for testing — no real port or buffer needed for
   # handle_names and handle_spans.
   defp base_state do
     %EditorState{
       port_manager: nil,
-      viewport: Minga.Editor.Viewport.new(24, 80),
+      viewport: Viewport.new(24, 80),
       mode: :normal,
-      mode_state: Minga.Mode.initial_state()
+      mode_state: Mode.initial_state()
     }
   end
 
