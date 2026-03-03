@@ -351,7 +351,6 @@ defmodule Minga.Editor.Renderer do
 
     snapshot = BufferServer.render_snapshot(buffer, first_line, visible_rows)
     lines = snapshot.lines
-    {cursor_line, _} = snapshot.cursor
     line_count = snapshot.line_count
 
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
