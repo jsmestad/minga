@@ -30,18 +30,9 @@ were doing.
 
 Minga runs as **two OS processes** with full fault isolation:
 
-```
-BEAM (Elixir/Erlang VM)              Zig + libvaxis
-───────────────────────              ──────────────
-Your buffers, undo history,          Terminal rendering
-modes, keybindings, commands,        Input capture
-search, file picker, marks,          Screen drawing
-syntax highlighting                  Floating panels
-
-         ◄── keyboard events ──┐
-         ── render commands ───►│
-            (Port protocol)    │
-```
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Minga two-process architecture" width="720"/>
+</p>
 
 The Erlang VM (the BEAM) was designed to run telephone switches,
 systems
