@@ -1,0 +1,52 @@
+defmodule Minga.LSP.Client.State do
+  @moduledoc """
+  Internal state for an `LSP.Client` GenServer.
+  """
+
+  alias Minga.LSP.ServerRegistry
+
+  @enforce_keys [:server_config, :root_path]
+  defstruct [
+    :server_config,
+    :root_path,
+    :port,
+    :encoding,
+    buffer: "",
+    next_id: 1,
+    pending: %{},
+    open_documents: %{},
+    capabilities: %{},
+    status: :starting,
+    subscribers: []
+  ]
+
+  @typedoc "Client lifecycle status."
+  @type status :: :starting | :initializing | :ready | :shutdown
+
+  @typedoc "A pending request awaiting a response."
+  @type pending_entry :: %{
+          method: String.t(),
+          from: GenServer.from() | nil,
+          timer: reference() | nil
+        }
+
+  @typedoc "An open document tracked by version."
+  @type open_doc :: %{
+          uri: String.t(),
+          version: pos_integer()
+        }
+
+  @type t :: %__MODULE__{
+          server_config: ServerRegistry.server_config(),
+          root_path: String.t(),
+          port: port() | nil,
+          encoding: Minga.LSP.PositionEncoding.encoding(),
+          buffer: binary(),
+          next_id: pos_integer(),
+          pending: %{integer() => pending_entry()},
+          open_documents: %{String.t() => open_doc()},
+          capabilities: map(),
+          status: status(),
+          subscribers: [pid()]
+        }
+end
