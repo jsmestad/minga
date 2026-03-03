@@ -58,7 +58,7 @@ defmodule Minga.Editor.Mouse do
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
-  # ── Left click (press) — focuses window, sets position, starts potential drag ──
+  # ── Left click (press) — focuses window, moves cursor, records drag anchor ──
 
   def handle(state, row, col, :left, :press) do
     state = maybe_focus_window_at(state, row, col)
@@ -70,50 +70,37 @@ defmodule Minga.Editor.Mouse do
       {target_line, target_col} ->
         BufferServer.move_to(state.buf.buffer, {target_line, target_col})
 
-        # Enter visual mode for potential drag; record anchor.
-        visual_state = %VisualState{
-          visual_anchor: {target_line, target_col},
-          visual_type: :char
-        }
-
         state
         |> cancel_mode_for_mouse()
         |> Map.merge(%{
-          mode: :visual,
-          mode_state: visual_state,
-          mouse_dragging: true
+          mode: :normal,
+          mode_state: Mode.initial_state(),
+          mouse_dragging: true,
+          mouse_anchor: {target_line, target_col}
         })
     end
   end
 
-  # ── Left drag — extends visual selection ──
+  # ── Left drag — starts or extends visual selection ──
 
-  def handle(%{mouse_dragging: true} = state, row, col, :left, :drag) do
-    state
-    |> maybe_auto_scroll(row)
-    |> move_to_mouse_pos(row, col)
+  def handle(%{mouse_dragging: true, mouse_anchor: anchor} = state, row, col, :left, :drag) do
+    state =
+      state
+      |> maybe_auto_scroll(row)
+      |> move_to_mouse_pos(row, col)
+
+    # Enter visual mode on first drag movement
+    enter_visual_if_needed(state, anchor)
   end
 
-  # ── Left release — finalize selection or cancel if no movement ──
+  # ── Left release — finalize click or drag ──
 
-  def handle(
-        %{
-          mouse_dragging: true,
-          buf: %{buffer: buf},
-          mode_state: %VisualState{visual_anchor: anchor}
-        } =
-          state,
-        _row,
-        _col,
-        :left,
-        :release
-      ) do
-    cursor = BufferServer.cursor(buf)
-    finalize_drag(state, anchor, cursor)
+  def handle(%{mouse_dragging: true, mode: :visual} = state, _row, _col, :left, :release) do
+    %{state | mouse_dragging: false, mouse_anchor: nil}
   end
 
   def handle(%{mouse_dragging: true} = state, _row, _col, :left, :release) do
-    %{state | mouse_dragging: false, mode: :normal, mode_state: Mode.initial_state()}
+    %{state | mouse_dragging: false, mouse_anchor: nil}
   end
 
   # Ignore all other mouse events (right click, middle click, motion, etc.)
@@ -182,19 +169,13 @@ defmodule Minga.Editor.Mouse do
     end
   end
 
-  # Finalize a drag: if anchor == cursor it was just a click, return to normal;
-  # otherwise keep the visual selection active.
-  @spec finalize_drag(
-          state(),
-          {non_neg_integer(), non_neg_integer()},
-          {non_neg_integer(), non_neg_integer()}
-        ) :: state()
-  defp finalize_drag(state, pos, pos) do
-    %{state | mouse_dragging: false, mode: :normal, mode_state: Mode.initial_state()}
-  end
+  # Enters visual mode if not already in it (first drag movement).
+  @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()
+  defp enter_visual_if_needed(%{mode: :visual} = state, _anchor), do: state
 
-  defp finalize_drag(state, _anchor, _cursor) do
-    %{state | mouse_dragging: false}
+  defp enter_visual_if_needed(state, anchor) do
+    visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
+    %{state | mode: :visual, mode_state: visual_state}
   end
 
   # Converts screen row/col to buffer position, or nil if the click is on
