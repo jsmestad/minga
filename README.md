@@ -128,7 +128,7 @@ For the curious, here's what makes Minga tick:
 
 | Layer | Technology | Responsibility |
 |-------|-----------|----------------|
-| **Editor core** | Elixir on the BEAM | Gap buffer, modes, motions, operators, text objects, keymap trie, command registry, undo/redo, syntax highlight orchestration — [Elixir is our Elisp](docs/ELIXIR-AS-ELISP.md) |
+| **Editor core** | Elixir on the BEAM | Gap buffer, modes, motions, operators, text objects, keymap trie, command registry, undo/redo, syntax highlight orchestration |
 | **Renderer** | Zig + libvaxis | Terminal drawing, keyboard input, tree-sitter parsing, floating panels |
 | **Protocol** | Length-prefixed binary over stdin/stdout | Typed opcodes for render commands (BEAM→Zig) and input events (Zig→BEAM) |
 | **Supervision** | OTP supervisor tree | Automatic restart of crashed components with preserved editor state |
@@ -142,7 +142,7 @@ pre-compiled queries for instant highlighting on file open.
 ## Coming from another editor?
 
 - **[For Neovim users](docs/FOR-NEOVIM-USERS.md):** Same modal editing, better runtime. Why the BEAM solves problems Neovim can't fix without a rewrite.
-- **[For Emacs users](docs/ELIXIR-AS-ELISP.md)** — Elixir is Minga's Elisp. Point-by-point comparison of runtime extensibility.
+- **[For Emacs users](docs/FOR-EMACS-USERS.md):** Same depth of customization, none of the single-threaded pain. Elixir is Minga's Elisp.
 
 ## Contributing
 

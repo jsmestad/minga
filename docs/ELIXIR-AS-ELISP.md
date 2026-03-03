@@ -1,9 +1,12 @@
 # Elixir is Minga's Elisp
 
-A guide for Emacs users who want to know if Minga can be as extensible as
-Emacs — and whether Elixir can really replace Elisp.
+> **Looking for the full Emacs-to-Minga pitch?** See
+> [For Emacs Users](FOR-EMACS-USERS.md). This document is the technical
+> deep-dive on Elisp vs Elixir extensibility.
 
-**Short answer:** Yes. In some ways, it's stronger.
+A detailed comparison of Elisp and Elixir as editor extension languages.
+proof that Elixir on the BEAM matches every property that makes Emacs
+programmable, and where it's stronger.
 
 ---
 
