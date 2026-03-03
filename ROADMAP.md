@@ -182,6 +182,26 @@ Current status and planned features. Updated as development progresses.
 | Floating windows | 📋 | Zig renderer supports panels |
 | Tab bar | 💭 | |
 
+## LSP & Diagnostics
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Source-agnostic diagnostic framework | ✅ | `Minga.Diagnostics` — any producer (LSP, linters, compilers) publishes via unified API |
+| LSP server registry | ✅ | Hardcoded defaults for 16 languages (Elixir, Go, Rust, C/C++, JS/TS, Python, etc.) |
+| LSP client GenServer | ✅ | Port-based spawn, initialize handshake, capability + offset encoding negotiation |
+| Multi-server per buffer | ✅ | e.g., typescript-language-server + eslint on same file |
+| Document sync (full) | ✅ | `didOpen`, debounced `didChange` (150ms), `didSave`, `didClose` |
+| Diagnostic gutter signs | ✅ | 2-char sign column: `E`/`W`/`I`/`H` in Doom One colors |
+| Diagnostic navigation | ✅ | `]d` / `[d` next/prev, `SPC c d` picker |
+| Minibuffer diagnostic hint | ✅ | Shows message when cursor is on a diagnostic line |
+| `:LspInfo` command | ✅ | Server name, status, encoding in minibuffer |
+| LSP DynamicSupervisor | ✅ | One client per (server, root), crash recovery |
+| Completion | 📋 | |
+| Go-to-definition | 📋 | |
+| Hover | 📋 | |
+| Rename | 📋 | |
+| Incremental document sync | 📋 | Full sync for now; incremental when perf requires it |
+
 ## Infrastructure
 
 | Feature | Status | Notes |
@@ -190,7 +210,7 @@ Current status and planned features. Updated as development progresses.
 | Port protocol (BEAM ↔ Zig) | ✅ | Length-prefixed binary, typed opcodes |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 1,393 Elixir tests | ✅ | Including property-based tests |
+| 1,659 Elixir tests | ✅ | Including property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 
@@ -201,7 +221,7 @@ Current status and planned features. Updated as development progresses.
 Roughly in priority order:
 
 1. ~~**Split windows**~~ — ✅ Done
-2. **LSP client (diagnostics)** — 🚧 Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename pending.
+2. ~~**LSP client (diagnostics)**~~ — ✅ Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename are next.
 3. **Plugin system** — Elixir-based plugins that run as supervised processes
 4. **Additional themes** — Theme loading from disk, runtime switching
 5. **Visual block mode** — Column selection and editing
@@ -219,4 +239,4 @@ These guide what we build and how:
 - **Two-process isolation** — Editor state and rendering never share memory; either can fail independently
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus
 - **Elixir for logic, Zig for pixels** — Each language where it excels
-- **Test everything** — 1,500 tests and counting; property-based tests for data structures
+- **Test everything** — 1,659 tests and counting; property-based tests for data structures

@@ -75,6 +75,8 @@ Minga.Supervisor (rest_for_one)
 ├── Filetype.Registry        ← static data, crashes are rare
 ├── Buffer.Supervisor        ← if this dies, restart it (buffers survive)
 ├── Command.Registry         ← rebuilt from module attributes on restart
+├── Diagnostics              ← source-agnostic diagnostic aggregation
+├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
 ├── FileWatcher              ← OS file notifications
 ├── Port.Manager             ← owns the Zig renderer process
 └── Editor                   ← orchestration, depends on everything above
