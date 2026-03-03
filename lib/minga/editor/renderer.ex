@@ -255,7 +255,8 @@ defmodule Minga.Editor.Renderer do
       end)
 
     # Render vertical separators between side-by-side panes
-    separator_commands = render_separators(state.window_tree, screen, full_viewport.rows)
+    {_screen_row, _screen_col, _screen_w, screen_h} = screen
+    separator_commands = render_separators(state.window_tree, screen, screen_h)
 
     # ── Global elements (minibuffer, whichkey, picker) use full viewport ──
     minibuffer_row = full_viewport.rows - 1
@@ -338,10 +339,12 @@ defmodule Minga.Editor.Renderer do
     {cursor_line, cursor_byte_col} = BufferServer.cursor(buffer)
     cursor = {cursor_line, cursor_byte_col}
 
-    viewport = Viewport.scroll_to_cursor(win_viewport, {cursor_line, 0})
-    {first_line, _last_line} = Viewport.visible_range(viewport)
-    # Reserve 1 row for per-window modeline
-    visible_rows = max(Viewport.content_rows(viewport) - 1, 1)
+    # Each window reserves 1 row at the bottom for its own modeline.
+    # The global minibuffer is excluded from the layout rect, so we only
+    # subtract 1 here (not the standard footer_rows of 2).
+    visible_rows = max(win_viewport.rows - 1, 1)
+    viewport = scroll_to_cursor_modeline_only(win_viewport, {cursor_line, 0})
+    {first_line, _} = visible_range_modeline_only(viewport)
 
     snapshot = BufferServer.render_snapshot(buffer, first_line, visible_rows)
     lines = snapshot.lines
@@ -357,7 +360,7 @@ defmodule Minga.Editor.Renderer do
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, cursor_col})
+    viewport = scroll_to_cursor_modeline_only(viewport, {cursor_line, cursor_col})
 
     # Only show visual selection in the active window
     visual_selection =
@@ -367,8 +370,17 @@ defmodule Minga.Editor.Renderer do
         nil
       end
 
+    # Use the correct highlight state for this window's buffer:
+    # active buffer → state.highlight, other buffers → cached highlights
+    highlight_for_buffer =
+      if window.buffer == state.buf.buffer do
+        state.highlight
+      else
+        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.new())
+      end
+
     highlight =
-      if state.highlight.capture_names != [], do: state.highlight, else: nil
+      if highlight_for_buffer.capture_names != [], do: highlight_for_buffer, else: nil
 
     render_ctx = %Context{
       viewport: viewport,
@@ -412,17 +424,16 @@ defmodule Minga.Editor.Renderer do
         []
       end
 
-    # Per-window modeline
+    # Per-window modeline (Doom Emacs style — each window has its own)
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
+    filetype = Map.get(snapshot, :filetype, :text)
     buf_count = length(state.buf.buffers)
     buf_index = state.buf.active_buffer + 1
-    modeline_row = row_off + viewport.rows - Viewport.footer_rows()
-
-    filetype = Map.get(snapshot, :filetype, :text)
+    modeline_row = row_off + win_viewport.rows - 1
 
     modeline_commands =
-      Modeline.render(modeline_row, viewport.cols, %{
+      Modeline.render(modeline_row, win_viewport.cols, %{
         mode: if(is_active, do: state.mode, else: :normal),
         mode_state: if(is_active, do: state.mode_state, else: nil),
         file_name: file_name,
@@ -433,12 +444,20 @@ defmodule Minga.Editor.Renderer do
         line_count: line_count,
         buf_index: buf_index,
         buf_count: buf_count,
-        macro_recording: false
+        macro_recording:
+          if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false)
       })
 
     modeline_commands = offset_commands(modeline_commands, 0, col_off)
 
-    commands = gutter_commands ++ line_commands ++ tilde_commands ++ modeline_commands
+    commands =
+      apply_inactive_dimming(
+        is_active,
+        gutter_commands,
+        line_commands,
+        tilde_commands,
+        modeline_commands
+      )
 
     cursor_info =
       if is_active do
@@ -455,11 +474,9 @@ defmodule Minga.Editor.Renderer do
   defp render_separators(tree, screen_rect, total_rows) do
     separator_cols = collect_separator_cols(tree, screen_rect)
 
-    Enum.flat_map(separator_cols, fn col ->
-      for row <- 0..(total_rows - 2) do
-        Protocol.encode_draw(row, col, "│", fg: 0x555555)
-      end
-    end)
+    for col <- separator_cols, row <- 0..(total_rows - 1) do
+      Protocol.encode_draw(row, col, "│", fg: 0x555555)
+    end
   end
 
   @spec collect_separator_cols(WindowTree.t(), WindowTree.rect()) :: [non_neg_integer()]
@@ -497,6 +514,72 @@ defmodule Minga.Editor.Renderer do
         other
     end)
   end
+
+  # ── Split-mode viewport helpers (1 row for modeline only) ────────────────────
+
+  # Like Viewport.scroll_to_cursor/2 but reserves only 1 row for the per-window
+  # modeline (instead of the standard 2 for modeline + minibuffer).
+  @spec scroll_to_cursor_modeline_only(Viewport.t(), {non_neg_integer(), non_neg_integer()}) ::
+          Viewport.t()
+  defp scroll_to_cursor_modeline_only(%Viewport{} = vp, {cursor_line, cursor_col}) do
+    visible_rows = max(vp.rows - 1, 1)
+
+    top =
+      cond do
+        cursor_line < vp.top -> cursor_line
+        cursor_line >= vp.top + visible_rows -> cursor_line - visible_rows + 1
+        true -> vp.top
+      end
+
+    left =
+      cond do
+        cursor_col < vp.left -> cursor_col
+        cursor_col >= vp.left + vp.cols -> cursor_col - vp.cols + 1
+        true -> vp.left
+      end
+
+    %Viewport{vp | top: top, left: left}
+  end
+
+  # Like Viewport.visible_range/1 but reserves only 1 row for the per-window modeline.
+  @spec visible_range_modeline_only(Viewport.t()) :: {non_neg_integer(), non_neg_integer()}
+  defp visible_range_modeline_only(%Viewport{top: top, rows: rows}) do
+    visible_rows = max(rows - 1, 1)
+    {top, top + visible_rows - 1}
+  end
+
+  # ── Dimming (inactive window — Doom Emacs style) ────────────────────────────
+
+  # Active window: assemble commands unchanged.
+  # Inactive window: dim gutter/tilde, grayscale modeline.
+  # Line content dimming is handled in the LineRenderer via ctx.dim.
+  @spec apply_inactive_dimming(boolean(), [binary()], [binary()], [binary()], [binary()]) ::
+          [binary()]
+  defp apply_inactive_dimming(true, gutter, lines, tildes, modeline) do
+    gutter ++ lines ++ tildes ++ modeline
+  end
+
+  defp apply_inactive_dimming(false, gutter, lines, tildes, modeline) do
+    gutter ++ lines ++ tildes ++ Enum.map(modeline, &grayscale_draw_command/1)
+  end
+
+  # ── Dimming helpers ────────────────────────────────────────────────────────
+
+  # Converts a draw command to grayscale (for inactive modelines).
+  @spec grayscale_draw_command(binary()) :: binary()
+  defp grayscale_draw_command(
+         <<0x10, row::16, col::16, fg_r::8, fg_g::8, fg_b::8, bg_r::8, bg_g::8, bg_b::8, attrs::8,
+           rest::binary>>
+       ) do
+    # Luminance-weighted grayscale
+    fg_gray = round(fg_r * 0.299 + fg_g * 0.587 + fg_b * 0.114)
+    bg_gray = round(bg_r * 0.299 + bg_g * 0.587 + bg_b * 0.114)
+
+    <<0x10, row::16, col::16, fg_gray::8, fg_gray::8, fg_gray::8, bg_gray::8, bg_gray::8,
+      bg_gray::8, attrs::8, rest::binary>>
+  end
+
+  defp grayscale_draw_command(other), do: other
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

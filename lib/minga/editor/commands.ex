@@ -349,5 +349,6 @@ defmodule Minga.Editor.Commands do
   @spec add_buffer(state(), pid()) :: state()
   def add_buffer(state, pid) do
     %{state | buf: Buffers.add(state.buf, pid)}
+    |> EditorState.sync_active_window_buffer()
   end
 end

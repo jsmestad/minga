@@ -78,10 +78,11 @@ defmodule Minga.Editor.Commands.WindowTest do
         |> Map.values()
         |> Enum.map(& &1.viewport)
 
-      # Vertical split: each window gets roughly half the width
+      # Vertical split: each window gets roughly half the width,
+      # and rows equal the content area (total rows minus 1 for global minibuffer)
       Enum.each(viewports, fn vp ->
         assert vp.cols < 80
-        assert vp.rows == 24
+        assert vp.rows == 23
       end)
     end
   end

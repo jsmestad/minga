@@ -23,38 +23,41 @@ defmodule Minga.Editor.Renderer.Line do
       |> Enum.drop(ctx.viewport.left)
       |> Enum.take(ctx.content_w)
 
-    case selection_cols_for_line(buf_line, line_len, ctx.visual_selection) do
-      nil when ctx.highlight != nil ->
-        render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
+    commands =
+      case selection_cols_for_line(buf_line, line_len, ctx.visual_selection) do
+        nil when ctx.highlight != nil ->
+          render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
 
-      nil ->
-        SearchHighlight.render_line_with_search(
-          visible_graphemes,
-          screen_row,
-          buf_line,
-          ctx.viewport,
-          ctx.search_matches,
-          ctx.gutter_w,
-          ctx.confirm_match
-        )
-
-      :full ->
-        [
-          Protocol.encode_draw(screen_row, ctx.gutter_w, Enum.join(visible_graphemes),
-            reverse: true
+        nil ->
+          SearchHighlight.render_line_with_search(
+            visible_graphemes,
+            screen_row,
+            buf_line,
+            ctx.viewport,
+            ctx.search_matches,
+            ctx.gutter_w,
+            ctx.confirm_match
           )
-        ]
 
-      {sel_start, sel_end} ->
-        render_partial_selection(
-          visible_graphemes,
-          screen_row,
-          ctx.gutter_w,
-          ctx.viewport.left,
-          sel_start,
-          sel_end
-        )
-    end
+        :full ->
+          [
+            Protocol.encode_draw(screen_row, ctx.gutter_w, Enum.join(visible_graphemes),
+              reverse: true
+            )
+          ]
+
+        {sel_start, sel_end} ->
+          render_partial_selection(
+            visible_graphemes,
+            screen_row,
+            ctx.gutter_w,
+            ctx.viewport.left,
+            sel_start,
+            sel_end
+          )
+      end
+
+    commands
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────

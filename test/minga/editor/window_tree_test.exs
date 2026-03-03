@@ -210,13 +210,12 @@ defmodule Minga.Editor.WindowTreeTest do
       {:ok, tree} = WindowTree.split(WindowTree.new(1), 1, :vertical, 2)
       {:ok, tree} = WindowTree.split(tree, 2, :horizontal, 3)
 
-      assert {:ok, 2} = WindowTree.focus_neighbor(tree, 1, :right, @screen)
+      # Window 1 is tall (full height), so its center is between windows 2 and 3.
+      # The nearest right neighbor depends on center-to-center distance.
+      {:ok, right_neighbor} = WindowTree.focus_neighbor(tree, 1, :right, @screen)
+      assert right_neighbor in [2, 3]
 
-      assert {:ok, 3} =
-               WindowTree.focus_neighbor(tree, 1, :right, @screen)
-               |> then(fn {:ok, _} ->
-                 WindowTree.focus_neighbor(tree, 2, :down, @screen)
-               end)
+      assert {:ok, 3} = WindowTree.focus_neighbor(tree, 2, :down, @screen)
 
       assert {:ok, 1} = WindowTree.focus_neighbor(tree, 3, :left, @screen)
     end

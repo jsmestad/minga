@@ -125,10 +125,31 @@ defmodule Minga.Editor.State do
   def split?(%__MODULE__{window_tree: {:leaf, _}}), do: false
   def split?(%__MODULE__{window_tree: {:split, _, _, _}}), do: true
 
-  @doc "Returns the screen rect for layout computation: {0, 0, cols, rows}."
+  @doc "Returns the screen rect for layout computation, excluding the global minibuffer row."
   @spec screen_rect(t()) :: WindowTree.rect()
   def screen_rect(%__MODULE__{viewport: vp}) do
-    {0, 0, vp.cols, vp.rows}
+    {0, 0, vp.cols, vp.rows - 1}
+  end
+
+  @doc """
+  Syncs the active window's buffer reference with `state.buf.buffer`.
+
+  Call this after any operation that changes `state.buf.buffer` to keep the
+  window tree consistent. No-op when windows aren't initialized.
+  """
+  @spec sync_active_window_buffer(t()) :: t()
+  def sync_active_window_buffer(%__MODULE__{buf: %{buffer: nil}} = state), do: state
+
+  def sync_active_window_buffer(
+        %__MODULE__{windows: windows, active_window: id, buf: buf} = state
+      ) do
+    case Map.fetch(windows, id) do
+      {:ok, %Window{buffer: existing} = window} when existing != buf.buffer ->
+        %{state | windows: Map.put(windows, id, %{window | buffer: buf.buffer})}
+
+      _ ->
+        state
+    end
   end
 
   @doc """

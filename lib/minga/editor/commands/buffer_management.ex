@@ -279,6 +279,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(%{buf: bs} = state, idx) do
     %{state | buf: Buffers.switch_to(bs, idx)}
+    |> EditorState.sync_active_window_buffer()
   end
 
   @spec next_buffer(state()) :: state()
@@ -345,7 +346,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
         [] ->
           # Fall back to scratch buffer if available
           fallback = bs.scratch_buffer
+
           %{state | buf: %{bs | buffers: [], active_buffer: 0, buffer: fallback}}
+          |> EditorState.sync_active_window_buffer()
 
         _ ->
           new_idx = min(idx, Enum.count(new_buffers) - 1)
@@ -355,6 +358,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
             state
             | buf: %{bs | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
           }
+          |> EditorState.sync_active_window_buffer()
       end
     end
   end
