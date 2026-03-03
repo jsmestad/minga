@@ -324,6 +324,160 @@ defmodule Minga.Buffer.Unicode do
   end
 
   @doc """
+  Returns the display width (terminal columns) of a string.
+
+  Most graphemes are 1 column wide. CJK characters and some emoji are 2
+  columns. Combining marks and zero-width characters are 0 columns.
+
+  Uses Unicode East Asian Width + emoji detection for correctness.
+
+  ## Examples
+
+      iex> Minga.Buffer.Unicode.display_width("hello")
+      5
+
+      iex> Minga.Buffer.Unicode.display_width("café")
+      4
+
+      iex> Minga.Buffer.Unicode.display_width("你好")
+      4
+
+      iex> Minga.Buffer.Unicode.display_width("")
+      0
+  """
+  @spec display_width(String.t()) :: non_neg_integer()
+  def display_width(text) when is_binary(text) do
+    do_display_width(text, 0)
+  end
+
+  @spec do_display_width(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp do_display_width("", acc), do: acc
+
+  defp do_display_width(text, acc) do
+    case String.next_grapheme(text) do
+      {g, rest} -> do_display_width(rest, acc + grapheme_width(g))
+      nil -> acc
+    end
+  end
+
+  @doc """
+  Returns the display width (terminal columns) of a single grapheme.
+
+  ## Examples
+
+      iex> Minga.Buffer.Unicode.grapheme_width("a")
+      1
+
+      iex> Minga.Buffer.Unicode.grapheme_width("你")
+      2
+  """
+  @spec grapheme_width(String.t()) :: non_neg_integer()
+  def grapheme_width(grapheme) when is_binary(grapheme) do
+    case grapheme do
+      "" ->
+        0
+
+      <<cp::utf8, _rest::binary>> ->
+        codepoint_width(cp)
+    end
+  end
+
+  # Width of a codepoint based on Unicode East Asian Width property.
+  # Wide (W) and Fullwidth (F) characters are 2 columns.
+  # Combining marks and zero-width characters are 0 columns.
+  @spec codepoint_width(non_neg_integer()) :: non_neg_integer()
+  defp codepoint_width(cp) when cp <= 0x001F, do: 0
+  defp codepoint_width(0x007F), do: 0
+  # Combining Diacritical Marks
+  defp codepoint_width(cp) when cp in 0x0300..0x036F, do: 0
+  # General combining marks
+  defp codepoint_width(cp) when cp in 0x1AB0..0x1AFF, do: 0
+  defp codepoint_width(cp) when cp in 0x1DC0..0x1DFF, do: 0
+  defp codepoint_width(cp) when cp in 0x20D0..0x20FF, do: 0
+  defp codepoint_width(cp) when cp in 0xFE20..0xFE2F, do: 0
+  # Zero-width characters
+  defp codepoint_width(0x200B), do: 0
+  defp codepoint_width(0x200C), do: 0
+  defp codepoint_width(0x200D), do: 0
+  defp codepoint_width(0xFEFF), do: 0
+  # Variation selectors
+  defp codepoint_width(cp) when cp in 0xFE00..0xFE0F, do: 0
+  defp codepoint_width(cp) when cp in 0xE0100..0xE01EF, do: 0
+  # CJK Unified Ideographs and extensions
+  defp codepoint_width(cp) when cp in 0x4E00..0x9FFF, do: 2
+  defp codepoint_width(cp) when cp in 0x3400..0x4DBF, do: 2
+  defp codepoint_width(cp) when cp in 0x20000..0x2A6DF, do: 2
+  defp codepoint_width(cp) when cp in 0x2A700..0x2B73F, do: 2
+  defp codepoint_width(cp) when cp in 0x2B740..0x2B81F, do: 2
+  defp codepoint_width(cp) when cp in 0x2B820..0x2CEAF, do: 2
+  defp codepoint_width(cp) when cp in 0x2CEB0..0x2EBEF, do: 2
+  defp codepoint_width(cp) when cp in 0x30000..0x3134F, do: 2
+  # CJK Compatibility Ideographs
+  defp codepoint_width(cp) when cp in 0xF900..0xFAFF, do: 2
+  defp codepoint_width(cp) when cp in 0x2F800..0x2FA1F, do: 2
+  # Hangul Syllables
+  defp codepoint_width(cp) when cp in 0xAC00..0xD7AF, do: 2
+  # CJK Radicals, Kangxi, Description
+  defp codepoint_width(cp) when cp in 0x2E80..0x2FFF, do: 2
+  # CJK Symbols and Punctuation, Hiragana, Katakana, Bopomofo, etc.
+  defp codepoint_width(cp) when cp in 0x3000..0x33FF, do: 2
+  defp codepoint_width(cp) when cp in 0xFE30..0xFE6F, do: 2
+  # Fullwidth Forms
+  defp codepoint_width(cp) when cp in 0xFF01..0xFF60, do: 2
+  defp codepoint_width(cp) when cp in 0xFFE0..0xFFE6, do: 2
+  # Emoji modifiers and regional indicators (typically rendered wide)
+  defp codepoint_width(cp) when cp in 0x1F1E0..0x1F1FF, do: 2
+  defp codepoint_width(cp) when cp in 0x1F300..0x1F9FF, do: 2
+  defp codepoint_width(cp) when cp in 0x1FA00..0x1FA6F, do: 2
+  defp codepoint_width(cp) when cp in 0x1FA70..0x1FAFF, do: 2
+  # Halfwidth Katakana (1 column, despite being in CJK block)
+  defp codepoint_width(cp) when cp in 0xFF61..0xFFDC, do: 1
+  defp codepoint_width(cp) when cp in 0xFFE8..0xFFEE, do: 1
+  # Everything else is 1 column
+  defp codepoint_width(_), do: 1
+
+  @doc """
+  Converts a byte column to a display column by summing grapheme display
+  widths for the first `byte_col` bytes of `text`.
+
+  Unlike `grapheme_col/2`, which counts graphemes (each +1), this function
+  accounts for wide characters (CJK, emoji: +2) and zero-width characters
+  (combining marks: +0).
+
+  ## Examples
+
+      iex> Minga.Buffer.Unicode.display_col("hello", 3)
+      3
+
+      iex> Minga.Buffer.Unicode.display_col("你好世界", 6)
+      4
+
+      iex> Minga.Buffer.Unicode.display_col("café", 4)
+      3
+  """
+  @spec display_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  def display_col(_text, 0), do: 0
+
+  def display_col(text, byte_col) do
+    do_display_col(text, byte_col, 0, 0)
+  end
+
+  @spec do_display_col(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_display_col(_text, target, current, width) when current >= target, do: width
+
+  defp do_display_col(text, target, current, width) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        g_size = byte_size(text) - byte_size(rest)
+        do_display_col(rest, target, current + g_size, width + grapheme_width(g))
+
+      nil ->
+        width
+    end
+  end
+
+  @doc """
   Converts a grapheme (display) column to a byte column.
 
   ## Examples

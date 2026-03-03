@@ -1054,8 +1054,8 @@ test "commandSize: load_grammar" {
 test "encodeHighlightSpans round-trip" {
     const hl = @import("highlighter.zig");
     const spans = [_]hl.Span{
-        .{ .start_byte = 0, .end_byte = 9, .capture_id = 0 },
-        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1 },
+        .{ .start_byte = 0, .end_byte = 9, .capture_id = 0, .pattern_index = 0 },
+        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 1 },
     };
     const buf = try encodeHighlightSpans(std.testing.allocator, 42, &spans);
     defer std.testing.allocator.free(buf);

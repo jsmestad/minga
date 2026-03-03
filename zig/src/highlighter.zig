@@ -5,10 +5,13 @@ const c = @cImport({
 });
 
 /// A highlight span: byte range + capture index.
+/// `pattern_index` is used for priority sorting (higher = more specific)
+/// but is NOT serialized in the port protocol.
 pub const Span = struct {
     start_byte: u32,
     end_byte: u32,
     capture_id: u16,
+    pattern_index: u16,
 };
 
 /// Result of a highlight operation.
@@ -258,9 +261,21 @@ pub const Highlighter = struct {
                     .start_byte = start,
                     .end_byte = end,
                     .capture_id = @intCast(cap.index),
+                    .pattern_index = @intCast(match.pattern_index),
                 });
             }
         }
+
+        // Sort by (start_byte ASC, pattern_index DESC, end_byte ASC).
+        // This puts the most specific pattern first at each position,
+        // so the BEAM side's first-wins processing picks the correct span.
+        std.mem.sortUnstable(Span, spans.items, {}, struct {
+            fn cmp(_: void, a: Span, b: Span) bool {
+                if (a.start_byte != b.start_byte) return a.start_byte < b.start_byte;
+                if (a.pattern_index != b.pattern_index) return a.pattern_index > b.pattern_index;
+                return a.end_byte < b.end_byte;
+            }
+        }.cmp);
 
         // Collect capture names
         const pattern_count = c.ts_query_capture_count(query);

@@ -127,6 +127,12 @@ defmodule Minga.Highlight do
 
   # ── Private ──
 
+  # Spans arrive from Zig pre-sorted by (start_byte ASC, pattern_index DESC,
+  # end_byte ASC). This means the most specific tree-sitter pattern comes first
+  # at each byte position. The left-to-right walk below uses first-wins: the
+  # first span covering a position determines its style, and later spans that
+  # overlap already-rendered text are skipped.
+
   @spec build_segments(
           String.t(),
           non_neg_integer(),
@@ -165,7 +171,7 @@ defmodule Minga.Highlight do
     span_start_in_line = max(span.start_byte - line_start, 0)
     span_end_in_line = min(span.end_byte - line_start, line_len)
 
-    # Skip spans that are entirely behind our current position (overlapping)
+    # Skip spans that are entirely behind our current position
     if span_end_in_line <= pos or span_start_in_line >= line_len do
       do_build(line_text, line_start, line_end, rest, hl, pos, acc)
     else

@@ -29,6 +29,7 @@ defmodule Minga.Highlight.ThemeTest do
 
     test "exact match for dotted name", %{theme: theme} do
       style = Theme.style_for_capture(theme, "keyword.function")
+      # keyword.function = magenta (Helix/Neovim consensus)
       assert Keyword.get(style, :fg) == 0xC678DD
     end
 
@@ -49,6 +50,40 @@ defmodule Minga.Highlight.ThemeTest do
 
     test "empty string returns empty list", %{theme: theme} do
       assert Theme.style_for_capture(theme, "") == []
+    end
+
+    test "covers all Elixir query captures", %{theme: theme} do
+      elixir_captures = [
+        "attribute",
+        "comment",
+        "comment.doc",
+        "comment.unused",
+        "constant",
+        "constant.builtin",
+        "embedded",
+        "function",
+        "keyword",
+        "module",
+        "number",
+        "operator",
+        "property",
+        "punctuation",
+        "punctuation.bracket",
+        "punctuation.delimiter",
+        "punctuation.special",
+        "string",
+        "string.escape",
+        "string.regex",
+        "string.special",
+        "string.special.symbol",
+        "variable"
+      ]
+
+      for capture <- elixir_captures do
+        style = Theme.style_for_capture(theme, capture)
+        assert style != [], "Expected style for #{inspect(capture)}, got []"
+        assert Keyword.has_key?(style, :fg), "Expected :fg in style for #{inspect(capture)}"
+      end
     end
   end
 end

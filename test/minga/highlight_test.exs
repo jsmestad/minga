@@ -164,15 +164,15 @@ defmodule Minga.HighlightTest do
       assert [{"def", []}, {" foo", []}] = result
     end
 
-    test "overlapping spans are deduplicated (first wins)" do
-      # Tree-sitter returns overlapping captures for the same node.
-      # The do_build loop skips spans behind the current position,
-      # so the first span wins for any given byte range.
+    test "overlapping spans use first (pre-sorted by Zig with highest priority first)" do
+      # Spans arrive from Zig sorted by (start_byte ASC, pattern_index DESC).
+      # The most specific pattern comes first. First-wins picks it.
+      # In tests, we simulate this by putting the specific span first.
       hl = %Highlight{
         version: 1,
         spans: [
-          %{start_byte: 0, end_byte: 9, capture_id: 0},
-          %{start_byte: 0, end_byte: 9, capture_id: 1}
+          %{start_byte: 0, end_byte: 9, capture_id: 1},
+          %{start_byte: 0, end_byte: 9, capture_id: 0}
         ],
         capture_names: ["keyword", "keyword.function"],
         theme: %{
@@ -187,8 +187,8 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "defmodule Foo do"
 
-      # First span wins for the overlapping region
-      assert [{"defmodule", [fg: 0xFF0000]}, {" Foo do", []}] = result
+      # First span (highest priority) wins for the overlapping region
+      assert [{"defmodule", [fg: 0x00FF00]}, {" Foo do", []}] = result
     end
 
     test "partially overlapping spans don't duplicate text" do
@@ -205,6 +205,58 @@ defmodule Minga.HighlightTest do
       result = Highlight.styles_for_line(hl, "hello world", 0)
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "hello world"
+    end
+
+    test "contained spans: inner overrides outer when sorted first" do
+      # Spans pre-sorted by Zig: narrower (inner) before broader (outer)
+      # at the same start_byte. Inner span at 0-2 comes first, wins for
+      # its range, then outer covers the remainder.
+      # String: #{content} = bytes: #(0) {(1) c(2) o(3) n(4) t(5) e(6) n(7) t(8) }(9)
+      hl = %Highlight{
+        version: 1,
+        spans: [
+          %{start_byte: 0, end_byte: 2, capture_id: 1},
+          %{start_byte: 0, end_byte: 10, capture_id: 0},
+          %{start_byte: 9, end_byte: 10, capture_id: 1}
+        ],
+        capture_names: ["embedded", "punctuation.special"],
+        theme: %{
+          "embedded" => [fg: 0xAAAAAA],
+          "punctuation.special" => [fg: 0xFF0000]
+        }
+      }
+
+      result = Highlight.styles_for_line(hl, "\#{content}", 0)
+      all_text = Enum.map_join(result, fn {text, _} -> text end)
+      assert all_text == "\#{content}"
+
+      # Inner span wins for its range, outer covers the rest
+      assert [
+               {"\#{", [fg: 0xFF0000]},
+               {"content}", [fg: 0xAAAAAA]}
+             ] = result
+    end
+
+    test "three overlapping spans at same position: first (highest priority) wins" do
+      # Spans arrive from Zig sorted by pattern_index DESC.
+      # In this test, keyword has the highest priority so comes first.
+      hl = %Highlight{
+        version: 1,
+        spans: [
+          %{start_byte: 0, end_byte: 3, capture_id: 2},
+          %{start_byte: 0, end_byte: 3, capture_id: 1},
+          %{start_byte: 0, end_byte: 3, capture_id: 0}
+        ],
+        capture_names: ["variable", "function", "keyword"],
+        theme: %{
+          "variable" => [fg: 0x111111],
+          "function" => [fg: 0x222222],
+          "keyword" => [fg: 0x333333]
+        }
+      }
+
+      result = Highlight.styles_for_line(hl, "def bar", 0)
+      assert [{"def", [fg: 0x333333]}, {" bar", []}] = result
     end
 
     test "with line_start_byte offset" do
