@@ -22,6 +22,7 @@ defmodule Minga.Mode.State do
             pending_macro_register: false,
             pending_macro_replay: false,
             pending_describe_key: false,
+            pending_bracket: nil,
             describe_key_leader_node: nil,
             describe_key_keys: []
 
@@ -30,6 +31,9 @@ defmodule Minga.Mode.State do
 
   @typedoc "Pending mark operation kind."
   @type pending_mark_kind :: :set | :jump_line | :jump_exact
+
+  @typedoc "Pending bracket direction: `]` (next) or `[` (prev)."
+  @type pending_bracket :: :next | :prev | nil
 
   @type t :: %__MODULE__{
           count: non_neg_integer() | nil,
@@ -43,6 +47,7 @@ defmodule Minga.Mode.State do
           pending_macro_register: boolean(),
           pending_macro_replay: boolean(),
           pending_describe_key: boolean(),
+          pending_bracket: pending_bracket(),
           describe_key_leader_node: Trie.node_t() | nil,
           describe_key_keys: [String.t()]
         }

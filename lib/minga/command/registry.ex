@@ -55,7 +55,11 @@ defmodule Minga.Command.Registry do
     {:half_page_up, "Scroll half page up"},
     {:page_down, "Scroll page down"},
     {:page_up, "Scroll page up"},
-    {:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)"}
+    {:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)"},
+    {:diagnostics_list, "List buffer diagnostics"},
+    {:next_diagnostic, "Jump to next diagnostic"},
+    {:prev_diagnostic, "Jump to previous diagnostic"},
+    {:lsp_info, "Show LSP server status"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

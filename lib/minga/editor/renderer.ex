@@ -148,13 +148,32 @@ defmodule Minga.Editor.Renderer do
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
           buf_line = first_line + screen_row
 
+          sign_w =
+            if render_ctx.diagnostic_signs == %{},
+              do: 0,
+              else: Gutter.sign_column_width()
+
+          sign_cmd =
+            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
+
           gutter_cmd =
-            Gutter.render_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
+            Gutter.render_number(
+              screen_row,
+              sign_w,
+              buf_line,
+              cursor_line,
+              gutter_w - sign_w,
+              line_number_style
+            )
 
           content_cmds =
             LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
 
-          new_gutters = if gutter_cmd == [], do: gutters, else: [gutter_cmd | gutters]
+          new_gutters =
+            gutters
+            |> prepend_if(sign_cmd)
+            |> prepend_if(gutter_cmd)
+
           next_byte_offset = byte_offset + byte_size(line_text) + 1
 
           {new_gutters, contents ++ content_cmds, next_byte_offset}
@@ -402,17 +421,35 @@ defmodule Minga.Editor.Renderer do
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
           buf_line = first_line + screen_row
 
+          sign_w =
+            if render_ctx.diagnostic_signs == %{},
+              do: 0,
+              else: Gutter.sign_column_width()
+
+          sign_cmd =
+            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
+
           gutter_cmd =
-            Gutter.render_number(screen_row, buf_line, cursor_line, gutter_w, line_number_style)
+            Gutter.render_number(
+              screen_row,
+              sign_w,
+              buf_line,
+              cursor_line,
+              gutter_w - sign_w,
+              line_number_style
+            )
 
           content_cmds =
             LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
 
           # Offset all commands by window position
-          gutter_cmd = offset_commands(List.wrap(gutter_cmd), row_off, col_off)
+          gutter_cmds =
+            (List.wrap(sign_cmd) ++ List.wrap(gutter_cmd))
+            |> offset_commands(row_off, col_off)
+
           content_cmds = offset_commands(content_cmds, row_off, col_off)
 
-          {gutters ++ gutter_cmd, contents ++ content_cmds,
+          {gutters ++ gutter_cmds, contents ++ content_cmds,
            byte_offset + byte_size(line_text) + 1}
         end
       )
@@ -513,6 +550,10 @@ defmodule Minga.Editor.Renderer do
   end
 
   # Offsets draw command row/col positions by the given amounts.
+  @spec prepend_if([binary()], binary() | []) :: [binary()]
+  defp prepend_if(list, []), do: list
+  defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
+
   # Only offsets draw_text commands (opcode 0x10) — cursor commands are handled separately.
   @spec offset_commands([binary()], non_neg_integer(), non_neg_integer()) :: [binary()]
   defp offset_commands(commands, 0, 0), do: commands

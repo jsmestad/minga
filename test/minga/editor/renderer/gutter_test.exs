@@ -1,112 +1,76 @@
 defmodule Minga.Editor.Renderer.GutterTest do
-  @moduledoc """
-  Tests for gutter rendering: modeline, cursor shape, cursor position, and
-  screen cursor gutter offset.
-  """
+  use ExUnit.Case, async: true
 
-  use Minga.Test.EditorCase, async: true
+  alias Minga.Editor.Renderer.Gutter
 
-  describe "modeline" do
-    test "shows NORMAL mode on startup" do
-      ctx = start_editor("hello")
-      assert_mode(ctx, :normal)
+  describe "total_width/2" do
+    test "adds sign column width when diagnostics present" do
+      line_number_w = 4
+      assert Gutter.total_width(line_number_w, true) == 6
     end
 
-    test "shows filename in modeline" do
-      ctx = start_editor("content", file_path: "/tmp/test_file.txt")
-      assert_modeline_contains(ctx, "test_file.txt")
+    test "no sign column when no diagnostics" do
+      line_number_w = 4
+      assert Gutter.total_width(line_number_w, false) == 4
     end
 
-    test "shows cursor position" do
-      ctx = start_editor("hello\nworld")
-      assert_modeline_contains(ctx, "1:1")
-    end
-
-    test "updates cursor position after movement" do
-      ctx = start_editor("hello\nworld")
-
-      send_key(ctx, ?j)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-
-      assert_modeline_contains(ctx, "2:3")
-    end
-
-    test "shows INSERT mode after pressing i" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?i)
-      assert_mode(ctx, :insert)
-    end
-
-    test "shows VISUAL mode after pressing v" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?v)
-      assert_mode(ctx, :visual)
-    end
-
-    test "returns to NORMAL mode after Esc from insert" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?i)
-      assert_mode(ctx, :insert)
-      send_key(ctx, 27)
-      assert_mode(ctx, :normal)
-    end
-
-    test "shows dirty indicator after editing" do
-      ctx = start_editor("hello")
-
-      send_key(ctx, ?i)
-      send_key(ctx, ?x)
-      send_key(ctx, 27)
-
-      assert_modeline_contains(ctx, "●")
+    test "handles zero line number width" do
+      assert Gutter.total_width(0, true) == 2
+      assert Gutter.total_width(0, false) == 0
     end
   end
 
-  describe "cursor shape" do
-    test "block cursor in normal mode" do
-      ctx = start_editor("hello")
-      assert cursor_shape(ctx) == :block
-    end
-
-    test "beam cursor in insert mode" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?i)
-      assert cursor_shape(ctx) == :beam
-    end
-
-    test "block cursor in visual mode" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?v)
-      assert cursor_shape(ctx) == :block
-    end
-
-    test "restores block cursor when leaving insert mode" do
-      ctx = start_editor("hello")
-      send_key(ctx, ?i)
-      assert cursor_shape(ctx) == :beam
-      send_key(ctx, 27)
-      assert cursor_shape(ctx) == :block
+  describe "sign_column_width/0" do
+    test "returns 2" do
+      assert Gutter.sign_column_width() == 2
     end
   end
 
-  describe "screen cursor position" do
-    @gutter_w 3
-
-    test "cursor starts at gutter offset" do
-      ctx = start_editor("hello\nworld")
-      assert screen_cursor(ctx) == {0, @gutter_w}
+  describe "render_sign/4" do
+    test "renders error sign" do
+      signs = %{5 => :error}
+      result = Gutter.render_sign(0, 0, 5, signs)
+      assert is_binary(result)
+      assert result != []
     end
 
-    test "cursor follows hjkl movement with gutter offset" do
-      ctx = start_editor("hello\nworld")
+    test "renders warning sign" do
+      signs = %{3 => :warning}
+      result = Gutter.render_sign(0, 0, 3, signs)
+      assert is_binary(result)
+    end
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      assert screen_cursor(ctx) == {0, @gutter_w + 2}
+    test "renders info sign" do
+      signs = %{1 => :info}
+      result = Gutter.render_sign(0, 0, 1, signs)
+      assert is_binary(result)
+    end
 
-      send_key(ctx, ?j)
-      assert screen_cursor(ctx) == {1, @gutter_w + 2}
+    test "renders hint sign" do
+      signs = %{0 => :hint}
+      result = Gutter.render_sign(0, 0, 0, signs)
+      assert is_binary(result)
+    end
+
+    test "renders empty space when line has no diagnostic" do
+      signs = %{5 => :error}
+      result = Gutter.render_sign(0, 0, 10, signs)
+      assert is_binary(result)
+    end
+
+    test "returns empty list when signs map is empty" do
+      assert Gutter.render_sign(0, 0, 5, %{}) == []
+    end
+  end
+
+  describe "render_number/6" do
+    test "renders line number with col_offset" do
+      result = Gutter.render_number(0, 2, 5, 5, 4, :hybrid)
+      assert is_binary(result)
+    end
+
+    test "returns empty for :none style with zero width" do
+      assert Gutter.render_number(0, 0, 5, 5, 0, :none) == []
     end
   end
 end

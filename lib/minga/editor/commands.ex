@@ -30,6 +30,7 @@ defmodule Minga.Editor.Commands do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.BufferManagement
+  alias Minga.Editor.Commands.Diagnostics
   alias Minga.Editor.Commands.Editing
   alias Minga.Editor.Commands.Eval
   alias Minga.Editor.Commands.Help
@@ -291,6 +292,24 @@ defmodule Minga.Editor.Commands do
   def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
 
+  # ── Diagnostics ──────────────────────────────────────────────────────────
+
+  def execute(state, :diagnostics_list) do
+    PickerUI.open(state, Minga.Diagnostics.PickerSource)
+  end
+
+  def execute(state, :next_diagnostic) do
+    Diagnostics.execute(state, :next_diagnostic)
+  end
+
+  def execute(state, :prev_diagnostic) do
+    Diagnostics.execute(state, :prev_diagnostic)
+  end
+
+  def execute(state, :lsp_info) do
+    Diagnostics.execute(state, :lsp_info)
+  end
+
   # ── Macro recording ──────────────────────────────────────────────────────
 
   def execute(state, :toggle_macro_recording) do
@@ -339,6 +358,9 @@ defmodule Minga.Editor.Commands do
   def execute(%{macro_recorder: %{last_register: reg}} = state, :replay_last_macro) do
     {state, {:replay_macro, reg}}
   end
+
+  def execute(state, {:execute_ex_command, {:lsp_info, []}}),
+    do: Diagnostics.execute(state, :lsp_info)
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
 

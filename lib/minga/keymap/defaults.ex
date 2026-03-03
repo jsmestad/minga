@@ -62,6 +62,9 @@ defmodule Minga.Keymap.Defaults do
     # ── Help ──────────────────────────────────────────────────────────────────
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
 
+    # ── Code ────────────────────────────────────────────────────────────────────
+    {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
@@ -71,6 +74,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?s, @none}], "+search"},
     {[{?f, @none}], "+file"},
     {[{?b, @none}], "+buffer"},
+    {[{?c, @none}], "+code"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},

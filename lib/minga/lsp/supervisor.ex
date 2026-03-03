@@ -43,9 +43,10 @@ defmodule Minga.LSP.Supervisor do
   @spec ensure_client(
           GenServer.server(),
           ServerRegistry.server_config(),
-          String.t()
+          String.t(),
+          keyword()
         ) :: {:ok, pid()} | {:error, :not_available | term()}
-  def ensure_client(supervisor \\ __MODULE__, server_config, root_path)
+  def ensure_client(supervisor \\ __MODULE__, server_config, root_path, opts \\ [])
       when is_map(server_config) and is_binary(root_path) do
     key = {server_config.name, root_path}
 
@@ -54,7 +55,7 @@ defmodule Minga.LSP.Supervisor do
         {:ok, pid}
 
       :not_found ->
-        start_client(supervisor, server_config, root_path)
+        start_client(supervisor, server_config, root_path, opts)
     end
   end
 
@@ -103,12 +104,16 @@ defmodule Minga.LSP.Supervisor do
   @spec start_client(
           GenServer.server(),
           ServerRegistry.server_config(),
-          String.t()
+          String.t(),
+          keyword()
         ) :: {:ok, pid()} | {:error, :not_available | term()}
-  defp start_client(supervisor, server_config, root_path) do
+  defp start_client(supervisor, server_config, root_path, opts) do
     if ServerRegistry.available?(server_config) do
-      child_spec =
-        {Client, server_config: server_config, root_path: root_path}
+      client_opts =
+        [server_config: server_config, root_path: root_path] ++
+          Keyword.take(opts, [:diagnostics])
+
+      child_spec = {Client, client_opts}
 
       case DynamicSupervisor.start_child(supervisor, child_spec) do
         {:ok, pid} ->

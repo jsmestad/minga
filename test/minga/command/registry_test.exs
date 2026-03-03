@@ -47,7 +47,11 @@ defmodule Minga.Command.RegistryTest do
           :cycle_line_numbers,
           :view_messages,
           :view_scratch,
-          :new_buffer
+          :new_buffer,
+          :diagnostics_list,
+          :next_diagnostic,
+          :prev_diagnostic,
+          :lsp_info
         ]
         |> Enum.sort()
 

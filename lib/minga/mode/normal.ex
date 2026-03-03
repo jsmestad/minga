@@ -413,6 +413,32 @@ defmodule Minga.Mode.Normal do
     {:execute, {:goto_line, count}, %{state | count: nil}}
   end
 
+  # ] prefix — wait for second key (next diagnostic, etc.)
+  def handle_key({?], 0}, %ModeState{pending_bracket: nil} = state) do
+    {:continue, %{state | pending_bracket: :next}}
+  end
+
+  # [ prefix — wait for second key (prev diagnostic, etc.)
+  def handle_key({?[, 0}, %ModeState{pending_bracket: nil} = state) do
+    {:continue, %{state | pending_bracket: :prev}}
+  end
+
+  # ]d — next diagnostic
+  def handle_key({?d, 0}, %ModeState{pending_bracket: :next} = state) do
+    {:execute, :next_diagnostic, %{state | pending_bracket: nil}}
+  end
+
+  # [d — previous diagnostic
+  def handle_key({?d, 0}, %ModeState{pending_bracket: :prev} = state) do
+    {:execute, :prev_diagnostic, %{state | pending_bracket: nil}}
+  end
+
+  # Cancel bracket prefix on any unrecognized key
+  def handle_key(_key, %ModeState{pending_bracket: bracket} = state)
+      when bracket != nil do
+    {:continue, %{state | pending_bracket: nil}}
+  end
+
   # g prefix — wait for second key
   def handle_key({?g, 0}, %ModeState{pending_g: false} = state) do
     {:continue, %{state | pending_g: true}}

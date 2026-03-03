@@ -11,6 +11,7 @@ defmodule Minga.Editor.Renderer.Context do
   per-line values that actually vary (line text, screen row, buffer line).
   """
 
+  alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.Viewport
   alias Minga.Highlight
@@ -22,7 +23,8 @@ defmodule Minga.Editor.Renderer.Context do
             gutter_w: 0,
             content_w: 0,
             confirm_match: nil,
-            highlight: nil
+            highlight: nil,
+            diagnostic_signs: %{}
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -44,6 +46,7 @@ defmodule Minga.Editor.Renderer.Context do
           gutter_w: non_neg_integer(),
           content_w: pos_integer(),
           confirm_match: SearchHighlight.search_match() | nil,
-          highlight: Highlight.t() | nil
+          highlight: Highlight.t() | nil,
+          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()}
         }
 end
