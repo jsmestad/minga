@@ -6,7 +6,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   - Invalid byte boundaries in spans produce safe output
   """
 
-  use Minga.Test.EditorCase, async: true
+  use Minga.Test.EditorCase, async: false
 
   alias Minga.Editor
   alias Minga.Editor.HighlightBridge
@@ -87,6 +87,10 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
 
+      # cd into tmp_dir so the file picker can find the test files
+      original_dir = File.cwd!()
+      File.cd!(tmp_dir)
+
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
       # Inject highlights for file1
@@ -105,6 +109,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send_key(ctx, 13)
 
       state = :sys.get_state(ctx.editor)
+      File.cd!(original_dir)
 
       assert state.highlight.spans == [],
              "Stale spans from file1 persisted after SPC f f to file2"
@@ -116,6 +121,10 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       path2 = Path.join(tmp_dir, "bbb.ex")
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
+
+      # cd into tmp_dir so the file picker can find the test files
+      original_dir = File.cwd!()
+      File.cd!(tmp_dir)
 
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
@@ -132,6 +141,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send_key(ctx, 13)
 
       state = :sys.get_state(ctx.editor)
+      File.cd!(original_dir)
 
       # Verify cache was populated for file1
       assert Map.has_key?(state.highlight_cache, buf1_pid),
