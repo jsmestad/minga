@@ -36,7 +36,7 @@ set :scroll_margin, 5
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
 
-For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.com/minga/Minga.Config.Options.html).
+For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
 
 ## Per-filetype settings
 
@@ -50,7 +50,7 @@ for_filetype :elixir, tab_width: 2, autopair: true
 
 When you open a Go file, `tab_width` is 8. When you open an Elixir file, it's 2. Buffers with no filetype (or filetypes without overrides) use the global value.
 
-You can set any option that `set/2` accepts. The filetype atom matches what [`Minga.Filetype`](https://jsmestad.github.com/minga/Minga.Filetype.html) detects (`:elixir`, `:go`, `:python`, `:rust`, `:javascript`, etc.).
+You can set any option that `set/2` accepts. The filetype atom matches what [`Minga.Filetype`](https://jsmestad.github.io/minga/Minga.Filetype.html) detects (`:elixir`, `:go`, `:python`, `:rust`, `:javascript`, etc.).
 
 ## Keybindings
 
@@ -77,7 +77,7 @@ User bindings override defaults. If you bind `SPC f f` to something else, it rep
 
 Invalid key sequences log a warning but don't crash the editor.
 
-For key parser internals, see [`Minga.Keymap.KeyParser`](https://jsmestad.github.com/minga/Minga.Keymap.KeyParser.html). For how the keymap trie works, see [`Minga.Keymap.Store`](https://jsmestad.github.com/minga/Minga.Keymap.Store.html) and [`Minga.Keymap.Trie`](https://jsmestad.github.com/minga/Minga.Keymap.Trie.html).
+For key parser internals, see [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html). For how the keymap trie works, see [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) and [`Minga.Keymap.Trie`](https://jsmestad.github.io/minga/Minga.Keymap.Trie.html).
 
 ## Custom commands
 
@@ -96,7 +96,7 @@ bind :normal, "SPC c t", :count_todos, "Count TODOs"
 
 Commands run inside a supervised Task. If your command raises an exception, the error shows in the status bar but the editor keeps running. You can't crash the editor with a buggy command.
 
-The [`Minga.API`](https://jsmestad.github.com/minga/Minga.API.html) module provides a user-friendly interface for common operations inside commands: `content/0`, `insert/1`, `cursor/0`, `move_to/2`, `save/0`, `message/1`, and more.
+The [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) module provides a user-friendly interface for common operations inside commands: `content/0`, `insert/1`, `cursor/0`, `move_to/2`, `save/0`, `message/1`, and more.
 
 ## Lifecycle hooks
 
@@ -130,7 +130,7 @@ Hooks run asynchronously. A slow `:after_save` hook (like running a formatter) w
 
 Multiple hooks on the same event fire in registration order.
 
-For the hooks API, see [`Minga.Config.Hooks`](https://jsmestad.github.com/minga/Minga.Config.Hooks.html).
+For the hooks API, see [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html).
 
 ## Error handling
 
@@ -142,7 +142,7 @@ Minga is forgiving about config errors:
 - **Command crashes**: error shown in status bar, editor keeps running
 - **Hook crashes**: error logged, other hooks still fire, editor keeps running
 
-You can check for config load errors programmatically with [`Minga.Config.Loader.load_error/0`](https://jsmestad.github.com/minga/Minga.Config.Loader.html#load_error/0).
+You can check for config load errors programmatically with [`Minga.Config.Loader.load_error/0`](https://jsmestad.github.io/minga/Minga.Config.Loader.html#load_error/0).
 
 ## Full example
 
@@ -184,11 +184,11 @@ end
 
 ## Further reading
 
-- [`Minga.Config`](https://jsmestad.github.com/minga/Minga.Config.html) — the DSL module (`set`, `bind`, `command`, `on`, `for_filetype`)
-- [`Minga.Config.Options`](https://jsmestad.github.com/minga/Minga.Config.Options.html) — typed option registry with per-filetype overrides
-- [`Minga.Config.Loader`](https://jsmestad.github.com/minga/Minga.Config.Loader.html) — config file discovery and evaluation
-- [`Minga.Config.Hooks`](https://jsmestad.github.com/minga/Minga.Config.Hooks.html) — lifecycle hook registry
-- [`Minga.Keymap.Store`](https://jsmestad.github.com/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
-- [`Minga.Keymap.KeyParser`](https://jsmestad.github.com/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
-- [`Minga.API`](https://jsmestad.github.com/minga/Minga.API.html) — user-friendly editor API for commands and eval
-- [Elixir is Minga's Elisp](https://jsmestad.github.com/minga/extensibility.html) — deep dive on how the BEAM enables Emacs-level extensibility
+- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html) — the DSL module (`set`, `bind`, `command`, `on`, `for_filetype`)
+- [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html) — typed option registry with per-filetype overrides
+- [`Minga.Config.Loader`](https://jsmestad.github.io/minga/Minga.Config.Loader.html) — config file discovery and evaluation
+- [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html) — lifecycle hook registry
+- [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
+- [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
+- [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) — user-friendly editor API for commands and eval
+- [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html) — deep dive on how the BEAM enables Emacs-level extensibility

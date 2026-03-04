@@ -1,6 +1,6 @@
 # 🥨 Minga
 
-[Documentation](https://jsmestad.github.com/minga/) | [Configuration Guide](https://jsmestad.github.com/minga/configuration.html) | [Roadmap](ROADMAP.md)
+[Documentation](https://jsmestad.github.io/minga/) | [Configuration Guide](https://jsmestad.github.io/minga/configuration.html) | [Roadmap](ROADMAP.md)
 
 **A modal text editor where every component is isolated, concurrent, and inspectable.**
 
