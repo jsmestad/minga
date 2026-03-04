@@ -21,7 +21,60 @@ defmodule Minga.MixProject do
       source_url: "https://github.com/jsmestad/minga",
       docs: [
         main: "readme",
-        extras: ["README.md", "PLAN.md", "ROADMAP.md"],
+        extras: [
+          "README.md",
+          "ROADMAP.md",
+          "docs/ARCHITECTURE.md",
+          "docs/DIAGRAMS.md",
+          "docs/PERFORMANCE.md",
+          "docs/EXTENSIBILITY.md",
+          "docs/FOR-NEOVIM-USERS.md",
+          "docs/FOR-EMACS-USERS.md",
+          "docs/FOR-AI-CODERS.md"
+        ],
+        groups_for_extras: [
+          Guides: [
+            "docs/ARCHITECTURE.md",
+            "docs/DIAGRAMS.md",
+            "docs/PERFORMANCE.md",
+            "docs/EXTENSIBILITY.md"
+          ],
+          "Coming From...": [
+            "docs/FOR-NEOVIM-USERS.md",
+            "docs/FOR-EMACS-USERS.md",
+            "docs/FOR-AI-CODERS.md"
+          ]
+        ],
+        before_closing_body_tag: %{
+          html: """
+          <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+          <script>
+            let initialized = false;
+            window.addEventListener("exdoc:loaded", () => {
+              if (!initialized) {
+                mermaid.initialize({
+                  startOnLoad: false,
+                  theme: document.body.className.includes("dark") ? "dark" : "default"
+                });
+                initialized = true;
+              }
+              let id = 0;
+              for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
+                const preEl = codeEl.parentElement;
+                const graphDefinition = codeEl.textContent;
+                const graphEl = document.createElement("div");
+                const graphId = "mermaid-graph-" + id++;
+                mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
+                  graphEl.innerHTML = svg;
+                  bindFunctions?.(graphEl);
+                  preEl.insertAdjacentElement("afterend", graphEl);
+                  preEl.remove();
+                });
+              }
+            });
+          </script>
+          """
+        },
         groups_for_modules: [
           "Public API": [
             Minga.API
