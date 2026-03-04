@@ -103,6 +103,7 @@ Current status and planned features. Updated as development progresses.
 | `SPC w d` | Close window | ✅ | Last window protected |
 | `SPC f p` | Open config file | ✅ | Creates starter template if missing |
 | `SPC h k` | Describe key | 📋 | Stubbed |
+| `SPC h r` | Reload config | ✅ | Hot-reloads modules, config, extensions |
 | `SPC q q` | Quit | ✅ |
 
 ## Ex Commands (`:`)
@@ -118,6 +119,7 @@ Current status and planned features. Updated as development progresses.
 | `:set nu` / `:set rnu` | ✅ | Line number options |
 | `:reload-highlights` | ✅ | Re-apply syntax highlighting |
 | `:checktime` | ✅ | Check for external file changes |
+| `:extensions` / `:ext` | ✅ | List loaded extensions with status |
 
 ## Syntax Highlighting
 
@@ -151,6 +153,10 @@ Current status and planned features. Updated as development progresses.
 | Custom commands in config | ✅ | `command :name, "desc" do ... end`, crash-isolated |
 | Lifecycle hooks | ✅ | `on :after_save`, `:after_open`, `:on_mode_change` |
 | Per-filetype options | ✅ | `for_filetype :go, tab_width: 8` |
+| User modules | ✅ | `.ex` files in `~/.config/minga/modules/` compiled at startup |
+| Project-local config | ✅ | `.minga.exs` in project root overrides global settings |
+| Hot config reload | ✅ | `SPC h r` reloads modules, config, extensions without restart |
+| Extension system | ✅ | `Minga.Extension` behaviour, local-path loading, crash-isolated supervision |
 | Global / buffer-local options | 📋 | Per-buffer overrides with filetype defaults (see [Architecture](docs/ARCHITECTURE.md)) |
 
 ## Registers & Macros
@@ -228,9 +234,9 @@ Roughly in priority order:
 
 1. ~~**Split windows**~~ — ✅ Done
 2. ~~**LSP client (diagnostics)**~~ — ✅ Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename are next.
-3. **Config system** — ✅ Complete (#92, #93, #94). Options, keybindings, commands, hooks, and per-filetype settings all shipped.
-4. **Plugin system** — Elixir-based plugins that run as supervised processes
-5. **Theme runtime picker** — `SPC h t` to preview and switch themes without restart
+3. **Config system** — ✅ Complete (#92, #93, #94, #95). Options, keybindings, commands, hooks, per-filetype settings, user modules, project-local config, and hot reload all shipped.
+4. **Extension system** — ✅ Local-path loading with `Minga.Extension` behaviour, crash-isolated supervision. Package registry (#80) is next.
+5. ~~**Theme runtime picker**~~ — ✅ Done. `SPC h t` to preview and switch themes without restart.
 6. **Visual block mode** — Column selection and editing
 7. **File tree sidebar** — Project navigation panel
 8. **Git integration** — Gutter indicators, blame, hunk staging
@@ -246,4 +252,4 @@ These guide what we build and how:
 - **Two-process isolation** — Editor state and rendering never share memory; either can fail independently
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus
 - **Elixir for logic, Zig for pixels** — Each language where it excels
-- **Test everything** — 1,659 tests and counting; property-based tests for data structures
+- **Test everything** — 1,839 tests and counting; property-based tests for data structures
