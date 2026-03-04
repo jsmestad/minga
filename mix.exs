@@ -24,6 +24,7 @@ defmodule Minga.MixProject do
         extras: [
           "README.md",
           "ROADMAP.md",
+          "docs/CONFIGURATION.md",
           "docs/ARCHITECTURE.md",
           "docs/DIAGRAMS.md",
           "docs/PERFORMANCE.md",
@@ -34,6 +35,7 @@ defmodule Minga.MixProject do
         ],
         groups_for_extras: [
           Guides: [
+            "docs/CONFIGURATION.md",
             "docs/ARCHITECTURE.md",
             "docs/DIAGRAMS.md",
             "docs/PERFORMANCE.md",
@@ -101,9 +103,17 @@ defmodule Minga.MixProject do
             Minga.Mode.Replace,
             Minga.Mode.Search
           ],
+          Configuration: [
+            Minga.Config,
+            Minga.Config.Options,
+            Minga.Config.Loader,
+            Minga.Config.Hooks
+          ],
           Keymap: [
             Minga.Keymap.Trie,
             Minga.Keymap.Defaults,
+            Minga.Keymap.Store,
+            Minga.Keymap.KeyParser,
             Minga.WhichKey
           ],
           "Port Protocol": [
