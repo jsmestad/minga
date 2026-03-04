@@ -23,7 +23,7 @@ The following optimizations have been completed (see commit `8beec9d`):
 1. [Gap Buffer: Eliminate Repeated Full-Text Materialization](#1-gap-buffer-eliminate-repeated-full-text-materialization)
 2. [Gap Buffer: Replace Grapheme Lists with Binary Walking](#2-gap-buffer-replace-grapheme-lists-with-binary-walking)
 3. [Gap Buffer: Use IOdata Instead of Binary Concatenation](#3-gap-buffer-use-iodata-instead-of-binary-concatenation)
-4. [Motion Module: Avoid Temporary GapBuffer + Content Copies](#4-motion-module-avoid-temporary-gapbuffer--content-copies)
+4. [Motion Module: Avoid Temporary Document + Content Copies](#4-motion-module-avoid-temporary-gapbuffer--content-copies)
 5. [Editor: Batch Remaining Buffer.Server Mutations into Single Calls](#5-editor-batch-remaining-bufferserver-mutations-into-single-calls)
 6. [Editor: Pre-build Render Binaries with IOlists](#6-editor-pre-build-render-binaries-with-iolists)
 7. [Undo/Redo: Structural Sharing via Zipper or Diff-Based Stack](#7-undoredo-structural-sharing-via-zipper-or-diff-based-stack)
@@ -42,7 +42,7 @@ The following optimizations have been completed (see commit `8beec9d`):
 
 ### Problem
 
-Nearly every query function in `GapBuffer` calls `content/1` which does `before <> after_`, an O(n) binary concatenation that allocates a fresh copy of the entire buffer content. Functions like `line_at/2`, `lines/3`, and `content_range/3` then immediately `String.split/2` that copy into a list of lines.
+Nearly every query function in `Document` calls `content/1` which does `before <> after_`, an O(n) binary concatenation that allocates a fresh copy of the entire buffer content. Functions like `line_at/2`, `lines/3`, and `content_range/3` then immediately `String.split/2` that copy into a list of lines.
 
 For a 10,000-line file, every single cursor motion triggers:
 1. `content/1` → allocate ~500 KB binary
@@ -128,13 +128,13 @@ end
 
 ---
 
-## 4. Motion Module: Avoid Temporary GapBuffer + Content Copies
+## 4. Motion Module: Avoid Temporary Document + Content Copies
 
 ### Problem
 
-Every motion function receives a `GapBuffer.t()` and calls `GapBuffer.content/1` (binary concat), then `String.graphemes/1` (tuple allocation), then `String.split/2` (another list). The Editor's `apply_motion/2` creates a temporary `GapBuffer.new(content)`, so the content is still materialized and copied into a throwaway struct.
+Every motion function receives a `Document.t()` and calls `Document.content/1` (binary concat), then `String.graphemes/1` (tuple allocation), then `String.split/2` (another list). The Editor's `apply_motion/2` creates a temporary `Document.new(content)`, so the content is still materialized and copied into a throwaway struct.
 
-While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temporary GapBuffer allocation and content copy remain.
+While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temporary Document allocation and content copy remain.
 
 ### Fix
 
@@ -143,13 +143,13 @@ While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temp
 ```elixir
 # In Buffer.Server
 def handle_call({:apply_motion, motion_fn}, _from, state) do
-  new_pos = motion_fn.(state.document, GapBuffer.cursor(state.document))
-  new_buf = GapBuffer.move_to(state.document, new_pos)
+  new_pos = motion_fn.(state.document, Document.cursor(state.document))
+  new_buf = Document.move_to(state.document, new_pos)
   {:reply, :ok, %{state | document: new_buf}}
 end
 ```
 
-This eliminates the content copy, the temporary GapBuffer, and reduces the remaining 2 GenServer calls to 1.
+This eliminates the content copy, the temporary Document, and reduces the remaining 2 GenServer calls to 1.
 
 ### Impact
 
@@ -170,12 +170,12 @@ Several editor commands still issue multiple sequential GenServer calls to `Buff
 
 ### Fix
 
-Add compound operations to `BufferServer` / `GapBuffer`:
+Add compound operations to `BufferServer` / `Document`:
 
 ```elixir
 # In Buffer.Server
 def handle_call({:join_lines, line}, _from, state) do
-  {new_buf, _} = GapBuffer.join_lines(state.document, line)
+  {new_buf, _} = Document.join_lines(state.document, line)
   {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
 end
 ```
@@ -214,7 +214,7 @@ More impactful: in `PortManager.handle_cast({:send_commands, ...})`, skip the in
 
 ### Problem
 
-Every mutation pushes a **complete copy** of the `GapBuffer.t()` struct onto the undo stack. The struct contains `before` and `after_` binaries which together hold the full file content. For a 1 MB file, each keystroke adds ~1 MB to the undo stack. With `@max_undo_stack` of 1000, that's potentially ~1 GB of undo history.
+Every mutation pushes a **complete copy** of the `Document.t()` struct onto the undo stack. The struct contains `before` and `after_` binaries which together hold the full file content. For a 1 MB file, each keystroke adds ~1 MB to the undo stack. With `@max_undo_stack` of 1000, that's potentially ~1 GB of undo history.
 
 The BEAM's garbage collector runs per-process, so this all lives in the `Buffer.Server` process heap and causes increasingly expensive GC pauses.
 
@@ -335,7 +335,7 @@ The render loop allocates many short-lived binaries per frame that become garbag
 
 ### Problem
 
-The Editor process still creates a temporary `GapBuffer.new(content)` for motions, copying the full content across processes.
+The Editor process still creates a temporary `Document.new(content)` for motions, copying the full content across processes.
 
 ### Fix
 

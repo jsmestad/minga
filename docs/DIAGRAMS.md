@@ -192,7 +192,7 @@ Each buffer wraps a gap buffer: two binaries with a gap at the cursor. Insertion
 
 ```mermaid
 graph TD
-    subgraph GapBuffer["Gap Buffer Internals"]
+    subgraph Document["Gap Buffer Internals"]
         direction LR
         BEFORE["before: &quot;Hello&quot;"]
         GAP["◄ cursor ►"]
@@ -205,8 +205,8 @@ graph TD
         DEL["Delete before cursor<br/>before → &quot;Hell&quot;<br/>after unchanged"]
     end
 
-    GapBuffer --> Operations
+    Document --> Operations
 
-    style GapBuffer fill:#1a1a2e,stroke:#6c3483,color:#fff
+    style Document fill:#1a1a2e,stroke:#6c3483,color:#fff
     style Operations fill:#1a2e1a,stroke:#1e8449,color:#fff
 ```

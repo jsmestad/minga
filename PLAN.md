@@ -88,7 +88,7 @@ Every cursor move, insert, delete, motion, and rendered line hits these paths. 8
 
 This is a mechanical refactor: `cursor_col` changes from grapheme index to byte offset within the current line. Every downstream consumer adapts.
 
-#### 0a. Core: `GapBuffer` internals
+#### 0a. Core: `Document` internals
 - **Files**: `lib/minga/buffer/document.ex`, `test/minga/buffer/document_test.exs`
 - **Changes**:
   - `cursor_col` becomes byte offset within the current line
@@ -115,7 +115,7 @@ This is a mechanical refactor: `cursor_col` changes from grapheme index to byte 
   - `line_end/2`: `byte_size(text)` instead of `String.length(text) - 1`. Note: byte offset of last grapheme, not past-end. Need `byte_size(text) - byte_size_of_last_grapheme(text)`. OR: keep the semantic "col of last character" but in byte units. Define helper `last_grapheme_byte_offset/1`.
   - `first_non_blank/2`: walk with `String.next_grapheme`, accumulate byte offset instead of incrementing col by 1
   - `find_char_forward/3`, `find_char_backward/3`: scan text tracking byte offset instead of grapheme index
-  - `word_forward/2`, `word_backward/2`, `word_end/2` etc: convert to work with byte offsets. `Helpers.offset_for` returns byte offset. `GapBuffer.offset_to_position` converts byte offset → `{line, byte_col}`
+  - `word_forward/2`, `word_backward/2`, `word_end/2` etc: convert to work with byte offsets. `Helpers.offset_for` returns byte offset. `Document.offset_to_position` converts byte offset → `{line, byte_col}`
   - `match_bracket/2`: scan tracking byte positions
   - **Key**: motions compare characters (graphemes), but track positions in bytes. The scanning loop changes from `col + 1` to `col + byte_size(grapheme)`.
 
