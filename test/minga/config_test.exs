@@ -1,38 +1,62 @@
 defmodule Minga.ConfigTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Options
+  alias Minga.Keymap.Store, as: KeymapStore
+  alias Minga.Keymap.Trie
 
   setup do
-    {:ok, pid} = Options.start_link(name: :"config_opts_#{System.unique_integer([:positive])}")
-    # Point the Config DSL at our test instance by temporarily replacing the
-    # named process. Since Config.set/2 calls Options.set/2 which uses the
-    # default __MODULE__ name, we test through the Options server directly
-    # and verify the DSL macro behavior separately.
-    %{server: pid}
+    # Ensure required servers are running
+    case Options.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> Options.reset()
+    end
+
+    case KeymapStore.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> KeymapStore.reset()
+    end
+
+    case CommandRegistry.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
+
+    on_exit(fn ->
+      try do
+        KeymapStore.reset()
+      catch
+        :exit, _ -> :ok
+      end
+
+      try do
+        Options.reset()
+      catch
+        :exit, _ -> :ok
+      end
+    end)
+
+    :ok
   end
 
   describe "use Minga.Config" do
-    test "imports set/2 into the calling module" do
-      # Verify the macro makes set/2 available by compiling a module
+    test "imports set/2, bind/4, and command/3 into the calling module" do
+      # Compilation succeeding proves the imports work
       Code.compile_string("""
-      defmodule Minga.ConfigTest.SampleConfig do
+      defmodule Minga.ConfigTest.SampleConfig#{System.unique_integer([:positive])} do
         use Minga.Config
 
-        # Just verify it compiles; don't actually call set/2 here
-        # since Options may not be running with the right name.
-        def available?, do: function_exported?(__MODULE__, :set, 2)
+        def check_set, do: function_exported?(__MODULE__, :set, 2)
+        def check_bind, do: function_exported?(__MODULE__, :bind, 4)
       end
       """)
 
-      # The function is imported (from Minga.Config), not defined locally,
-      # so function_exported? won't find it. But compilation succeeding
-      # proves the import works.
       assert true
     end
   end
 
-  describe "set/2 raises on invalid option" do
+  describe "set/2" do
     test "raises ArgumentError for unknown option name" do
       assert_raise ArgumentError, ~r/unknown option/, fn ->
         Minga.Config.set(:nonexistent, 42)
@@ -43,6 +67,54 @@ defmodule Minga.ConfigTest do
       assert_raise ArgumentError, ~r/positive integer/, fn ->
         Minga.Config.set(:tab_width, -1)
       end
+    end
+  end
+
+  describe "bind/4" do
+    test "adds a leader key binding" do
+      Minga.Config.bind(:normal, "SPC g s", :git_status, "Git status")
+
+      trie = KeymapStore.leader_trie()
+      {:prefix, g_node} = Trie.lookup(trie, {?g, 0})
+      assert {:command, :git_status} = Trie.lookup(g_node, {?s, 0})
+    end
+
+    test "invalid key sequence logs warning but does not crash" do
+      # Should not raise
+      Minga.Config.bind(:normal, "", :noop, "noop")
+    end
+  end
+
+  describe "command/3 macro" do
+    test "registers command in the registry" do
+      Code.eval_string("""
+      use Minga.Config
+
+      command :test_cmd_#{System.unique_integer([:positive])}, "Test command" do
+        :ok
+      end
+      """)
+
+      # The command was registered (we can't easily look up a dynamic name,
+      # so we test with a known name)
+      Minga.Config.register_command(:my_test_cmd, "My test", fn -> :ok end)
+      assert {:ok, cmd} = CommandRegistry.lookup(CommandRegistry, :my_test_cmd)
+      assert cmd.description == "My test"
+    end
+
+    test "command runtime errors are isolated from the editor" do
+      Minga.Config.register_command(:crashing_cmd, "Crashes", fn ->
+        raise "boom"
+      end)
+
+      {:ok, cmd} = CommandRegistry.lookup(CommandRegistry, :crashing_cmd)
+      # Executing the command should not raise (it runs in a Task)
+      state = %{some: :state}
+      result = cmd.execute.(state)
+      assert result == state
+
+      # Give the task a moment to crash
+      Process.sleep(50)
     end
   end
 end

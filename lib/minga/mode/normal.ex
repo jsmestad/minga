@@ -64,6 +64,7 @@ defmodule Minga.Mode.Normal do
   import Bitwise
 
   alias Minga.Keymap.Defaults
+  alias Minga.Keymap.Store, as: KeymapStore
   alias Minga.Keymap.Trie
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
@@ -107,9 +108,9 @@ defmodule Minga.Mode.Normal do
         {@space, 0},
         %ModeState{pending_describe_key: true, describe_key_leader_node: nil} = state
       ) do
-    leader_trie = Defaults.leader_trie()
+    trie = get_leader_trie()
 
-    {:continue, %{state | describe_key_leader_node: leader_trie, describe_key_keys: ["SPC"]}}
+    {:continue, %{state | describe_key_leader_node: trie, describe_key_keys: ["SPC"]}}
   end
 
   # Key while walking leader trie in describe-key mode
@@ -155,7 +156,7 @@ defmodule Minga.Mode.Normal do
   def handle_key(key, %ModeState{pending_describe_key: true} = state) do
     formatted = WhichKey.format_key(key)
 
-    case Map.fetch(Defaults.normal_bindings(), key) do
+    case Map.fetch(get_normal_bindings(), key) do
       {:ok, {command, description}} ->
         {:execute, {:describe_key_result, formatted, command, description},
          %{
@@ -180,16 +181,16 @@ defmodule Minga.Mode.Normal do
 
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
-    leader_trie = Defaults.leader_trie()
-    new_state = %{state | leader_node: leader_trie, leader_keys: ["SPC"]}
-    {:execute, {:leader_start, leader_trie}, new_state}
+    trie = get_leader_trie()
+    new_state = %{state | leader_node: trie, leader_keys: ["SPC"]}
+    {:execute, {:leader_start, trie}, new_state}
   end
 
   # SPC pressed while already in leader mode → cancel and restart.
   def handle_key({@space, 0}, %ModeState{leader_node: _node} = state) do
-    leader_trie = Defaults.leader_trie()
-    new_state = %{state | leader_node: leader_trie, leader_keys: ["SPC"]}
-    {:execute, [:leader_cancel, {:leader_start, leader_trie}], new_state}
+    trie = get_leader_trie()
+    new_state = %{state | leader_node: trie, leader_keys: ["SPC"]}
+    {:execute, [:leader_cancel, {:leader_start, trie}], new_state}
   end
 
   # Any other key while in leader mode → walk the trie.
@@ -781,5 +782,21 @@ defmodule Minga.Mode.Normal do
 
   def handle_key(_key, state) do
     {:continue, state}
+  end
+
+  # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec get_leader_trie() :: Trie.node_t()
+  defp get_leader_trie do
+    KeymapStore.leader_trie()
+  catch
+    :exit, _ -> Defaults.leader_trie()
+  end
+
+  @spec get_normal_bindings() :: %{Trie.key() => {atom(), String.t()}}
+  defp get_normal_bindings do
+    KeymapStore.normal_bindings()
+  catch
+    :exit, _ -> Defaults.normal_bindings()
   end
 end

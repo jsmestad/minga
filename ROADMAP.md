@@ -147,6 +147,8 @@ Current status and planned features. Updated as development progresses.
 | Multiple buffers | ✅ | Open several files, switch between them |
 | Dirty buffer protection | ✅ | Warns before quitting with unsaved changes |
 | User config file (`config.exs`) | ✅ | `~/.config/minga/config.exs` with `use Minga.Config` DSL |
+| Custom keybindings in config | ✅ | `bind :normal, "SPC g s", :cmd, "desc"` |
+| Custom commands in config | ✅ | `command :name, "desc" do ... end`, crash-isolated |
 | Global / buffer-local options | 📋 | Per-buffer overrides with filetype defaults (see [Architecture](docs/ARCHITECTURE.md)) |
 
 ## Registers & Macros
@@ -212,7 +214,7 @@ Current status and planned features. Updated as development progresses.
 | Port protocol (BEAM ↔ Zig) | ✅ | Length-prefixed binary, typed opcodes |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 1,708 Elixir tests | ✅ | Including property-based tests |
+| 1,741 Elixir tests | ✅ | Including property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 
@@ -224,7 +226,7 @@ Roughly in priority order:
 
 1. ~~**Split windows**~~ — ✅ Done
 2. ~~**LSP client (diagnostics)**~~ — ✅ Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename are next.
-3. **Config system** — ✅ Options registry + config file loading shipped. Keybindings, commands, hooks, and per-filetype settings are next (#93, #94).
+3. **Config system** — ✅ Options, keybindings, and custom commands shipped (#92, #93). Hooks and per-filetype settings are next (#94).
 4. **Plugin system** — Elixir-based plugins that run as supervised processes
 5. **Additional themes** — Theme loading from disk, runtime switching
 6. **Visual block mode** — Column selection and editing

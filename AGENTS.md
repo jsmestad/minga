@@ -48,6 +48,8 @@ lib/
     keymap/
       trie.ex                 # Prefix tree for key sequences
       defaults.ex             # Default Doom-style keybindings
+      store.ex                # Mutable keymap store (defaults + user overrides)
+      key_parser.ex           # Human-readable key string parser
     which_key.ex              # Which-key popup logic
     cli.ex                    # CLI entry point
   mix/

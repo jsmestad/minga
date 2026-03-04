@@ -3,37 +3,49 @@ defmodule Minga.Config do
   DSL module for Minga user configuration.
 
   Used in `~/.config/minga/config.exs` (or `$XDG_CONFIG_HOME/minga/config.exs`)
-  to declare editor options. The config file is real Elixir code evaluated at
-  startup.
+  to declare editor options, custom keybindings, and commands. The config
+  file is real Elixir code evaluated at startup.
 
   ## Example config file
 
       use Minga.Config
 
+      # Options
       set :tab_width, 4
       set :line_numbers, :relative
-      set :autopair, false
       set :scroll_margin, 8
+
+      # Custom keybindings
+      bind :normal, "SPC g s", :git_status, "Git status"
+
+      # Custom commands
+      command :git_status, "Show git status" do
+        {output, _} = System.cmd("git", ["status", "--short"])
+        Minga.API.message(output)
+      end
 
   ## Available options
 
-  See `Minga.Config.Options` for the full list of supported options and their
-  types.
+  See `Minga.Config.Options` for the full list of supported options.
   """
+
+  alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Config.Options
+  alias Minga.Keymap.Store, as: KeymapStore
+
+  require Logger
 
   @doc """
   Injects the config DSL into the calling module or script.
 
-  Imports `Minga.Config` so that `set/2` (and future DSL functions like
-  `bind/4`, `command/3`, `on/2`) are available without qualification.
+  Imports `Minga.Config` so that `set/2`, `bind/4`, and `command/3` are
+  available without qualification.
   """
   defmacro __using__(_opts) do
     quote do
       import Minga.Config
     end
   end
-
-  alias Minga.Config.Options
 
   @doc """
   Sets an editor option.
@@ -53,5 +65,84 @@ defmodule Minga.Config do
       {:ok, _} -> :ok
       {:error, msg} -> raise ArgumentError, msg
     end
+  end
+
+  @doc """
+  Binds a key sequence to a command in the given mode.
+
+  For normal mode, leader sequences (starting with `SPC`) are added to
+  the leader trie. Single-key bindings override defaults.
+
+  Invalid key sequences log a warning but don't crash.
+
+  ## Examples
+
+      bind :normal, "SPC g s", :git_status, "Git status"
+      bind :normal, "SPC t t", :toggle_tree, "Toggle file tree"
+  """
+  @spec bind(atom(), String.t(), atom(), String.t()) :: :ok
+  def bind(mode, key_str, command_name, description)
+      when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
+             is_binary(description) do
+    case KeymapStore.bind(mode, key_str, command_name, description) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("bind failed: #{reason}")
+    end
+
+    :ok
+  end
+
+  @doc """
+  Defines a custom command and registers it in the command registry.
+
+  The block runs inside a supervised Task, so crashes don't take down
+  the editor. Errors are shown in the status bar.
+
+  ## Examples
+
+      command :count_lines, "Count buffer lines" do
+        count = Minga.API.line_count()
+        Minga.API.message("Lines: \#{count}")
+      end
+  """
+  defmacro command(name, description, do: block) do
+    quote do
+      Minga.Config.register_command(unquote(name), unquote(description), fn ->
+        unquote(block)
+      end)
+    end
+  end
+
+  @doc """
+  Registers a custom command (called by the `command/3` macro).
+
+  Wraps the function in a Task under `Minga.Eval.TaskSupervisor` so that
+  crashes are isolated from the editor process.
+  """
+  @spec register_command(atom(), String.t(), (-> term())) :: :ok
+  def register_command(name, description, fun)
+      when is_atom(name) and is_binary(description) and is_function(fun, 0) do
+    execute_fn = fn state ->
+      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+        try do
+          fun.()
+        rescue
+          e ->
+            msg = "Command #{name} failed: #{Exception.message(e)}"
+            Logger.warning(msg)
+
+            try do
+              Minga.API.message(msg)
+            catch
+              :exit, _ -> :ok
+            end
+        end
+      end)
+
+      state
+    end
+
+    CommandRegistry.register(CommandRegistry, name, description, execute_fn)
+    :ok
   end
 end

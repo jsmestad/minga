@@ -10,6 +10,7 @@ defmodule Minga.Application do
 
       Minga.Supervisor (rest_for_one)
       ├── Minga.Config.Options
+      ├── Minga.Keymap.Store
       ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
       ├── Minga.Port.Manager
@@ -26,6 +27,7 @@ defmodule Minga.Application do
   def start(_type, _args) do
     base_children = [
       Minga.Config.Options,
+      Minga.Keymap.Store,
       Minga.Config.Loader,
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
