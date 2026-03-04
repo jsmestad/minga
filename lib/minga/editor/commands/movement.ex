@@ -24,7 +24,8 @@ defmodule Minga.Editor.Commands.Movement do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
-      {_line, col} = BufferServer.cursor(buf)
+      gb = BufferServer.snapshot(buf)
+      {_line, col} = GapBuffer.cursor(gb)
       if col > 0, do: BufferServer.move(buf, :left)
     end
 
@@ -35,10 +36,11 @@ defmodule Minga.Editor.Commands.Movement do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
-      {line, col} = BufferServer.cursor(buf)
+      gb = BufferServer.snapshot(buf)
+      {line, col} = GapBuffer.cursor(gb)
 
       max_col =
-        case BufferServer.get_lines(buf, line, 1) do
+        case GapBuffer.lines(gb, line, 1) do
           [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
           _ -> 0
         end
@@ -62,16 +64,18 @@ defmodule Minga.Editor.Commands.Movement do
   # ── Line start / end ──────────────────────────────────────────────────────
 
   def execute(%{buf: %{buffer: buf}} = state, :move_to_line_start) do
-    {line, _col} = BufferServer.cursor(buf)
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = GapBuffer.cursor(gb)
     BufferServer.move_to(buf, {line, 0})
     state
   end
 
   def execute(%{buf: %{buffer: buf}} = state, :move_to_line_end) do
-    {line, _col} = BufferServer.cursor(buf)
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = GapBuffer.cursor(gb)
 
     end_col =
-      case BufferServer.get_lines(buf, line, 1) do
+      case GapBuffer.lines(gb, line, 1) do
         [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
         _ -> 0
       end
@@ -122,15 +126,15 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buf: %{buffer: buf}} = state, :move_to_document_start) do
-    content = BufferServer.content(buf)
-    new_pos = Minga.Motion.document_start(GapBuffer.new(content))
+    gb = BufferServer.snapshot(buf)
+    new_pos = Minga.Motion.document_start(gb)
     BufferServer.move_to(buf, new_pos)
     state
   end
 
   def execute(%{buf: %{buffer: buf}} = state, :move_to_document_end) do
-    content = BufferServer.content(buf)
-    new_pos = Minga.Motion.document_end(GapBuffer.new(content))
+    gb = BufferServer.snapshot(buf)
+    new_pos = Minga.Motion.document_end(gb)
     BufferServer.move_to(buf, new_pos)
     state
   end
@@ -142,20 +146,20 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buf: %{buffer: buf}} = state, :next_line_first_non_blank) do
-    {content, {line, _col}} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    total = GapBuffer.line_count(tmp_buf)
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = GapBuffer.cursor(gb)
+    total = GapBuffer.line_count(gb)
     next_line = min(line + 1, total - 1)
-    new_pos = Minga.Motion.first_non_blank(tmp_buf, {next_line, 0})
+    new_pos = Minga.Motion.first_non_blank(gb, {next_line, 0})
     BufferServer.move_to(buf, new_pos)
     state
   end
 
   def execute(%{buf: %{buffer: buf}} = state, :prev_line_first_non_blank) do
-    {content, {line, _col}} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = GapBuffer.cursor(gb)
     prev_line = max(line - 1, 0)
-    new_pos = Minga.Motion.first_non_blank(tmp_buf, {prev_line, 0})
+    new_pos = Minga.Motion.first_non_blank(gb, {prev_line, 0})
     BufferServer.move_to(buf, new_pos)
     state
   end
@@ -209,7 +213,8 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(%{buf: %{buffer: buf}, viewport: vp} = state, {:move_to_screen, position}) do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
-    total_lines = BufferServer.line_count(buf)
+    gb = BufferServer.snapshot(buf)
+    total_lines = GapBuffer.line_count(gb)
 
     target_line =
       case position do

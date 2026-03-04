@@ -288,4 +288,67 @@ defmodule Minga.Buffer.ServerTest do
       assert snap.read_only == true
     end
   end
+
+  describe "snapshot/1" do
+    test "returns the underlying GapBuffer struct" do
+      {:ok, pid} = Server.start_link(content: "hello\nworld")
+      gb = Server.snapshot(pid)
+
+      assert %Minga.Buffer.GapBuffer{} = gb
+      assert Minga.Buffer.GapBuffer.content(gb) == "hello\nworld"
+      assert Minga.Buffer.GapBuffer.cursor(gb) == {0, 0}
+      assert Minga.Buffer.GapBuffer.line_count(gb) == 2
+    end
+
+    test "snapshot reflects cursor position" do
+      {:ok, pid} = Server.start_link(content: "hello\nworld")
+      Server.move_to(pid, {1, 3})
+      gb = Server.snapshot(pid)
+
+      assert Minga.Buffer.GapBuffer.cursor(gb) == {1, 3}
+    end
+  end
+
+  describe "apply_snapshot/2" do
+    test "replaces buffer content and marks dirty" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      gb = Server.snapshot(pid)
+      new_gb = Minga.Buffer.GapBuffer.insert_char(gb, "X")
+
+      assert :ok = Server.apply_snapshot(pid, new_gb)
+      assert Server.content(pid) == "Xhello"
+      assert Server.dirty?(pid)
+    end
+
+    test "pushes undo state so changes can be undone" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      gb = Server.snapshot(pid)
+      new_gb = Minga.Buffer.GapBuffer.insert_char(gb, "X")
+
+      Server.apply_snapshot(pid, new_gb)
+      assert Server.content(pid) == "Xhello"
+
+      Server.undo(pid)
+      assert Server.content(pid) == "hello"
+    end
+
+    test "returns error on read-only buffer" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      gb = Server.snapshot(pid)
+      new_gb = Minga.Buffer.GapBuffer.insert_char(gb, "X")
+
+      assert {:error, :read_only} = Server.apply_snapshot(pid, new_gb)
+      assert Server.content(pid) == "hello"
+    end
+
+    test "round-trip preserves buffer identity" do
+      {:ok, pid} = Server.start_link(content: "hello\nworld")
+      Server.move_to(pid, {1, 2})
+      gb = Server.snapshot(pid)
+
+      Server.apply_snapshot(pid, gb)
+      assert Server.content(pid) == "hello\nworld"
+      assert Server.cursor(pid) == {1, 2}
+    end
+  end
 end

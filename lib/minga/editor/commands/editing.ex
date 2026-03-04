@@ -23,10 +23,10 @@ defmodule Minga.Editor.Commands.Editing do
         %{buf: %{buffer: buf}, mode: :insert, autopair_enabled: true} = state,
         :delete_before
       ) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
 
-    case Minga.AutoPair.on_backspace(tmp_buf, cursor) do
+    case Minga.AutoPair.on_backspace(gb, cursor) do
       :delete_pair ->
         BufferServer.delete_before(buf)
         BufferServer.delete_at(buf)
@@ -60,10 +60,10 @@ defmodule Minga.Editor.Commands.Editing do
         {:insert_char, char}
       )
       when is_binary(char) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
 
-    case Minga.AutoPair.on_insert(tmp_buf, cursor, char) do
+    case Minga.AutoPair.on_insert(gb, cursor, char) do
       {:pair, open, close} ->
         BufferServer.insert_char(buf, open)
         BufferServer.insert_char(buf, close)
@@ -316,9 +316,9 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(%{buf: %{buffer: buf}} = state, {:indent_motion, motion}) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    target = Helpers.resolve_motion(tmp_buf, cursor, motion)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
+    target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
     start_line = min(cursor_line, target_line)
@@ -328,9 +328,9 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(%{buf: %{buffer: buf}} = state, {:dedent_motion, motion}) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    target = Helpers.resolve_motion(tmp_buf, cursor, motion)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
+    target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
     start_line = min(cursor_line, target_line)

@@ -286,6 +286,31 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:delete_lines, start_line, end_line})
   end
 
+  @doc """
+  Returns the underlying `GapBuffer.t()` struct for pure computation.
+
+  Use this to batch multiple reads into a single GenServer call. Perform
+  all calculations on the returned struct, then apply the result with
+  `move_to/2` (cursor-only changes) or `apply_snapshot/2` (content changes).
+  """
+  @spec snapshot(GenServer.server()) :: GapBuffer.t()
+  def snapshot(server) do
+    GenServer.call(server, :snapshot)
+  end
+
+  @doc """
+  Replaces the internal gap buffer with a new one, pushing the old buffer
+  onto the undo stack and marking the buffer dirty.
+
+  Use this after performing a batch of pure `GapBuffer` operations on a
+  snapshot. Only call this when content has actually changed; for cursor-only
+  changes use `move_to/2` instead.
+  """
+  @spec apply_snapshot(GenServer.server(), GapBuffer.t()) :: :ok
+  def apply_snapshot(server, %GapBuffer{} = new_buf) do
+    GenServer.call(server, {:apply_snapshot, new_buf})
+  end
+
   # ── Server Callbacks ──
 
   @impl true
@@ -632,6 +657,18 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:content_and_cursor, _from, state) do
     {:reply, GapBuffer.content_and_cursor(state.gap_buffer), state}
+  end
+
+  def handle_call(:snapshot, _from, state) do
+    {:reply, state.gap_buffer, state}
+  end
+
+  def handle_call({:apply_snapshot, _new_buf}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:apply_snapshot, new_buf}, _from, state) do
+    {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do

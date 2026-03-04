@@ -127,9 +127,8 @@ defmodule Minga.Editor.Commands.Helpers do
           (GapBuffer.t(), Minga.Motion.position() -> Minga.Motion.position())
         ) :: :ok
   def apply_motion(buf, motion_fn) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    new_pos = motion_fn.(tmp_buf, cursor)
+    gb = BufferServer.snapshot(buf)
+    new_pos = motion_fn.(gb, GapBuffer.cursor(gb))
     BufferServer.move_to(buf, new_pos)
   end
 
@@ -172,8 +171,8 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
 
     motion_fn =
       case dir do
@@ -183,7 +182,7 @@ defmodule Minga.Editor.Commands.Helpers do
         :T -> &Minga.Motion.till_char_backward/3
       end
 
-    new_pos = motion_fn.(tmp_buf, cursor, char)
+    new_pos = motion_fn.(gb, cursor, char)
     BufferServer.move_to(buf, new_pos)
   end
 
@@ -199,19 +198,19 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a delete or yank operator over a motion range."
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   def apply_operator_motion(buf, state, motion, action) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    target = resolve_motion(tmp_buf, cursor, motion)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
+    target = resolve_motion(gb, cursor, motion)
     {start_pos, end_pos} = sort_positions(cursor, target)
 
     case action do
       :delete ->
-        text = BufferServer.get_range(buf, start_pos, end_pos)
+        text = GapBuffer.get_range(gb, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       :yank ->
-        text = BufferServer.get_range(buf, start_pos, end_pos)
+        text = GapBuffer.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
@@ -219,21 +218,21 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
   def apply_text_object(%{buf: %{buffer: buf}} = state, modifier, spec, action) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
-    range = compute_text_object_range(tmp_buf, cursor, modifier, spec)
+    gb = BufferServer.snapshot(buf)
+    cursor = GapBuffer.cursor(gb)
+    range = compute_text_object_range(gb, cursor, modifier, spec)
 
     case {action, range} do
       {_, nil} ->
         state
 
       {:delete, {start_pos, end_pos}} ->
-        text = BufferServer.get_range(buf, start_pos, end_pos)
+        text = GapBuffer.get_range(gb, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
-        text = BufferServer.get_range(buf, start_pos, end_pos)
+        text = GapBuffer.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
@@ -261,12 +260,13 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   def page_move(buf, _vp, delta) do
-    {line, col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    gb = BufferServer.snapshot(buf)
+    {line, col} = GapBuffer.cursor(gb)
+    total_lines = GapBuffer.line_count(gb)
     target_line = max(0, min(line + delta, total_lines - 1))
 
     target_col =
-      case BufferServer.get_lines(buf, target_line, 1) do
+      case GapBuffer.lines(gb, target_line, 1) do
         [text] when byte_size(text) > 0 ->
           min(col, Unicode.last_grapheme_byte_offset(text))
 
