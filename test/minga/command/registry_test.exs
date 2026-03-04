@@ -53,6 +53,7 @@ defmodule Minga.Command.RegistryTest do
           :prev_diagnostic,
           :lsp_info,
           :open_config,
+          :reload_config,
           :theme_picker
         ]
         |> Enum.sort()
@@ -143,6 +144,36 @@ defmodule Minga.Command.RegistryTest do
       before_count = length(Registry.all(r))
       :ok = Registry.register(r, :save, "New save description", fn s -> s end)
       assert length(Registry.all(r)) == before_count
+    end
+  end
+
+  describe "reset/1" do
+    test "removes user commands and restores built-ins", %{registry: r} do
+      :ok = Registry.register(r, :custom_cmd, "Custom", fn s -> s end)
+      assert {:ok, _} = Registry.lookup(r, :custom_cmd)
+
+      :ok = Registry.reset(r)
+
+      assert :error = Registry.lookup(r, :custom_cmd)
+      assert {:ok, %Command{name: :save}} = Registry.lookup(r, :save)
+    end
+
+    test "restores overwritten built-in descriptions", %{registry: r} do
+      :ok = Registry.register(r, :save, "Overridden save", fn s -> s end)
+      :ok = Registry.reset(r)
+
+      {:ok, cmd} = Registry.lookup(r, :save)
+      assert cmd.description == "Save the current file"
+    end
+
+    test "count returns to built-in count after reset", %{registry: r} do
+      built_in_count = length(Registry.all(r))
+      :ok = Registry.register(r, :extra1, "E1", fn s -> s end)
+      :ok = Registry.register(r, :extra2, "E2", fn s -> s end)
+      assert length(Registry.all(r)) == built_in_count + 2
+
+      :ok = Registry.reset(r)
+      assert length(Registry.all(r)) == built_in_count
     end
   end
 

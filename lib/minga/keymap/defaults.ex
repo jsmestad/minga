@@ -62,6 +62,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Help ──────────────────────────────────────────────────────────────────
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
+    {[{?h, @none}, {?r, @none}], :reload_config, "Reload config"},
     {[{?h, @none}, {?t, @none}], :theme_picker, "Pick theme"},
 
     # ── Code ────────────────────────────────────────────────────────────────────

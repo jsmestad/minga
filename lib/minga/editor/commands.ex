@@ -23,6 +23,7 @@ defmodule Minga.Editor.Commands do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Diagnostics
   alias Minga.Editor.Commands.Editing
@@ -279,6 +280,18 @@ defmodule Minga.Editor.Commands do
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
   def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
 
+  # ── Config reload ────────────────────────────────────────────────────────
+
+  def execute(state, :reload_config) do
+    case ConfigLoader.reload() do
+      :ok ->
+        %{state | status_msg: "Config reloaded"}
+
+      {:error, msg} ->
+        %{state | status_msg: "Config reload error: #{msg}"}
+    end
+  end
+
   # ── Diagnostics ──────────────────────────────────────────────────────────
 
   def execute(state, :diagnostics_list) do
@@ -348,6 +361,28 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:execute_ex_command, {:lsp_info, []}}),
     do: Diagnostics.execute(state, :lsp_info)
+
+  def execute(state, {:execute_ex_command, {:extensions, []}}) do
+    alias Minga.Extension.Supervisor, as: ExtSupervisor
+
+    extensions = ExtSupervisor.list_extensions()
+
+    msg =
+      case extensions do
+        [] ->
+          "No extensions loaded"
+
+        exts ->
+          lines =
+            Enum.map(exts, fn {name, version, status} ->
+              "  #{name} v#{version} [#{status}]"
+            end)
+
+          ["Extensions:" | lines] |> Enum.join("\n")
+      end
+
+    %{state | status_msg: msg}
+  end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
 

@@ -61,7 +61,8 @@ defmodule Minga.Command.Registry do
     {:next_diagnostic, "Jump to next diagnostic"},
     {:prev_diagnostic, "Jump to previous diagnostic"},
     {:lsp_info, "Show LSP server status"},
-    {:open_config, "Open config file"}
+    {:open_config, "Open config file"},
+    {:reload_config, "Reload config"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -110,6 +111,20 @@ defmodule Minga.Command.Registry do
   @spec all(server()) :: [Command.t()]
   def all(server) do
     Agent.get(server, &Map.values(&1))
+  end
+
+  @doc """
+  Resets the registry to built-in commands only.
+
+  Removes all user-registered commands and re-registers the defaults.
+  Used by hot reload to clear stale user commands before re-evaluating config.
+  """
+  @spec reset() :: :ok
+  @spec reset(server()) :: :ok
+  def reset, do: reset(__MODULE__)
+
+  def reset(server) do
+    Agent.update(server, fn _ -> build_initial_state() end)
   end
 
   # ── Built-in execute functions ───────────────────────────────────────────────
