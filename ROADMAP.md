@@ -157,6 +157,9 @@ Current status and planned features. Updated as development progresses.
 | Project-local config | ✅ | `.minga.exs` in project root overrides global settings |
 | Hot config reload | ✅ | `SPC h r` reloads modules, config, extensions without restart |
 | Extension system | ✅ | `Minga.Extension` behaviour, local-path loading, crash-isolated supervision |
+| Formatter system | ✅ | `SPC c f`, format-on-save, default formatters for common languages |
+| Save transforms | ✅ | `trim_trailing_whitespace`, `insert_final_newline` applied on save |
+| Indent with tabs | ✅ | `indent_with: :tabs` for `>>` / `<<` |
 | Global / buffer-local options | 📋 | Per-buffer overrides with filetype defaults (see [Architecture](docs/ARCHITECTURE.md)) |
 
 ## Registers & Macros
@@ -252,4 +255,4 @@ These guide what we build and how:
 - **Two-process isolation** — Editor state and rendering never share memory; either can fail independently
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus
 - **Elixir for logic, Zig for pixels** — Each language where it excels
-- **Test everything** — 1,839 tests and counting; property-based tests for data structures
+- **Test everything** — 1,855 tests and counting; property-based tests for data structures
