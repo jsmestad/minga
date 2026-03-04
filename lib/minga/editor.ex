@@ -445,9 +445,6 @@ defmodule Minga.Editor do
       fire_hook(:on_mode_change, [old_mode, new_mode])
     end
 
-    # Clear any stale leader update from the process dictionary.
-    Process.delete(:__leader_update__)
-
     after_commands =
       Enum.reduce(commands, base_state, fn cmd, acc ->
         dispatch_command(acc, cmd)
@@ -468,14 +465,7 @@ defmodule Minga.Editor do
         after_commands
       end
 
-    # Apply any leader/whichkey state updates emitted by execute_command.
-    case Process.delete(:__leader_update__) do
-      nil ->
-        after_commands
-
-      %Minga.Editor.State.WhichKey{} = wk ->
-        %{after_commands | whichkey: wk}
-    end
+    after_commands
   end
 
   # ── Change recording helpers ───────────────────────────────────────────────
@@ -733,6 +723,7 @@ defmodule Minga.Editor do
       case Commands.execute(state, cmd) do
         {s, {:dot_repeat, count}} -> replay_last_change(s, count)
         {s, {:replay_macro, register}} -> replay_macro(s, register)
+        {s, {:whichkey_update, wk}} -> %{s | whichkey: wk}
         s -> s
       end
 

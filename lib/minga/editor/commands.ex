@@ -20,12 +20,6 @@ defmodule Minga.Editor.Commands do
   When a command requires the GenServer to do something outside the pure
   `state → state` pipeline (dot-repeat replay), `execute/2` returns
   `{state, {:dot_repeat, count}}`. The caller (`Editor`) dispatches it.
-
-  ## Process dictionary side-channel
-
-  Leader/which-key commands write to `Process.put(:__leader_update__, ...)`.
-  This works because `execute/2` is always called from within the GenServer
-  process; the GenServer merges the update map after all commands run.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -51,7 +45,10 @@ defmodule Minga.Editor.Commands do
   @type state :: EditorState.t()
 
   @typedoc "Action the GenServer must dispatch after execute/2."
-  @type action :: {:dot_repeat, non_neg_integer() | nil} | {:replay_macro, String.t()}
+  @type action ::
+          {:dot_repeat, non_neg_integer() | nil}
+          | {:replay_macro, String.t()}
+          | {:whichkey_update, Minga.Editor.State.WhichKey.t()}
 
   @doc """
   Executes a single command against the editor state.
@@ -97,38 +94,23 @@ defmodule Minga.Editor.Commands do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
-      node: node,
-      timer: timer,
-      show: false
-    })
-
-    state
+    whichkey = %Minga.Editor.State.WhichKey{node: node, timer: timer, show: false}
+    {state, {:whichkey_update, whichkey}}
   end
 
   def execute(state, {:leader_progress, node}) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
-      node: node,
-      timer: timer,
-      show: state.whichkey.show
-    })
-
-    state
+    whichkey = %Minga.Editor.State.WhichKey{node: node, timer: timer, show: state.whichkey.show}
+    {state, {:whichkey_update, whichkey}}
   end
 
   def execute(state, :leader_cancel) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
 
-    Process.put(:__leader_update__, %Minga.Editor.State.WhichKey{
-      node: nil,
-      timer: nil,
-      show: false
-    })
-
-    state
+    whichkey = %Minga.Editor.State.WhichKey{node: nil, timer: nil, show: false}
+    {state, {:whichkey_update, whichkey}}
   end
 
   # ── Eval ───────────────────────────────────────────────────────────────────
