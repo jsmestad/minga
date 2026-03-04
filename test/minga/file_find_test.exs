@@ -53,7 +53,7 @@ defmodule Minga.FileFindTest do
 
     test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
       # Initialize a real git repo so git ls-files works if selected
-      System.cmd("git", ["init"], cd: tmp_dir)
+      System.cmd("git", ["init"], cd: tmp_dir, env: [{"GIT_TEMPLATE_DIR", ""}], stderr_to_stdout: true)
       System.cmd("git", ["add", "."], cd: tmp_dir)
 
       {:ok, files} = FileFind.list_files(tmp_dir)

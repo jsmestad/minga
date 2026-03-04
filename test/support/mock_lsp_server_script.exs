@@ -12,9 +12,13 @@
 defmodule MockServer do
   @moduledoc false
 
+  require Logger
+
   def run do
-    # Set stdout to binary mode
+    # Set stdout to binary mode and suppress Logger output so teardown
+    # of the parent port doesn't produce noisy :epipe errors.
     :io.setopts(:standard_io, binary: true, encoding: :latin1)
+    Logger.configure(level: :none)
     loop("")
   end
 
@@ -147,7 +151,13 @@ defmodule MockServer do
   defp write_message(msg) do
     json = JSON.encode!(msg)
     header = "Content-Length: #{byte_size(json)}\r\n\r\n"
-    IO.binwrite(:stdio, header <> json)
+
+    try do
+      IO.binwrite(:stdio, header <> json)
+    rescue
+      # Stdout pipe closed because the test tore down the port. Exit quietly.
+      ErlangError -> :ok
+    end
   end
 end
 
