@@ -167,6 +167,7 @@ defmodule Minga.Editor do
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = lsp_buffer_opened(new_state, pid)
+        fire_hook(:after_open, [pid, file_path])
         Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -438,6 +439,11 @@ defmodule Minga.Editor do
       adjust_mode_state_on_transition(new_mode_state, old_mode, new_mode, state)
 
     base_state = %{state | mode: new_mode, mode_state: new_mode_state}
+
+    # Fire mode change hook
+    if old_mode != new_mode do
+      fire_hook(:on_mode_change, [old_mode, new_mode])
+    end
 
     # Clear any stale leader update from the process dictionary.
     Process.delete(:__leader_update__)
@@ -967,6 +973,10 @@ defmodule Minga.Editor do
          {:execute_ex_command, {:save, []}},
          {:execute_ex_command, {:save_quit, []}}
        ] do
+      # Fire after_save hooks
+      path = BufferServer.file_path(buf)
+      if path, do: fire_hook(:after_save, [buf, path])
+
       new_lsp = LspBridge.on_buffer_save(state.lsp, buf)
       %{state | lsp: new_lsp}
     else
@@ -991,6 +1001,15 @@ defmodule Minga.Editor do
   defp lsp_after_kill(state, _cmd, _old_buffer), do: state
 
   # ── Config options ──────────────────────────────────────────────────────
+
+  alias Minga.Config.Hooks, as: ConfigHooks
+
+  @spec fire_hook(ConfigHooks.event(), [term()]) :: :ok
+  defp fire_hook(event, args) do
+    ConfigHooks.run(event, args)
+  catch
+    :exit, _ -> :ok
+  end
 
   @spec apply_config_options(state()) :: state()
   defp apply_config_options(state) do

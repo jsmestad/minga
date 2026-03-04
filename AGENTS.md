@@ -42,8 +42,9 @@ lib/
       parser.ex               # :command parsing
     config.ex                 # Config DSL (use Minga.Config)
     config/
-      options.ex              # Typed option registry (Agent)
+      options.ex              # Typed option registry with per-filetype overrides
       loader.ex               # Config file discovery and evaluation
+      hooks.ex                # Lifecycle hook registry (after_save, after_open, etc.)
     keymap.ex                 # Mode-specific keymap management
     keymap/
       trie.ex                 # Prefix tree for key sequences

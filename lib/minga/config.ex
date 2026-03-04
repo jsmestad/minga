@@ -145,4 +145,56 @@ defmodule Minga.Config do
     CommandRegistry.register(CommandRegistry, name, description, execute_fn)
     :ok
   end
+
+  @doc """
+  Registers a lifecycle hook for an editor event.
+
+  Hooks run asynchronously under a TaskSupervisor, so they won't block
+  editing. Crashes are logged but don't affect the editor.
+
+  ## Supported events
+
+  * `:after_save` — receives `(buffer_pid, file_path)`
+  * `:after_open` — receives `(buffer_pid, file_path)`
+  * `:on_mode_change` — receives `(old_mode, new_mode)`
+
+  ## Examples
+
+      on :after_save, fn _buf, path ->
+        System.cmd("mix", ["format", path])
+      end
+  """
+  alias Minga.Config.Hooks
+
+  @spec on(Hooks.event(), function()) :: :ok
+  def on(event, fun) when is_atom(event) and is_function(fun) do
+    case Hooks.register(event, fun) do
+      :ok -> :ok
+      {:error, reason} -> raise ArgumentError, reason
+    end
+  end
+
+  @doc """
+  Sets per-filetype option overrides.
+
+  When a buffer of the given filetype is active, these values override
+  the global defaults.
+
+  ## Examples
+
+      for_filetype :go, tab_width: 8
+      for_filetype :python, tab_width: 4
+      for_filetype :elixir, tab_width: 2, autopair: true
+  """
+  @spec for_filetype(atom(), keyword()) :: :ok
+  def for_filetype(filetype, opts) when is_atom(filetype) and is_list(opts) do
+    for {name, value} <- opts do
+      case Options.set_for_filetype(filetype, name, value) do
+        {:ok, _} -> :ok
+        {:error, msg} -> raise ArgumentError, "for_filetype #{filetype}: #{msg}"
+      end
+    end
+
+    :ok
+  end
 end

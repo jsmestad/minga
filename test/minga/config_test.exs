@@ -2,6 +2,7 @@ defmodule Minga.ConfigTest do
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Config.Hooks
   alias Minga.Config.Options
   alias Minga.Keymap.Store, as: KeymapStore
   alias Minga.Keymap.Trie
@@ -23,17 +24,18 @@ defmodule Minga.ConfigTest do
       {:error, {:already_started, _}} -> :ok
     end
 
-    on_exit(fn ->
-      try do
-        KeymapStore.reset()
-      catch
-        :exit, _ -> :ok
-      end
+    case Hooks.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> Hooks.reset()
+    end
 
-      try do
-        Options.reset()
-      catch
-        :exit, _ -> :ok
+    on_exit(fn ->
+      for mod <- [KeymapStore, Options, Hooks] do
+        try do
+          mod.reset()
+        catch
+          :exit, _ -> :ok
+        end
       end
     end)
 
@@ -115,6 +117,44 @@ defmodule Minga.ConfigTest do
 
       # Give the task a moment to crash
       Process.sleep(50)
+    end
+  end
+
+  describe "on/2" do
+    test "registers a hook that fires on event" do
+      test_pid = self()
+      Minga.Config.on(:after_save, fn _buf, path -> send(test_pid, {:saved, path}) end)
+
+      Hooks.run(:after_save, [:buf, "/tmp/test.ex"])
+      assert_receive {:saved, "/tmp/test.ex"}, 500
+    end
+
+    test "raises for unknown event" do
+      assert_raise ArgumentError, fn ->
+        Minga.Config.on(:nonexistent, fn -> :ok end)
+      end
+    end
+  end
+
+  describe "for_filetype/2" do
+    test "sets per-filetype option overrides" do
+      Minga.Config.for_filetype(:go, tab_width: 8)
+
+      assert Options.get_for_filetype(:tab_width, :go) == 8
+      assert Options.get(:tab_width) == 2
+    end
+
+    test "sets multiple options at once" do
+      Minga.Config.for_filetype(:python, tab_width: 4, autopair: false)
+
+      assert Options.get_for_filetype(:tab_width, :python) == 4
+      assert Options.get_for_filetype(:autopair, :python) == false
+    end
+
+    test "raises for invalid option value" do
+      assert_raise ArgumentError, fn ->
+        Minga.Config.for_filetype(:go, tab_width: -1)
+      end
     end
   end
 end

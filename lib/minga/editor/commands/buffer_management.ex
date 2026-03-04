@@ -294,10 +294,29 @@ defmodule Minga.Editor.Commands.BufferManagement do
       File.write!(config_path, """
       use Minga.Config
 
+      # Options
       # set :tab_width, 2
       # set :line_numbers, :hybrid
       # set :autopair, true
       # set :scroll_margin, 5
+
+      # Per-filetype overrides
+      # for_filetype :go, tab_width: 8
+      # for_filetype :python, tab_width: 4
+
+      # Keybindings
+      # bind :normal, "SPC g s", :git_status, "Git status"
+
+      # Custom commands
+      # command :git_status, "Show git status" do
+      #   {output, _} = System.cmd("git", ["status", "--short"])
+      #   Minga.API.message(output)
+      # end
+
+      # Hooks
+      # on :after_save, fn _buf, path ->
+      #   System.cmd("mix", ["format", path])
+      # end
       """)
     end
 

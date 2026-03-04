@@ -127,4 +127,43 @@ defmodule Minga.Config.OptionsTest do
       assert :scroll_margin in names
     end
   end
+
+  describe "per-filetype options" do
+    test "set_for_filetype overrides global for that filetype", %{server: s} do
+      Options.set(s, :tab_width, 2)
+      Options.set_for_filetype(s, :go, :tab_width, 8)
+
+      assert Options.get_for_filetype(s, :tab_width, :go) == 8
+      assert Options.get_for_filetype(s, :tab_width, :elixir) == 2
+      assert Options.get(s, :tab_width) == 2
+    end
+
+    test "returns global value when no filetype override exists", %{server: s} do
+      Options.set(s, :tab_width, 4)
+      assert Options.get_for_filetype(s, :tab_width, :rust) == 4
+    end
+
+    test "returns global value when filetype is nil", %{server: s} do
+      Options.set(s, :tab_width, 4)
+      assert Options.get_for_filetype(s, :tab_width, nil) == 4
+    end
+
+    test "validates filetype option values", %{server: s} do
+      assert {:error, _} = Options.set_for_filetype(s, :go, :tab_width, -1)
+    end
+
+    test "multiple filetypes can have different overrides", %{server: s} do
+      Options.set_for_filetype(s, :go, :tab_width, 8)
+      Options.set_for_filetype(s, :python, :tab_width, 4)
+
+      assert Options.get_for_filetype(s, :tab_width, :go) == 8
+      assert Options.get_for_filetype(s, :tab_width, :python) == 4
+    end
+
+    test "reset clears filetype overrides", %{server: s} do
+      Options.set_for_filetype(s, :go, :tab_width, 8)
+      Options.reset(s)
+      assert Options.get_for_filetype(s, :tab_width, :go) == 2
+    end
+  end
 end

@@ -277,7 +277,7 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Indent / dedent (single line) ────────────────────────────────────────
 
   def execute(%{buf: %{buffer: buf}} = state, :indent_line) do
-    tw = tab_width()
+    tw = tab_width(buf)
     indent = String.duplicate(" ", tw)
     {line, col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
@@ -371,7 +371,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_indent_lines(buf, start_line, end_line) do
-    tw = tab_width()
+    tw = tab_width(buf)
     indent = String.duplicate(" ", tw)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
 
@@ -412,7 +412,7 @@ defmodule Minga.Editor.Commands.Editing do
   defp cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line) do
     if cursor_line >= start_line and cursor_line <= end_line do
       case BufferServer.get_lines(buf, cursor_line, 1) do
-        [text] -> min(count_leading_spaces(text), tab_width())
+        [text] -> min(count_leading_spaces(text), tab_width(buf))
         _ -> 0
       end
     else
@@ -423,14 +423,14 @@ defmodule Minga.Editor.Commands.Editing do
   @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
   defp dedent_line_at(buf, line) do
     case BufferServer.get_lines(buf, line, 1) do
-      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), tab_width()))
+      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), tab_width(buf)))
       _ -> :ok
     end
   end
 
   @spec dedent_single_line(pid(), non_neg_integer(), non_neg_integer(), String.t()) :: :ok
   defp dedent_single_line(buf, line, col, text) do
-    to_remove = min(count_leading_spaces(text), tab_width())
+    to_remove = min(count_leading_spaces(text), tab_width(buf))
     remove_leading_spaces(buf, line, to_remove)
     if to_remove > 0, do: BufferServer.move_to(buf, {line, max(0, col - to_remove)})
     :ok
@@ -452,9 +452,10 @@ defmodule Minga.Editor.Commands.Editing do
   defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
   defp do_count_leading_spaces(_, n), do: n
 
-  @spec tab_width() :: pos_integer()
-  defp tab_width do
-    Options.get(:tab_width)
+  @spec tab_width(pid()) :: pos_integer()
+  defp tab_width(buf) when is_pid(buf) do
+    filetype = BufferServer.filetype(buf)
+    Options.get_for_filetype(:tab_width, filetype)
   catch
     :exit, _ -> 2
   end

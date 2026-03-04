@@ -2,9 +2,9 @@ defmodule Minga.Config.Options do
   @moduledoc """
   Central registry for typed editor options.
 
-  Stores option values in an Agent, validates types on write, and provides
-  defaults for unset options. Other modules read options via `get/1` instead
-  of hardcoding values.
+  Stores global option values and per-filetype overrides. Other modules
+  read options via `get/1` (global) or `get_for_filetype/2` (merged with
+  filetype overrides).
 
   ## Supported options
 
@@ -14,6 +14,14 @@ defmodule Minga.Config.Options do
   | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none`   | `:hybrid` |
   | `:autopair`     | boolean                                        | `true`    |
   | `:scroll_margin`| non-negative integer                           | `5`       |
+
+  ## Per-filetype overrides
+
+  Per-filetype settings override globals for buffers of that type:
+
+      Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
+      Minga.Config.Options.get_for_filetype(:tab_width, :go)
+      #=> 8
 
   ## Example
 
@@ -35,6 +43,12 @@ defmodule Minga.Config.Options do
 
   @typep type_descriptor :: :pos_integer | :non_neg_integer | :boolean | {:enum, [atom()]}
 
+  @typedoc "Internal state: global options + per-filetype overrides."
+  @type state :: %{
+          global: %{option_name() => term()},
+          filetype: %{atom() => %{option_name() => term()}}
+        }
+
   @option_specs [
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
@@ -54,11 +68,11 @@ defmodule Minga.Config.Options do
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    Agent.start_link(fn -> @defaults end, name: name)
+    Agent.start_link(fn -> %{global: @defaults, filetype: %{}} end, name: name)
   end
 
   @doc """
-  Sets an option value after type validation.
+  Sets a global option value after type validation.
 
   Returns `{:ok, value}` on success or `{:error, reason}` if the option
   name is unknown or the value has the wrong type.
@@ -70,7 +84,10 @@ defmodule Minga.Config.Options do
   def set(server, name, value) when is_atom(name) do
     case validate(name, value) do
       :ok ->
-        Agent.update(server, &Map.put(&1, name, value))
+        Agent.update(server, fn %{global: g} = state ->
+          %{state | global: Map.put(g, name, value)}
+        end)
+
         {:ok, value}
 
       {:error, _} = err ->
@@ -79,33 +96,85 @@ defmodule Minga.Config.Options do
   end
 
   @doc """
-  Gets the current value of an option, falling back to its default.
+  Gets the current global value of an option, falling back to its default.
   """
   @spec get(option_name()) :: term()
   @spec get(GenServer.server(), option_name()) :: term()
   def get(name) when is_atom(name), do: get(__MODULE__, name)
 
   def get(server, name) when is_atom(name) do
-    Agent.get(server, fn state ->
-      Map.get(state, name, Map.get(@defaults, name))
+    Agent.get(server, fn %{global: g} ->
+      Map.get(g, name, Map.get(@defaults, name))
     end)
   end
 
   @doc """
-  Returns all current option values as a map.
+  Gets an option value with filetype override applied.
+
+  Checks filetype-specific settings first, then falls back to the global
+  value. If `filetype` is `nil`, returns the global value.
+  """
+  @spec get_for_filetype(option_name(), atom() | nil) :: term()
+  @spec get_for_filetype(GenServer.server(), option_name(), atom() | nil) :: term()
+  def get_for_filetype(name, filetype) when is_atom(name),
+    do: get_for_filetype(__MODULE__, name, filetype)
+
+  def get_for_filetype(server, name, nil), do: get(server, name)
+
+  def get_for_filetype(server, name, filetype) when is_atom(name) and is_atom(filetype) do
+    Agent.get(server, fn %{global: g, filetype: ft} ->
+      ft_opts = Map.get(ft, filetype, %{})
+
+      case Map.fetch(ft_opts, name) do
+        {:ok, value} -> value
+        :error -> Map.get(g, name, Map.get(@defaults, name))
+      end
+    end)
+  end
+
+  @doc """
+  Sets an option override for a specific filetype.
+
+  The value is validated the same way as global options.
+  """
+  @spec set_for_filetype(atom(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  @spec set_for_filetype(GenServer.server(), atom(), option_name(), term()) ::
+          {:ok, term()} | {:error, String.t()}
+  def set_for_filetype(filetype, name, value)
+      when is_atom(filetype) and is_atom(name),
+      do: set_for_filetype(__MODULE__, filetype, name, value)
+
+  def set_for_filetype(server, filetype, name, value)
+      when is_atom(filetype) and is_atom(name) do
+    case validate(name, value) do
+      :ok ->
+        Agent.update(server, fn %{filetype: ft} = state ->
+          ft_opts = Map.get(ft, filetype, %{})
+          %{state | filetype: Map.put(ft, filetype, Map.put(ft_opts, name, value))}
+        end)
+
+        {:ok, value}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Returns all current global option values as a map.
   """
   @spec all() :: %{option_name() => term()}
   @spec all(GenServer.server()) :: %{option_name() => term()}
   def all, do: all(__MODULE__)
-  def all(server), do: Agent.get(server, & &1)
+  def all(server), do: Agent.get(server, & &1.global)
 
   @doc """
-  Resets all options to their defaults.
+  Resets all options (global and per-filetype) to defaults.
   """
   @spec reset() :: :ok
   @spec reset(GenServer.server()) :: :ok
   def reset, do: reset(__MODULE__)
-  def reset(server), do: Agent.update(server, fn _ -> @defaults end)
+  def reset(server), do: Agent.update(server, fn _ -> %{global: @defaults, filetype: %{}} end)
 
   @doc """
   Returns the default value for an option.
