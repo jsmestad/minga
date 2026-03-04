@@ -19,7 +19,7 @@ lib/
   minga/
     application.ex            # OTP application / supervisor tree
     buffer/
-      gap_buffer.ex           # Pure data structure (no GenServer)
+      document.ex           # Pure data structure (no GenServer)
       server.ex               # GenServer wrapper for gap buffer
     port/
       protocol.ex             # Port protocol encoder/decoder
@@ -106,7 +106,7 @@ end
 
 ### Elixir Testing
 
-- Test files mirror `lib/` structure: `lib/minga/buffer/gap_buffer.ex` → `test/minga/buffer/gap_buffer_test.exs`
+- Test files mirror `lib/` structure: `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
 - **Descriptive names**: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode

@@ -1,10 +1,10 @@
 defmodule Minga.Motion.LineTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Motion
 
-  defp buf(text), do: GapBuffer.new(text)
+  defp buf(text), do: Document.new(text)
 
   describe "line_start/2" do
     test "returns col 0 on the same line" do

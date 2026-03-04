@@ -89,7 +89,7 @@ Every cursor move, insert, delete, motion, and rendered line hits these paths. 8
 This is a mechanical refactor: `cursor_col` changes from grapheme index to byte offset within the current line. Every downstream consumer adapts.
 
 #### 0a. Core: `GapBuffer` internals
-- **Files**: `lib/minga/buffer/gap_buffer.ex`, `test/minga/buffer/gap_buffer_test.exs`
+- **Files**: `lib/minga/buffer/document.ex`, `test/minga/buffer/document_test.exs`
 - **Changes**:
   - `cursor_col` becomes byte offset within the current line
   - `@type position :: {line :: non_neg_integer(), byte_col :: non_neg_integer()}`

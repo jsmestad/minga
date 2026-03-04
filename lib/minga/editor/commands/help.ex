@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.Help do
   invocations, and is always read-only.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
@@ -89,7 +89,7 @@ defmodule Minga.Editor.Commands.Help do
   @spec replace_help_content(pid(), String.t()) :: :ok
   defp replace_help_content(buf, content) do
     :sys.replace_state(buf, fn s ->
-      %{s | gap_buffer: GapBuffer.new(content)}
+      %{s | document: Document.new(content)}
     end)
 
     BufferServer.move_to(buf, {0, 0})

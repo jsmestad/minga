@@ -13,7 +13,7 @@ defmodule Minga.Editor do
 
   use GenServer
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
@@ -910,7 +910,7 @@ defmodule Minga.Editor do
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
       # Direct state manipulation to bypass read-only for trim
       :sys.replace_state(buf, fn s ->
-        %{s | gap_buffer: GapBuffer.new(trimmed)}
+        %{s | document: Document.new(trimmed)}
       end)
     end
 

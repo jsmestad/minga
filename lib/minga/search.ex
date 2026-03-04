@@ -14,7 +14,7 @@ defmodule Minga.Search do
   `byte_col` are zero-indexed.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
 
   @typedoc "A match: `{line, byte_col, byte_length}`."
   @type match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
@@ -124,17 +124,17 @@ defmodule Minga.Search do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Search.word_at_cursor(buf, {0, 0})
       "hello"
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Search.word_at_cursor(buf, {0, 5})
       nil
   """
-  @spec word_at_cursor(GapBuffer.t(), position()) :: String.t() | nil
-  def word_at_cursor(%GapBuffer{} = buf, {line, col}) do
-    lines = :binary.split(GapBuffer.content(buf), "\n", [:global])
+  @spec word_at_cursor(Document.t(), position()) :: String.t() | nil
+  def word_at_cursor(%Document{} = buf, {line, col}) do
+    lines = :binary.split(Document.content(buf), "\n", [:global])
 
     case Enum.at(lines, line) do
       nil ->

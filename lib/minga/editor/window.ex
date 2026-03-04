@@ -9,7 +9,7 @@ defmodule Minga.Editor.Window do
 
   alias Minga.Editor.Viewport
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
@@ -18,7 +18,7 @@ defmodule Minga.Editor.Window do
           id: id(),
           buffer: pid(),
           viewport: Viewport.t(),
-          cursor: GapBuffer.position()
+          cursor: Document.position()
         }
 
   @enforce_keys [:id, :buffer, :viewport]
@@ -37,7 +37,7 @@ defmodule Minga.Editor.Window do
   end
 
   @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
-  @spec new(id(), pid(), pos_integer(), pos_integer(), GapBuffer.position()) :: t()
+  @spec new(id(), pid(), pos_integer(), pos_integer(), Document.position()) :: t()
   def new(id, buffer, rows, cols, cursor)
       when is_integer(id) and id > 0 and is_pid(buffer) and
              is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 and

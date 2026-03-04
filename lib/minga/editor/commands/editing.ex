@@ -4,7 +4,7 @@ defmodule Minga.Editor.Commands.Editing do
   case toggle, indent/dedent, undo/redo, and paste.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
@@ -24,7 +24,7 @@ defmodule Minga.Editor.Commands.Editing do
         :delete_before
       ) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
 
     case Minga.AutoPair.on_backspace(gb, cursor) do
       :delete_pair ->
@@ -61,7 +61,7 @@ defmodule Minga.Editor.Commands.Editing do
       )
       when is_binary(char) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
 
     case Minga.AutoPair.on_insert(gb, cursor, char) do
       {:pair, open, close} ->
@@ -317,7 +317,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{buf: %{buffer: buf}} = state, {:indent_motion, motion}) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
@@ -329,7 +329,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{buf: %{buffer: buf}} = state, {:dedent_motion, motion}) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target

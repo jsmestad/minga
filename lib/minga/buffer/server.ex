@@ -1,6 +1,6 @@
 defmodule Minga.Buffer.Server do
   @moduledoc """
-  GenServer wrapping a `GapBuffer` with file I/O and dirty tracking.
+  GenServer wrapping a `Document` with file I/O and dirty tracking.
 
   Each open file gets its own `Buffer.Server` process, managed by
   the `Buffer.Supervisor` (DynamicSupervisor). If a buffer process
@@ -18,7 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Unicode
   alias Minga.Filetype
 
@@ -74,13 +74,13 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Moves the cursor in the given direction."
-  @spec move(GenServer.server(), GapBuffer.direction()) :: :ok
+  @spec move(GenServer.server(), Document.direction()) :: :ok
   def move(server, direction) when direction in [:left, :right, :up, :down] do
     GenServer.call(server, {:move, direction})
   end
 
   @doc "Moves the cursor to an exact position."
-  @spec move_to(GenServer.server(), GapBuffer.position()) :: :ok
+  @spec move_to(GenServer.server(), Document.position()) :: :ok
   def move_to(server, {line, col} = pos)
       when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
     GenServer.call(server, {:move_to, pos})
@@ -130,7 +130,7 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Returns the current cursor position."
-  @spec cursor(GenServer.server()) :: GapBuffer.position()
+  @spec cursor(GenServer.server()) :: Document.position()
   def cursor(server) do
     GenServer.call(server, :cursor)
   end
@@ -197,7 +197,7 @@ defmodule Minga.Buffer.Server do
 
   @typedoc "All data needed to render a single frame, fetched in one GenServer call."
   @type render_snapshot :: %{
-          cursor: GapBuffer.position(),
+          cursor: Document.position(),
           line_count: pos_integer(),
           lines: [String.t()],
           file_path: String.t() | nil,
@@ -223,14 +223,14 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Returns the text between two positions (from_pos inclusive, to_pos exclusive)."
-  @spec content_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) ::
+  @spec content_range(GenServer.server(), Document.position(), Document.position()) ::
           String.t()
   def content_range(server, from_pos, to_pos) do
     GenServer.call(server, {:content_range, from_pos, to_pos})
   end
 
   @doc "Deletes the text between two positions (from_pos inclusive, to_pos exclusive), placing the cursor at the start of the range."
-  @spec delete_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) :: :ok
+  @spec delete_range(GenServer.server(), Document.position(), Document.position()) :: :ok
   def delete_range(server, from_pos, to_pos) do
     GenServer.call(server, {:delete_range, from_pos, to_pos})
   end
@@ -239,7 +239,7 @@ defmodule Minga.Buffer.Server do
   Returns the text in the range [start_pos, end_pos] inclusive.
   Positions are sorted automatically.
   """
-  @spec get_range(GenServer.server(), GapBuffer.position(), GapBuffer.position()) :: String.t()
+  @spec get_range(GenServer.server(), Document.position(), Document.position()) :: String.t()
   def get_range(server, start_pos, end_pos) do
     GenServer.call(server, {:get_range, start_pos, end_pos})
   end
@@ -255,7 +255,7 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Returns the content and cursor position in a single GenServer call."
-  @spec content_and_cursor(GenServer.server()) :: {String.t(), GapBuffer.position()}
+  @spec content_and_cursor(GenServer.server()) :: {String.t(), Document.position()}
   def content_and_cursor(server) do
     GenServer.call(server, :content_and_cursor)
   end
@@ -287,13 +287,13 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc """
-  Returns the underlying `GapBuffer.t()` struct for pure computation.
+  Returns the underlying `Document.t()` struct for pure computation.
 
   Use this to batch multiple reads into a single GenServer call. Perform
   all calculations on the returned struct, then apply the result with
   `move_to/2` (cursor-only changes) or `apply_snapshot/2` (content changes).
   """
-  @spec snapshot(GenServer.server()) :: GapBuffer.t()
+  @spec snapshot(GenServer.server()) :: Document.t()
   def snapshot(server) do
     GenServer.call(server, :snapshot)
   end
@@ -302,12 +302,12 @@ defmodule Minga.Buffer.Server do
   Replaces the internal gap buffer with a new one, pushing the old buffer
   onto the undo stack and marking the buffer dirty.
 
-  Use this after performing a batch of pure `GapBuffer` operations on a
+  Use this after performing a batch of pure `Document` operations on a
   snapshot. Only call this when content has actually changed; for cursor-only
   changes use `move_to/2` instead.
   """
-  @spec apply_snapshot(GenServer.server(), GapBuffer.t()) :: :ok
-  def apply_snapshot(server, %GapBuffer{} = new_buf) do
+  @spec apply_snapshot(GenServer.server(), Document.t()) :: :ok
+  def apply_snapshot(server, %Document{} = new_buf) do
     GenServer.call(server, {:apply_snapshot, new_buf})
   end
 
@@ -325,7 +325,7 @@ defmodule Minga.Buffer.Server do
         filetype = Filetype.detect_from_content(path, first_line)
 
         state = %BufState{
-          gap_buffer: GapBuffer.new(text),
+          document: Document.new(text),
           file_path: path,
           filetype: filetype,
           mtime: mtime,
@@ -355,7 +355,7 @@ defmodule Minga.Buffer.Server do
 
         new_state = %{
           state
-          | gap_buffer: GapBuffer.new(text),
+          | document: Document.new(text),
             file_path: file_path,
             filetype: filetype,
             dirty: false,
@@ -375,7 +375,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:insert_char, char}, _from, state) do
-    new_buf = GapBuffer.insert_char(state.gap_buffer, char)
+    new_buf = Document.insert_char(state.document, char)
     {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
   end
 
@@ -384,9 +384,9 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_before, _from, state) do
-    new_buf = GapBuffer.delete_before(state.gap_buffer)
+    new_buf = Document.delete_before(state.document)
 
-    if new_buf == state.gap_buffer do
+    if new_buf == state.document do
       {:reply, :ok, state}
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
@@ -398,9 +398,9 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_at, _from, state) do
-    new_buf = GapBuffer.delete_at(state.gap_buffer)
+    new_buf = Document.delete_at(state.document)
 
-    if new_buf == state.gap_buffer do
+    if new_buf == state.document do
       {:reply, :ok, state}
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
@@ -408,13 +408,13 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:move, direction}, _from, state) do
-    new_buf = GapBuffer.move(state.gap_buffer, direction)
-    {:reply, :ok, %{state | gap_buffer: new_buf}}
+    new_buf = Document.move(state.document, direction)
+    {:reply, :ok, %{state | document: new_buf}}
   end
 
   def handle_call({:move_to, pos}, _from, state) do
-    new_buf = GapBuffer.move_to(state.gap_buffer, pos)
-    {:reply, :ok, %{state | gap_buffer: new_buf}}
+    new_buf = Document.move_to(state.document, pos)
+    {:reply, :ok, %{state | document: new_buf}}
   end
 
   def handle_call(:save, _from, %{file_path: nil} = state) do
@@ -427,7 +427,7 @@ defmodule Minga.Buffer.Server do
     if file_changed_on_disk?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
-      case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
+      case write_file(state.file_path, Document.content(state.document)) do
         :ok ->
           {new_mtime, new_size} = file_stat_info(state.file_path)
           {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
@@ -443,7 +443,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:force_save, _from, state) do
-    case write_file(state.file_path, GapBuffer.content(state.gap_buffer)) do
+    case write_file(state.file_path, Document.content(state.document)) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(state.file_path)
         {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
@@ -460,13 +460,13 @@ defmodule Minga.Buffer.Server do
   def handle_call(:reload, _from, state) do
     case File.read(state.file_path) do
       {:ok, text} ->
-        {line, col} = GapBuffer.cursor(state.gap_buffer)
-        new_buf = GapBuffer.new(text)
-        line_count = GapBuffer.line_count(new_buf)
+        {line, col} = Document.cursor(state.document)
+        new_buf = Document.new(text)
+        line_count = Document.line_count(new_buf)
         clamped_line = min(line, line_count - 1)
 
         clamped_col =
-          case GapBuffer.lines(new_buf, clamped_line, 1) do
+          case Document.lines(new_buf, clamped_line, 1) do
             [row] ->
               # col is a byte offset; clamp to last valid grapheme boundary
               Unicode.clamp_to_grapheme_boundary(row, min(col, byte_size(row)))
@@ -475,7 +475,7 @@ defmodule Minga.Buffer.Server do
               0
           end
 
-        new_buf = GapBuffer.move_to(new_buf, {clamped_line, clamped_col})
+        new_buf = Document.move_to(new_buf, {clamped_line, clamped_col})
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Filetype.detect_from_content(state.file_path, first_line)
 
@@ -483,7 +483,7 @@ defmodule Minga.Buffer.Server do
 
         new_state = %{
           state
-          | gap_buffer: new_buf,
+          | document: new_buf,
             filetype: filetype,
             dirty: false,
             mtime: new_mtime,
@@ -500,7 +500,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:save_as, file_path}, _from, state) do
-    case write_file(file_path, GapBuffer.content(state.gap_buffer)) do
+    case write_file(file_path, Document.content(state.document)) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(file_path)
 
@@ -517,25 +517,25 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:replace_content, new_content}, _from, state) do
-    new_state = push_undo(state, state.gap_buffer)
-    new_buf = GapBuffer.new(new_content)
-    {:reply, :ok, mark_dirty(%{new_state | gap_buffer: new_buf})}
+    new_state = push_undo(state, state.document)
+    new_buf = Document.new(new_content)
+    {:reply, :ok, mark_dirty(%{new_state | document: new_buf})}
   end
 
   def handle_call(:content, _from, state) do
-    {:reply, GapBuffer.content(state.gap_buffer), state}
+    {:reply, Document.content(state.document), state}
   end
 
   def handle_call({:get_lines, start, count}, _from, state) do
-    {:reply, GapBuffer.lines(state.gap_buffer, start, count), state}
+    {:reply, Document.lines(state.document, start, count), state}
   end
 
   def handle_call(:cursor, _from, state) do
-    {:reply, GapBuffer.cursor(state.gap_buffer), state}
+    {:reply, Document.cursor(state.document), state}
   end
 
   def handle_call(:line_count, _from, state) do
-    {:reply, GapBuffer.line_count(state.gap_buffer), state}
+    {:reply, Document.line_count(state.document), state}
   end
 
   def handle_call(:dirty?, _from, state) do
@@ -571,36 +571,36 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:append, text}, _from, state) do
-    content = GapBuffer.content(state.gap_buffer)
+    content = Document.content(state.document)
     new_content = content <> text
-    new_buf = GapBuffer.new(new_content)
+    new_buf = Document.new(new_content)
     # Move cursor to end
-    line_count = GapBuffer.line_count(new_buf)
+    line_count = Document.line_count(new_buf)
     last_line = max(0, line_count - 1)
 
     last_col =
-      case GapBuffer.lines(new_buf, last_line, 1) do
+      case Document.lines(new_buf, last_line, 1) do
         # last_grapheme_byte_offset returns 0 for empty rows, which is correct
         [row] -> Unicode.last_grapheme_byte_offset(row)
         _ -> 0
       end
 
-    new_buf = GapBuffer.move_to(new_buf, {last_line, last_col})
-    {:reply, :ok, %{state | gap_buffer: new_buf}}
+    new_buf = Document.move_to(new_buf, {last_line, last_col})
+    {:reply, :ok, %{state | document: new_buf}}
   end
 
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
-    buf = state.gap_buffer
+    buf = state.document
 
     first_line_byte_offset =
       buf
-      |> GapBuffer.lines(0, first_line)
+      |> Document.lines(0, first_line)
       |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
 
     snapshot = %{
-      cursor: GapBuffer.cursor(buf),
-      line_count: GapBuffer.line_count(buf),
-      lines: GapBuffer.lines(buf, first_line, count),
+      cursor: Document.cursor(buf),
+      line_count: Document.line_count(buf),
+      lines: Document.lines(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
       dirty: state.dirty,
@@ -613,7 +613,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:content_range, from_pos, to_pos}, _from, state) do
-    text = GapBuffer.content_range(state.gap_buffer, from_pos, to_pos)
+    text = Document.content_range(state.document, from_pos, to_pos)
     {:reply, text, state}
   end
 
@@ -622,9 +622,9 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
-    new_buf = GapBuffer.delete_range(state.gap_buffer, from_pos, to_pos)
+    new_buf = Document.delete_range(state.document, from_pos, to_pos)
 
-    if new_buf == state.gap_buffer do
+    if new_buf == state.document do
       {:reply, :ok, state}
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
@@ -632,12 +632,12 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:get_range, start_pos, end_pos}, _from, state) do
-    result = GapBuffer.get_range(state.gap_buffer, start_pos, end_pos)
+    result = Document.get_range(state.document, start_pos, end_pos)
     {:reply, result, state}
   end
 
   def handle_call({:get_lines_content, start_line, end_line}, _from, state) do
-    result = GapBuffer.get_lines_content(state.gap_buffer, start_line, end_line)
+    result = Document.get_lines_content(state.document, start_line, end_line)
     {:reply, result, state}
   end
 
@@ -646,9 +646,9 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
-    new_buf = GapBuffer.delete_lines(state.gap_buffer, start_line, end_line)
+    new_buf = Document.delete_lines(state.document, start_line, end_line)
 
-    if new_buf == state.gap_buffer do
+    if new_buf == state.document do
       {:reply, :ok, state}
     else
       {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
@@ -656,11 +656,11 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:content_and_cursor, _from, state) do
-    {:reply, GapBuffer.content_and_cursor(state.gap_buffer), state}
+    {:reply, Document.content_and_cursor(state.document), state}
   end
 
   def handle_call(:snapshot, _from, state) do
-    {:reply, state.gap_buffer, state}
+    {:reply, state.document, state}
   end
 
   def handle_call({:apply_snapshot, _new_buf}, _from, %{read_only: true} = state) do
@@ -676,9 +676,9 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:clear_line, line}, _from, state) do
-    {yanked, new_buf} = GapBuffer.clear_line(state.gap_buffer, line)
+    {yanked, new_buf} = Document.clear_line(state.document, line)
 
-    if new_buf == state.gap_buffer do
+    if new_buf == state.document do
       {:reply, {:ok, yanked}, state}
     else
       {:reply, {:ok, yanked}, push_undo(state, new_buf) |> mark_dirty()}
@@ -694,9 +694,9 @@ defmodule Minga.Buffer.Server do
         new_state =
           %{
             state
-            | gap_buffer: prev_buf,
+            | document: prev_buf,
               undo_stack: rest_undo,
-              redo_stack: [state.gap_buffer | state.redo_stack]
+              redo_stack: [state.document | state.redo_stack]
           }
           |> mark_dirty()
 
@@ -713,9 +713,9 @@ defmodule Minga.Buffer.Server do
         new_state =
           %{
             state
-            | gap_buffer: next_buf,
+            | document: next_buf,
               redo_stack: rest_redo,
-              undo_stack: [state.gap_buffer | state.undo_stack]
+              undo_stack: [state.document | state.undo_stack]
           }
           |> mark_dirty()
 
@@ -759,15 +759,15 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  # Pushes the current gap_buffer onto the undo stack (capped at @max_undo_stack),
-  # sets the new gap_buffer, and clears the redo stack.
-  @spec push_undo(state(), GapBuffer.t()) :: state()
+  # Pushes the current document onto the undo stack (capped at @max_undo_stack),
+  # sets the new document, and clears the redo stack.
+  @spec push_undo(state(), Document.t()) :: state()
   defp push_undo(state, new_buf) do
     new_undo =
-      [state.gap_buffer | state.undo_stack]
+      [state.document | state.undo_stack]
       |> Enum.take(@max_undo_stack)
 
-    %{state | gap_buffer: new_buf, undo_stack: new_undo, redo_stack: []}
+    %{state | document: new_buf, undo_stack: new_undo, redo_stack: []}
   end
 
   @spec mark_dirty(state()) :: state()

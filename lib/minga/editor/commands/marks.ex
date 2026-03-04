@@ -4,7 +4,7 @@ defmodule Minga.Editor.Commands.Marks do
   last cursor position.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
@@ -33,7 +33,7 @@ defmodule Minga.Editor.Commands.Marks do
       {mark_line, _mark_col} ->
         current_pos = BufferServer.cursor(buf)
         {content, _} = BufferServer.content_and_cursor(buf)
-        tmp_buf = GapBuffer.new(content)
+        tmp_buf = Document.new(content)
         target = Minga.Motion.first_non_blank(tmp_buf, {mark_line, 0})
         BufferServer.move_to(buf, target)
         Helpers.save_jump_pos(state, current_pos, target)
@@ -60,7 +60,7 @@ defmodule Minga.Editor.Commands.Marks do
     current_pos = BufferServer.cursor(buf)
     {last_line, _} = last_pos
     {content, _} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    tmp_buf = Document.new(content)
     target = Minga.Motion.first_non_blank(tmp_buf, {last_line, 0})
     BufferServer.move_to(buf, target)
     %{state | last_jump_pos: current_pos}

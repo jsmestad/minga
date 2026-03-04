@@ -9,7 +9,7 @@ defmodule Minga.DoctestTest do
 
   use ExUnit.Case, async: true
 
-  doctest Minga.Buffer.GapBuffer
+  doctest Minga.Buffer.Document
   doctest Minga.Motion
   doctest Minga.Keymap.Trie
   doctest Minga.WhichKey

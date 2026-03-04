@@ -27,10 +27,10 @@ defmodule Minga.AutoPair do
   comments) is deferred to tree-sitter integration.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
 
   @typedoc "A zero-indexed `{line, col}` position."
-  @type position :: GapBuffer.position()
+  @type position :: Document.position()
 
   @typedoc "Result of auto-pair analysis on a typed character."
   @type insert_action ::
@@ -71,16 +71,16 @@ defmodule Minga.AutoPair do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello")
+      iex> buf = Minga.Buffer.Document.new("hello")
       iex> Minga.AutoPair.on_insert(buf, {0, 5}, "(")
       {:pair, "(", ")"}
 
-      iex> buf = Minga.Buffer.GapBuffer.new("()")
+      iex> buf = Minga.Buffer.Document.new("()")
       iex> Minga.AutoPair.on_insert(buf, {0, 1}, ")")
       {:skip, ")"}
   """
-  @spec on_insert(GapBuffer.t(), position(), String.t()) :: insert_action()
-  def on_insert(%GapBuffer{} = buffer, {line, col}, char) when is_binary(char) do
+  @spec on_insert(Document.t(), position(), String.t()) :: insert_action()
+  def on_insert(%Document{} = buffer, {line, col}, char) when is_binary(char) do
     char_at_cursor = char_at(buffer, line, col)
 
     cond do
@@ -121,16 +121,16 @@ defmodule Minga.AutoPair do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("()")
+      iex> buf = Minga.Buffer.Document.new("()")
       iex> Minga.AutoPair.on_backspace(buf, {0, 1})
       :delete_pair
 
-      iex> buf = Minga.Buffer.GapBuffer.new("(x)")
+      iex> buf = Minga.Buffer.Document.new("(x)")
       iex> Minga.AutoPair.on_backspace(buf, {0, 1})
       :passthrough
   """
-  @spec on_backspace(GapBuffer.t(), position()) :: backspace_action()
-  def on_backspace(%GapBuffer{} = buffer, {line, col}) do
+  @spec on_backspace(Document.t(), position()) :: backspace_action()
+  def on_backspace(%Document{} = buffer, {line, col}) do
     if col == 0 do
       :passthrough
     else
@@ -166,9 +166,9 @@ defmodule Minga.AutoPair do
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # Returns the grapheme at {line, byte_col}, or nil if out of bounds.
-  @spec char_at(GapBuffer.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
+  @spec char_at(Document.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
   defp char_at(buffer, line, byte_col) do
-    case GapBuffer.line_at(buffer, line) do
+    case Document.line_at(buffer, line) do
       nil ->
         nil
 
@@ -186,11 +186,11 @@ defmodule Minga.AutoPair do
   end
 
   # Returns the grapheme before the cursor position, or nil.
-  @spec char_before(GapBuffer.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
+  @spec char_before(Document.t(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
   defp char_before(_buffer, _line, 0), do: nil
 
   defp char_before(buffer, line, byte_col) do
-    case GapBuffer.line_at(buffer, line) do
+    case Document.line_at(buffer, line) do
       nil ->
         nil
 

@@ -73,7 +73,7 @@ The Editor process never directly touches buffer memory. It sends messages:
 
 # Buffer process handles this in isolation
 def handle_call(:content_and_cursor, _from, state) do
-  {:reply, {GapBuffer.content(state.gap_buffer), GapBuffer.cursor(state.gap_buffer)}, state}
+  {:reply, {GapBuffer.content(state.document), GapBuffer.cursor(state.document)}, state}
 end
 ```
 

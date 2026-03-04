@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.GapBuffer do
+defmodule Minga.Buffer.Document do
   @moduledoc """
   A gap buffer implementation for text editing.
 
@@ -27,11 +27,11 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
-      iex> Minga.Buffer.GapBuffer.cursor(buf)
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
+      iex> Minga.Buffer.Document.cursor(buf)
       {0, 0}
-      iex> buf = Minga.Buffer.GapBuffer.insert_char(buf, "H")
-      iex> Minga.Buffer.GapBuffer.content(buf)
+      iex> buf = Minga.Buffer.Document.insert_char(buf, "H")
+      iex> Minga.Buffer.Document.content(buf)
       "Hhello\\nworld"
   """
 
@@ -65,10 +65,10 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello")
-      iex> Minga.Buffer.GapBuffer.content(buf)
+      iex> buf = Minga.Buffer.Document.new("hello")
+      iex> Minga.Buffer.Document.content(buf)
       "hello"
-      iex> Minga.Buffer.GapBuffer.cursor(buf)
+      iex> Minga.Buffer.Document.cursor(buf)
       {0, 0}
   """
   @spec new(String.t()) :: t()
@@ -95,9 +95,9 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> Minga.Buffer.GapBuffer.empty?(Minga.Buffer.GapBuffer.new(""))
+      iex> Minga.Buffer.Document.empty?(Minga.Buffer.Document.new(""))
       true
-      iex> Minga.Buffer.GapBuffer.empty?(Minga.Buffer.GapBuffer.new("hi"))
+      iex> Minga.Buffer.Document.empty?(Minga.Buffer.Document.new("hi"))
       false
   """
   @spec empty?(t()) :: boolean()
@@ -111,10 +111,10 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("one\\ntwo\\nthree")
-      iex> Minga.Buffer.GapBuffer.line_count(buf)
+      iex> buf = Minga.Buffer.Document.new("one\\ntwo\\nthree")
+      iex> Minga.Buffer.Document.line_count(buf)
       3
-      iex> Minga.Buffer.GapBuffer.line_count(Minga.Buffer.GapBuffer.new(""))
+      iex> Minga.Buffer.Document.line_count(Minga.Buffer.Document.new(""))
       1
   """
   @spec line_count(t()) :: pos_integer()
@@ -209,9 +209,9 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("world")
-      iex> buf = Minga.Buffer.GapBuffer.insert_char(buf, "hello ")
-      iex> Minga.Buffer.GapBuffer.content(buf)
+      iex> buf = Minga.Buffer.Document.new("world")
+      iex> buf = Minga.Buffer.Document.insert_char(buf, "hello ")
+      iex> Minga.Buffer.Document.content(buf)
       "hello world"
   """
   @spec insert_char(t(), String.t()) :: t()
@@ -243,10 +243,10 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello")
-      iex> buf = Minga.Buffer.GapBuffer.move_to(buf, {0, 5})
-      iex> buf = Minga.Buffer.GapBuffer.delete_before(buf)
-      iex> Minga.Buffer.GapBuffer.content(buf)
+      iex> buf = Minga.Buffer.Document.new("hello")
+      iex> buf = Minga.Buffer.Document.move_to(buf, {0, 5})
+      iex> buf = Minga.Buffer.Document.delete_before(buf)
+      iex> Minga.Buffer.Document.content(buf)
       "hell"
   """
   @spec delete_before(t()) :: t()
@@ -297,9 +297,9 @@ defmodule Minga.Buffer.GapBuffer do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
-      iex> buf = Minga.Buffer.GapBuffer.move_to(buf, {1, 3})
-      iex> Minga.Buffer.GapBuffer.cursor(buf)
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
+      iex> buf = Minga.Buffer.Document.move_to(buf, {1, 3})
+      iex> Minga.Buffer.Document.cursor(buf)
       {1, 3}
   """
   @spec move_to(t(), position()) :: t()

@@ -24,11 +24,11 @@ defmodule Minga.Operator do
   line by index (zero-based).
   """
 
-  alias Minga.Buffer.{GapBuffer, Server}
+  alias Minga.Buffer.{Document, Server}
   alias Minga.Buffer.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
-  @type position :: GapBuffer.position()
+  @type position :: Document.position()
 
   # ── Character-range operators ─────────────────────────────────────────────
 

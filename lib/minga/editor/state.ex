@@ -17,7 +17,7 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.Registers` — named registers and active register selection
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.LspBridge
@@ -38,7 +38,7 @@ defmodule Minga.Editor.State do
   @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
 
   @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name (single letter)."
-  @type marks :: %{pid() => %{String.t() => GapBuffer.position()}}
+  @type marks :: %{pid() => %{String.t() => Document.position()}}
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -96,7 +96,7 @@ defmodule Minga.Editor.State do
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,
           marks: marks(),
-          last_jump_pos: GapBuffer.position() | nil,
+          last_jump_pos: Document.position() | nil,
           macro_recorder: MacroRecorder.t(),
           highlight: Highlight.t(),
           highlight_version: non_neg_integer(),

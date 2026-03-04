@@ -4,7 +4,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   ex-command dispatch, and line number style cycling.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Editor.Commands
@@ -359,8 +359,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
     :sys.replace_state(buf, fn s ->
       %{
         s
-        | gap_buffer:
-            GapBuffer.new(
+        | document:
+            Document.new(
               ";; This buffer is for notes you don't want to save.\n;; It will persist across buffer switches.\n\n"
             )
       }
@@ -386,7 +386,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
           else: ""
 
       :sys.replace_state(buf, fn s ->
-        %{s | gap_buffer: GapBuffer.new(initial)}
+        %{s | document: Document.new(initial)}
       end)
 
       %{state | status_msg: "Buffer is persistent — content cleared"}

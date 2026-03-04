@@ -3,23 +3,23 @@ defmodule Minga.Motion.Line do
   Line-level cursor motion functions: start, end, and first-non-blank.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
-  @type position :: GapBuffer.position()
+  @type position :: Document.position()
 
   @doc """
   Move to the first column of the current line (Vim's `0`).
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> buf = Minga.Buffer.Document.new("  hello")
       iex> Minga.Motion.Line.line_start(buf, {0, 4})
       {0, 0}
   """
-  @spec line_start(GapBuffer.t(), position()) :: position()
-  def line_start(%GapBuffer{}, {line, _col}), do: {line, 0}
+  @spec line_start(Document.t(), position()) :: position()
+  def line_start(%Document{}, {line, _col}), do: {line, 0}
 
   @doc """
   Move to the last column of the current line (Vim's `$`).
@@ -27,13 +27,13 @@ defmodule Minga.Motion.Line do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
       iex> Minga.Motion.Line.line_end(buf, {0, 0})
       {0, 4}
   """
-  @spec line_end(GapBuffer.t(), position()) :: position()
-  def line_end(%GapBuffer{} = buf, {line, _col}) do
-    case GapBuffer.line_at(buf, line) do
+  @spec line_end(Document.t(), position()) :: position()
+  def line_end(%Document{} = buf, {line, _col}) do
+    case Document.line_at(buf, line) do
       nil -> {line, 0}
       "" -> {line, 0}
       text -> {line, Unicode.last_grapheme_byte_offset(text)}
@@ -46,13 +46,13 @@ defmodule Minga.Motion.Line do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> buf = Minga.Buffer.Document.new("  hello")
       iex> Minga.Motion.Line.first_non_blank(buf, {0, 0})
       {0, 2}
   """
-  @spec first_non_blank(GapBuffer.t(), position()) :: position()
-  def first_non_blank(%GapBuffer{} = buf, {line, _col}) do
-    case GapBuffer.line_at(buf, line) do
+  @spec first_non_blank(Document.t(), position()) :: position()
+  def first_non_blank(%Document{} = buf, {line, _col}) do
+    case Document.line_at(buf, line) do
       nil ->
         {line, 0}
 

@@ -2,10 +2,10 @@ defmodule Minga.Motion do
   @moduledoc """
   Pure cursor-motion functions for the Minga editor.
 
-  Each function takes a `GapBuffer.t()` and a current `position()`, and
+  Each function takes a `Document.t()` and a current `position()`, and
   returns the new `position()` after applying the motion.  No buffer state
   is mutated — the caller is responsible for moving the buffer cursor via
-  `GapBuffer.move_to/2` or `Buffer.Server.move_to/2`.
+  `Document.move_to/2` or `Buffer.Server.move_to/2`.
 
   This module is a facade over focused sub-modules:
 
@@ -31,14 +31,14 @@ defmodule Minga.Motion do
   | `document_end/1`  | `G`     | Last character of the last line          |
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Motion.Char
-  alias Minga.Motion.Document
+  alias Minga.Motion.Document, as: MotionDoc
   alias Minga.Motion.Line
   alias Minga.Motion.Word
 
   @typedoc "A zero-indexed {line, col} cursor position."
-  @type position :: GapBuffer.position()
+  @type position :: Document.position()
 
   # ── Word motions ─────────────────────────────────────────────────────────
 
@@ -47,11 +47,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.word_forward(buf, {0, 0})
       {0, 6}
   """
-  @spec word_forward(GapBuffer.t(), position()) :: position()
+  @spec word_forward(Document.t(), position()) :: position()
   defdelegate word_forward(buf, pos), to: Word
 
   @doc """
@@ -59,11 +59,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.word_backward(buf, {0, 6})
       {0, 0}
   """
-  @spec word_backward(GapBuffer.t(), position()) :: position()
+  @spec word_backward(Document.t(), position()) :: position()
   defdelegate word_backward(buf, pos), to: Word
 
   @doc """
@@ -71,11 +71,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.word_end(buf, {0, 0})
       {0, 4}
   """
-  @spec word_end(GapBuffer.t(), position()) :: position()
+  @spec word_end(Document.t(), position()) :: position()
   defdelegate word_end(buf, pos), to: Word
 
   @doc """
@@ -83,11 +83,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> buf = Minga.Buffer.Document.new("foo.bar baz")
       iex> Minga.Motion.word_forward_big(buf, {0, 0})
       {0, 8}
   """
-  @spec word_forward_big(GapBuffer.t(), position()) :: position()
+  @spec word_forward_big(Document.t(), position()) :: position()
   defdelegate word_forward_big(buf, pos), to: Word
 
   @doc """
@@ -95,11 +95,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> buf = Minga.Buffer.Document.new("foo.bar baz")
       iex> Minga.Motion.word_backward_big(buf, {0, 8})
       {0, 0}
   """
-  @spec word_backward_big(GapBuffer.t(), position()) :: position()
+  @spec word_backward_big(Document.t(), position()) :: position()
   defdelegate word_backward_big(buf, pos), to: Word
 
   @doc """
@@ -107,11 +107,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("foo.bar baz")
+      iex> buf = Minga.Buffer.Document.new("foo.bar baz")
       iex> Minga.Motion.word_end_big(buf, {0, 0})
       {0, 6}
   """
-  @spec word_end_big(GapBuffer.t(), position()) :: position()
+  @spec word_end_big(Document.t(), position()) :: position()
   defdelegate word_end_big(buf, pos), to: Word
 
   # ── Line motions ─────────────────────────────────────────────────────────
@@ -121,11 +121,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> buf = Minga.Buffer.Document.new("  hello")
       iex> Minga.Motion.line_start(buf, {0, 4})
       {0, 0}
   """
-  @spec line_start(GapBuffer.t(), position()) :: position()
+  @spec line_start(Document.t(), position()) :: position()
   defdelegate line_start(buf, pos), to: Line
 
   @doc """
@@ -135,11 +135,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
       iex> Minga.Motion.line_end(buf, {0, 0})
       {0, 4}
   """
-  @spec line_end(GapBuffer.t(), position()) :: position()
+  @spec line_end(Document.t(), position()) :: position()
   defdelegate line_end(buf, pos), to: Line
 
   @doc """
@@ -148,11 +148,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("  hello")
+      iex> buf = Minga.Buffer.Document.new("  hello")
       iex> Minga.Motion.first_non_blank(buf, {0, 0})
       {0, 2}
   """
-  @spec first_non_blank(GapBuffer.t(), position()) :: position()
+  @spec first_non_blank(Document.t(), position()) :: position()
   defdelegate first_non_blank(buf, pos), to: Line
 
   # ── Document motions ──────────────────────────────────────────────────────
@@ -163,47 +163,47 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> Minga.Motion.document_start(Minga.Buffer.GapBuffer.new("hello\\nworld"))
+      iex> Minga.Motion.document_start(Minga.Buffer.Document.new("hello\\nworld"))
       {0, 0}
   """
-  @spec document_start(GapBuffer.t()) :: position()
-  defdelegate document_start(buf), to: Document
+  @spec document_start(Document.t()) :: position()
+  defdelegate document_start(buf), to: MotionDoc
 
   @doc """
   Move to the last character of the last line (like Vim's `G`).
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld")
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld")
       iex> Minga.Motion.document_end(buf)
       {1, 4}
   """
-  @spec document_end(GapBuffer.t()) :: position()
-  defdelegate document_end(buf), to: Document
+  @spec document_end(Document.t()) :: position()
+  defdelegate document_end(buf), to: MotionDoc
 
   @doc """
   Move to the next blank line (Vim's `}`).
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld\\n\\nfoo")
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld\\n\\nfoo")
       iex> Minga.Motion.paragraph_forward(buf, {0, 0})
       {2, 0}
   """
-  @spec paragraph_forward(GapBuffer.t(), position()) :: position()
-  defdelegate paragraph_forward(buf, pos), to: Document
+  @spec paragraph_forward(Document.t(), position()) :: position()
+  defdelegate paragraph_forward(buf, pos), to: MotionDoc
 
   @doc """
   Move to the previous blank line (Vim's `{`).
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello\\nworld\\n\\nfoo")
+      iex> buf = Minga.Buffer.Document.new("hello\\nworld\\n\\nfoo")
       iex> Minga.Motion.paragraph_backward(buf, {3, 0})
       {2, 0}
   """
-  @spec paragraph_backward(GapBuffer.t(), position()) :: position()
-  defdelegate paragraph_backward(buf, pos), to: Document
+  @spec paragraph_backward(Document.t(), position()) :: position()
+  defdelegate paragraph_backward(buf, pos), to: MotionDoc
 
   # ── Find-char motions ─────────────────────────────────────────────────────
 
@@ -213,11 +213,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.find_char_forward(buf, {0, 0}, "o")
       {0, 4}
   """
-  @spec find_char_forward(GapBuffer.t(), position(), String.t()) :: position()
+  @spec find_char_forward(Document.t(), position(), String.t()) :: position()
   defdelegate find_char_forward(buf, pos, char), to: Char
 
   @doc """
@@ -226,11 +226,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.find_char_backward(buf, {0, 7}, "o")
       {0, 4}
   """
-  @spec find_char_backward(GapBuffer.t(), position(), String.t()) :: position()
+  @spec find_char_backward(Document.t(), position(), String.t()) :: position()
   defdelegate find_char_backward(buf, pos, char), to: Char
 
   @doc """
@@ -239,11 +239,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.till_char_forward(buf, {0, 0}, "o")
       {0, 3}
   """
-  @spec till_char_forward(GapBuffer.t(), position(), String.t()) :: position()
+  @spec till_char_forward(Document.t(), position(), String.t()) :: position()
   defdelegate till_char_forward(buf, pos, char), to: Char
 
   @doc """
@@ -252,11 +252,11 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("hello world")
+      iex> buf = Minga.Buffer.Document.new("hello world")
       iex> Minga.Motion.till_char_backward(buf, {0, 7}, "o")
       {0, 5}
   """
-  @spec till_char_backward(GapBuffer.t(), position(), String.t()) :: position()
+  @spec till_char_backward(Document.t(), position(), String.t()) :: position()
   defdelegate till_char_backward(buf, pos, char), to: Char
 
   @doc """
@@ -264,10 +264,10 @@ defmodule Minga.Motion do
 
   ## Examples
 
-      iex> buf = Minga.Buffer.GapBuffer.new("(hello)")
+      iex> buf = Minga.Buffer.Document.new("(hello)")
       iex> Minga.Motion.match_bracket(buf, {0, 0})
       {0, 6}
   """
-  @spec match_bracket(GapBuffer.t(), position()) :: position()
+  @spec match_bracket(Document.t(), position()) :: position()
   defdelegate match_bracket(buf, pos), to: Char
 end

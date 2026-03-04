@@ -35,7 +35,7 @@ See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and
 
 - **`@spec` on every public function** — Elixir 1.19's type system is strict
 - **Pattern matching over `if`/`cond`** — multi-clause functions preferred
-- **Test files mirror `lib/`** — `lib/minga/buffer/gap_buffer.ex` → `test/minga/buffer/gap_buffer_test.exs`
+- **Test files mirror `lib/`** — `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
 - **Property-based tests** with StreamData for data structures
 
 ## Key Documentation

@@ -5,10 +5,10 @@ defmodule Minga.Buffer.State do
   Holds the gap buffer, file path, dirty flag, and undo/redo stacks.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
 
-  @enforce_keys [:gap_buffer]
-  defstruct gap_buffer: nil,
+  @enforce_keys [:document]
+  defstruct document: nil,
             file_path: nil,
             filetype: :text,
             dirty: false,
@@ -23,15 +23,15 @@ defmodule Minga.Buffer.State do
             persistent: false
 
   @type t :: %__MODULE__{
-          gap_buffer: GapBuffer.t(),
+          document: Document.t(),
           file_path: String.t() | nil,
           filetype: atom(),
           dirty: boolean(),
           version: non_neg_integer(),
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
-          undo_stack: [GapBuffer.t()],
-          redo_stack: [GapBuffer.t()],
+          undo_stack: [Document.t()],
+          redo_stack: [Document.t()],
           name: String.t() | nil,
           read_only: boolean(),
           unlisted: boolean(),
@@ -49,12 +49,12 @@ defmodule Minga.Buffer.State do
   `new_buf`. Clears the redo stack. The undo stack is capped at
   #{@max_undo_stack} entries.
   """
-  @spec push_undo(t(), GapBuffer.t()) :: t()
+  @spec push_undo(t(), Document.t()) :: t()
   def push_undo(%__MODULE__{} = state, new_buf) do
     new_undo =
-      [state.gap_buffer | state.undo_stack]
+      [state.document | state.undo_stack]
       |> Enum.take(@max_undo_stack)
 
-    %{state | gap_buffer: new_buf, undo_stack: new_undo, redo_stack: []}
+    %{state | document: new_buf, undo_stack: new_undo, redo_stack: []}
   end
 end

@@ -1,10 +1,10 @@
 defmodule Minga.Motion.WordTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Motion
 
-  defp buf(text), do: GapBuffer.new(text)
+  defp buf(text), do: Document.new(text)
 
   describe "word_forward/2" do
     test "moves from start of word to start of next word" do

@@ -4,7 +4,7 @@ defmodule Minga.Editor.Commands.Search do
   word-under-cursor search.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.PickerUI
@@ -115,7 +115,7 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(%{buf: %{buffer: buf}} = state, :search_word_under_cursor_forward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    tmp_buf = Document.new(content)
 
     case Minga.Search.word_at_cursor(tmp_buf, cursor) do
       nil ->
@@ -141,7 +141,7 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(%{buf: %{buffer: buf}} = state, :search_word_under_cursor_backward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
-    tmp_buf = GapBuffer.new(content)
+    tmp_buf = Document.new(content)
 
     case Minga.Search.word_at_cursor(tmp_buf, cursor) do
       nil ->

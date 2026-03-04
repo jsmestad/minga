@@ -1,12 +1,12 @@
 defmodule Minga.TextObjectTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.TextObject
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
-  defp buf(text), do: GapBuffer.new(text)
+  defp buf(text), do: Document.new(text)
 
   # ── inner_word/2 ──────────────────────────────────────────────────────────────
 

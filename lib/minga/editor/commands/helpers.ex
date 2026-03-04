@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Helpers do
   should use `Editor.Commands.execute/2` instead.
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Clipboard
@@ -104,14 +104,14 @@ defmodule Minga.Editor.Commands.Helpers do
   # ── Positional helpers ──────────────────────────────────────────────────────
 
   @doc "Returns the two positions sorted so the lesser comes first."
-  @spec sort_positions(GapBuffer.position(), GapBuffer.position()) ::
-          {GapBuffer.position(), GapBuffer.position()}
+  @spec sort_positions(Document.position(), Document.position()) ::
+          {Document.position(), Document.position()}
   def sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
   @doc "Saves the jump position when the cursor crosses a line boundary."
-  @spec save_jump_pos(state(), GapBuffer.position(), GapBuffer.position()) :: state()
+  @spec save_jump_pos(state(), Document.position(), Document.position()) :: state()
   def save_jump_pos(state, {from_line, _} = from_pos, {to_line, _})
       when from_line != to_line do
     %{state | last_jump_pos: from_pos}
@@ -124,16 +124,16 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a `(buf, pos) -> new_pos` motion function to the buffer cursor."
   @spec apply_motion(
           pid(),
-          (GapBuffer.t(), Minga.Motion.position() -> Minga.Motion.position())
+          (Document.t(), Minga.Motion.position() -> Minga.Motion.position())
         ) :: :ok
   def apply_motion(buf, motion_fn) do
     gb = BufferServer.snapshot(buf)
-    new_pos = motion_fn.(gb, GapBuffer.cursor(gb))
+    new_pos = motion_fn.(gb, Document.cursor(gb))
     BufferServer.move_to(buf, new_pos)
   end
 
   @doc "Resolves a motion atom to a new position in the buffer."
-  @spec resolve_motion(GapBuffer.t(), Minga.Motion.position(), atom()) ::
+  @spec resolve_motion(Document.t(), Minga.Motion.position(), atom()) ::
           Minga.Motion.position()
   def resolve_motion(buf, cursor, :word_forward), do: Minga.Motion.word_forward(buf, cursor)
   def resolve_motion(buf, cursor, :word_backward), do: Minga.Motion.word_backward(buf, cursor)
@@ -172,7 +172,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
 
     motion_fn =
       case dir do
@@ -199,18 +199,18 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   def apply_operator_motion(buf, state, motion, action) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
     target = resolve_motion(gb, cursor, motion)
     {start_pos, end_pos} = sort_positions(cursor, target)
 
     case action do
       :delete ->
-        text = GapBuffer.get_range(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       :yank ->
-        text = GapBuffer.get_range(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
@@ -219,7 +219,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
   def apply_text_object(%{buf: %{buffer: buf}} = state, modifier, spec, action) do
     gb = BufferServer.snapshot(buf)
-    cursor = GapBuffer.cursor(gb)
+    cursor = Document.cursor(gb)
     range = compute_text_object_range(gb, cursor, modifier, spec)
 
     case {action, range} do
@@ -227,18 +227,18 @@ defmodule Minga.Editor.Commands.Helpers do
         state
 
       {:delete, {start_pos, end_pos}} ->
-        text = GapBuffer.get_range(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         BufferServer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
-        text = GapBuffer.get_range(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
 
   @doc "Computes the range for a text object modifier + spec pair."
-  @spec compute_text_object_range(GapBuffer.t(), TextObject.position(), atom(), term()) ::
+  @spec compute_text_object_range(Document.t(), TextObject.position(), atom(), term()) ::
           TextObject.range()
   def compute_text_object_range(buf, pos, :inner, :word), do: TextObject.inner_word(buf, pos)
   def compute_text_object_range(buf, pos, :around, :word), do: TextObject.a_word(buf, pos)
@@ -261,12 +261,12 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   def page_move(buf, _vp, delta) do
     gb = BufferServer.snapshot(buf)
-    {line, col} = GapBuffer.cursor(gb)
-    total_lines = GapBuffer.line_count(gb)
+    {line, col} = Document.cursor(gb)
+    total_lines = Document.line_count(gb)
     target_line = max(0, min(line + delta, total_lines - 1))
 
     target_col =
-      case GapBuffer.lines(gb, target_line, 1) do
+      case Document.lines(gb, target_line, 1) do
         [text] when byte_size(text) > 0 ->
           min(col, Unicode.last_grapheme_byte_offset(text))
 

@@ -30,7 +30,9 @@ defmodule Minga.Theme.CatppuccinMacchiato do
     crust: 0x181926
   }
 
+  alias Minga.Theme.Catppuccin
+
   @doc "Returns the Catppuccin Macchiato theme struct."
   @spec theme() :: Minga.Theme.t()
-  def theme, do: Minga.Theme.Catppuccin.build(:catppuccin_macchiato, @palette)
+  def theme, do: Catppuccin.build(:catppuccin_macchiato, @palette)
 end

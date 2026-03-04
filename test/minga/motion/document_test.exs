@@ -1,10 +1,10 @@
 defmodule Minga.Motion.DocumentTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Motion
 
-  defp buf(text), do: GapBuffer.new(text)
+  defp buf(text), do: Document.new(text)
 
   describe "document_start/1" do
     test "always returns {0, 0}" do

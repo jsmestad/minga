@@ -89,7 +89,7 @@ defmodule Minga.MixProject do
             Minga.Editor.WindowTree
           ],
           Buffer: [
-            Minga.Buffer.GapBuffer,
+            Minga.Buffer.Document,
             Minga.Buffer.Server
           ],
           Modes: [

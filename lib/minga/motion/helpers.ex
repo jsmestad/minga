@@ -14,7 +14,7 @@ defmodule Minga.Motion.Helpers do
   @compile {:inline, word_char?: 1, whitespace?: 1, classify_char: 1}
 
   @typedoc "A zero-indexed {line, byte_col} cursor position."
-  @type position :: Minga.Buffer.GapBuffer.position()
+  @type position :: Minga.Buffer.Document.position()
 
   # ── Character classification ─────────────────────────────────────────────
 

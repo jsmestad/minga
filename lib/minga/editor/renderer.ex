@@ -14,7 +14,7 @@ defmodule Minga.Editor.Renderer do
   * `Renderer.Minibuffer`      — command/search/status line
   """
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Diagnostics
@@ -756,7 +756,7 @@ defmodule Minga.Editor.Renderer do
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
-  @spec visual_selection_bounds(state(), GapBuffer.position()) :: visual_selection()
+  @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
   defp visual_selection_bounds(%{mode: :visual, mode_state: %VisualState{} = ms}, cursor) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
@@ -778,7 +778,7 @@ defmodule Minga.Editor.Renderer do
   # Converts byte-indexed visual selection positions to grapheme columns for rendering.
   @spec visual_selection_grapheme_bounds(
           state(),
-          GapBuffer.position(),
+          Document.position(),
           [String.t()],
           non_neg_integer()
         ) :: visual_selection()
@@ -841,8 +841,8 @@ defmodule Minga.Editor.Renderer do
     end
   end
 
-  @spec sort_positions(GapBuffer.position(), GapBuffer.position()) ::
-          {GapBuffer.position(), GapBuffer.position()}
+  @spec sort_positions(Document.position(), Document.position()) ::
+          {Document.position(), Document.position()}
   defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end

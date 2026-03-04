@@ -1,7 +1,7 @@
 defmodule Minga.SearchTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.GapBuffer
+  alias Minga.Buffer.Document
   alias Minga.Search
 
   # ── find_next/4 ────────────────────────────────────────────────────────
@@ -94,42 +94,42 @@ defmodule Minga.SearchTest do
 
   describe "word_at_cursor/2" do
     test "returns word under cursor" do
-      buf = GapBuffer.new("hello world")
+      buf = Document.new("hello world")
       assert "hello" = Search.word_at_cursor(buf, {0, 0})
     end
 
     test "returns word when cursor is mid-word" do
-      buf = GapBuffer.new("hello world")
+      buf = Document.new("hello world")
       assert "hello" = Search.word_at_cursor(buf, {0, 2})
     end
 
     test "returns nil when cursor is on space" do
-      buf = GapBuffer.new("hello world")
+      buf = Document.new("hello world")
       assert nil == Search.word_at_cursor(buf, {0, 5})
     end
 
     test "returns nil for empty buffer" do
-      buf = GapBuffer.new("")
+      buf = Document.new("")
       assert nil == Search.word_at_cursor(buf, {0, 0})
     end
 
     test "returns word with underscores" do
-      buf = GapBuffer.new("hello_world test")
+      buf = Document.new("hello_world test")
       assert "hello_world" = Search.word_at_cursor(buf, {0, 3})
     end
 
     test "returns word with numbers" do
-      buf = GapBuffer.new("var123 = 5")
+      buf = Document.new("var123 = 5")
       assert "var123" = Search.word_at_cursor(buf, {0, 0})
     end
 
     test "works on second line" do
-      buf = GapBuffer.new("first\nsecond")
+      buf = Document.new("first\nsecond")
       assert "second" = Search.word_at_cursor(buf, {1, 0})
     end
 
     test "returns nil when cursor is on punctuation" do
-      buf = GapBuffer.new("hello, world")
+      buf = Document.new("hello, world")
       assert nil == Search.word_at_cursor(buf, {0, 5})
     end
   end

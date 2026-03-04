@@ -143,9 +143,9 @@ While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temp
 ```elixir
 # In Buffer.Server
 def handle_call({:apply_motion, motion_fn}, _from, state) do
-  new_pos = motion_fn.(state.gap_buffer, GapBuffer.cursor(state.gap_buffer))
-  new_buf = GapBuffer.move_to(state.gap_buffer, new_pos)
-  {:reply, :ok, %{state | gap_buffer: new_buf}}
+  new_pos = motion_fn.(state.document, GapBuffer.cursor(state.document))
+  new_buf = GapBuffer.move_to(state.document, new_pos)
+  {:reply, :ok, %{state | document: new_buf}}
 end
 ```
 
@@ -175,7 +175,7 @@ Add compound operations to `BufferServer` / `GapBuffer`:
 ```elixir
 # In Buffer.Server
 def handle_call({:join_lines, line}, _from, state) do
-  {new_buf, _} = GapBuffer.join_lines(state.gap_buffer, line)
+  {new_buf, _} = GapBuffer.join_lines(state.document, line)
   {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
 end
 ```
@@ -396,7 +396,7 @@ Additional hot functions in the render path and buffer operations could benefit 
 
 ### Existing Performance Test
 
-The project already has `test/perf/gap_buffer_perf_test.exs`. Extend this with benchmarks for:
+The project already has `test/perf/document_perf_test.exs`. Extend this with benchmarks for:
 - Motion on 10K-line buffer (word_forward, paragraph, bracket match)
 - Render cycle with full viewport
 - Picker filtering with 5000 candidates

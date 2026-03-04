@@ -43,7 +43,7 @@ defmodule Minga.Mode.Visual do
   Visual mode expects the following extra keys in the FSM state (set by the
   editor when transitioning *into* visual mode):
 
-  * `:visual_anchor` — `t:Minga.Buffer.GapBuffer.position/0` — the fixed end
+  * `:visual_anchor` — `t:Minga.Buffer.Document.position/0` — the fixed end
     of the selection.
   * `:visual_type` — `:char | :line` — selection granularity.
   """
