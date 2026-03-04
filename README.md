@@ -139,4 +139,4 @@ A heartfelt thank you to [Henrik Lissner](https://github.com/hlissner) and all c
 
 ---
 
-*Created with 🥨 in Colorado.*
+*Created by [Justin Smestad](https://evalcode.com). Built with 🥨 in Colorado.*
