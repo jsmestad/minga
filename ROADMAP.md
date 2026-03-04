@@ -130,8 +130,8 @@ Current status and planned features. Updated as development progresses.
 | Runtime grammar loading | ✅ | `dlopen` for user grammars |
 | Background query pre-compilation | ✅ | All 23 query sets compiled on startup |
 | Per-buffer highlight cache | ✅ | Instant switching between files |
-| Additional themes | 📋 | Only Doom One currently |
-| Theme switching at runtime | 📋 | |
+| Additional themes | ✅ | 7 built-in: Doom One, Catppuccin ×4, One Dark/Light |
+| Theme switching at runtime | 📋 | Static via config; runtime picker planned |
 | Incremental parsing | 💭 | Full reparse is <5ms for 10K lines; not needed yet |
 
 ## File Management
@@ -230,7 +230,7 @@ Roughly in priority order:
 2. ~~**LSP client (diagnostics)**~~ — ✅ Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename are next.
 3. **Config system** — ✅ Complete (#92, #93, #94). Options, keybindings, commands, hooks, and per-filetype settings all shipped.
 4. **Plugin system** — Elixir-based plugins that run as supervised processes
-5. **Additional themes** — Theme loading from disk, runtime switching
+5. **Theme runtime picker** — `SPC h t` to preview and switch themes without restart
 6. **Visual block mode** — Column selection and editing
 7. **File tree sidebar** — Project navigation panel
 8. **Git integration** — Gutter indicators, blame, hunk staging
