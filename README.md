@@ -1,5 +1,7 @@
 # 🥨 Minga
 
+[Documentation](https://jsmestad.github.com/minga/) | [Configuration Guide](https://jsmestad.github.com/minga/configuration.html) | [Roadmap](ROADMAP.md)
+
 **A modal text editor where every component is isolated, concurrent, and inspectable.**
 
 AI coding agents are rewriting your files, spawning subprocesses, and racing against your keystrokes. Most editors bolt this on as an afterthought, hoping the single-threaded event loop can keep up. Minga was designed from the ground up with isolated processes that can't interfere with each other. Your typing never waits for a background task. An agent editing one file can't corrupt the buffer you're working in. And you can inspect any running component's state without stopping it.
