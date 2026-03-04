@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
+  alias Minga.Config.Options
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
@@ -14,7 +15,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.HighlightBridge
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-
+  alias Minga.Formatter
   alias Minga.Mode
 
   require Logger
@@ -26,6 +27,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Save / quit ───────────────────────────────────────────────────────────
 
   def execute(%{buf: %{buffer: buf}} = state, :save) do
+    state = apply_pre_save_transforms(state, buf)
+
     case BufferServer.save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -446,5 +449,61 @@ defmodule Minga.Editor.Commands.BufferManagement do
       [] -> 1
       nums -> Enum.max(nums) + 1
     end
+  end
+
+  # ── Pre-save transforms ─────────────────────────────────────────────────
+
+  @spec apply_pre_save_transforms(state(), pid()) :: state()
+  defp apply_pre_save_transforms(state, buf) when is_pid(buf) do
+    filetype = BufferServer.filetype(buf)
+
+    state = maybe_format_on_save(state, buf, filetype)
+    apply_whitespace_transforms(buf, filetype)
+    state
+  end
+
+  @spec maybe_format_on_save(state(), pid(), atom()) :: state()
+  defp maybe_format_on_save(state, buf, filetype) do
+    if Options.get_for_filetype(:format_on_save, filetype) do
+      run_format_on_save(state, buf, filetype)
+    else
+      state
+    end
+  end
+
+  @spec run_format_on_save(state(), pid(), atom()) :: state()
+  defp run_format_on_save(state, buf, filetype) do
+    file_path = BufferServer.file_path(buf)
+    spec = Formatter.resolve_formatter(filetype, file_path)
+
+    case {spec, spec && Formatter.format(BufferServer.content(buf), spec)} do
+      {nil, _} ->
+        state
+
+      {_, {:ok, formatted}} ->
+        BufferServer.replace_content(buf, formatted)
+        state
+
+      {_, {:error, msg}} ->
+        Logger.warning("Format-on-save failed: #{msg}")
+        state
+    end
+  end
+
+  @spec apply_whitespace_transforms(pid(), atom()) :: :ok
+  defp apply_whitespace_transforms(buf, filetype) do
+    needs_trim = Options.get_for_filetype(:trim_trailing_whitespace, filetype)
+    needs_final_newline = Options.get_for_filetype(:insert_final_newline, filetype)
+
+    if needs_trim or needs_final_newline do
+      content = BufferServer.content(buf)
+      transformed = Formatter.apply_save_transforms(content, filetype)
+
+      if transformed != content do
+        BufferServer.replace_content(buf, transformed)
+      end
+    end
+
+    :ok
   end
 end

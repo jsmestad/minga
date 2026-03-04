@@ -54,6 +54,7 @@ defmodule Minga.Command.RegistryTest do
           :lsp_info,
           :open_config,
           :reload_config,
+          :format_buffer,
           :theme_picker
         ]
         |> Enum.sort()

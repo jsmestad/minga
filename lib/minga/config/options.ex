@@ -15,6 +15,11 @@ defmodule Minga.Config.Options do
   | `:autopair`     | boolean                                        | `true`    |
   | `:scroll_margin`| non-negative integer                           | `5`       |
   | `:theme`        | theme name atom (see `Minga.Theme.available/0`) | `:doom_one`|
+  | `:indent_with`  | `:spaces` or `:tabs`                            | `:spaces`  |
+  | `:trim_trailing_whitespace` | boolean                             | `false`    |
+  | `:insert_final_newline`     | boolean                             | `false`    |
+  | `:format_on_save`           | boolean                             | `false`    |
+  | `:formatter`    | string or `nil`                                  | `nil`      |
 
   ## Per-filetype overrides
 
@@ -34,7 +39,17 @@ defmodule Minga.Config.Options do
   use Agent
 
   @typedoc "Valid option names."
-  @type option_name :: :tab_width | :line_numbers | :autopair | :scroll_margin | :theme
+  @type option_name ::
+          :tab_width
+          | :line_numbers
+          | :autopair
+          | :scroll_margin
+          | :theme
+          | :indent_with
+          | :trim_trailing_whitespace
+          | :insert_final_newline
+          | :format_on_save
+          | :formatter
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -43,7 +58,12 @@ defmodule Minga.Config.Options do
   @type option_spec :: {option_name(), type_descriptor(), term()}
 
   @typep type_descriptor ::
-           :pos_integer | :non_neg_integer | :boolean | {:enum, [atom()]} | :theme_atom
+           :pos_integer
+           | :non_neg_integer
+           | :boolean
+           | {:enum, [atom()]}
+           | :theme_atom
+           | :string_or_nil
 
   @typedoc "Internal state: global options + per-filetype overrides."
   @type state :: %{
@@ -56,7 +76,12 @@ defmodule Minga.Config.Options do
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
     {:autopair, :boolean, true},
     {:scroll_margin, :non_neg_integer, 5},
-    {:theme, :theme_atom, :doom_one}
+    {:theme, :theme_atom, :doom_one},
+    {:indent_with, {:enum, [:spaces, :tabs]}, :spaces},
+    {:trim_trailing_whitespace, :boolean, false},
+    {:insert_final_newline, :boolean, false},
+    {:format_on_save, :boolean, false},
+    {:formatter, :string_or_nil, nil}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
@@ -231,6 +256,13 @@ defmodule Minga.Config.Options do
 
   defp validate_type({:enum, allowed}, name, value) do
     {:error, "#{name} must be one of #{inspect(allowed)}, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:string_or_nil, _name, nil), do: :ok
+  defp validate_type(:string_or_nil, _name, value) when is_binary(value), do: :ok
+
+  defp validate_type(:string_or_nil, name, value) do
+    {:error, "#{name} must be a string or nil, got: #{inspect(value)}"}
   end
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do

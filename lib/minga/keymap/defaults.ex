@@ -67,6 +67,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Code ────────────────────────────────────────────────────────────────────
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
+    {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
 
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}

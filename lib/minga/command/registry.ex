@@ -62,7 +62,8 @@ defmodule Minga.Command.Registry do
     {:prev_diagnostic, "Jump to previous diagnostic"},
     {:lsp_info, "Show LSP server status"},
     {:open_config, "Open config file"},
-    {:reload_config, "Reload config"}
+    {:reload_config, "Reload config"},
+    {:format_buffer, "Format buffer"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

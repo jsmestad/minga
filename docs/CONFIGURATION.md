@@ -27,6 +27,11 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:autopair` | boolean | `true` | Auto-insert matching brackets and quotes |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
 | `:theme` | theme name atom | `:doom_one` | Color theme (see [Themes](#themes) below) |
+| `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
+| `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
+| `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
+| `:format_on_save` | boolean | `false` | Run the filetype's formatter before saving |
+| `:formatter` | string or `nil` | `nil` | Override the default formatter command (see [Formatters](#formatters)) |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 
@@ -95,6 +100,58 @@ for_filetype :elixir, tab_width: 2, autopair: true
 When you open a Go file, `tab_width` is 8. When you open an Elixir file, it's 2. Buffers with no filetype (or filetypes without overrides) use the global value.
 
 You can set any option that `set/2` accepts. The filetype atom matches what [`Minga.Filetype`](https://jsmestad.github.io/minga/Minga.Filetype.html) detects (`:elixir`, `:go`, `:python`, `:rust`, `:javascript`, etc.).
+
+## Formatters
+
+`SPC c f` formats the current buffer using the configured formatter for its filetype. Minga ships default formatters for common languages:
+
+| Language | Default formatter |
+|----------|-------------------|
+| Elixir | `mix format --stdin-filename {file} -` |
+| Go | `gofmt` |
+| Rust | `rustfmt --edition 2021` |
+| Python | `python3 -m black --quiet -` |
+| JavaScript/TypeScript | `prettier --stdin-filepath {file}` |
+| Zig | `zig fmt --stdin` |
+| C/C++ | `clang-format` |
+
+The `{file}` placeholder is replaced with the buffer's file path (useful for formatters that need it to find their config).
+
+### Format-on-save
+
+Enable per-filetype with `for_filetype`:
+
+```elixir
+for_filetype :elixir, format_on_save: true
+for_filetype :go, format_on_save: true, indent_with: :tabs, tab_width: 8
+for_filetype :rust, format_on_save: true
+```
+
+When you save (`:w` or `SPC f s`), the buffer is formatted before writing to disk. If the formatter fails, the buffer is saved unformatted and the error appears in the status bar.
+
+### Custom formatters
+
+Override the default formatter for any filetype:
+
+```elixir
+for_filetype :elixir, formatter: "mix format --stdin-filename {file} -"
+for_filetype :ruby, formatter: "rubocop --stdin {file} --autocorrect"
+for_filetype :javascript, formatter: "deno fmt --ext=js -"
+```
+
+### Save transforms
+
+Two additional options clean up whitespace on save:
+
+```elixir
+# Strip trailing whitespace from every line
+for_filetype :elixir, trim_trailing_whitespace: true
+
+# Ensure the file ends with a newline
+for_filetype :elixir, insert_final_newline: true
+```
+
+These run before format-on-save, so the formatter gets clean input.
 
 ## Keybindings
 
@@ -400,8 +457,9 @@ set :font_family, "JetBrains Mono"
 set :font_size, 14
 
 # ── Per-language ─────────────────────────────────────────────────────
-for_filetype :go, tab_width: 8
-for_filetype :python, tab_width: 4
+for_filetype :elixir, format_on_save: true, trim_trailing_whitespace: true, insert_final_newline: true
+for_filetype :go, tab_width: 8, indent_with: :tabs, format_on_save: true
+for_filetype :python, tab_width: 4, format_on_save: true
 for_filetype :ruby, tab_width: 2
 
 # ── Keybindings ──────────────────────────────────────────────────────
@@ -439,6 +497,7 @@ extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --st
 - [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
 - [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
 - [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) — user-friendly editor API for commands and eval
+- [`Minga.Formatter`](https://jsmestad.github.io/minga/Minga.Formatter.html) — formatter execution and default formatter registry
 - [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html) — extension behaviour and lifecycle
 - [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html) — extension process management
 - [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html) — deep dive on how the BEAM enables Emacs-level extensibility

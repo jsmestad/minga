@@ -36,7 +36,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-
+  alias Minga.Formatter
   alias Minga.Mode
   alias Minga.WhichKey
 
@@ -292,6 +292,24 @@ defmodule Minga.Editor.Commands do
     end
   end
 
+  # ── Format ────────────────────────────────────────────────────────────
+
+  def execute(%{buf: %{buffer: buf}} = state, :format_buffer) when is_pid(buf) do
+    filetype = BufferServer.filetype(buf)
+    file_path = BufferServer.file_path(buf)
+    spec = Formatter.resolve_formatter(filetype, file_path)
+
+    case spec do
+      nil ->
+        %{state | status_msg: "No formatter configured for #{filetype}"}
+
+      _ ->
+        format_and_replace(state, buf, spec)
+    end
+  end
+
+  def execute(state, :format_buffer), do: %{state | status_msg: "No buffer to format"}
+
   # ── Diagnostics ──────────────────────────────────────────────────────────
 
   def execute(state, :diagnostics_list) do
@@ -388,6 +406,26 @@ defmodule Minga.Editor.Commands do
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state
+
+  # ── Private formatting helpers ─────────────────────────────────────────────
+
+  @spec format_and_replace(state(), pid(), Formatter.formatter_spec()) :: state()
+  defp format_and_replace(state, buf, spec) do
+    content = BufferServer.content(buf)
+
+    case Formatter.format(content, spec) do
+      {:ok, formatted} ->
+        {cursor_line, cursor_col} = BufferServer.cursor(buf)
+        BufferServer.replace_content(buf, formatted)
+        line_count = BufferServer.line_count(buf)
+        safe_line = min(cursor_line, max(line_count - 1, 0))
+        BufferServer.move_to(buf, {safe_line, cursor_col})
+        %{state | status_msg: "Formatted"}
+
+      {:error, msg} ->
+        %{state | status_msg: "Format error: #{msg}"}
+    end
+  end
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────
 

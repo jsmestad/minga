@@ -371,8 +371,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_indent_lines(buf, start_line, end_line) do
-    tw = tab_width(buf)
-    indent = String.duplicate(" ", tw)
+    {indent, indent_bytes} = indent_string(buf)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
 
     for line <- start_line..end_line do
@@ -382,7 +381,7 @@ defmodule Minga.Editor.Commands.Editing do
 
     new_col =
       if cursor_line >= start_line and cursor_line <= end_line,
-        do: cursor_col + tw,
+        do: cursor_col + indent_bytes,
         else: cursor_col
 
     BufferServer.move_to(buf, {cursor_line, new_col})
@@ -392,7 +391,7 @@ defmodule Minga.Editor.Commands.Editing do
   @spec do_dedent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_dedent_lines(buf, start_line, end_line) do
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
-    cursor_removed = cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line)
+    cursor_removed = cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line)
 
     for line <- start_line..end_line do
       dedent_line_at(buf, line)
@@ -403,16 +402,16 @@ defmodule Minga.Editor.Commands.Editing do
     :ok
   end
 
-  @spec cursor_line_spaces_to_remove(
+  @spec cursor_line_chars_to_remove(
           pid(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) :: non_neg_integer()
-  defp cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line) do
+  defp cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line) do
     if cursor_line >= start_line and cursor_line <= end_line do
       case BufferServer.get_lines(buf, cursor_line, 1) do
-        [text] -> min(count_leading_spaces(text), tab_width(buf))
+        [text] -> dedent_amount(buf, text)
         _ -> 0
       end
     else
@@ -423,23 +422,33 @@ defmodule Minga.Editor.Commands.Editing do
   @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
   defp dedent_line_at(buf, line) do
     case BufferServer.get_lines(buf, line, 1) do
-      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), tab_width(buf)))
+      [text] -> remove_leading_indent(buf, line, dedent_amount(buf, text))
       _ -> :ok
     end
   end
 
   @spec dedent_single_line(pid(), non_neg_integer(), non_neg_integer(), String.t()) :: :ok
   defp dedent_single_line(buf, line, col, text) do
-    to_remove = min(count_leading_spaces(text), tab_width(buf))
-    remove_leading_spaces(buf, line, to_remove)
+    to_remove = dedent_amount(buf, text)
+    remove_leading_indent(buf, line, to_remove)
     if to_remove > 0, do: BufferServer.move_to(buf, {line, max(0, col - to_remove)})
     :ok
   end
 
-  @spec remove_leading_spaces(pid(), non_neg_integer(), non_neg_integer()) :: :ok
-  defp remove_leading_spaces(_buf, _line, 0), do: :ok
+  # Returns the number of characters to remove for one dedent level.
+  # If the line starts with a tab, remove 1 character.
+  # Otherwise, remove up to tab_width spaces.
+  @spec dedent_amount(pid(), String.t()) :: non_neg_integer()
+  defp dedent_amount(buf, <<"\t", _::binary>>), do: if(uses_tabs?(buf), do: 1, else: 1)
 
-  defp remove_leading_spaces(buf, line, n) when n > 0 do
+  defp dedent_amount(buf, text) do
+    min(count_leading_spaces(text), tab_width(buf))
+  end
+
+  @spec remove_leading_indent(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp remove_leading_indent(_buf, _line, 0), do: :ok
+
+  defp remove_leading_indent(buf, line, n) when n > 0 do
     BufferServer.move_to(buf, {line, 0})
     for _ <- 1..n, do: BufferServer.delete_at(buf)
     :ok
@@ -451,6 +460,25 @@ defmodule Minga.Editor.Commands.Editing do
   @spec do_count_leading_spaces(String.t(), non_neg_integer()) :: non_neg_integer()
   defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
   defp do_count_leading_spaces(_, n), do: n
+
+  # Returns {indent_string, byte_size} for one indent level.
+  @spec indent_string(pid()) :: {String.t(), pos_integer()}
+  defp indent_string(buf) do
+    if uses_tabs?(buf) do
+      {"\t", 1}
+    else
+      tw = tab_width(buf)
+      {String.duplicate(" ", tw), tw}
+    end
+  end
+
+  @spec uses_tabs?(pid()) :: boolean()
+  defp uses_tabs?(buf) do
+    filetype = BufferServer.filetype(buf)
+    Options.get_for_filetype(:indent_with, filetype) == :tabs
+  catch
+    :exit, _ -> false
+  end
 
   @spec tab_width(pid()) :: pos_integer()
   defp tab_width(buf) when is_pid(buf) do
