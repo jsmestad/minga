@@ -47,6 +47,7 @@ defmodule Minga.Command.Registry do
     {:view_scratch, "Switch to *scratch* buffer"},
     {:new_buffer, "Create new empty buffer"},
     {:command_palette, "Execute command"},
+    {:theme_picker, "Pick theme"},
     {:delete_line, "Delete current line"},
     {:yank_line, "Yank current line"},
     {:paste_after, "Paste after cursor"},

@@ -65,7 +65,8 @@ defmodule Minga.Editor.PickerUI do
           | picker_ui: %PickerState{
               picker: picker,
               source: source_module,
-              restore: state.buf.active_buffer
+              restore: state.buf.active_buffer,
+              restore_theme: state.theme
             }
         }
     end

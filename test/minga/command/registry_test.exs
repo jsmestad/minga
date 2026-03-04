@@ -52,7 +52,8 @@ defmodule Minga.Command.RegistryTest do
           :next_diagnostic,
           :prev_diagnostic,
           :lsp_info,
-          :open_config
+          :open_config,
+          :theme_picker
         ]
         |> Enum.sort()
 

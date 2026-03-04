@@ -71,6 +71,10 @@ defmodule Minga.Editor.Commands do
     PickerUI.open(state, Minga.Picker.FileSource)
   end
 
+  def execute(state, :theme_picker) do
+    PickerUI.open(state, Minga.Picker.ThemeSource)
+  end
+
   def execute(state, :search_project) do
     %{state | mode: :search_prompt, mode_state: %Minga.Mode.SearchPromptState{}}
   end
