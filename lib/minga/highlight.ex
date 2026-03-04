@@ -7,7 +7,7 @@ defmodule Minga.Highlight do
   to split a line into styled segments for rendering.
   """
 
-  alias Minga.Highlight.Theme
+  alias Minga.Theme
 
   @enforce_keys [:version, :spans, :capture_names, :theme]
   defstruct [:version, :spans, :capture_names, :theme]
@@ -17,7 +17,7 @@ defmodule Minga.Highlight do
           version: non_neg_integer(),
           spans: [Minga.Port.Protocol.highlight_span()],
           capture_names: [String.t()],
-          theme: Theme.t()
+          theme: Theme.syntax()
         }
 
   @typedoc "A styled text segment for rendering."
@@ -30,12 +30,12 @@ defmodule Minga.Highlight do
       version: 0,
       spans: [],
       capture_names: [],
-      theme: Theme.doom_one()
+      theme: Theme.get!(:doom_one).syntax
     }
   end
 
   @doc "Creates an empty highlight state with a syntax theme map."
-  @spec new(Theme.t()) :: t()
+  @spec new(Theme.syntax()) :: t()
   def new(theme) when is_map(theme) do
     %__MODULE__{
       version: 0,

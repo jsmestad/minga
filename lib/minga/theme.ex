@@ -255,8 +255,12 @@ defmodule Minga.Theme do
       iex> Minga.Theme.style_for_capture(theme, "nonexistent")
       []
   """
-  @spec style_for_capture(t(), String.t()) :: style()
+  @spec style_for_capture(t() | syntax(), String.t()) :: style()
   def style_for_capture(%__MODULE__{syntax: syntax}, name) when is_binary(name) do
+    do_capture_lookup(syntax, name)
+  end
+
+  def style_for_capture(syntax, name) when is_map(syntax) and is_binary(name) do
     do_capture_lookup(syntax, name)
   end
 
