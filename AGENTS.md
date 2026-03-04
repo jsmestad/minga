@@ -2,10 +2,7 @@
 
 ## Project Overview
 
-Minga is a BEAM-powered modal text editor with a Zig terminal renderer.
-Read `PLAN.md` for full architecture and implementation roadmap.
-Read `ROADMAP.md` for the current feature grid and planned work.
-Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
+Minga is a BEAM-powered modal text editor with a Zig terminal renderer. Read `PLAN.md` for full architecture and implementation roadmap. Read `ROADMAP.md` for the current feature grid and planned work. Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
 
 ## Tech Stack
 
@@ -68,20 +65,15 @@ test/                         # Mirrors lib/ structure
 
 ### Elixir Types (mandatory)
 
-Elixir 1.19's set-theoretic type system catches real bugs at compile time.
-Help it by being explicit:
+Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help it by being explicit:
 
 - **`@spec`** on every public function — no exceptions
 - **`@type` / `@typep`** for all custom types in every module
 - **`@enforce_keys`** on structs for required fields
 - **Guards** in function heads where they aid type inference
 - **Pattern matching** over `if/cond` — helps type narrowing across clauses
-- **No `cond` blocks** — use multi-clause functions with pattern matching and
-  guards instead. `cond` defeats BEAM JIT optimizations and hides control flow
-  that the type system and compiler can reason about. Extract a private
-  helper with multiple `defp` clauses rather than inlining a `cond`.
-- **`[head | tail]`** over `list ++ [item]` — appending to a list is O(n);
-  prepend and reverse if order matters
+- **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
+- **`[head | tail]`** over `list ++ [item]` — appending to a list is O(n); prepend and reverse if order matters
 - `mix compile --warnings-as-errors` must pass clean
 
 ### Pre-commit Checks
@@ -107,10 +99,8 @@ end
 
 ### Elixir Testing
 
-- Test files mirror `lib/` structure: `lib/minga/buffer/gap_buffer.ex` →
-  `test/minga/buffer/gap_buffer_test.exs`
-- **Descriptive names**: `"deleting at start of line joins with previous line"`
-  not `"test delete_before/1"`
+- Test files mirror `lib/` structure: `lib/minga/buffer/gap_buffer.ex` → `test/minga/buffer/gap_buffer_test.exs`
+- **Descriptive names**: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
 - Run with `mix test --warnings-as-errors`
@@ -130,8 +120,7 @@ type(scope): short description
 Longer body if needed.
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-Scopes: `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `cli`
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `cli`
 
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`
@@ -140,9 +129,7 @@ Examples:
 
 ## Port Protocol
 
-BEAM ↔ Zig communication uses length-prefixed binary messages over
-stdin/stdout of the Zig process. The Zig process uses `/dev/tty` for
-terminal I/O (not stdout).
+BEAM ↔ Zig communication uses length-prefixed binary messages over stdin/stdout of the Zig process. The Zig process uses `/dev/tty` for terminal I/O (not stdout).
 
 See `PLAN.md` § "Port Protocol" for the full message specification.
 
@@ -150,10 +137,8 @@ See `PLAN.md` § "Port Protocol" for the full message specification.
 
 When implementing features, completing planned work, or changing architecture:
 
-- **`ROADMAP.md`** — Update the feature grid status (📋→🚧→✅) when starting
-  or finishing work. Add new rows for features not yet listed.
-- **`docs/ARCHITECTURE.md`** — Update when adding new process types,
-  protocol opcodes, or changing supervision structure.
+- **`ROADMAP.md`** — Update the feature grid status (📋→🚧→✅) when starting or finishing work. Add new rows for features not yet listed.
+- **`docs/ARCHITECTURE.md`** — Update when adding new process types, protocol opcodes, or changing supervision structure.
 - **`docs/PERFORMANCE.md`** — Mark optimizations as completed when done.
 
 ## Adding New Features

@@ -1,9 +1,6 @@
 # Performance Optimizations for Minga
 
-This document catalogues concrete performance improvements that leverage
-BEAM VM internals, JIT compiler behaviour (OTP 25+), and Elixir/Erlang
-idioms. Each section identifies the current bottleneck, explains *why* it's
-slow on the BEAM, and proposes a fix.
+This document catalogues concrete performance improvements that leverage BEAM VM internals, JIT compiler behaviour (OTP 25+), and Elixir/Erlang idioms. Each section identifies the current bottleneck, explains *why* it's slow on the BEAM, and proposes a fix.
 
 ---
 
@@ -11,22 +8,13 @@ slow on the BEAM, and proposes a fix.
 
 The following optimizations have been completed (see commit `8beec9d`):
 
-- **Gap Buffer: `count_newlines`** uses `:binary.matches/2` (Boyer-Moore C)
-  instead of `String.graphemes/1 |> Enum.count/2`.
-- **Gap Buffer: multi-clause `move/2`** split from single `case` into 4
-  function clauses for JIT jump table optimization.
-- **Gap Buffer: `clear_line/2` + `content_and_cursor/1`** compound operations
-  that eliminate multiple GenServer round-trips. `change_line` went from N+5
-  GenServer calls to 1.
-- **Motion: tuple indexing** all grapheme lists converted to tuples;
-  `elem/2` (O(1)) replaces `Enum.at/2` (O(n)), turning O(n²) motions to O(n).
-- **Motion: binary pattern matching for char classification** `classify_char/1`
-  with guards replaces `word_char?` regex. Hot helpers inlined with
-  `@compile {:inline, ...}`.
-- **Motion: multi-clause functions replacing `cond`** `advance_word_forward/4`,
-  `advance_word_end/4`, bracket scan helpers extracted as multi-clause functions.
-- **Editor: `content_and_cursor/1`** 12 separate `content()` + `cursor()`
-  GenServer call pairs replaced with single round-trip.
+- **Gap Buffer: `count_newlines`** uses `:binary.matches/2` (Boyer-Moore C) instead of `String.graphemes/1 |> Enum.count/2`.
+- **Gap Buffer: multi-clause `move/2`** split from single `case` into 4 function clauses for JIT jump table optimization.
+- **Gap Buffer: `clear_line/2` + `content_and_cursor/1`** compound operations that eliminate multiple GenServer round-trips. `change_line` went from N+5 GenServer calls to 1.
+- **Motion: tuple indexing** all grapheme lists converted to tuples; `elem/2` (O(1)) replaces `Enum.at/2` (O(n)), turning O(n²) motions to O(n).
+- **Motion: binary pattern matching for char classification** `classify_char/1` with guards replaces `word_char?` regex. Hot helpers inlined with `@compile {:inline, ...}`.
+- **Motion: multi-clause functions replacing `cond`** `advance_word_forward/4`, `advance_word_end/4`, bracket scan helpers extracted as multi-clause functions.
+- **Editor: `content_and_cursor/1`** 12 separate `content()` + `cursor()` GenServer call pairs replaced with single round-trip.
 
 ---
 
@@ -54,11 +42,7 @@ The following optimizations have been completed (see commit `8beec9d`):
 
 ### Problem
 
-Nearly every query function in `GapBuffer` calls `content/1` which does
-`before <> after_`, an O(n) binary concatenation that allocates a fresh
-copy of the entire buffer content. Functions like `line_at/2`, `lines/3`,
-and `content_range/3` then immediately `String.split/2` that copy into
-a list of lines.
+Nearly every query function in `GapBuffer` calls `content/1` which does `before <> after_`, an O(n) binary concatenation that allocates a fresh copy of the entire buffer content. Functions like `line_at/2`, `lines/3`, and `content_range/3` then immediately `String.split/2` that copy into a list of lines.
 
 For a 10,000-line file, every single cursor motion triggers:
 1. `content/1` → allocate ~500 KB binary
@@ -69,10 +53,7 @@ This is the single largest performance bottleneck.
 
 ### Fix
 
-**Cache line metadata on the struct.** Maintain a list (or tuple) of
-`{byte_offset, grapheme_count}` per line, updated incrementally on
-insert/delete. Then `line_at/2` can extract a sub-binary directly from
-`before` or `after_` without materializing the full content:
+**Cache line metadata on the struct.** Maintain a list (or tuple) of `{byte_offset, grapheme_count}` per line, updated incrementally on insert/delete. Then `line_at/2` can extract a sub-binary directly from `before` or `after_` without materializing the full content:
 
 ```elixir
 defstruct [:before, :after, :cursor_line, :cursor_col, :line_count,
@@ -91,16 +72,11 @@ def line_at(%__MODULE__{} = buf, line_num) do
 end
 ```
 
-This turns `line_at/2` from O(n) to O(1) and eliminates the temporary
-allocation entirely. The JIT can optimize `binary_part/3` calls into
-direct pointer arithmetic on the heap binary.
+This turns `line_at/2` from O(n) to O(1) and eliminates the temporary allocation entirely. The JIT can optimize `binary_part/3` calls into direct pointer arithmetic on the heap binary.
 
 ### Impact
 
-**Critical.** Every keystroke in the editor calls `line_at` or `lines`
-at least once (for rendering) and often 3–4 times (motion + render).
-With a 10K-line file, this alone would cut per-keystroke allocations by
-~90%.
+**Critical.** Every keystroke in the editor calls `line_at` or `lines` at least once (for rendering) and often 3–4 times (motion + render). With a 10K-line file, this alone would cut per-keystroke allocations by ~90%.
 
 ---
 
@@ -108,27 +84,17 @@ With a 10K-line file, this alone would cut per-keystroke allocations by
 
 ### Problem
 
-Functions like `pop_last_grapheme/1` and motion helpers still convert
-binaries into grapheme data structures. While motions now use tuples
-(O(1) indexing), the initial `String.graphemes/1` call is still O(n)
-in both time and memory.
+Functions like `pop_last_grapheme/1` and motion helpers still convert binaries into grapheme data structures. While motions now use tuples (O(1) indexing), the initial `String.graphemes/1` call is still O(n) in both time and memory.
 
 ### Fix
 
-Use `String.next_grapheme/1` or `String.next_grapheme_size/1` to walk
-the binary in-place without materializing the full list. The BEAM JIT
-generates excellent native code for binary matching. It can process
-UTF-8 bytes with near-C performance using the `bs_match` JIT primitive.
+Use `String.next_grapheme/1` or `String.next_grapheme_size/1` to walk the binary in-place without materializing the full list. The BEAM JIT generates excellent native code for binary matching. It can process UTF-8 bytes with near-C performance using the `bs_match` JIT primitive.
 
-For random access by grapheme index, the current tuple approach is good.
-The next step is eliminating the need for full-buffer grapheme conversion
-in motions by working on individual lines (enabled by the line index
-cache from optimization #1).
+For random access by grapheme index, the current tuple approach is good. The next step is eliminating the need for full-buffer grapheme conversion in motions by working on individual lines (enabled by the line index cache from optimization #1).
 
 ### Impact
 
-**High.** Eliminates the remaining O(n) allocation in every motion call.
-Most impactful after the line index cache is implemented.
+**High.** Eliminates the remaining O(n) allocation in every motion call. Most impactful after the line index cache is implemented.
 
 ---
 
@@ -136,16 +102,11 @@ Most impactful after the line index cache is implemented.
 
 ### Problem
 
-`insert_char/2` does `before <> char` which copies the entire `before`
-binary to append a single character. For rapid typing (e.g., pasting
-text), this is O(n²) in the size of `before`.
+`insert_char/2` does `before <> char` which copies the entire `before` binary to append a single character. For rapid typing (e.g., pasting text), this is O(n²) in the size of `before`.
 
 ### Fix
 
-Store `before` as an iolist instead of a flat binary. Appending becomes
-O(1): `[before | char]`. Flatten to binary only when needed (content
-extraction, file save). The Port protocol's `IO.iodata_to_binary/1`
-already handles iolists natively.
+Store `before` as an iolist instead of a flat binary. Appending becomes O(1): `[before | char]`. Flatten to binary only when needed (content extraction, file save). The Port protocol's `IO.iodata_to_binary/1` already handles iolists natively.
 
 ```elixir
 # Insert becomes O(1)
@@ -159,14 +120,11 @@ def content(%__MODULE__{before: before, after: after_}) do
 end
 ```
 
-**Caveat:** This changes the internal representation. `binary_part/3`,
-`byte_size/1`, and pattern matching on `before` would need adjustment.
-Consider this a Phase 2 optimization after the line index cache.
+**Caveat:** This changes the internal representation. `binary_part/3`, `byte_size/1`, and pattern matching on `before` would need adjustment. Consider this a Phase 2 optimization after the line index cache.
 
 ### Impact
 
-**Medium-High.** Primarily affects insert-heavy workloads (typing,
-pasting). Transforms O(n) per character to O(1).
+**Medium-High.** Primarily affects insert-heavy workloads (typing, pasting). Transforms O(n) per character to O(1).
 
 ---
 
@@ -174,20 +132,13 @@ pasting). Transforms O(n) per character to O(1).
 
 ### Problem
 
-Every motion function receives a `GapBuffer.t()` and calls
-`GapBuffer.content/1` (binary concat), then `String.graphemes/1`
-(tuple allocation), then `String.split/2` (another list). The Editor's
-`apply_motion/2` creates a temporary `GapBuffer.new(content)`, so
-the content is still materialized and copied into a throwaway struct.
+Every motion function receives a `GapBuffer.t()` and calls `GapBuffer.content/1` (binary concat), then `String.graphemes/1` (tuple allocation), then `String.split/2` (another list). The Editor's `apply_motion/2` creates a temporary `GapBuffer.new(content)`, so the content is still materialized and copied into a throwaway struct.
 
-While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2,
-the temporary GapBuffer allocation and content copy remain.
+While `content_and_cursor/1` reduced GenServer round-trips from 3 to 2, the temporary GapBuffer allocation and content copy remain.
 
 ### Fix
 
-**Move motion execution into the Buffer.Server process** via an
-`apply_motion/2` GenServer call. The motion function runs inside the
-server where the gap buffer already lives (zero copies):
+**Move motion execution into the Buffer.Server process** via an `apply_motion/2` GenServer call. The motion function runs inside the server where the gap buffer already lives (zero copies):
 
 ```elixir
 # In Buffer.Server
@@ -198,13 +149,11 @@ def handle_call({:apply_motion, motion_fn}, _from, state) do
 end
 ```
 
-This eliminates the content copy, the temporary GapBuffer, and reduces
-the remaining 2 GenServer calls to 1.
+This eliminates the content copy, the temporary GapBuffer, and reduces the remaining 2 GenServer calls to 1.
 
 ### Impact
 
-**High.** Eliminates all temporary allocations per motion. For a
-50,000-line file, that's ~3 MB saved per keystroke.
+**High.** Eliminates all temporary allocations per motion. For a 50,000-line file, that's ~3 MB saved per keystroke.
 
 ---
 
@@ -212,12 +161,9 @@ the remaining 2 GenServer calls to 1.
 
 ### Problem
 
-Several editor commands still issue multiple sequential GenServer calls
-to `BufferServer`. The `change_line` command was fixed (now uses
-`clear_line/1`), but others remain:
+Several editor commands still issue multiple sequential GenServer calls to `BufferServer`. The `change_line` command was fixed (now uses `clear_line/1`), but others remain:
 
-- **`join_lines`**: 4+ GenServer calls (cursor, get_lines, move_to,
-  delete_at, N × delete_at for whitespace, insert_char)
+- **`join_lines`**: 4+ GenServer calls (cursor, get_lines, move_to, delete_at, N × delete_at for whitespace, insert_char)
 - **`indent_line`**: 3 calls (cursor, move_to, insert_char, move_to)
 - **`dedent_line`**: 3+ calls
 - **`toggle_case`**: 4 calls (cursor, get_lines, delete_at, insert_char)
@@ -238,9 +184,7 @@ Similarly for `toggle_case_at`, `indent_line`, `dedent_line`.
 
 ### Impact
 
-**Medium-High.** Eliminates O(n) GenServer overhead for multi-step
-operations. Each GenServer call involves message copying, scheduling,
-and reply matching.
+**Medium-High.** Eliminates O(n) GenServer overhead for multi-step operations. Each GenServer call involves message copying, scheduling, and reply matching.
 
 ---
 
@@ -248,29 +192,21 @@ and reply matching.
 
 ### Problem
 
-`do_render/1` builds render commands by concatenating strings with `<>`
-for padding (`String.pad_trailing`, `String.duplicate`) and joining.
-Each `Protocol.encode_draw/4` call allocates a fresh binary.
+`do_render/1` builds render commands by concatenating strings with `<>` for padding (`String.pad_trailing`, `String.duplicate`) and joining. Each `Protocol.encode_draw/4` call allocates a fresh binary.
 
-The full render pipeline allocates hundreds of small binaries per frame
-that are immediately sent to the Port and become garbage.
+The full render pipeline allocates hundreds of small binaries per frame that are immediately sent to the Port and become garbage.
 
 ### Fix
 
-Use iolists throughout the render pipeline. The Port's `Port.command/2`
-accepts iolists natively, so there's no need to flatten to binary.
+Use iolists throughout the render pipeline. The Port's `Port.command/2` accepts iolists natively, so there's no need to flatten to binary.
 
-More impactful: in `PortManager.handle_cast({:send_commands, ...})`,
-skip the intermediate `IO.iodata_to_binary(commands)` flattening since
-`Port.command/2` accepts iolists directly.
+More impactful: in `PortManager.handle_cast({:send_commands, ...})`, skip the intermediate `IO.iodata_to_binary(commands)` flattening since `Port.command/2` accepts iolists directly.
 
 **Note:** Validate `{:packet, 4}` framing compatibility with iolists.
 
 ### Impact
 
-**Medium.** Saves one full-buffer-sized allocation per render frame.
-At 60 fps with a full-screen terminal, that's ~60 allocations/second
-of 10–50 KB each.
+**Medium.** Saves one full-buffer-sized allocation per render frame. At 60 fps with a full-screen terminal, that's ~60 allocations/second of 10–50 KB each.
 
 ---
 
@@ -278,15 +214,9 @@ of 10–50 KB each.
 
 ### Problem
 
-Every mutation pushes a **complete copy** of the `GapBuffer.t()` struct
-onto the undo stack. The struct contains `before` and `after_` binaries
-which together hold the full file content. For a 1 MB file, each
-keystroke adds ~1 MB to the undo stack. With `@max_undo_stack` of 1000,
-that's potentially ~1 GB of undo history.
+Every mutation pushes a **complete copy** of the `GapBuffer.t()` struct onto the undo stack. The struct contains `before` and `after_` binaries which together hold the full file content. For a 1 MB file, each keystroke adds ~1 MB to the undo stack. With `@max_undo_stack` of 1000, that's potentially ~1 GB of undo history.
 
-The BEAM's garbage collector runs per-process, so this all lives in the
-`Buffer.Server` process heap and causes increasingly expensive GC
-pauses.
+The BEAM's garbage collector runs per-process, so this all lives in the `Buffer.Server` process heap and causes increasingly expensive GC pauses.
 
 ### Fix
 
@@ -299,15 +229,11 @@ Store diffs instead of full snapshots:
 }
 ```
 
-Each undo entry is typically a few bytes (the inserted/deleted text +
-cursor position). Undo replays the inverse operations; redo replays
-forward.
+Each undo entry is typically a few bytes (the inserted/deleted text + cursor position). Undo replays the inverse operations; redo replays forward.
 
 ### Impact
 
-**High for large files.** Reduces undo stack memory from O(n × stack_size)
-to O(delta × stack_size). For a 1 MB file with 1000 undo entries, this
-could reduce memory from ~1 GB to ~1 MB.
+**High for large files.** Reduces undo stack memory from O(n × stack_size) to O(delta × stack_size). For a 1 MB file with 1000 undo entries, this could reduce memory from ~1 GB to ~1 MB.
 
 ---
 
@@ -315,27 +241,19 @@ could reduce memory from ~1 GB to ~1 MB.
 
 ### Problem
 
-`find_delimited_pair/4` calls `flatten_with_positions/1`, which creates
-a list of `{grapheme, {line, col}}` tuples for the *entire* buffer.
-For a 10,000-line file with 50 chars/line, that's 500,000 tuples
-(~40 MB of list cells + tuple headers).
+`find_delimited_pair/4` calls `flatten_with_positions/1`, which creates a list of `{grapheme, {line, col}}` tuples for the *entire* buffer. For a 10,000-line file with 50 chars/line, that's 500,000 tuples (~40 MB of list cells + tuple headers).
 
 Then it does linear scans with `Enum.at/2` on this flat list.
 
 ### Fix
 
-Scan backward/forward from the cursor position using binary walking on
-the raw content, tracking line/col as you go. This requires no
-allocation beyond the final result positions.
+Scan backward/forward from the cursor position using binary walking on the raw content, tracking line/col as you go. This requires no allocation beyond the final result positions.
 
-Alternatively, use the gap buffer's `before` and `after_` directly:
-scan backward through `before` for the opening delimiter, forward
-through `after_` for the closing one.
+Alternatively, use the gap buffer's `before` and `after_` directly: scan backward through `before` for the opening delimiter, forward through `after_` for the closing one.
 
 ### Impact
 
-**High for large files.** Eliminates a 40 MB allocation for paren
-matching on a 500K-character file.
+**High for large files.** Eliminates a 40 MB allocation for paren matching on a 500K-character file.
 
 ---
 
@@ -343,25 +261,19 @@ matching on a 500K-character file.
 
 ### Problem
 
-`refilter/1` runs on every keystroke in the picker. For each item, it
-calls `String.downcase/1` on the label and description. With 10,000
-files in a project, that's 20,000 `String.downcase/1` calls per
-keystroke.
+`refilter/1` runs on every keystroke in the picker. For each item, it calls `String.downcase/1` on the label and description. With 10,000 files in a project, that's 20,000 `String.downcase/1` calls per keystroke.
 
-The `length/1` function is also called repeatedly on the same lists.
-`length/1` is O(n) on linked lists.
+The `length/1` function is also called repeatedly on the same lists. `length/1` is O(n) on linked lists.
 
 ### Fix
 
 1. **Pre-compute downcased labels** at picker construction time.
 2. **Cache the filtered count** as a field instead of calling `length/1`.
-3. For very large candidate sets (>5000 items), consider ETS with
-   match specs or a sorted index for prefix matching.
+3. For very large candidate sets (>5000 items), consider ETS with match specs or a sorted index for prefix matching.
 
 ### Impact
 
-**Medium.** Eliminates 20K+ `String.downcase/1` allocations per
-keystroke in the picker.
+**Medium.** Eliminates 20K+ `String.downcase/1` allocations per keystroke in the picker.
 
 ---
 
@@ -369,15 +281,11 @@ keystroke in the picker.
 
 ### Problem
 
-The keymap trie is already efficient. `Map.fetch/2` on small maps is
-fast. However, the trie is rebuilt from `Defaults` every time the
-editor starts. For the leader trie, `Defaults.leader_trie()` is called
-on every SPC keypress.
+The keymap trie is already efficient. `Map.fetch/2` on small maps is fast. However, the trie is rebuilt from `Defaults` every time the editor starts. For the leader trie, `Defaults.leader_trie()` is called on every SPC keypress.
 
 ### Fix
 
-1. **Module-attribute compile-time construction**: Build the trie at
-   compile time using module attributes so it lives in the literal pool.
+1. **Module-attribute compile-time construction**: Build the trie at compile time using module attributes so it lives in the literal pool.
 
 2. **Use `:persistent_term`** for runtime-registered keybindings.
 
@@ -391,14 +299,11 @@ on every SPC keypress.
 
 ### Problem
 
-For render commands going *out*, ensure large text payloads in
-`encode_draw/4` use sub-binaries of the original line text rather than
-copies.
+For render commands going *out*, ensure large text payloads in `encode_draw/4` use sub-binaries of the original line text rather than copies.
 
 ### Fix
 
-Use `binary_part/3` to create sub-binary references (zero-copy) when
-the source is a reference-counted binary.
+Use `binary_part/3` to create sub-binary references (zero-copy) when the source is a reference-counted binary.
 
 ### Impact
 
@@ -410,8 +315,7 @@ the source is a reference-counted binary.
 
 ### Problem
 
-The render loop allocates many short-lived binaries per frame that
-become garbage after `Port.command/2` sends them.
+The render loop allocates many short-lived binaries per frame that become garbage after `Port.command/2` sends them.
 
 ### Fix
 
@@ -431,8 +335,7 @@ become garbage after `Port.command/2` sends them.
 
 ### Problem
 
-The Editor process still creates a temporary `GapBuffer.new(content)`
-for motions, copying the full content across processes.
+The Editor process still creates a temporary `GapBuffer.new(content)` for motions, copying the full content across processes.
 
 ### Fix
 
@@ -452,9 +355,7 @@ Several patterns remain that can help the JIT:
 
 ### a. Avoid `Enum` for Small, Known-Size Collections
 
-`Enum` functions add overhead from protocol dispatch and anonymous
-function calls. For small collections, use direct recursion or
-comprehensions:
+`Enum` functions add overhead from protocol dispatch and anonymous function calls. For small collections, use direct recursion or comprehensions:
 
 ```elixir
 # Faster for small lists: list comprehension (JIT-optimized)
@@ -463,8 +364,7 @@ for {text, fg, bg, opts} <- segments, do: ...
 
 ### b. Mark Hot Functions for Inlining
 
-Additional hot functions in the render path and buffer operations
-could benefit from `@compile {:inline, ...}`.
+Additional hot functions in the render path and buffer operations could benefit from `@compile {:inline, ...}`.
 
 ### Impact
 
@@ -486,23 +386,17 @@ could benefit from `@compile {:inline, ...}`.
 
 ### What to Measure
 
-1. **Per-keystroke latency**: Time from `handle_info({:minga_input, ...})`
-   to `Port.command/2` completion. Target: < 1 ms for normal mode,
-   < 5 ms for complex operations.
+1. **Per-keystroke latency**: Time from `handle_info({:minga_input, ...})` to `Port.command/2` completion. Target: < 1 ms for normal mode, < 5 ms for complex operations.
 
-2. **Memory per buffer**: `:erlang.process_info(buf_pid, :memory)` with
-   files of 1K, 10K, 100K lines. Track growth over 1000 edits.
+2. **Memory per buffer**: `:erlang.process_info(buf_pid, :memory)` with files of 1K, 10K, 100K lines. Track growth over 1000 edits.
 
-3. **GC pause frequency**: Monitor `{:garbage_collection, info}` trace
-   events on the Editor process during sustained typing.
+3. **GC pause frequency**: Monitor `{:garbage_collection, info}` trace events on the Editor process during sustained typing.
 
-4. **Allocation rate**: Use `:erlang.system_info(:alloc_util_allocators)`
-   before/after a burst of operations.
+4. **Allocation rate**: Use `:erlang.system_info(:alloc_util_allocators)` before/after a burst of operations.
 
 ### Existing Performance Test
 
-The project already has `test/perf/gap_buffer_perf_test.exs`. Extend
-this with benchmarks for:
+The project already has `test/perf/gap_buffer_perf_test.exs`. Extend this with benchmarks for:
 - Motion on 10K-line buffer (word_forward, paragraph, bracket match)
 - Render cycle with full viewport
 - Picker filtering with 5000 candidates

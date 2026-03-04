@@ -1,7 +1,6 @@
 # Contributing to Minga
 
-Thanks for your interest! Minga is in early development and contributions are
-welcome — whether that's bug reports, feature ideas, or code.
+Thanks for your interest! Minga is in early development and contributions are welcome — whether that's bug reports, feature ideas, or code.
 
 ## Getting Started
 
@@ -32,13 +31,11 @@ mix dialyzer                      # Typespec consistency
 
 ## Project Layout
 
-See [AGENTS.md](AGENTS.md) for the full project structure, coding standards,
-and conventions. The highlights:
+See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and conventions. The highlights:
 
 - **`@spec` on every public function** — Elixir 1.19's type system is strict
 - **Pattern matching over `if`/`cond`** — multi-clause functions preferred
-- **Test files mirror `lib/`** — `lib/minga/buffer/gap_buffer.ex` →
-  `test/minga/buffer/gap_buffer_test.exs`
+- **Test files mirror `lib/`** — `lib/minga/buffer/gap_buffer.ex` → `test/minga/buffer/gap_buffer_test.exs`
 - **Property-based tests** with StreamData for data structures
 
 ## Key Documentation
@@ -80,8 +77,7 @@ and conventions. The highlights:
 type(scope): short description
 ```
 
-**Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-**Scopes:** `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `cli`
+**Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore` **Scopes:** `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `cli`
 
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`

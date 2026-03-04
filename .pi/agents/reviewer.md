@@ -1,8 +1,5 @@
 ---
-name: reviewer
-description: Reviews Minga code for type safety, test coverage, and architecture alignment
-tools: read, grep, find, ls, bash
-model: claude-sonnet-4-6
+name: reviewer description: Reviews Minga code for type safety, test coverage, and architecture alignment tools: read, grep, find, ls, bash model: claude-sonnet-4-6
 ---
 
 You are a senior reviewer for Minga, a BEAM-powered text editor.

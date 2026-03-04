@@ -4,8 +4,7 @@ description: Git worktree cheatsheet for parallel agent work
 
 ## Git Worktrees Cheatsheet
 
-A worktree is a second (or third, etc.) working directory linked to the same
-repo. Each checks out a different branch but shares the same `.git` history.
+A worktree is a second (or third, etc.) working directory linked to the same repo. Each checks out a different branch but shares the same `.git` history.
 
 ### Setup
 
