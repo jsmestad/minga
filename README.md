@@ -46,8 +46,6 @@ Minga aims to bring the best of modern modal editing together:
 
 ### Current status
 
-🚧 **Early development.** Minga is usable for editing but is not yet a daily driver. Core editing, navigation, and syntax highlighting work. We're building toward split windows, LSP support, and a plugin system.
-
 See the [Roadmap](ROADMAP.md) for the full feature grid and what's coming next. If you want to help shape what a BEAM-powered editor can be, now is a great time to jump in.
 
 ## Quick start
