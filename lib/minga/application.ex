@@ -9,9 +9,11 @@ defmodule Minga.Application do
   ## Supervision Tree
 
       Minga.Supervisor (rest_for_one)
+      ├── Minga.Config.Options
+      ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
       ├── Minga.Port.Manager
-      └── Minga.Editor (added in a later commit)
+      └── Minga.Editor
 
   In standalone (Burrito) mode, automatically processes CLI arguments
   after the supervision tree is up.
@@ -23,6 +25,8 @@ defmodule Minga.Application do
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
     base_children = [
+      Minga.Config.Options,
+      Minga.Config.Loader,
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},

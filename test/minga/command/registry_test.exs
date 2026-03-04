@@ -51,7 +51,8 @@ defmodule Minga.Command.RegistryTest do
           :diagnostics_list,
           :next_diagnostic,
           :prev_diagnostic,
-          :lsp_info
+          :lsp_info,
+          :open_config
         ]
         |> Enum.sort()
 

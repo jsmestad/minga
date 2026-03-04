@@ -21,14 +21,14 @@ defmodule Minga.Editor.ViewportTest do
     end
 
     test "scrolls down when cursor moves past bottom" do
-      vp = Viewport.new(10, 80) |> Viewport.scroll_to_cursor({15, 0})
+      vp = Viewport.new(10, 80) |> Viewport.scroll_to_cursor({15, 0}, 0)
       # 10 rows, 2 for footer = 8 visible. cursor at 15 means top = 15 - 8 + 1 = 8
       assert vp.top == 8
     end
 
     test "scrolls up when cursor moves above top" do
       vp = %Viewport{top: 10, left: 0, rows: 24, cols: 80}
-      vp = Viewport.scroll_to_cursor(vp, {5, 0})
+      vp = Viewport.scroll_to_cursor(vp, {5, 0}, 0)
       assert vp.top == 5
     end
 
@@ -50,9 +50,36 @@ defmodule Minga.Editor.ViewportTest do
     end
 
     test "handles very small terminal (3 rows)" do
-      vp = Viewport.new(3, 40) |> Viewport.scroll_to_cursor({5, 0})
+      vp = Viewport.new(3, 40) |> Viewport.scroll_to_cursor({5, 0}, 0)
       # 3 rows, 2 for footer = 1 visible. cursor at 5 means top = 5 - 1 + 1 = 5
       assert vp.top == 5
+    end
+
+    test "scroll_margin keeps lines above cursor" do
+      vp = %Viewport{top: 10, left: 0, rows: 24, cols: 80}
+      vp = Viewport.scroll_to_cursor(vp, {8, 0}, 3)
+      # Cursor at 8 with margin 3: want top = max(8-3, 0) = 5
+      assert vp.top == 5
+    end
+
+    test "scroll_margin keeps lines below cursor" do
+      # 24 rows - 2 footer = 22 visible; margin 3
+      vp = Viewport.new(24, 80) |> Viewport.scroll_to_cursor({25, 0}, 3)
+      # top = 25 - 22 + 1 + 3 = 7
+      assert vp.top == 7
+    end
+
+    test "scroll_margin clamps to half visible area" do
+      # 6 rows - 2 footer = 4 visible; margin 5 clamps to 1
+      vp = Viewport.new(6, 80) |> Viewport.scroll_to_cursor({10, 0}, 5)
+      # effective_margin = min(5, (4-1) div 2) = 1
+      # top = 10 - 4 + 1 + 1 = 8
+      assert vp.top == 8
+    end
+
+    test "scroll_margin zero behaves like no margin" do
+      vp = Viewport.new(10, 80) |> Viewport.scroll_to_cursor({15, 0}, 0)
+      assert vp.top == 8
     end
   end
 

@@ -59,7 +59,8 @@ defmodule Minga.Command.Registry do
     {:diagnostics_list, "List buffer diagnostics"},
     {:next_diagnostic, "Jump to next diagnostic"},
     {:prev_diagnostic, "Jump to previous diagnostic"},
-    {:lsp_info, "Show LSP server status"}
+    {:lsp_info, "Show LSP server status"},
+    {:open_config, "Open config file"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

@@ -101,6 +101,7 @@ Current status and planned features. Updated as development progresses.
 | `SPC w h/j/k/l` | Window navigation | ✅ | Directional focus movement |
 | `SPC w v` / `SPC w s` | Vertical / horizontal split | ✅ | Nested splits supported |
 | `SPC w d` | Close window | ✅ | Last window protected |
+| `SPC f p` | Open config file | ✅ | Creates starter template if missing |
 | `SPC h k` | Describe key | 📋 | Stubbed |
 | `SPC q q` | Quit | ✅ |
 
@@ -145,6 +146,7 @@ Current status and planned features. Updated as development progresses.
 | Filetype detection | ✅ | By extension, with registry |
 | Multiple buffers | ✅ | Open several files, switch between them |
 | Dirty buffer protection | ✅ | Warns before quitting with unsaved changes |
+| User config file (`config.exs`) | ✅ | `~/.config/minga/config.exs` with `use Minga.Config` DSL |
 | Global / buffer-local options | 📋 | Per-buffer overrides with filetype defaults (see [Architecture](docs/ARCHITECTURE.md)) |
 
 ## Registers & Macros
@@ -210,7 +212,7 @@ Current status and planned features. Updated as development progresses.
 | Port protocol (BEAM ↔ Zig) | ✅ | Length-prefixed binary, typed opcodes |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 1,659 Elixir tests | ✅ | Including property-based tests |
+| 1,708 Elixir tests | ✅ | Including property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 
@@ -222,12 +224,13 @@ Roughly in priority order:
 
 1. ~~**Split windows**~~ — ✅ Done
 2. ~~**LSP client (diagnostics)**~~ — ✅ Foundation + diagnostics shipped. Completion, go-to-definition, hover, rename are next.
-3. **Plugin system** — Elixir-based plugins that run as supervised processes
-4. **Additional themes** — Theme loading from disk, runtime switching
-5. **Visual block mode** — Column selection and editing
-6. **File tree sidebar** — Project navigation panel
-7. **Git integration** — Gutter indicators, blame, hunk staging
-8. **Terminal emulator** — Embedded terminal in a split
+3. **Config system** — ✅ Options registry + config file loading shipped. Keybindings, commands, hooks, and per-filetype settings are next (#93, #94).
+4. **Plugin system** — Elixir-based plugins that run as supervised processes
+5. **Additional themes** — Theme loading from disk, runtime switching
+6. **Visual block mode** — Column selection and editing
+7. **File tree sidebar** — Project navigation panel
+8. **Git integration** — Gutter indicators, blame, hunk staging
+9. **Terminal emulator** — Embedded terminal in a split
 
 ---
 

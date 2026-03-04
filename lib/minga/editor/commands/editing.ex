@@ -6,6 +6,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -276,10 +277,12 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Indent / dedent (single line) ────────────────────────────────────────
 
   def execute(%{buf: %{buffer: buf}} = state, :indent_line) do
+    tw = tab_width()
+    indent = String.duplicate(" ", tw)
     {line, col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
-    BufferServer.insert_char(buf, "  ")
-    BufferServer.move_to(buf, {line, col + 2})
+    BufferServer.insert_char(buf, indent)
+    BufferServer.move_to(buf, {line, col + tw})
     state
   end
 
@@ -368,16 +371,18 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_indent_lines(buf, start_line, end_line) do
+    tw = tab_width()
+    indent = String.duplicate(" ", tw)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
 
     for line <- start_line..end_line do
       BufferServer.move_to(buf, {line, 0})
-      BufferServer.insert_char(buf, "  ")
+      BufferServer.insert_char(buf, indent)
     end
 
     new_col =
       if cursor_line >= start_line and cursor_line <= end_line,
-        do: cursor_col + 2,
+        do: cursor_col + tw,
         else: cursor_col
 
     BufferServer.move_to(buf, {cursor_line, new_col})
@@ -407,7 +412,7 @@ defmodule Minga.Editor.Commands.Editing do
   defp cursor_line_spaces_to_remove(buf, cursor_line, start_line, end_line) do
     if cursor_line >= start_line and cursor_line <= end_line do
       case BufferServer.get_lines(buf, cursor_line, 1) do
-        [text] -> min(count_leading_spaces(text), 2)
+        [text] -> min(count_leading_spaces(text), tab_width())
         _ -> 0
       end
     else
@@ -418,14 +423,14 @@ defmodule Minga.Editor.Commands.Editing do
   @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
   defp dedent_line_at(buf, line) do
     case BufferServer.get_lines(buf, line, 1) do
-      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), 2))
+      [text] -> remove_leading_spaces(buf, line, min(count_leading_spaces(text), tab_width()))
       _ -> :ok
     end
   end
 
   @spec dedent_single_line(pid(), non_neg_integer(), non_neg_integer(), String.t()) :: :ok
   defp dedent_single_line(buf, line, col, text) do
-    to_remove = min(count_leading_spaces(text), 2)
+    to_remove = min(count_leading_spaces(text), tab_width())
     remove_leading_spaces(buf, line, to_remove)
     if to_remove > 0, do: BufferServer.move_to(buf, {line, max(0, col - to_remove)})
     :ok
@@ -446,4 +451,11 @@ defmodule Minga.Editor.Commands.Editing do
   @spec do_count_leading_spaces(String.t(), non_neg_integer()) :: non_neg_integer()
   defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
   defp do_count_leading_spaces(_, n), do: n
+
+  @spec tab_width() :: pos_integer()
+  defp tab_width do
+    Options.get(:tab_width)
+  catch
+    :exit, _ -> 2
+  end
 end

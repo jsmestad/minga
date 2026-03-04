@@ -37,6 +37,7 @@ defmodule Minga.Keymap.Defaults do
     # ── File ──────────────────────────────────────────────────────────────────
     {[{?f, @none}, {?f, @none}], :find_file, "Find file"},
     {[{?f, @none}, {?s, @none}], :save, "Save file"},
+    {[{?f, @none}, {?p, @none}], :open_config, "Open config file"},
 
     # ── Buffer ────────────────────────────────────────────────────────────────
     {[{?b, @none}, {?b, @none}], :buffer_list, "Switch buffer"},

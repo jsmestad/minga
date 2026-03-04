@@ -7,6 +7,8 @@ defmodule Minga.Editor.Viewport do
   scrolls to keep the cursor visible.
   """
 
+  alias Minga.Config.Options, as: ConfigOptions
+
   @enforce_keys [:top, :left, :rows, :cols]
   defstruct [:top, :left, :rows, :cols]
 
@@ -49,14 +51,32 @@ defmodule Minga.Editor.Viewport do
   """
   @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}) :: t()
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do
+    scroll_to_cursor(vp, {cursor_line, cursor_col}, scroll_margin())
+  end
+
+  @doc """
+  Scrolls the viewport with an explicit scroll margin.
+
+  The margin keeps `n` lines visible above and below the cursor when possible.
+  When the file is shorter than `2 * margin + 1`, the margin shrinks to fit.
+  """
+  @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()) :: t()
+  def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, margin) do
     # Reserve rows for modeline + minibuffer
     visible_rows = max(vp.rows - footer_rows(), 1)
+    # Clamp margin so it can't exceed half the visible area
+    effective_margin = min(margin, div(visible_rows - 1, 2))
 
     top =
       cond do
-        cursor_line < vp.top -> cursor_line
-        cursor_line >= vp.top + visible_rows -> cursor_line - visible_rows + 1
-        true -> vp.top
+        cursor_line < vp.top + effective_margin ->
+          max(cursor_line - effective_margin, 0)
+
+        cursor_line >= vp.top + visible_rows - effective_margin ->
+          cursor_line - visible_rows + 1 + effective_margin
+
+        true ->
+          vp.top
       end
 
     left =
@@ -104,5 +124,14 @@ defmodule Minga.Editor.Viewport do
   def content_cols(%__MODULE__{cols: cols}, line_count)
       when is_integer(line_count) and line_count >= 0 do
     max(cols - gutter_width(line_count), 1)
+  end
+
+  # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec scroll_margin() :: non_neg_integer()
+  defp scroll_margin do
+    ConfigOptions.get(:scroll_margin)
+  catch
+    :exit, _ -> 5
   end
 end

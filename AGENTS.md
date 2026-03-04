@@ -40,6 +40,10 @@ lib/
     command/
       registry.ex             # Named command lookup
       parser.ex               # :command parsing
+    config.ex                 # Config DSL (use Minga.Config)
+    config/
+      options.ex              # Typed option registry (Agent)
+      loader.ex               # Config file discovery and evaluation
     keymap.ex                 # Mode-specific keymap management
     keymap/
       trie.ex                 # Prefix tree for key sequences

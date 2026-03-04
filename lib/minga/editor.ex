@@ -15,6 +15,8 @@ defmodule Minga.Editor do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Loader, as: ConfigLoader
+  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
   alias Minga.Editor.HighlightBridge
@@ -146,6 +148,9 @@ defmodule Minga.Editor do
     }
 
     state = log_message(state, "Editor started")
+
+    # Apply user config options
+    state = apply_config_options(state)
 
     # Subscribe to diagnostic changes for re-rendering gutter signs
     Minga.Diagnostics.subscribe()
@@ -984,4 +989,29 @@ defmodule Minga.Editor do
   end
 
   defp lsp_after_kill(state, _cmd, _old_buffer), do: state
+
+  # ── Config options ──────────────────────────────────────────────────────
+
+  @spec apply_config_options(state()) :: state()
+  defp apply_config_options(state) do
+    state =
+      try do
+        line_numbers = ConfigOptions.get(:line_numbers)
+        autopair = ConfigOptions.get(:autopair)
+
+        %{state | line_numbers: line_numbers, autopair_enabled: autopair}
+      catch
+        :exit, _ -> state
+      end
+
+    # Show config load error as status message
+    try do
+      case ConfigLoader.load_error() do
+        nil -> state
+        error -> %{state | status_msg: error}
+      end
+    catch
+      :exit, _ -> state
+    end
+  end
 end

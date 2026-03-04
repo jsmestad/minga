@@ -1,0 +1,163 @@
+defmodule Minga.Config.Options do
+  @moduledoc """
+  Central registry for typed editor options.
+
+  Stores option values in an Agent, validates types on write, and provides
+  defaults for unset options. Other modules read options via `get/1` instead
+  of hardcoding values.
+
+  ## Supported options
+
+  | Option          | Type                                          | Default   |
+  |-----------------|-----------------------------------------------|-----------|
+  | `:tab_width`    | positive integer                               | `2`       |
+  | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none`   | `:hybrid` |
+  | `:autopair`     | boolean                                        | `true`    |
+  | `:scroll_margin`| non-negative integer                           | `5`       |
+
+  ## Example
+
+      Minga.Config.Options.set(:tab_width, 4)
+      Minga.Config.Options.get(:tab_width)
+      #=> 4
+  """
+
+  use Agent
+
+  @typedoc "Valid option names."
+  @type option_name :: :tab_width | :line_numbers | :autopair | :scroll_margin
+
+  @typedoc "Line number display style."
+  @type line_number_style :: :hybrid | :absolute | :relative | :none
+
+  @typedoc "Option spec: `{name, type_descriptor, default_value}`."
+  @type option_spec :: {option_name(), type_descriptor(), term()}
+
+  @typep type_descriptor :: :pos_integer | :non_neg_integer | :boolean | {:enum, [atom()]}
+
+  @option_specs [
+    {:tab_width, :pos_integer, 2},
+    {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
+    {:autopair, :boolean, true},
+    {:scroll_margin, :non_neg_integer, 5}
+  ]
+
+  @valid_names Enum.map(@option_specs, &elem(&1, 0))
+
+  @defaults Map.new(@option_specs, fn {name, _type, default} -> {name, default} end)
+
+  @types Map.new(@option_specs, fn {name, type, _default} -> {name, type} end)
+
+  # ── Client API ──────────────────────────────────────────────────────────────
+
+  @doc "Starts the options registry."
+  @spec start_link(keyword()) :: Agent.on_start()
+  def start_link(opts \\ []) do
+    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
+    Agent.start_link(fn -> @defaults end, name: name)
+  end
+
+  @doc """
+  Sets an option value after type validation.
+
+  Returns `{:ok, value}` on success or `{:error, reason}` if the option
+  name is unknown or the value has the wrong type.
+  """
+  @spec set(option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  @spec set(GenServer.server(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  def set(name, value) when is_atom(name), do: set(__MODULE__, name, value)
+
+  def set(server, name, value) when is_atom(name) do
+    case validate(name, value) do
+      :ok ->
+        Agent.update(server, &Map.put(&1, name, value))
+        {:ok, value}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Gets the current value of an option, falling back to its default.
+  """
+  @spec get(option_name()) :: term()
+  @spec get(GenServer.server(), option_name()) :: term()
+  def get(name) when is_atom(name), do: get(__MODULE__, name)
+
+  def get(server, name) when is_atom(name) do
+    Agent.get(server, fn state ->
+      Map.get(state, name, Map.get(@defaults, name))
+    end)
+  end
+
+  @doc """
+  Returns all current option values as a map.
+  """
+  @spec all() :: %{option_name() => term()}
+  @spec all(GenServer.server()) :: %{option_name() => term()}
+  def all, do: all(__MODULE__)
+  def all(server), do: Agent.get(server, & &1)
+
+  @doc """
+  Resets all options to their defaults.
+  """
+  @spec reset() :: :ok
+  @spec reset(GenServer.server()) :: :ok
+  def reset, do: reset(__MODULE__)
+  def reset(server), do: Agent.update(server, fn _ -> @defaults end)
+
+  @doc """
+  Returns the default value for an option.
+  """
+  @spec default(option_name()) :: term()
+  def default(name) when name in @valid_names, do: Map.fetch!(@defaults, name)
+
+  @doc """
+  Returns the list of valid option names.
+  """
+  @spec valid_names() :: [option_name()]
+  def valid_names, do: @valid_names
+
+  # ── Validation ──────────────────────────────────────────────────────────────
+
+  @spec validate(atom(), term()) :: :ok | {:error, String.t()}
+  defp validate(name, value) do
+    case Map.fetch(@types, name) do
+      {:ok, type} -> validate_type(type, name, value)
+      :error -> {:error, "unknown option: #{inspect(name)}"}
+    end
+  end
+
+  @spec validate_type(type_descriptor(), atom(), term()) :: :ok | {:error, String.t()}
+  defp validate_type(:pos_integer, _name, value) when is_integer(value) and value > 0, do: :ok
+
+  defp validate_type(:pos_integer, name, value) do
+    {:error, "#{name} must be a positive integer, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:non_neg_integer, _name, value) when is_integer(value) and value >= 0,
+    do: :ok
+
+  defp validate_type(:non_neg_integer, name, value) do
+    {:error, "#{name} must be a non-negative integer, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:boolean, _name, value) when is_boolean(value), do: :ok
+
+  defp validate_type(:boolean, name, value) do
+    {:error, "#{name} must be a boolean, got: #{inspect(value)}"}
+  end
+
+  defp validate_type({:enum, allowed}, name, value) when is_atom(value) do
+    if value in allowed do
+      :ok
+    else
+      {:error, "#{name} must be one of #{inspect(allowed)}, got: #{inspect(value)}"}
+    end
+  end
+
+  defp validate_type({:enum, allowed}, name, value) do
+    {:error, "#{name} must be one of #{inspect(allowed)}, got: #{inspect(value)}"}
+  end
+end

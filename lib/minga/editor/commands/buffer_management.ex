@@ -6,6 +6,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   alias Minga.Buffer.GapBuffer
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
@@ -272,6 +273,42 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Logger.debug("Unknown ex command: #{raw}")
     state
+  end
+
+  # ── Open config file ─────────────────────────────────────────────────────
+
+  def execute(state, :open_config) do
+    config_path =
+      try do
+        ConfigLoader.config_path()
+      catch
+        :exit, _ -> Path.expand("~/.config/minga/config.exs")
+      end
+
+    # Ensure the directory exists
+    config_dir = Path.dirname(config_path)
+    File.mkdir_p(config_dir)
+
+    # Create the file with a starter template if it doesn't exist
+    unless File.exists?(config_path) do
+      File.write!(config_path, """
+      use Minga.Config
+
+      # set :tab_width, 2
+      # set :line_numbers, :hybrid
+      # set :autopair, true
+      # set :scroll_margin, 5
+      """)
+    end
+
+    case Commands.start_buffer(config_path) do
+      {:ok, pid} ->
+        EditorState.add_buffer(state, pid)
+
+      {:error, reason} ->
+        Logger.warning("Failed to open config: #{inspect(reason)}")
+        state
+    end
   end
 
   # ── Private buffer helpers ────────────────────────────────────────────────
