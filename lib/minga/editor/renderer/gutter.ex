@@ -12,19 +12,13 @@ defmodule Minga.Editor.Renderer.Gutter do
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Port.Protocol
 
-  @gutter_fg 0x555555
-  @gutter_current_fg 0xBBC2CF
-
-  # Doom One diagnostic colors
-  @error_fg 0xFF6C6B
-  @warning_fg 0xECBE7B
-  @info_fg 0x51AFEF
-  @hint_fg 0x555555
-
   @sign_col_width 2
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
+
+  @typedoc "Gutter color set from the active theme."
+  @type colors :: Minga.Theme.Gutter.t()
 
   @doc """
   Returns the total gutter width including sign column and line numbers.
@@ -46,17 +40,20 @@ defmodule Minga.Editor.Renderer.Gutter do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          %{non_neg_integer() => Diagnostic.severity()}
+          %{non_neg_integer() => Diagnostic.severity()},
+          colors()
         ) :: binary() | []
-  def render_sign(_screen_row, _col_offset, _buf_line, signs) when map_size(signs) == 0, do: []
+  def render_sign(_screen_row, _col_offset, _buf_line, signs, _colors)
+      when map_size(signs) == 0,
+      do: []
 
-  def render_sign(screen_row, col_offset, buf_line, signs) do
+  def render_sign(screen_row, col_offset, buf_line, signs, colors) do
     case Map.get(signs, buf_line) do
       nil ->
         Protocol.encode_draw(screen_row, col_offset, "  ")
 
       severity ->
-        {icon, fg} = sign_for_severity(severity)
+        {icon, fg} = sign_for_severity(severity, colors)
         Protocol.encode_draw(screen_row, col_offset, icon, fg: fg)
     end
   end
@@ -68,12 +65,14 @@ defmodule Minga.Editor.Renderer.Gutter do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          line_number_style()
+          line_number_style(),
+          colors()
         ) :: binary() | []
-  def render_number(_screen_row, _col_offset, _buf_line, _cursor_line, 0, :none), do: []
+  def render_number(_screen_row, _col_offset, _buf_line, _cursor_line, 0, :none, _colors),
+    do: []
 
-  def render_number(screen_row, col_offset, buf_line, cursor_line, line_number_w, style) do
-    {number, fg} = number_and_color(buf_line, cursor_line, style)
+  def render_number(screen_row, col_offset, buf_line, cursor_line, line_number_w, style, colors) do
+    {number, fg} = number_and_color(buf_line, cursor_line, style, colors)
 
     num_str = Integer.to_string(number)
     padded = String.pad_leading(num_str, line_number_w - 1)
@@ -82,27 +81,27 @@ defmodule Minga.Editor.Renderer.Gutter do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec sign_for_severity(Diagnostic.severity()) :: {String.t(), non_neg_integer()}
-  defp sign_for_severity(:error), do: {"E ", @error_fg}
-  defp sign_for_severity(:warning), do: {"W ", @warning_fg}
-  defp sign_for_severity(:info), do: {"I ", @info_fg}
-  defp sign_for_severity(:hint), do: {"H ", @hint_fg}
+  @spec sign_for_severity(Diagnostic.severity(), colors()) :: {String.t(), non_neg_integer()}
+  defp sign_for_severity(:error, colors), do: {"E ", colors.error_fg}
+  defp sign_for_severity(:warning, colors), do: {"W ", colors.warning_fg}
+  defp sign_for_severity(:info, colors), do: {"I ", colors.info_fg}
+  defp sign_for_severity(:hint, colors), do: {"H ", colors.hint_fg}
 
-  @spec number_and_color(non_neg_integer(), non_neg_integer(), line_number_style()) ::
+  @spec number_and_color(non_neg_integer(), non_neg_integer(), line_number_style(), colors()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp number_and_color(buf_line, _cursor_line, :absolute) do
-    {buf_line + 1, @gutter_current_fg}
+  defp number_and_color(buf_line, _cursor_line, :absolute, colors) do
+    {buf_line + 1, colors.current_fg}
   end
 
-  defp number_and_color(buf_line, cursor_line, :relative) do
-    {abs(buf_line - cursor_line), @gutter_fg}
+  defp number_and_color(buf_line, cursor_line, :relative, colors) do
+    {abs(buf_line - cursor_line), colors.fg}
   end
 
-  defp number_and_color(buf_line, cursor_line, :hybrid) do
+  defp number_and_color(buf_line, cursor_line, :hybrid, colors) do
     if buf_line == cursor_line do
-      {buf_line + 1, @gutter_current_fg}
+      {buf_line + 1, colors.current_fg}
     else
-      {abs(buf_line - cursor_line), @gutter_fg}
+      {abs(buf_line - cursor_line), colors.fg}
     end
   end
 end

@@ -31,7 +31,7 @@ defmodule Minga.Editor.HighlightBridge do
         send_parse_only(state, language)
 
       :unsupported ->
-        %{state | highlight: Highlight.new()}
+        %{state | highlight: Highlight.from_theme(state.theme)}
     end
   end
 
@@ -48,7 +48,7 @@ defmodule Minga.Editor.HighlightBridge do
 
     PortManager.send_commands(state.port_manager, commands)
 
-    %{state | highlight: Highlight.new(), highlight_version: version}
+    %{state | highlight: Highlight.from_theme(state.theme), highlight_version: version}
   end
 
   # Returns a list with a set_highlight_query command if the user has a custom

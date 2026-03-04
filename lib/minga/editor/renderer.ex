@@ -142,7 +142,9 @@ defmodule Minga.Editor.Renderer do
       content_w: content_w,
       confirm_match: SearchHighlight.current_confirm_match(state),
       highlight: highlight,
-      diagnostic_signs: diagnostic_signs_for_buffer(state)
+      diagnostic_signs: diagnostic_signs_for_buffer(state),
+      search_colors: state.theme.search,
+      gutter_colors: state.theme.gutter
     }
 
     {gutter_commands, line_commands, _byte_offset} =
@@ -159,7 +161,13 @@ defmodule Minga.Editor.Renderer do
               else: Gutter.sign_column_width()
 
           sign_cmd =
-            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
+            Gutter.render_sign(
+              screen_row,
+              0,
+              buf_line,
+              render_ctx.diagnostic_signs,
+              render_ctx.gutter_colors
+            )
 
           gutter_cmd =
             Gutter.render_number(
@@ -168,7 +176,8 @@ defmodule Minga.Editor.Renderer do
               buf_line,
               cursor_line,
               gutter_w - sign_w,
-              line_number_style
+              line_number_style,
+              render_ctx.gutter_colors
             )
 
           content_cmds =
@@ -190,7 +199,7 @@ defmodule Minga.Editor.Renderer do
     tilde_commands =
       if length(lines) < visible_rows do
         for row <- length(lines)..(visible_rows - 1) do
-          Protocol.encode_draw(row, gutter_w, "~", fg: 0x555555)
+          Protocol.encode_draw(row, gutter_w, "~", fg: state.theme.editor.tilde_fg)
         end
       else
         []
@@ -207,19 +216,24 @@ defmodule Minga.Editor.Renderer do
     filetype = Map.get(snapshot, :filetype, :text)
 
     modeline_commands =
-      Modeline.render(modeline_row, viewport.cols, %{
-        mode: state.mode,
-        mode_state: state.mode_state,
-        file_name: file_name,
-        filetype: filetype,
-        dirty_marker: dirty_marker,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        line_count: line_count,
-        buf_index: buf_index,
-        buf_count: buf_count,
-        macro_recording: MacroRecorder.recording?(state.macro_recorder)
-      })
+      Modeline.render(
+        modeline_row,
+        viewport.cols,
+        %{
+          mode: state.mode,
+          mode_state: state.mode_state,
+          file_name: file_name,
+          filetype: filetype,
+          dirty_marker: dirty_marker,
+          cursor_line: cursor_line,
+          cursor_col: cursor_col,
+          line_count: line_count,
+          buf_index: buf_index,
+          buf_count: buf_count,
+          macro_recording: MacroRecorder.recording?(state.macro_recorder)
+        },
+        state.theme
+      )
 
     # ── Minibuffer (row N-1) ──
     minibuffer_row = viewport.rows - 1
@@ -283,7 +297,7 @@ defmodule Minga.Editor.Renderer do
 
     # Render vertical separators between side-by-side panes
     {_screen_row, _screen_col, _screen_w, screen_h} = screen
-    separator_commands = render_separators(state.window_tree, screen, screen_h)
+    separator_commands = render_separators(state.window_tree, screen, screen_h, state.theme)
 
     # ── Global elements (minibuffer, whichkey, picker) use full viewport ──
     minibuffer_row = full_viewport.rows - 1
@@ -410,7 +424,7 @@ defmodule Minga.Editor.Renderer do
       )
 
     tilde_commands =
-      render_tildes(lines, visible_rows, gutter_w, row_off, col_off)
+      render_tildes(lines, visible_rows, gutter_w, row_off, col_off, state.theme)
 
     # Per-window modeline (Doom Emacs style — each window has its own)
     line_count = snapshot.line_count
@@ -422,20 +436,25 @@ defmodule Minga.Editor.Renderer do
     modeline_row = row_off + win_viewport.rows - 1
 
     modeline_commands =
-      Modeline.render(modeline_row, win_viewport.cols, %{
-        mode: if(is_active, do: state.mode, else: :normal),
-        mode_state: if(is_active, do: state.mode_state, else: nil),
-        file_name: file_name,
-        filetype: filetype,
-        dirty_marker: dirty_marker,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        line_count: line_count,
-        buf_index: buf_index,
-        buf_count: buf_count,
-        macro_recording:
-          if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false)
-      })
+      Modeline.render(
+        modeline_row,
+        win_viewport.cols,
+        %{
+          mode: if(is_active, do: state.mode, else: :normal),
+          mode_state: if(is_active, do: state.mode_state, else: nil),
+          file_name: file_name,
+          filetype: filetype,
+          dirty_marker: dirty_marker,
+          cursor_line: cursor_line,
+          cursor_col: cursor_col,
+          line_count: line_count,
+          buf_index: buf_index,
+          buf_count: buf_count,
+          macro_recording:
+            if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false)
+        },
+        state.theme
+      )
 
     modeline_commands = offset_commands(modeline_commands, 0, col_off)
 
@@ -460,12 +479,13 @@ defmodule Minga.Editor.Renderer do
 
   # Renders vertical separator lines for vertical splits, scoped to each
   # split's row range (not the full screen height).
-  @spec render_separators(WindowTree.t(), WindowTree.rect(), pos_integer()) :: [binary()]
-  defp render_separators(tree, screen_rect, _total_rows) do
+  @spec render_separators(WindowTree.t(), WindowTree.rect(), pos_integer(), Minga.Theme.t()) ::
+          [binary()]
+  defp render_separators(tree, screen_rect, _total_rows, theme) do
     separators = collect_separators(tree, screen_rect)
 
     for {col, start_row, end_row} <- separators, row <- start_row..end_row do
-      Protocol.encode_draw(row, col, "│", fg: 0x555555)
+      Protocol.encode_draw(row, col, "│", fg: theme.editor.split_border_fg)
     end
   end
 
@@ -525,7 +545,9 @@ defmodule Minga.Editor.Renderer do
       content_w: frame.content_w,
       confirm_match: SearchHighlight.current_confirm_match(state),
       highlight: highlight,
-      diagnostic_signs: diagnostic_signs_for_window(state, window)
+      diagnostic_signs: diagnostic_signs_for_window(state, window),
+      search_colors: state.theme.search,
+      gutter_colors: state.theme.gutter
     }
   end
 
@@ -535,7 +557,7 @@ defmodule Minga.Editor.Renderer do
       if window.buffer == state.buf.buffer do
         state.highlight
       else
-        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.new())
+        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.from_theme(state.theme))
       end
 
     if hl.capture_names != [], do: hl, else: nil
@@ -575,7 +597,13 @@ defmodule Minga.Editor.Renderer do
               else: Gutter.sign_column_width()
 
           sign_cmd =
-            Gutter.render_sign(screen_row, 0, buf_line, render_ctx.diagnostic_signs)
+            Gutter.render_sign(
+              screen_row,
+              0,
+              buf_line,
+              render_ctx.diagnostic_signs,
+              render_ctx.gutter_colors
+            )
 
           gutter_cmd =
             Gutter.render_number(
@@ -584,7 +612,8 @@ defmodule Minga.Editor.Renderer do
               buf_line,
               cursor_line,
               gutter_w - sign_w,
-              line_number_style
+              line_number_style,
+              render_ctx.gutter_colors
             )
 
           content_cmds =
@@ -609,12 +638,13 @@ defmodule Minga.Editor.Renderer do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          Minga.Theme.t()
         ) :: [binary()]
-  defp render_tildes(lines, visible_rows, gutter_w, row_off, col_off) do
+  defp render_tildes(lines, visible_rows, gutter_w, row_off, col_off, theme) do
     if length(lines) < visible_rows do
       for row <- length(lines)..(visible_rows - 1) do
-        Protocol.encode_draw(row + row_off, col_off + gutter_w, "~", fg: 0x555555)
+        Protocol.encode_draw(row + row_off, col_off + gutter_w, "~", fg: theme.editor.tilde_fg)
       end
     else
       []
@@ -897,19 +927,23 @@ defmodule Minga.Editor.Renderer do
   end
 
   @spec render_whichkey(state(), Viewport.t()) :: [binary()]
-  defp render_whichkey(%{whichkey: %{show: true, node: node}}, viewport)
+  defp render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport)
        when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     lines = WhichKey.render_popup(bindings)
 
     popup_row = max(0, viewport.rows - 3 - length(lines))
 
-    ([Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols), fg: 0x888888)] ++
+    ([
+       Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols),
+         fg: theme.popup.border_fg
+       )
+     ] ++
        lines)
     |> Enum.with_index(popup_row + 1)
     |> Enum.map(fn {line_text, row} ->
       padded = String.pad_trailing(line_text, viewport.cols)
-      Protocol.encode_draw(row, 0, padded, fg: 0xEEEEEE, bg: 0x333333)
+      Protocol.encode_draw(row, 0, padded, fg: theme.popup.fg, bg: theme.popup.bg)
     end)
   end
 

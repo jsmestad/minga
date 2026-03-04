@@ -11,23 +11,7 @@ defmodule Minga.Editor.Modeline do
   alias Minga.Mode
   alias Minga.Port.Protocol
 
-  # Doom Emacs color palette for mode indicators
-  @mode_colors %{
-    # black on blue
-    normal: {0x000000, 0x51AFEF},
-    # black on green
-    insert: {0x000000, 0x98BE65},
-    # black on magenta
-    visual: {0x000000, 0xC678DD},
-    # black on orange
-    operator_pending: {0x000000, 0xDA8548},
-    # black on yellow
-    command: {0x000000, 0xECBE7B},
-    # black on red/orange
-    replace: {0x000000, 0xFF6C6B},
-    # black on cyan
-    search: {0x000000, 0x46D9FF}
-  }
+  alias Minga.Theme
 
   # Powerline separator characters
   @separator ""
@@ -48,13 +32,17 @@ defmodule Minga.Editor.Modeline do
         }
 
   @doc "Renders the modeline at the given row using the provided data."
-  @spec render(non_neg_integer(), pos_integer(), modeline_data()) :: [binary()]
-  def render(row, cols, data) do
-    {mode_fg, mode_bg} = Map.get(@mode_colors, data.mode, {0x000000, 0x51AFEF})
-    bar_fg = 0xBBC2CF
-    bar_bg = 0x23272E
-    info_fg = 0xBBC2CF
-    info_bg = 0x3F444A
+  @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t()) :: [binary()]
+  def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one)) do
+    ml = theme.modeline
+
+    {mode_fg, mode_bg} =
+      Map.get(ml.mode_colors, data.mode, {0x000000, ml.mode_colors.normal |> elem(1)})
+
+    bar_fg = ml.bar_fg
+    bar_bg = ml.bar_bg
+    info_fg = ml.info_fg
+    info_bg = ml.info_bg
 
     # Build segments
     mode_segment = " #{mode_badge(data.mode, data.mode_state)} "
@@ -79,7 +67,7 @@ defmodule Minga.Editor.Modeline do
 
     # Build draw commands as a list of {text, fg, bg, opts} segments,
     # then lay them out left-to-right.
-    filetype_fg = 0x98BE65
+    filetype_fg = ml.filetype_fg
     filetype_bg = bar_bg
 
     left_segments = [

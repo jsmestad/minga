@@ -260,13 +260,14 @@ defmodule Minga.Editor.PickerUI do
     separator_row = prompt_row - item_count - 1
     first_item_row = separator_row + 1
 
-    # Background colors
-    bg = 0x1E2127
-    sel_bg = 0x3E4451
-    prompt_bg = 0x1E2127
-    dim_fg = 0x5C6370
-    text_fg = 0xABB2BF
-    highlight_fg = 0xFFFFFF
+    # Theme colors
+    pc = state.theme.picker
+    bg = pc.bg
+    sel_bg = pc.sel_bg
+    prompt_bg = pc.prompt_bg
+    dim_fg = pc.dim_fg
+    text_fg = pc.text_fg
+    highlight_fg = pc.highlight_fg
 
     # Separator line
     title = picker.title
@@ -294,8 +295,7 @@ defmodule Minga.Editor.PickerUI do
         []
       end
 
-    # Match highlight color (yellow/gold)
-    match_fg = 0xE5C07B
+    match_fg = pc.match_fg
 
     picker_colors = %{
       text_fg: text_fg,
@@ -455,7 +455,7 @@ defmodule Minga.Editor.PickerUI do
   end
 
   defp render_action_menu(
-         %{picker_ui: %{action_menu: {actions, menu_sel}}},
+         %{picker_ui: %{action_menu: {actions, menu_sel}}, theme: theme},
          viewport,
          first_item_row,
          selected_offset
@@ -465,11 +465,12 @@ defmodule Minga.Editor.PickerUI do
     menu_col = div(viewport.cols, 3)
     menu_width = min(30, viewport.cols - menu_col - 2)
 
-    border_fg = 0x61AFEF
-    menu_bg = 0x282C34
-    menu_fg = 0xABB2BF
-    menu_sel_bg = 0x3E4451
-    menu_sel_fg = 0xFFFFFF
+    pc = theme.picker
+    border_fg = pc.border_fg
+    menu_bg = pc.menu_bg
+    menu_fg = pc.menu_fg
+    menu_sel_bg = pc.menu_sel_bg
+    menu_sel_fg = pc.menu_sel_fg
 
     # Header
     header_text = String.pad_trailing(" Actions", menu_width)

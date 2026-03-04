@@ -14,6 +14,7 @@ defmodule Minga.Config.Options do
   | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none`   | `:hybrid` |
   | `:autopair`     | boolean                                        | `true`    |
   | `:scroll_margin`| non-negative integer                           | `5`       |
+  | `:theme`        | theme name atom (see `Minga.Theme.available/0`) | `:doom_one`|
 
   ## Per-filetype overrides
 
@@ -33,7 +34,7 @@ defmodule Minga.Config.Options do
   use Agent
 
   @typedoc "Valid option names."
-  @type option_name :: :tab_width | :line_numbers | :autopair | :scroll_margin
+  @type option_name :: :tab_width | :line_numbers | :autopair | :scroll_margin | :theme
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -41,7 +42,8 @@ defmodule Minga.Config.Options do
   @typedoc "Option spec: `{name, type_descriptor, default_value}`."
   @type option_spec :: {option_name(), type_descriptor(), term()}
 
-  @typep type_descriptor :: :pos_integer | :non_neg_integer | :boolean | {:enum, [atom()]}
+  @typep type_descriptor ::
+           :pos_integer | :non_neg_integer | :boolean | {:enum, [atom()]} | :theme_atom
 
   @typedoc "Internal state: global options + per-filetype overrides."
   @type state :: %{
@@ -53,7 +55,8 @@ defmodule Minga.Config.Options do
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
     {:autopair, :boolean, true},
-    {:scroll_margin, :non_neg_integer, 5}
+    {:scroll_margin, :non_neg_integer, 5},
+    {:theme, :theme_atom, :doom_one}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
@@ -228,5 +231,17 @@ defmodule Minga.Config.Options do
 
   defp validate_type({:enum, allowed}, name, value) do
     {:error, "#{name} must be one of #{inspect(allowed)}, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:theme_atom, _name, value) when is_atom(value) do
+    if value in Minga.Theme.available() do
+      :ok
+    else
+      {:error, "theme must be one of #{inspect(Minga.Theme.available())}, got: #{inspect(value)}"}
+    end
+  end
+
+  defp validate_type(:theme_atom, _name, value) do
+    {:error, "theme must be a theme name atom, got: #{inspect(value)}"}
   end
 end

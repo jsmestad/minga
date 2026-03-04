@@ -30,7 +30,8 @@ defmodule Minga.Config.OptionsTest do
                tab_width: 2,
                line_numbers: :hybrid,
                autopair: true,
-               scroll_margin: 5
+               scroll_margin: 5,
+               theme: :doom_one
              }
     end
   end

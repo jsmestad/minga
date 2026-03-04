@@ -11,71 +11,80 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
   @spec render(map(), non_neg_integer(), pos_integer()) :: binary()
-  def render(%{mode: :search, mode_state: ms}, row, cols) do
+  def render(%{mode: :search, mode_state: ms, theme: theme}, row, cols) do
     prefix = if ms.direction == :forward, do: "/", else: "?"
     search_text = prefix <> ms.input
+    mb = theme.minibuffer
 
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(search_text, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{mode: :search_prompt, mode_state: ms}, row, cols) do
+  def render(%{mode: :search_prompt, mode_state: ms, theme: theme}, row, cols) do
     prompt_text = "Search: " <> ms.input
+    mb = theme.minibuffer
 
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(prompt_text, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{mode: :substitute_confirm, mode_state: ms}, row, cols) do
+  def render(%{mode: :substitute_confirm, mode_state: ms, theme: theme}, row, cols) do
     current = ms.current + 1
     total = length(ms.matches)
     prompt = "replace with #{ms.replacement}? [y/n/a/q] (#{current} of #{total})"
+    mb = theme.minibuffer
 
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(prompt, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{mode: :command, mode_state: ms}, row, cols) do
+  def render(%{mode: :command, mode_state: ms, theme: theme}, row, cols) do
     cmd_text = ":" <> ms.input
+    mb = theme.minibuffer
 
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(cmd_text, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{mode: :eval, mode_state: ms}, row, cols) do
+  def render(%{mode: :eval, mode_state: ms, theme: theme}, row, cols) do
     eval_text = "Eval: " <> ms.input
+    mb = theme.minibuffer
 
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(eval_text, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
   def render(
-        %{mode: :normal, mode_state: %{pending_describe_key: true, describe_key_keys: keys}},
+        %{
+          mode: :normal,
+          mode_state: %{pending_describe_key: true, describe_key_keys: keys},
+          theme: theme
+        },
         row,
         cols
       ) do
@@ -85,46 +94,64 @@ defmodule Minga.Editor.Renderer.Minibuffer do
         _ -> "Press key to describe: " <> (keys |> Enum.reverse() |> Enum.join(" ")) <> " …"
       end
 
+    mb = theme.minibuffer
+
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(prompt, cols),
-      fg: 0xEEEEEE,
-      bg: 0x000000
+      fg: mb.fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{status_msg: msg}, row, cols) when is_binary(msg) do
+  def render(%{status_msg: msg, theme: theme}, row, cols) when is_binary(msg) do
+    mb = theme.minibuffer
+
     Protocol.encode_draw(
       row,
       0,
       String.pad_trailing(msg, cols),
-      fg: 0xFFCC00,
-      bg: 0x000000
+      fg: mb.warning_fg,
+      bg: mb.bg
     )
   end
 
-  def render(%{buf: %{buffer: buf}} = state, row, cols)
+  def render(%{buf: %{buffer: buf}, theme: theme} = state, row, cols)
       when is_pid(buf) and state.mode in [:normal, :insert, :replace] do
+    mb = theme.minibuffer
+
     case cursor_line_diagnostic(buf) do
       nil ->
-        render_blank(row, cols)
+        render_blank(row, cols, mb)
 
       msg ->
         Protocol.encode_draw(
           row,
           0,
           String.pad_trailing(msg, cols),
-          fg: 0x888888,
-          bg: 0x000000
+          fg: mb.dim_fg,
+          bg: mb.bg
         )
     end
   end
 
-  def render(_state, row, cols), do: render_blank(row, cols)
+  def render(%{theme: theme}, row, cols), do: render_blank(row, cols, theme.minibuffer)
+  def render(_state, row, cols), do: render_blank_default(row, cols)
 
-  @spec render_blank(non_neg_integer(), pos_integer()) :: binary()
-  defp render_blank(row, cols) do
+  @spec render_blank(non_neg_integer(), pos_integer(), map()) :: binary()
+  defp render_blank(row, cols, mb) do
+    Protocol.encode_draw(
+      row,
+      0,
+      String.duplicate(" ", cols),
+      fg: mb.dim_fg,
+      bg: mb.bg
+    )
+  end
+
+  @spec render_blank_default(non_neg_integer(), pos_integer()) :: binary()
+  defp render_blank_default(row, cols) do
     Protocol.encode_draw(
       row,
       0,

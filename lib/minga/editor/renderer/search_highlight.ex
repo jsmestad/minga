@@ -8,9 +8,8 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   alias Minga.Editor.Viewport
   alias Minga.Port.Protocol
 
-  @search_highlight_fg 0x000000
-  @search_highlight_bg 0xECBE7B
-  @confirm_current_bg 0xFF6C6B
+  @typedoc "Search color set from the active theme."
+  @type search_colors :: Minga.Theme.Search.t()
 
   @typedoc "A search match: `{line, col, length}` (absolute buffer coordinates)."
   @type search_match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
@@ -58,7 +57,8 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           Viewport.t(),
           [search_match()],
           non_neg_integer(),
-          search_match() | nil
+          search_match() | nil,
+          search_colors()
         ) :: [binary()]
   def render_line_with_search(
         visible_graphemes,
@@ -67,7 +67,12 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
         viewport,
         matches,
         gutter_w,
-        confirm_match \\ nil
+        confirm_match \\ nil,
+        colors \\ %Minga.Theme.Search{
+          highlight_fg: 0x000000,
+          highlight_bg: 0xECBE7B,
+          current_bg: 0xFF6C6B
+        }
       ) do
     spans = build_highlight_spans(matches, confirm_match, buf_line, viewport, visible_graphemes)
 
@@ -76,7 +81,14 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
         [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
 
       _ ->
-        render_highlighted_spans(visible_graphemes, viewport.left, spans, screen_row, gutter_w)
+        render_highlighted_spans(
+          visible_graphemes,
+          viewport.left,
+          spans,
+          screen_row,
+          gutter_w,
+          colors
+        )
     end
   end
 
@@ -318,14 +330,15 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           [highlight_span()],
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          search_colors()
         ) :: [binary()]
-  defp render_highlighted_spans(visible_graphemes, vis_start, spans, screen_row, gutter_w) do
+  defp render_highlighted_spans(visible_graphemes, vis_start, spans, screen_row, gutter_w, colors) do
     visible_graphemes
     |> Enum.with_index(vis_start)
     |> chunk_by_highlight_type(spans)
     |> Enum.flat_map(fn {chars, abs_start_col, hl_type} ->
-      encode_span(chars, abs_start_col, vis_start, hl_type, screen_row, gutter_w)
+      encode_span(chars, abs_start_col, vis_start, hl_type, screen_row, gutter_w, colors)
     end)
   end
 
@@ -337,31 +350,32 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           highlight_type(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          search_colors()
         ) :: [binary()]
-  defp encode_span(chars, abs_start_col, vis_start, :confirm, screen_row, gutter_w) do
+  defp encode_span(chars, abs_start_col, vis_start, :confirm, screen_row, gutter_w, colors) do
     screen_col = gutter_w + (abs_start_col - vis_start)
 
     [
       Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
-        fg: @search_highlight_fg,
-        bg: @confirm_current_bg
+        fg: colors.highlight_fg,
+        bg: colors.current_bg
       )
     ]
   end
 
-  defp encode_span(chars, abs_start_col, vis_start, :search, screen_row, gutter_w) do
+  defp encode_span(chars, abs_start_col, vis_start, :search, screen_row, gutter_w, colors) do
     screen_col = gutter_w + (abs_start_col - vis_start)
 
     [
       Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
-        fg: @search_highlight_fg,
-        bg: @search_highlight_bg
+        fg: colors.highlight_fg,
+        bg: colors.highlight_bg
       )
     ]
   end
 
-  defp encode_span(chars, abs_start_col, vis_start, :none, screen_row, gutter_w) do
+  defp encode_span(chars, abs_start_col, vis_start, :none, screen_row, gutter_w, _colors) do
     screen_col = gutter_w + (abs_start_col - vis_start)
     [Protocol.encode_draw(screen_row, screen_col, Enum.join(chars))]
   end

@@ -689,7 +689,7 @@ defmodule Minga.Editor do
       case Map.get(cache, new_buffer) do
         nil ->
           send(self(), :setup_highlight)
-          %{state | highlight: Minga.Highlight.new(), highlight_cache: cache}
+          %{state | highlight: Minga.Highlight.from_theme(state.theme), highlight_cache: cache}
 
         cached ->
           %{state | highlight: cached, highlight_cache: cache}
@@ -1017,8 +1017,10 @@ defmodule Minga.Editor do
       try do
         line_numbers = ConfigOptions.get(:line_numbers)
         autopair = ConfigOptions.get(:autopair)
+        theme_name = ConfigOptions.get(:theme)
+        theme = Minga.Theme.get!(theme_name)
 
-        %{state | line_numbers: line_numbers, autopair_enabled: autopair}
+        %{state | line_numbers: line_numbers, autopair_enabled: autopair, theme: theme}
       catch
         :exit, _ -> state
       end

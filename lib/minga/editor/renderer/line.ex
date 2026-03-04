@@ -51,7 +51,8 @@ defmodule Minga.Editor.Renderer.Line do
             ctx.viewport,
             ctx.search_matches,
             ctx.gutter_w,
-            ctx.confirm_match
+            ctx.confirm_match,
+            ctx.search_colors
           )
 
         :full ->

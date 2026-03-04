@@ -24,7 +24,20 @@ defmodule Minga.Editor.Renderer.Context do
             content_w: 0,
             confirm_match: nil,
             highlight: nil,
-            diagnostic_signs: %{}
+            diagnostic_signs: %{},
+            search_colors: %Minga.Theme.Search{
+              highlight_fg: 0x000000,
+              highlight_bg: 0xECBE7B,
+              current_bg: 0xFF6C6B
+            },
+            gutter_colors: %Minga.Theme.Gutter{
+              fg: 0x555555,
+              current_fg: 0xBBC2CF,
+              error_fg: 0xFF6C6B,
+              warning_fg: 0xECBE7B,
+              info_fg: 0x51AFEF,
+              hint_fg: 0x555555
+            }
 
   @typedoc """
   Represents the bounds of a visual selection for rendering.
@@ -47,6 +60,8 @@ defmodule Minga.Editor.Renderer.Context do
           content_w: pos_integer(),
           confirm_match: SearchHighlight.search_match() | nil,
           highlight: Highlight.t() | nil,
-          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()}
+          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
+          search_colors: Minga.Theme.Search.t(),
+          gutter_colors: Minga.Theme.Gutter.t()
         }
 end

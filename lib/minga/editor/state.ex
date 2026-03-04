@@ -32,6 +32,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.WindowTree
   alias Minga.Highlight
   alias Minga.Mode
+  alias Minga.Theme
 
   @typedoc "Stored last find-char motion for ; and , repeat."
   @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
@@ -58,6 +59,7 @@ defmodule Minga.Editor.State do
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
             autopair_enabled: true,
+            theme: Minga.Theme.get!(:doom_one),
             line_numbers: :hybrid,
             status_msg: nil,
             pending_conflict: nil,
@@ -89,6 +91,7 @@ defmodule Minga.Editor.State do
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
           autopair_enabled: boolean(),
+          theme: Theme.t(),
           line_numbers: line_number_style(),
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,

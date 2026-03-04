@@ -109,6 +109,16 @@ defmodule Minga.MixProject do
             Minga.Config.Loader,
             Minga.Config.Hooks
           ],
+          Themes: [
+            Minga.Theme,
+            Minga.Theme.DoomOne,
+            Minga.Theme.CatppuccinFrappe,
+            Minga.Theme.CatppuccinLatte,
+            Minga.Theme.CatppuccinMacchiato,
+            Minga.Theme.CatppuccinMocha,
+            Minga.Theme.OneDark,
+            Minga.Theme.OneLight
+          ],
           Keymap: [
             Minga.Keymap.Trie,
             Minga.Keymap.Defaults,

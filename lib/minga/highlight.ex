@@ -34,7 +34,7 @@ defmodule Minga.Highlight do
     }
   end
 
-  @doc "Creates an empty highlight state with a custom theme."
+  @doc "Creates an empty highlight state with a syntax theme map."
   @spec new(Theme.t()) :: t()
   def new(theme) when is_map(theme) do
     %__MODULE__{
@@ -43,6 +43,12 @@ defmodule Minga.Highlight do
       capture_names: [],
       theme: theme
     }
+  end
+
+  @doc "Creates an empty highlight state using the syntax map from a `Minga.Theme.t()` struct."
+  @spec from_theme(Minga.Theme.t()) :: t()
+  def from_theme(%Minga.Theme{syntax: syntax}) do
+    new(syntax)
   end
 
   @doc "Stores capture names from a `highlight_names` event."
