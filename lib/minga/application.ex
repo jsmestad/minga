@@ -14,6 +14,8 @@ defmodule Minga.Application do
       ├── Minga.Config.Hooks
       ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
+      ├── Minga.Extension.Registry
+      ├── Minga.Extension.Supervisor (DynamicSupervisor)
       ├── Minga.Port.Manager
       └── Minga.Editor
 
@@ -35,6 +37,8 @@ defmodule Minga.Application do
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
+      Minga.Extension.Registry,
+      Minga.Extension.Supervisor,
       Minga.Diagnostics,
       Minga.LSP.Supervisor
     ]

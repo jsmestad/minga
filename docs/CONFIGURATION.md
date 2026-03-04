@@ -188,6 +188,201 @@ Minga is forgiving about config errors:
 
 You can check for config load errors programmatically with [`Minga.Config.Loader.load_error/0`](https://jsmestad.github.io/minga/Minga.Config.Loader.html#load_error/0).
 
+## User modules
+
+For anything beyond a quick command, you can write full Elixir modules. Drop `.ex` files in `~/.config/minga/modules/` and they're compiled and loaded at startup.
+
+```elixir
+# ~/.config/minga/modules/todo_tools.ex
+defmodule TodoTools do
+  def count(text) do
+    text |> String.split("\n") |> Enum.count(&String.contains?(&1, "TODO"))
+  end
+
+  def list(text) do
+    text
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _} -> String.contains?(line, "TODO") end)
+    |> Enum.map(fn {line, num} -> "#{num}: #{String.trim(line)}" end)
+    |> Enum.join("\n")
+  end
+end
+```
+
+Then reference it in your config:
+
+```elixir
+# ~/.config/minga/config.exs
+use Minga.Config
+
+command :list_todos, "List TODO lines" do
+  {:ok, content} = Minga.API.content()
+  Minga.API.message(TodoTools.list(content))
+end
+
+bind :normal, "SPC c t", :list_todos, "List TODOs"
+```
+
+If a module has a compile error, Minga logs a warning and skips that file. Other modules and your config still load normally.
+
+## Project-local config
+
+Drop a `.minga.exs` file in your project root to set project-specific options. Project config runs after global config, so it overrides global settings.
+
+```elixir
+# /path/to/my-project/.minga.exs
+use Minga.Config
+
+set :tab_width, 4
+for_filetype :go, tab_width: 8
+
+on :after_save, fn _buf, path ->
+  if String.ends_with?(path, ".go"), do: System.cmd("gofmt", ["-w", path])
+end
+```
+
+This is useful for team-shared settings. Check `.minga.exs` into your repo and everyone on the team gets the same tab width, formatters, and hooks.
+
+**Note:** Project-local config is real Elixir code that runs when you open the editor in that directory. Review `.minga.exs` files in untrusted projects before opening them.
+
+## Post-init hook (after.exs)
+
+If you need config that depends on user modules being loaded first, put it in `~/.config/minga/after.exs`. This file runs last, after modules, global config, and project config.
+
+```elixir
+# ~/.config/minga/after.exs
+use Minga.Config
+
+# This works because TodoTools was compiled from modules/ first
+set :tab_width, TodoTools.preferred_tab_width()
+```
+
+## Hot reload
+
+Press `SPC h r` to reload your config without restarting the editor. This:
+
+1. Stops all running extensions
+2. Purges user modules
+3. Resets options, keybindings, hooks, and commands to defaults
+4. Re-compiles modules, re-evaluates config.exs, .minga.exs, and after.exs
+5. Restarts extensions
+
+Changed keybindings and options take effect immediately. The status bar shows "Config reloaded" on success or an error message if something went wrong.
+
+You can also reload from the command line with `:reload-config` (not yet wired as an ex command, use `SPC h r`).
+
+## Load order
+
+Minga loads config in this order. Each stage can override the previous one:
+
+1. `~/.config/minga/modules/*.ex` (user modules, compiled alphabetically)
+2. `~/.config/minga/config.exs` (global config)
+3. `.minga.exs` in the current working directory (project-local config)
+4. `~/.config/minga/after.exs` (post-init hook)
+5. Extensions are started (from declarations in steps 2-4)
+
+## Extensions
+
+Extensions are reusable, self-contained editor plugins. Each extension runs under its own supervisor, so a crash in one extension never affects others or the editor.
+
+### Writing an extension
+
+An extension is a directory containing `.ex` files, with one module that implements the `Minga.Extension` behaviour:
+
+```elixir
+# ~/code/minga_todo/extension.ex
+defmodule MingaTodo do
+  use Minga.Extension
+
+  @impl true
+  def name, do: :minga_todo
+
+  @impl true
+  def description, do: "TODO tracking and highlighting"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(config) do
+    keyword = Keyword.get(config, :keyword, "TODO")
+    {:ok, %{keyword: keyword}}
+  end
+end
+```
+
+The `use Minga.Extension` macro gives you a default `child_spec/1` that starts a simple Agent holding your config. Override `child_spec/1` if your extension needs a GenServer or a full supervision tree:
+
+```elixir
+defmodule MingaTodo do
+  use Minga.Extension
+
+  # ... name, description, version, init callbacks ...
+
+  @impl true
+  def child_spec(config) do
+    %{
+      id: __MODULE__,
+      start: {MingaTodo.Server, :start_link, [config]},
+      restart: :permanent,
+      type: :worker
+    }
+  end
+end
+```
+
+Extensions can register commands, keybindings, and hooks using the standard config API:
+
+```elixir
+# Inside your extension's init/1 or a supporting module
+def init(config) do
+  Minga.Config.bind(:normal, "SPC c t", :todo_list, "List TODOs")
+
+  Minga.Config.register_command(:todo_list, "List TODO lines", fn ->
+    {:ok, content} = Minga.API.content()
+    todos = find_todos(content)
+    Minga.API.message(todos)
+  end)
+
+  {:ok, config}
+end
+```
+
+### Loading an extension
+
+Declare extensions in your config file with a local path:
+
+```elixir
+# ~/.config/minga/config.exs
+use Minga.Config
+
+extension :minga_todo, path: "~/code/minga_todo"
+extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --stdin"
+```
+
+Extra keyword options (everything except `:path`) are passed to the extension's `init/1` callback.
+
+### Listing extensions
+
+Run `:extensions` (or `:ext`) in command mode to see all loaded extensions with their name, version, and status:
+
+```
+Extensions:
+  minga_todo v0.1.0 [running]
+  my_formatter v0.2.0 [running]
+```
+
+### Crash isolation
+
+Each extension runs under its own supervisor. If an extension process crashes, it restarts automatically without affecting the editor or other extensions. If an extension fails to load (bad path, compile error, init failure), you get a clear error message and everything else keeps working.
+
+### Extension lifecycle
+
+- Extensions are compiled and started after all config files are evaluated
+- `SPC h r` stops all extensions, reloads config, then restarts them
+- Extension state is lost on reload (the process restarts fresh)
+
 ## Full example
 
 ```elixir
@@ -229,6 +424,10 @@ end
 on :after_save, fn _buf, path ->
   if String.ends_with?(path, ".ex"), do: System.cmd("mix", ["format", path])
 end
+
+# ── Extensions ───────────────────────────────────────────────────────
+extension :minga_todo, path: "~/code/minga_todo"
+extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --stdin"
 ```
 
 ## Further reading
@@ -240,4 +439,6 @@ end
 - [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
 - [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
 - [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) — user-friendly editor API for commands and eval
+- [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html) — extension behaviour and lifecycle
+- [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html) — extension process management
 - [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html) — deep dive on how the BEAM enables Emacs-level extensibility

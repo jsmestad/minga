@@ -31,6 +31,7 @@ defmodule Minga.Config do
 
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Options
+  alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Store, as: KeymapStore
 
   require Logger
@@ -196,5 +197,34 @@ defmodule Minga.Config do
     end
 
     :ok
+  end
+
+  @doc """
+  Declares an extension to load from a local path.
+
+  The extension module at `path` must implement the `Minga.Extension`
+  behaviour. Extra keyword options (beyond `:path`) are passed to the
+  extension's `init/1` callback as config.
+
+  ## Examples
+
+      extension :my_tool, path: "~/code/minga_my_tool"
+      extension :greeter, path: "~/code/greeter", greeting: "howdy"
+  """
+  @spec extension(atom(), keyword()) :: :ok
+  def extension(name, opts) when is_atom(name) and is_list(opts) do
+    {path, config} = Keyword.pop(opts, :path)
+
+    if is_nil(path) do
+      raise ArgumentError, "extension #{name}: :path option is required"
+    end
+
+    expanded = Path.expand(path)
+
+    unless File.dir?(expanded) do
+      Logger.warning("extension #{name}: path does not exist: #{expanded}")
+    end
+
+    ExtRegistry.register(name, expanded, config)
   end
 end
