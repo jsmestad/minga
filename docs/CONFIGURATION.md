@@ -26,17 +26,61 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none` | `:hybrid` | Line number display style |
 | `:autopair` | boolean | `true` | Auto-insert matching brackets and quotes |
 | `:scroll_margin` | non-negative integer | `5` | Lines to keep visible above/below cursor when scrolling |
+| `:theme` | theme name atom | `:doom_one` | Color theme (see [Themes](#themes) below) |
+| `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
+| `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 
 ```elixir
 set :tab_width, 2
 set :line_numbers, :hybrid
 set :autopair, true
 set :scroll_margin, 5
+set :theme, :catppuccin_mocha
+set :font_family, "JetBrains Mono"
+set :font_size, 14
 ```
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
+
+## Themes
+
+Minga ships 7 built-in color themes. Set one in your config and restart, or browse them live with `SPC h t`.
+
+```elixir
+set :theme, :catppuccin_mocha
+```
+
+| Theme | Style |
+|-------|-------|
+| `:doom_one` | Dark (default), Doom Emacs |
+| `:catppuccin_frappe` | Dark, Catppuccin family |
+| `:catppuccin_latte` | Light, Catppuccin family |
+| `:catppuccin_macchiato` | Dark, Catppuccin family |
+| `:catppuccin_mocha` | Dark, Catppuccin family |
+| `:one_dark` | Dark, Atom |
+| `:one_light` | Light, Atom |
+
+The theme picker (`SPC h t`) live-previews each theme as you navigate the list. Selecting one applies it for the current session. To make it permanent, add the `set :theme` line to your config file.
+
+For theme internals, see [`Minga.Theme`](https://jsmestad.github.io/minga/Minga.Theme.html).
+
+## Fonts
+
+Font settings only apply to the GUI backend. **In TUI mode (the default), your terminal controls the font.** Change your font in your terminal emulator's preferences (Ghostty, Kitty, iTerm2, WezTerm, etc.) instead. The font options are accepted in TUI mode without error, they just have no effect.
+
+```elixir
+set :font_family, "JetBrains Mono"
+set :font_size, 14
+```
+
+You can use any of these name formats:
+
+- **Family name**: `"Fira Code"`, `"JetBrains Mono"`, `"Menlo"`
+- **PostScript name**: `"FiraCode-Regular"`, `"JetBrainsMonoNF-Regular"`
+
+If the font isn't found, Minga falls back to the system monospace font. The default is `"Menlo"` at size 13, which ships with every Mac.
 
 ## Per-filetype settings
 
@@ -154,6 +198,11 @@ set :tab_width, 2
 set :line_numbers, :relative
 set :scroll_margin, 5
 set :autopair, true
+set :theme, :catppuccin_mocha
+
+# Font (GUI backend only; no effect in TUI mode)
+set :font_family, "JetBrains Mono"
+set :font_size, 14
 
 # ── Per-language ─────────────────────────────────────────────────────
 for_filetype :go, tab_width: 8
