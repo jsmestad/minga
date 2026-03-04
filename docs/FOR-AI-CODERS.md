@@ -12,15 +12,15 @@ Every editor you use today was built on the same assumption: **one human, typing
 
 Then AI agents showed up.
 
-Now you have external processes making API calls, reading your files, writing to your buffers, spawning shell commands, and running for minutes at a time. Your editor handles this by... bolting on async extensions and hoping nothing breaks.
+Now you have external processes making API calls, reading your files, writing to your buffers, spawning shell commands, and running for minutes at a time. Your editor handles this by running everything on one event loop and hoping nothing contends too badly.
 
 You've already seen what happens when it does:
 
-- **Cursor freezes** while the agent processes a large response
-- An agent writes to a file you're actively editing and your undo history gets confused
-- A long-running agent operation blocks your ability to switch buffers or save files
-- An API timeout hangs the extension and you have to force-quit your editor
-- You lose unsaved work because an agent integration crashed the whole process
+- An agent streaming a large response **causes UI jank** because it's competing with your keystrokes for the same thread
+- An agent writes to a file you're editing and **your undo history gets confused** because there's no serialization between concurrent modifications
+- You have **no visibility** into what an agent is doing. Is it thinking? Stuck? Writing to the wrong file? You can't tell without checking the terminal
+- A long-running agent operation **blocks your ability to switch buffers** or save files because the event loop is busy
+- An API timeout **hangs the extension** and you have to force-quit or wait it out
 
 These aren't bugs in the AI tools. They're architectural limitations of editors that were designed decades before AI coding existed.
 
@@ -28,7 +28,7 @@ These aren't bugs in the AI tools. They're architectural limitations of editors 
 
 ## What Minga does differently
 
-Minga is built on the Erlang VM (BEAM), a runtime designed for systems with thousands of concurrent, unreliable processes. It treats "an external thing wants to modify a buffer" as a first-class operation, not an edge case.
+Minga is built on the Erlang VM (BEAM), a runtime designed for systems with thousands of concurrent, independent processes. It treats "an external thing wants to modify a buffer" as a first-class operation, not an edge case.
 
 ### Your editor never freezes
 
@@ -36,24 +36,7 @@ Every component in Minga runs in its own isolated process. The BEAM's preemptive
 
 An agent streaming a 2,000-line response? You're still editing. An LSP server parsing a huge codebase? Your keystrokes don't queue up. Three agents working on three different files? The scheduler handles it.
 
-This isn't async-with-callbacks like JavaScript or Neovim's event loop. It's true preemptive concurrency. The VM enforces fairness at the scheduler level. No single process can starve another.
-
-### Agent crashes don't kill your editor
-
-In Cursor or VS Code, an extension crash can take down the editor or leave it in a broken state. In Minga, each agent session runs in its own supervised process tree:
-
-```
-Minga.Supervisor
-├── Buffer "main.ex"           ← your work, untouchable
-├── Buffer "router.ex"         ← your work, untouchable
-├── Agent.Session (Claude)     ← crashes here
-│   ├── API client             ← API timeout? just this dies
-│   ├── File watcher
-│   └── Tool executor          ← shell command hangs? just this dies
-└── Editor                     ← keeps running, always
-```
-
-The supervisor detects the crash and restarts the agent session. Your buffers, undo history, cursor positions, and unsaved changes are in completely separate processes. They don't even know the agent crashed.
+This isn't async-with-callbacks like JavaScript or Neovim's event loop. It's true preemptive concurrency. The VM enforces fairness at the scheduler level. No single process can starve another. Your typing is responsive not because of careful engineering, but because the runtime makes it structurally impossible for anything to block your input handling.
 
 ### No buffer corruption from concurrent edits
 
@@ -66,7 +49,7 @@ Your keystroke:     {:insert, "x", {50, 10}}     → processed first
 Agent edit:         {:insert, code, {200, 0}}     → processed second
 ```
 
-No locks. No mutexes. No "file changed on disk" dialogs. Just ordered message passing.
+No locks. No mutexes. No "file changed on disk" dialogs. Just ordered message passing. The agent's edits participate in the same undo system as your typing, so you can undo them the same way you undo your own work.
 
 ### You can see what agents are doing
 
@@ -89,6 +72,23 @@ Agent.Session.list()
 
 When an agent is doing something unexpected, you don't have to guess. You inspect the running system. This is how Erlang engineers debug telecom switches that can't be stopped. The same tools work for debugging agent behavior in your editor.
 
+### Agents are isolated from everything
+
+Each agent session runs in its own supervised process tree. An agent can't corrupt buffer state because it doesn't have direct access to buffer memory. It communicates through the same message-passing interface the editor itself uses.
+
+```
+Minga.Supervisor
+├── Buffer "main.ex"           ← isolated process, private state
+├── Buffer "router.ex"         ← isolated process, private state
+├── Agent.Session (Claude)     ← isolated process tree
+│   ├── API client             ← API timeout? just this process is affected
+│   ├── File watcher
+│   └── Tool executor          ← shell command hangs? just this process
+└── Editor                     ← keeps running, always
+```
+
+If an agent hits an error, its supervisor handles recovery. Your buffers, undo history, cursor positions, and unsaved changes are in completely separate processes with completely separate memory. They aren't affected because they *can't* be affected. The VM enforces the boundary.
+
 ### Multiple agents, no conflicts
 
 Want a code review agent examining one buffer while a refactoring agent works on another? Want a test-writing agent running alongside your manual editing?
@@ -101,11 +101,11 @@ These are just processes. The BEAM was built to run millions of them. Each agent
 
 ### vs. Cursor / Windsurf
 
-Cursor is VS Code with AI bolted on. The agent runs as an extension in Electron's single-threaded JavaScript runtime. When the agent is working hard, you feel it: UI lag, slow tab switching, occasional freezes.
+Cursor is VS Code with AI bolted on. The agent runs as an extension in Electron's single-threaded JavaScript runtime. When the agent is working hard, you feel it: UI lag, slow tab switching, occasional stutters.
 
 Cursor's "background agent" runs in a separate process, which helps, but the results still flow back into the single-threaded VS Code extension host. Buffer modifications, diagnostics, and UI updates all contend on one thread.
 
-**Minga:** Agents, buffers, and the editor run as separate BEAM processes with preemptive scheduling. There's no single thread to contend on.
+**Minga:** Agents, buffers, and the editor run as separate BEAM processes with preemptive scheduling. There's no single thread to contend on. The scheduler guarantees fair CPU time for every process.
 
 ### vs. Claude Code / pi / Aider (terminal agents)
 
@@ -122,7 +122,7 @@ These tools run outside your editor entirely. They read and write files on disk,
 
 Inline completion (ghost text) is the simplest AI integration, and most editors handle it fine. Minga will support this too. It's not the interesting problem.
 
-The interesting problem is **agentic editing**: AI that doesn't just suggest one line, but reads your codebase, plans changes across multiple files, executes shell commands, and modifies buffers autonomously. That's where single-threaded editors break down, and where Minga's architecture matters.
+The interesting problem is **agentic editing**: AI that doesn't just suggest one line, but reads your codebase, plans changes across multiple files, executes shell commands, and modifies buffers autonomously. That's where single-threaded editors hit their limits, and where Minga's architecture matters.
 
 ---
 
@@ -186,15 +186,15 @@ Minga isn't a drop-in replacement for Cursor today. It's building the editor arc
 
 ## The bet
 
-Your current editor was designed for you, sitting at a keyboard, typing one character at a time. AI coding agents are the biggest change in how code gets written since IDEs replaced `ed`. And they need an editor architecture that treats concurrent, crash-prone, autonomous processes as first-class citizens, not an afterthought.
+Your current editor was designed for you, sitting at a keyboard, typing one character at a time. AI coding agents are the biggest change in how code gets written since IDEs replaced `ed`. And they need an editor architecture that treats concurrent, independent, observable processes as first-class citizens, not an afterthought.
 
 Every other editor is retrofitting. Minga is building for this future from the ground up.
 
 If you've ever:
-- Had your editor freeze while an agent was working
-- Lost unsaved changes because an AI extension crashed
-- Wished you could keep editing while an agent runs in the background
+- Had your editor stutter while an agent was streaming a response
+- Wished you could keep editing while an agent runs in the background without any jank
+- Wanted to see exactly what an agent is doing from inside your editor
 - Wanted to undo agent changes the same way you undo your own
-- Wondered why your editor can't handle two agents at once
+- Wondered why your editor can't handle two agents at once without slowing down
 
 Then Minga is the editor you've been waiting for. The age of AI-assisted coding needs an editor that was designed for it. This is that editor.

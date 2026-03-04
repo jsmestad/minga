@@ -1,12 +1,12 @@
 # Minga Architecture
 
-How a text editor built on telecom infrastructure actually works, and why it's a surprisingly good idea.
+How a text editor built on process isolation and preemptive concurrency actually works, and why it's a surprisingly good idea.
 
 ---
 
 ## The Big Idea
 
-Most text editors are single-process programs. Buffer state, rendering, input handling, plugin execution, all living in one address space. A crash in any component takes down everything. Your unsaved work disappears.
+Most text editors are single-threaded programs with shared state. Buffers, rendering, input handling, plugin execution, AI agents: all living in one address space, contending for one event loop. When a background task does heavy work, your keystrokes queue up. When two things modify the same buffer, you get race conditions. When you want to know what a plugin is doing, you add `print` statements and restart.
 
 Minga splits the editor into **two OS processes** with completely isolated memory:
 
@@ -30,7 +30,7 @@ Minga splits the editor into **two OS processes** with completely isolated memor
 └─────────────────────────────────┘
 ```
 
-The two processes communicate over a binary protocol on stdin/stdout. They share no memory. Either can crash without corrupting the other.
+The two processes communicate over a binary protocol on stdin/stdout. They share no memory. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
 
 This isn't a workaround for a limitation. It's the whole point.
 
@@ -38,38 +38,30 @@ This isn't a workaround for a limitation. It's the whole point.
 
 ## Why the BEAM?
 
-The Erlang VM (BEAM) was designed in the 1980s to run telephone switches, systems that serve millions of concurrent calls and literally cannot go down. Its design priorities are exactly what a text editor needs but has never had:
+The Erlang VM (BEAM) was designed in the 1980s to run telephone switches: systems serving millions of concurrent connections that must stay responsive under load. Its design priorities map directly onto what a modern editor needs but has never had.
 
-### Fault isolation through processes
+### Structural isolation through processes
 
-Every buffer in Minga is its own BEAM process (a GenServer). Processes don't share memory. If a buffer process encounters a corrupt state, it crashes and gets restarted by its supervisor. Other buffers are completely unaffected.
+Every buffer in Minga is its own BEAM process (a GenServer). Processes don't share memory. A buffer's state is only ever accessed by that buffer's process. Period.
 
 ```
 Buffer.Supervisor (DynamicSupervisor, one_for_one)
-├── Buffer "main.ex"     ← crashes here
-├── Buffer "router.ex"   ← completely unaffected
-└── Buffer "schema.ex"   ← completely unaffected
+├── Buffer "main.ex"     ← this process owns its own state
+├── Buffer "router.ex"   ← completely independent memory
+└── Buffer "schema.ex"   ← completely independent memory
 ```
 
-In a traditional editor, a buffer corruption bug means restarting the entire application. In Minga, it means one buffer reinitializes while everything else keeps running.
+This eliminates an entire class of bugs: data races, torn reads, iterator invalidation. When an AI agent edits line 200 of a file while you're typing on line 50, there's no race condition. Both edits arrive as messages to the buffer's GenServer, which processes them sequentially and atomically. The buffer's mailbox serializes all access naturally.
 
-### Supervision trees: "let it crash"
+In a traditional editor, two things modifying the same buffer is a concurrency hazard. In Minga, it's just two messages in a queue.
 
-The BEAM's philosophy isn't "prevent all crashes." It's "crashes are normal, recover from them automatically." Minga's supervision tree encodes the dependency relationships between components:
+### True preemptive concurrency
 
-```
-Minga.Supervisor (rest_for_one)
-├── Filetype.Registry        ← static data, crashes are rare
-├── Buffer.Supervisor        ← if this dies, restart it (buffers survive)
-├── Command.Registry         ← rebuilt from module attributes on restart
-├── Diagnostics              ← source-agnostic diagnostic aggregation
-├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
-├── FileWatcher              ← OS file notifications
-├── Port.Manager             ← owns the Zig renderer process
-└── Editor                   ← orchestration, depends on everything above
-```
+This is the strongest technical differentiator. The BEAM runs a preemptive scheduler with reduction counting that guarantees every process gets fair CPU time. Your keystroke handling is a process. LSP communication is a process. An AI agent is a process. The scheduler ensures none of them can starve the others.
 
-The `rest_for_one` strategy means: if the Port Manager crashes, the Editor restarts too (since it depends on the renderer), but buffers are untouched. Your undo history, cursor positions, unsaved changes: all preserved. The renderer comes back up, re-renders the current viewport, and you're exactly where you were.
+This is qualitatively different from async/await or event loops. In Neovim, VS Code's extension host, or Emacs, "async" means cooperative multitasking: one thing runs at a time, and if it takes too long, everything else waits. The BEAM's scheduler preempts processes after a fixed number of reductions (roughly, function calls) regardless of whether they yield voluntarily.
+
+The practical result: your typing is always responsive. Not because of careful async engineering, but because the VM enforces it at the scheduler level.
 
 ### Message passing over shared state
 
@@ -85,7 +77,7 @@ def handle_call(:content_and_cursor, _from, state) do
 end
 ```
 
-This eliminates an entire class of bugs: data races, torn reads, iterator invalidation. The buffer's state is only ever accessed by the buffer's process. Period.
+No locks. No mutexes. No "file changed on disk" dialogs. Just processes with private state communicating through well-defined messages.
 
 ### Per-process garbage collection
 
@@ -93,13 +85,35 @@ Each BEAM process has its own heap and its own garbage collector. When a buffer 
 
 Traditional editors in GC'd languages (VS Code/Electron, editors in Java or Go) have global GC pauses that cause visible input latency spikes. The BEAM's per-process GC eliminates this entirely.
 
+### Supervision: graceful degradation
+
+BEAM processes are organized into supervision trees that encode dependency relationships. When a component fails, its supervisor can restart it without affecting unrelated components:
+
+```
+Minga.Supervisor (rest_for_one)
+├── Filetype.Registry        ← static data, rarely fails
+├── Buffer.Supervisor        ← if this restarts, buffers survive
+├── Command.Registry         ← rebuilt from module attributes on restart
+├── Diagnostics              ← source-agnostic diagnostic aggregation
+├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
+├── FileWatcher              ← OS file notifications
+├── Port.Manager             ← owns the Zig renderer process
+└── Editor                   ← orchestration, depends on everything above
+```
+
+The `rest_for_one` strategy means: if the Port Manager fails, the Editor restarts too (since it depends on the renderer), but buffers are untouched. Your undo history, cursor positions, unsaved changes: all preserved. The renderer comes back up, re-renders the current viewport, and you're exactly where you were.
+
+This is graceful degradation. Individual features can fail and recover independently. Losing your LSP connection doesn't affect your editing. A plugin that hits an error doesn't corrupt your buffers. The system degrades in pieces rather than failing all at once.
+
+The BEAM was designed for telecom systems that run for years without downtime. The same supervision engineering applies here.
+
 ---
 
 ## Why Zig for Rendering?
 
-The BEAM is excellent at concurrency and fault tolerance. It is terrible at drawing characters on a terminal. It has no concept of raw terminal mode, ANSI escape sequences, or low-level input decoding.
+The BEAM is excellent at concurrency and isolation. It is terrible at drawing characters on a terminal. It has no concept of raw terminal mode, ANSI escape sequences, or low-level input decoding.
 
-Rather than fight this with NIFs (which crash the entire VM when they segfault) or Ports to C (which require manual memory management), Minga uses **Zig**:
+Rather than fight this with NIFs (which run inside the BEAM process and compromise isolation when they fail) or Ports to C (which require manual memory management), Minga uses **Zig**:
 
 - **No hidden allocations:** every byte of memory is explicit
 - **Compiles C natively:** tree-sitter grammars (written in C) compile as part of the Zig build with zero FFI overhead
@@ -110,9 +124,9 @@ The Zig process uses [libvaxis](https://github.com/rockorager/libvaxis) for term
 
 ### Why not a NIF?
 
-NIFs (Native Implemented Functions) run inside the BEAM process. A segfault in a NIF crashes the entire Erlang VM: every buffer, every process, everything. This directly contradicts Minga's fault tolerance model.
+NIFs (Native Implemented Functions) run inside the BEAM process. A failure in a NIF takes down the entire Erlang VM: every buffer, every process, everything. This directly contradicts Minga's isolation model.
 
-A Port is an OS-level process boundary. The Zig renderer can segfault, and the BEAM keeps running. The supervisor detects the Port died, restarts the Port Manager, and the Editor re-renders. Zero data loss.
+A Port is an OS-level process boundary. The Zig renderer can fail completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Port Manager, and the Editor re-renders. Your data stays intact because it lives in completely separate processes.
 
 ---
 
@@ -252,7 +266,7 @@ Grapheme conversion happens only at the **render boundary**, when converting cur
 
 ## What This Enables
 
-The two-process, supervision-based architecture isn't just about crash recovery. It opens up possibilities that traditional editors can't easily achieve:
+The two-process, isolation-based architecture isn't just about resilience. It opens up possibilities that traditional editors can't easily achieve:
 
 ### Runtime customization: the Emacs inheritance
 
@@ -301,23 +315,23 @@ BEAM processes can communicate across machines transparently. Two Minga instance
 
 ### Plugin isolation
 
-Future plugins will run as supervised BEAM processes. A misbehaving plugin crashes its own process tree. It can't corrupt buffer state, freeze the renderer, or take down other plugins. The supervisor restarts it, and you get an error message instead of a dead editor.
+Future plugins will run as supervised BEAM processes. A misbehaving plugin is confined to its own process tree. It can't corrupt buffer state, block your input handling, or interfere with other plugins, because it doesn't share memory with any of them. If it fails, its supervisor restarts it and you see an error message instead of a degraded editing experience.
 
 ### Agentic AI integration
 
-This is where Minga's architecture becomes genuinely prescient. AI coding agents (tools like Claude Code, Cursor, Aider, and Copilot) work by spawning external processes: LLM API calls, shell commands, file rewrites, tool invocations. These processes are inherently unreliable. API calls time out. Shell commands hang. File operations conflict with what you're editing. An agent might try to write to a buffer you're actively modifying.
+This is where Minga's architecture becomes genuinely prescient. AI coding agents (tools like Claude Code, Cursor, Aider, and Copilot) work by spawning external processes: LLM API calls, shell commands, file rewrites, tool invocations. These processes are inherently unpredictable. API calls time out. Shell commands hang. File operations conflict with what you're editing. An agent might try to write to a buffer you're actively modifying.
 
-In a traditional editor, this is a nightmare. Agent processes share the editor's address space or communicate through fragile async bridges. A hung API call can freeze the UI. A botched file write can corrupt buffer state. Editors bolt on agent support as an afterthought and pray nothing goes wrong.
+In a traditional editor, these workloads fight for the same event loop as your typing. A long-running API call can cause UI jank. Concurrent buffer modifications create race conditions. And you have limited visibility into what the agent is actually doing at any moment.
 
 Minga's architecture was *designed* for exactly this kind of workload:
 
-- **Each agent session runs as its own supervised process tree.** If an agent crashes, hangs, or produces garbage, its supervisor detects the failure and cleans up. Your editor keeps running. Your buffers are untouched.
+- **Each agent session runs as its own supervised process tree.** Agents are isolated from your buffers, from each other, and from the editor core. They communicate through the same message-passing interface the editor itself uses.
 
 - **Buffer access goes through message passing.** An agent process that wants to modify a file sends a message to that buffer's GenServer. The buffer processes the edit atomically. There's no possibility of a torn write or a race condition between your typing and the agent's edits. The buffer's mailbox serializes them naturally.
 
-- **The BEAM's preemptive scheduler prevents starvation.** A long-running agent can't freeze your UI. The scheduler guarantees every process gets CPU time, regardless of what any single process is doing. You keep editing while the agent works in the background, not because of careful async engineering, but because the VM enforces it at the scheduler level.
+- **The BEAM's preemptive scheduler prevents starvation.** A long-running agent can't cause UI jank. The scheduler guarantees every process gets CPU time, regardless of what any single process is doing. You keep editing while the agent works in the background, not because of careful async engineering, but because the VM enforces it at the scheduler level.
 
-- **Process monitoring enables real-time feedback.** The editor can monitor agent processes and reflect their status in the UI: running, waiting for API response, applying changes, failed. When an agent process dies, the editor knows immediately and can display the error or offer to retry.
+- **Process monitoring enables real-time observability.** The editor can monitor agent processes and reflect their status in the UI: running, waiting for API response, applying changes, failed. You can inspect an agent's state with `:sys.get_state(agent_pid)` without stopping it. When something unexpected is happening, you don't guess. You look.
 
 - **Concurrent agents are free.** Want to run a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. There's no thread pool to tune, no async runtime to configure, no event loop to worry about blocking.
 
@@ -341,4 +355,4 @@ Honest accounting of what this architecture costs:
 | **Memory overhead** (the BEAM VM has a baseline footprint) | ~30MB for the VM + processes. Comparable to Neovim with plugins. |
 | **Latency floor** (message passing adds microseconds vs direct function calls) | Measured end-to-end keystroke latency is <1ms. Below human perception. |
 
-None of these are deal-breakers. The fault tolerance, process isolation, and concurrency model more than compensate.
+None of these are deal-breakers. The isolation, concurrency, and observability more than compensate.

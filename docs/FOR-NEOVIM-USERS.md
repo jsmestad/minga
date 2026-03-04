@@ -2,7 +2,7 @@
 
 You already have modal editing, tree-sitter, and LSP. So why would you consider Minga?
 
-**Short answer:** Your plugins can crash without killing your editor, your background tasks truly run in parallel, and the extension language is better than Lua.
+**Short answer:** True preemptive concurrency instead of a single-threaded event loop, an extension language that's also the implementation language, and components that are structurally isolated from each other.
 
 ---
 
@@ -32,19 +32,11 @@ The editing model is Vim. You're not learning a new editor. You're getting a bet
 
 ---
 
-## What's actually wrong with Neovim
+## What's actually different about Neovim's architecture
 
 You probably already know these pain points, even if you've accepted them:
 
-### 1. A bad plugin crashes your entire editor
-
-You've been there. You install a new plugin, it has a bug in an autocmd, and Neovim segfaults. Or a Lua plugin throws an error in a hot path and every keystroke prints a stack trace. Or worse, silent state corruption that you don't notice until your undo history is gone.
-
-Neovim plugins run in-process. There's no isolation. A bug in `telescope.nvim` can corrupt state in `nvim-cmp`. A segfault in a C extension kills everything.
-
-**Minga:** Every component is an isolated BEAM process. A buggy plugin crashes its own process. The supervisor restarts it. Your buffers, undo history, cursor positions, all in separate processes, all untouched. You get an error message, not a core dump.
-
-### 2. "Async" isn't really async
+### 1. "Async" isn't really async
 
 Neovim is single-threaded. When people say it supports "async," they mean it has an event loop with callbacks, like JavaScript. One thing runs at a time. If your LSP server sends a huge response, or tree-sitter is reparsing a large file, or a plugin is doing something expensive in a `vim.schedule` callback, the event loop blocks. Your keystrokes queue up. You feel the lag.
 
@@ -52,7 +44,7 @@ Neovim works around this with `:jobstart` (separate process) and Lua coroutines,
 
 **Minga:** The BEAM runs a preemptive scheduler with true parallelism. Every process gets a fair share of CPU time, enforced by the VM. An LSP client parsing a huge JSON response literally cannot block your keystroke handling because they run on different scheduler threads. This isn't async with callbacks. It's real concurrency with fairness guarantees.
 
-### 3. Lua is... fine
+### 2. Lua is... fine
 
 Be honest. You don't love Lua. You tolerate it because it's better than Vimscript. Your `init.lua` is 500 lines of boilerplate. Half your config is copy-pasted from GitHub READMEs. Plugin configurations look like this:
 
@@ -98,27 +90,27 @@ end
 
 And because Elixir is the same language the editor is written in, you can read the source to understand what you're configuring. No Lua↔C boundary to navigate. No `:h api` that describes C functions you call from Lua.
 
-### 4. Plugin dependency hell
+### 3. Everything shares one address space
 
-Your `lazy.nvim` config has 40 plugins. Half of them have breaking changes every few months. Some depend on specific Neovim nightly features. You've spent Saturday mornings debugging why `nvim-treesitter` broke after an update, or why `mason.nvim` can't find `lua-language-server` anymore.
+Neovim plugins run in-process. There's no isolation between components. A bug in `telescope.nvim` can corrupt state used by `nvim-cmp`. A C extension with a memory error takes down the entire process. And every plugin, hook, and autocmd competes for the same event loop.
 
-Plugin updates in Neovim are all-or-nothing. There's no way to roll back one plugin without reverting your entire lock file. There's no supervision If a plugin fails to load, you get a wall of Lua errors on startup.
+This also means plugin dependency management is fragile. Your `lazy.nvim` config has 40 plugins. Half of them have breaking changes every few months. If one fails to load, it can cascade into errors in unrelated plugins because they share global state.
 
-**Minga:** Extensions are BEAM processes. They load independently. If one fails, the others still work. You get an error message for the broken one, not a cascade of failures. And because extensions are isolated processes, they genuinely can't interfere with each other. There's no shared global state to corrupt.
+**Minga:** Every component is an isolated BEAM process. Buffers, plugins, agents: they each have their own memory and their own state. A buggy plugin can't corrupt your buffer state because it literally doesn't have access to buffer memory. The VM enforces the isolation. If a plugin fails, its supervisor handles it while everything else keeps running. Other plugins don't even know it happened.
 
-### 5. AI agents are fighting your event loop
+### 4. AI agents are fighting your event loop
 
 You're using `copilot.vim` or `codecompanion.nvim` or `avante.nvim`. These plugins make HTTP requests to LLM APIs, stream responses, and modify buffers. They do this on the same event loop as your typing. You've noticed the occasional stutter when a completion comes in.
 
 Now imagine agentic coding tools that don't just suggest, but execute. They spawn shell commands, read files, write to multiple buffers, and run for minutes. All of this on Neovim's single-threaded event loop, contending with your keystrokes.
 
-**Minga:** Each AI agent session is its own supervised process tree. It communicates with buffers via message passing. The BEAM's preemptive scheduler guarantees your typing always gets CPU time, even if an agent is burning cycles on a long operation. An agent crash takes down the agent's process tree. Your editor doesn't blink.
+**Minga:** Each AI agent session is its own supervised process tree. It communicates with buffers via message passing. The BEAM's preemptive scheduler guarantees your typing always gets CPU time, even if an agent is burning cycles on a long operation. You can inspect agent state live with `:sys.get_state(agent_pid)`. You can run multiple agents concurrently without any of them affecting your input responsiveness.
 
 ---
 
 ## What you gain
 
-Beyond fixing Neovim's problems:
+Beyond addressing Neovim's architectural limitations:
 
 ### Hot code reloading
 
@@ -148,7 +140,7 @@ The BEAM gives you:
 :dbg.p(Process.whereis(Minga.Editor), [:receive])
 ```
 
-This is a production-grade observability toolkit. When something goes wrong, you don't add `print` statements and restart. You inspect the running system.
+This is a production-grade observability toolkit. When something goes wrong, you don't add `print` statements and restart. You inspect the running system. This is how Erlang engineers debug systems that run for years without downtime. The same tools work for understanding what your editor is doing.
 
 ### The extension language is the implementation language
 
@@ -178,13 +170,13 @@ Minga isn't trying to match Neovim feature-for-feature today. It's building on a
 
 Neovim is a great editor today. Minga is a better architecture for tomorrow.
 
-If you're happy with Neovim and your plugins rarely crash and you don't use AI coding agents heavily, stay with Neovim. It's a good editor.
+If you're happy with Neovim and you don't mind the occasional UI jank from background operations and you don't use AI coding agents heavily, stay with Neovim. It's a good editor.
 
 But if you've ever:
-- Lost work to a plugin crash
-- Debugged why your editor "hangs" for 200ms on certain operations
-- Wished Lua was a better language
-- Worried about how AI agents will integrate with your single-threaded editor
-- Wanted to truly understand and modify your editor's internals in one language
+- Noticed your editor stutter while an LSP server or AI plugin was doing heavy work
+- Wished your background tasks were truly concurrent instead of cooperative
+- Wanted an extension language that's also the implementation language
+- Wanted to inspect the live state of your editor's internals without restarting
+- Wondered how AI agents will integrate with a single-threaded event loop as they get more capable
 
 Then Minga is building the editor you want. The modal editing you know, on a runtime that was designed from the ground up for exactly the problems modern editors face.

@@ -1,28 +1,30 @@
 # 🥨 Minga
 
-**A modal text editor built for the age of AI agents, where any process can crash without taking down your editor.**
+**A modal text editor where every component is isolated, concurrent, and inspectable.**
 
-AI coding agents are rewriting your files, spawning subprocesses, and racing against your keystrokes. Most editors bolt this on and hope nothing breaks. Minga was designed from the ground up with isolated, supervised processes. When an agent hangs, a plugin crashes, or a renderer glitches, it restarts itself. Your buffers, undo history, and unsaved work stay untouched.
+AI coding agents are rewriting your files, spawning subprocesses, and racing against your keystrokes. Most editors bolt this on as an afterthought, hoping the single-threaded event loop can keep up. Minga was designed from the ground up with isolated processes that can't interfere with each other. Your typing never waits for a background task. An agent editing one file can't corrupt the buffer you're working in. And you can inspect any running component's state without stopping it.
 
-Minga combines the modal editing of Neovim, the runtime flexibility of Emacs, and a modern architecture: **Elixir on the BEAM VM** for editor logic and **Zig** for terminal rendering. Vim users get the motions, operators, and text objects they think in. Emacs users get a living, mutable runtime where you can redefine commands, override keybindings, and customize any buffer's behavior, all without restarting. And unlike either, every component is an isolated process that can crash and recover independently.
+Minga combines the modal editing of Neovim, the runtime flexibility of Emacs, and a modern architecture: **Elixir on the BEAM VM** for editor logic and **Zig** for terminal rendering. Vim users get the motions, operators, and text objects they think in. Emacs users get a living, mutable runtime where you can redefine commands, override keybindings, and customize any buffer's behavior, all without restarting. And unlike either, every component runs in its own isolated process with true preemptive concurrency.
 
 ## Why Minga?
 
 ### The problem with editors
 
-Text editors are single-process programs. When something crashes (a bad plugin, a rendering glitch, a corrupted state) your whole editor goes down. Unsaved work, gone. You restart, reopen, re-navigate, re-remember what you were doing.
+Text editors are single-threaded programs with shared state. Every component (buffers, rendering, input handling, plugins, AI agents) contends for one event loop. When a background task does heavy work, your keystrokes queue up. When two things try to modify the same buffer, you get race conditions. When you want to know what a plugin is actually doing, you add `print` statements and restart.
 
-### What if the editor could crash… and keep going?
+These problems get worse as editors take on more concurrent workloads: LSP servers, formatters, AI agents, file watchers, git operations. The single-threaded architecture that worked for one human typing sequentially doesn't hold up when a dozen things want to happen at once.
 
-Minga runs as **two OS processes** with full fault isolation:
+### What if every component ran independently?
+
+Minga runs as **two OS processes** with full isolation between components:
 
 <p align="center">
   <img src="docs/images/architecture.svg" alt="Minga two-process architecture" width="720"/>
 </p>
 
-The Erlang VM (the BEAM) was designed to run telephone switches, systems that literally cannot go down. It uses lightweight isolated processes with supervision trees that detect failures and restart components automatically. If the renderer crashes? The supervisor restarts it. Your buffers, cursor position, undo history: untouched. No data loss. No corrupted state.
+The Erlang VM (the BEAM) was designed to run millions of lightweight processes with preemptive scheduling and no shared memory. Each buffer is its own process. The editor, the port manager, the LSP clients: all separate processes that communicate through message passing. The BEAM's scheduler guarantees every process gets CPU time, so your typing is always responsive regardless of what else is happening. This isn't async with callbacks. It's true preemptive concurrency with fairness guarantees enforced by the VM.
 
-This isn't theoretical. It's how Erlang has worked in telecom, banking, and messaging infrastructure for 30+ years. Minga just points that reliability at a text editor.
+This architecture was battle-tested in telecom, banking, and messaging infrastructure for 30+ years before Minga pointed it at a text editor.
 
 ### Why hasn't anyone done this before?
 
@@ -37,8 +39,8 @@ Minga aims to bring the best of modern modal editing together:
 - **Tree-sitter syntax highlighting:** 24 languages compiled in (Elixir, Ruby, TypeScript, Go, Rust, Python, Zig, and more), with user-overridable highlight queries
 - **Fuzzy file finder and buffer switcher:** built-in pickers with incremental search
 - **Persistent undo:** your undo history survives buffer switches
-- **Fault-tolerant by design:** OTP supervision means components restart independently
-- **Built for the agentic era:** AI coding agents spawn unreliable external processes. Minga's supervision model makes agent crashes recoverable events instead of editor-killing disasters (see [Architecture](docs/ARCHITECTURE.md))
+- **Isolated by design:** every component is its own process. Buffers, plugins, agents, and the renderer can't interfere with each other, and if one fails, the rest keep running
+- **Built for the agentic era:** AI coding agents need true concurrency, serialized buffer access, and observable state. Minga's process model provides all three natively (see [Architecture](docs/ARCHITECTURE.md))
 
 ### Current status
 
@@ -104,13 +106,13 @@ For the curious, here's what makes Minga tick:
 | **Editor core** | Elixir on the BEAM | Gap buffer, modes, motions, operators, text objects, keymap trie, command registry, undo/redo, syntax highlight orchestration |
 | **Renderer** | Zig + libvaxis | Terminal drawing, keyboard input, tree-sitter parsing, floating panels |
 | **Protocol** | Length-prefixed binary over stdin/stdout | Typed opcodes for render commands (BEAM→Zig) and input events (Zig→BEAM) |
-| **Supervision** | OTP supervisor tree | Automatic restart of crashed components with preserved editor state |
+| **Supervision** | OTP supervisor tree | Process lifecycle management with automatic recovery of failed components |
 
 The BEAM side is a set of GenServers (one per buffer, one for the editor orchestrator, one for the port manager) all supervised. The Zig side is a single-threaded event loop that reads port commands, renders frames, and forwards keyboard input. Tree-sitter runs in the Zig process with pre-compiled queries for instant highlighting on file open.
 
 ## Coming from another editor?
 
-- **[For AI-assisted developers](docs/FOR-AI-CODERS.md):** Using Claude Code, Cursor, Copilot, or Aider? Your editor wasn't designed for agents. Minga was.
+- **[For AI-assisted developers](docs/FOR-AI-CODERS.md):** Using Claude Code, Cursor, Copilot, or Aider? Your editor wasn't designed for concurrent autonomous agents. Minga was.
 - **[For Neovim users](docs/FOR-NEOVIM-USERS.md):** Same modal editing, better runtime. Why the BEAM solves problems Neovim can't fix without a rewrite.
 - **[For Emacs users](docs/FOR-EMACS-USERS.md):** Same depth of customization, none of the single-threaded pain. Elixir is Minga's Elisp.
 

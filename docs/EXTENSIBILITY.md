@@ -1,8 +1,8 @@
 # Elixir is Minga's Elisp
 
-> **Looking for the full Emacs-to-Minga pitch?** See > [For Emacs Users](FOR-EMACS-USERS.md). This document is the technical > deep-dive proving Elixir matches Elisp's extensibility, and where it's > stronger.
+> **Looking for the full Emacs-to-Minga pitch?** See [For Emacs Users](FOR-EMACS-USERS.md). This document is the technical deep-dive proving Elixir matches Elisp's extensibility, and where it's stronger.
 
-A detailed comparison of Elisp and Elixir as editor extension languages. proof that Elixir on the BEAM matches every property that makes Emacs programmable, and where it's stronger.
+A detailed comparison of Elisp and Elixir as editor extension languages: proof that Elixir on the BEAM matches every property that makes Emacs programmable, and where it's stronger.
 
 ---
 
@@ -14,7 +14,7 @@ Let's be specific about what Emacs users actually mean when they say "you can mo
 2. **Advice system:** wrap, replace, or intercept any function without modifying the original
 3. **Hooks:** attach custom behavior to events (buffer open, save, mode change)
 4. **Buffer-local variables:** any variable can be overridden for a single buffer
-5. **Live evaluation:** `M-:`, `eval-buffer`, `eval-region`. run code in the running editor
+5. **Live evaluation:** `M-:`, `eval-buffer`, `eval-region`. Run code in the running editor
 6. **Introspection:** `describe-function`, `describe-variable`, `describe-key`. Inspect anything
 7. **The config IS the language:** `init.el` is real Elisp, not a YAML file or a limited DSL
 
@@ -26,7 +26,7 @@ These are the properties that make Emacs Emacs. Any replacement must match all s
 
 ### 1. Redefine any function at runtime ✅
 
-The BEAM was designed for hot code reloading. Erlang telecom switches upgrade running code without dropping active phone calls. Elixir inherits this fully.
+The BEAM was designed for hot code reloading. Erlang systems upgrade running code without dropping active connections. Elixir inherits this fully.
 
 **Elisp:**
 ```elisp
@@ -96,7 +96,7 @@ end
 
 The implementation is straightforward: the command registry wraps the original function with the advice chain. Because commands are dispatched through GenServers, the wrapping is atomic. You can't hit a half-applied advice state.
 
-**Where Elixir is stronger:** In Emacs, badly written advice can crash the editor. In Minga, advice runs inside a supervised process. A crash in your `:before` advice kills that command execution, not the editor. The supervisor recovers, you see an error message, and you keep editing.
+**Where Elixir is stronger:** Advice runs inside a supervised process. If your `:before` advice raises an error, it takes down that command execution, not the editor. The supervisor recovers, you see an error message, and you keep editing. In Emacs, badly written advice can leave the editor in a half-modified, inconsistent state.
 
 ### 3. Hooks ✅
 
@@ -124,7 +124,7 @@ on :mode_change, fn buffer_pid, old_mode, new_mode ->
 end
 ```
 
-**Where Elixir is stronger:** Hooks can run concurrently. An `:after_save` hook that runs `mix format` doesn't block your typing. It's a separate process. In Emacs, `after-save-hook` runs synchronously. A slow hook freezes your editor until it completes.
+**Where Elixir is stronger:** Hooks run concurrently in their own processes. An `:after_save` hook that runs `mix format` doesn't block your typing. It's a separate process on a separate scheduler thread. In Emacs, `after-save-hook` runs synchronously. A slow hook freezes your editor until it completes.
 
 ### 4. Buffer-local variables ✅
 
@@ -150,7 +150,7 @@ Minga.Config.set(:tab_size, 4)
 # There is no ambiguity. Process boundaries enforce the separation.
 ```
 
-**Where Elixir is stronger:** There's no `make-local-variable` dance. A buffer's options are *always* local to that buffer's process. You cannot accidentally mutate another buffer's state. The VM prevents it. In Emacs, forgetting `setq-local` vs `setq` has caused countless bugs in packages.
+**Where Elixir is stronger:** There's no `make-local-variable` dance. A buffer's options are *always* local to that buffer's process. You cannot accidentally mutate another buffer's state because processes don't share memory. The VM enforces the isolation. In Emacs, forgetting `setq-local` vs `setq` has caused countless bugs in packages.
 
 ### 5. Live evaluation ✅
 
@@ -192,7 +192,7 @@ DynamicSupervisor.which_children(Minga.Buffer.Supervisor)
 :dbg.p(Process.whereis(Minga.Editor), [:receive])
 ```
 
-Emacs has nothing comparable to `:observer.start()`, a full GUI dashboard showing every process, their memory usage, message queues, and CPU time.
+Emacs has nothing comparable to `:observer.start()`, a full GUI dashboard showing every process, their memory usage, message queues, and CPU time. This kind of observability exists because the BEAM was built for systems that must be debuggable without stopping.
 
 ### 6. Introspection ✅
 
@@ -277,7 +277,7 @@ Honest accounting of what's different:
 | **Execution model** | Single-threaded interpreter | Multi-process preemptive VM |
 | **Function redefinition** | Immediate, per-function | Per-module reload (~50ms) |
 | **Eval speed** | Interpreted (fast for small exprs) | Interpreted via `Code.eval_string` (comparable) |
-| **Crash behavior** | Crashes Emacs or corrupts state | Crashes one process; supervisor restarts it |
+| **Failure behavior** | Can leave editor in inconsistent state | Contained to one process; supervisor recovers |
 | **Extension concurrency** | None (slow extension freezes editor) | Extensions are processes; can't block UI |
 | **State model** | Global mutable state (footgun-prone) | Per-process state (isolated by default) |
 | **Community packages** | MELPA (thousands of packages) | Hex (large Elixir ecosystem, not editor-specific yet) |
@@ -305,17 +305,17 @@ end
 
 In Emacs, this would freeze your editor for 2 seconds. Every time you save.
 
-### Crash-safe extensions
+### Isolated extensions
 ```elixir
-# Your buggy command crashes? The supervisor restarts the process.
-# Your buffers, undo history, and open files are untouched.
-command :risky_thing, "Might crash" do
+# Your buggy command raises an error? It's contained to that process.
+# Your buffers, undo history, and open files are in separate processes, untouched.
+command :risky_thing, "Might fail" do
   dangerous_operation!()  # raises an exception
 end
 # Result: error message in status bar. Editor keeps running.
 ```
 
-In Emacs, `(error ...)` in a hook can leave the editor in a half-modified state. In Minga, it's a process crash: clean, contained, recoverable.
+In Emacs, `(error ...)` in a hook can leave the editor in a half-modified state. In Minga, it's a contained failure: the supervisor recovers the process, and nothing outside that process is affected.
 
 ### Live process inspection
 ```elixir
@@ -329,14 +329,13 @@ In Emacs, `(error ...)` in a hook can leave the editor in a half-modified state.
 :sys.get_state(buffer_pid)  # inspect buffer state live
 ```
 
-Emacs has `describe-function` and `edebug`. The BEAM has an entire production observability toolkit because it was built for systems that run 24/7 and must be debuggable without stopping.
+Emacs has `describe-function` and `edebug`. The BEAM has a production-grade observability toolkit because it was built for systems that must be debuggable without stopping. You can inspect any process's state, trace message flow, monitor memory per-component, all live, in a running editor.
 
 ### Native concurrency for AI agents
 ```elixir
 # AI agent running in its own supervised process tree
-# Can modify buffers via message passing, can't corrupt state
-# Can crash without affecting the editor
-# Can run alongside your typing, preemptive scheduler guarantees it
+# Communicates with buffers via message passing, can't interfere with state
+# Runs concurrently with your typing, preemptive scheduler guarantees it
 Agent.Session.start(provider: :claude, buffer: current_buffer())
 ```
 
@@ -350,6 +349,6 @@ Elisp's power comes from two things: *it's the same language as the editor* and 
 
 The config is Elixir. The editor is Elixir. When you customize, you're writing the same code as the editor source. When you redefine a function, the BEAM hot-loads it. When you set a buffer-local option, you're updating a process's state.
 
-And you get things Elisp never had: crash isolation, concurrent extensions, per-process garbage collection, and a VM that was purpose-built for systems that cannot go down.
+And you get things Elisp never had: structural isolation between components, concurrent extensions, per-process garbage collection, production-grade observability, and a VM that was purpose-built for systems that must stay responsive under load.
 
 Minga isn't a Lisp machine. It's a BEAM machine. And for building a resilient, extensible editor, that's better.
