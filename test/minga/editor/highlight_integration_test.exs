@@ -35,14 +35,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       )
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans != [], "Pre-condition: file1 should have spans"
+      assert state.highlight.current.spans != [], "Pre-condition: file1 should have spans"
 
       # Open second file via :e — triggers buffer switch
       send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.spans == [],
+      assert state.highlight.current.spans == [],
              "Stale spans from file1 persisted after :e to file2"
     end
 
@@ -67,14 +67,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       )
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans != [], "Pre-condition: file2 should have spans"
+      assert state.highlight.current.spans != [], "Pre-condition: file2 should have spans"
 
       # Switch to previous buffer via SPC b n
       send_keys(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.spans == [],
+      assert state.highlight.current.spans == [],
              "Stale spans from file2 persisted after SPC b n"
     end
   end
@@ -99,7 +99,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans == spans_a
+      assert state.highlight.current.spans == spans_a
 
       # Open file2 via SPC f f picker
       send_keys(ctx, "<Space>ff")
@@ -111,7 +111,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       state = :sys.get_state(ctx.editor)
       File.cd!(original_dir)
 
-      assert state.highlight.spans == [],
+      assert state.highlight.current.spans == [],
              "Stale spans from file1 persisted after SPC f f to file2"
     end
 
@@ -144,10 +144,10 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       File.cd!(original_dir)
 
       # Verify cache was populated for file1
-      assert Map.has_key?(state.highlight_cache, buf1_pid),
+      assert Map.has_key?(state.highlight.cache, buf1_pid),
              "Expected file1 highlights to be cached after picker switch"
 
-      cached = state.highlight_cache[buf1_pid]
+      cached = state.highlight.cache[buf1_pid]
       assert cached.spans == spans_a
     end
   end
@@ -229,15 +229,15 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Switch to file2
       send_keys(ctx, ":e #{path2}<CR>")
 
-      assert :sys.get_state(ctx.editor).highlight.spans == []
+      assert :sys.get_state(ctx.editor).highlight.current.spans == []
 
       # Switch back to file1 via :e (should already be in buffer list)
       send_keys(ctx, ":e #{path1}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.spans == spans_a,
-             "Expected cached spans restored via :e, got: #{inspect(state.highlight.spans)}"
+      assert state.highlight.current.spans == spans_a,
+             "Expected cached spans restored via :e, got: #{inspect(state.highlight.current.spans)}"
     end
   end
 
@@ -258,21 +258,21 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans == spans_a
+      assert state.highlight.current.spans == spans_a
 
       # Open file2 and switch to it
       send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans == [], "File2 should start with empty spans"
+      assert state.highlight.current.spans == [], "File2 should start with empty spans"
 
       # Switch back to file1 — should restore cached highlights instantly
       send_keys(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.spans == spans_a,
-             "Expected cached spans from file1 to be restored, got: #{inspect(state.highlight.spans)}"
+      assert state.highlight.current.spans == spans_a,
+             "Expected cached spans from file1 to be restored, got: #{inspect(state.highlight.current.spans)}"
     end
   end
 
@@ -292,8 +292,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         )
 
       state = :sys.get_state(editor)
-      assert state.highlight.spans == []
-      assert state.highlight.capture_names == []
+      assert state.highlight.current.spans == []
+      assert state.highlight.current.capture_names == []
     end
   end
 
@@ -307,9 +307,9 @@ defmodule Minga.Editor.HighlightIntegrationTest do
           %{start_byte: 10, end_byte: 15, capture_id: 1}
         ])
 
-      assert state.highlight.capture_names == ["keyword", "string", "comment"]
-      assert length(state.highlight.spans) == 2
-      assert state.highlight.version == 1
+      assert state.highlight.current.capture_names == ["keyword", "string", "comment"]
+      assert length(state.highlight.current.spans) == 2
+      assert state.highlight.current.version == 1
     end
 
     test "receiving new names clears old names without affecting spans" do
@@ -319,8 +319,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
         |> HighlightSync.handle_names(["new_keyword", "new_string"])
 
-      assert state.highlight.capture_names == ["new_keyword", "new_string"]
-      assert length(state.highlight.spans) == 1
+      assert state.highlight.current.capture_names == ["new_keyword", "new_string"]
+      assert length(state.highlight.current.spans) == 1
     end
   end
 
@@ -336,12 +336,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}]}}
       )
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       # dd deletes the current line
       send_keys(ctx, "dd")
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after dd (#{version_before} → #{version_after})"
@@ -357,11 +357,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
       )
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       send_key(ctx, ?x)
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after x"
@@ -380,11 +380,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Yank a word first (yw), then paste
       send_keys(ctx, "yw")
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       send_key(ctx, ?p)
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after p"
@@ -403,12 +403,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Make a change first
       send_key(ctx, ?x)
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       # Undo
       send_key(ctx, ?u)
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after undo"
@@ -424,12 +424,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
       )
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       # Pure motions: h, j, k, l, w
       send_keys(ctx, "llljkw")
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after == version_before,
              "Expected highlight_version unchanged after motions (#{version_before} → #{version_after})"
@@ -447,8 +447,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert_row_contains(ctx, 0, "just plain text")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.capture_names == []
-      assert state.highlight.spans == []
+      assert state.highlight.current.capture_names == []
+      assert state.highlight.current.spans == []
     end
 
     test "empty file renders without crash" do
@@ -456,7 +456,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Should show empty first line and tildes
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans == []
+      assert state.highlight.current.spans == []
     end
 
     test "file with syntax errors still renders partial highlights" do
@@ -508,12 +508,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
       )
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       send_key(ctx, ?i)
       send_key(ctx, ?a)
 
-      version_after = :sys.get_state(ctx.editor).highlight_version
+      version_after = :sys.get_state(ctx.editor).highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after insert mode typing"

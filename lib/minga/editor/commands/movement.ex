@@ -267,13 +267,14 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec split_window(state(), WindowTree.direction()) :: state()
-  defp split_window(%{window_tree: nil} = state, _direction), do: state
+  defp split_window(%{windows: %{tree: nil}} = state, _direction), do: state
 
   defp split_window(state, direction) do
-    active_id = state.active_window
-    new_id = state.next_window_id
+    ws = state.windows
+    active_id = ws.active
+    new_id = ws.next_id
 
-    case WindowTree.split(state.window_tree, active_id, direction, new_id) do
+    case WindowTree.split(ws.tree, active_id, direction, new_id) do
       {:ok, new_tree} -> apply_split(state, new_tree, active_id, new_id)
       :error -> state
     end
@@ -281,7 +282,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
   defp apply_split(state, new_tree, active_id, new_id) do
-    active_window = Map.fetch!(state.windows, active_id)
+    active_window = Map.fetch!(state.windows.map, active_id)
     cursor = BufferServer.cursor(active_window.buffer)
 
     # New window gets a copy of the current cursor position
@@ -290,11 +291,16 @@ defmodule Minga.Editor.Commands.Movement do
     # Also snapshot the current cursor into the active window
     state = EditorState.update_window(state, active_id, &%{&1 | cursor: cursor})
 
+    ws = state.windows
+
     state = %{
       state
-      | window_tree: new_tree,
-        windows: Map.put(state.windows, new_id, new_window),
-        next_window_id: new_id + 1
+      | windows: %{
+          ws
+          | tree: new_tree,
+            map: Map.put(ws.map, new_id, new_window),
+            next_id: new_id + 1
+        }
     }
 
     resize_windows_to_layout(state)
@@ -303,7 +309,7 @@ defmodule Minga.Editor.Commands.Movement do
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
     screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.window_tree, screen)
+    layouts = WindowTree.layout(state.windows.tree, screen)
 
     Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
       EditorState.update_window(acc, id, &Window.resize(&1, height, width))
@@ -311,36 +317,36 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec navigate_window(state(), WindowTree.nav_direction()) :: state()
-  defp navigate_window(%{window_tree: nil} = state, _direction), do: state
+  defp navigate_window(%{windows: %{tree: nil}} = state, _direction), do: state
 
   defp navigate_window(state, direction) do
     screen = EditorState.screen_rect(state)
 
-    case WindowTree.focus_neighbor(state.window_tree, state.active_window, direction, screen) do
+    case WindowTree.focus_neighbor(state.windows.tree, state.windows.active, direction, screen) do
       {:ok, neighbor_id} -> EditorState.focus_window(state, neighbor_id)
       :error -> state
     end
   end
 
   @spec close_window(state()) :: state()
-  defp close_window(%{window_tree: nil} = state), do: state
+  defp close_window(%{windows: %{tree: nil}} = state), do: state
 
   defp close_window(state) do
-    case WindowTree.close(state.window_tree, state.active_window) do
+    ws = state.windows
+
+    case WindowTree.close(ws.tree, ws.active) do
       {:ok, new_tree} ->
-        old_id = state.active_window
+        old_id = ws.active
         remaining = WindowTree.leaves(new_tree)
         new_active = hd(remaining)
-        new_active_window = Map.fetch!(state.windows, new_active)
+        new_active_window = Map.fetch!(ws.map, new_active)
 
         # Restore the surviving window's cursor into the buffer
         BufferServer.move_to(new_active_window.buffer, new_active_window.cursor)
 
         %{
           state
-          | window_tree: new_tree,
-            windows: Map.delete(state.windows, old_id),
-            active_window: new_active,
+          | windows: %{ws | tree: new_tree, map: Map.delete(ws.map, old_id), active: new_active},
             buffers: %{state.buffers | active: new_active_window.buffer}
         }
 

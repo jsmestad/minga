@@ -134,12 +134,12 @@ defmodule Minga.Editor.Mouse do
   # If the click is on a separator, start a resize drag and return state
   # with resize_dragging set. Otherwise return state unchanged.
   @spec maybe_start_separator_drag(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_start_separator_drag(%{window_tree: nil} = state, _row, _col), do: state
+  defp maybe_start_separator_drag(%{windows: %{tree: nil}} = state, _row, _col), do: state
 
   defp maybe_start_separator_drag(state, row, col) do
     screen = EditorState.screen_rect(state)
 
-    case WindowTree.separator_at(state.window_tree, screen, row, col) do
+    case WindowTree.separator_at(state.windows.tree, screen, row, col) do
       {:ok, {dir, sep_pos}} ->
         %{state | mouse: MouseState.start_resize(state.mouse, dir, sep_pos)}
 
@@ -164,11 +164,11 @@ defmodule Minga.Editor.Mouse do
   defp handle_separator_drag(state, dir, sep_pos, new_pos) do
     screen = EditorState.screen_rect(state)
 
-    case WindowTree.resize_at(state.window_tree, screen, dir, sep_pos, new_pos) do
+    case WindowTree.resize_at(state.windows.tree, screen, dir, sep_pos, new_pos) do
       {:ok, new_tree} ->
         state = %{
           state
-          | window_tree: new_tree,
+          | windows: %{state.windows | tree: new_tree},
             mouse: MouseState.update_resize(state.mouse, dir, new_pos)
         }
 
@@ -182,7 +182,7 @@ defmodule Minga.Editor.Mouse do
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
     screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.window_tree, screen)
+    layouts = WindowTree.layout(state.windows.tree, screen)
 
     Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
       EditorState.update_window(acc, id, &Window.resize(&1, height, width))
@@ -213,12 +213,12 @@ defmodule Minga.Editor.Mouse do
 
   # Focus the window under the mouse click (split mode only).
   @spec maybe_focus_window_at(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_focus_window_at(%{window_tree: nil} = state, _row, _col), do: state
+  defp maybe_focus_window_at(%{windows: %{tree: nil}} = state, _row, _col), do: state
 
   defp maybe_focus_window_at(state, row, col) do
     screen = EditorState.screen_rect(state)
 
-    case WindowTree.window_at(state.window_tree, screen, row, col) do
+    case WindowTree.window_at(state.windows.tree, screen, row, col) do
       {:ok, id, _rect} -> EditorState.focus_window(state, id)
       :error -> state
     end
@@ -312,9 +312,9 @@ defmodule Minga.Editor.Mouse do
   defp mouse_to_buffer_pos_split(state, row, col) do
     screen = EditorState.screen_rect(state)
 
-    case WindowTree.window_at(state.window_tree, screen, row, col) do
+    case WindowTree.window_at(state.windows.tree, screen, row, col) do
       {:ok, id, {win_row, win_col, _win_w, win_h}} ->
-        window = Map.fetch!(state.windows, id)
+        window = Map.fetch!(state.windows.map, id)
         buf = window.buffer
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)

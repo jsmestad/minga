@@ -151,7 +151,7 @@ defmodule Minga.Editor.Renderer do
 
     # 4. Build render context (invariant per frame) and render lines.
     highlight =
-      if state.highlight.capture_names != [], do: state.highlight, else: nil
+      if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
 
     render_ctx = %Context{
       viewport: viewport,
@@ -316,7 +316,7 @@ defmodule Minga.Editor.Renderer do
   @spec render_split(state()) :: :ok
   defp render_split(state) do
     screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.window_tree, screen)
+    layouts = WindowTree.layout(state.windows.tree, screen)
     full_viewport = state.viewport
 
     clear = [Protocol.encode_clear()]
@@ -329,7 +329,7 @@ defmodule Minga.Editor.Renderer do
 
     # Render vertical separators between side-by-side panes
     {_screen_row, _screen_col, _screen_w, screen_h} = screen
-    separator_commands = render_separators(state.window_tree, screen, screen_h, state.theme)
+    separator_commands = render_separators(state.windows.tree, screen, screen_h, state.theme)
 
     # ── Global elements (minibuffer, whichkey, picker) use full viewport ──
     minibuffer_row = full_viewport.rows - 1
@@ -402,7 +402,7 @@ defmodule Minga.Editor.Renderer do
          {win_id, {row_off, col_off, width, height}},
          {cmds_acc, cursor_acc}
        ) do
-    window = Map.get(state.windows, win_id)
+    window = Map.get(state.windows.map, win_id)
 
     is_terminal =
       state.terminal != nil and state.terminal.open and state.terminal.window_id == win_id
@@ -410,7 +410,7 @@ defmodule Minga.Editor.Renderer do
     if window == nil or window.buffer == nil or is_terminal do
       {cmds_acc, cursor_acc}
     else
-      is_active = win_id == state.active_window
+      is_active = win_id == state.windows.active
       win_viewport = Viewport.new(height, width)
 
       {win_cmds, cursor_info} =
@@ -610,9 +610,9 @@ defmodule Minga.Editor.Renderer do
   defp window_highlight(state, window) do
     hl =
       if window.buffer == state.buffers.active do
-        state.highlight
+        state.highlight.current
       else
-        Map.get(state.highlight_cache, window.buffer, Minga.Highlight.from_theme(state.theme))
+        Map.get(state.highlight.cache, window.buffer, Minga.Highlight.from_theme(state.theme))
       end
 
     if hl.capture_names != [], do: hl, else: nil

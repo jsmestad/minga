@@ -208,11 +208,17 @@ pub const Terminal = struct {
 
     /// Cleans up the PTY and libvterm.
     pub fn deinit(self: *Terminal) void {
+        std.log.info("Terminal.deinit: alive={} pty_fd={d} pid={d}", .{ self.alive, self.pty_fd, self.child_pid });
         if (self.alive) {
             _ = c.kill(self.child_pid, c.SIGTERM);
             _ = c.waitpid(self.child_pid, null, 0);
         }
-        std.posix.close(self.pty_fd);
+        // Use C close() instead of std.posix.close() because the latter
+        // panics on EBADF in safe mode. The PTY fd may already be closed
+        // if the child process exited and the kernel cleaned up.
+        if (self.pty_fd >= 0) {
+            _ = c.close(self.pty_fd);
+        }
         c.minga_vterm_free(self.vt);
     }
 };

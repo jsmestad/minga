@@ -393,7 +393,11 @@ pub const TuiRuntime = struct {
         switch (cmd) {
             .open_terminal => |ot| {
                 // Close existing terminal if any
-                if (self.term) |*t| t.deinit();
+                std.log.info("open_terminal: shell={s} rows={d} cols={d}", .{ ot.shell, ot.rows, ot.cols });
+                if (self.term) |*t| {
+                    std.log.info("open_terminal: closing existing terminal", .{});
+                    t.deinit();
+                }
 
                 // Need a null-terminated shell path for execvp
                 var shell_buf: [256]u8 = undefined;

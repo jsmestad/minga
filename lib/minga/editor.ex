@@ -121,6 +121,7 @@ defmodule Minga.Editor do
     initial_window_id = 1
 
     alias Minga.Editor.State.Buffers
+    alias Minga.Editor.State.Windows
 
     initial_window =
       if active_buf do
@@ -144,10 +145,12 @@ defmodule Minga.Editor do
       viewport: viewport,
       mode: :normal,
       mode_state: Mode.initial_state(),
-      window_tree: WindowTree.new(initial_window_id),
-      windows: windows,
-      active_window: initial_window_id,
-      next_window_id: initial_window_id + 1
+      windows: %Windows{
+        tree: WindowTree.new(initial_window_id),
+        map: windows,
+        active: initial_window_id,
+        next_id: initial_window_id + 1
+      }
     }
 
     state = log_message(state, "Editor started")
@@ -399,7 +402,12 @@ defmodule Minga.Editor do
     # Cache the updated highlights for this buffer
     new_state =
       if new_state.buffers.active do
-        put_in(new_state.highlight_cache[new_state.buffers.active], new_state.highlight)
+        hl = new_state.highlight
+
+        %{
+          new_state
+          | highlight: %{hl | cache: Map.put(hl.cache, new_state.buffers.active, hl.current)}
+        }
       else
         new_state
       end
@@ -790,21 +798,27 @@ defmodule Minga.Editor do
 
     if new_buffer != old_buffer and new_buffer != nil do
       # Save current highlights for the old buffer
+      hl = state.highlight
+
       cache =
-        if old_buffer != nil and state.highlight.capture_names != [] do
-          Map.put(state.highlight_cache, old_buffer, state.highlight)
+        if old_buffer != nil and hl.current.capture_names != [] do
+          Map.put(hl.cache, old_buffer, hl.current)
         else
-          state.highlight_cache
+          hl.cache
         end
 
       # Restore cached highlights for the new buffer, or setup fresh
       case Map.get(cache, new_buffer) do
         nil ->
           send(self(), :setup_highlight)
-          %{state | highlight: Minga.Highlight.from_theme(state.theme), highlight_cache: cache}
+
+          %{
+            state
+            | highlight: %{hl | current: Minga.Highlight.from_theme(state.theme), cache: cache}
+          }
 
         cached ->
-          %{state | highlight: cached, highlight_cache: cache}
+          %{state | highlight: %{hl | current: cached, cache: cache}}
       end
     else
       state
@@ -826,7 +840,7 @@ defmodule Minga.Editor do
         state
       end
 
-    if content_changed and state.highlight.capture_names != [] do
+    if content_changed and state.highlight.current.capture_names != [] do
       HighlightSync.request_reparse(state)
     else
       state
@@ -1053,11 +1067,11 @@ defmodule Minga.Editor do
   # ── Window resize ────────────────────────────────────────────────────────
 
   @spec resize_all_windows(state()) :: state()
-  defp resize_all_windows(%{window_tree: nil} = state), do: state
+  defp resize_all_windows(%{windows: %{tree: nil}} = state), do: state
 
   defp resize_all_windows(state) do
     screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.window_tree, screen)
+    layouts = WindowTree.layout(state.windows.tree, screen)
 
     Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
       EditorState.update_window(acc, id, fn window ->

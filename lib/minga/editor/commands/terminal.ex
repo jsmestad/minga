@@ -46,14 +46,15 @@ defmodule Minga.Editor.Commands.Terminal do
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec open_terminal(state()) :: state()
-  defp open_terminal(%{window_tree: nil} = state), do: state
+  defp open_terminal(%EditorState{windows: %{tree: nil}} = state), do: state
 
-  defp open_terminal(state) do
+  defp open_terminal(%EditorState{} = state) do
     terminal = state.terminal || Terminal.new()
+    ws = state.windows
 
     # Create a new window for the terminal in a bottom horizontal split
-    new_id = state.next_window_id
-    root_tree = state.window_tree
+    new_id = ws.next_id
+    root_tree = ws.tree
 
     # Split the root horizontally: editor on top, terminal on bottom
     new_tree = {:split, :horizontal, root_tree, {:leaf, new_id}, 0}
@@ -63,9 +64,9 @@ defmodule Minga.Editor.Commands.Terminal do
     layouts = WindowTree.layout(new_tree, screen)
 
     {row_offset, col_offset, cols, rows} =
-      case Map.get(layouts, new_id) do
+      case List.keyfind(layouts, new_id, 0) do
         nil -> {0, 0, 80, 12}
-        rect -> rect
+        {^new_id, rect} -> rect
       end
 
     # Create a placeholder window for the terminal leaf in the tree
@@ -82,9 +83,12 @@ defmodule Minga.Editor.Commands.Terminal do
     # Resize existing windows to account for the new split
     state = %{
       state
-      | window_tree: new_tree,
-        windows: Map.put(state.windows, new_id, placeholder_window),
-        next_window_id: new_id + 1,
+      | windows: %{
+          ws
+          | tree: new_tree,
+            map: Map.put(ws.map, new_id, placeholder_window),
+            next_id: new_id + 1
+        },
         terminal: terminal,
         mode: :terminal,
         status_msg: "TERMINAL (C-\\ C-n to return)"
@@ -94,46 +98,44 @@ defmodule Minga.Editor.Commands.Terminal do
   end
 
   @spec close_terminal(state()) :: state()
-  defp close_terminal(%{terminal: %Terminal{window_id: nil}} = state) do
+  defp close_terminal(%EditorState{terminal: %Terminal{window_id: nil}} = state) do
     %{state | terminal: Terminal.close(state.terminal)}
   end
 
-  defp close_terminal(%{terminal: %Terminal{window_id: wid}} = state) do
+  defp close_terminal(%EditorState{terminal: %Terminal{window_id: wid}} = state) do
     # Send close command to Zig
     Manager.send_commands(state.port_manager, [Protocol.encode_close_terminal()])
 
+    ws = state.windows
+
     # Remove the terminal window from the tree
     new_tree =
-      case WindowTree.close(state.window_tree, wid) do
+      case WindowTree.close(ws.tree, wid) do
         {:ok, tree} -> tree
-        :error -> state.window_tree
+        :error -> ws.tree
       end
 
     # If we were focused on the terminal, switch to a real window
     new_active =
-      if state.active_window == wid do
+      if ws.active == wid do
         hd(WindowTree.leaves(new_tree))
       else
-        state.active_window
+        ws.active
       end
 
-    new_windows = Map.delete(state.windows, wid)
-    active_window = Map.get(new_windows, new_active)
+    new_map = Map.delete(ws.map, wid)
+    active_window = Map.get(new_map, new_active)
     active_buf = if active_window, do: active_window.buffer, else: state.buffers.active
 
-    state = %{
+    %{
       state
-      | window_tree: new_tree,
-        windows: new_windows,
-        active_window: new_active,
+      | windows: %{ws | tree: new_tree, map: new_map, active: new_active},
         terminal: Terminal.close(state.terminal),
         mode: :normal,
         mode_state: nil,
         buffers: %{state.buffers | active: active_buf},
         status_msg: nil
     }
-
-    resize_windows(state)
   end
 
   @spec focus_terminal(state()) :: state()
@@ -150,9 +152,9 @@ defmodule Minga.Editor.Commands.Terminal do
   end
 
   @spec resize_windows(state()) :: state()
-  defp resize_windows(state) do
+  defp resize_windows(%EditorState{} = state) do
     screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.window_tree, screen)
+    layouts = WindowTree.layout(state.windows.tree, screen)
 
     state =
       Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
@@ -162,8 +164,8 @@ defmodule Minga.Editor.Commands.Terminal do
     # If terminal is open, update its dimensions and tell Zig
     case state.terminal do
       %Terminal{open: true, window_id: wid} when is_integer(wid) ->
-        case Map.get(layouts, wid) do
-          {row_offset, col_offset, cols, rows} ->
+        case List.keyfind(layouts, wid, 0) do
+          {^wid, {row_offset, col_offset, cols, rows}} ->
             terminal = Terminal.resize(state.terminal, rows, cols, row_offset, col_offset)
             cmd = Protocol.encode_resize_terminal(rows, cols, row_offset, col_offset)
             Manager.send_commands(state.port_manager, [cmd])

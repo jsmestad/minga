@@ -23,7 +23,7 @@ defmodule Minga.Editor.HighlightSyncTest do
       names = ["keyword", "string", "comment"]
       new_state = HighlightSync.handle_names(state, names)
 
-      assert new_state.highlight.capture_names == names
+      assert new_state.highlight.current.capture_names == names
     end
 
     test "replaces previous capture names" do
@@ -32,7 +32,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_names(["old"])
         |> HighlightSync.handle_names(["new1", "new2"])
 
-      assert state.highlight.capture_names == ["new1", "new2"]
+      assert state.highlight.current.capture_names == ["new1", "new2"]
     end
   end
 
@@ -47,8 +47,8 @@ defmodule Minga.Editor.HighlightSyncTest do
         base_state()
         |> HighlightSync.handle_spans(1, spans)
 
-      assert state.highlight.version == 1
-      assert state.highlight.spans == spans
+      assert state.highlight.current.version == 1
+      assert state.highlight.current.spans == spans
     end
 
     test "rejects stale spans with older version" do
@@ -60,8 +60,8 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(5, spans1)
         |> HighlightSync.handle_spans(3, spans2)
 
-      assert state.highlight.version == 5
-      assert state.highlight.spans == spans1
+      assert state.highlight.current.version == 5
+      assert state.highlight.current.spans == spans1
     end
 
     test "accepts spans with equal version" do
@@ -73,7 +73,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(5, spans1)
         |> HighlightSync.handle_spans(5, spans2)
 
-      assert state.highlight.spans == spans2
+      assert state.highlight.current.spans == spans2
     end
   end
 
@@ -92,7 +92,7 @@ defmodule Minga.Editor.HighlightSyncTest do
 
     test "returns state unchanged when no highlighting active" do
       state = base_state()
-      assert state.highlight.capture_names == []
+      assert state.highlight.current.capture_names == []
       assert HighlightSync.request_reparse(state) == state
     end
   end

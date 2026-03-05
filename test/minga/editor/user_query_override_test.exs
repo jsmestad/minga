@@ -38,9 +38,9 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       )
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans != []
+      assert state.highlight.current.spans != []
 
-      version_before = state.highlight_version
+      version_before = state.highlight.version
 
       # Run :reload-highlights
       send_keys(ctx, ":reload-highlights<CR>")
@@ -49,8 +49,8 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
       # Highlight state should be reset (new Highlight struct with empty spans)
       # and a new parse should be in-flight (version incremented)
-      assert state.highlight.spans == []
-      assert state.highlight_version > version_before
+      assert state.highlight.current.spans == []
+      assert state.highlight.version > version_before
     end
 
     @tag :tmp_dir
@@ -66,13 +66,13 @@ defmodule Minga.Editor.UserQueryOverrideTest do
         {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
       )
 
-      version_before = :sys.get_state(ctx.editor).highlight_version
+      version_before = :sys.get_state(ctx.editor).highlight.version
 
       send_keys(ctx, ":rh<CR>")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.spans == []
-      assert state.highlight_version > version_before
+      assert state.highlight.current.spans == []
+      assert state.highlight.version > version_before
     end
   end
 

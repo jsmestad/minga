@@ -31,13 +31,15 @@ defmodule Minga.Editor.HighlightSync do
         send_parse_only(state, language)
 
       :unsupported ->
-        %{state | highlight: Highlight.from_theme(state.theme)}
+        hl = state.highlight
+        %{state | highlight: %{hl | current: Highlight.from_theme(state.theme)}}
     end
   end
 
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
   defp send_parse_only(state, language) do
-    version = state.highlight_version + 1
+    hl = state.highlight
+    version = hl.version + 1
     content = BufferServer.content(state.buffers.active)
 
     query_override = user_query_override(language)
@@ -48,7 +50,7 @@ defmodule Minga.Editor.HighlightSync do
 
     PortManager.send_commands(state.port_manager, commands)
 
-    %{state | highlight: Highlight.from_theme(state.theme), highlight_version: version}
+    %{state | highlight: %{hl | current: Highlight.from_theme(state.theme), version: version}}
   end
 
   # Returns a list with a set_highlight_query command if the user has a custom
@@ -83,33 +85,37 @@ defmodule Minga.Editor.HighlightSync do
   @spec request_reparse(EditorState.t()) :: EditorState.t()
   def request_reparse(%EditorState{buffers: %{active: nil}} = state), do: state
 
-  def request_reparse(%EditorState{highlight: %{spans: []}} = state)
-      when state.highlight.capture_names == [] do
+  def request_reparse(
+        %EditorState{highlight: %{current: %{spans: [], capture_names: []}}} = state
+      ) do
     # No highlighting active — skip
     state
   end
 
   def request_reparse(%EditorState{} = state) do
-    version = state.highlight_version + 1
+    hl = state.highlight
+    version = hl.version + 1
     content = BufferServer.content(state.buffers.active)
 
     PortManager.send_commands(state.port_manager, [
       Protocol.encode_parse_buffer(version, content)
     ])
 
-    %{state | highlight_version: version}
+    %{state | highlight: %{hl | version: version}}
   end
 
   @doc "Handles a highlight_names event from Zig."
   @spec handle_names(EditorState.t(), [String.t()]) :: EditorState.t()
   def handle_names(%EditorState{} = state, names) do
-    %{state | highlight: Highlight.put_names(state.highlight, names)}
+    hl = state.highlight
+    %{state | highlight: %{hl | current: Highlight.put_names(hl.current, names)}}
   end
 
   @doc "Handles a highlight_spans event from Zig."
   @spec handle_spans(EditorState.t(), non_neg_integer(), [Minga.Port.Protocol.highlight_span()]) ::
           EditorState.t()
   def handle_spans(%EditorState{} = state, version, spans) do
-    %{state | highlight: Highlight.put_spans(state.highlight, version, spans)}
+    hl = state.highlight
+    %{state | highlight: %{hl | current: Highlight.put_spans(hl.current, version, spans)}}
   end
 end

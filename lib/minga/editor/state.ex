@@ -15,6 +15,8 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.WhichKey`  — which-key popup node, timer, visibility
   * `Minga.Editor.State.Search`    — last search pattern/direction, project results
   * `Minga.Editor.State.Registers` — named registers and active register selection
+  * `Minga.Editor.State.Windows`    — window tree, window map, active/next id
+  * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
   alias Minga.Buffer.Document
@@ -25,15 +27,16 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Highlighting
   alias Minga.Editor.State.Mouse
   alias Minga.Editor.State.Picker
   alias Minga.Editor.State.Registers
   alias Minga.Editor.State.Search
   alias Minga.Editor.State.WhichKey
+  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Highlight
   alias Minga.Mode
   alias Minga.Theme
 
@@ -67,17 +70,12 @@ defmodule Minga.Editor.State do
             marks: %{},
             last_jump_pos: nil,
             macro_recorder: MacroRecorder.new(),
-            highlight: Highlight.new(),
-            highlight_version: 0,
-            highlight_cache: %{},
+            highlight: %Highlighting{},
             lsp: DocumentSync.new(),
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
-            window_tree: nil,
-            windows: %{},
-            active_window: 1,
-            next_window_id: 2,
+            windows: %Windows{},
             terminal: nil
 
   @type t :: %__MODULE__{
@@ -101,17 +99,12 @@ defmodule Minga.Editor.State do
           marks: marks(),
           last_jump_pos: Document.position() | nil,
           macro_recorder: MacroRecorder.t(),
-          highlight: Highlight.t(),
-          highlight_version: non_neg_integer(),
-          highlight_cache: %{pid() => Highlight.t()},
+          highlight: Highlighting.t(),
           lsp: DocumentSync.t(),
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
-          window_tree: WindowTree.t() | nil,
-          windows: %{Window.id() => Window.t()},
-          active_window: Window.id(),
-          next_window_id: Window.id(),
+          windows: Windows.t(),
           terminal: Minga.Terminal.t() | nil
         }
 
@@ -129,25 +122,33 @@ defmodule Minga.Editor.State do
   @spec active_buffer(t()) :: non_neg_integer()
   def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
 
-  # ── Window accessors ──────────────────────────────────────────────────────
+  # ── Window delegates ────────────────────────────────────────────────────────
+  # Pure window-only logic lives in `Windows`. These delegators keep the
+  # call-site API stable so callers pass the full editor state.
 
   @doc "Returns the active window struct, or nil if windows aren't initialized."
   @spec active_window_struct(t()) :: Window.t() | nil
-  def active_window_struct(%__MODULE__{windows: windows, active_window: id}) do
-    Map.get(windows, id)
-  end
+  def active_window_struct(%__MODULE__{windows: ws}), do: Windows.active_struct(ws)
 
   @doc "Returns true if the editor has more than one window."
   @spec split?(t()) :: boolean()
-  def split?(%__MODULE__{window_tree: nil}), do: false
-  def split?(%__MODULE__{window_tree: {:leaf, _}}), do: false
-  def split?(%__MODULE__{window_tree: {:split, _, _, _, _}}), do: true
+  def split?(%__MODULE__{windows: ws}), do: Windows.split?(ws)
+
+  @doc "Updates the window struct for the given window id via a mapper function."
+  @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
+  def update_window(%__MODULE__{windows: ws} = state, id, fun) do
+    %{state | windows: Windows.update(ws, id, fun)}
+  end
+
+  # ── Other accessors ───────────────────────────────────────────────────────
 
   @doc "Returns the screen rect for layout computation, excluding the global minibuffer row."
   @spec screen_rect(t()) :: WindowTree.rect()
   def screen_rect(%__MODULE__{viewport: vp}) do
     {0, 0, vp.cols, vp.rows - 1}
   end
+
+  # ── Cross-cutting window + buffer helpers ─────────────────────────────────
 
   @doc """
   Syncs the active window's buffer reference with `state.buffers.active`.
@@ -159,11 +160,11 @@ defmodule Minga.Editor.State do
   def sync_active_window_buffer(%__MODULE__{buffers: %{active: nil}} = state), do: state
 
   def sync_active_window_buffer(
-        %__MODULE__{windows: windows, active_window: id, buffers: buffers} = state
+        %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: buffers} = state
       ) do
     case Map.fetch(windows, id) do
       {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
-        %{state | windows: Map.put(windows, id, %{window | buffer: buffers.active})}
+        %{state | windows: %{ws | map: Map.put(windows, id, %{window | buffer: buffers.active})}}
 
       _ ->
         state
@@ -204,12 +205,12 @@ defmodule Minga.Editor.State do
   def sync_active_window_cursor(%__MODULE__{buffers: %{active: nil}} = state), do: state
 
   def sync_active_window_cursor(
-        %__MODULE__{windows: windows, active_window: id, buffers: %{active: buf}} = state
+        %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: %{active: buf}} = state
       ) do
     case Map.fetch(windows, id) do
       {:ok, window} ->
         cursor = BufferServer.cursor(buf)
-        %{state | windows: Map.put(windows, id, %{window | cursor: cursor})}
+        %{state | windows: %{ws | map: Map.put(windows, id, %{window | cursor: cursor})}}
 
       :error ->
         state
@@ -223,14 +224,14 @@ defmodule Minga.Editor.State do
   No-op if `target_id` is already the active window or windows aren't set up.
   """
   @spec focus_window(t(), Window.id()) :: t()
-  def focus_window(%__MODULE__{active_window: active} = state, target_id)
+  def focus_window(%__MODULE__{windows: %{active: active}} = state, target_id)
       when target_id == active,
       do: state
 
   def focus_window(%__MODULE__{buffers: %{active: nil}} = state, _target_id), do: state
 
   def focus_window(
-        %__MODULE__{windows: windows, active_window: old_id, buffers: buffers} = state,
+        %__MODULE__{windows: %{map: windows, active: old_id} = ws, buffers: buffers} = state,
         target_id
       ) do
     case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
@@ -244,26 +245,12 @@ defmodule Minga.Editor.State do
 
         %{
           state
-          | windows: windows,
-            active_window: target_id,
+          | windows: %{ws | map: windows, active: target_id},
             buffers: %{buffers | active: target_win.buffer}
         }
 
       _ ->
         state
-    end
-  end
-
-  @doc """
-  Updates the window struct for the given window id.
-
-  Applies the given function to the window and stores the result.
-  """
-  @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update_window(%__MODULE__{windows: windows} = state, id, fun) when is_function(fun, 1) do
-    case Map.fetch(windows, id) do
-      {:ok, window} -> %{state | windows: Map.put(windows, id, fun.(window))}
-      :error -> state
     end
   end
 end
