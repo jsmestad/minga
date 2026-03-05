@@ -98,8 +98,14 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     _ = self.arena.reset(.retain_capacity);
                 },
 
-                // Highlight commands are handled by the event loop, not the renderer.
+                .set_title => |title| {
+                    // Set terminal window title via OSC 0
+                    self.surface.tty_writer.print("\x1b]0;{s}\x07", .{title}) catch {};
+                },
+
+                // Highlight and terminal commands are handled by the event loop, not the renderer.
                 .set_language, .parse_buffer, .set_highlight_query, .load_grammar => {},
+                .open_terminal, .close_terminal, .resize_terminal, .terminal_input, .terminal_focus => {},
             }
         }
     };
@@ -118,6 +124,16 @@ const MockSurface = struct {
     last_cell: ?Cell = null,
     mock_width: u16 = 80,
     mock_height: u16 = 24,
+    /// No-op writer that discards all output (satisfies set_title).
+    tty_writer: NullWriter = .{},
+
+    const NullWriter = struct {
+        pub fn print(self: *NullWriter, comptime fmt: []const u8, args: anytype) !void {
+            _ = self;
+            _ = fmt;
+            _ = args;
+        }
+    };
 
     pub fn clear(self: *MockSurface) void {
         self.clear_count += 1;

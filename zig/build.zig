@@ -129,6 +129,24 @@ pub fn build(b: *std.Build) void {
         });
     }
 
+    // ── libvterm C wrapper ──────────────────────────────────────────────
+    // Thin wrapper to avoid Zig cImport issues with C bitfield structs.
+    const vterm_wrapper = b.addLibrary(.{
+        .name = "vterm-wrapper",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = c_optimize,
+        }),
+    });
+    vterm_wrapper.root_module.link_libc = true;
+    vterm_wrapper.root_module.addIncludePath(b.path("vendor/libvterm/include"));
+    vterm_wrapper.root_module.addIncludePath(b.path("src"));
+    vterm_wrapper.root_module.addCSourceFile(.{
+        .file = b.path("src/vterm_wrapper.c"),
+        .flags = &.{"-std=c99"},
+    });
+
     // Main executable
     const exe = b.addExecutable(.{
         .name = "minga-renderer",
@@ -142,8 +160,10 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("build_options", build_options.createModule());
     exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     exe.root_module.addIncludePath(b.path("vendor/libvterm/include"));
+    exe.root_module.addIncludePath(b.path("src"));
     exe.linkLibrary(ts_lib);
     exe.linkLibrary(vterm_lib);
+    exe.linkLibrary(vterm_wrapper);
     for (grammar_libs) |gl| exe.linkLibrary(gl);
 
     // GUI backend: compile Swift, link AppKit/Foundation frameworks.
@@ -174,8 +194,10 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("build_options", build_options.createModule());
     tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     tests.root_module.addIncludePath(b.path("vendor/libvterm/include"));
+    tests.root_module.addIncludePath(b.path("src"));
     tests.linkLibrary(ts_lib);
     tests.linkLibrary(vterm_lib);
+    tests.linkLibrary(vterm_wrapper);
     for (grammar_libs) |gl| tests.linkLibrary(gl);
 
     if (backend == .gui) {

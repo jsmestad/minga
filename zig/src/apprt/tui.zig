@@ -13,6 +13,7 @@ const protocol = @import("../protocol.zig");
 const renderer_mod = @import("../renderer.zig");
 const surface_mod = @import("../surface.zig");
 const highlighter_mod = @import("../highlighter.zig");
+const terminal_mod = @import("../terminal.zig");
 const Cell = surface_mod.Cell;
 
 // ── VaxisSurface ──────────────────────────────────────────────────────────────
@@ -122,6 +123,8 @@ pub const TuiRuntime = struct {
     rend: renderer_mod.Renderer(VaxisSurface),
     hl: highlighter_mod.Highlighter,
     tty_write_buf: [4096]u8,
+    term: ?terminal_mod.Terminal = null,
+    terminal_focused: bool = false,
 
     /// Initialize the TUI runtime: open TTY, set up vaxis, enter alt screen.
     pub fn init(alloc: std.mem.Allocator) !TuiRuntime {
@@ -142,6 +145,9 @@ pub const TuiRuntime = struct {
         // Allocate screen buffers at the real terminal size.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
         try self.vx.resize(alloc, self.tty.writer(), initial_ws);
+
+        // Save the current terminal title so we can restore it on exit.
+        self.tty.writer().writeAll("\x1b[22;0t") catch {};
 
         // Alternate screen keeps existing terminal output intact.
         try self.vx.enterAltScreen(self.tty.writer());
@@ -186,8 +192,11 @@ pub const TuiRuntime = struct {
 
     /// Clean up: free renderer, vaxis, and restore terminal.
     pub fn deinit(self: *TuiRuntime) void {
+        if (self.term) |*t| t.deinit();
         self.hl.deinit();
         self.rend.deinit();
+        // Restore the terminal title saved at init.
+        self.tty.writer().writeAll("\x1b[23;0t") catch {};
         self.vx.deinit(self.alloc, self.tty.writer());
         self.tty.deinit();
     }
@@ -203,10 +212,15 @@ pub const TuiRuntime = struct {
 
         var msg_buf: [65536]u8 = undefined;
 
-        var pollfds = [2]std.posix.pollfd{
+        // pollfds: [0] = stdin (port), [1] = tty, [2] = pty (optional)
+        var pollfds = [3]std.posix.pollfd{
             .{ .fd = stdin_fd, .events = std.posix.POLL.IN, .revents = 0 },
             .{ .fd = self.tty.fd, .events = std.posix.POLL.IN, .revents = 0 },
+            .{ .fd = -1, .events = std.posix.POLL.IN, .revents = 0 },
         };
+
+        // Track C-\ C-n escape sequence: saw_ctrl_backslash
+        var saw_ctrl_backslash = false;
 
         main_loop: while (true) {
             if (g_quit.load(.acquire)) break :main_loop;
@@ -215,7 +229,43 @@ pub const TuiRuntime = struct {
                 try self.handleResize(stdout);
             }
 
-            _ = try std.posix.poll(&pollfds, 1000);
+            // Update PTY pollfd
+            const nfds: usize = if (self.term != null and self.term.?.alive) blk: {
+                pollfds[2].fd = self.term.?.pty_fd;
+                break :blk 3;
+            } else blk: {
+                pollfds[2].fd = -1;
+                break :blk 2;
+            };
+
+            _ = try std.posix.poll(pollfds[0..nfds], 100);
+
+            // PTY readable: read shell output and feed to libvterm
+            if (nfds == 3 and pollfds[2].revents & std.posix.POLL.IN != 0) {
+                if (self.term) |*t| {
+                    _ = t.processOutput() catch {};
+                    // Re-render terminal cells to surface
+                    t.render(&self.surface);
+                    self.surface.render() catch {};
+                }
+            }
+
+            // Check if PTY has HUP (child exited)
+            if (nfds == 3) {
+                const pty_hup: i16 = std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL;
+                if (pollfds[2].revents & pty_hup != 0) {
+                    if (self.term) |*t| {
+                        t.alive = false;
+                        // Notify Elixir
+                        var ebuf: [5]u8 = undefined;
+                        const elen = protocol.encodeTerminalExited(&ebuf, 0) catch 0;
+                        if (elen > 0) {
+                            protocol.writeMessage(stdout, ebuf[0..elen]) catch {};
+                            stdout.flush() catch {};
+                        }
+                    }
+                }
+            }
 
             // stdin readable (Port command from BEAM)
             if (pollfds[0].revents & std.posix.POLL.IN != 0) {
@@ -246,6 +296,11 @@ pub const TuiRuntime = struct {
                                 std.log.warn("highlight error: {}", .{err});
                             };
                         },
+                        .open_terminal, .close_terminal, .resize_terminal, .terminal_input, .terminal_focus => {
+                            self.handleTerminalCommand(cmd, stdout) catch |err| {
+                                std.log.warn("terminal error: {}", .{err});
+                            };
+                        },
                         else => {
                             self.rend.handleCommand(cmd) catch |err| {
                                 std.log.warn("renderer error: {}", .{err});
@@ -265,24 +320,126 @@ pub const TuiRuntime = struct {
                 const n = try std.posix.read(self.tty.fd, tty_read_buf[tty_read_start..]);
                 if (n == 0) break :main_loop;
 
-                var seq_start: usize = 0;
-                tty_parse_loop: while (seq_start < n) {
-                    const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
-                    if (result.n == 0) {
-                        const remaining = n - seq_start;
-                        std.mem.copyForwards(u8, tty_read_buf[0..remaining], tty_read_buf[seq_start..n]);
-                        tty_read_start = remaining;
-                        break :tty_parse_loop;
+                // When terminal is focused, forward raw bytes to PTY
+                // except for the C-\ C-n escape sequence.
+                if (self.terminal_focused and self.term != null and self.term.?.alive) {
+                    var i: usize = 0;
+                    var flush_start: usize = 0;
+                    while (i < n) : (i += 1) {
+                        if (saw_ctrl_backslash) {
+                            saw_ctrl_backslash = false;
+                            // C-n = 0x0E
+                            if (tty_read_buf[i] == 0x0E) {
+                                // C-\ C-n detected: flush preceding bytes, then unfocus
+                                if (i > flush_start + 1) {
+                                    // Write bytes before the C-\ (excluding C-\ itself)
+                                    self.term.?.writeInput(tty_read_buf[flush_start .. i - 1]) catch {};
+                                }
+                                flush_start = i + 1;
+                                self.terminal_focused = false;
+                                // Send a key event to Elixir to signal terminal unfocus
+                                // We use a synthetic "escape" key (codepoint 27) with no mods
+                                var kbuf: [6]u8 = undefined;
+                                const klen = protocol.encodeKeyPress(&kbuf, 27, 0) catch 0;
+                                if (klen > 0) {
+                                    protocol.writeMessage(stdout, kbuf[0..klen]) catch {};
+                                    stdout.flush() catch {};
+                                }
+                                break;
+                            }
+                            // Not C-n after C-\, forward both bytes
+                        }
+                        // C-\ = 0x1C
+                        if (tty_read_buf[i] == 0x1C) {
+                            saw_ctrl_backslash = true;
+                            // Flush bytes before C-\
+                            if (i > flush_start) {
+                                self.term.?.writeInput(tty_read_buf[flush_start..i]) catch {};
+                            }
+                            flush_start = i; // will include C-\ if not followed by C-n
+                            continue;
+                        }
                     }
-                    tty_read_start = 0;
-                    seq_start += result.n;
+                    // Flush remaining bytes
+                    if (flush_start < n and self.terminal_focused) {
+                        self.term.?.writeInput(tty_read_buf[flush_start..n]) catch {};
+                    }
+                } else {
+                    // Normal mode: parse key events and send to Elixir
+                    var seq_start: usize = 0;
+                    tty_parse_loop: while (seq_start < n) {
+                        const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
+                        if (result.n == 0) {
+                            const remaining = n - seq_start;
+                            std.mem.copyForwards(u8, tty_read_buf[0..remaining], tty_read_buf[seq_start..n]);
+                            tty_read_start = remaining;
+                            break :tty_parse_loop;
+                        }
+                        tty_read_start = 0;
+                        seq_start += result.n;
 
-                    const event = result.event orelse continue;
-                    handleTtyEvent(&self.vx, event, stdout) catch |err| {
-                        std.log.warn("tty event error: {}", .{err});
-                    };
+                        const event = result.event orelse continue;
+                        handleTtyEvent(&self.vx, event, stdout) catch |err| {
+                            std.log.warn("tty event error: {}", .{err});
+                        };
+                    }
                 }
             }
+        }
+    }
+
+    /// Handle terminal lifecycle commands from the port protocol.
+    fn handleTerminalCommand(self: *TuiRuntime, cmd: protocol.RenderCommand, stdout: *std.Io.Writer) !void {
+        switch (cmd) {
+            .open_terminal => |ot| {
+                // Close existing terminal if any
+                if (self.term) |*t| t.deinit();
+
+                // Need a null-terminated shell path for execvp
+                var shell_buf: [256]u8 = undefined;
+                if (ot.shell.len >= shell_buf.len) return error.Malformed;
+                @memcpy(shell_buf[0..ot.shell.len], ot.shell);
+                shell_buf[ot.shell.len] = 0;
+                const shell_z: [*:0]const u8 = @ptrCast(shell_buf[0..ot.shell.len :0]);
+
+                self.term = terminal_mod.Terminal.init(
+                    shell_z,
+                    ot.rows,
+                    ot.cols,
+                    ot.row_offset,
+                    ot.col_offset,
+                ) catch |err| {
+                    std.log.err("Failed to open terminal: {}", .{err});
+                    // Send terminal_exited immediately
+                    var ebuf: [5]u8 = undefined;
+                    const elen = try protocol.encodeTerminalExited(&ebuf, -1);
+                    try protocol.writeMessage(stdout, ebuf[0..elen]);
+                    try stdout.flush();
+                    return;
+                };
+                self.terminal_focused = true;
+            },
+            .close_terminal => {
+                if (self.term) |*t| {
+                    t.deinit();
+                    self.term = null;
+                    self.terminal_focused = false;
+                }
+            },
+            .resize_terminal => |rt| {
+                if (self.term) |*t| {
+                    t.resize(rt.rows, rt.cols, rt.row_offset, rt.col_offset);
+                }
+            },
+            .terminal_input => |data| {
+                if (self.term) |*t| {
+                    t.writeInput(data) catch {};
+                }
+            },
+            .terminal_focus => |focused| {
+                self.terminal_focused = focused;
+            },
+            else => {},
         }
     }
 
