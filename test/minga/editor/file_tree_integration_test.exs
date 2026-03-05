@@ -3,6 +3,8 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
   Integration tests for the file tree sidebar panel.
 
   Tests toggling the tree, navigation, opening files, and focus switching.
+  Uses `send_keys_sync`/`send_key_sync` which synchronize on GenServer
+  state rather than render frames, avoiding timing-dependent flakiness.
   """
   use Minga.Test.EditorCase, async: true
 
@@ -18,14 +20,12 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       # Open tree
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree != nil
       assert state.file_tree_focused == true
 
       # Close tree (SPC o p again while focused)
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree == nil
       assert state.file_tree_focused == false
     end
@@ -42,8 +42,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       assert w == 80
 
       # Open tree
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       {_r, c2, w2, _h} = EditorState.screen_rect(state)
       # Tree takes some columns; editor starts after tree + separator
       assert c2 > 0
@@ -62,23 +61,19 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       # Open tree
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree.cursor == 0
 
       # Move down
-      send_key(ctx, ?j)
-      state = :sys.get_state(ctx.editor)
+      state = send_key_sync(ctx, ?j)
       assert state.file_tree.cursor == 1
 
       # Move down again
-      send_key(ctx, ?j)
-      state = :sys.get_state(ctx.editor)
+      state = send_key_sync(ctx, ?j)
       assert state.file_tree.cursor == 2
 
       # Move up
-      send_key(ctx, ?k)
-      state = :sys.get_state(ctx.editor)
+      state = send_key_sync(ctx, ?k)
       assert state.file_tree.cursor == 1
     end
 
@@ -87,12 +82,10 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree != nil
 
-      send_key(ctx, ?q)
-      state = :sys.get_state(ctx.editor)
+      state = send_key_sync(ctx, ?q)
       assert state.file_tree == nil
     end
 
@@ -101,9 +94,8 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      send_keys(ctx, "<SPC>op")
-      send_keys(ctx, "<Esc>")
-      state = :sys.get_state(ctx.editor)
+      send_keys_sync(ctx, "<SPC>op")
+      state = send_keys_sync(ctx, "<Esc>")
       assert state.file_tree == nil
     end
   end
@@ -114,27 +106,18 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Open tree, then press Escape to return focus to editor (tree stays open but unfocused... wait, Esc closes it)
-      # Instead: open tree, enter a file to unfocus, then navigate back
-      # Simplest: open tree (focused), passthrough SPC to unfocus + trigger leader
-      # Actually, let's open the tree, use a file open to return to editor, then SPC w h back
-      # Even simpler: just test the state manipulation directly
-
       # Open tree (focused)
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree != nil
       assert state.file_tree_focused == true
 
       # SPC w l should passthrough from tree, unfocusing it
-      send_keys(ctx, "<SPC>wl")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>wl")
       assert state.file_tree != nil
       assert state.file_tree_focused == false
 
       # SPC w h should focus the tree again
-      send_keys(ctx, "<SPC>wh")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>wh")
       assert state.file_tree_focused == true
     end
 
@@ -144,13 +127,11 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       # Open tree (focused)
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       assert state.file_tree_focused == true
 
       # SPC w l unfocuses tree, returns to editor
-      send_keys(ctx, "<SPC>wl")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>wl")
       assert state.file_tree != nil
       assert state.file_tree_focused == false
     end
@@ -163,19 +144,17 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(Path.join(dir, "alpha.txt"))
 
       # Open tree
-      send_keys(ctx, "<SPC>op")
-      state = :sys.get_state(ctx.editor)
+      state = send_keys_sync(ctx, "<SPC>op")
       entries = FileTree.visible_entries(state.file_tree)
       # Find beta.txt index (tree may be rooted at project root, not tmp_dir)
       beta_idx = Enum.find_index(entries, fn e -> e.name == "beta.txt" end)
 
       if beta_idx do
         # Navigate to beta.txt
-        for _ <- 1..beta_idx, do: send_key(ctx, ?j)
+        for _ <- 1..beta_idx, do: send_key_sync(ctx, ?j)
 
         # Press Enter to open
-        send_key(ctx, 13)
-        state = :sys.get_state(ctx.editor)
+        state = send_key_sync(ctx, 13)
 
         # Focus returned to editor
         assert state.file_tree_focused == false

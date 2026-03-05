@@ -122,6 +122,37 @@ defmodule Minga.Test.EditorCase do
     :ok = HeadlessPort.collect_frame(ref)
   end
 
+  @doc """
+  Sends a key and waits for the editor GenServer to process it.
+
+  Uses `:sys.get_state` as a synchronization barrier instead of waiting
+  for a render frame. This is faster and more reliable for tests that
+  only check editor state, not rendered screen output. Returns the
+  editor state after processing.
+  """
+  @spec send_key_sync(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
+  def send_key_sync(%{editor: editor}, codepoint, mods \\ 0) do
+    send(editor, {:minga_input, {:key_press, codepoint, mods}})
+    :sys.get_state(editor)
+  end
+
+  @doc """
+  Sends a vim-style key sequence and returns the editor state after
+  all keys are processed. Uses `:sys.get_state` as a barrier after
+  each key to ensure re-sent messages (like passthrough from file tree
+  or which-key timeouts) are fully processed before the next key.
+  """
+  @spec send_keys_sync(editor_ctx(), String.t()) :: map()
+  def send_keys_sync(%{editor: editor} = _ctx, sequence) do
+    parse_key_sequence(sequence)
+    |> Enum.each(fn {cp, mods} ->
+      send(editor, {:minga_input, {:key_press, cp, mods}})
+      :sys.get_state(editor)
+    end)
+
+    :sys.get_state(editor)
+  end
+
   @doc "Sends each character in the string as a key press, waiting after each."
   @spec type_text(editor_ctx(), String.t()) :: :ok
   def type_text(ctx, text) do
@@ -259,6 +290,39 @@ defmodule Minga.Test.EditorCase do
       assert String.contains?(ml, badge),
              "Expected modeline to show #{badge} mode, got: #{inspect(ml)}"
     end
+  end
+
+  @doc """
+  Polls the editor state until the given function returns a truthy value.
+
+  Retries up to `max_attempts` times with `interval_ms` between attempts.
+  Returns the final state on success, or raises with the given message.
+  Useful for waiting on async state transitions (file opens, picker
+  selection, highlight clears) that may not settle within a single frame.
+  """
+  @spec wait_until(editor_ctx(), (map() -> boolean()), keyword()) :: map()
+  def wait_until(%{editor: editor} = _ctx, condition, opts \\ []) do
+    max = Keyword.get(opts, :max_attempts, 20)
+    interval = Keyword.get(opts, :interval_ms, 10)
+    message = Keyword.get(opts, :message, "Condition not met after polling")
+
+    do_wait_until(editor, condition, max, interval, message)
+  end
+
+  defp do_wait_until(editor, condition, remaining, interval, message) when remaining > 0 do
+    state = :sys.get_state(editor)
+
+    if condition.(state) do
+      state
+    else
+      Process.sleep(interval)
+      do_wait_until(editor, condition, remaining - 1, interval, message)
+    end
+  end
+
+  defp do_wait_until(editor, _condition, _remaining, _interval, message) do
+    state = :sys.get_state(editor)
+    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.mode}"
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────

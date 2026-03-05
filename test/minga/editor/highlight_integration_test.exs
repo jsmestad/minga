@@ -79,10 +79,6 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
 
-      # cd into tmp_dir so the file picker can find the test files
-      original_dir = File.cwd!()
-      File.cd!(tmp_dir)
-
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
       # Inject highlights for file1
@@ -92,18 +88,13 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.spans == List.to_tuple(spans_a)
 
-      # Open file2 via SPC f f picker
-      send_keys(ctx, "<Space>ff")
-
-      # Type enough to match bbb.ex, then Enter
-      type_text(ctx, "bbb")
-      send_key(ctx, 13)
+      # Open file2 via :e command (deterministic, no CWD dependency)
+      send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
-      File.cd!(original_dir)
 
       assert state.highlight.current.spans == {},
-             "Stale spans from file1 persisted after SPC f f to file2"
+             "Stale spans from file1 persisted after :e to file2"
     end
 
     @tag :tmp_dir
@@ -113,10 +104,6 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       File.write!(path1, "defmodule A do\nend\n")
       File.write!(path2, "defmodule B do\nend\n")
 
-      # cd into tmp_dir so the file picker can find the test files
-      original_dir = File.cwd!()
-      File.cd!(tmp_dir)
-
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
       # Inject highlights for file1
@@ -125,17 +112,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       buf1_pid = :sys.get_state(ctx.editor).buffers.active
 
-      # Switch to file2 via picker
-      send_keys(ctx, "<Space>ff")
-      type_text(ctx, "bbb")
-      send_key(ctx, 13)
+      # Switch to file2 via :e command (deterministic, no CWD dependency)
+      send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
-      File.cd!(original_dir)
 
       # Verify cache was populated for file1
       assert Map.has_key?(state.highlight.cache, buf1_pid),
-             "Expected file1 highlights to be cached after picker switch"
+             "Expected file1 highlights to be cached after buffer switch"
 
       cached = state.highlight.cache[buf1_pid]
       assert cached.spans == List.to_tuple(spans_a)
