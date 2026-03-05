@@ -12,6 +12,10 @@ pub const Span = struct {
     end_byte: u32,
     capture_id: u16,
     pattern_index: u16,
+    /// Priority layer: 0 = outer language, 1+ = injection depth.
+    /// Higher layers win when spans overlap at the same byte position.
+    /// Not serialized in the port protocol.
+    layer: u16 = 0,
 };
 
 /// Result of a highlight operation.
@@ -29,11 +33,12 @@ pub const HighlightResult = struct {
 /// Compiled-in grammar language function type.
 const LanguageFn = *const fn () callconv(.c) ?*const c.TSLanguage;
 
-/// Built-in grammar entry with optional embedded highlight query.
+/// Built-in grammar entry with optional embedded highlight and injection queries.
 const BuiltinGrammar = struct {
     name: []const u8,
     func: LanguageFn,
     query: ?[]const u8 = null,
+    injection_query: ?[]const u8 = null,
 };
 
 /// Tree-sitter highlighter. Owns a parser, optional tree, and query.
@@ -43,10 +48,13 @@ pub const Highlighter = struct {
     parser: *c.TSParser,
     tree: ?*c.TSTree = null,
     query: ?*c.TSQuery = null,
+    injection_query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
     current_language_name: ?[]const u8 = null,
+    current_source: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -63,6 +71,7 @@ pub const Highlighter = struct {
             .parser = parser,
             .languages = .empty,
             .query_cache = .empty,
+            .injection_query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -88,18 +97,26 @@ pub const Highlighter = struct {
     fn prewarmQueries(self: *Highlighter) void {
         inline for (builtin_grammars) |entry| {
             if (entry.query) |query_source| {
-                self.prewarmOne(entry.name, query_source);
+                self.prewarmOne(entry.name, query_source, &self.query_cache);
+            }
+            if (entry.injection_query) |inj_source| {
+                self.prewarmOne(entry.name, inj_source, &self.injection_query_cache);
             }
         }
         self.prewarm_done.store(true, .release);
     }
 
-    fn prewarmOne(self: *Highlighter, name: []const u8, query_source: []const u8) void {
+    fn prewarmOne(
+        self: *Highlighter,
+        name: []const u8,
+        query_source: []const u8,
+        cache: *std.StringHashMapUnmanaged(*c.TSQuery),
+    ) void {
         // Check if already compiled (e.g. by a setLanguage call on the main thread)
         {
             self.cache_mutex.lock();
             defer self.cache_mutex.unlock();
-            if (self.query_cache.get(name) != null) return;
+            if (cache.get(name) != null) return;
         }
 
         const lang = self.languages.get(name) orelse return;
@@ -120,10 +137,10 @@ pub const Highlighter = struct {
             self.cache_mutex.lock();
             defer self.cache_mutex.unlock();
             // Double-check: main thread may have compiled it while we worked
-            if (self.query_cache.get(name) != null) {
+            if (cache.get(name) != null) {
                 c.ts_query_delete(compiled);
             } else {
-                self.query_cache.put(self.allocator, name, compiled) catch {
+                cache.put(self.allocator, name, compiled) catch {
                     c.ts_query_delete(compiled);
                 };
             }
@@ -142,13 +159,20 @@ pub const Highlighter = struct {
         }
         self.query_cache.deinit(self.allocator);
 
+        // Free all cached injection queries
+        var iqit = self.injection_query_cache.iterator();
+        while (iqit.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.injection_query_cache.deinit(self.allocator);
+
         if (self.tree) |t| c.ts_tree_delete(t);
         c.ts_parser_delete(self.parser);
         self.languages.deinit(self.allocator);
     }
 
     /// Set the active language by name. Returns false if not found.
-    /// Restores the cached query for this language if available.
+    /// Restores cached highlight and injection queries for this language.
     pub fn setLanguage(self: *Highlighter, name: []const u8) bool {
         const lang = self.languages.get(name) orelse return false;
         _ = c.ts_parser_set_language(self.parser, lang);
@@ -159,17 +183,17 @@ pub const Highlighter = struct {
             c.ts_tree_delete(t);
             self.tree = null;
         }
-        // Restore cached query (may have been pre-compiled on background thread),
+        // Restore cached queries (may have been pre-compiled on background thread),
         // or lazily compile from embedded source.
         {
             self.cache_mutex.lock();
             defer self.cache_mutex.unlock();
 
+            // Highlight query
             if (self.query_cache.get(name)) |cached| {
                 self.query = cached;
             } else {
                 self.query = null;
-                // Try to compile from embedded query source
                 inline for (builtin_grammars) |entry| {
                     if (std.mem.eql(u8, entry.name, name)) {
                         if (entry.query) |query_source| {
@@ -178,6 +202,25 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
                                 self.query = compiled;
                                 self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Injection query
+            if (self.injection_query_cache.get(name)) |cached| {
+                self.injection_query = cached;
+            } else {
+                self.injection_query = null;
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.injection_query) |inj_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, inj_source.ptr, @intCast(inj_source.len), &err_off, &err_type)) |compiled| {
+                                self.injection_query = compiled;
+                                self.injection_query_cache.put(self.allocator, entry.name, compiled) catch {};
                             }
                         }
                     }
@@ -222,7 +265,43 @@ pub const Highlighter = struct {
         self.query_cache.put(self.allocator, name, new_query) catch {};
     }
 
+    /// Compile an injection query (.scm source) for the current language.
+    /// Caches the compiled query so subsequent `setLanguage` calls restore it.
+    pub fn setInjectionQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+
+        // If we already have a cached injection query, skip recompilation
+        if (self.injection_query_cache.get(name)) |cached| {
+            self.injection_query = cached;
+            return;
+        }
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        const new_query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.warn("Injection query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+
+        self.injection_query = new_query;
+        self.injection_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
     /// Parse source text. Full re-parse (no incremental).
+    /// Stores a reference to the source for injection highlighting.
     pub fn parse(self: *Highlighter, source: []const u8) !void {
         if (self.tree) |t| c.ts_tree_delete(t);
 
@@ -232,6 +311,8 @@ pub const Highlighter = struct {
             source.ptr,
             @intCast(source.len),
         ) orelse return error.ParseFailed;
+
+        self.current_source = source;
     }
 
     /// Run highlight query on the current tree, returning spans.
@@ -266,16 +347,11 @@ pub const Highlighter = struct {
             }
         }
 
-        // Sort by (start_byte ASC, pattern_index DESC, end_byte ASC).
-        // This puts the most specific pattern first at each position,
-        // so the BEAM side's first-wins processing picks the correct span.
-        std.mem.sortUnstable(Span, spans.items, {}, struct {
-            fn cmp(_: void, a: Span, b: Span) bool {
-                if (a.start_byte != b.start_byte) return a.start_byte < b.start_byte;
-                if (a.pattern_index != b.pattern_index) return a.pattern_index > b.pattern_index;
-                return a.end_byte < b.end_byte;
-            }
-        }.cmp);
+        // Sort by (start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC).
+        // Layer ensures injection spans always win over outer spans at the
+        // same byte position. Within a layer, higher pattern_index = more
+        // specific rule. The BEAM side's first-wins walk picks the correct span.
+        std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
 
         // Collect capture names
         const pattern_count = c.ts_query_capture_count(query);
@@ -285,6 +361,324 @@ pub const Highlighter = struct {
             const name_ptr = c.ts_query_capture_name_for_id(query, @intCast(i), &length);
             names[i] = name_ptr[0..length];
         }
+
+        return .{
+            .spans = try spans.toOwnedSlice(alloc),
+            .capture_names = names,
+            .allocator = alloc,
+        };
+    }
+
+    /// Run highlight query on the current tree with injection support.
+    /// If the current language has an injection query, finds embedded language
+    /// regions, highlights them with the appropriate grammar, and merges all
+    /// spans into a single sorted result with correct capture name remapping.
+    /// Falls back to plain `highlight()` when no injection query exists.
+    pub fn highlightWithInjections(self: *Highlighter) !HighlightResult {
+        const inj_query = self.injection_query orelse return self.highlight();
+        const tree = self.tree orelse return error.NoTree;
+        const query = self.query orelse return error.NoQuery;
+        const source = self.current_source orelse return error.NoTree;
+        const alloc = self.allocator;
+
+        const root = c.ts_tree_root_node(tree);
+
+        // ── Phase 1: Outer highlight ──────────────────────────────────────
+        const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(cursor);
+        c.ts_query_cursor_exec(cursor, query, root);
+
+        var spans: std.ArrayListUnmanaged(Span) = .empty;
+        errdefer spans.deinit(alloc);
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..match.capture_count];
+            for (captures) |cap| {
+                try spans.append(alloc, .{
+                    .start_byte = c.ts_node_start_byte(cap.node),
+                    .end_byte = c.ts_node_end_byte(cap.node),
+                    .capture_id = @intCast(cap.index),
+                    .pattern_index = @intCast(match.pattern_index),
+                    .layer = 0,
+                });
+            }
+        }
+
+        // Build unified capture name list, starting with outer query names
+        var name_list: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer name_list.deinit(alloc);
+
+        const outer_capture_count = c.ts_query_capture_count(query);
+        try name_list.ensureTotalCapacity(alloc, outer_capture_count + 16);
+        for (0..outer_capture_count) |i| {
+            var length: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(query, @intCast(i), &length);
+            try name_list.append(alloc, name_ptr[0..length]);
+        }
+
+        // ── Phase 2: Injection query ─────────────────────────────────────
+        const inj_cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(inj_cursor);
+        c.ts_query_cursor_exec(inj_cursor, inj_query, root);
+
+        // Find capture indices for @injection.content and @injection.language
+        const inj_capture_count = c.ts_query_capture_count(inj_query);
+        var content_capture_id: ?u32 = null;
+        var language_capture_id: ?u32 = null;
+        for (0..inj_capture_count) |i| {
+            var length: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(inj_query, @intCast(i), &length);
+            const name = name_ptr[0..length];
+            if (std.mem.eql(u8, name, "injection.content")) {
+                content_capture_id = @intCast(i);
+            } else if (std.mem.eql(u8, name, "injection.language")) {
+                language_capture_id = @intCast(i);
+            }
+        }
+
+        if (content_capture_id == null) {
+            // Injection query has no @injection.content — nothing to inject.
+            // Return plain highlight result.
+            std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+            const names = try alloc.alloc([]const u8, name_list.items.len);
+            @memcpy(names, name_list.items);
+            return .{
+                .spans = try spans.toOwnedSlice(alloc),
+                .capture_names = names,
+                .allocator = alloc,
+            };
+        }
+
+        // Collect injection regions: (content_range, language_name)
+        const InjectionRegion = struct {
+            start_byte: u32,
+            end_byte: u32,
+            start_point: c.TSPoint,
+            end_point: c.TSPoint,
+            language: []const u8,
+        };
+        var regions: std.ArrayListUnmanaged(InjectionRegion) = .empty;
+        defer regions.deinit(alloc);
+
+        var inj_match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(inj_cursor, &inj_match)) {
+            var content_node: ?c.TSNode = null;
+            var lang_from_capture: ?[]const u8 = null;
+
+            const caps = inj_match.captures[0..inj_match.capture_count];
+            for (caps) |cap| {
+                if (cap.index == content_capture_id.?) {
+                    content_node = cap.node;
+                } else if (language_capture_id != null and cap.index == language_capture_id.?) {
+                    // Language name from captured node text (e.g. fenced code info string)
+                    const start = c.ts_node_start_byte(cap.node);
+                    const end = c.ts_node_end_byte(cap.node);
+                    if (end > start and end <= source.len) {
+                        lang_from_capture = source[start..end];
+                    }
+                }
+            }
+
+            const cnode = content_node orelse continue;
+
+            // Determine language: captured text takes priority, then #set! predicate
+            const lang_name = lang_from_capture orelse
+                getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse
+                continue;
+
+            // Skip if we don't have this grammar
+            if (self.languages.get(lang_name) == null) continue;
+
+            try regions.append(alloc, .{
+                .start_byte = c.ts_node_start_byte(cnode),
+                .end_byte = c.ts_node_end_byte(cnode),
+                .start_point = c.ts_node_start_point(cnode),
+                .end_point = c.ts_node_end_point(cnode),
+                .language = lang_name,
+            });
+        }
+
+        // ── Phase 3: Highlight injected regions ──────────────────────────
+        // Group regions by language for combined parsing
+        var lang_regions = std.StringHashMapUnmanaged(std.ArrayListUnmanaged(InjectionRegion)).empty;
+        defer {
+            var it = lang_regions.iterator();
+            while (it.next()) |entry| {
+                entry.value_ptr.deinit(alloc);
+            }
+            lang_regions.deinit(alloc);
+        }
+
+        for (regions.items) |region| {
+            const gop = try lang_regions.getOrPut(alloc, region.language);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .empty;
+            }
+            try gop.value_ptr.append(alloc, region);
+        }
+
+        // Process each injected language
+        var lang_it = lang_regions.iterator();
+        while (lang_it.next()) |entry| {
+            const lang_name = entry.key_ptr.*;
+            const lang_regs = entry.value_ptr.items;
+
+            const lang = self.languages.get(lang_name) orelse continue;
+
+            // Look up the highlight query for this injection language
+            const inj_hl_query = blk: {
+                self.cache_mutex.lock();
+                defer self.cache_mutex.unlock();
+                if (self.query_cache.get(lang_name)) |cached| break :blk cached;
+
+                // Try compiling from embedded source
+                inline for (builtin_grammars) |bg| {
+                    if (std.mem.eql(u8, bg.name, lang_name)) {
+                        if (bg.query) |qs| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, qs.ptr, @intCast(qs.len), &err_off, &err_type)) |compiled| {
+                                self.query_cache.put(alloc, bg.name, compiled) catch {};
+                                break :blk compiled;
+                            }
+                        }
+                    }
+                }
+                break :blk null;
+            };
+            const hl_query = inj_hl_query orelse continue;
+
+            // Create a temporary parser for this injection language
+            const inj_parser = c.ts_parser_new() orelse continue;
+            defer c.ts_parser_delete(inj_parser);
+            _ = c.ts_parser_set_language(inj_parser, lang);
+
+            // Build TSRange array for included ranges
+            var ts_ranges = try alloc.alloc(c.TSRange, lang_regs.len);
+            defer alloc.free(ts_ranges);
+            for (lang_regs, 0..) |reg, i| {
+                ts_ranges[i] = .{
+                    .start_byte = reg.start_byte,
+                    .end_byte = reg.end_byte,
+                    .start_point = reg.start_point,
+                    .end_point = reg.end_point,
+                };
+            }
+
+            _ = c.ts_parser_set_included_ranges(inj_parser, ts_ranges.ptr, @intCast(ts_ranges.len));
+
+            // Parse the full source with included ranges limiting what gets parsed
+            const inj_tree = c.ts_parser_parse_string(
+                inj_parser,
+                null,
+                source.ptr,
+                @intCast(source.len),
+            ) orelse continue;
+            defer c.ts_tree_delete(inj_tree);
+
+            // Run highlight query on the injection tree
+            const hl_cursor = c.ts_query_cursor_new() orelse continue;
+            defer c.ts_query_cursor_delete(hl_cursor);
+
+            const inj_root = c.ts_tree_root_node(inj_tree);
+            c.ts_query_cursor_exec(hl_cursor, hl_query, inj_root);
+
+            // Build capture ID remap: injection capture names → unified name list
+            const inj_cap_count = c.ts_query_capture_count(hl_query);
+            var id_remap = try alloc.alloc(u16, inj_cap_count);
+            defer alloc.free(id_remap);
+
+            for (0..inj_cap_count) |i| {
+                var length: u32 = 0;
+                const name_ptr = c.ts_query_capture_name_for_id(hl_query, @intCast(i), &length);
+                const cap_name = name_ptr[0..length];
+
+                // Find existing name or add new one
+                var found: ?u16 = null;
+                for (name_list.items, 0..) |existing, idx| {
+                    if (std.mem.eql(u8, existing, cap_name)) {
+                        found = @intCast(idx);
+                        break;
+                    }
+                }
+                if (found) |idx| {
+                    id_remap[i] = idx;
+                } else {
+                    id_remap[i] = @intCast(name_list.items.len);
+                    try name_list.append(alloc, cap_name);
+                }
+            }
+
+            // Collect injection spans with remapped capture IDs
+            var hl_match: c.TSQueryMatch = undefined;
+            while (c.ts_query_cursor_next_match(hl_cursor, &hl_match)) {
+                const caps = hl_match.captures[0..hl_match.capture_count];
+                for (caps) |cap| {
+                    const start = c.ts_node_start_byte(cap.node);
+                    const end = c.ts_node_end_byte(cap.node);
+                    // Only include spans within the injection ranges
+                    var in_range = false;
+                    for (lang_regs) |reg| {
+                        if (start >= reg.start_byte and end <= reg.end_byte) {
+                            in_range = true;
+                            break;
+                        }
+                    }
+                    if (!in_range) continue;
+
+                    try spans.append(alloc, .{
+                        .start_byte = start,
+                        .end_byte = end,
+                        .capture_id = id_remap[cap.index],
+                        .pattern_index = @intCast(hl_match.pattern_index),
+                        .layer = 1,
+                    });
+                }
+            }
+        }
+
+        // ── Phase 4: Punch holes in outer spans ──────────────────────────
+        // The BEAM's renderer sorts spans by start_byte and uses first-wins.
+        // Outer spans that cover injection regions would "eat" the injection
+        // spans because they start at a lower byte offset. Fix: trim or
+        // remove outer spans that overlap with any injection region.
+        if (regions.items.len > 0) {
+            // Build sorted injection range list
+            var inj_ranges = try alloc.alloc(InjectionRange, regions.items.len);
+            defer alloc.free(inj_ranges);
+            for (regions.items, 0..) |reg, i| {
+                inj_ranges[i] = .{ .start_byte = reg.start_byte, .end_byte = reg.end_byte };
+            }
+            std.mem.sortUnstable(InjectionRange, inj_ranges, {}, struct {
+                fn cmp(_: void, a: InjectionRange, b: InjectionRange) bool {
+                    return a.start_byte < b.start_byte;
+                }
+            }.cmp);
+
+            var trimmed: std.ArrayListUnmanaged(Span) = .empty;
+            errdefer trimmed.deinit(alloc);
+            try trimmed.ensureTotalCapacity(alloc, spans.items.len);
+
+            for (spans.items) |span| {
+                if (span.layer != 0) {
+                    // Injection span — keep as-is
+                    try trimmed.append(alloc, span);
+                    continue;
+                }
+                // Outer span — trim around injection regions
+                try trimOuterSpan(alloc, span, inj_ranges, &trimmed);
+            }
+
+            spans.deinit(alloc);
+            spans = trimmed;
+        }
+
+        // ── Phase 5: Sort and return ─────────────────────────────────────
+        std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+
+        const names = try alloc.alloc([]const u8, name_list.items.len);
+        @memcpy(names, name_list.items);
 
         return .{
             .spans = try spans.toOwnedSlice(alloc),
@@ -325,6 +719,128 @@ pub const Highlighter = struct {
         try self.languages.put(self.allocator, name, lang);
     }
 };
+
+// ── Injection helpers ─────────────────────────────────────────────────────
+
+/// Reads `#set! injection.language "..."` predicates from a query pattern.
+/// Returns the language name string if found, or null.
+fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const u8 {
+    var step_count: u32 = 0;
+    const steps = c.ts_query_predicates_for_pattern(query, pattern_index, &step_count);
+    if (step_count == 0) return null;
+
+    // Walk predicate steps looking for: "set!" "injection.language" "<value>"
+    var i: u32 = 0;
+    while (i < step_count) {
+        const step = steps[i];
+        if (step.type == c.TSQueryPredicateStepTypeDone) {
+            i += 1;
+            continue;
+        }
+
+        // Check for a "set!" string step
+        if (step.type == c.TSQueryPredicateStepTypeString) {
+            var len: u32 = 0;
+            const str = c.ts_query_string_value_for_id(query, step.value_id, &len);
+            const name = str[0..len];
+
+            if (std.mem.eql(u8, name, "set!") and i + 2 < step_count) {
+                const key_step = steps[i + 1];
+                const val_step = steps[i + 2];
+
+                if (key_step.type == c.TSQueryPredicateStepTypeString and
+                    val_step.type == c.TSQueryPredicateStepTypeString)
+                {
+                    var key_len: u32 = 0;
+                    const key_str = c.ts_query_string_value_for_id(query, key_step.value_id, &key_len);
+                    const key = key_str[0..key_len];
+
+                    if (std.mem.eql(u8, key, "injection.language")) {
+                        var val_len: u32 = 0;
+                        const val_str = c.ts_query_string_value_for_id(query, val_step.value_id, &val_len);
+                        return val_str[0..val_len];
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return null;
+}
+
+/// A byte range representing an injection region.
+const InjectionRange = struct {
+    start_byte: u32,
+    end_byte: u32,
+};
+
+/// Trims an outer span around injection ranges. If the span doesn't
+/// overlap any range, it's kept as-is. If it partially overlaps, the
+/// non-overlapping fragments are emitted. If fully covered, it's dropped.
+fn trimOuterSpan(
+    alloc: std.mem.Allocator,
+    span: Span,
+    ranges: []const InjectionRange,
+    out: *std.ArrayListUnmanaged(Span),
+) !void {
+    // Check if this span overlaps any injection range
+    var overlaps_any = false;
+    for (ranges) |r| {
+        if (span.start_byte < r.end_byte and span.end_byte > r.start_byte) {
+            overlaps_any = true;
+            break;
+        }
+    }
+    if (!overlaps_any) {
+        try out.append(alloc, span);
+        return;
+    }
+
+    // Walk through injection ranges and emit fragments of the outer span
+    // that don't overlap with any range.
+    var pos = span.start_byte;
+    for (ranges) |r| {
+        if (r.start_byte >= span.end_byte) break;
+        if (r.end_byte <= pos) continue;
+
+        // Emit fragment before this range
+        const range_start = @max(r.start_byte, span.start_byte);
+        if (range_start > pos) {
+            try out.append(alloc, .{
+                .start_byte = pos,
+                .end_byte = range_start,
+                .capture_id = span.capture_id,
+                .pattern_index = span.pattern_index,
+                .layer = 0,
+            });
+        }
+        pos = @max(pos, @min(r.end_byte, span.end_byte));
+    }
+
+    // Emit trailing fragment after the last overlapping range
+    if (pos < span.end_byte) {
+        try out.append(alloc, .{
+            .start_byte = pos,
+            .end_byte = span.end_byte,
+            .capture_id = span.capture_id,
+            .pattern_index = span.pattern_index,
+            .layer = 0,
+        });
+    }
+}
+
+// ── Span ordering ─────────────────────────────────────────────────────────
+
+/// Comparator for highlight spans.
+/// Order: start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC.
+/// This ensures injection spans (higher layer) win over outer spans at the
+/// same byte position, and within a layer the most specific pattern wins.
+fn spanLessThan(_: void, a: Span, b: Span) bool {
+    if (a.start_byte != b.start_byte) return a.start_byte < b.start_byte;
+    if (a.layer != b.layer) return a.layer > b.layer;
+    if (a.pattern_index != b.pattern_index) return a.pattern_index > b.pattern_index;
+    return a.end_byte < b.end_byte;
+}
 
 // ── Compiled-in grammar registry ──────────────────────────────────────────
 
@@ -379,8 +895,8 @@ const builtin_grammars = [_]BuiltinGrammar{
     .{ .name = "json", .func = tree_sitter_json, .query = @embedFile(query_dir ++ "json/highlights.scm") },
     .{ .name = "yaml", .func = tree_sitter_yaml, .query = @embedFile(query_dir ++ "yaml/highlights.scm") },
     .{ .name = "toml", .func = tree_sitter_toml, .query = @embedFile(query_dir ++ "toml/highlights.scm") },
-    .{ .name = "markdown", .func = tree_sitter_markdown, .query = @embedFile(query_dir ++ "markdown/highlights.scm") },
-    .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = @embedFile(query_dir ++ "markdown_inline/highlights.scm") },
+    .{ .name = "markdown", .func = tree_sitter_markdown, .query = @embedFile(query_dir ++ "markdown/highlights.scm"), .injection_query = @embedFile(query_dir ++ "markdown/injections.scm") },
+    .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = @embedFile(query_dir ++ "markdown_inline/highlights.scm"), .injection_query = @embedFile(query_dir ++ "markdown_inline/injections.scm") },
     .{ .name = "ruby", .func = tree_sitter_ruby, .query = @embedFile(query_dir ++ "ruby/highlights.scm") },
     .{ .name = "javascript", .func = tree_sitter_javascript, .query = @embedFile(query_dir ++ "javascript/highlights.scm") },
     .{ .name = "typescript", .func = tree_sitter_typescript, .query = @embedFile(query_dir ++ "typescript/highlights.scm") },
@@ -553,4 +1069,140 @@ test "highlighter: query cache restores on language switch" {
     try std.testing.expect(hl.setLanguage("elixir"));
     try std.testing.expect(hl.query != null);
     try std.testing.expect(hl.query == elixir_query);
+}
+
+test "highlighter: injection query loaded for markdown" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("markdown"));
+    try std.testing.expect(hl.injection_query != null);
+
+    // JSON has no injection query
+    try std.testing.expect(hl.setLanguage("json"));
+    try std.testing.expect(hl.injection_query == null);
+
+    // Switch back: injection query restored from cache
+    try std.testing.expect(hl.setLanguage("markdown"));
+    try std.testing.expect(hl.injection_query != null);
+}
+
+test "highlighter: highlightWithInjections falls back for non-injection language" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    // JSON has no injection query — should fall back to plain highlight
+    try std.testing.expect(hl.setLanguage("json"));
+    const source = "{\"key\": 42}";
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections();
+    defer result.deinit();
+
+    // Should produce the same spans as regular highlight
+    try std.testing.expect(result.spans.len > 0);
+    // All spans should be layer 0
+    for (result.spans) |span| {
+        try std.testing.expectEqual(@as(u16, 0), span.layer);
+    }
+}
+
+test "highlighter: markdown injection produces spans for fenced code block" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("markdown"));
+
+    // Markdown with a fenced JSON code block
+    const source =
+        \\# Title
+        \\
+        \\```json
+        \\{"key": 42}
+        \\```
+        \\
+    ;
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections();
+    defer result.deinit();
+
+    try std.testing.expect(result.spans.len > 0);
+
+    // Should have at least one injection span (layer 1)
+    var has_injection = false;
+    for (result.spans) |span| {
+        if (span.layer == 1) {
+            has_injection = true;
+            break;
+        }
+    }
+    try std.testing.expect(has_injection);
+}
+
+test "highlighter: injection spans sort before outer spans at same position" {
+    // Verify the sort puts layer 1 before layer 0 at same start_byte
+    const spans = [_]Span{
+        .{ .start_byte = 10, .end_byte = 20, .capture_id = 0, .pattern_index = 5, .layer = 0 },
+        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 2, .layer = 1 },
+    };
+
+    var sorted: [2]Span = spans;
+    std.mem.sortUnstable(Span, &sorted, {}, spanLessThan);
+
+    // Layer 1 should come first (higher layer wins)
+    try std.testing.expectEqual(@as(u16, 1), sorted[0].layer);
+    try std.testing.expectEqual(@as(u16, 0), sorted[1].layer);
+}
+
+test "highlighter: capture names are unified across injection boundaries" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("markdown"));
+
+    // Markdown with a fenced JSON block
+    const source =
+        \\# Hello
+        \\
+        \\```json
+        \\{"key": 42}
+        \\```
+        \\
+    ;
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections();
+    defer result.deinit();
+
+    // All capture IDs in spans should be valid indices into capture_names
+    for (result.spans) |span| {
+        try std.testing.expect(span.capture_id < result.capture_names.len);
+    }
+
+    // The capture names list should contain names from both markdown and JSON queries
+    // (at minimum the outer markdown names)
+    try std.testing.expect(result.capture_names.len > 0);
+}
+
+test "highlighter: getInjectionLanguagePredicate reads #set! predicates" {
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("markdown"));
+
+    // The markdown injection query has patterns with #set! injection.language
+    // (e.g. for html_block, yaml metadata). Verify we can read at least one.
+    const inj_q = hl.injection_query orelse return error.NoInjectionQuery;
+
+    const pattern_count = c.ts_query_pattern_count(inj_q);
+    var found_set_predicate = false;
+    for (0..pattern_count) |i| {
+        if (getInjectionLanguagePredicate(inj_q, @intCast(i))) |lang| {
+            // Should be a known language like "html", "yaml", "toml", or "markdown_inline"
+            try std.testing.expect(lang.len > 0);
+            found_set_predicate = true;
+        }
+    }
+    try std.testing.expect(found_set_predicate);
 }

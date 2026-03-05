@@ -56,6 +56,7 @@ defmodule Minga.Port.Protocol do
   @op_parse_buffer 0x21
   @op_set_highlight_query 0x22
   @op_load_grammar 0x23
+  @op_set_injection_query 0x24
 
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
@@ -232,6 +233,12 @@ defmodule Minga.Port.Protocol do
   @spec encode_set_highlight_query(String.t()) :: binary()
   def encode_set_highlight_query(query) when is_binary(query) do
     <<@op_set_highlight_query, byte_size(query)::32, query::binary>>
+  end
+
+  @doc "Encodes a set_injection_query command."
+  @spec encode_set_injection_query(String.t()) :: binary()
+  def encode_set_injection_query(query) when is_binary(query) do
+    <<@op_set_injection_query, byte_size(query)::32, query::binary>>
   end
 
   @doc "Encodes a load_grammar command."

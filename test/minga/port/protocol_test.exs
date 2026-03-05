@@ -340,6 +340,14 @@ defmodule Minga.Port.ProtocolTest do
       assert rest == query
     end
 
+    test "encode_set_injection_query produces correct binary" do
+      query = "(content) @injection.content"
+      encoded = Protocol.encode_set_injection_query(query)
+      qlen = byte_size(query)
+      assert <<0x24, ^qlen::32, rest::binary>> = encoded
+      assert rest == query
+    end
+
     test "encode_load_grammar produces correct binary" do
       encoded = Protocol.encode_load_grammar("lua", "/tmp/lua.so")
       assert <<0x23, 3::16, "lua", 11::16, rest::binary>> = encoded

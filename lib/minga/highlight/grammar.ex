@@ -110,6 +110,39 @@ defmodule Minga.Highlight.Grammar do
   end
 
   @doc """
+  Returns the path to the injection query file for a language.
+
+  Checks user config dir first (`~/.config/minga/queries/{lang}/injections.scm`),
+  then falls back to `priv/queries/{lang}/injections.scm`.
+
+  Returns `nil` if no injection query file exists.
+  """
+  @spec injection_query_path(language()) :: String.t() | nil
+  def injection_query_path(language) when is_binary(language) do
+    user_path = user_injection_query_path(language)
+    priv_path = priv_injection_query_path(language)
+
+    cond do
+      user_path != nil and File.exists?(user_path) -> user_path
+      File.exists?(priv_path) -> priv_path
+      true -> nil
+    end
+  end
+
+  @doc """
+  Reads the injection query content for a language.
+
+  Returns `{:ok, query_text}` or `{:error, reason}`.
+  """
+  @spec read_injection_query(language()) :: {:ok, String.t()} | {:error, :no_query | File.posix()}
+  def read_injection_query(language) when is_binary(language) do
+    case injection_query_path(language) do
+      nil -> {:error, :no_query}
+      path -> File.read(path)
+    end
+  end
+
+  @doc """
   Returns the expected path for a dynamically-loaded grammar shared library.
 
   Path: `~/.config/minga/grammars/{name}.so` (or `.dylib` on macOS).
@@ -137,6 +170,19 @@ defmodule Minga.Highlight.Grammar do
     case System.user_home() do
       nil -> nil
       home -> Path.join([home, ".config", "minga", "queries", language, "highlights.scm"])
+    end
+  end
+
+  @spec priv_injection_query_path(language()) :: String.t()
+  defp priv_injection_query_path(language) do
+    Path.join([:code.priv_dir(:minga), "queries", language, "injections.scm"])
+  end
+
+  @spec user_injection_query_path(language()) :: String.t() | nil
+  defp user_injection_query_path(language) do
+    case System.user_home() do
+      nil -> nil
+      home -> Path.join([home, ".config", "minga", "queries", language, "injections.scm"])
     end
   end
 end

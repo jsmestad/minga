@@ -48,7 +48,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(1, spans)
 
       assert state.highlight.current.version == 1
-      assert state.highlight.current.spans == spans
+      assert state.highlight.current.spans == List.to_tuple(spans)
     end
 
     test "rejects stale spans with older version" do
@@ -61,7 +61,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(3, spans2)
 
       assert state.highlight.current.version == 5
-      assert state.highlight.current.spans == spans1
+      assert state.highlight.current.spans == List.to_tuple(spans1)
     end
 
     test "accepts spans with equal version" do
@@ -73,7 +73,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(5, spans1)
         |> HighlightSync.handle_spans(5, spans2)
 
-      assert state.highlight.current.spans == spans2
+      assert state.highlight.current.spans == List.to_tuple(spans2)
     end
   end
 

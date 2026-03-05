@@ -15,7 +15,7 @@ defmodule Minga.Highlight do
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
           version: non_neg_integer(),
-          spans: [Minga.Port.Protocol.highlight_span()],
+          spans: tuple() | [map()],
           capture_names: [String.t()],
           theme: Theme.syntax()
         }
@@ -28,7 +28,7 @@ defmodule Minga.Highlight do
   def new do
     %__MODULE__{
       version: 0,
-      spans: [],
+      spans: {},
       capture_names: [],
       theme: Theme.get!(:doom_one).syntax
     }
@@ -39,7 +39,7 @@ defmodule Minga.Highlight do
   def new(theme) when is_map(theme) do
     %__MODULE__{
       version: 0,
-      spans: [],
+      spans: {},
       capture_names: [],
       theme: theme
     }
@@ -70,7 +70,7 @@ defmodule Minga.Highlight do
   end
 
   def put_spans(%__MODULE__{} = hl, version, spans) when is_list(spans) do
-    %{hl | version: version, spans: spans}
+    %{hl | version: version, spans: List.to_tuple(spans)}
   end
 
   @doc """
@@ -106,21 +106,23 @@ defmodule Minga.Highlight do
       [{"def", [fg: 0xFF0000]}, {" foo", []}]
   """
   @spec styles_for_line(t(), String.t(), non_neg_integer()) :: [styled_segment()]
-  def styles_for_line(%__MODULE__{spans: []}, line_text, _line_start_byte) do
+  def styles_for_line(%__MODULE__{spans: spans}, line_text, _line_start_byte)
+      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
     [{line_text, []}]
   end
 
-  def styles_for_line(%__MODULE__{} = hl, line_text, line_start_byte)
-      when is_binary(line_text) and is_integer(line_start_byte) and line_start_byte >= 0 do
+  # Fast path: tuple spans with binary search (production path from Zig)
+  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+      when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
+             line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
+    span_count = tuple_size(spans)
 
-    # Find spans that overlap this line
-    overlapping =
-      hl.spans
-      |> Enum.filter(fn span ->
-        span.start_byte < line_end_byte and span.end_byte > line_start_byte
-      end)
-      |> Enum.sort_by(& &1.start_byte)
+    # Spans are stored in a tuple sorted by start_byte. Binary search for
+    # the first span that could overlap this line, then collect forward.
+    start_idx = bsearch_first_overlap(spans, span_count, line_start_byte)
+
+    overlapping = collect_overlapping(spans, span_count, start_idx, line_start_byte, line_end_byte, [])
 
     case overlapping do
       [] ->
@@ -131,7 +133,72 @@ defmodule Minga.Highlight do
     end
   end
 
+  # Fallback: list spans (used by tests that construct Highlight structs directly)
+  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+      when is_list(spans) and is_binary(line_text) and is_integer(line_start_byte) and
+             line_start_byte >= 0 do
+    styles_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte)
+  end
+
   # ── Private ──
+
+  # Binary search for the first span index whose end_byte > line_start_byte.
+  # This is the earliest span that could overlap the line. Spans are sorted
+  # by start_byte, but a span starting before the line could extend into it,
+  # so we search on end_byte to catch those.
+  @spec bsearch_first_overlap(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp bsearch_first_overlap(_spans, 0, _line_start), do: 0
+
+  defp bsearch_first_overlap(spans, count, line_start) do
+    do_bsearch(spans, 0, count - 1, line_start)
+  end
+
+  @spec do_bsearch(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp do_bsearch(_spans, low, high, _line_start) when low > high, do: low
+
+  defp do_bsearch(spans, low, high, line_start) do
+    mid = div(low + high, 2)
+    span = elem(spans, mid)
+
+    if span.end_byte <= line_start do
+      do_bsearch(spans, mid + 1, high, line_start)
+    else
+      do_bsearch(spans, low, mid - 1, line_start)
+    end
+  end
+
+  # Collect spans that overlap [line_start, line_end) starting from start_idx.
+  # Stops once spans start past the line.
+  @spec collect_overlapping(
+          tuple(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [map()]
+        ) :: [map()]
+  defp collect_overlapping(_spans, count, idx, _line_start, _line_end, acc) when idx >= count do
+    Enum.reverse(acc)
+  end
+
+  defp collect_overlapping(spans, count, idx, line_start, line_end, acc) do
+    span = elem(spans, idx)
+
+    cond do
+      span.start_byte >= line_end ->
+        # Past the line — done
+        Enum.reverse(acc)
+
+      span.end_byte > line_start ->
+        # Overlaps the line
+        collect_overlapping(spans, count, idx + 1, line_start, line_end, [span | acc])
+
+      true ->
+        # Ends before line starts — skip
+        collect_overlapping(spans, count, idx + 1, line_start, line_end, acc)
+    end
+  end
 
   # Spans arrive from Zig pre-sorted by (start_byte ASC, pattern_index DESC,
   # end_byte ASC). This means the most specific tree-sitter pattern comes first

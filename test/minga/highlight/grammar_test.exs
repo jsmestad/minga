@@ -58,6 +58,38 @@ defmodule Minga.Highlight.GrammarTest do
     end
   end
 
+  describe "injection_query_path/1" do
+    test "returns path for markdown (has injection query in priv)" do
+      path = Grammar.injection_query_path("markdown")
+      assert path != nil
+      assert String.ends_with?(path, "injections.scm")
+    end
+
+    test "returns nil for languages without injection queries" do
+      assert Grammar.injection_query_path("json") == nil
+    end
+
+    test "returns nil for nonexistent languages" do
+      assert Grammar.injection_query_path("nonexistent_lang_xyz") == nil
+    end
+  end
+
+  describe "read_injection_query/1" do
+    test "reads markdown injection query" do
+      assert {:ok, content} = Grammar.read_injection_query("markdown")
+      assert is_binary(content)
+      assert content =~ "injection"
+    end
+
+    test "returns error for language without injection query" do
+      assert {:error, :no_query} = Grammar.read_injection_query("json")
+    end
+
+    test "returns error for nonexistent language" do
+      assert {:error, :no_query} = Grammar.read_injection_query("nonexistent_lang_xyz")
+    end
+  end
+
   describe "dynamic_grammar_path/1" do
     test "returns path with correct extension" do
       path = Grammar.dynamic_grammar_path("custom")

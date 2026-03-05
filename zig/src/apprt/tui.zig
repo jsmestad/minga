@@ -250,7 +250,7 @@ pub const TuiRuntime = struct {
                         break;
                     };
                     switch (cmd) {
-                        .set_language, .parse_buffer, .set_highlight_query, .load_grammar => {
+                        .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar => {
                             self.handleHighlightCommand(cmd, stdout) catch |err| {
                                 std.log.warn("highlight error: {}", .{err});
                             };
@@ -310,9 +310,9 @@ pub const TuiRuntime = struct {
                     return;
                 };
 
-                // If a query is loaded, run highlighting and send results
+                // If a query is loaded, run highlighting (with injection support) and send results
                 if (self.hl.query != null) {
-                    var result = self.hl.highlight() catch |err| {
+                    var result = self.hl.highlightWithInjections() catch |err| {
                         std.log.warn("highlight failed: {}", .{err});
                         return;
                     };
@@ -334,6 +334,11 @@ pub const TuiRuntime = struct {
             .set_highlight_query => |source| {
                 self.hl.setHighlightQuery(source) catch |err| {
                     std.log.warn("query compile failed: {}", .{err});
+                };
+            },
+            .set_injection_query => |source| {
+                self.hl.setInjectionQuery(source) catch |err| {
+                    std.log.warn("injection query compile failed: {}", .{err});
                 };
             },
             .load_grammar => |lg| {

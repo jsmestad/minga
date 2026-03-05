@@ -7,7 +7,7 @@ defmodule Minga.HighlightTest do
     test "creates empty state with default theme" do
       hl = Highlight.new()
       assert hl.version == 0
-      assert hl.spans == []
+      assert hl.spans == {}
       assert hl.capture_names == []
       assert is_map(hl.theme)
       assert map_size(hl.theme) > 0
@@ -34,7 +34,7 @@ defmodule Minga.HighlightTest do
       spans = [%{start_byte: 0, end_byte: 5, capture_id: 0}]
       hl = Highlight.new() |> Highlight.put_spans(1, spans)
       assert hl.version == 1
-      assert hl.spans == spans
+      assert hl.spans == List.to_tuple(spans)
     end
 
     test "rejects spans with older version" do
@@ -47,7 +47,7 @@ defmodule Minga.HighlightTest do
         |> Highlight.put_spans(3, spans2)
 
       assert hl.version == 5
-      assert hl.spans == spans1
+      assert hl.spans == List.to_tuple(spans1)
     end
 
     test "accepts spans with equal version" do
@@ -59,7 +59,7 @@ defmodule Minga.HighlightTest do
         |> Highlight.put_spans(5, spans1)
         |> Highlight.put_spans(5, spans2)
 
-      assert hl.spans == spans2
+      assert hl.spans == List.to_tuple(spans2)
     end
   end
 

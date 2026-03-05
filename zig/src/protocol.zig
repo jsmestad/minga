@@ -36,6 +36,7 @@ pub const OP_SET_LANGUAGE: u8 = 0x20;
 pub const OP_PARSE_BUFFER: u8 = 0x21;
 pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
 pub const OP_LOAD_GRAMMAR: u8 = 0x23;
+pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -108,6 +109,7 @@ pub const RenderCommand = union(enum) {
     set_language: []const u8,
     parse_buffer: ParseBuffer,
     set_highlight_query: []const u8,
+    set_injection_query: []const u8,
     load_grammar: LoadGrammar,
 };
 
@@ -338,6 +340,13 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 4 + query_len) return error.Malformed;
             return .{ .set_highlight_query = rest[4 .. 4 + query_len] };
         },
+        OP_SET_INJECTION_QUERY => {
+            // query_len:4, query (same wire format as set_highlight_query)
+            if (rest.len < 4) return error.Malformed;
+            const query_len = std.mem.readInt(u32, rest[0..4], .big);
+            if (rest.len < 4 + query_len) return error.Malformed;
+            return .{ .set_injection_query = rest[4 .. 4 + query_len] };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -391,7 +400,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len = std.mem.readInt(u32, payload[5..9], .big);
             break :blk 9 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY => blk: {
             if (payload.len < 5) break :blk payload.len;
             const query_len = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + query_len;
@@ -1076,6 +1085,25 @@ test "commandSize: parse_buffer" {
 test "commandSize: set_highlight_query" {
     var data: [1 + 4 + 5]u8 = undefined;
     data[0] = OP_SET_HIGHLIGHT_QUERY;
+    std.mem.writeInt(u32, data[1..5], 5, .big);
+    @memcpy(data[5..10], "query");
+    try std.testing.expectEqual(@as(usize, 10), commandSize(&data));
+}
+
+test "decode set_injection_query" {
+    const query = "(content) @injection.content";
+    var data: [1 + 4 + query.len]u8 = undefined;
+    data[0] = OP_SET_INJECTION_QUERY;
+    std.mem.writeInt(u32, data[1..5], query.len, .big);
+    @memcpy(data[5..], query);
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .set_injection_query);
+    try std.testing.expectEqualStrings(query, cmd.set_injection_query);
+}
+
+test "commandSize: set_injection_query" {
+    var data: [1 + 4 + 5]u8 = undefined;
+    data[0] = OP_SET_INJECTION_QUERY;
     std.mem.writeInt(u32, data[1..5], 5, .big);
     @memcpy(data[5..10], "query");
     try std.testing.expectEqual(@as(usize, 10), commandSize(&data));

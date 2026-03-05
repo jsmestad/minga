@@ -252,7 +252,7 @@ Roughly in priority order:
 4. **Extension system** — ✅ Local-path loading with `Minga.Extension` behaviour, crash-isolated supervision. Package registry (#80) is next.
 5. ~~**Theme runtime picker**~~ — ✅ Done. `SPC h t` to preview and switch themes without restart.
 6. **Visual block mode** — Column selection and editing
-7. **File tree sidebar** — Project navigation panel
+7. ~~**File tree sidebar**~~ — ✅ Done
 8. **Git integration** — Gutter indicators, blame, hunk staging
 9. **Terminal emulator** — 📋 Embedded terminal split (SPC o t toggle) #122
 
