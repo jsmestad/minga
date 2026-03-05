@@ -358,6 +358,7 @@ The single real trade-off: you reload a whole module, not a single function. In 
 | LSP (`eglot` / `lsp-mode`) | Planned (#22). Each LSP client as its own process |
 | Thousands of MELPA packages | Early. The extension system is being built (#14) |
 | Splits / windows | Planned. Keybindings exist, implementation pending |
+| `projectile` | ✅ Project detection, known projects, `SPC p` group. See [Projects](PROJECTS.md) |
 | `dired` | File tree planned (#40) |
 | Decades of community wisdom | Brand new. You'd be early. |
 | Emacs Lisp (if you love Lisp) | Elixir. Optional LFE support planned (#3) for Lisp fans. |

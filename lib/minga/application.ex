@@ -42,7 +42,8 @@ defmodule Minga.Application do
       Minga.Extension.Registry,
       Minga.Extension.Supervisor,
       Minga.Diagnostics,
-      Minga.LSP.Supervisor
+      Minga.LSP.Supervisor,
+      Minga.Project
     ]
 
     editor_children =

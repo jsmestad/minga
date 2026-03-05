@@ -158,7 +158,7 @@ In Minga, when you call `Buffer.Server.content(buf)` in your config, you're call
 | LSP built-in | Planned (#22). Will run as supervised BEAM processes. |
 | Splits / tabs | Planned. Keybindings exist, implementation pending. |
 | Visual block mode | Planned. |
-| Telescope / fzf-lua | Built-in fuzzy picker exists. Not as feature-rich yet. |
+| Telescope / fzf-lua | Built-in fuzzy picker with project-scoped file finding and search. See [Projects](PROJECTS.md) |
 | DAP (debugger) | Not planned yet. |
 | Established community | Brand new. You'd be early. |
 

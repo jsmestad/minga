@@ -37,6 +37,7 @@ defmodule Minga.Editor do
   alias Minga.Mode.EvalState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.Project
 
   require Logger
 
@@ -170,6 +171,7 @@ defmodule Minga.Editor do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
         maybe_watch_buffer(file_watcher_pid(), pid)
+        maybe_detect_project(file_path)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = lsp_buffer_opened(new_state, pid)
@@ -849,6 +851,15 @@ defmodule Minga.Editor do
   defp command_name(cmd) when is_tuple(cmd), do: elem(cmd, 0)
   defp command_name(cmd) when is_list(cmd), do: :multi
   defp command_name(_cmd), do: :unknown
+
+  # ── Project detection ───────────────────────────────────────────────────────
+
+  @spec maybe_detect_project(String.t()) :: :ok
+  defp maybe_detect_project(file_path) do
+    Project.detect_and_set(file_path)
+  catch
+    :exit, _ -> :ok
+  end
 
   # ── File watcher helpers ──────────────────────────────────────────────────
 

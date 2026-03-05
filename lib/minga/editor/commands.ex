@@ -32,6 +32,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
+  alias Minga.Editor.Commands.Project
   alias Minga.Editor.Commands.Search
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
@@ -260,6 +261,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:jump_to_mark_exact, _} = cmd), do: Marks.execute(state, cmd)
   def execute(state, :jump_to_last_pos_line), do: Marks.execute(state, :jump_to_last_pos_line)
   def execute(state, :jump_to_last_pos_exact), do: Marks.execute(state, :jump_to_last_pos_exact)
+
+  # ── Project ────────────────────────────────────────────────────────────────
+
+  def execute(state, :project_find_file), do: Project.execute(state, :project_find_file)
+  def execute(state, :project_switch), do: Project.execute(state, :project_switch)
+  def execute(state, :project_invalidate), do: Project.execute(state, :project_invalidate)
+  def execute(state, :project_add), do: Project.execute(state, :project_add)
+  def execute(state, :project_remove), do: Project.execute(state, :project_remove)
 
   # ── Buffer management ─────────────────────────────────────────────────────
 

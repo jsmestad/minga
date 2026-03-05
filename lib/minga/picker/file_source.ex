@@ -20,7 +20,7 @@ defmodule Minga.Picker.FileSource do
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
   def candidates(_context) do
-    root = File.cwd!()
+    root = project_root()
 
     case Minga.FileFind.list_files(root) do
       {:ok, paths} ->
@@ -90,6 +90,16 @@ defmodule Minga.Picker.FileSource do
   def on_action(_action, _item, state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec project_root() :: String.t()
+  defp project_root do
+    case Minga.Project.root() do
+      nil -> File.cwd!()
+      root -> root
+    end
+  catch
+    :exit, _ -> File.cwd!()
+  end
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
   defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do

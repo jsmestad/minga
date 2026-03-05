@@ -13,6 +13,7 @@ defmodule Minga.Keymap.Defaults do
   | `SPC f`   | +file       |
   | `SPC b`   | +buffer     |
   | `SPC w`   | +window     |
+  | `SPC p`   | +project    |
   | `SPC q`   | +quit       |
   | `SPC h`   | +help       |
   """
@@ -69,6 +70,13 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
     {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
 
+    # ── Project ────────────────────────────────────────────────────────────────
+    {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},
+    {[{?p, @none}, {?p, @none}], :project_switch, "Switch project"},
+    {[{?p, @none}, {?i, @none}], :project_invalidate, "Invalidate project cache"},
+    {[{?p, @none}, {?a, @none}], :project_add, "Add known project"},
+    {[{?p, @none}, {?d, @none}], :project_remove, "Remove known project"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
@@ -78,6 +86,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?s, @none}], "+search"},
     {[{?f, @none}], "+file"},
     {[{?b, @none}], "+buffer"},
+    {[{?p, @none}], "+project"},
     {[{?c, @none}], "+code"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},

@@ -100,6 +100,11 @@ Current status and planned features. Updated as development progresses.
 | `SPC b s` | Switch to scratch | ✅ |
 | `SPC b N` | New empty buffer | ✅ |
 | `SPC s p` / `SPC /` | Search project (ripgrep) | ✅ |
+| `SPC p f` | Find file in project | ✅ | Scoped to detected project root |
+| `SPC p p` | Switch project | ✅ | Persisted known-projects list |
+| `SPC p i` | Invalidate project cache | ✅ |
+| `SPC p a` | Add known project | ✅ |
+| `SPC p d` | Remove known project | ✅ |
 | `SPC t l` | Toggle line number style | ✅ |
 | `SPC w h/j/k/l` | Window navigation | ✅ | Directional focus movement |
 | `SPC w v` / `SPC w s` | Vertical / horizontal split | ✅ | Nested splits supported |
@@ -147,6 +152,7 @@ Current status and planned features. Updated as development progresses.
 | Fuzzy file finder | ✅ | `SPC f f` with incremental search |
 | Buffer list picker | ✅ | `SPC b b` |
 | Project search (ripgrep) | ✅ | `SPC s p` / `SPC /` |
+| Project awareness | ✅ | Auto-detects root (.git, mix.exs, etc.), persists known projects, `SPC p` group |
 | File change detection | ✅ | Watches open files, prompts on conflict |
 | Filetype detection | ✅ | By extension, with registry |
 | Multiple buffers | ✅ | Open several files, switch between them |

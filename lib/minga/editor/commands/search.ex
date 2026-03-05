@@ -167,7 +167,9 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(%{mode_state: %{input: query}} = state, :confirm_project_search)
       when is_binary(query) and query != "" do
-    case ProjectSearch.search(query) do
+    root = project_root()
+
+    case ProjectSearch.search(query, root) do
       {:ok, [], _truncated?} ->
         %{state | status_msg: "No results for: #{query}"}
 
@@ -353,5 +355,15 @@ defmodule Minga.Editor.Commands.Search do
       end)
 
     Enum.join(new_lines, "\n")
+  end
+
+  @spec project_root() :: String.t()
+  defp project_root do
+    case Minga.Project.root() do
+      nil -> File.cwd!()
+      root -> root
+    end
+  catch
+    :exit, _ -> File.cwd!()
   end
 end

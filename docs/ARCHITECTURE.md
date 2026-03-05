@@ -104,6 +104,7 @@ Minga.Supervisor (rest_for_one)
 ├── Extension.Supervisor     ← DynamicSupervisor for extension processes
 ├── Diagnostics              ← source-agnostic diagnostic aggregation
 ├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
+├── Project                  ← project root detection, known-projects persistence, file cache
 ├── FileWatcher              ← OS file notifications
 ├── Port.Manager             ← owns the Zig renderer process
 └── Editor                   ← orchestration, depends on everything above

@@ -29,6 +29,7 @@ defmodule Minga.MixProject do
           "docs/DIAGRAMS.md",
           "docs/PERFORMANCE.md",
           "docs/EXTENSIBILITY.md",
+          "docs/PROJECTS.md",
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
           "docs/FOR-AI-CODERS.md"
@@ -39,7 +40,8 @@ defmodule Minga.MixProject do
             "docs/ARCHITECTURE.md",
             "docs/DIAGRAMS.md",
             "docs/PERFORMANCE.md",
-            "docs/EXTENSIBILITY.md"
+            "docs/EXTENSIBILITY.md",
+            "docs/PROJECTS.md"
           ],
           "Coming From...": [
             "docs/FOR-NEOVIM-USERS.md",
