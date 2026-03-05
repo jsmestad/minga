@@ -134,8 +134,17 @@ defmodule MockServer do
     System.halt(0)
   end
 
-  defp handle_message(msg) do
-    IO.puts(:stderr, "MockLSP: unhandled message: #{inspect(msg)}")
+  # Silently handle known methods that don't need mock responses
+  defp handle_message(%{"method" => "textDocument/hover", "id" => id}) do
+    send_response(id, nil)
+  end
+
+  defp handle_message(%{"method" => "textDocument/completion", "id" => id}) do
+    send_response(id, %{"isIncomplete" => false, "items" => []})
+  end
+
+  defp handle_message(_msg) do
+    :ok
   end
 
   defp send_response(id, result) do
