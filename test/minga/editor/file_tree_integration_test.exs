@@ -108,6 +108,54 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
     end
   end
 
+  describe "window navigation with file tree" do
+    test "SPC w h focuses the file tree from editor", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Open tree, then press Escape to return focus to editor (tree stays open but unfocused... wait, Esc closes it)
+      # Instead: open tree, enter a file to unfocus, then navigate back
+      # Simplest: open tree (focused), passthrough SPC to unfocus + trigger leader
+      # Actually, let's open the tree, use a file open to return to editor, then SPC w h back
+      # Even simpler: just test the state manipulation directly
+
+      # Open tree (focused)
+      send_keys(ctx, "<SPC>op")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree != nil
+      assert state.file_tree_focused == true
+
+      # SPC w l should passthrough from tree, unfocusing it
+      send_keys(ctx, "<SPC>wl")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree != nil
+      assert state.file_tree_focused == false
+
+      # SPC w h should focus the tree again
+      send_keys(ctx, "<SPC>wh")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree_focused == true
+    end
+
+    test "SPC w l from the file tree returns focus to editor", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Open tree (focused)
+      send_keys(ctx, "<SPC>op")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree_focused == true
+
+      # SPC w l unfocuses tree, returns to editor
+      send_keys(ctx, "<SPC>wl")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree != nil
+      assert state.file_tree_focused == false
+    end
+  end
+
   describe "opening files from tree" do
     test "Enter on a file opens it and returns focus to editor", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "alpha.txt"), "alpha content")

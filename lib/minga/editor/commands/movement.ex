@@ -323,10 +323,21 @@ defmodule Minga.Editor.Commands.Movement do
     screen = EditorState.screen_rect(state)
 
     case WindowTree.focus_neighbor(state.windows.tree, state.windows.active, direction, screen) do
-      {:ok, neighbor_id} -> EditorState.focus_window(state, neighbor_id)
-      :error -> state
+      {:ok, neighbor_id} ->
+        EditorState.focus_window(state, neighbor_id)
+
+      :error ->
+        # No neighbor in that direction; check if the file tree is there
+        maybe_focus_file_tree(state, direction)
     end
   end
+
+  @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
+  defp maybe_focus_file_tree(%{file_tree: %Minga.FileTree{}} = state, :left) do
+    %{state | file_tree_focused: true}
+  end
+
+  defp maybe_focus_file_tree(state, _direction), do: state
 
   @spec close_window(state()) :: state()
   defp close_window(%{windows: %{tree: nil}} = state), do: state
