@@ -88,9 +88,9 @@ defmodule Minga.Editor.Commands.Eval do
   end
 
   @spec log_to_messages(state(), String.t()) :: state()
-  defp log_to_messages(%{buf: %{messages_buffer: nil}} = state, _text), do: state
+  defp log_to_messages(%{buffers: %{messages: nil}} = state, _text), do: state
 
-  defp log_to_messages(%{buf: %{messages_buffer: buf}} = state, text) do
+  defp log_to_messages(%{buffers: %{messages: buf}} = state, text) do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
     BufferServer.append(buf, "[#{time}] #{text}\n")
 

@@ -36,6 +36,8 @@ defmodule Minga.Diagnostics do
 
   alias Minga.Diagnostics.Diagnostic
 
+  defstruct store: %{}, subscribers: []
+
   @typedoc "A diagnostic source identifier (e.g., `:lexical`, `:mix_compile`)."
   @type source :: atom()
 
@@ -43,7 +45,7 @@ defmodule Minga.Diagnostics do
   @type uri :: String.t()
 
   @typedoc "Internal state."
-  @type state :: %{
+  @type state :: %__MODULE__{
           store: %{{source(), uri()} => [Diagnostic.t()]},
           subscribers: [pid()]
         }
@@ -180,28 +182,28 @@ defmodule Minga.Diagnostics do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(_opts) do
-    {:ok, %{store: %{}, subscribers: []}}
+    {:ok, %__MODULE__{}}
   end
 
   @impl true
-  def handle_call({:subscribe, pid}, _from, state) when is_pid(pid) do
+  def handle_call({:subscribe, pid}, _from, %__MODULE__{} = state) when is_pid(pid) do
     Process.monitor(pid)
-    {:reply, :ok, %{state | subscribers: [pid | state.subscribers]}}
+    {:reply, :ok, %__MODULE__{state | subscribers: [pid | state.subscribers]}}
   end
 
-  def handle_call({:publish, source, uri, diagnostics}, _from, state) do
+  def handle_call({:publish, source, uri, diagnostics}, _from, %__MODULE__{} = state) do
     new_store = Map.put(state.store, {source, uri}, diagnostics)
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, %{state | store: new_store}}
+    {:reply, :ok, %__MODULE__{state | store: new_store}}
   end
 
-  def handle_call({:clear, source, uri}, _from, state) do
+  def handle_call({:clear, source, uri}, _from, %__MODULE__{} = state) do
     new_store = Map.delete(state.store, {source, uri})
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, %{state | store: new_store}}
+    {:reply, :ok, %__MODULE__{state | store: new_store}}
   end
 
-  def handle_call({:clear_source, source}, _from, state) do
+  def handle_call({:clear_source, source}, _from, %__MODULE__{} = state) do
     {removed, kept} =
       state.store
       |> Map.split_with(fn {{src, _uri}, _diags} -> src == source end)
@@ -213,14 +215,14 @@ defmodule Minga.Diagnostics do
       |> Enum.uniq()
 
     Enum.each(affected_uris, &notify_subscribers(state.subscribers, &1))
-    {:reply, :ok, %{state | store: kept}}
+    {:reply, :ok, %__MODULE__{state | store: kept}}
   end
 
-  def handle_call({:for_uri, uri}, _from, state) do
+  def handle_call({:for_uri, uri}, _from, %__MODULE__{} = state) do
     {:reply, merged_for_uri(state.store, uri), state}
   end
 
-  def handle_call({:severity_by_line, uri}, _from, state) do
+  def handle_call({:severity_by_line, uri}, _from, %__MODULE__{} = state) do
     result =
       state.store
       |> merged_for_uri(uri)
@@ -235,19 +237,19 @@ defmodule Minga.Diagnostics do
     {:reply, result, state}
   end
 
-  def handle_call({:next, uri, current_line}, _from, state) do
+  def handle_call({:next, uri, current_line}, _from, %__MODULE__{} = state) do
     diags = merged_for_uri(state.store, uri)
     result = find_next(diags, current_line)
     {:reply, result, state}
   end
 
-  def handle_call({:prev, uri, current_line}, _from, state) do
+  def handle_call({:prev, uri, current_line}, _from, %__MODULE__{} = state) do
     diags = merged_for_uri(state.store, uri)
     result = find_prev(diags, current_line)
     {:reply, result, state}
   end
 
-  def handle_call({:count, uri}, _from, state) do
+  def handle_call({:count, uri}, _from, %__MODULE__{} = state) do
     counts =
       state.store
       |> merged_for_uri(uri)
@@ -258,7 +260,7 @@ defmodule Minga.Diagnostics do
     {:reply, counts, state}
   end
 
-  def handle_call({:on_line, uri, line}, _from, state) do
+  def handle_call({:on_line, uri, line}, _from, %__MODULE__{} = state) do
     result =
       state.store
       |> merged_for_uri(uri)
@@ -268,8 +270,8 @@ defmodule Minga.Diagnostics do
   end
 
   @impl true
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {:noreply, %{state | subscribers: List.delete(state.subscribers, pid)}}
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %__MODULE__{} = state) do
+    {:noreply, %__MODULE__{state | subscribers: List.delete(state.subscribers, pid)}}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

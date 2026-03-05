@@ -125,7 +125,7 @@ defmodule Minga.Editor.Commands do
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: nil}} = state, _cmd), do: state
+  def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
 
   # ── Movement ──────────────────────────────────────────────────────────────
 
@@ -294,7 +294,7 @@ defmodule Minga.Editor.Commands do
 
   # ── Format ────────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :format_buffer) when is_pid(buf) do
+  def execute(%{buffers: %{active: buf}} = state, :format_buffer) when is_pid(buf) do
     filetype = BufferServer.filetype(buf)
     file_path = BufferServer.file_path(buf)
     spec = Formatter.resolve_formatter(filetype, file_path)

@@ -23,7 +23,7 @@ defmodule Minga.Picker.BufferSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{buf: %{buffers: buffers}}) do
+  def candidates(%{buffers: %{list: buffers}}) do
     buffers
     |> Enum.with_index()
     |> Enum.reject(fn {buf, _idx} ->
@@ -66,7 +66,7 @@ defmodule Minga.Picker.BufferSource do
   def on_action(
         :kill,
         {idx, _label, _desc},
-        %{buf: %Minga.Editor.State.Buffers{buffers: buffers} = bs} = state
+        %{buffers: %Minga.Editor.State.Buffers{list: buffers} = bs} = state
       )
       when is_integer(idx) and idx < length(buffers) do
     alias Minga.Editor.State.Buffers
@@ -84,10 +84,10 @@ defmodule Minga.Picker.BufferSource do
         state
 
       _ ->
-        new_active = min(bs.active_buffer, length(new_buffers) - 1)
-        new_bs = %Buffers{bs | buffers: new_buffers}
+        new_active = min(bs.active_index, length(new_buffers) - 1)
+        new_bs = %Buffers{bs | list: new_buffers}
 
-        %{state | buf: Buffers.switch_to(new_bs, new_active)}
+        %{state | buffers: Buffers.switch_to(new_bs, new_active)}
         |> EditorState.sync_active_window_buffer()
     end
   end

@@ -51,7 +51,7 @@ defmodule Minga.Editor.State do
             viewport: nil,
             mode: :normal,
             mode_state: nil,
-            buf: %Buffers{},
+            buffers: %Buffers{},
             picker_ui: %Picker{},
             whichkey: %WhichKey{},
             search: %Search{},
@@ -83,7 +83,7 @@ defmodule Minga.Editor.State do
           viewport: Viewport.t(),
           mode: Mode.mode(),
           mode_state: Mode.state(),
-          buf: Buffers.t(),
+          buffers: Buffers.t(),
           picker_ui: Picker.t(),
           whichkey: WhichKey.t(),
           search: Search.t(),
@@ -115,15 +115,15 @@ defmodule Minga.Editor.State do
 
   @doc "Returns the active buffer pid."
   @spec buffer(t()) :: pid() | nil
-  def buffer(%__MODULE__{buf: %{buffer: b}}), do: b
+  def buffer(%__MODULE__{buffers: %{active: b}}), do: b
 
   @doc "Returns the buffer list."
   @spec buffers(t()) :: [pid()]
-  def buffers(%__MODULE__{buf: %{buffers: bs}}), do: bs
+  def buffers(%__MODULE__{buffers: %{list: bs}}), do: bs
 
   @doc "Returns the active buffer index."
   @spec active_buffer(t()) :: non_neg_integer()
-  def active_buffer(%__MODULE__{buf: %{active_buffer: idx}}), do: idx
+  def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
 
   # ── Window accessors ──────────────────────────────────────────────────────
 
@@ -146,20 +146,20 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
-  Syncs the active window's buffer reference with `state.buf.buffer`.
+  Syncs the active window's buffer reference with `state.buffers.active`.
 
-  Call this after any operation that changes `state.buf.buffer` to keep the
+  Call this after any operation that changes `state.buffers.active` to keep the
   window tree consistent. No-op when windows aren't initialized.
   """
   @spec sync_active_window_buffer(t()) :: t()
-  def sync_active_window_buffer(%__MODULE__{buf: %{buffer: nil}} = state), do: state
+  def sync_active_window_buffer(%__MODULE__{buffers: %{active: nil}} = state), do: state
 
   def sync_active_window_buffer(
-        %__MODULE__{windows: windows, active_window: id, buf: buf} = state
+        %__MODULE__{windows: windows, active_window: id, buffers: buffers} = state
       ) do
     case Map.fetch(windows, id) do
-      {:ok, %Window{buffer: existing} = window} when existing != buf.buffer ->
-        %{state | windows: Map.put(windows, id, %{window | buffer: buf.buffer})}
+      {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
+        %{state | windows: Map.put(windows, id, %{window | buffer: buffers.active})}
 
       _ ->
         state
@@ -173,8 +173,8 @@ defmodule Minga.Editor.State do
   to call `sync_active_window_buffer/1`.
   """
   @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(%__MODULE__{buf: bs} = state, pid) do
-    %{state | buf: Buffers.add(bs, pid)}
+  def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
+    %{state | buffers: Buffers.add(bs, pid)}
     |> sync_active_window_buffer()
   end
 
@@ -185,8 +185,8 @@ defmodule Minga.Editor.State do
   remember to call `sync_active_window_buffer/1`.
   """
   @spec switch_buffer(t(), non_neg_integer()) :: t()
-  def switch_buffer(%__MODULE__{buf: bs} = state, idx) do
-    %{state | buf: Buffers.switch_to(bs, idx)}
+  def switch_buffer(%__MODULE__{buffers: bs} = state, idx) do
+    %{state | buffers: Buffers.switch_to(bs, idx)}
     |> sync_active_window_buffer()
   end
 
@@ -197,10 +197,10 @@ defmodule Minga.Editor.State do
   cursor position for the active window when it becomes inactive later.
   """
   @spec sync_active_window_cursor(t()) :: t()
-  def sync_active_window_cursor(%__MODULE__{buf: %{buffer: nil}} = state), do: state
+  def sync_active_window_cursor(%__MODULE__{buffers: %{active: nil}} = state), do: state
 
   def sync_active_window_cursor(
-        %__MODULE__{windows: windows, active_window: id, buf: %{buffer: buf}} = state
+        %__MODULE__{windows: windows, active_window: id, buffers: %{active: buf}} = state
       ) do
     case Map.fetch(windows, id) do
       {:ok, window} ->
@@ -223,16 +223,16 @@ defmodule Minga.Editor.State do
       when target_id == active,
       do: state
 
-  def focus_window(%__MODULE__{buf: %{buffer: nil}} = state, _target_id), do: state
+  def focus_window(%__MODULE__{buffers: %{active: nil}} = state, _target_id), do: state
 
   def focus_window(
-        %__MODULE__{windows: windows, active_window: old_id, buf: buf} = state,
+        %__MODULE__{windows: windows, active_window: old_id, buffers: buffers} = state,
         target_id
       ) do
     case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
       {{:ok, old_win}, {:ok, target_win}} ->
         # Save current cursor to outgoing window
-        current_cursor = BufferServer.cursor(buf.buffer)
+        current_cursor = BufferServer.cursor(buffers.active)
         windows = Map.put(windows, old_id, %{old_win | cursor: current_cursor})
 
         # Restore target window's cursor into its buffer
@@ -242,7 +242,7 @@ defmodule Minga.Editor.State do
           state
           | windows: windows,
             active_window: target_id,
-            buf: %{buf | buffer: target_win.buffer}
+            buffers: %{buffers | active: target_win.buffer}
         }
 
       _ ->

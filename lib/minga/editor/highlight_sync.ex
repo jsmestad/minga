@@ -20,10 +20,10 @@ defmodule Minga.Editor.HighlightSync do
   to the Zig port. Call this when a buffer is opened or switched to.
   """
   @spec setup_for_buffer(EditorState.t()) :: EditorState.t()
-  def setup_for_buffer(%EditorState{buf: %{buffer: nil}} = state), do: state
+  def setup_for_buffer(%EditorState{buffers: %{active: nil}} = state), do: state
 
   def setup_for_buffer(%EditorState{} = state) do
-    filetype = BufferServer.filetype(state.buf.buffer)
+    filetype = BufferServer.filetype(state.buffers.active)
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
@@ -38,7 +38,7 @@ defmodule Minga.Editor.HighlightSync do
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
   defp send_parse_only(state, language) do
     version = state.highlight_version + 1
-    content = BufferServer.content(state.buf.buffer)
+    content = BufferServer.content(state.buffers.active)
 
     query_override = user_query_override(language)
 
@@ -81,7 +81,7 @@ defmodule Minga.Editor.HighlightSync do
   Call this after content changes (insert, delete, paste, etc.).
   """
   @spec request_reparse(EditorState.t()) :: EditorState.t()
-  def request_reparse(%EditorState{buf: %{buffer: nil}} = state), do: state
+  def request_reparse(%EditorState{buffers: %{active: nil}} = state), do: state
 
   def request_reparse(%EditorState{highlight: %{spans: []}} = state)
       when state.highlight.capture_names == [] do
@@ -91,7 +91,7 @@ defmodule Minga.Editor.HighlightSync do
 
   def request_reparse(%EditorState{} = state) do
     version = state.highlight_version + 1
-    content = BufferServer.content(state.buf.buffer)
+    content = BufferServer.content(state.buffers.active)
 
     PortManager.send_commands(state.port_manager, [
       Protocol.encode_parse_buffer(version, content)

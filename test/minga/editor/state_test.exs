@@ -29,14 +29,14 @@ defmodule Minga.Editor.StateTest do
     buf = start_buffer(content)
 
     state =
-      %{new_state() | buf: %Buffers{buffers: [buf], active_buffer: 0, buffer: buf}}
+      %{new_state() | buffers: %Buffers{list: [buf], active_index: 0, active: buf}}
       |> setup_windows()
 
     {state, buf}
   end
 
   defp setup_windows(state) do
-    buf = state.buf.buffer
+    buf = state.buffers.active
     tree = WindowTree.new(1)
     window = Window.new(1, buf, 24, 80)
     %{state | window_tree: tree, windows: %{1 => window}, active_window: 1, next_window_id: 2}
@@ -51,9 +51,9 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.add_buffer(state, buf2)
 
-      assert new_state.buf.buffer == buf2
-      assert length(new_state.buf.buffers) == 2
-      assert new_state.buf.active_buffer == 1
+      assert new_state.buffers.active == buf2
+      assert length(new_state.buffers.list) == 2
+      assert new_state.buffers.active_index == 1
     end
 
     test "syncs the active window's buffer reference" do
@@ -71,7 +71,7 @@ defmodule Minga.Editor.StateTest do
 
       # Create a split: window 1 (active) and window 2
       {:ok, tree} = WindowTree.split(state.window_tree, 1, :vertical, 2)
-      win2 = Window.new(2, state.buf.buffer, 24, 40)
+      win2 = Window.new(2, state.buffers.active, 24, 40)
 
       state = %{
         state
@@ -94,7 +94,7 @@ defmodule Minga.Editor.StateTest do
       buf = start_buffer()
       new_state = EditorState.add_buffer(state, buf)
 
-      assert new_state.buf.buffer == buf
+      assert new_state.buffers.active == buf
     end
   end
 
@@ -108,8 +108,8 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.switch_buffer(state, 0)
 
-      assert new_state.buf.buffer == buf1
-      assert new_state.buf.active_buffer == 0
+      assert new_state.buffers.active == buf1
+      assert new_state.buffers.active_index == 0
     end
 
     test "syncs active window's buffer reference on switch" do
@@ -243,7 +243,7 @@ defmodule Minga.Editor.StateTest do
     test "true after split" do
       {state, _} = state_with_buffer()
       {:ok, tree} = WindowTree.split(state.window_tree, 1, :vertical, 2)
-      win2 = Window.new(2, state.buf.buffer, 24, 40)
+      win2 = Window.new(2, state.buffers.active, 24, 40)
       state = %{state | window_tree: tree, windows: Map.put(state.windows, 2, win2)}
       assert EditorState.split?(state)
     end

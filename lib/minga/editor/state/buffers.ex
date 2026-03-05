@@ -7,38 +7,38 @@ defmodule Minga.Editor.State.Buffers do
   """
 
   @type t :: %__MODULE__{
-          buffer: pid() | nil,
-          buffers: [pid()],
-          active_buffer: non_neg_integer(),
-          messages_buffer: pid() | nil,
-          scratch_buffer: pid() | nil,
-          help_buffer: pid() | nil
+          active: pid() | nil,
+          list: [pid()],
+          active_index: non_neg_integer(),
+          messages: pid() | nil,
+          scratch: pid() | nil,
+          help: pid() | nil
         }
 
-  defstruct buffer: nil,
-            buffers: [],
-            active_buffer: 0,
-            messages_buffer: nil,
-            scratch_buffer: nil,
-            help_buffer: nil
+  defstruct active: nil,
+            list: [],
+            active_index: 0,
+            messages: nil,
+            scratch: nil,
+            help: nil
 
   @doc "Appends a buffer pid and makes it active."
   @spec add(t(), pid()) :: t()
   def add(%__MODULE__{} = bs, pid) do
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-    buffers = bs.buffers ++ [pid]
+    buffers = bs.list ++ [pid]
     idx = length(buffers) - 1
-    %{bs | buffers: buffers, active_buffer: idx, buffer: pid}
+    %{bs | list: buffers, active_index: idx, active: pid}
   end
 
   @doc "Switches to the buffer at `idx`, wrapping around."
   @spec switch_to(t(), non_neg_integer()) :: t()
-  def switch_to(%__MODULE__{buffers: [_ | _] = buffers} = bs, idx) do
+  def switch_to(%__MODULE__{list: [_ | _] = buffers} = bs, idx) do
     len = length(buffers)
     idx = rem(idx, len)
     idx = if idx < 0, do: idx + len, else: idx
     pid = Enum.at(buffers, idx)
-    %{bs | active_buffer: idx, buffer: pid}
+    %{bs | active_index: idx, active: pid}
   end
 
   def switch_to(%__MODULE__{} = bs, _idx), do: bs

@@ -47,12 +47,12 @@ defmodule Minga.Editor.Commands.Help do
     replace_help_content(help_buf, content)
 
     # Switch to help buffer
-    idx = Enum.find_index(state.buf.buffers, &(&1 == help_buf))
+    idx = Enum.find_index(state.buffers.list, &(&1 == help_buf))
 
     state =
       if idx do
-        put_in(state.buf.active_buffer, idx)
-        |> then(fn s -> put_in(s.buf.buffer, help_buf) end)
+        put_in(state.buffers.active_index, idx)
+        |> then(fn s -> put_in(s.buffers.active, help_buf) end)
       else
         Commands.add_buffer(state, help_buf)
       end
@@ -61,7 +61,7 @@ defmodule Minga.Editor.Commands.Help do
   end
 
   @spec ensure_help_buffer(state()) :: {state(), pid()}
-  defp ensure_help_buffer(%{buf: %{help_buffer: buf}} = state)
+  defp ensure_help_buffer(%{buffers: %{help: buf}} = state)
        when is_pid(buf) and buf != nil do
     if Process.alive?(buf) do
       {state, buf}
@@ -83,7 +83,7 @@ defmodule Minga.Editor.Commands.Help do
          content: "", buffer_name: "*Help*", read_only: true, unlisted: true, persistent: true}
       )
 
-    {put_in(state.buf.help_buffer, pid), pid}
+    {put_in(state.buffers.help, pid), pid}
   end
 
   @spec replace_help_content(pid(), String.t()) :: :ok

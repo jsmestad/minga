@@ -20,7 +20,7 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Deletion ──────────────────────────────────────────────────────────────
 
   def execute(
-        %{buf: %{buffer: buf}, mode: :insert, autopair_enabled: true} = state,
+        %{buffers: %{active: buf}, mode: :insert, autopair_enabled: true} = state,
         :delete_before
       ) do
     gb = BufferServer.snapshot(buf)
@@ -38,25 +38,25 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :delete_before) do
+  def execute(%{buffers: %{active: buf}} = state, :delete_before) do
     BufferServer.delete_before(buf)
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :delete_at) do
+  def execute(%{buffers: %{active: buf}} = state, :delete_at) do
     BufferServer.delete_at(buf)
     state
   end
 
   # ── Insertion ─────────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :insert_newline) do
+  def execute(%{buffers: %{active: buf}} = state, :insert_newline) do
     BufferServer.insert_char(buf, "\n")
     state
   end
 
   def execute(
-        %{buf: %{buffer: buf}, mode: :insert, autopair_enabled: true} = state,
+        %{buffers: %{active: buf}, mode: :insert, autopair_enabled: true} = state,
         {:insert_char, char}
       )
       when is_binary(char) do
@@ -79,14 +79,14 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:insert_char, char}) when is_binary(char) do
+  def execute(%{buffers: %{active: buf}} = state, {:insert_char, char}) when is_binary(char) do
     BufferServer.insert_char(buf, char)
     state
   end
 
   # ── Open lines ────────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :insert_line_below) do
+  def execute(%{buffers: %{active: buf}} = state, :insert_line_below) do
     {line, _col} = BufferServer.cursor(buf)
 
     end_col =
@@ -100,7 +100,7 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :insert_line_above) do
+  def execute(%{buffers: %{active: buf}} = state, :insert_line_above) do
     {line, _col} = BufferServer.cursor(buf)
     BufferServer.move_to(buf, {line, 0})
     BufferServer.insert_char(buf, "\n")
@@ -110,7 +110,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   # ── Single-key editing ────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :join_lines) do
+  def execute(%{buffers: %{active: buf}} = state, :join_lines) do
     {line, _col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
 
@@ -149,14 +149,14 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:replace_char, char}) do
+  def execute(%{buffers: %{active: buf}} = state, {:replace_char, char}) do
     BufferServer.delete_at(buf)
     BufferServer.insert_char(buf, char)
     BufferServer.move(buf, :left)
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :toggle_case) do
+  def execute(%{buffers: %{active: buf}} = state, :toggle_case) do
     {line, col} = BufferServer.cursor(buf)
 
     case BufferServer.get_lines(buf, line, 1) do
@@ -184,7 +184,7 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Replace mode ──────────────────────────────────────────────────────────
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %ReplaceState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %ReplaceState{} = ms} = state,
         {:replace_overwrite, char}
       ) do
     {line, col} = BufferServer.cursor(buf)
@@ -235,19 +235,19 @@ defmodule Minga.Editor.Commands.Editing do
 
   # ── Undo / redo ───────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :undo) do
+  def execute(%{buffers: %{active: buf}} = state, :undo) do
     BufferServer.undo(buf)
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :redo) do
+  def execute(%{buffers: %{active: buf}} = state, :redo) do
     BufferServer.redo(buf)
     state
   end
 
   # ── Paste ─────────────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :paste_before) do
+  def execute(%{buffers: %{active: buf}} = state, :paste_before) do
     {text, state} = Helpers.get_register(state)
 
     case text do
@@ -260,7 +260,7 @@ defmodule Minga.Editor.Commands.Editing do
     end
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :paste_after) do
+  def execute(%{buffers: %{active: buf}} = state, :paste_after) do
     {text, state} = Helpers.get_register(state)
 
     case text do
@@ -276,7 +276,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   # ── Indent / dedent (single line) ────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :indent_line) do
+  def execute(%{buffers: %{active: buf}} = state, :indent_line) do
     tw = tab_width(buf)
     indent = String.duplicate(" ", tw)
     {line, col} = BufferServer.cursor(buf)
@@ -286,7 +286,7 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :dedent_line) do
+  def execute(%{buffers: %{active: buf}} = state, :dedent_line) do
     {line, col} = BufferServer.cursor(buf)
 
     case BufferServer.get_lines(buf, line, 1) do
@@ -299,7 +299,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   # ── Indent / dedent (multiple lines via count or motion) ─────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, {:indent_lines, n}) do
+  def execute(%{buffers: %{active: buf}} = state, {:indent_lines, n}) do
     {cursor_line, _} = BufferServer.cursor(buf)
     total = BufferServer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
@@ -307,7 +307,7 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:dedent_lines, n}) do
+  def execute(%{buffers: %{active: buf}} = state, {:dedent_lines, n}) do
     {cursor_line, _} = BufferServer.cursor(buf)
     total = BufferServer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
@@ -315,7 +315,7 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:indent_motion, motion}) do
+  def execute(%{buffers: %{active: buf}} = state, {:indent_motion, motion}) do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
@@ -327,7 +327,7 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:dedent_motion, motion}) do
+  def execute(%{buffers: %{active: buf}} = state, {:dedent_motion, motion}) do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
@@ -340,7 +340,7 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %VisualState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
         :indent_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -354,7 +354,7 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %VisualState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
         :dedent_visual_selection
       ) do
     anchor = ms.visual_anchor

@@ -16,13 +16,13 @@ defmodule Minga.Editor.Commands.Diagnostics do
   @doc "Executes a diagnostic or LSP command."
   @spec execute(EditorState.t(), :next_diagnostic | :prev_diagnostic | :lsp_info) ::
           EditorState.t()
-  def execute(%{buf: %{buffer: nil}} = state, _cmd), do: state
+  def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
 
-  def execute(%{buf: %{buffer: buf}} = state, :next_diagnostic) do
+  def execute(%{buffers: %{active: buf}} = state, :next_diagnostic) do
     navigate(state, buf, &Diagnostics.next/2)
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :prev_diagnostic) do
+  def execute(%{buffers: %{active: buf}} = state, :prev_diagnostic) do
     navigate(state, buf, &Diagnostics.prev/2)
   end
 
