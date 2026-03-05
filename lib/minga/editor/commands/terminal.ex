@@ -2,10 +2,11 @@ defmodule Minga.Editor.Commands.Terminal do
   @moduledoc """
   Terminal toggle command for the embedded terminal split.
 
-  `SPC o t` cycles through three states:
-  1. No terminal open → open a bottom split (30% height) and focus it
-  2. Terminal open but not focused → focus it
-  3. Terminal open and focused → close it
+  `SPC o t` is a simple open/close toggle:
+  - Terminal not open → open a bottom split and focus it
+  - Terminal open → close it (regardless of focus state)
+
+  ESC returns focus to the editor without closing the terminal.
   """
 
   alias Minga.Editor.State, as: EditorState
@@ -25,12 +26,8 @@ defmodule Minga.Editor.Commands.Terminal do
     open_terminal(state)
   end
 
-  def execute(%{terminal: %Terminal{open: true, focused: true}} = state, :toggle_terminal) do
+  def execute(%{terminal: %Terminal{open: true}} = state, :toggle_terminal) do
     close_terminal(state)
-  end
-
-  def execute(%{terminal: %Terminal{open: true, focused: false}} = state, :toggle_terminal) do
-    focus_terminal(state)
   end
 
   @doc "Handles the terminal_exited event from the Zig renderer."
@@ -135,19 +132,6 @@ defmodule Minga.Editor.Commands.Terminal do
         mode_state: nil,
         buffers: %{state.buffers | active: active_buf},
         status_msg: nil
-    }
-  end
-
-  @spec focus_terminal(state()) :: state()
-  defp focus_terminal(state) do
-    terminal = Terminal.set_focus(state.terminal, true)
-    Manager.send_commands(state.port_manager, [Protocol.encode_terminal_focus(true)])
-
-    %{
-      state
-      | terminal: terminal,
-        mode: :terminal,
-        status_msg: "TERMINAL (ESC to return)"
     }
   end
 
