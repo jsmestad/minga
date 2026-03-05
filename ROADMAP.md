@@ -247,7 +247,7 @@ Roughly in priority order:
 6. **Visual block mode** — Column selection and editing
 7. **File tree sidebar** — Project navigation panel
 8. **Git integration** — Gutter indicators, blame, hunk staging
-9. **Terminal emulator** — Embedded terminal in a split
+9. **Terminal emulator** — 🚧 Embedded terminal via libvterm (SPC o t toggle, C-\ C-n escape) #122
 
 ---
 
