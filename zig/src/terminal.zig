@@ -28,7 +28,9 @@ const c = @cImport({
     @cInclude("unistd.h");
     @cInclude("signal.h");
     @cInclude("sys/ioctl.h");
-    @cInclude("sys/ttycom.h");
+    if (builtin.os.tag == .macos) {
+        @cInclude("sys/ttycom.h");
+    }
     @cInclude("sys/wait.h");
 });
 

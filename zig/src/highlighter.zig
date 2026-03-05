@@ -423,7 +423,7 @@ test "highlighter: init registers all grammars" {
     var hl = try Highlighter.init(std.testing.allocator);
     defer hl.deinit();
 
-    try std.testing.expect(hl.languages.count() == 24);
+    try std.testing.expect(hl.languages.count() == builtin_grammars.len);
     try std.testing.expect(hl.languages.get("elixir") != null);
     try std.testing.expect(hl.languages.get("zig") != null);
     try std.testing.expect(hl.languages.get("nonexistent") == null);
