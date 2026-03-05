@@ -20,6 +20,9 @@ Current status and planned features. Updated as development progresses.
 | Indent / dedent (`>>`, `<<`) | ✅ | |
 | Toggle case (`~`) | ✅ | |
 | Line numbers (absolute / relative) | ✅ | Togglable via `:set nu` / `:set rnu` |
+| Undo coalescing (time-based) | ✅ | 300ms window; mode transitions break coalescing |
+| Bulk text insert | ✅ | `Document.insert_text/2`; single binary op instead of char-by-char |
+| Batch edit API | ✅ | `Buffer.Server.apply_text_edits/2`; one undo entry per batch |
 | Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots |
 | Line index cache (O(1) line access) | 📋 | See `docs/PERFORMANCE.md` |
 
