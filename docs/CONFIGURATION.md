@@ -153,6 +153,64 @@ for_filetype :elixir, insert_final_newline: true
 
 These run before format-on-save, so the formatter gets clean input.
 
+## Syntax highlighting
+
+Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting. 23 languages are supported out of the box:
+
+Bash, C, C++, CSS, Elixir, Erlang, Gleam, Go, HEEx, HTML, JavaScript, JSON, Kotlin, Lua, Markdown, Python, Ruby, Rust, TOML, TSX, TypeScript, YAML, Zig
+
+Highlighting activates automatically when a file's type is detected. No configuration needed for supported languages.
+
+### Customizing highlight colors
+
+Highlight colors come from your theme. Switching themes (`set :theme, :catppuccin_mocha`) changes all syntax colors at once. See [Themes](#themes) above.
+
+### Overriding highlight queries
+
+Each language's highlighting is driven by a tree-sitter query file (`.scm`). If you want to change what gets highlighted (for example, adding a capture for a language feature the default query misses), drop a custom query file at:
+
+```
+~/.config/minga/queries/{language}/highlights.scm
+```
+
+For example, to customize Elixir highlighting:
+
+```
+~/.config/minga/queries/elixir/highlights.scm
+```
+
+Your custom query completely replaces the built-in one for that language. Start by copying the default query from the Minga source (`zig/src/queries/{language}/highlights.scm`) and modifying it.
+
+Queries use tree-sitter's [query syntax](https://tree-sitter.github.io/tree-sitter/syntax-highlighting/). The capture names Minga recognizes include: `@keyword`, `@string`, `@comment`, `@function`, `@type`, `@number`, `@operator`, `@punctuation`, `@variable`, `@constant`, and more. Each maps to a color slot in the active theme.
+
+No restart is needed after changing a query file; `SPC h r` (hot reload) picks up the change.
+
+### Registering custom filetypes
+
+If Minga doesn't recognize a file extension, you can register it in your config so the right grammar is used:
+
+```elixir
+# In config.exs
+Minga.Filetype.Registry.register(".astro", :astro)
+Minga.Filetype.Registry.register("Justfile", :just)
+```
+
+This tells Minga the filetype, but highlighting only works if a grammar for that language is compiled into the editor. See below for adding new grammars.
+
+### Adding a new language grammar
+
+Adding a grammar for a language Minga doesn't ship requires building from source. This involves five steps:
+
+1. **Vendor the grammar** — copy the tree-sitter grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`.
+2. **Add a highlight query** — place a `highlights.scm` at `zig/src/queries/{lang}/highlights.scm`. The grammar's upstream repo usually has one you can start from.
+3. **Register in the Zig build** — add an entry to the `grammars` array in `zig/build.zig` with `has_scanner` set appropriately.
+4. **Register in the highlighter** — in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array.
+5. **Register the filetype** — add extension/filename mappings in `lib/minga/filetype.ex` so files are detected correctly.
+
+After rebuilding (`mix compile`), the grammar is compiled into the binary and available immediately.
+
+If you add a grammar for a popular language, consider opening a PR so everyone gets it.
+
 ## Keybindings
 
 `bind/4` adds or overrides leader-key bindings:
