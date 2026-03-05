@@ -391,4 +391,42 @@ defmodule Minga.Port.ProtocolTest do
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end
   end
+
+  describe "log_message protocol" do
+    test "decode_event log_message with err level" do
+      payload = <<0x60, 0, 10::16, "test error">>
+      assert {:ok, {:log_message, "ERR", "test error"}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with warn level" do
+      payload = <<0x60, 1, 12::16, "test warning">>
+      assert {:ok, {:log_message, "WARN", "test warning"}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with info level" do
+      payload = <<0x60, 2, 9::16, "test info">>
+      assert {:ok, {:log_message, "INFO", "test info"}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with debug level" do
+      payload = <<0x60, 3, 10::16, "test debug">>
+      assert {:ok, {:log_message, "DEBUG", "test debug"}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with unknown level" do
+      payload = <<0x60, 99, 4::16, "test">>
+      assert {:ok, {:log_message, "UNKNOWN", "test"}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with empty message" do
+      payload = <<0x60, 2, 0::16>>
+      assert {:ok, {:log_message, "INFO", ""}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event log_message with unicode text" do
+      text = "Zig says: Ü"
+      payload = <<0x60, 2, byte_size(text)::16, text::binary>>
+      assert {:ok, {:log_message, "INFO", ^text}} = Protocol.decode_event(payload)
+    end
+  end
 end

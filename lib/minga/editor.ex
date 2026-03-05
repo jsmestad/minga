@@ -423,6 +423,11 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  def handle_info({:minga_input, {:log_message, level, text}}, state) do
+    new_state = log_message(state, "[ZIG/#{level}] #{text}")
+    {:noreply, new_state}
+  end
+
   # LSP debounced didChange timer fired — flush the change notification
   def handle_info({:lsp_did_change, buffer_pid}, state) do
     new_lsp = DocumentSync.flush_did_change(state.lsp, buffer_pid)

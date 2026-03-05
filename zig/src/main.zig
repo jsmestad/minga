@@ -31,9 +31,39 @@ fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
 
 pub const panic = std.debug.FullPanic(panicImpl);
 
-// Suppress vaxis debug log messages (they bleed into the terminal).
+// ── Custom log function ───────────────────────────────────────────────────────
+// Routes std.log calls over the port protocol to the BEAM instead of stderr.
+// Before the port writer is initialized, messages are silently discarded.
+
+/// Module-level writer for the port channel (stdout). Set by the TUI runtime
+/// during startup, before the event loop begins.
+pub var g_port_writer: ?*std.Io.Writer = null;
+
+fn mingaLogFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
+    _ = scope;
+
+    const writer = g_port_writer orelse return;
+
+    const level: u8 = switch (message_level) {
+        .err => protocol.LOG_LEVEL_ERR,
+        .warn => protocol.LOG_LEVEL_WARN,
+        .info => protocol.LOG_LEVEL_INFO,
+        .debug => protocol.LOG_LEVEL_DEBUG,
+    };
+
+    // Format the message into a stack buffer. Truncate if it doesn't fit.
+    var msg_buf: [4096]u8 = undefined;
+    const msg = std.fmt.bufPrint(&msg_buf, format, args) catch msg_buf[0..msg_buf.len];
+
+    var payload_buf: [4096 + 4]u8 = undefined;
+    const payload_len = protocol.encodeLogMessage(&payload_buf, level, msg) catch return;
+    protocol.writeMessage(writer, payload_buf[0..payload_len]) catch return;
+    writer.flush() catch {};
+}
+
 pub const std_options = std.Options{
     .log_level = .info,
+    .logFn = mingaLogFn,
 };
 
 // ── Runtime type selection ────────────────────────────────────────────────────

@@ -62,6 +62,9 @@ defmodule Minga.Port.Protocol do
   @op_highlight_names 0x31
   @op_grammar_loaded 0x32
 
+  # Log messages (Zig → BEAM)
+  @op_log_message 0x60
+
   # Cursor shapes
   @cursor_block 0x00
   @cursor_beam 0x01
@@ -122,6 +125,7 @@ defmodule Minga.Port.Protocol do
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
           | {:highlight_names, [String.t()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
+          | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -278,6 +282,11 @@ defmodule Minga.Port.Protocol do
     {:ok, {:grammar_loaded, success == 1, name}}
   end
 
+  def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
+    level = decode_log_level(level_byte)
+    {:ok, {:log_message, level, msg}}
+  end
+
   def decode_event(<<opcode::8, _rest::binary>>)
       when opcode in [@op_key_press, @op_resize, @op_ready, @op_mouse_event] do
     {:error, :malformed}
@@ -423,4 +432,13 @@ defmodule Minga.Port.Protocol do
   defp decode_mouse_event_type(@mouse_motion), do: :motion
   defp decode_mouse_event_type(@mouse_drag), do: :drag
   defp decode_mouse_event_type(other), do: {:unknown, other}
+
+  # ── Log level helpers ──
+
+  @spec decode_log_level(non_neg_integer()) :: String.t()
+  defp decode_log_level(0), do: "ERR"
+  defp decode_log_level(1), do: "WARN"
+  defp decode_log_level(2), do: "INFO"
+  defp decode_log_level(3), do: "DEBUG"
+  defp decode_log_level(_), do: "UNKNOWN"
 end

@@ -9,6 +9,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vaxis = @import("vaxis");
+const root = @import("../main.zig");
 const protocol = @import("../protocol.zig");
 const renderer_mod = @import("../renderer.zig");
 const surface_mod = @import("../surface.zig");
@@ -176,6 +177,9 @@ pub const TuiRuntime = struct {
         var stdout_buf: [4096]u8 = undefined;
         var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
         const stdout: *std.Io.Writer = &stdout_writer_obj.interface;
+
+        // Enable log routing over the port protocol now that stdout is ready.
+        root.g_port_writer = stdout;
 
         // Send ready event with initial dimensions.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);

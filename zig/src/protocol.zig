@@ -42,6 +42,15 @@ pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
 pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
 pub const OP_GRAMMAR_LOADED: u8 = 0x32;
 
+// Log messages (Zig → BEAM)
+pub const OP_LOG_MESSAGE: u8 = 0x60;
+
+// Log levels
+pub const LOG_LEVEL_ERR: u8 = 0;
+pub const LOG_LEVEL_WARN: u8 = 1;
+pub const LOG_LEVEL_INFO: u8 = 2;
+pub const LOG_LEVEL_DEBUG: u8 = 3;
+
 // ── Cursor shapes ──
 
 pub const CURSOR_BLOCK: u8 = 0x00;
@@ -239,6 +248,19 @@ pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
     buf[1] = if (success) 1 else 0;
     std.mem.writeInt(u16, buf[2..4], @intCast(name.len), .big);
     @memcpy(buf[4 .. 4 + name.len], name);
+    return total;
+}
+
+/// Encodes log_message: opcode(1) + level:u8 + msg_len:u16 + msg
+/// Wire format: `<0x60, level:8, msg_len:16, msg:binary>`
+pub fn encodeLogMessage(buf: []u8, level: u8, msg: []const u8) !usize {
+    const msg_len = @min(msg.len, std.math.maxInt(u16));
+    const total = 4 + msg_len;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_LOG_MESSAGE;
+    buf[1] = level;
+    std.mem.writeInt(u16, buf[2..4], @intCast(msg_len), .big);
+    @memcpy(buf[4 .. 4 + msg_len], msg[0..msg_len]);
     return total;
 }
 
@@ -1109,4 +1131,38 @@ test "encodeGrammarLoaded" {
     try std.testing.expectEqual(@as(u8, 1), buf[1]);
     try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, buf[2..4], .big));
     try std.testing.expectEqualStrings("elixir", buf[4..10]);
+}
+
+// ── Log message protocol tests ────────────────────────────────────────────────
+
+test "encodeLogMessage byte layout" {
+    var buf: [20]u8 = undefined;
+    const len = try encodeLogMessage(&buf, LOG_LEVEL_WARN, "test msg");
+    try std.testing.expectEqual(@as(usize, 12), len); // 4 header + 8 msg
+    try std.testing.expectEqual(OP_LOG_MESSAGE, buf[0]);
+    try std.testing.expectEqual(LOG_LEVEL_WARN, buf[1]);
+    try std.testing.expectEqual(@as(u16, 8), std.mem.readInt(u16, buf[2..4], .big));
+    try std.testing.expectEqualStrings("test msg", buf[4..12]);
+}
+
+test "encodeLogMessage all levels" {
+    var buf: [10]u8 = undefined;
+    const levels = [_]u8{ LOG_LEVEL_ERR, LOG_LEVEL_WARN, LOG_LEVEL_INFO, LOG_LEVEL_DEBUG };
+    for (levels) |lvl| {
+        _ = try encodeLogMessage(&buf, lvl, "hi");
+        try std.testing.expectEqual(lvl, buf[1]);
+    }
+}
+
+test "encodeLogMessage empty message" {
+    var buf: [4]u8 = undefined;
+    const len = try encodeLogMessage(&buf, LOG_LEVEL_INFO, "");
+    try std.testing.expectEqual(@as(usize, 4), len);
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[2..4], .big));
+}
+
+test "encodeLogMessage buffer too small returns error" {
+    var buf: [3]u8 = undefined; // needs at least 4
+    const result = encodeLogMessage(&buf, LOG_LEVEL_ERR, "");
+    try std.testing.expectError(error.Malformed, result);
 }
