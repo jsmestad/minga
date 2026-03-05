@@ -6,7 +6,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.DocumentSync
   alias Minga.Port.Protocol
 
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
@@ -170,7 +170,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
         nil
 
       path ->
-        uri = LspBridge.path_to_uri(path)
+        uri = DocumentSync.path_to_uri(path)
         {cursor_line, _col} = BufferServer.cursor(buf)
         first_on_line(uri, cursor_line)
     end

@@ -18,7 +18,8 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Diagnostics
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.CompletionUI
+  alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -264,6 +265,18 @@ defmodule Minga.Editor.Renderer do
 
     whichkey_commands = render_whichkey(state, viewport)
 
+    completion_commands =
+      CompletionUI.render(
+        state.completion,
+        %{
+          cursor_row: cursor_line - first_line,
+          cursor_col: cursor_col + gutter_w,
+          viewport_rows: viewport.rows,
+          viewport_cols: viewport.cols
+        },
+        state.theme
+      )
+
     all_commands =
       clear ++
         gutter_commands ++
@@ -272,6 +285,7 @@ defmodule Minga.Editor.Renderer do
         modeline_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
+        completion_commands ++
         picker_commands ++
         [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
@@ -326,12 +340,32 @@ defmodule Minga.Editor.Renderer do
           end
       end
 
+    # Completion popup in the active window
+    completion_commands =
+      case active_cursor_info do
+        {cur_row, cur_col} ->
+          CompletionUI.render(
+            state.completion,
+            %{
+              cursor_row: cur_row,
+              cursor_col: cur_col,
+              viewport_rows: full_viewport.rows,
+              viewport_cols: full_viewport.cols
+            },
+            state.theme
+          )
+
+        nil ->
+          []
+      end
+
     all_commands =
       clear ++
         window_commands ++
         separator_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
+        completion_commands ++
         picker_commands ++
         [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
@@ -655,7 +689,7 @@ defmodule Minga.Editor.Renderer do
   defp diagnostic_signs_for_buffer(%{buf: %{buffer: buf}}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
+      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
     end
   end
 
@@ -665,7 +699,7 @@ defmodule Minga.Editor.Renderer do
   defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
+      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
     end
   end
 

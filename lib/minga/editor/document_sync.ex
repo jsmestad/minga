@@ -1,6 +1,6 @@
-defmodule Minga.Editor.LspBridge do
+defmodule Minga.Editor.DocumentSync do
   @moduledoc """
-  Bridges the Editor with the LSP subsystem.
+  Synchronizes editor buffers with LSP servers.
 
   Provides functions the Editor calls at key lifecycle points:
 
@@ -178,7 +178,7 @@ defmodule Minga.Editor.LspBridge do
 
   ## Examples
 
-      iex> Minga.Editor.LspBridge.path_to_uri("/tmp/test.ex")
+      iex> Minga.Editor.DocumentSync.path_to_uri("/tmp/test.ex")
       "file:///tmp/test.ex"
   """
   @spec path_to_uri(String.t()) :: String.t()
@@ -191,7 +191,7 @@ defmodule Minga.Editor.LspBridge do
 
   ## Examples
 
-      iex> Minga.Editor.LspBridge.uri_to_path("file:///tmp/test.ex")
+      iex> Minga.Editor.DocumentSync.uri_to_path("file:///tmp/test.ex")
       "/tmp/test.ex"
   """
   @spec uri_to_path(String.t()) :: String.t()

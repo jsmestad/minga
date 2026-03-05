@@ -15,12 +15,14 @@ defmodule Minga.Editor do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Completion
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
-  alias Minga.Editor.HighlightBridge
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.CompletionTrigger
+  alias Minga.Editor.DocumentSync
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
@@ -313,11 +315,48 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  # Completion popup key interception — when popup is visible in insert mode,
+  # intercept navigation and accept keys before normal insert mode handling.
+  def handle_info(
+        {:minga_input, {:key_press, codepoint, modifiers}},
+        %{mode: :insert, completion: %Completion{} = completion} = state
+      ) do
+    case handle_completion_key(state, completion, codepoint, modifiers) do
+      {:handled, new_state} ->
+        Renderer.render(new_state)
+        {:noreply, new_state}
+
+      :passthrough ->
+        # Not a completion key — fall through to normal insert handling
+        buf_version_before = buffer_version(state)
+        new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
+        new_state = maybe_reset_highlight(new_state, state.buf.buffer)
+        new_state = maybe_reparse(new_state, buf_version_before)
+
+        # After insert mode edits, update completion filter or trigger new completions
+        new_state = maybe_update_completion(new_state, codepoint, modifiers)
+
+        Renderer.render(new_state)
+        {:noreply, new_state}
+    end
+  end
+
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     buf_version_before = buffer_version(state)
+    old_mode = state.mode
     new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
     new_state = maybe_reset_highlight(new_state, state.buf.buffer)
     new_state = maybe_reparse(new_state, buf_version_before)
+
+    # Trigger completion after insert mode edits (no active popup)
+    new_state =
+      if new_state.mode == :insert and old_mode == :insert do
+        maybe_update_completion(new_state, codepoint, modifiers)
+      else
+        # Dismiss completion when leaving insert mode
+        dismiss_completion(new_state)
+      end
+
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -342,19 +381,19 @@ defmodule Minga.Editor do
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
-    new_state = HighlightBridge.setup_for_buffer(state)
+    new_state = HighlightSync.setup_for_buffer(state)
     {:noreply, new_state}
   end
 
   # ── Highlight events from Zig ────────────────────────────────────────────────
 
   def handle_info({:minga_input, {:highlight_names, names}}, state) do
-    new_state = HighlightBridge.handle_names(state, names)
+    new_state = HighlightSync.handle_names(state, names)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
-    new_state = HighlightBridge.handle_spans(state, version, spans)
+    new_state = HighlightSync.handle_spans(state, version, spans)
 
     # Cache the updated highlights for this buffer
     new_state =
@@ -374,8 +413,39 @@ defmodule Minga.Editor do
 
   # LSP debounced didChange timer fired — flush the change notification
   def handle_info({:lsp_did_change, buffer_pid}, state) do
-    new_lsp = LspBridge.flush_did_change(state.lsp, buffer_pid)
+    new_lsp = DocumentSync.flush_did_change(state.lsp, buffer_pid)
     {:noreply, %{state | lsp: new_lsp}}
+  end
+
+  # Completion debounce timer fired — send the actual completion request
+  def handle_info({:completion_debounce, client, buffer_pid}, state) do
+    new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, client, buffer_pid)
+    {:noreply, %{state | completion_trigger: new_bridge}}
+  end
+
+  # LSP async response — route completion responses to the completion bridge
+  def handle_info({:lsp_response, ref, result}, state) do
+    buffer_pid = state.buf.buffer
+
+    case buffer_pid do
+      nil ->
+        {:noreply, state}
+
+      _ ->
+        {new_bridge, completion} =
+          CompletionTrigger.handle_response(state.completion_trigger, ref, result, buffer_pid)
+
+        new_state = %{state | completion_trigger: new_bridge}
+
+        new_state =
+          case completion do
+            nil -> new_state
+            %Completion{} -> %{new_state | completion: completion}
+          end
+
+        Renderer.render(new_state)
+        {:noreply, new_state}
+    end
   end
 
   # Diagnostics changed — re-render to update gutter signs and minibuffer hint
@@ -705,7 +775,7 @@ defmodule Minga.Editor do
       end
 
     if content_changed and state.highlight.capture_names != [] do
-      HighlightBridge.request_reparse(state)
+      HighlightSync.request_reparse(state)
     else
       state
     end
@@ -937,7 +1007,7 @@ defmodule Minga.Editor do
 
   @spec lsp_buffer_opened(state(), pid()) :: state()
   defp lsp_buffer_opened(state, buffer_pid) do
-    new_lsp = LspBridge.on_buffer_open(state.lsp, buffer_pid)
+    new_lsp = DocumentSync.on_buffer_open(state.lsp, buffer_pid)
     %{state | lsp: new_lsp}
   end
 
@@ -945,7 +1015,7 @@ defmodule Minga.Editor do
   defp lsp_buffer_changed(%{buf: %{buffer: nil}} = state), do: state
 
   defp lsp_buffer_changed(%{buf: %{buffer: buf}} = state) do
-    new_lsp = LspBridge.on_buffer_change(state.lsp, buf)
+    new_lsp = DocumentSync.on_buffer_change(state.lsp, buf)
     %{state | lsp: new_lsp}
   end
 
@@ -968,7 +1038,7 @@ defmodule Minga.Editor do
       path = BufferServer.file_path(buf)
       if path, do: fire_hook(:after_save, [buf, path])
 
-      new_lsp = LspBridge.on_buffer_save(state.lsp, buf)
+      new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
       %{state | lsp: new_lsp}
     else
       state
@@ -982,7 +1052,7 @@ defmodule Minga.Editor do
        when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
     # The old buffer was closed — notify LSP if it changed
     if state.buf.buffer != old_buffer do
-      new_lsp = LspBridge.on_buffer_close(state.lsp, old_buffer)
+      new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
       %{state | lsp: new_lsp}
     else
       state
@@ -1026,4 +1096,169 @@ defmodule Minga.Editor do
       :exit, _ -> state
     end
   end
+
+  # ── Completion helpers ───────────────────────────────────────────────────────
+
+  @escape 27
+  @enter 13
+  @tab 9
+  @arrow_up 57_352
+  @arrow_down 57_353
+
+  @spec handle_completion_key(state(), Completion.t(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, state()} | :passthrough
+
+  # Escape — dismiss completion and stay in insert mode
+  defp handle_completion_key(state, _completion, @escape, _mods) do
+    {:handled, dismiss_completion(state)}
+  end
+
+  # C-n or arrow down — move selection down
+  defp handle_completion_key(state, completion, cp, mods)
+       when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
+    {:handled, %{state | completion: Completion.move_down(completion)}}
+  end
+
+  # C-p or arrow up — move selection up
+  defp handle_completion_key(state, completion, cp, mods)
+       when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
+    {:handled, %{state | completion: Completion.move_up(completion)}}
+  end
+
+  # Tab or Enter — accept the selected completion
+  defp handle_completion_key(state, completion, cp, _mods) when cp in [@tab, @enter] do
+    case Completion.accept(completion) do
+      nil ->
+        {:handled, dismiss_completion(state)}
+
+      {:insert_text, text} ->
+        new_state = accept_completion_text(state, completion, text)
+        {:handled, dismiss_completion(new_state)}
+
+      {:text_edit, edit} ->
+        new_state = apply_completion_text_edit(state, edit)
+        {:handled, dismiss_completion(new_state)}
+    end
+  end
+
+  # All other keys — pass through to normal insert mode handling
+  defp handle_completion_key(_state, _completion, _cp, _mods), do: :passthrough
+
+  @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
+  defp accept_completion_text(%{buf: %{buffer: buf}} = state, completion, text)
+       when is_pid(buf) do
+    # Delete the text typed since the trigger position, then insert the completion text
+    {trigger_line, trigger_col} = completion.trigger_position
+    {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+
+    # Only works on same line for now
+    if cursor_line == trigger_line and cursor_col > trigger_col do
+      chars_to_delete = cursor_col - trigger_col
+      Enum.each(1..chars_to_delete, fn _ -> BufferServer.delete_before(buf) end)
+    end
+
+    # Insert the completion text character by character
+    BufferServer.insert_text(buf, text)
+    lsp_buffer_changed(state)
+  end
+
+  defp accept_completion_text(state, _completion, _text), do: state
+
+  @spec apply_completion_text_edit(state(), Completion.text_edit()) :: state()
+  defp apply_completion_text_edit(%{buf: %{buffer: buf}} = state, edit) when is_pid(buf) do
+    BufferServer.apply_text_edit(
+      buf,
+      edit.range.start_line,
+      edit.range.start_col,
+      edit.range.end_line,
+      edit.range.end_col,
+      edit.new_text
+    )
+
+    lsp_buffer_changed(state)
+  end
+
+  defp apply_completion_text_edit(state, _edit), do: state
+
+  @spec maybe_update_completion(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp maybe_update_completion(state, codepoint, _mods) do
+    buf = state.buf.buffer
+    if buf == nil, do: state, else: do_update_completion(state, buf, codepoint)
+  end
+
+  @spec do_update_completion(state(), pid(), non_neg_integer()) :: state()
+  defp do_update_completion(state, buf, codepoint) do
+    # If we have active completion, update the filter
+    state = update_completion_filter(state, buf)
+
+    # Try to trigger new completion if we just typed a character
+    maybe_trigger_completion(state, buf, codepoint)
+  end
+
+  @spec update_completion_filter(state(), pid()) :: state()
+  defp update_completion_filter(%{completion: nil} = state, _buf), do: state
+
+  defp update_completion_filter(%{completion: %Completion{} = completion} = state, buf) do
+    prefix = completion_prefix(buf, completion.trigger_position)
+    apply_completion_filter(state, completion, prefix)
+  end
+
+  @spec apply_completion_filter(state(), Completion.t(), String.t() | nil) :: state()
+  defp apply_completion_filter(state, _completion, nil), do: dismiss_completion(state)
+  defp apply_completion_filter(state, _completion, ""), do: dismiss_completion(state)
+
+  defp apply_completion_filter(state, completion, prefix) do
+    filtered = Completion.filter(completion, prefix)
+
+    if Completion.active?(filtered) do
+      %{state | completion: filtered}
+    else
+      dismiss_completion(state)
+    end
+  end
+
+  @spec maybe_trigger_completion(state(), pid(), non_neg_integer()) :: state()
+  defp maybe_trigger_completion(state, buf, codepoint) do
+    case codepoint_to_char(codepoint) do
+      nil ->
+        state
+
+      char ->
+        {new_bridge, _comp} =
+          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf, state.lsp)
+
+        %{state | completion_trigger: new_bridge}
+    end
+  end
+
+  @spec dismiss_completion(state()) :: state()
+  defp dismiss_completion(state) do
+    new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
+    %{state | completion: nil, completion_trigger: new_bridge}
+  end
+
+  @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
+  defp completion_prefix(buf, {trigger_line, trigger_col}) do
+    {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+
+    if cursor_line == trigger_line and cursor_col >= trigger_col do
+      lines = String.split(content, "\n")
+
+      case Enum.at(lines, cursor_line) do
+        nil -> nil
+        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
+      end
+    else
+      nil
+    end
+  end
+
+  @spec codepoint_to_char(non_neg_integer()) :: String.t() | nil
+  defp codepoint_to_char(cp) when cp >= 32 and cp <= 0x10FFFF do
+    <<cp::utf8>>
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp codepoint_to_char(_), do: nil
 end

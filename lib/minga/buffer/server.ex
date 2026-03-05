@@ -61,6 +61,37 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:insert_char, char})
   end
 
+  @doc """
+  Inserts a string at the current cursor position.
+
+  Each character is inserted sequentially, advancing the cursor.
+  """
+  @spec insert_text(GenServer.server(), String.t()) :: :ok
+  def insert_text(server, text) when is_binary(text) do
+    GenServer.call(server, {:insert_text, text})
+  end
+
+  @doc """
+  Replaces a range of text with new text.
+
+  Moves to the start of the range, deletes the range, then inserts the
+  new text. Used by LSP text edits.
+  """
+  @spec apply_text_edit(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: :ok
+  def apply_text_edit(server, start_line, start_col, end_line, end_col, new_text) do
+    GenServer.call(
+      server,
+      {:apply_text_edit, {start_line, start_col}, {end_line, end_col}, new_text}
+    )
+  end
+
   @doc "Deletes the character before the cursor (backspace)."
   @spec delete_before(GenServer.server()) :: :ok
   def delete_before(server) do
@@ -377,6 +408,40 @@ defmodule Minga.Buffer.Server do
   def handle_call({:insert_char, char}, _from, state) do
     new_buf = Document.insert_char(state.document, char)
     {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+  end
+
+  def handle_call({:insert_text, _text}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:insert_text, text}, _from, state) do
+    new_doc =
+      text
+      |> String.graphemes()
+      |> Enum.reduce(state.document, fn char, doc -> Document.insert_char(doc, char) end)
+
+    {:reply, :ok, push_undo(state, new_doc) |> mark_dirty()}
+  end
+
+  def handle_call(
+        {:apply_text_edit, _from_pos, _to_pos, _text},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:apply_text_edit, from_pos, to_pos, new_text}, _from, state) do
+    # Move to start, delete range, then insert new text
+    doc = Document.move_to(state.document, from_pos)
+    doc = Document.delete_range(doc, from_pos, to_pos)
+
+    doc =
+      new_text
+      |> String.graphemes()
+      |> Enum.reduce(doc, fn char, d -> Document.insert_char(d, char) end)
+
+    {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
   end
 
   def handle_call(:delete_before, _from, %{read_only: true} = state) do

@@ -211,7 +211,7 @@ Current status and planned features. Updated as development progresses.
 | Minibuffer diagnostic hint | ✅ | Shows message when cursor is on a diagnostic line |
 | `:LspInfo` command | ✅ | Server name, status, encoding in minibuffer |
 | LSP DynamicSupervisor | ✅ | One client per (server, root), crash recovery |
-| Completion | 📋 | |
+| Completion | ✅ | Inline popup with trigger chars, identifier debounce, C-n/C-p/Tab/Enter |
 | Go-to-definition | 📋 | |
 | Hover | 📋 | |
 | Rename | 📋 | |

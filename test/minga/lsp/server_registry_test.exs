@@ -127,12 +127,9 @@ defmodule Minga.LSP.ServerRegistryTest do
 
   describe "available?/1" do
     test "returns false for nonexistent binary" do
-      config = %{
+      config = %Minga.LSP.ServerConfig{
         name: :fake,
-        command: "definitely_not_a_real_binary_#{System.unique_integer()}",
-        args: [],
-        root_markers: [],
-        init_options: %{}
+        command: "definitely_not_a_real_binary_#{System.unique_integer()}"
       }
 
       refute ServerRegistry.available?(config)
@@ -140,12 +137,9 @@ defmodule Minga.LSP.ServerRegistryTest do
 
     test "returns true for a binary on PATH" do
       # `elixir` should always be available in test env
-      config = %{
+      config = %Minga.LSP.ServerConfig{
         name: :test,
-        command: "elixir",
-        args: [],
-        root_markers: [],
-        init_options: %{}
+        command: "elixir"
       }
 
       assert ServerRegistry.available?(config)

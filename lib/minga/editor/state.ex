@@ -19,10 +19,13 @@ defmodule Minga.Editor.State do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Completion
   alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.CompletionTrigger
+  alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Mouse
   alias Minga.Editor.State.Picker
   alias Minga.Editor.State.Registers
   alias Minga.Editor.State.Search
@@ -53,9 +56,7 @@ defmodule Minga.Editor.State do
             whichkey: %WhichKey{},
             search: %Search{},
             reg: %Registers{},
-            mouse_dragging: false,
-            mouse_anchor: nil,
-            resize_dragging: nil,
+            mouse: %Mouse{},
             last_find_char: nil,
             change_recorder: ChangeRecorder.new(),
             autopair_enabled: true,
@@ -69,7 +70,9 @@ defmodule Minga.Editor.State do
             highlight: Highlight.new(),
             highlight_version: 0,
             highlight_cache: %{},
-            lsp: LspBridge.new(),
+            lsp: DocumentSync.new(),
+            completion: nil,
+            completion_trigger: CompletionTrigger.new(),
             window_tree: nil,
             windows: %{},
             active_window: 1,
@@ -85,9 +88,7 @@ defmodule Minga.Editor.State do
           whichkey: WhichKey.t(),
           search: Search.t(),
           reg: Registers.t(),
-          mouse_dragging: boolean(),
-          mouse_anchor: {non_neg_integer(), non_neg_integer()} | nil,
-          resize_dragging: {WindowTree.direction(), non_neg_integer()} | nil,
+          mouse: Mouse.t(),
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
           autopair_enabled: boolean(),
@@ -101,7 +102,9 @@ defmodule Minga.Editor.State do
           highlight: Highlight.t(),
           highlight_version: non_neg_integer(),
           highlight_cache: %{pid() => Highlight.t()},
-          lsp: LspBridge.t(),
+          lsp: DocumentSync.t(),
+          completion: Completion.t() | nil,
+          completion_trigger: CompletionTrigger.t(),
           window_tree: WindowTree.t() | nil,
           windows: %{Window.id() => Window.t()},
           active_window: Window.id(),

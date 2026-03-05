@@ -1,9 +1,9 @@
-defmodule Minga.Editor.LspBridgeTest do
+defmodule Minga.Editor.DocumentSyncTest do
   use ExUnit.Case
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.DocumentSync
   alias Minga.LSP.Client
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.Test.MockLSPServer
@@ -47,7 +47,7 @@ defmodule Minga.Editor.LspBridgeTest do
 
   describe "new/0" do
     test "returns empty LSP bridge state" do
-      state = LspBridge.new()
+      state = DocumentSync.new()
       assert state.buffer_clients == %{}
       assert state.debounce_timers == %{}
     end
@@ -59,7 +59,7 @@ defmodule Minga.Editor.LspBridgeTest do
       lsp_supervisor: sup
     } do
       # Mock the server registry to return our mock server
-      lsp_state = LspBridge.new()
+      lsp_state = DocumentSync.new()
 
       # We need to temporarily make the registry return the mock config.
       # Since ServerRegistry is a pure module with hardcoded data, and
@@ -67,11 +67,11 @@ defmodule Minga.Editor.LspBridgeTest do
       # we test with a buffer that has no matching server (no-op case)
       # and test the full flow separately.
 
-      lsp_state = LspBridge.on_buffer_open(lsp_state, buffer, lsp_supervisor: sup)
+      lsp_state = DocumentSync.on_buffer_open(lsp_state, buffer, lsp_supervisor: sup)
 
       # The mock won't match :elixir filetype's "lexical" command,
       # so no clients should be attached (server not on PATH)
-      clients = LspBridge.clients_for_buffer(lsp_state, buffer)
+      clients = DocumentSync.clients_for_buffer(lsp_state, buffer)
       assert is_list(clients)
     end
 
@@ -82,10 +82,10 @@ defmodule Minga.Editor.LspBridgeTest do
           id: :"scratch_#{System.unique_integer()}"
         )
 
-      lsp_state = LspBridge.new()
-      lsp_state = LspBridge.on_buffer_open(lsp_state, scratch, lsp_supervisor: sup)
+      lsp_state = DocumentSync.new()
+      lsp_state = DocumentSync.on_buffer_open(lsp_state, scratch, lsp_supervisor: sup)
 
-      assert LspBridge.clients_for_buffer(lsp_state, scratch) == []
+      assert DocumentSync.clients_for_buffer(lsp_state, scratch) == []
     end
   end
 
@@ -93,9 +93,9 @@ defmodule Minga.Editor.LspBridgeTest do
     test "schedules debounced didChange when clients are attached", %{buffer: buffer} do
       # Simulate having a client attached
       fake_client = self()
-      lsp_state = %{LspBridge.new() | buffer_clients: %{buffer => [fake_client]}}
+      lsp_state = %{DocumentSync.new() | buffer_clients: %{buffer => [fake_client]}}
 
-      lsp_state = LspBridge.on_buffer_change(lsp_state, buffer)
+      lsp_state = DocumentSync.on_buffer_change(lsp_state, buffer)
 
       # Should have a debounce timer
       assert Map.has_key?(lsp_state.debounce_timers, buffer)
@@ -103,12 +103,12 @@ defmodule Minga.Editor.LspBridgeTest do
 
     test "cancels previous debounce timer on rapid changes", %{buffer: buffer} do
       fake_client = self()
-      lsp_state = %{LspBridge.new() | buffer_clients: %{buffer => [fake_client]}}
+      lsp_state = %{DocumentSync.new() | buffer_clients: %{buffer => [fake_client]}}
 
-      lsp_state = LspBridge.on_buffer_change(lsp_state, buffer)
+      lsp_state = DocumentSync.on_buffer_change(lsp_state, buffer)
       timer1 = Map.get(lsp_state.debounce_timers, buffer)
 
-      lsp_state = LspBridge.on_buffer_change(lsp_state, buffer)
+      lsp_state = DocumentSync.on_buffer_change(lsp_state, buffer)
       timer2 = Map.get(lsp_state.debounce_timers, buffer)
 
       assert timer1 != timer2
@@ -117,10 +117,10 @@ defmodule Minga.Editor.LspBridgeTest do
     end
 
     test "no-op when buffer has no attached clients" do
-      lsp_state = LspBridge.new()
+      lsp_state = DocumentSync.new()
       fake_buffer = self()
 
-      result = LspBridge.on_buffer_change(lsp_state, fake_buffer)
+      result = DocumentSync.on_buffer_change(lsp_state, fake_buffer)
       assert result.debounce_timers == %{}
     end
   end
@@ -130,23 +130,23 @@ defmodule Minga.Editor.LspBridgeTest do
       fake_client = self()
 
       lsp_state = %{
-        LspBridge.new()
+        DocumentSync.new()
         | buffer_clients: %{buffer => [fake_client]},
           debounce_timers: %{buffer => make_ref()}
       }
 
-      result = LspBridge.flush_did_change(lsp_state, buffer)
+      result = DocumentSync.flush_did_change(lsp_state, buffer)
       refute Map.has_key?(result.debounce_timers, buffer)
     end
   end
 
   describe "on_buffer_save/2" do
     test "no-op when buffer has no clients" do
-      lsp_state = LspBridge.new()
+      lsp_state = DocumentSync.new()
       fake_buffer = self()
 
       # Should not crash
-      result = LspBridge.on_buffer_save(lsp_state, fake_buffer)
+      result = DocumentSync.on_buffer_save(lsp_state, fake_buffer)
       assert result == lsp_state
     end
   end
@@ -156,26 +156,26 @@ defmodule Minga.Editor.LspBridgeTest do
       fake_client = self()
 
       lsp_state = %{
-        LspBridge.new()
+        DocumentSync.new()
         | buffer_clients: %{buffer => [fake_client]},
           debounce_timers: %{buffer => make_ref()}
       }
 
-      result = LspBridge.on_buffer_close(lsp_state, buffer)
+      result = DocumentSync.on_buffer_close(lsp_state, buffer)
       assert result.buffer_clients == %{}
       assert result.debounce_timers == %{}
     end
 
     test "no-op for untracked buffer" do
-      lsp_state = LspBridge.new()
-      result = LspBridge.on_buffer_close(lsp_state, self())
+      lsp_state = DocumentSync.new()
+      result = DocumentSync.on_buffer_close(lsp_state, self())
       assert result == lsp_state
     end
   end
 
   describe "clients_for_buffer/2" do
     test "returns empty list for unknown buffer" do
-      assert LspBridge.clients_for_buffer(LspBridge.new(), self()) == []
+      assert DocumentSync.clients_for_buffer(DocumentSync.new(), self()) == []
     end
 
     test "returns tracked clients" do
@@ -183,21 +183,21 @@ defmodule Minga.Editor.LspBridgeTest do
       pid2 = spawn(fn -> Process.sleep(:infinity) end)
       buffer = self()
 
-      lsp_state = %{LspBridge.new() | buffer_clients: %{buffer => [pid1, pid2]}}
-      assert LspBridge.clients_for_buffer(lsp_state, buffer) == [pid1, pid2]
+      lsp_state = %{DocumentSync.new() | buffer_clients: %{buffer => [pid1, pid2]}}
+      assert DocumentSync.clients_for_buffer(lsp_state, buffer) == [pid1, pid2]
     end
   end
 
   describe "path_to_uri/1 and uri_to_path/1" do
     test "round-trips a path" do
       path = "/tmp/test.ex"
-      uri = LspBridge.path_to_uri(path)
+      uri = DocumentSync.path_to_uri(path)
       assert uri == "file:///tmp/test.ex"
-      assert LspBridge.uri_to_path(uri) == path
+      assert DocumentSync.uri_to_path(uri) == path
     end
 
     test "expands relative paths" do
-      uri = LspBridge.path_to_uri("lib/minga.ex")
+      uri = DocumentSync.path_to_uri("lib/minga.ex")
       assert String.starts_with?(uri, "file:///")
       assert String.ends_with?(uri, "lib/minga.ex")
     end
@@ -217,11 +217,11 @@ defmodule Minga.Editor.LspBridgeTest do
       wait_until_ready(client)
 
       # Wire up the client to the buffer manually
-      uri = LspBridge.path_to_uri(file_path)
+      uri = DocumentSync.path_to_uri(file_path)
       {content, _} = BufferServer.content_and_cursor(buffer)
       Client.did_open(client, uri, "elixir", content)
 
-      lsp_state = %{LspBridge.new() | buffer_clients: %{buffer => [client]}}
+      lsp_state = %{DocumentSync.new() | buffer_clients: %{buffer => [client]}}
 
       # Subscribe to diagnostics
       Diagnostics.subscribe(diag_server)
@@ -234,16 +234,16 @@ defmodule Minga.Editor.LspBridgeTest do
 
       # Change
       BufferServer.insert_char(buffer, "x")
-      lsp_state = LspBridge.on_buffer_change(lsp_state, buffer)
+      lsp_state = DocumentSync.on_buffer_change(lsp_state, buffer)
       assert Map.has_key?(lsp_state.debounce_timers, buffer)
 
       # Flush the debounce
-      lsp_state = LspBridge.flush_did_change(lsp_state, buffer)
+      lsp_state = DocumentSync.flush_did_change(lsp_state, buffer)
       Process.sleep(100)
       assert Client.status(client) == :ready
 
       # Save
-      _lsp_state = LspBridge.on_buffer_save(lsp_state, buffer)
+      _lsp_state = DocumentSync.on_buffer_save(lsp_state, buffer)
       Process.sleep(100)
       assert Client.status(client) == :ready
     end

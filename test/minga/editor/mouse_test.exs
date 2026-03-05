@@ -237,7 +237,7 @@ defmodule Minga.Editor.MouseTest do
       assert col == 8
       s = state(editor)
       assert s.mode == :visual
-      assert s.mouse_dragging == false
+      assert s.mouse.dragging == false
       send_key(editor, ?y)
       assert Process.alive?(editor)
     end
@@ -248,7 +248,7 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, 0, 3, :left, :release)
       s = state(editor)
       assert s.mode == :normal
-      assert s.mouse_dragging == false
+      assert s.mouse.dragging == false
     end
 
     test "drag clamps to buffer bounds" do

@@ -123,4 +123,29 @@ defmodule Minga.LSP.ClientTest do
       assert :ok = Client.subscribe(client)
     end
   end
+
+  describe "async request/response" do
+    test "request/3 returns a reference", %{client: client} do
+      ref =
+        Client.request(client, "textDocument/completion", %{
+          "textDocument" => %{"uri" => "file:///tmp/test.ex"},
+          "position" => %{"line" => 0, "character" => 0}
+        })
+
+      assert is_reference(ref)
+
+      # The mock server doesn't handle completion, so we'll get a timeout.
+      # The key thing is the request was sent without crashing.
+      assert Client.status(client) == :ready
+    end
+
+    test "multiple requests return unique references", %{client: client} do
+      ref1 = Client.request(client, "textDocument/hover", %{})
+      ref2 = Client.request(client, "textDocument/hover", %{})
+
+      assert is_reference(ref1)
+      assert is_reference(ref2)
+      assert ref1 != ref2
+    end
+  end
 end

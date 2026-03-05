@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.DocumentSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.Supervisor, as: LSPSupervisor
@@ -60,7 +60,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
         %{state | status_msg: "No file — no diagnostics"}
 
       path ->
-        uri = LspBridge.path_to_uri(path)
+        uri = DocumentSync.path_to_uri(path)
         {cursor_line, _col} = BufferServer.cursor(buf)
 
         case find_fn.(uri, cursor_line) do
