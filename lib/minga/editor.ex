@@ -31,6 +31,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.FileTree
   alias Minga.FileWatcher
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -44,6 +45,9 @@ defmodule Minga.Editor do
   import Bitwise
 
   @ctrl Protocol.mod_ctrl()
+  @escape 27
+  @enter 13
+  @tab 9
 
   @typedoc "Options for starting the editor."
   @type start_opt ::
@@ -295,6 +299,24 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:key_press, _cp, _mods}}, %{pending_conflict: {_, _}} = state) do
     # Any other key while conflict prompt is active — ignore
     {:noreply, state}
+  end
+
+  # ── File tree key interception ──
+  def handle_info(
+        {:minga_input, {:key_press, codepoint, modifiers}},
+        %{file_tree: %FileTree{}, file_tree_focused: true} = state
+      ) do
+    case handle_file_tree_key(state, codepoint, modifiers) do
+      :passthrough ->
+        # Key not handled by tree; unfocus and forward to normal processing
+        new_state = %{state | file_tree_focused: false}
+        send(self(), {:minga_input, {:key_press, codepoint, modifiers}})
+        {:noreply, new_state}
+
+      new_state ->
+        Renderer.render(new_state)
+        {:noreply, new_state}
+    end
   end
 
   # ── File watcher notification ──
@@ -997,6 +1019,80 @@ defmodule Minga.Editor do
     end
   end
 
+  # ── File tree key handling ──────────────────────────────────────────────
+
+  @spec handle_file_tree_key(state(), non_neg_integer(), non_neg_integer()) ::
+          state() | :passthrough
+
+  # q or Escape — close the tree
+  defp handle_file_tree_key(state, cp, _mods) when cp in [?q, @escape] do
+    %{state | file_tree: nil, file_tree_focused: false}
+  end
+
+  # j — move down
+  defp handle_file_tree_key(%{file_tree: tree} = state, ?j, _mods) do
+    %{state | file_tree: FileTree.move_down(tree)}
+  end
+
+  # k — move up
+  defp handle_file_tree_key(%{file_tree: tree} = state, ?k, _mods) do
+    %{state | file_tree: FileTree.move_up(tree)}
+  end
+
+  # Enter — open file or toggle directory
+  defp handle_file_tree_key(%{file_tree: tree} = state, @enter, _mods) do
+    case FileTree.selected_entry(tree) do
+      %{dir?: true} ->
+        %{state | file_tree: FileTree.toggle_expand(tree)}
+
+      %{dir?: false, path: path} ->
+        # Open the file and return focus to editor
+        state = %{state | file_tree_focused: false}
+
+        case Commands.start_buffer(path) do
+          {:ok, pid} ->
+            new_state = Commands.add_buffer(state, pid)
+            new_state = log_message(new_state, "Opened: #{path}")
+            # Reveal the opened file in the tree
+            %{new_state | file_tree: FileTree.reveal(tree, path)}
+
+          {:error, _} ->
+            state
+        end
+
+      nil ->
+        state
+    end
+  end
+
+  # Tab — same as Enter for directories
+  defp handle_file_tree_key(%{file_tree: tree} = state, @tab, _mods) do
+    %{state | file_tree: FileTree.toggle_expand(tree)}
+  end
+
+  # h — collapse (or jump to parent)
+  defp handle_file_tree_key(%{file_tree: tree} = state, ?h, _mods) do
+    %{state | file_tree: FileTree.collapse(tree)}
+  end
+
+  # l — expand (or move into first child)
+  defp handle_file_tree_key(%{file_tree: tree} = state, ?l, _mods) do
+    %{state | file_tree: FileTree.expand(tree)}
+  end
+
+  # H — toggle hidden files
+  defp handle_file_tree_key(%{file_tree: tree} = state, ?H, _mods) do
+    %{state | file_tree: FileTree.toggle_hidden(tree)}
+  end
+
+  # r or g — refresh
+  defp handle_file_tree_key(%{file_tree: tree} = state, cp, _mods) when cp in [?r, ?g] do
+    %{state | file_tree: FileTree.refresh(tree)}
+  end
+
+  # Any other key — pass through to normal mode processing
+  defp handle_file_tree_key(_state, _cp, _mods), do: :passthrough
+
   # ── Special buffers ──────────────────────────────────────────────────────
 
   @spec start_special_buffers() :: {pid() | nil, pid() | nil}
@@ -1173,9 +1269,6 @@ defmodule Minga.Editor do
 
   # ── Completion helpers ───────────────────────────────────────────────────────
 
-  @escape 27
-  @enter 13
-  @tab 9
   @arrow_up 57_352
   @arrow_down 57_353
 

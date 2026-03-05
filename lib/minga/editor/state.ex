@@ -37,6 +37,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.FileTree
   alias Minga.Mode
   alias Minga.Theme
 
@@ -75,7 +76,9 @@ defmodule Minga.Editor.State do
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
-            windows: %Windows{}
+            windows: %Windows{},
+            file_tree: nil,
+            file_tree_focused: false
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -103,7 +106,9 @@ defmodule Minga.Editor.State do
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
-          windows: Windows.t()
+          windows: Windows.t(),
+          file_tree: FileTree.t() | nil,
+          file_tree_focused: boolean()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -140,10 +145,29 @@ defmodule Minga.Editor.State do
 
   # ── Other accessors ───────────────────────────────────────────────────────
 
-  @doc "Returns the screen rect for layout computation, excluding the global minibuffer row."
+  @doc """
+  Returns the screen rect for layout computation, excluding the global
+  minibuffer row and reserving space for the file tree panel when open.
+  """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{viewport: vp}) do
+  def screen_rect(%__MODULE__{viewport: vp, file_tree: nil}) do
     {0, 0, vp.cols, vp.rows - 1}
+  end
+
+  def screen_rect(%__MODULE__{viewport: vp, file_tree: %FileTree{width: tw}}) do
+    # Tree occupies columns 0..tw-1, separator at column tw,
+    # editor content starts at column tw+1.
+    editor_col = tw + 1
+    editor_width = max(vp.cols - editor_col, 1)
+    {0, editor_col, editor_width, vp.rows - 1}
+  end
+
+  @doc "Returns the screen rect for the file tree panel, or nil if closed."
+  @spec tree_rect(t()) :: WindowTree.rect() | nil
+  def tree_rect(%__MODULE__{file_tree: nil}), do: nil
+
+  def tree_rect(%__MODULE__{viewport: vp, file_tree: %FileTree{width: tw}}) do
+    {0, 0, tw, vp.rows - 1}
   end
 
   # ── Cross-cutting window + buffer helpers ─────────────────────────────────

@@ -37,6 +37,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.FileTree
   alias Minga.Formatter
   alias Minga.Mode
   alias Minga.WhichKey
@@ -123,6 +124,10 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:describe_key_result, _, _, _} = cmd), do: Help.execute(state, cmd)
   def execute(state, {:describe_key_not_found, _} = cmd), do: Help.execute(state, cmd)
+
+  # ── File tree ─────────────────────────────────────────────────────────────
+
+  def execute(state, :toggle_file_tree), do: toggle_file_tree(state)
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
@@ -451,4 +456,28 @@ defmodule Minga.Editor.Commands do
   @doc "Adds a new buffer to the list and makes it active."
   @spec add_buffer(state(), pid()) :: state()
   def add_buffer(state, pid), do: EditorState.add_buffer(state, pid)
+
+  # ── File tree helpers ───────────────────────────────────────────────────
+
+  @spec toggle_file_tree(state()) :: state()
+  defp toggle_file_tree(%{file_tree: nil} = state), do: open_file_tree(state)
+  defp toggle_file_tree(state), do: %{state | file_tree: nil, file_tree_focused: false}
+
+  @spec open_file_tree(state()) :: state()
+  defp open_file_tree(state) do
+    root = Minga.Project.root() || File.cwd!()
+    tree = FileTree.new(root)
+    tree = reveal_active_in_tree(tree, state.buffers.active)
+    %{state | file_tree: tree, file_tree_focused: true}
+  end
+
+  @spec reveal_active_in_tree(FileTree.t(), pid() | nil) :: FileTree.t()
+  defp reveal_active_in_tree(tree, nil), do: tree
+
+  defp reveal_active_in_tree(tree, buf) do
+    case BufferServer.file_path(buf) do
+      nil -> tree
+      path -> FileTree.reveal(tree, path)
+    end
+  end
 end

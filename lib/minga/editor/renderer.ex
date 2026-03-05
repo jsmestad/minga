@@ -31,6 +31,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Title
+  alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -104,11 +105,16 @@ defmodule Minga.Editor.Renderer do
 
   @spec render_single(state()) :: :ok
   defp render_single(state) do
+    # When the file tree is open, the editor content is shifted right.
+    {_row, col_off, editor_width, _editor_height} = EditorState.screen_rect(state)
+
     # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
     #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
     {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
     cursor = {cursor_line, cursor_byte_col}
-    viewport = Viewport.scroll_to_cursor(state.viewport, {cursor_line, 0})
+    # Use full terminal rows but editor-area width (tree may reduce it).
+    viewport = Viewport.new(state.viewport.rows, editor_width)
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
@@ -254,12 +260,13 @@ defmodule Minga.Editor.Renderer do
         state.theme
       )
 
-    # ── Minibuffer (row N-1) ──
-    minibuffer_row = viewport.rows - 1
-    minibuffer_command = Minibuffer.render(state, minibuffer_row, viewport.cols)
+    # ── Minibuffer (row N-1, full terminal width) ──
+    full_viewport = state.viewport
+    minibuffer_row = full_viewport.rows - 1
+    minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
-    # ── Picker overlay ──
-    {picker_commands, picker_cursor} = PickerUI.render(state, viewport)
+    # ── Picker overlay (uses full terminal viewport) ──
+    {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
 
     # ── Cursor placement + shape ──
     cursor_shape_command =
@@ -269,19 +276,7 @@ defmodule Minga.Editor.Renderer do
         Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
       end
 
-    cursor_command =
-      resolve_cursor_command(
-        picker_cursor,
-        state.mode,
-        state.mode_state,
-        minibuffer_row,
-        cursor_line,
-        cursor_col,
-        viewport,
-        gutter_w
-      )
-
-    whichkey_commands = render_whichkey(state, viewport)
+    whichkey_commands = render_whichkey(state, full_viewport)
 
     completion_commands =
       CompletionUI.render(
@@ -295,8 +290,31 @@ defmodule Minga.Editor.Renderer do
         state.theme
       )
 
+    tree_commands = TreeRenderer.render(state)
+
+    # Offset buffer content commands when file tree is open
+    gutter_commands = offset_commands(gutter_commands, 0, col_off)
+    line_commands = offset_commands(line_commands, 0, col_off)
+    tilde_commands = offset_commands(tilde_commands, 0, col_off)
+    modeline_commands = offset_commands(modeline_commands, 0, col_off)
+    completion_commands = offset_commands(completion_commands, 0, col_off)
+
+    # Adjust cursor position for the tree offset
+    cursor_command =
+      resolve_cursor_command(
+        picker_cursor,
+        state.mode,
+        state.mode_state,
+        minibuffer_row,
+        cursor_line,
+        cursor_col + col_off,
+        viewport,
+        gutter_w
+      )
+
     all_commands =
       clear ++
+        tree_commands ++
         gutter_commands ++
         line_commands ++
         tilde_commands ++
@@ -377,8 +395,11 @@ defmodule Minga.Editor.Renderer do
           []
       end
 
+    tree_commands = TreeRenderer.render(state)
+
     all_commands =
       clear ++
+        tree_commands ++
         window_commands ++
         separator_commands ++
         [minibuffer_command] ++

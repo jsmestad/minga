@@ -78,6 +78,9 @@ defmodule Minga.Keymap.Defaults do
     {[{?p, @none}, {?d, @none}], :project_remove, "Remove known project"},
     {[{?p, @none}, {?R, @none}], :project_recent_files, "Recent files in project"},
 
+    # ── Open ──────────────────────────────────────────────────────────────────
+    {[{?o, @none}, {?p, @none}], :toggle_file_tree, "Toggle file tree"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
@@ -92,6 +95,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},
+    {[{?o, @none}], "+open"},
     {[{?t, @none}], "+toggle"}
   ]
 
