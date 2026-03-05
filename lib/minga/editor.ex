@@ -449,14 +449,34 @@ defmodule Minga.Editor do
     end
   end
 
-  # Diagnostics changed — re-render to update gutter signs and minibuffer hint
+  # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
+  # Debounced because multiple diagnostics may arrive in rapid succession.
   def handle_info({:diagnostics_changed, _uri}, state) do
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  # Debounced render timer fired — perform the actual render.
+  def handle_info(:debounced_render, state) do
     Renderer.render(state)
-    {:noreply, state}
+    {:noreply, %{state | render_timer: nil}}
   end
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # ── Render scheduling ────────────────────────────────────────────────────────
+
+  # Schedules a render within `delay_ms`. If a render is already scheduled,
+  # this is a no-op (the pending render will pick up the latest state).
+  # Use this instead of `Renderer.render/1` in paths that may fire rapidly
+  # (e.g., diagnostics, LSP responses, file watcher events).
+  @spec schedule_render(state(), non_neg_integer()) :: state()
+  defp schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
+
+  defp schedule_render(state, delay_ms) do
+    ref = Process.send_after(self(), :debounced_render, delay_ms)
+    %{state | render_timer: ref}
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
