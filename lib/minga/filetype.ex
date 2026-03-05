@@ -71,8 +71,8 @@ defmodule Minga.Filetype do
     "html" => :html,
     "htm" => :html,
     "css" => :css,
-    "scss" => :css,
-    "sass" => :css,
+    "scss" => :scss,
+    "sass" => :scss,
     "json" => :json,
     "jsonc" => :json,
     "yaml" => :yaml,
@@ -104,7 +104,25 @@ defmodule Minga.Filetype do
     "proto" => :protobuf,
     "java" => :java,
     "swift" => :swift,
-    "r" => :r
+    "r" => :r,
+    "rmd" => :r,
+    "cs" => :c_sharp,
+    "csx" => :c_sharp,
+    "php" => :php,
+    "phtml" => :php,
+    "tf" => :hcl,
+    "tfvars" => :hcl,
+    "hcl" => :hcl,
+    "ml" => :ocaml,
+    "mli" => :ocaml,
+    "hs" => :haskell,
+    "lhs" => :haskell,
+    "scala" => :scala,
+    "sbt" => :scala,
+    "sc" => :scala,
+    "dart" => :dart,
+    "mk" => :make,
+    "mak" => :make
   }
 
   # ── Shebang interpreter → filetype ────────────────────────────────────────

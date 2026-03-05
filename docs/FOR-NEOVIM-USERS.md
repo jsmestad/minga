@@ -26,7 +26,7 @@ Let's start with what doesn't change. If you use Neovim, your muscle memory tran
 | Marks (`m{a-z}`, `'{a-z}`, `` `{a-z} ``) | Same | ✅ |
 | Dot repeat (`.`) | Same | ✅ |
 | Count prefix (`3dd`, `5j`) | Same | ✅ |
-| Tree-sitter highlighting | Same engine, 24 grammars | ✅ |
+| Tree-sitter highlighting | Same engine, 39 grammars | ✅ |
 
 The editing model is Vim. You're not learning a new editor. You're getting a better runtime under the same interface.
 

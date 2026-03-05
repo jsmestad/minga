@@ -155,11 +155,51 @@ These run before format-on-save, so the formatter gets clean input.
 
 ## Syntax highlighting
 
-Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting. 23 languages are supported out of the box:
+Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting. 39 languages are supported out of the box. Highlighting activates automatically when a file's type is detected. No configuration needed.
 
-Bash, C, C++, CSS, Elixir, Erlang, Gleam, Go, HEEx, HTML, JavaScript, JSON, Kotlin, Lua, Markdown, Python, Ruby, Rust, TOML, TSX, TypeScript, YAML, Zig
+### Supported languages
 
-Highlighting activates automatically when a file's type is detected. No configuration needed for supported languages.
+| Language | Extensions |
+|----------|-----------|
+| Bash | `.sh`, `.bash`, `.zsh` |
+| C | `.c`, `.h` |
+| C# | `.cs`, `.csx` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| CSS | `.css` |
+| Dart | `.dart` |
+| Diff | `.diff`, `.patch` |
+| Dockerfile | `Dockerfile` |
+| Elisp | `.el` |
+| Elixir | `.ex`, `.exs` |
+| Erlang | `.erl`, `.hrl` |
+| Gleam | `.gleam` |
+| Go | `.go` |
+| GraphQL | `.graphql`, `.gql` |
+| Haskell | `.hs`, `.lhs` |
+| HCL / Terraform | `.tf`, `.tfvars`, `.hcl` |
+| HEEx | `.heex`, `.leex` |
+| HTML | `.html`, `.htm` |
+| Java | `.java` |
+| JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx` |
+| JSON | `.json`, `.jsonc` |
+| Kotlin | `.kt`, `.kts` |
+| Lua | `.lua` |
+| Make | `Makefile`, `.mk`, `.mak` |
+| Markdown | `.md`, `.markdown` |
+| Nix | `.nix` |
+| OCaml | `.ml`, `.mli` |
+| PHP | `.php`, `.phtml` |
+| Python | `.py`, `.pyi` |
+| R | `.r`, `.rmd` |
+| Ruby | `.rb`, `.rake`, `.gemspec` |
+| Rust | `.rs` |
+| Scala | `.scala`, `.sbt`, `.sc` |
+| SCSS | `.scss`, `.sass` |
+| TOML | `.toml` |
+| TSX | `.tsx` |
+| TypeScript | `.ts`, `.mts`, `.cts` |
+| YAML | `.yaml`, `.yml` |
+| Zig | `.zig`, `.zon` |
 
 ### Customizing highlight colors
 

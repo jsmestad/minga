@@ -133,7 +133,7 @@ Current status and planned features. Updated as development progresses.
 | Doom One color theme | ✅ | Built-in default theme |
 | User-overridable queries | ✅ | `~/.config/minga/queries/{lang}/highlights.scm` |
 | Runtime grammar loading | ✅ | `dlopen` for user grammars |
-| Background query pre-compilation | ✅ | All 23 query sets compiled on startup |
+| Background query pre-compilation | ✅ | All 39 query sets compiled on startup |
 | Per-buffer highlight cache | ✅ | Instant switching between files |
 | Additional themes | ✅ | 7 built-in: Doom One, Catppuccin ×4, One Dark/Light |
 | Theme switching at runtime | 📋 | Static via config; runtime picker planned |

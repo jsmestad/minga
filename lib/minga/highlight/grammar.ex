@@ -32,7 +32,23 @@ defmodule Minga.Highlight.Grammar do
     toml: "toml",
     markdown: "markdown",
     kotlin: "kotlin",
-    gleam: "gleam"
+    gleam: "gleam",
+    java: "java",
+    c_sharp: "c_sharp",
+    php: "php",
+    dockerfile: "dockerfile",
+    hcl: "hcl",
+    scss: "scss",
+    graphql: "graphql",
+    nix: "nix",
+    ocaml: "ocaml",
+    haskell: "haskell",
+    scala: "scala",
+    r: "r",
+    dart: "dart",
+    make: "make",
+    diff: "diff",
+    emacs_lisp: "elisp"
   }
 
   @typedoc "A tree-sitter language name."

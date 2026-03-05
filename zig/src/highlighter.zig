@@ -353,6 +353,23 @@ extern fn tree_sitter_lua() ?*const c.TSLanguage;
 extern fn tree_sitter_python() ?*const c.TSLanguage;
 extern fn tree_sitter_kotlin() ?*const c.TSLanguage;
 extern fn tree_sitter_gleam() ?*const c.TSLanguage;
+extern fn tree_sitter_java() ?*const c.TSLanguage;
+extern fn tree_sitter_c_sharp() ?*const c.TSLanguage;
+extern fn tree_sitter_php_only() ?*const c.TSLanguage;
+extern fn tree_sitter_dockerfile() ?*const c.TSLanguage;
+extern fn tree_sitter_hcl() ?*const c.TSLanguage;
+extern fn tree_sitter_scss() ?*const c.TSLanguage;
+extern fn tree_sitter_graphql() ?*const c.TSLanguage;
+extern fn tree_sitter_nix() ?*const c.TSLanguage;
+extern fn tree_sitter_ocaml() ?*const c.TSLanguage;
+extern fn tree_sitter_haskell() ?*const c.TSLanguage;
+extern fn tree_sitter_scala() ?*const c.TSLanguage;
+extern fn tree_sitter_r() ?*const c.TSLanguage;
+extern fn tree_sitter_dart() ?*const c.TSLanguage;
+extern fn tree_sitter_make() ?*const c.TSLanguage;
+extern fn tree_sitter_diff() ?*const c.TSLanguage;
+extern fn tree_sitter_elisp() ?*const c.TSLanguage;
+
 
 const query_dir = "queries/";
 
@@ -381,6 +398,23 @@ const builtin_grammars = [_]BuiltinGrammar{
     .{ .name = "python", .func = tree_sitter_python, .query = @embedFile(query_dir ++ "python/highlights.scm") },
     .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = @embedFile(query_dir ++ "kotlin/highlights.scm") },
     .{ .name = "gleam", .func = tree_sitter_gleam, .query = @embedFile(query_dir ++ "gleam/highlights.scm") },
+    .{ .name = "java", .func = tree_sitter_java, .query = @embedFile(query_dir ++ "java/highlights.scm") },
+    .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = @embedFile(query_dir ++ "c_sharp/highlights.scm") },
+    .{ .name = "php", .func = tree_sitter_php_only, .query = @embedFile(query_dir ++ "php/highlights.scm") },
+    .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = @embedFile(query_dir ++ "dockerfile/highlights.scm") },
+    .{ .name = "hcl", .func = tree_sitter_hcl, .query = @embedFile(query_dir ++ "hcl/highlights.scm") },
+    .{ .name = "scss", .func = tree_sitter_scss, .query = @embedFile(query_dir ++ "scss/highlights.scm") },
+    .{ .name = "graphql", .func = tree_sitter_graphql, .query = @embedFile(query_dir ++ "graphql/highlights.scm") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = @embedFile(query_dir ++ "nix/highlights.scm") },
+    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = @embedFile(query_dir ++ "ocaml/highlights.scm") },
+    .{ .name = "haskell", .func = tree_sitter_haskell, .query = @embedFile(query_dir ++ "haskell/highlights.scm") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = @embedFile(query_dir ++ "scala/highlights.scm") },
+    .{ .name = "r", .func = tree_sitter_r, .query = @embedFile(query_dir ++ "r/highlights.scm") },
+    .{ .name = "dart", .func = tree_sitter_dart, .query = @embedFile(query_dir ++ "dart/highlights.scm") },
+    .{ .name = "make", .func = tree_sitter_make, .query = @embedFile(query_dir ++ "make/highlights.scm") },
+    .{ .name = "diff", .func = tree_sitter_diff, .query = @embedFile(query_dir ++ "diff/highlights.scm") },
+    .{ .name = "elisp", .func = tree_sitter_elisp, .query = @embedFile(query_dir ++ "elisp/highlights.scm") },
+
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────

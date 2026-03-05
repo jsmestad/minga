@@ -238,7 +238,7 @@ BEAM emits draw_text commands with per-segment fg/bg/attrs
 Zig renders colored text to terminal
 ```
 
-All 24 grammars are compiled into the Zig binary. Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
+All 39 grammars are compiled into the Zig binary. Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
 
 Users can override queries by placing `.scm` files in `~/.config/minga/queries/{lang}/highlights.scm`.
 

@@ -67,7 +67,7 @@ defmodule Minga.FiletypeTest do
       assert Filetype.detect("index.html") == :html
       assert Filetype.detect("page.htm") == :html
       assert Filetype.detect("style.css") == :css
-      assert Filetype.detect("style.scss") == :css
+      assert Filetype.detect("style.scss") == :scss
     end
 
     test "detects data formats" do
