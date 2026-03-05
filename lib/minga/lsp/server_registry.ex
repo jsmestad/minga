@@ -9,7 +9,7 @@ defmodule Minga.LSP.ServerRegistry do
   ## Adding a new server
 
   Add an entry to `@servers` mapping a filetype atom to a list of
-  `server_config()` structs. Multiple servers per filetype are supported
+  `ServerConfig` structs. Multiple servers per filetype are supported
   (e.g., TypeScript files may use both `typescript-language-server` and
   `eslint`).
 
@@ -19,158 +19,128 @@ defmodule Minga.LSP.ServerRegistry do
   or extend these defaults without modifying source code.
   """
 
+  alias Minga.LSP.ServerConfig
+
   @typedoc "Configuration for a single language server."
-  @type server_config :: %{
-          name: atom(),
-          command: String.t(),
-          args: [String.t()],
-          root_markers: [String.t()],
-          init_options: map()
-        }
+  @type server_config :: ServerConfig.t()
 
   @servers %{
     elixir: [
-      %{
+      %ServerConfig{
         name: :lexical,
         command: "lexical",
-        args: [],
-        root_markers: ["mix.exs"],
-        init_options: %{}
+        root_markers: ["mix.exs"]
       }
     ],
     go: [
-      %{
+      %ServerConfig{
         name: :gopls,
         command: "gopls",
-        args: [],
-        root_markers: ["go.mod", "go.sum"],
-        init_options: %{}
+        root_markers: ["go.mod", "go.sum"]
       }
     ],
     rust: [
-      %{
+      %ServerConfig{
         name: :rust_analyzer,
         command: "rust-analyzer",
-        args: [],
-        root_markers: ["Cargo.toml"],
-        init_options: %{}
+        root_markers: ["Cargo.toml"]
       }
     ],
     c: [
-      %{
+      %ServerConfig{
         name: :clangd,
         command: "clangd",
-        args: [],
-        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"],
-        init_options: %{}
+        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"]
       }
     ],
     cpp: [
-      %{
+      %ServerConfig{
         name: :clangd,
         command: "clangd",
-        args: [],
-        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"],
-        init_options: %{}
+        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"]
       }
     ],
     javascript: [
-      %{
+      %ServerConfig{
         name: :typescript_language_server,
         command: "typescript-language-server",
         args: ["--stdio"],
-        root_markers: ["package.json", "tsconfig.json", "jsconfig.json"],
-        init_options: %{}
+        root_markers: ["package.json", "tsconfig.json", "jsconfig.json"]
       }
     ],
     typescript: [
-      %{
+      %ServerConfig{
         name: :typescript_language_server,
         command: "typescript-language-server",
         args: ["--stdio"],
-        root_markers: ["package.json", "tsconfig.json"],
-        init_options: %{}
+        root_markers: ["package.json", "tsconfig.json"]
       }
     ],
     python: [
-      %{
+      %ServerConfig{
         name: :pyright,
         command: "pyright-langserver",
         args: ["--stdio"],
-        root_markers: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"],
-        init_options: %{}
+        root_markers: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]
       }
     ],
     ruby: [
-      %{
+      %ServerConfig{
         name: :solargraph,
         command: "solargraph",
         args: ["stdio"],
-        root_markers: ["Gemfile", ".solargraph.yml"],
-        init_options: %{}
+        root_markers: ["Gemfile", ".solargraph.yml"]
       }
     ],
     zig: [
-      %{
+      %ServerConfig{
         name: :zls,
         command: "zls",
-        args: [],
-        root_markers: ["build.zig", "build.zig.zon"],
-        init_options: %{}
+        root_markers: ["build.zig", "build.zig.zon"]
       }
     ],
     lua: [
-      %{
+      %ServerConfig{
         name: :lua_ls,
         command: "lua-language-server",
-        args: [],
-        root_markers: [".luarc.json", ".luarc.jsonc", ".stylua.toml"],
-        init_options: %{}
+        root_markers: [".luarc.json", ".luarc.jsonc", ".stylua.toml"]
       }
     ],
     json: [
-      %{
+      %ServerConfig{
         name: :vscode_json_languageserver,
         command: "vscode-json-language-server",
-        args: ["--stdio"],
-        root_markers: [],
-        init_options: %{}
+        args: ["--stdio"]
       }
     ],
     yaml: [
-      %{
+      %ServerConfig{
         name: :yaml_language_server,
         command: "yaml-language-server",
-        args: ["--stdio"],
-        root_markers: [],
-        init_options: %{}
+        args: ["--stdio"]
       }
     ],
     css: [
-      %{
+      %ServerConfig{
         name: :vscode_css_languageserver,
         command: "vscode-css-language-server",
         args: ["--stdio"],
-        root_markers: ["package.json"],
-        init_options: %{}
+        root_markers: ["package.json"]
       }
     ],
     html: [
-      %{
+      %ServerConfig{
         name: :vscode_html_languageserver,
         command: "vscode-html-language-server",
         args: ["--stdio"],
-        root_markers: ["package.json"],
-        init_options: %{}
+        root_markers: ["package.json"]
       }
     ],
     bash: [
-      %{
+      %ServerConfig{
         name: :bash_language_server,
         command: "bash-language-server",
-        args: ["start"],
-        root_markers: [],
-        init_options: %{}
+        args: ["start"]
       }
     ]
   }
@@ -215,12 +185,12 @@ defmodule Minga.LSP.ServerRegistry do
 
   ## Examples
 
-      iex> config = %{name: :test, command: "nonexistent_binary_xyz", args: [], root_markers: [], init_options: %{}}
+      iex> config = %Minga.LSP.ServerConfig{name: :test, command: "nonexistent_binary_xyz"}
       iex> Minga.LSP.ServerRegistry.available?(config)
       false
   """
   @spec available?(server_config()) :: boolean()
-  def available?(%{command: command}) when is_binary(command) do
+  def available?(%ServerConfig{command: command}) when is_binary(command) do
     System.find_executable(command) != nil
   end
 

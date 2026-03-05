@@ -61,12 +61,9 @@ defmodule Minga.LSP.SupervisorTest do
     end
 
     test "returns error for unavailable server", %{supervisor: sup} do
-      config = %{
+      config = %Minga.LSP.ServerConfig{
         name: :nonexistent,
-        command: "definitely_not_a_binary_#{System.unique_integer()}",
-        args: [],
-        root_markers: [],
-        init_options: %{}
+        command: "definitely_not_a_binary_#{System.unique_integer()}"
       }
 
       assert {:error, :not_available} = LSPSupervisor.ensure_client(sup, config, "/tmp")

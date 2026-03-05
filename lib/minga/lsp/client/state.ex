@@ -3,7 +3,7 @@ defmodule Minga.LSP.Client.State do
   Internal state for an `LSP.Client` GenServer.
   """
 
-  alias Minga.LSP.ServerRegistry
+  alias Minga.LSP.ServerConfig
 
   @enforce_keys [:server_config, :root_path]
   defstruct [
@@ -23,10 +23,13 @@ defmodule Minga.LSP.Client.State do
   @typedoc "Client lifecycle status."
   @type status :: :starting | :initializing | :ready | :shutdown
 
+  @typedoc "Caller for a pending request: a GenServer reply target, an async caller, or nil."
+  @type pending_from :: GenServer.from() | {:async, pid(), reference()} | nil
+
   @typedoc "A pending request awaiting a response."
   @type pending_entry :: %{
           method: String.t(),
-          from: GenServer.from() | nil,
+          from: pending_from(),
           timer: reference() | nil
         }
 
@@ -37,7 +40,7 @@ defmodule Minga.LSP.Client.State do
         }
 
   @type t :: %__MODULE__{
-          server_config: ServerRegistry.server_config(),
+          server_config: ServerConfig.t(),
           root_path: String.t(),
           port: port() | nil,
           encoding: Minga.LSP.PositionEncoding.encoding(),

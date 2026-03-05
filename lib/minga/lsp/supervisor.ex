@@ -47,7 +47,7 @@ defmodule Minga.LSP.Supervisor do
           keyword()
         ) :: {:ok, pid()} | {:error, :not_available | term()}
   def ensure_client(supervisor \\ __MODULE__, server_config, root_path, opts \\ [])
-      when is_map(server_config) and is_binary(root_path) do
+      when is_struct(server_config, Minga.LSP.ServerConfig) and is_binary(root_path) do
     key = {server_config.name, root_path}
 
     case find_client(supervisor, key) do

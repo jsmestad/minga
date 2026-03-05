@@ -24,18 +24,16 @@ defmodule Minga.Test.MockLSPServer do
   end
 
   @doc """
-  Returns a server_config map suitable for `LSP.Client.start_link/1`.
+  Returns a ServerConfig struct suitable for `LSP.Client.start_link/1`.
 
   Uses `elixir` as the command with the mock script as the argument.
   """
-  @spec server_config() :: map()
+  @spec server_config() :: Minga.LSP.ServerRegistry.server_config()
   def server_config do
-    %{
+    %Minga.LSP.ServerConfig{
       name: :mock_lsp,
       command: "elixir",
-      args: [script_path()],
-      root_markers: [],
-      init_options: %{}
+      args: [script_path()]
     }
   end
 end

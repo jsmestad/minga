@@ -19,7 +19,9 @@ defmodule Minga.Editor.State do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Completion
   alias Minga.Editor.ChangeRecorder
+  alias Minga.Editor.CompletionBridge
   alias Minga.Editor.LspBridge
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Buffers
@@ -70,6 +72,8 @@ defmodule Minga.Editor.State do
             highlight_version: 0,
             highlight_cache: %{},
             lsp: LspBridge.new(),
+            completion: nil,
+            completion_bridge: CompletionBridge.new(),
             window_tree: nil,
             windows: %{},
             active_window: 1,
@@ -102,6 +106,8 @@ defmodule Minga.Editor.State do
           highlight_version: non_neg_integer(),
           highlight_cache: %{pid() => Highlight.t()},
           lsp: LspBridge.t(),
+          completion: Completion.t() | nil,
+          completion_bridge: CompletionBridge.t(),
           window_tree: WindowTree.t() | nil,
           windows: %{Window.id() => Window.t()},
           active_window: Window.id(),

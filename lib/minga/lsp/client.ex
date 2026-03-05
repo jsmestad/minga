@@ -117,6 +117,21 @@ defmodule Minga.LSP.Client do
     GenServer.call(server, {:subscribe, self()})
   end
 
+  @doc """
+  Sends an async LSP request and returns a reference.
+
+  The response will be delivered as `{:lsp_response, ref, {:ok, result} | {:error, error}}`
+  to the calling process. This is the primary API for features like completion,
+  go-to-definition, and hover that need request/response semantics without
+  blocking the caller.
+  """
+  @spec request(GenServer.server(), String.t(), map()) :: reference()
+  def request(server, method, params) when is_binary(method) and is_map(params) do
+    ref = make_ref()
+    GenServer.cast(server, {:async_request, method, params, self(), ref})
+    ref
+  end
+
   @doc "Sends a shutdown request and exit notification to the server."
   @spec shutdown(GenServer.server()) :: :ok
   def shutdown(server) do
@@ -250,6 +265,12 @@ defmodule Minga.LSP.Client do
     end
   end
 
+  def handle_cast({:async_request, method, params, caller, ref}, %{status: :ready} = state) do
+    {id, state} = send_request(state, method, params)
+    state = put_pending(state, id, method, {:async, caller, ref})
+    {:noreply, state}
+  end
+
   # Ignore casts when not ready
   def handle_cast(_msg, state) do
     {:noreply, state}
@@ -297,11 +318,7 @@ defmodule Minga.LSP.Client do
 
       {%{from: from, method: method}, pending} ->
         Logger.warning("LSP request #{method} (id=#{id}) timed out")
-
-        if from do
-          GenServer.reply(from, {:error, :timeout})
-        end
-
+        reply_to_caller(from, {:error, :timeout})
         {:noreply, %{state | pending: pending}}
     end
   end
@@ -405,6 +422,11 @@ defmodule Minga.LSP.Client do
     end
 
     send_notification(state, "exit", %{})
+    state
+  end
+
+  defp handle_method_response(_method, result, {:async, caller, ref}, state) do
+    send(caller, {:lsp_response, ref, result})
     state
   end
 
@@ -528,9 +550,9 @@ defmodule Minga.LSP.Client do
     )
   end
 
-  @spec find_executable(Minga.LSP.ServerRegistry.server_config()) ::
+  @spec find_executable(Minga.LSP.ServerConfig.t()) ::
           {:ok, String.t()} | :error
-  defp find_executable(%{command: command}) do
+  defp find_executable(%Minga.LSP.ServerConfig{command: command}) do
     case System.find_executable(command) do
       nil -> :error
       path -> {:ok, path}
@@ -563,7 +585,7 @@ defmodule Minga.LSP.Client do
     :ok
   end
 
-  @spec put_pending(State.t(), integer(), String.t(), GenServer.from() | nil) :: State.t()
+  @spec put_pending(State.t(), integer(), String.t(), State.pending_from()) :: State.t()
   defp put_pending(state, id, method, from) do
     timer = Process.send_after(self(), {:request_timeout, id}, @request_timeout)
 
@@ -584,9 +606,32 @@ defmodule Minga.LSP.Client do
         },
         "publishDiagnostics" => %{
           "relatedInformation" => true
+        },
+        "completion" => %{
+          "dynamicRegistration" => false,
+          "completionItem" => %{
+            "snippetSupport" => false,
+            "insertReplaceSupport" => true
+          },
+          "completionItemKind" => %{
+            "valueSet" => Enum.to_list(1..25)
+          }
         }
       }
     }
+  end
+
+  @spec reply_to_caller(State.pending_from(), term()) :: :ok
+  defp reply_to_caller(nil, _result), do: :ok
+
+  defp reply_to_caller({:async, caller, ref}, result) do
+    send(caller, {:lsp_response, ref, result})
+    :ok
+  end
+
+  defp reply_to_caller(from, result) do
+    GenServer.reply(from, result)
+    :ok
   end
 
   @spec notify_subscribers([pid()], term()) :: :ok
