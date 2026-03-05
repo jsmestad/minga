@@ -116,13 +116,37 @@ These tools run outside your editor entirely. They read and write files on disk,
 - You can't edit the same file while the agent is writing to it
 - No way to see the agent's progress from inside your editor
 
-**Minga:** Terminal agents could communicate directly with Minga's buffer processes. Agent edits flow through the same undo system as your typing. You can edit one part of a file while an agent edits another. The buffer serializes both safely. And because Minga runs on the BEAM, it could host the agent runtime directly: no separate process, no file-watching lag, just another supervised process tree in the editor.
+And here's the thing nobody says out loud: **you still open an editor.** You run Claude Code in one terminal, then flip to Neovim or VS Code to audit what it did. You follow along, spot-check diffs, review file by file. The agent is your writer; the editor is your reviewer. You're always running two tools because neither one is complete on its own.
+
+The terminal agent can't show you the codebase the way an editor can. The editor can't see or control the agent. So you play air traffic controller between them, context-switching constantly, losing flow state every time you alt-tab.
+
+**Minga:** Terminal agents could communicate directly with Minga's buffer processes. Agent edits flow through the same undo system as your typing. You can edit one part of a file while an agent edits another. The buffer serializes both safely. And because Minga runs on the BEAM, it could host the agent runtime directly: no separate process, no file-watching lag, just another supervised process tree in the editor. The "sidecar editor" workflow collapses into one tool. You watch the agent work in real-time, review inline, and intervene without switching windows.
 
 ### vs. Copilot / inline completions
 
 Inline completion (ghost text) is the simplest AI integration, and most editors handle it fine. Minga will support this too. It's not the interesting problem.
 
 The interesting problem is **agentic editing**: AI that doesn't just suggest one line, but reads your codebase, plans changes across multiple files, executes shell commands, and modifies buffers autonomously. That's where single-threaded editors hit their limits, and where Minga's architecture matters.
+
+---
+
+## The IDE isn't dead. It's just wrong.
+
+There's a popular narrative that AI agents will replace the IDE. You'll just talk to a terminal, describe what you want, and the agent will write everything. The editor becomes a vestige.
+
+That hasn't happened. It won't happen, either.
+
+Even the best AI coding agents hit a wall when they touch too many files too quickly. They make mistakes. They misunderstand context. They hallucinate function signatures. And when they do, you need to *see* the code, navigate it, understand what changed, and fix what's wrong. That's what an editor is for.
+
+The proof is in your own workflow. Nobody runs Claude Code or Cursor's agent and then blindly commits the result. You review. You audit. You open files, check diffs, trace through logic, run tests. The editor is still essential; it's just been demoted to a review tool that has no idea an agent exists.
+
+Some people push back here: "I just review the PR diff" or "I fix things by telling the agent what to change." Sure, and sometimes that works. But a PR diff shows you what changed, not *why it's wrong*. You can't jump to a definition from a diff view. You can't trace a call chain across three files. You can't set a breakpoint or run a single test from GitHub's review UI. And telling an agent "fix line 47" only works when you already understand the problem well enough to describe it. For the cases where you don't (where you need to read surrounding code, check types, follow imports, understand state flow) you open an editor. Every time.
+
+The chat prompt has the same limitation. It's great for describing intent, terrible for spatial reasoning about code. "Move the validation before the database call" is easy to say, hard to verify without seeing both locations in context. You end up pasting code into the chat so the agent can see what you're already looking at in your editor. That's two tools doing one job, badly.
+
+The concept of an IDE (a place where you read, write, navigate, build, and debug code) hasn't been made obsolete by AI. It just needs to be reinvented for a world where you're not the only one editing. The old IDE assumed one operator. The new one needs to assume many: you, plus one or more agents, all working concurrently, all visible, all controllable from one place.
+
+That's what Minga is. Not a throwback to the IDE era, but the version of it that AI-assisted coding actually demands: an environment where human editing, agent editing, review, and orchestration all happen in the same process, with the same undo history, in the same viewport.
 
 ---
 
@@ -189,6 +213,10 @@ Minga isn't a drop-in replacement for Cursor today. It's building the editor arc
 Your current editor was designed for you, sitting at a keyboard, typing one character at a time. AI coding agents are the biggest change in how code gets written since IDEs replaced `ed`. And they need an editor architecture that treats concurrent, independent, observable processes as first-class citizens, not an afterthought.
 
 Every other editor is retrofitting. Minga is building for this future from the ground up.
+
+And unlike the flavor-of-the-week AI editors that keep appearing (and disappearing), Minga isn't built on hype. It's built on a lineage. Emacs proved that an editor is really a Lisp runtime that happens to edit text. That insight, that the editor should be a programmable environment, not a static tool, is almost 50 years old and still correct. Minga carries that same philosophy forward: the editor is a BEAM runtime that happens to edit text. Buffers are processes. Modes are processes. Agents are processes. Everything is extensible, inspectable, and composable because the runtime makes it so.
+
+Emacs survived every editor war because its architecture was deeper than its UI. Minga makes the same bet: get the runtime right and the editor can adapt to whatever comes next, whether that's today's LLM-based agents or whatever replaces them in five years. Editors built as thin wrappers around a specific AI product have a shelf life. Editors built as programmable runtimes don't.
 
 If you've ever:
 - Had your editor stutter while an agent was streaming a response
