@@ -250,11 +250,17 @@ defmodule Minga.Port.Protocol do
   # ── Encoding: terminal commands (BEAM → Zig) ──
 
   @doc "Encodes an open_terminal command."
-  @spec encode_open_terminal(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  @spec encode_open_terminal(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
   def encode_open_terminal(shell, rows, cols, row_offset, col_offset)
       when is_binary(shell) and is_integer(rows) and is_integer(cols) do
-    <<@op_open_terminal, byte_size(shell)::16, shell::binary,
-      rows::16, cols::16, row_offset::16, col_offset::16>>
+    <<@op_open_terminal, byte_size(shell)::16, shell::binary, rows::16, cols::16, row_offset::16,
+      col_offset::16>>
   end
 
   @doc "Encodes a close_terminal command."
@@ -262,7 +268,12 @@ defmodule Minga.Port.Protocol do
   def encode_close_terminal, do: <<@op_close_terminal>>
 
   @doc "Encodes a resize_terminal command."
-  @spec encode_resize_terminal(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  @spec encode_resize_terminal(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
   def encode_resize_terminal(rows, cols, row_offset, col_offset)
       when is_integer(rows) and is_integer(cols) do
     <<@op_resize_terminal, rows::16, cols::16, row_offset::16, col_offset::16>>

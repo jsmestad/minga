@@ -404,7 +404,10 @@ defmodule Minga.Editor.Renderer do
        ) do
     window = Map.get(state.windows, win_id)
 
-    if window == nil or window.buffer == nil do
+    is_terminal =
+      state.terminal != nil and state.terminal.open and state.terminal.window_id == win_id
+
+    if window == nil or window.buffer == nil or is_terminal do
       {cmds_acc, cursor_acc}
     else
       is_active = win_id == state.active_window

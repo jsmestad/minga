@@ -41,7 +41,6 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end
   end
 
-
   @spec copy_to_priv(String.t(), String.t()) :: :ok
   defp copy_to_priv(src_name, dest_name) do
     src = Path.join([@zig_dir, "zig-out", "bin", src_name])

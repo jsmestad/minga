@@ -77,7 +77,8 @@ defmodule Minga.Editor.State do
             window_tree: nil,
             windows: %{},
             active_window: 1,
-            next_window_id: 2
+            next_window_id: 2,
+            terminal: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -110,7 +111,8 @@ defmodule Minga.Editor.State do
           window_tree: WindowTree.t() | nil,
           windows: %{Window.id() => Window.t()},
           active_window: Window.id(),
-          next_window_id: Window.id()
+          next_window_id: Window.id(),
+          terminal: Minga.Terminal.t() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

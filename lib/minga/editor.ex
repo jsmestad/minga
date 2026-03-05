@@ -412,6 +412,12 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  def handle_info({:minga_input, {:terminal_exited, _exit_code}}, state) do
+    new_state = Minga.Editor.Commands.Terminal.handle_exited(state)
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
   # LSP debounced didChange timer fired — flush the change notification
   def handle_info({:lsp_did_change, buffer_pid}, state) do
     new_lsp = DocumentSync.flush_did_change(state.lsp, buffer_pid)
@@ -501,6 +507,27 @@ defmodule Minga.Editor do
     System.stop(0)
     state
   end
+
+  # Terminal mode: Zig handles all input directly. The only key that
+  # reaches Elixir is Escape (codepoint 27) sent when C-\ C-n is detected,
+  # signaling that the user wants to return to the editor.
+  defp handle_key(%{mode: :terminal} = state, 27, _modifiers) do
+    terminal = Minga.Terminal.set_focus(state.terminal, false)
+
+    PortManager.send_commands(state.port_manager, [
+      Protocol.encode_terminal_focus(false)
+    ])
+
+    %{
+      state
+      | mode: :normal,
+        mode_state: Mode.initial_state(),
+        terminal: terminal,
+        status_msg: nil
+    }
+  end
+
+  defp handle_key(%{mode: :terminal} = state, _codepoint, _modifiers), do: state
 
   # All other keys go through the Mode FSM.
   defp handle_key(state, codepoint, modifiers) do
