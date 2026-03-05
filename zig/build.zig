@@ -74,11 +74,59 @@ pub fn build(b: *std.Build) void {
         .{ .name = "python", .has_scanner = true },
         .{ .name = "kotlin", .has_scanner = true },
         .{ .name = "gleam", .has_scanner = true },
+        .{ .name = "java", .has_scanner = false },
+        .{ .name = "c_sharp", .has_scanner = true },
+        .{ .name = "php", .has_scanner = true },
+        .{ .name = "dockerfile", .has_scanner = true },
+        .{ .name = "hcl", .has_scanner = true },
+        .{ .name = "scss", .has_scanner = true },
+        .{ .name = "graphql", .has_scanner = false },
+        .{ .name = "nix", .has_scanner = true },
+        .{ .name = "ocaml", .has_scanner = true },
+        .{ .name = "haskell", .has_scanner = true },
+        .{ .name = "scala", .has_scanner = true },
+        .{ .name = "r", .has_scanner = true },
+        .{ .name = "dart", .has_scanner = true },
+        .{ .name = "make", .has_scanner = false },
+        .{ .name = "diff", .has_scanner = false },
+        .{ .name = "elisp", .has_scanner = false },
+
     };
 
     var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
     for (grammars, 0..) |g, i| {
         grammar_libs[i] = addGrammar(b, target, c_optimize, g.name, g.has_scanner, g.scanner_extra_flags);
+    }
+
+    // ── libvterm static library ──────────────────────────────────────────
+    const vterm_lib = b.addLibrary(.{
+        .name = "vterm",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = c_optimize,
+        }),
+    });
+    vterm_lib.root_module.link_libc = true;
+    vterm_lib.root_module.addIncludePath(b.path("vendor/libvterm/include"));
+    vterm_lib.root_module.addIncludePath(b.path("vendor/libvterm/src"));
+
+    const vterm_sources = [_][]const u8{
+        "vendor/libvterm/src/encoding.c",
+        "vendor/libvterm/src/keyboard.c",
+        "vendor/libvterm/src/mouse.c",
+        "vendor/libvterm/src/parser.c",
+        "vendor/libvterm/src/pen.c",
+        "vendor/libvterm/src/screen.c",
+        "vendor/libvterm/src/state.c",
+        "vendor/libvterm/src/unicode.c",
+        "vendor/libvterm/src/vterm.c",
+    };
+    for (vterm_sources) |src| {
+        vterm_lib.root_module.addCSourceFile(.{
+            .file = b.path(src),
+            .flags = &.{ "-std=c99", "-DINLINE=static inline", "-DUSE_POSIX" },
+        });
     }
 
     // Main executable
@@ -93,7 +141,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("build_options", build_options.createModule());
     exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    exe.root_module.addIncludePath(b.path("vendor/libvterm/include"));
     exe.linkLibrary(ts_lib);
+    exe.linkLibrary(vterm_lib);
     for (grammar_libs) |gl| exe.linkLibrary(gl);
 
     // GUI backend: compile Swift, link AppKit/Foundation frameworks.
@@ -123,7 +173,9 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
     tests.root_module.addImport("build_options", build_options.createModule());
     tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    tests.root_module.addIncludePath(b.path("vendor/libvterm/include"));
     tests.linkLibrary(ts_lib);
+    tests.linkLibrary(vterm_lib);
     for (grammar_libs) |gl| tests.linkLibrary(gl);
 
     if (backend == .gui) {
