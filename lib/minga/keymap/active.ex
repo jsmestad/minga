@@ -13,9 +13,9 @@ defmodule Minga.Keymap.Active do
 
   use Agent
 
+  alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.KeyParser
-  alias Minga.Keymap.Bindings
 
   require Logger
 

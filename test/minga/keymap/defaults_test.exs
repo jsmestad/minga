@@ -1,8 +1,8 @@
 defmodule Minga.Keymap.DefaultsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Keymap.Defaults
   alias Minga.Keymap.Bindings
+  alias Minga.Keymap.Defaults
 
   describe "leader_trie/0" do
     test "returns a non-empty trie node" do

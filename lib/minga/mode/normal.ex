@@ -63,9 +63,9 @@ defmodule Minga.Mode.Normal do
 
   import Bitwise
 
-  alias Minga.Keymap.Defaults
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
+  alias Minga.Keymap.Defaults
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
   alias Minga.WhichKey
