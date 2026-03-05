@@ -1,6 +1,7 @@
 defmodule Minga.Editor.TitleTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Title
 
   defp state_with(opts \\ []) do
@@ -10,14 +11,14 @@ defmodule Minga.Editor.TitleTest do
     mode = Keyword.get(opts, :mode, :normal)
 
     {:ok, buf} =
-      Minga.Buffer.Server.start_link(
+      BufferServer.start_link(
         content: "hello",
         file_path: path,
         buffer_name: name
       )
 
     if dirty do
-      Minga.Buffer.Server.insert_char(buf, "x")
+      BufferServer.insert_char(buf, "x")
     end
 
     %{
