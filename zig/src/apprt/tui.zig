@@ -367,9 +367,13 @@ pub const TuiRuntime = struct {
                                         continue;
                                     }
 
-                                    // Convert key event to bytes and send to PTY
-                                    var input_buf: [16]u8 = undefined;
-                                    const input_len = keyToBytes(key, &input_buf);
+                                    // Forward key to PTY. Use the vaxis-style encoding:
+                                    // 1. If key has .text, write it directly (most reliable)
+                                    // 2. ASCII without mods: write the byte
+                                    // 3. Ctrl+letter: write control code
+                                    // 4. Special keys: write ANSI escape sequences
+                                    var input_buf: [32]u8 = undefined;
+                                    const input_len = keyToPtyBytes(key, &input_buf);
                                     if (input_len > 0) {
                                         self.term.?.writeInput(input_buf[0..input_len]) catch {};
                                     }
@@ -568,103 +572,116 @@ fn installSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.INT, &quit_act, null);
 }
 
-/// Converts a vaxis key event to bytes suitable for writing to a PTY.
-/// Returns the number of bytes written to `buf`.
-fn keyToBytes(key: vaxis.Key, buf: *[16]u8) usize {
+/// Converts a vaxis key event to bytes for a PTY.
+/// Follows the same logic as vaxis's built-in terminal key encoder:
+/// text first, then ASCII byte, then ctrl codes, then ANSI sequences.
+fn keyToPtyBytes(key: vaxis.Key, buf: *[32]u8) usize {
+    // 1. If vaxis provides .text, use it directly (handles Unicode, dead keys, etc.)
+    if (key.text) |text| {
+        if (text.len > 0 and text.len <= buf.len) {
+            @memcpy(buf[0..text.len], text);
+            return text.len;
+        }
+    }
+
     const cp = key.codepoint;
+    const has_ctrl = key.mods.ctrl;
+    const has_alt = key.mods.alt;
 
-    // Special keys (arrows, function keys, etc.) use codepoints >= 57348
-    // Tab/Enter/Escape/Backspace use their ASCII values and are handled
-    // by specialKeyToBytes too.
-    if (cp >= 57348 or cp == vaxis.Key.escape or cp == vaxis.Key.enter or
-        cp == vaxis.Key.tab or cp == vaxis.Key.backspace)
-    {
-        return specialKeyToBytes(key, buf);
+    // 2. Plain ASCII without mods → write byte directly
+    if (!has_ctrl and !has_alt and cp <= 0x7F) {
+        buf[0] = @truncate(cp);
+        return 1;
     }
 
-    // Ctrl+key → control code
-    if (key.mods.ctrl and !key.mods.alt) {
-        if (cp >= 'a' and cp <= 'z') {
-            buf[0] = @intCast(cp - 'a' + 1);
-            return 1;
-        }
-        if (cp >= 'A' and cp <= 'Z') {
-            buf[0] = @intCast(cp - 'A' + 1);
-            return 1;
-        }
-        // Ctrl+[ = Escape, Ctrl+] = 0x1D, etc.
-        if (cp == '[') { buf[0] = 0x1B; return 1; }
-        if (cp == ']') { buf[0] = 0x1D; return 1; }
-        if (cp == '\\') { buf[0] = 0x1C; return 1; }
-        if (cp == '@') { buf[0] = 0x00; return 1; }
-        if (cp == '^') { buf[0] = 0x1E; return 1; }
-        if (cp == '_') { buf[0] = 0x1F; return 1; }
+    // 3. Ctrl + lowercase letter → control code (0x01-0x1A)
+    if (has_ctrl and !has_alt and cp >= 'a' and cp <= 'z') {
+        buf[0] = @as(u8, @truncate(cp)) -| 0x60;
+        return 1;
     }
 
-    // Alt+key → ESC prefix + key
-    if (key.mods.alt) {
+    // 4. Alt + printable ASCII → ESC prefix
+    if (has_alt and !has_ctrl and cp >= ' ' and cp < 0x7F) {
         buf[0] = 0x1B;
-        if (cp < 0x80) {
-            if (key.mods.ctrl and cp >= 'a' and cp <= 'z') {
-                buf[1] = @intCast(cp - 'a' + 1);
-            } else {
-                buf[1] = @intCast(cp);
-            }
-            return 2;
-        }
-        // Alt + unicode: ESC + UTF-8
-        const n = std.unicode.utf8Encode(@intCast(cp), buf[1..]) catch return 0;
-        return 1 + n;
+        buf[1] = @truncate(cp);
+        return 2;
     }
 
-    // Regular character → UTF-8
-    const n = std.unicode.utf8Encode(@intCast(cp), buf[0..]) catch return 0;
-    return n;
-}
+    // 5. Ctrl + Alt + lowercase → ESC + control code
+    if (has_ctrl and has_alt and cp >= 'a' and cp <= 'z') {
+        buf[0] = 0x1B;
+        buf[1] = @as(u8, @truncate(cp)) -| 0x60;
+        return 2;
+    }
 
-/// Encodes special keys (arrows, function keys, etc.) as ANSI escape sequences.
-fn specialKeyToBytes(key: vaxis.Key, buf: *[16]u8) usize {
-    // Map vaxis special key codepoints to escape sequences.
-    // vaxis uses codepoints from its Key enum for special keys.
-    const Seq = struct { seq: []const u8 };
-    const mapping: ?Seq = switch (key.codepoint) {
-        vaxis.Key.escape => .{ .seq = "\x1B" },
-        vaxis.Key.enter => .{ .seq = "\r" },
-        vaxis.Key.tab => .{ .seq = "\t" },
-        vaxis.Key.backspace => .{ .seq = "\x7F" },
-        vaxis.Key.delete => .{ .seq = "\x1B[3~" },
-        vaxis.Key.up => .{ .seq = "\x1B[A" },
-        vaxis.Key.down => .{ .seq = "\x1B[B" },
-        vaxis.Key.right => .{ .seq = "\x1B[C" },
-        vaxis.Key.left => .{ .seq = "\x1B[D" },
-        vaxis.Key.home => .{ .seq = "\x1B[H" },
-        vaxis.Key.end => .{ .seq = "\x1B[F" },
-        vaxis.Key.page_up => .{ .seq = "\x1B[5~" },
-        vaxis.Key.page_down => .{ .seq = "\x1B[6~" },
-        vaxis.Key.insert => .{ .seq = "\x1B[2~" },
-        vaxis.Key.f1 => .{ .seq = "\x1BOP" },
-        vaxis.Key.f2 => .{ .seq = "\x1BOQ" },
-        vaxis.Key.f3 => .{ .seq = "\x1BOR" },
-        vaxis.Key.f4 => .{ .seq = "\x1BOS" },
-        vaxis.Key.f5 => .{ .seq = "\x1B[15~" },
-        vaxis.Key.f6 => .{ .seq = "\x1B[17~" },
-        vaxis.Key.f7 => .{ .seq = "\x1B[18~" },
-        vaxis.Key.f8 => .{ .seq = "\x1B[19~" },
-        vaxis.Key.f9 => .{ .seq = "\x1B[20~" },
-        vaxis.Key.f10 => .{ .seq = "\x1B[21~" },
-        vaxis.Key.f11 => .{ .seq = "\x1B[23~" },
-        vaxis.Key.f12 => .{ .seq = "\x1B[24~" },
+    // 6. Special keys → ANSI escape sequences
+    const Def = struct { number: u21, suffix: u8 };
+    const def: ?Def = switch (cp) {
+        vaxis.Key.escape => .{ .number = 27, .suffix = 'u' },
+        vaxis.Key.enter => .{ .number = 13, .suffix = 'u' },
+        vaxis.Key.tab => .{ .number = 9, .suffix = 'u' },
+        vaxis.Key.backspace => .{ .number = 127, .suffix = 'u' },
+        vaxis.Key.insert => .{ .number = 2, .suffix = '~' },
+        vaxis.Key.delete => .{ .number = 3, .suffix = '~' },
+        vaxis.Key.left => .{ .number = 1, .suffix = 'D' },
+        vaxis.Key.right => .{ .number = 1, .suffix = 'C' },
+        vaxis.Key.up => .{ .number = 1, .suffix = 'A' },
+        vaxis.Key.down => .{ .number = 1, .suffix = 'B' },
+        vaxis.Key.page_up => .{ .number = 5, .suffix = '~' },
+        vaxis.Key.page_down => .{ .number = 6, .suffix = '~' },
+        vaxis.Key.home => .{ .number = 1, .suffix = 'H' },
+        vaxis.Key.end => .{ .number = 1, .suffix = 'F' },
+        vaxis.Key.f1 => .{ .number = 1, .suffix = 'P' },
+        vaxis.Key.f2 => .{ .number = 1, .suffix = 'Q' },
+        vaxis.Key.f3 => .{ .number = 1, .suffix = 'R' },
+        vaxis.Key.f4 => .{ .number = 1, .suffix = 'S' },
+        vaxis.Key.f5 => .{ .number = 15, .suffix = '~' },
+        vaxis.Key.f6 => .{ .number = 17, .suffix = '~' },
+        vaxis.Key.f7 => .{ .number = 18, .suffix = '~' },
+        vaxis.Key.f8 => .{ .number = 19, .suffix = '~' },
+        vaxis.Key.f9 => .{ .number = 20, .suffix = '~' },
+        vaxis.Key.f10 => .{ .number = 21, .suffix = '~' },
+        vaxis.Key.f11 => .{ .number = 23, .suffix = '~' },
+        vaxis.Key.f12 => .{ .number = 24, .suffix = '~' },
         else => null,
     };
 
-    if (mapping) |m| {
-        @memcpy(buf[0..m.seq.len], m.seq);
-        return m.seq.len;
+    if (def) |d| {
+        var fbs = std.io.fixedBufferStream(buf);
+        const writer = fbs.writer();
+        const shift: u8 = 0b00000001;
+        const alt_bit: u8 = 0b00000010;
+        const ctrl_bit: u8 = 0b00000100;
+        var mods: u8 = 0;
+        if (key.mods.shift) mods |= shift;
+        if (has_alt) mods |= alt_bit;
+        if (has_ctrl) mods |= ctrl_bit;
+
+        if (mods == 0) {
+            if (d.number == 1) {
+                // F1-F4 use SS3 format, others use CSI
+                switch (cp) {
+                    vaxis.Key.f1, vaxis.Key.f2, vaxis.Key.f3, vaxis.Key.f4 =>
+                        writer.print("\x1bO{c}", .{d.suffix}) catch return 0,
+                    else =>
+                        writer.print("\x1b[{c}", .{d.suffix}) catch return 0,
+                }
+            } else {
+                writer.print("\x1b[{d}{c}", .{ d.number, d.suffix }) catch return 0;
+            }
+        } else {
+            writer.print("\x1b[{d};{d}{c}", .{ d.number, mods + 1, d.suffix }) catch return 0;
+        }
+        return fbs.pos;
     }
 
-    // Unknown special key — try UTF-8 encoding the codepoint
-    const n = std.unicode.utf8Encode(@intCast(key.codepoint), buf[0..]) catch return 0;
-    return n;
+    // 7. Non-ASCII Unicode without mods → UTF-8
+    if (cp > 0x7F and cp <= 0x10FFFF) {
+        const n = std.unicode.utf8Encode(@intCast(cp), buf[0..]) catch return 0;
+        return n;
+    }
+
+    return 0;
 }
 
 /// Process a parsed terminal event.

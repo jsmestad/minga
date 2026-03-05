@@ -359,7 +359,20 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
+      # Trace setup_highlight calls
+      :erlang.trace(ctx.editor, true, [:receive])
+
       send_key(ctx, ?x)
+
+      # Collect any setup_highlight messages
+      receive do
+        {:trace, _, :receive, :setup_highlight} ->
+          IO.puts("GOT setup_highlight AFTER x")
+      after
+        50 -> IO.puts("No setup_highlight after x")
+      end
+
+      :erlang.trace(ctx.editor, false, [:receive])
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
