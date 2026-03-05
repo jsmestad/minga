@@ -49,7 +49,7 @@ defmodule Minga.Editor.Commands.Search do
         state
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
-        |> Map.put(:status_msg, "Pattern not found: #{ms.input}")
+        |> then(&%{&1 | status_msg: "Pattern not found: #{ms.input}"})
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
@@ -127,7 +127,7 @@ defmodule Minga.Editor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :forward)
-            |> Map.put(:status_msg, "Pattern not found: #{word}")
+            |> then(&%{&1 | status_msg: "Pattern not found: #{word}"})
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
@@ -153,7 +153,7 @@ defmodule Minga.Editor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :backward)
-            |> Map.put(:status_msg, "Pattern not found: #{word}")
+            |> then(&%{&1 | status_msg: "Pattern not found: #{word}"})
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
@@ -240,7 +240,7 @@ defmodule Minga.Editor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, ms.pattern)
-      |> Map.put(:status_msg, msg)
+      |> then(&%{&1 | status_msg: msg})
     end
   end
 
@@ -281,7 +281,7 @@ defmodule Minga.Editor.Commands.Search do
 
         state
         |> put_in_search(:last_pattern, pattern)
-        |> Map.merge(%{mode: :substitute_confirm, mode_state: ms})
+        |> then(&%{&1 | mode: :substitute_confirm, mode_state: ms})
     end
   end
 
@@ -315,7 +315,7 @@ defmodule Minga.Editor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, pattern)
-      |> Map.put(:status_msg, msg)
+      |> then(&%{&1 | status_msg: msg})
     end
   end
 
