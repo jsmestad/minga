@@ -171,3 +171,16 @@ When implementing features, completing planned work, or changing architecture:
 1. Add opcode constant and encoder in `Minga.Port.Protocol`
 2. Add decoder and handler in `zig/src/protocol.zig` + `zig/src/renderer.zig`
 3. Test encode/decode round-trip on both sides
+
+### New tree-sitter grammar
+Adding syntax highlighting for a new language touches four places:
+
+1. **Vendor the grammar** — clone or copy the tree-sitter grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`. Add a `VERSION` file with the grammar version.
+2. **Add the highlight query** — place a `highlights.scm` file at `zig/src/queries/{lang}/highlights.scm`. You can start with the query from the grammar's repo and trim capture names to the set Minga supports (keyword, string, comment, function, type, number, operator, punctuation, variable, constant, etc.).
+3. **Register in the Zig build** — add a `Grammar` entry to the `grammars` array in `zig/build.zig`. Set `has_scanner: true` if the grammar has a `scanner.c`.
+4. **Register in the Zig highlighter** — in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array with the grammar function and `@embedFile` for the query.
+5. **Register the filetype** (if new) — add extension/filename mappings in `lib/minga/filetype.ex` so the BEAM detects the filetype and sends the correct language name to Zig.
+
+After rebuilding (`zig build` or `mix compile`), the grammar is compiled into the binary and available immediately. No runtime loading needed.
+
+Users can override highlight queries without recompiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.
