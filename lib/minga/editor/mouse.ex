@@ -11,6 +11,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Mouse, as: MouseState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -69,15 +70,33 @@ defmodule Minga.Editor.Mouse do
 
   # ── Left drag — separator resize or visual selection ──
 
-  def handle(%{resize_dragging: {:vertical, sep_pos}} = state, _row, col, :left, :drag) do
+  def handle(
+        %{mouse: %MouseState{resize_dragging: {:vertical, sep_pos}}} = state,
+        _row,
+        col,
+        :left,
+        :drag
+      ) do
     handle_separator_drag(state, :vertical, sep_pos, col)
   end
 
-  def handle(%{resize_dragging: {:horizontal, sep_pos}} = state, row, _col, :left, :drag) do
+  def handle(
+        %{mouse: %MouseState{resize_dragging: {:horizontal, sep_pos}}} = state,
+        row,
+        _col,
+        :left,
+        :drag
+      ) do
     handle_separator_drag(state, :horizontal, sep_pos, row)
   end
 
-  def handle(%{mouse_dragging: true, mouse_anchor: anchor} = state, row, col, :left, :drag) do
+  def handle(
+        %{mouse: %MouseState{dragging: true, anchor: anchor}} = state,
+        row,
+        col,
+        :left,
+        :drag
+      ) do
     state =
       state
       |> maybe_auto_scroll(row)
@@ -89,16 +108,22 @@ defmodule Minga.Editor.Mouse do
 
   # ── Left release — finalize separator resize, click, or drag ──
 
-  def handle(%{resize_dragging: {_, _}} = state, _row, _col, :left, :release) do
-    %{state | resize_dragging: nil}
+  def handle(%{mouse: %MouseState{resize_dragging: {_, _}}} = state, _row, _col, :left, :release) do
+    %{state | mouse: MouseState.stop_resize(state.mouse)}
   end
 
-  def handle(%{mouse_dragging: true, mode: :visual} = state, _row, _col, :left, :release) do
-    %{state | mouse_dragging: false, mouse_anchor: nil}
+  def handle(
+        %{mouse: %MouseState{dragging: true}, mode: :visual} = state,
+        _row,
+        _col,
+        :left,
+        :release
+      ) do
+    %{state | mouse: MouseState.stop_drag(state.mouse)}
   end
 
-  def handle(%{mouse_dragging: true} = state, _row, _col, :left, :release) do
-    %{state | mouse_dragging: false, mouse_anchor: nil}
+  def handle(%{mouse: %MouseState{dragging: true}} = state, _row, _col, :left, :release) do
+    %{state | mouse: MouseState.stop_drag(state.mouse)}
   end
 
   # Ignore all other mouse events (right click, middle click, motion, etc.)
@@ -116,7 +141,7 @@ defmodule Minga.Editor.Mouse do
 
     case WindowTree.separator_at(state.window_tree, screen, row, col) do
       {:ok, {dir, sep_pos}} ->
-        %{state | resize_dragging: {dir, sep_pos}}
+        %{state | mouse: MouseState.start_resize(state.mouse, dir, sep_pos)}
 
       :error ->
         state
@@ -125,7 +150,12 @@ defmodule Minga.Editor.Mouse do
 
   # If a resize drag was started, skip content click handling.
   @spec maybe_handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_handle_content_click(%{resize_dragging: {_, _}} = state, _row, _col), do: state
+  defp maybe_handle_content_click(
+         %{mouse: %MouseState{resize_dragging: {_, _}}} = state,
+         _row,
+         _col
+       ), do: state
+
   defp maybe_handle_content_click(state, row, col), do: handle_content_click(state, row, col)
 
   @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
@@ -135,7 +165,12 @@ defmodule Minga.Editor.Mouse do
 
     case WindowTree.resize_at(state.window_tree, screen, dir, sep_pos, new_pos) do
       {:ok, new_tree} ->
-        state = %{state | window_tree: new_tree, resize_dragging: {dir, new_pos}}
+        state = %{
+          state
+          | window_tree: new_tree,
+            mouse: MouseState.update_resize(state.mouse, dir, new_pos)
+        }
+
         resize_windows_to_layout(state)
 
       :error ->
@@ -164,14 +199,14 @@ defmodule Minga.Editor.Mouse do
       {target_line, target_col} ->
         BufferServer.move_to(state.buf.buffer, {target_line, target_col})
 
-        state
-        |> cancel_mode_for_mouse()
-        |> Map.merge(%{
-          mode: :normal,
-          mode_state: Mode.initial_state(),
-          mouse_dragging: true,
-          mouse_anchor: {target_line, target_col}
-        })
+        state = cancel_mode_for_mouse(state)
+
+        %{
+          state
+          | mode: :normal,
+            mode_state: Mode.initial_state(),
+            mouse: MouseState.start_drag(state.mouse, {target_line, target_col})
+        }
     end
   end
 
