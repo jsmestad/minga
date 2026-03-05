@@ -89,6 +89,29 @@ defmodule Minga.Test.EditorCase do
     })
   end
 
+  # ── Highlight injection helpers ─────────────────────────────────────────────
+
+  @doc """
+  Injects highlight state into the editor and waits for it to be fully processed.
+
+  Flushes any pending messages (like `:setup_highlight` from the `:ready` handler)
+  before injecting, then syncs again to ensure the highlight state is applied
+  before the test continues.
+  """
+  @spec inject_highlights(editor_ctx(), [String.t()], non_neg_integer(), [map()]) :: editor_ctx()
+  def inject_highlights(ctx, capture_names, version \\ 1, spans) do
+    # Flush pending messages (e.g. :setup_highlight from :ready)
+    _ = :sys.get_state(ctx.editor)
+
+    send(ctx.editor, {:minga_input, {:highlight_names, capture_names}})
+    send(ctx.editor, {:minga_input, {:highlight_spans, version, spans}})
+
+    # Sync: ensure both messages have been processed before returning
+    _ = :sys.get_state(ctx.editor)
+
+    ctx
+  end
+
   # ── Key sending helpers ──────────────────────────────────────────────────────
 
   @doc "Sends a key press and waits for the next rendered frame."

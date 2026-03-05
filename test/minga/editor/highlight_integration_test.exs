@@ -27,12 +27,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
       # Inject highlight data as if Zig responded for file1
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
-      )
+      spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      inject_highlights(ctx, ["keyword"], 1, spans)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.spans != [], "Pre-condition: file1 should have spans"
@@ -59,12 +55,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send_keys(ctx, ":e #{path2}<CR>")
 
       # Inject spans for file2
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 9, capture_id: 0}]}}
-      )
+      spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
+      inject_highlights(ctx, ["keyword"], 1, spans)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.spans != [], "Pre-condition: file2 should have spans"
@@ -95,8 +87,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Inject highlights for file1
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.spans == spans_a
@@ -130,8 +121,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Inject highlights for file1
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       buf1_pid = :sys.get_state(ctx.editor).buffers.active
 
@@ -223,8 +213,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Inject highlights for file1
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       # Switch to file2
       send_keys(ctx, ":e #{path2}<CR>")
@@ -254,8 +243,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Inject highlights for file1
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-      send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
+      inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.spans == spans_a
@@ -329,12 +317,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("line one\nline two\nline three")
 
       # Inject highlights so reparse path is active
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}])
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
@@ -350,29 +333,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "x triggers highlight reparse" do
       ctx = start_editor("hello")
 
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
-      # Trace setup_highlight calls
-      :erlang.trace(ctx.editor, true, [:receive])
-
       send_key(ctx, ?x)
-
-      # Collect any setup_highlight messages
-      receive do
-        {:trace, _, :receive, :setup_highlight} ->
-          IO.puts("GOT setup_highlight AFTER x")
-      after
-        50 -> IO.puts("No setup_highlight after x")
-      end
-
-      :erlang.trace(ctx.editor, false, [:receive])
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -383,12 +348,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "p (paste) triggers highlight reparse" do
       ctx = start_editor("hello world")
 
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       # Yank a word first (yw), then paste
       send_keys(ctx, "yw")
@@ -406,12 +366,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "undo triggers highlight reparse" do
       ctx = start_editor("hello world")
 
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       # Make a change first
       send_key(ctx, ?x)
@@ -430,12 +385,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "motion-only keys do not trigger reparse" do
       ctx = start_editor("hello world\nsecond line")
 
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
@@ -514,12 +464,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "typing in insert mode triggers reparse" do
       ctx = start_editor("hello")
 
-      send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
-
-      send(
-        ctx.editor,
-        {:minga_input, {:highlight_spans, 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}]}}
-      )
+      inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
