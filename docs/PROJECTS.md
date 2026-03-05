@@ -37,11 +37,28 @@ All project commands live under the `SPC p` prefix:
 |---------|---------|-------------|
 | `SPC p f` | Find file in project | Opens the file finder scoped to the current project root |
 | `SPC p p` | Switch project | Shows all known projects; selecting one switches the root and opens the file finder |
+| `SPC p R` | Recent files | Shows recently opened files in the current project, most recent first |
 | `SPC p i` | Invalidate cache | Clears the cached file list and rebuilds it from disk |
 | `SPC p a` | Add project | Adds the current project root to the known-projects list |
 | `SPC p d` | Remove project | Removes the current project root from the known-projects list |
 
 `SPC f f` and `SPC s p` are also project-aware. They scope to the detected project root instead of the working directory.
+
+## Recent files
+
+Every file you open gets recorded in a per-project recent files list. `SPC p R` shows this list with the most recently opened file at the top. Recent files are scoped per project, so switching projects shows a different list.
+
+By default, recent file history is persisted to `~/.config/minga/recent-files` so it survives editor restarts. The file format is tab-separated: one `root<TAB>relative_path` per line.
+
+Two config options control this behavior:
+
+```elixir
+# In ~/.config/minga/config.exs
+set :recent_files_limit, 200       # max entries per project (default: 200)
+set :persist_recent_files, false   # disable writing history to disk
+```
+
+When `persist_recent_files` is `false`, recent files still work within a session (tracked in memory) but nothing is written to or read from disk. This is useful if you don't want file access history on disk for privacy or cleanliness reasons.
 
 ## File cache
 
@@ -90,5 +107,5 @@ Minga's project system covers the core projectile workflow but doesn't implement
 | `SPC p i` (invalidate cache) | ✅ |
 | `SPC p !` (run command in root) | Planned (needs terminal integration) |
 | `SPC p t` (terminal in root) | Planned (needs terminal emulator) |
-| `SPC p R` (recent files in project) | Planned |
+| `SPC p R` (recent files in project) | ✅ |
 | Per-project file cache | Current project only; switching rebuilds |

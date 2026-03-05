@@ -17,6 +17,10 @@ defmodule Minga.Editor.Commands.Project do
     PickerUI.open(state, Minga.Picker.FileSource)
   end
 
+  def execute(state, :project_recent_files) do
+    PickerUI.open(state, Minga.Picker.RecentFileSource)
+  end
+
   def execute(state, :project_switch) do
     PickerUI.open(state, Minga.Picker.ProjectSource)
   end

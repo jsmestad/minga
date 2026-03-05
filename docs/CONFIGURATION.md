@@ -33,6 +33,8 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:format_on_save` | boolean | `false` | Run the filetype's formatter before saving |
 | `:formatter` | string or `nil` | `nil` | Override the default formatter command (see [Formatters](#formatters)) |
 | `:title_format` | string | `"{filename} {dirty}({directory}) - Minga"` | Terminal window title format (see [Window Title](#window-title)) |
+| `:recent_files_limit` | positive integer | `200` | Max recent files tracked per project |
+| `:persist_recent_files` | boolean | `true` | Write recent file history to disk (see [Projects](PROJECTS.md)) |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 

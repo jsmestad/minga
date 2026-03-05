@@ -12,6 +12,7 @@ defmodule Minga.Project do
   * `project_type` — the type of project (`:git`, `:mix`, `:cargo`, etc.)
   * `cached_files` — the file list for the current project (populated by a background Task)
   * `known_projects` — list of all project roots the user has visited, persisted to disk
+  * `recent_files` — per-project list of recently opened files, most recent first, persisted to disk
   * `rebuilding?` — true while a background Task is rebuilding the file cache
 
   ## File cache
@@ -25,6 +26,7 @@ defmodule Minga.Project do
 
   use GenServer
 
+  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Project.Detector
 
   require Logger
@@ -34,8 +36,12 @@ defmodule Minga.Project do
             project_type: nil,
             cached_files: [],
             known_projects: [],
+            recent_files: %{},
             rebuilding?: false,
             rebuild_ref: nil
+
+  @typedoc "Per-project recent files map: project root => list of relative paths (most recent first)."
+  @type recent_files_map :: %{String.t() => [String.t()]}
 
   @typedoc "Project GenServer state."
   @type t :: %__MODULE__{
@@ -43,11 +49,14 @@ defmodule Minga.Project do
           project_type: Detector.project_type() | nil,
           cached_files: [String.t()],
           known_projects: [String.t()],
+          recent_files: recent_files_map(),
           rebuilding?: boolean(),
           rebuild_ref: reference() | nil
         }
 
   @known_projects_file "known-projects"
+  @recent_files_file "recent-files"
+  @default_recent_files_limit 200
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -111,13 +120,32 @@ defmodule Minga.Project do
     GenServer.cast(server, {:remove, root_path})
   end
 
+  @doc """
+  Records a file as recently opened in the current project.
+
+  The file path should be absolute. It is stored relative to the project root.
+  Most recent files appear first. Duplicates are moved to the front.
+  No-op if no project root is set or the file is outside the current project.
+  """
+  @spec record_file(GenServer.server(), String.t()) :: :ok
+  def record_file(server \\ __MODULE__, file_path) when is_binary(file_path) do
+    GenServer.cast(server, {:record_file, file_path})
+  end
+
+  @doc "Returns the list of recently opened files for the current project (relative paths, most recent first)."
+  @spec recent_files(GenServer.server()) :: [String.t()]
+  def recent_files(server \\ __MODULE__) do
+    GenServer.call(server, :recent_files)
+  end
+
   # ── GenServer Callbacks ─────────────────────────────────────────────────────
 
   @impl true
   @spec init(keyword()) :: {:ok, t()}
   def init(_opts) do
     known = load_known_projects()
-    {:ok, %__MODULE__{known_projects: known}}
+    recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
+    {:ok, %__MODULE__{known_projects: known, recent_files: recent}}
   end
 
   @impl true
@@ -132,6 +160,15 @@ defmodule Minga.Project do
 
   def handle_call(:known_projects, _from, state) do
     {:reply, state.known_projects, state}
+  end
+
+  def handle_call(:recent_files, _from, %{current_root: nil} = state) do
+    {:reply, [], state}
+  end
+
+  def handle_call(:recent_files, _from, state) do
+    files = Map.get(state.recent_files, state.current_root, [])
+    {:reply, files, state}
   end
 
   @impl true
@@ -187,6 +224,30 @@ defmodule Minga.Project do
     else
       Logger.warning("Project.add: directory not found: #{expanded}")
       {:noreply, state}
+    end
+  end
+
+  def handle_cast({:record_file, _file_path}, %{current_root: nil} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast({:record_file, file_path}, state) do
+    expanded = Path.expand(file_path)
+    root = state.current_root
+
+    case make_relative(expanded, root) do
+      nil ->
+        {:noreply, state}
+
+      rel_path ->
+        limit = recent_files_limit()
+        existing = Map.get(state.recent_files, root, [])
+        updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
+        updated = Enum.take(updated, limit)
+        new_recent = Map.put(state.recent_files, root, updated)
+        state = %{state | recent_files: new_recent}
+        if persist_recent_files?(), do: persist_recent_files(new_recent)
+        {:noreply, state}
     end
   end
 
@@ -282,6 +343,31 @@ defmodule Minga.Project do
     end
   end
 
+  @spec make_relative(String.t(), String.t()) :: String.t() | nil
+  defp make_relative(abs_path, root) do
+    root_prefix = root <> "/"
+
+    if String.starts_with?(abs_path, root_prefix) do
+      String.replace_prefix(abs_path, root_prefix, "")
+    else
+      nil
+    end
+  end
+
+  @spec recent_files_limit() :: pos_integer()
+  defp recent_files_limit do
+    ConfigOptions.get(:recent_files_limit)
+  catch
+    :exit, _ -> @default_recent_files_limit
+  end
+
+  @spec persist_recent_files?() :: boolean()
+  defp persist_recent_files? do
+    ConfigOptions.get(:persist_recent_files)
+  catch
+    :exit, _ -> true
+  end
+
   @spec persist_known_projects([String.t()]) :: :ok
   defp persist_known_projects(projects) do
     path = known_projects_path()
@@ -293,6 +379,65 @@ defmodule Minga.Project do
   rescue
     e ->
       Logger.warning("Failed to persist known projects: #{Exception.message(e)}")
+      :ok
+  end
+
+  # ── Recent files persistence ────────────────────────────────────────────────
+  # Format: one line per entry, tab-separated: root\trelative_path
+  # Most recent entries first. Loaded into a map keyed by root.
+
+  @spec recent_files_path() :: String.t()
+  defp recent_files_path do
+    config_dir = Path.expand("~/.config/minga")
+    Path.join(config_dir, @recent_files_file)
+  end
+
+  @spec load_recent_files() :: recent_files_map()
+  defp load_recent_files do
+    path = recent_files_path()
+
+    case File.read(path) do
+      {:ok, content} -> parse_recent_files(content)
+      {:error, _} -> %{}
+    end
+  end
+
+  @spec parse_recent_files(String.t()) :: recent_files_map()
+  defp parse_recent_files(content) do
+    # Build lists with prepend (O(1)), then reverse to restore file order.
+    reversed =
+      content
+      |> String.split("\n", trim: true)
+      |> Enum.reduce(%{}, fn line, acc ->
+        case String.split(line, "\t", parts: 2) do
+          [root, rel_path] ->
+            Map.update(acc, root, [rel_path], fn existing -> [rel_path | existing] end)
+
+          _ ->
+            acc
+        end
+      end)
+
+    Map.new(reversed, fn {root, files} -> {root, Enum.reverse(files)} end)
+  end
+
+  @spec persist_recent_files(recent_files_map()) :: :ok
+  defp persist_recent_files(recent_map) do
+    path = recent_files_path()
+    dir = Path.dirname(path)
+    File.mkdir_p!(dir)
+
+    lines =
+      Enum.flat_map(recent_map, fn {root, files} ->
+        Enum.map(files, fn rel -> "#{root}\t#{rel}" end)
+      end)
+
+    content = Enum.join(lines, "\n") <> "\n"
+    File.write!(path, content)
+    :ok
+  rescue
+    e ->
+      Logger.warning("Failed to persist recent files: #{Exception.message(e)}")
       :ok
   end
 end

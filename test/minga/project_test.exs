@@ -199,4 +199,140 @@ defmodule Minga.ProjectTest do
       refute bogus in Project.known_projects(name)
     end
   end
+
+  describe "record_file/2 and recent_files/1" do
+    test "records a file and returns it in recent files list", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "recent_test")
+      File.mkdir_p!(Path.join(project, "lib"))
+      File.write!(Path.join(project, "mix.exs"), "")
+      File.write!(Path.join(project, "lib/app.ex"), "")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
+      :timer.sleep(50)
+
+      Project.record_file(name, Path.join(project, "lib/app.ex"))
+      :timer.sleep(50)
+
+      recent = Project.recent_files(name)
+      assert "lib/app.ex" in recent
+    end
+
+    test "most recently opened file appears first", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "recent_order")
+      lib = Path.join(project, "lib")
+      File.mkdir_p!(lib)
+      File.write!(Path.join(project, "mix.exs"), "")
+      File.write!(Path.join(lib, "a.ex"), "")
+      File.write!(Path.join(lib, "b.ex"), "")
+      File.write!(Path.join(lib, "c.ex"), "")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(lib, "a.ex"))
+      :timer.sleep(50)
+
+      Project.record_file(name, Path.join(lib, "a.ex"))
+      :timer.sleep(50)
+      Project.record_file(name, Path.join(lib, "b.ex"))
+      :timer.sleep(50)
+      Project.record_file(name, Path.join(lib, "c.ex"))
+      :timer.sleep(50)
+
+      recent = Project.recent_files(name)
+      assert recent == ["lib/c.ex", "lib/b.ex", "lib/a.ex"]
+    end
+
+    test "reopening a file moves it to the front", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "recent_dedup")
+      lib = Path.join(project, "lib")
+      File.mkdir_p!(lib)
+      File.write!(Path.join(project, "mix.exs"), "")
+      File.write!(Path.join(lib, "a.ex"), "")
+      File.write!(Path.join(lib, "b.ex"), "")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(lib, "a.ex"))
+      :timer.sleep(50)
+
+      Project.record_file(name, Path.join(lib, "a.ex"))
+      :timer.sleep(50)
+      Project.record_file(name, Path.join(lib, "b.ex"))
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == ["lib/b.ex", "lib/a.ex"]
+
+      # Reopen a.ex — should move to front
+      Project.record_file(name, Path.join(lib, "a.ex"))
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == ["lib/a.ex", "lib/b.ex"]
+    end
+
+    test "ignores files outside the current project", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "recent_outside")
+      File.mkdir_p!(project)
+      File.write!(Path.join(project, "mix.exs"), "")
+
+      outside_file = Path.join(tmp, "outside.txt")
+      File.write!(outside_file, "")
+
+      {_pid, name} = start_project!()
+      Project.detect_and_set(name, Path.join(project, "mix.exs"))
+      :timer.sleep(50)
+
+      Project.record_file(name, outside_file)
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == []
+    end
+
+    test "returns empty list when no project is set" do
+      {_pid, name} = start_project!()
+      assert Project.recent_files(name) == []
+    end
+
+    test "no-op when no project root is set" do
+      {_pid, name} = start_project!()
+
+      Project.record_file(name, "/some/random/file.ex")
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == []
+    end
+
+    test "recent files are scoped per project", %{tmp_dir: tmp} do
+      project_a = Path.join(tmp, "proj_a")
+      project_b = Path.join(tmp, "proj_b")
+      File.mkdir_p!(project_a)
+      File.mkdir_p!(project_b)
+      File.write!(Path.join(project_a, "mix.exs"), "")
+      File.write!(Path.join(project_b, "mix.exs"), "")
+      File.write!(Path.join(project_a, "a.ex"), "")
+      File.write!(Path.join(project_b, "b.ex"), "")
+
+      {_pid, name} = start_project!()
+
+      # Record file in project A
+      Project.detect_and_set(name, Path.join(project_a, "a.ex"))
+      :timer.sleep(50)
+      Project.record_file(name, Path.join(project_a, "a.ex"))
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == ["a.ex"]
+
+      # Switch to project B and record a different file
+      Project.switch(name, project_b)
+      :timer.sleep(50)
+      Project.record_file(name, Path.join(project_b, "b.ex"))
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == ["b.ex"]
+
+      # Switch back to A — should see A's recent files
+      Project.switch(name, project_a)
+      :timer.sleep(50)
+
+      assert Project.recent_files(name) == ["a.ex"]
+    end
+  end
 end

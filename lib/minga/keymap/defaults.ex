@@ -76,6 +76,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?p, @none}, {?i, @none}], :project_invalidate, "Invalidate project cache"},
     {[{?p, @none}, {?a, @none}], :project_add, "Add known project"},
     {[{?p, @none}, {?d, @none}], :project_remove, "Remove known project"},
+    {[{?p, @none}, {?R, @none}], :project_recent_files, "Recent files in project"},
 
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}

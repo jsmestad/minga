@@ -269,6 +269,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, :project_invalidate), do: Project.execute(state, :project_invalidate)
   def execute(state, :project_add), do: Project.execute(state, :project_add)
   def execute(state, :project_remove), do: Project.execute(state, :project_remove)
+  def execute(state, :project_recent_files), do: Project.execute(state, :project_recent_files)
 
   # ── Buffer management ─────────────────────────────────────────────────────
 

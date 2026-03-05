@@ -172,6 +172,7 @@ defmodule Minga.Editor do
       {:ok, pid} ->
         maybe_watch_buffer(file_watcher_pid(), pid)
         maybe_detect_project(file_path)
+        maybe_record_file(file_path)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = lsp_buffer_opened(new_state, pid)
@@ -857,6 +858,13 @@ defmodule Minga.Editor do
   @spec maybe_detect_project(String.t()) :: :ok
   defp maybe_detect_project(file_path) do
     Project.detect_and_set(file_path)
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec maybe_record_file(String.t()) :: :ok
+  defp maybe_record_file(file_path) do
+    Project.record_file(file_path)
   catch
     :exit, _ -> :ok
   end

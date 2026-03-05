@@ -105,6 +105,7 @@ Current status and planned features. Updated as development progresses.
 | `SPC p i` | Invalidate project cache | ✅ |
 | `SPC p a` | Add known project | ✅ |
 | `SPC p d` | Remove known project | ✅ |
+| `SPC p R` | Recent files in project | ✅ | Per-project, persisted, configurable |
 | `SPC t l` | Toggle line number style | ✅ |
 | `SPC w h/j/k/l` | Window navigation | ✅ | Directional focus movement |
 | `SPC w v` / `SPC w s` | Vertical / horizontal split | ✅ | Nested splits supported |
