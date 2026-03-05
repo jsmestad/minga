@@ -458,6 +458,11 @@ pub fn commandSize(payload: []const u8) usize {
             const path_len = std.mem.readInt(u16, payload[path_off..][0..2], .big);
             break :blk path_off + 2 + path_len;
         },
+        OP_SET_TITLE => blk: {
+            if (payload.len < 3) break :blk payload.len;
+            const title_len = std.mem.readInt(u16, payload[1..3], .big);
+            break :blk 3 + title_len;
+        },
         OP_OPEN_TERMINAL => blk: {
             if (payload.len < 3) break :blk payload.len;
             const shell_len = std.mem.readInt(u16, payload[1..3], .big);

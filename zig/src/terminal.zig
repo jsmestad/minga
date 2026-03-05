@@ -210,7 +210,7 @@ pub const Terminal = struct {
 
     /// Cleans up the PTY and libvterm.
     pub fn deinit(self: *Terminal) void {
-        std.log.info("Terminal.deinit: alive={} pty_fd={d} pid={d}", .{ self.alive, self.pty_fd, self.child_pid });
+
         if (self.alive) {
             _ = c.kill(self.child_pid, c.SIGTERM);
             _ = c.waitpid(self.child_pid, null, 0);

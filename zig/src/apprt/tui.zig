@@ -311,6 +311,19 @@ pub const TuiRuntime = struct {
                     }
                     offset += protocol.commandSize(remaining);
                 }
+
+                // Re-render terminal cells after processing Elixir commands.
+                // The command batch includes a clear that wipes the entire
+                // surface, so terminal cells must be redrawn before the
+                // batch_end flushes to screen. Since batch_end already called
+                // surface.render(), we need to render terminal cells and flush
+                // again if a terminal is active.
+                if (self.term) |*t| {
+                    if (t.alive) {
+                        t.render(&self.surface);
+                        self.surface.render() catch {};
+                    }
+                }
             }
 
             // stdin HUP / error
@@ -395,10 +408,8 @@ pub const TuiRuntime = struct {
     fn handleTerminalCommand(self: *TuiRuntime, cmd: protocol.RenderCommand, stdout: *std.Io.Writer) !void {
         switch (cmd) {
             .open_terminal => |ot| {
-                std.log.info("open_terminal: shell={s} rows={d} cols={d}", .{ ot.shell, ot.rows, ot.cols });
                 // Close existing terminal if any
                 if (self.term) |*t| {
-                    std.log.info("open_terminal: closing existing terminal (alive={}, fd={d})", .{ t.alive, t.pty_fd });
                     t.deinit();
                     self.term = null;
                 }
