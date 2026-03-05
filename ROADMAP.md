@@ -24,7 +24,7 @@ Current status and planned features. Updated as development progresses.
 | Bulk text insert | ✅ | `Document.insert_text/2`; single binary op instead of char-by-char |
 | Batch edit API | ✅ | `Buffer.Server.apply_text_edits/2`; one undo entry per batch |
 | Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots |
-| Line index cache (O(1) line access) | 📋 | See `docs/PERFORMANCE.md` |
+| Line index cache (O(1) line access) | ✅ | Lazy line offset tuple; `line_at`/`lines`/`position_to_offset` use `binary_part` |
 
 ## Modes
 

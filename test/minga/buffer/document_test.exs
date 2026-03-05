@@ -769,6 +769,70 @@ defmodule Minga.Buffer.DocumentTest do
     :ok
   end
 
+  # ── Line index cache tests ──
+
+  describe "line index cache" do
+    property "line_at matches naive String.split for random content" do
+      check all(
+              text <- string(:printable, min_length: 0, max_length: 500),
+              line_num <- integer(0..20)
+            ) do
+        buf = Document.new(text)
+        naive = text |> String.split("\n") |> Enum.at(line_num)
+        indexed = Document.line_at(buf, line_num)
+        assert indexed == naive
+      end
+    end
+
+    property "lines matches naive String.split |> Enum.slice for random content" do
+      check all(
+              text <- string(:printable, min_length: 0, max_length: 500),
+              start <- integer(0..15),
+              count <- integer(1..10)
+            ) do
+        buf = Document.new(text)
+        naive = text |> String.split("\n") |> Enum.slice(start, count)
+        indexed = Document.lines(buf, start, count)
+        assert indexed == naive
+      end
+    end
+
+    test "line_at works after mutations invalidate the cache" do
+      buf = Document.new("aaa\nbbb\nccc")
+      assert Document.line_at(buf, 1) == "bbb"
+
+      # Insert invalidates cache
+      buf = Document.insert_char(buf, "X")
+      assert Document.line_at(buf, 0) == "Xaaa"
+
+      # Move invalidates cache
+      buf = Document.move_to(buf, {1, 0})
+      assert Document.line_at(buf, 1) == "bbb"
+
+      # Delete invalidates cache
+      buf = Document.delete_at(buf)
+      assert Document.line_at(buf, 1) == "bb"
+    end
+
+    test "lines returns correct viewport after insert_text" do
+      buf = Document.new("line1\nline2\nline3\nline4\nline5")
+      buf = Document.move_to(buf, {2, 0})
+      buf = Document.insert_text(buf, "NEW\n")
+
+      assert Document.lines(buf, 2, 2) == ["NEW", "line3"]
+      assert Document.line_count(buf) == 6
+    end
+
+    test "position_to_offset uses index for O(1) lookup" do
+      buf = Document.new("hello\nworld\nfoo")
+      # "hello\n" = 6 bytes, "world\n" = 6 bytes, "foo" starts at 12
+      assert Document.position_to_offset(buf, {0, 0}) == 0
+      assert Document.position_to_offset(buf, {1, 0}) == 6
+      assert Document.position_to_offset(buf, {2, 0}) == 12
+      assert Document.position_to_offset(buf, {2, 2}) == 14
+    end
+  end
+
   # Convert a byte offset in text to a {line, byte_col} position.
   @spec byte_offset_to_position(String.t(), non_neg_integer()) :: Document.position()
   defp byte_offset_to_position(text, byte_offset) do

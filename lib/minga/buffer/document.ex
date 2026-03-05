@@ -36,7 +36,10 @@ defmodule Minga.Buffer.Document do
   """
 
   @enforce_keys [:before, :after, :cursor_line, :cursor_col, :line_count]
-  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count]
+  defstruct [:before, :after, :cursor_line, :cursor_col, :line_count, :line_offsets]
+
+  @typedoc "Cached line offset tuple, or `nil` when stale."
+  @type line_offsets :: tuple() | nil
 
   @typedoc "A gap buffer instance."
   @type t :: %__MODULE__{
@@ -44,7 +47,8 @@ defmodule Minga.Buffer.Document do
           after: String.t(),
           cursor_line: non_neg_integer(),
           cursor_col: non_neg_integer(),
-          line_count: pos_integer()
+          line_count: pos_integer(),
+          line_offsets: line_offsets()
         }
 
   @typedoc """
@@ -126,10 +130,12 @@ defmodule Minga.Buffer.Document do
   """
   @spec line_at(t(), non_neg_integer()) :: String.t() | nil
   def line_at(%__MODULE__{} = buf, line_num) when is_integer(line_num) and line_num >= 0 do
-    buf
-    |> content()
-    |> String.split("\n")
-    |> Enum.at(line_num)
+    {offsets, text} = ensure_line_offsets(buf)
+
+    case line_byte_range(offsets, line_num, byte_size(text)) do
+      nil -> nil
+      {start, len} -> binary_part(text, start, len)
+    end
   end
 
   @doc """
@@ -138,10 +144,19 @@ defmodule Minga.Buffer.Document do
   @spec lines(t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   def lines(%__MODULE__{} = buf, start, count)
       when is_integer(start) and start >= 0 and is_integer(count) and count >= 0 do
-    buf
-    |> content()
-    |> String.split("\n")
-    |> Enum.slice(start, count)
+    {offsets, text} = ensure_line_offsets(buf)
+    text_size = byte_size(text)
+    max_line = tuple_size(offsets) - 1
+    last = min(start + count - 1, max_line)
+
+    if start > max_line do
+      []
+    else
+      for line_num <- start..last do
+        {s, len} = line_byte_range(offsets, line_num, text_size)
+        binary_part(text, s, len)
+      end
+    end
   end
 
   @doc "Returns the current cursor position as a `{line, byte_col}` tuple."
@@ -160,9 +175,8 @@ defmodule Minga.Buffer.Document do
   @spec position_to_offset(t(), position()) :: non_neg_integer()
   def position_to_offset(%__MODULE__{} = buf, {line, col})
       when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
-    text = content(buf)
-    all_lines = :binary.split(text, "\n", [:global])
-    byte_offset_for(all_lines, line, col)
+    {offsets, _text} = ensure_line_offsets(buf)
+    offset_for_position(offsets, line, col)
   end
 
   @doc """
@@ -334,29 +348,29 @@ defmodule Minga.Buffer.Document do
   def move_to(%__MODULE__{} = buf, {target_line, target_col})
       when is_integer(target_line) and target_line >= 0 and
              is_integer(target_col) and target_col >= 0 do
-    text = content(buf)
-    all_lines = :binary.split(text, "\n", [:global])
+    {offsets, text} = ensure_line_offsets(buf)
+    text_size = byte_size(text)
 
     # Clamp line to valid range
-    max_line = length(all_lines) - 1
+    max_line = tuple_size(offsets) - 1
     line = min(target_line, max_line)
 
-    # Clamp col to valid range for that line (byte size)
-    line_text = Enum.at(all_lines, line)
-    max_col = byte_size(line_text)
-    col = min(target_col, max_col)
+    # Get line text via index for column clamping
+    {line_start, line_len} = line_byte_range(offsets, line, text_size)
+    line_text = binary_part(text, line_start, line_len)
+    col = min(target_col, line_len)
 
     # Clamp to grapheme boundary (don't land in the middle of a multi-byte char)
     col = clamp_to_grapheme_boundary(line_text, col)
 
-    # Calculate byte offset from start of text
-    byte_off = byte_offset_for(all_lines, line, col)
+    # Calculate byte offset from line start offset + col
+    byte_off = line_start + col
 
     # Split at byte position (O(1) binary_part)
     before = binary_part(text, 0, byte_off)
-    after_ = binary_part(text, byte_off, byte_size(text) - byte_off)
+    after_ = binary_part(text, byte_off, text_size - byte_off)
 
-    %{buf | before: before, after: after_, cursor_line: line, cursor_col: col}
+    %{buf | before: before, after: after_, cursor_line: line, cursor_col: col, line_offsets: nil}
   end
 
   # ── Range operations ──
@@ -367,11 +381,10 @@ defmodule Minga.Buffer.Document do
   """
   @spec content_range(t(), position(), position()) :: String.t()
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    text = content(buf)
-    all_lines = :binary.split(text, "\n", [:global])
+    {offsets, text} = ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = byte_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = byte_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1))
     {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
 
     # end_off points to the start of the last character. Find its byte length.
@@ -389,11 +402,10 @@ defmodule Minga.Buffer.Document do
   """
   @spec delete_range(t(), position(), position()) :: t()
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
-    text = content(buf)
-    all_lines = :binary.split(text, "\n", [:global])
+    {offsets, text} = ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = byte_offset_for(all_lines, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = byte_offset_for(all_lines, elem(to_pos, 0), elem(to_pos, 1))
+    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1))
+    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1))
 
     {start_off, end_off, cursor_pos} =
       if from_off <= to_off,
@@ -419,13 +431,12 @@ defmodule Minga.Buffer.Document do
   """
   @spec get_range(t(), position(), position()) :: String.t()
   def get_range(%__MODULE__{} = buf, start_pos, end_pos) do
-    text = content(buf)
-    all_lines = :binary.split(text, "\n", [:global])
+    {offsets, text} = ensure_line_offsets(buf)
     text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
-    s_off = byte_offset_for(all_lines, elem(s, 0), elem(s, 1))
-    e_off = byte_offset_for(all_lines, elem(e, 0), elem(e, 1))
+    s_off = offset_for_position(offsets, elem(s, 0), elem(s, 1))
+    e_off = offset_for_position(offsets, elem(e, 0), elem(e, 1))
 
     # e_off points to the start of the last character. Find its byte length.
     remaining = binary_part(text, e_off, text_size - e_off)
@@ -444,12 +455,8 @@ defmodule Minga.Buffer.Document do
       when is_integer(start_line) and start_line >= 0 and
              is_integer(end_line) and end_line >= 0 do
     {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
-
-    buf
-    |> content()
-    |> String.split("\n")
-    |> Enum.slice(s..e)
-    |> Enum.join("\n")
+    count = e - s + 1
+    lines(buf, s, count) |> Enum.join("\n")
   end
 
   @doc """
@@ -462,25 +469,47 @@ defmodule Minga.Buffer.Document do
   def delete_lines(%__MODULE__{} = buf, start_line, end_line)
       when is_integer(start_line) and start_line >= 0 and
              is_integer(end_line) and end_line >= 0 do
-    text = content(buf)
-    all_lines = String.split(text, "\n")
-    total_lines = length(all_lines)
+    {offsets, text} = ensure_line_offsets(buf)
+    text_size = byte_size(text)
+    total_lines = tuple_size(offsets)
 
     {s, e} = if start_line <= end_line, do: {start_line, end_line}, else: {end_line, start_line}
     s = min(s, total_lines - 1)
     e = min(e, total_lines - 1)
 
-    before_lines = Enum.take(all_lines, s)
-    after_lines = Enum.drop(all_lines, e + 1)
-    remaining = before_lines ++ after_lines
+    # Compute byte range to delete: from start of line s to start of line e+1
+    # (or end of text if e is the last line)
+    delete_start = elem(offsets, s)
 
-    new_text =
-      case remaining do
-        [] -> ""
-        lines -> Enum.join(lines, "\n")
+    delete_end =
+      if e + 1 < total_lines do
+        elem(offsets, e + 1)
+      else
+        text_size
       end
 
-    target_line = min(s, max(0, length(remaining) - 1))
+    before_text = binary_part(text, 0, delete_start)
+    after_text = binary_part(text, delete_end, text_size - delete_end)
+
+    new_text =
+      case {before_text, after_text} do
+        {"", ""} -> ""
+        # If before_text ends with \n and we're joining with after_text,
+        # the newline separates them correctly
+        _ -> before_text <> after_text
+      end
+
+    # Remove trailing newline if we deleted through the end and before_text has one
+    new_text =
+      if delete_end == text_size and byte_size(new_text) > 0 and
+           :binary.last(new_text) == ?\n do
+        binary_part(new_text, 0, byte_size(new_text) - 1)
+      else
+        new_text
+      end
+
+    remaining_lines = total_lines - (e - s + 1)
+    target_line = min(s, max(0, remaining_lines - 1))
     new_text |> new() |> move_to({target_line, 0})
   end
 
@@ -535,6 +564,60 @@ defmodule Minga.Buffer.Document do
   end
 
   # ── Private helpers ──
+
+  # ── Line index helpers ──
+
+  # Lazily computes line offsets if the cache is stale. Returns the offset
+  # tuple and the materialized content binary so callers avoid a second
+  # `content()` call. Uses `:binary.matches/2` (Boyer-Moore in C) for a
+  # single-pass newline scan.
+  @spec ensure_line_offsets(t()) :: {tuple(), String.t()}
+  defp ensure_line_offsets(%__MODULE__{line_offsets: offsets} = buf) when is_tuple(offsets) do
+    {offsets, content(buf)}
+  end
+
+  defp ensure_line_offsets(%__MODULE__{} = buf) do
+    text = content(buf)
+    offsets = build_line_offsets(text)
+    {offsets, text}
+  end
+
+  # Builds a tuple of byte offsets marking the start of each line.
+  # Line 0 always starts at offset 0. Each subsequent line starts one byte
+  # after a newline character.
+  @spec build_line_offsets(String.t()) :: tuple()
+  defp build_line_offsets(text) do
+    newline_positions = :binary.matches(text, "\n")
+
+    [0 | Enum.map(newline_positions, fn {pos, _len} -> pos + 1 end)]
+    |> List.to_tuple()
+  end
+
+  # Returns the byte range {start_offset, byte_length} for a given line
+  # number, using the line offset tuple and the total content size.
+  # Returns `nil` if the line is out of range.
+  @spec line_byte_range(tuple(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  defp line_byte_range(offsets, line_num, text_size) do
+    max_line = tuple_size(offsets) - 1
+
+    cond do
+      line_num > max_line ->
+        nil
+
+      line_num == max_line ->
+        start = elem(offsets, line_num)
+        {start, text_size - start}
+
+      true ->
+        start = elem(offsets, line_num)
+        # Next line starts at elem(offsets, line_num + 1); subtract 1 for the newline
+        next_start = elem(offsets, line_num + 1)
+        {start, next_start - start - 1}
+    end
+  end
+
+  # ── Movement helpers ──
 
   @spec move_left(t()) :: t()
   defp move_left(%__MODULE__{before: ""} = buf), do: buf
@@ -682,16 +765,14 @@ defmodule Minga.Buffer.Document do
     length(:binary.matches(str, "\n"))
   end
 
-  # Computes the byte offset from start of text for a {line, byte_col} position.
-  @spec byte_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::
+  # Computes the byte offset from start of text for a {line, byte_col} position
+  # using the line offset tuple. O(1) lookup instead of O(lines) iteration.
+  @spec offset_for_position(tuple(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
-  defp byte_offset_for(all_lines, target_line, target_col) do
-    bytes_before =
-      all_lines
-      |> Enum.take(target_line)
-      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
-
-    bytes_before + target_col
+  defp offset_for_position(offsets, line, col) do
+    max_line = tuple_size(offsets) - 1
+    clamped_line = min(line, max_line)
+    elem(offsets, clamped_line) + col
   end
 
   # Returns the byte size of the next grapheme in `text`, or 0 for empty.

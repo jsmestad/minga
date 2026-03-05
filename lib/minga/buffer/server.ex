@@ -705,10 +705,9 @@ defmodule Minga.Buffer.Server do
   def handle_call({:render_snapshot, first_line, count}, _from, state) do
     buf = state.document
 
-    first_line_byte_offset =
-      buf
-      |> Document.lines(0, first_line)
-      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+    # Use position_to_offset for O(1) byte offset lookup via line index,
+    # instead of iterating all lines before first_line.
+    first_line_byte_offset = Document.position_to_offset(buf, {first_line, 0})
 
     snapshot = %{
       cursor: Document.cursor(buf),
