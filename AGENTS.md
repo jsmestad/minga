@@ -45,6 +45,7 @@ lib/
       options.ex              # Typed option registry with per-filetype overrides
       loader.ex               # Config file discovery and evaluation
       hooks.ex                # Lifecycle hook registry (after_save, after_open, etc.)
+      advice.ex               # Before/after command advice (ETS-backed, read_concurrency)
     keymap.ex                 # Mode-specific keymap management
     keymap/
       bindings.ex             # Key sequence to command mappings
@@ -81,6 +82,7 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
 - **Pattern matching** over `if/cond` — helps type narrowing across clauses
 - **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
 - **`[head | tail]`** over `list ++ [item]` — appending to a list is O(n); prepend and reverse if order matters
+- **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Buffer.Server.apply_text_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
 - `mix compile --warnings-as-errors` must pass clean
 
 ### Pre-commit Checks

@@ -163,6 +163,72 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  # ── Bulk Insert ──
+
+  describe "insert_text/2" do
+    test "inserts a multi-character string in one operation" do
+      buf = Document.new("world") |> Document.insert_text("hello ")
+      assert Document.content(buf) == "hello world"
+      assert Document.cursor(buf) == {0, 6}
+    end
+
+    test "inserts text containing newlines" do
+      buf = Document.new("end") |> Document.insert_text("line1\nline2\n")
+      assert Document.content(buf) == "line1\nline2\nend"
+      assert Document.cursor(buf) == {2, 0}
+      assert Document.line_count(buf) == 3
+    end
+
+    test "empty string is a no-op" do
+      buf = Document.new("hello")
+      assert Document.insert_text(buf, "") == buf
+    end
+
+    test "inserts at cursor position after move" do
+      buf =
+        Document.new("hello world")
+        |> Document.move_to({0, 5})
+        |> Document.insert_text(" beautiful")
+
+      assert Document.content(buf) == "hello beautiful world"
+      assert Document.cursor(buf) == {0, 15}
+    end
+
+    test "inserts unicode text in bulk" do
+      buf = Document.new("end") |> Document.insert_text("🎉🎊")
+      assert Document.content(buf) == "🎉🎊end"
+      # Each emoji is 4 bytes
+      assert Document.cursor(buf) == {0, 8}
+    end
+
+    test "produces identical result to sequential insert_char calls" do
+      text = "hello\nworld\n!"
+      bulk = Document.new("base") |> Document.insert_text(text)
+
+      sequential =
+        text
+        |> String.graphemes()
+        |> Enum.reduce(Document.new("base"), fn char, doc ->
+          Document.insert_char(doc, char)
+        end)
+
+      assert Document.content(bulk) == Document.content(sequential)
+      assert Document.cursor(bulk) == Document.cursor(sequential)
+      assert Document.line_count(bulk) == Document.line_count(sequential)
+    end
+
+    test "inserts multi-line text in the middle of existing content" do
+      buf =
+        Document.new("startend")
+        |> Document.move_to({0, 5})
+        |> Document.insert_text("A\nB\nC")
+
+      assert Document.content(buf) == "startA\nB\nCend"
+      assert Document.cursor(buf) == {2, 1}
+      assert Document.line_count(buf) == 3
+    end
+  end
+
   # ── Deletion ──
 
   describe "delete_before/1" do

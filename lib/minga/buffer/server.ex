@@ -415,11 +415,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:insert_text, text}, _from, state) do
-    new_doc =
-      text
-      |> String.graphemes()
-      |> Enum.reduce(state.document, fn char, doc -> Document.insert_char(doc, char) end)
-
+    new_doc = Document.insert_text(state.document, text)
     {:reply, :ok, push_undo(state, new_doc) |> mark_dirty()}
   end
 
@@ -432,14 +428,10 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_text_edit, from_pos, to_pos, new_text}, _from, state) do
-    # Move to start, delete range, then insert new text
+    # Move to start, delete range, then bulk insert new text
     doc = Document.move_to(state.document, from_pos)
     doc = Document.delete_range(doc, from_pos, to_pos)
-
-    doc =
-      new_text
-      |> String.graphemes()
-      |> Enum.reduce(doc, fn char, d -> Document.insert_char(d, char) end)
+    doc = Document.insert_text(doc, new_text)
 
     {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
   end

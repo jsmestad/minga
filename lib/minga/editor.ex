@@ -16,6 +16,7 @@ defmodule Minga.Editor do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.ChangeRecorder
@@ -788,6 +789,9 @@ defmodule Minga.Editor do
   @spec dispatch_command(state(), Mode.command()) :: state()
   defp dispatch_command(state, cmd) do
     old_buffer = state.buffers.active
+    cmd_name = command_name(cmd)
+
+    state = ConfigAdvice.run(:before, cmd_name, state)
 
     result =
       case Commands.execute(state, cmd) do
@@ -797,8 +801,17 @@ defmodule Minga.Editor do
         s -> s
       end
 
+    result = ConfigAdvice.run(:after, cmd_name, result)
+
     lsp_after_command(result, cmd, old_buffer)
   end
+
+  # Extracts the command name atom from a command (which may be an atom or tuple).
+  @spec command_name(Mode.command()) :: atom()
+  defp command_name(cmd) when is_atom(cmd), do: cmd
+  defp command_name(cmd) when is_tuple(cmd), do: elem(cmd, 0)
+  defp command_name(cmd) when is_list(cmd), do: :multi
+  defp command_name(_cmd), do: :unknown
 
   # ── File watcher helpers ──────────────────────────────────────────────────
 
@@ -1147,18 +1160,17 @@ defmodule Minga.Editor do
   @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
   defp accept_completion_text(%{buffers: %{active: buf}} = state, completion, text)
        when is_pid(buf) do
-    # Delete the text typed since the trigger position, then insert the completion text
+    # Replace the text typed since the trigger position with the completion text
+    # in a single apply_text_edit call (no N+2 round-trips).
     {trigger_line, trigger_col} = completion.trigger_position
     {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
 
-    # Only works on same line for now
     if cursor_line == trigger_line and cursor_col > trigger_col do
-      chars_to_delete = cursor_col - trigger_col
-      Enum.each(1..chars_to_delete, fn _ -> BufferServer.delete_before(buf) end)
+      BufferServer.apply_text_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
+    else
+      BufferServer.insert_text(buf, text)
     end
 
-    # Insert the completion text character by character
-    BufferServer.insert_text(buf, text)
     lsp_buffer_changed(state)
   end
 

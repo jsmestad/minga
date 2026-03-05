@@ -238,6 +238,34 @@ defmodule Minga.Buffer.Document do
   end
 
   @doc """
+  Inserts a multi-character string at the cursor position in a single
+  binary operation. Use this instead of decomposing into graphemes and
+  calling `insert_char/2` in a loop; that pattern is O(n²) on the gap
+  buffer's binary.
+
+  Functionally equivalent to `insert_char/2` (which already accepts
+  arbitrary strings), but exists as a separate entry point so the intent
+  is clear and `Buffer.Server` can route bulk inserts here directly.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.Document.new("world")
+      iex> buf = Minga.Buffer.Document.insert_text(buf, "hello ")
+      iex> Minga.Buffer.Document.content(buf)
+      "hello world"
+
+      iex> buf = Minga.Buffer.Document.new("end")
+      iex> buf = Minga.Buffer.Document.insert_text(buf, "line1\\nline2\\n")
+      iex> Minga.Buffer.Document.content(buf)
+      "line1\\nline2\\nend"
+      iex> Minga.Buffer.Document.cursor(buf)
+      {2, 0}
+  """
+  @spec insert_text(t(), String.t()) :: t()
+  def insert_text(%__MODULE__{} = buf, ""), do: buf
+  def insert_text(%__MODULE__{} = buf, text) when is_binary(text), do: insert_char(buf, text)
+
+  @doc """
   Deletes the character before the cursor (backspace).
   Returns the buffer unchanged if the cursor is at the beginning.
 
