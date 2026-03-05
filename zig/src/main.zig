@@ -14,6 +14,7 @@ pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 pub const font = if (build_options.backend == .gui) @import("font/main.zig") else struct {};
 pub const highlighter = @import("highlighter.zig");
+pub const terminal = @import("terminal.zig");
 
 // Vaxis is only needed for the TUI panic recovery path.
 const vaxis = if (build_options.backend == .tui) @import("vaxis") else struct {};
@@ -63,6 +64,7 @@ test {
     _ = surface;
     _ = apprt;
     _ = highlighter;
+    _ = terminal;
     if (build_options.backend == .gui) {
         _ = font;
     }
