@@ -17,7 +17,7 @@ defmodule Minga.Keymap.Defaults do
   | `SPC h`   | +help       |
   """
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   @none 0x00
 
@@ -92,31 +92,31 @@ defmodule Minga.Keymap.Defaults do
   @doc """
   Returns a trie whose root is the SPC leader key's subtrie.
 
-  The returned node can be passed directly to `Minga.Keymap.Trie.lookup/2` for
+  The returned node can be passed directly to `Minga.Keymap.Bindings.lookup/2` for
   subsequent keys in the leader sequence.
   """
-  @spec leader_trie() :: Trie.node_t()
+  @spec leader_trie() :: Bindings.node_t()
   def leader_trie do
     trie_with_bindings =
-      Enum.reduce(@leader_bindings, Trie.new(), fn {keys, command, description}, trie ->
-        Trie.bind(trie, keys, command, description)
+      Enum.reduce(@leader_bindings, Bindings.new(), fn {keys, command, description}, trie ->
+        Bindings.bind(trie, keys, command, description)
       end)
 
     Enum.reduce(@group_prefixes, trie_with_bindings, fn {keys, description}, trie ->
-      Trie.bind_prefix(trie, keys, description)
+      Bindings.bind_prefix(trie, keys, description)
     end)
   end
 
   @doc """
-  Returns the leader key as a `t:Minga.Keymap.Trie.key/0` tuple (SPC = `{32, 0}`).
+  Returns the leader key as a `t:Minga.Keymap.Bindings.key/0` tuple (SPC = `{32, 0}`).
   """
-  @spec leader_key() :: Trie.key()
+  @spec leader_key() :: Bindings.key()
   def leader_key, do: {32, @none}
 
   @doc """
   Returns all leader bindings as a flat list of `{key_sequence, command, description}` tuples.
   """
-  @spec all_bindings() :: [{[Trie.key()], atom(), String.t()}]
+  @spec all_bindings() :: [{[Bindings.key()], atom(), String.t()}]
   def all_bindings, do: @leader_bindings
 
   @doc """
@@ -125,7 +125,7 @@ defmodule Minga.Keymap.Defaults do
   These are the hardcoded bindings from `Minga.Mode.Normal.handle_key/2`,
   maintained as a static data structure for introspection (describe-key).
   """
-  @spec normal_bindings() :: %{Trie.key() => {atom(), String.t()}}
+  @spec normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
   def normal_bindings do
     %{
       # ── Movement ──────────────────────────────────────────────────────────

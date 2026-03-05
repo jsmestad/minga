@@ -1,7 +1,7 @@
 defmodule Minga.WhichKeyTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
   alias Minga.WhichKey
 
   # ── format_key/1 ────────────────────────────────────────────────────────────
@@ -83,9 +83,9 @@ defmodule Minga.WhichKeyTest do
   describe "bindings_from_node/1" do
     test "returns sorted binding maps from a trie node's children" do
       trie =
-        Trie.new()
-        |> Trie.bind([{?s, 0}], :save, "Save file")
-        |> Trie.bind([{?f, 0}], :find, "Find file")
+        Bindings.new()
+        |> Bindings.bind([{?s, 0}], :save, "Save file")
+        |> Bindings.bind([{?f, 0}], :find, "Find file")
 
       bindings = WhichKey.bindings_from_node(trie)
 
@@ -105,8 +105,8 @@ defmodule Minga.WhichKeyTest do
 
     test "labels prefix-only nodes as '+prefix'" do
       trie =
-        Trie.new()
-        |> Trie.bind([{?f, 0}, {?s, 0}], :save, "Save")
+        Bindings.new()
+        |> Bindings.bind([{?f, 0}, {?s, 0}], :save, "Save")
 
       # The `f` child is a prefix node with no description.
       bindings = WhichKey.bindings_from_node(trie)
@@ -115,19 +115,19 @@ defmodule Minga.WhichKeyTest do
 
     test "uses bind_prefix description when set" do
       trie =
-        Trie.new()
-        |> Trie.bind([{?f, 0}, {?s, 0}], :save, "Save")
-        |> Trie.bind_prefix([{?f, 0}], "+file")
+        Bindings.new()
+        |> Bindings.bind([{?f, 0}, {?s, 0}], :save, "Save")
+        |> Bindings.bind_prefix([{?f, 0}], "+file")
 
       bindings = WhichKey.bindings_from_node(trie)
       assert [%Minga.WhichKey.Binding{key: "f", description: "+file"}] = bindings
     end
 
     test "returns empty list for leaf node with no children" do
-      trie = Trie.bind(Trie.new(), [{?s, 0}], :save, "Save")
-      {:command, :save} = Trie.lookup(trie, {?s, 0})
+      trie = Bindings.bind(Bindings.new(), [{?s, 0}], :save, "Save")
+      {:command, :save} = Bindings.lookup(trie, {?s, 0})
 
-      # The leaf node (returned via Trie.lookup → get child) has no children.
+      # The leaf node (returned via Bindings.lookup → get child) has no children.
       {:ok, leaf} = Map.fetch(trie.children, {?s, 0})
       assert WhichKey.bindings_from_node(leaf) == []
     end

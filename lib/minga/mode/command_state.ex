@@ -15,7 +15,7 @@ defmodule Minga.Mode.CommandState do
   @type t :: %__MODULE__{
           input: String.t(),
           count: non_neg_integer() | nil,
-          leader_node: Minga.Keymap.Trie.node_t() | nil,
+          leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()]
         }
 end

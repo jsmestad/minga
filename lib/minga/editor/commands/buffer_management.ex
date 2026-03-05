@@ -26,7 +26,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
-  def execute(%{buf: %{buffer: buf}} = state, :save) do
+  def execute(%{buffers: %{active: buf}} = state, :save) do
     state = apply_pre_save_transforms(state, buf)
 
     case BufferServer.save(buf) do
@@ -45,7 +45,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :force_save) do
+  def execute(%{buffers: %{active: buf}} = state, :force_save) do
     case BufferServer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -59,7 +59,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, :reload) do
+  def execute(%{buffers: %{active: buf}} = state, :reload) do
     case BufferServer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -89,7 +89,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, :kill_buffer), do: remove_current_buffer(state)
 
   def execute(state, :new_buffer) do
-    n = next_new_buffer_number(state.buf.buffers)
+    n = next_new_buffer_number(state.buffers.list)
     name = "[new #{n}]"
 
     case DynamicSupervisor.start_child(
@@ -105,12 +105,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buf: %{scratch_buffer: nil}} = state, :view_scratch) do
+  def execute(%{buffers: %{scratch: nil}} = state, :view_scratch) do
     %{state | status_msg: "No scratch buffer"}
   end
 
-  def execute(%{buf: %{scratch_buffer: scratch_buf}} = state, :view_scratch) do
-    idx = Enum.find_index(state.buf.buffers, &(&1 == scratch_buf))
+  def execute(%{buffers: %{scratch: scratch_buf}} = state, :view_scratch) do
+    idx = Enum.find_index(state.buffers.list, &(&1 == scratch_buf))
 
     case idx do
       nil ->
@@ -121,13 +121,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buf: %{messages_buffer: nil}} = state, :view_messages) do
+  def execute(%{buffers: %{messages: nil}} = state, :view_messages) do
     %{state | status_msg: "No messages buffer"}
   end
 
-  def execute(%{buf: %{messages_buffer: msg_buf}} = state, :view_messages) do
+  def execute(%{buffers: %{messages: msg_buf}} = state, :view_messages) do
     # Add messages buffer to buffer list if not already there, then switch to it
-    idx = Enum.find_index(state.buf.buffers, &(&1 == msg_buf))
+    idx = Enum.find_index(state.buffers.list, &(&1 == msg_buf))
 
     case idx do
       nil ->
@@ -205,7 +205,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buf: %{buffer: buf}} = state, {:execute_ex_command, {:goto_line, line_num}}) do
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:goto_line, line_num}}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
     state
@@ -240,7 +240,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(
-        %{buf: %{buffer: buf}} = state,
+        %{buffers: %{active: buf}} = state,
         {:execute_ex_command, {:substitute, pattern, replacement, flags}}
       ) do
     global? = :global in flags
@@ -339,14 +339,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
 
   @spec next_buffer(state()) :: state()
-  defp next_buffer(%{buf: %{buffers: [_, _ | _] = buffers, active_buffer: idx}} = state) do
+  defp next_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
     switch_to_buffer(state, rem(idx + 1, Enum.count(buffers)))
   end
 
   defp next_buffer(state), do: state
 
   @spec prev_buffer(state()) :: state()
-  defp prev_buffer(%{buf: %{buffers: [_, _ | _] = buffers, active_buffer: idx}} = state) do
+  defp prev_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
     len = Enum.count(buffers)
     new_idx = if idx == 0, do: len - 1, else: idx - 1
     switch_to_buffer(state, new_idx)
@@ -357,7 +357,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec remove_current_buffer(state()) :: state()
 
   # Active buffer is scratch (not in buffer list) — clear it
-  defp remove_current_buffer(%{buf: %{buffers: [], buffer: buf, scratch_buffer: buf}} = state)
+  defp remove_current_buffer(%{buffers: %{list: [], active: buf, scratch: buf}} = state)
        when is_pid(buf) do
     :sys.replace_state(buf, fn s ->
       %{
@@ -373,7 +373,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp remove_current_buffer(
-         %{buf: %{buffers: [_ | _] = buffers, active_buffer: idx} = bs} = state
+         %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs} = state
        ) do
     buf = Enum.at(buffers, idx)
 
@@ -401,9 +401,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
       case new_buffers do
         [] ->
           # Fall back to scratch buffer if available
-          fallback = bs.scratch_buffer
+          fallback = bs.scratch
 
-          %{state | buf: %{bs | buffers: [], active_buffer: 0, buffer: fallback}}
+          %{state | buffers: %{bs | list: [], active_index: 0, active: fallback}}
           |> EditorState.sync_active_window_buffer()
 
         _ ->
@@ -412,7 +412,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
           %{
             state
-            | buf: %{bs | buffers: new_buffers, active_buffer: new_idx, buffer: new_active}
+            | buffers: %{bs | list: new_buffers, active_index: new_idx, active: new_active}
           }
           |> EditorState.sync_active_window_buffer()
       end
@@ -422,7 +422,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp remove_current_buffer(state), do: state
 
   @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buf: %{buffers: buffers}}, file_path) do
+  defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)

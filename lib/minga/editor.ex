@@ -132,12 +132,12 @@ defmodule Minga.Editor do
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
     state = %EditorState{
-      buf: %Buffers{
-        buffer: active_buf,
-        buffers: buffers,
-        active_buffer: active_idx,
-        messages_buffer: messages_buf,
-        scratch_buffer: scratch_buf
+      buffers: %Buffers{
+        active: active_buf,
+        list: buffers,
+        active_index: active_idx,
+        messages: messages_buf,
+        scratch: scratch_buf
       },
       port_manager: port_manager,
       viewport: viewport,
@@ -178,11 +178,11 @@ defmodule Minga.Editor do
     end
   end
 
-  def handle_call(:api_active_buffer, _from, %{buf: %{buffer: nil}} = state) do
+  def handle_call(:api_active_buffer, _from, %{buffers: %{active: nil}} = state) do
     {:reply, {:error, :no_buffer}, state}
   end
 
-  def handle_call(:api_active_buffer, _from, %{buf: %{buffer: buf}} = state) do
+  def handle_call(:api_active_buffer, _from, %{buffers: %{active: buf}} = state) do
     {:reply, {:ok, buf}, state}
   end
 
@@ -190,11 +190,11 @@ defmodule Minga.Editor do
     {:reply, state.mode, state}
   end
 
-  def handle_call(:api_save, _from, %{buf: %{buffer: nil}} = state) do
+  def handle_call(:api_save, _from, %{buffers: %{active: nil}} = state) do
     {:reply, {:error, :no_buffer}, state}
   end
 
-  def handle_call(:api_save, _from, %{buf: %{buffer: buf}} = state) do
+  def handle_call(:api_save, _from, %{buffers: %{active: buf}} = state) do
     result = BufferServer.save(buf)
 
     new_state =
@@ -302,7 +302,7 @@ defmodule Minga.Editor do
         %{picker_ui: %{picker: picker}} = state
       )
       when is_struct(picker, Minga.Picker) do
-    old_buffer = state.buf.buffer
+    old_buffer = state.buffers.active
 
     new_state =
       case PickerUI.handle_key(%{state | status_msg: nil}, codepoint, modifiers) do
@@ -330,7 +330,7 @@ defmodule Minga.Editor do
         # Not a completion key — fall through to normal insert handling
         buf_version_before = buffer_version(state)
         new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
-        new_state = maybe_reset_highlight(new_state, state.buf.buffer)
+        new_state = maybe_reset_highlight(new_state, state.buffers.active)
         new_state = maybe_reparse(new_state, buf_version_before)
 
         # After insert mode edits, update completion filter or trigger new completions
@@ -345,7 +345,7 @@ defmodule Minga.Editor do
     buf_version_before = buffer_version(state)
     old_mode = state.mode
     new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
-    new_state = maybe_reset_highlight(new_state, state.buf.buffer)
+    new_state = maybe_reset_highlight(new_state, state.buffers.active)
     new_state = maybe_reparse(new_state, buf_version_before)
 
     # Trigger completion after insert mode edits (no active popup)
@@ -397,8 +397,8 @@ defmodule Minga.Editor do
 
     # Cache the updated highlights for this buffer
     new_state =
-      if new_state.buf.buffer do
-        put_in(new_state.highlight_cache[new_state.buf.buffer], new_state.highlight)
+      if new_state.buffers.active do
+        put_in(new_state.highlight_cache[new_state.buffers.active], new_state.highlight)
       else
         new_state
       end
@@ -425,7 +425,7 @@ defmodule Minga.Editor do
 
   # LSP async response — route completion responses to the completion bridge
   def handle_info({:lsp_response, ref, result}, state) do
-    buffer_pid = state.buf.buffer
+    buffer_pid = state.buffers.active
 
     case buffer_pid do
       nil ->
@@ -465,8 +465,8 @@ defmodule Minga.Editor do
   # Global bindings — processed before the Mode FSM.
   # Ctrl+S → save (works in any mode).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buf.buffer do
-      case BufferServer.save(state.buf.buffer) do
+    if state.buffers.active do
+      case BufferServer.save(state.buffers.active) do
         :ok -> :ok
         {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
       end
@@ -497,8 +497,8 @@ defmodule Minga.Editor do
 
     # Guard: block insert/replace transitions on read-only buffers.
     {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and state.buf.buffer != nil and
-           BufferServer.read_only?(state.buf.buffer) do
+      if new_mode in [:insert, :replace] and state.buffers.active != nil and
+           BufferServer.read_only?(state.buffers.active) do
         {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
       else
         {new_mode, commands, new_mode_state, state}
@@ -620,7 +620,7 @@ defmodule Minga.Editor do
   # Entering visual mode: capture cursor as selection anchor.
   @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) ::
           Mode.state()
-  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buf: %{buffer: buf}})
+  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buffers: %{active: buf}})
        when old_mode != :visual and is_pid(buf) do
     anchor = BufferServer.cursor(buf)
     %{mode_state | visual_anchor: anchor}
@@ -649,7 +649,7 @@ defmodule Minga.Editor do
          %Minga.Mode.SearchState{} = mode_state,
          old_mode,
          :search,
-         %{buf: %{buffer: buf}}
+         %{buffers: %{active: buf}}
        )
        when old_mode != :search and is_pid(buf) do
     cursor = BufferServer.cursor(buf)
@@ -734,7 +734,7 @@ defmodule Minga.Editor do
   # Detect active buffer change: save old highlights to cache, restore or setup new.
   @spec maybe_reset_highlight(state(), pid() | nil) :: state()
   defp maybe_reset_highlight(state, old_buffer) do
-    new_buffer = state.buf.buffer
+    new_buffer = state.buffers.active
 
     if new_buffer != old_buffer and new_buffer != nil do
       # Save current highlights for the old buffer
@@ -782,12 +782,12 @@ defmodule Minga.Editor do
   end
 
   @spec buffer_version(state()) :: non_neg_integer()
-  defp buffer_version(%{buf: %{buffer: nil}}), do: 0
-  defp buffer_version(%{buf: %{buffer: buf}}), do: BufferServer.version(buf)
+  defp buffer_version(%{buffers: %{active: nil}}), do: 0
+  defp buffer_version(%{buffers: %{active: buf}}), do: BufferServer.version(buf)
 
   @spec dispatch_command(state(), Mode.command()) :: state()
   defp dispatch_command(state, cmd) do
-    old_buffer = state.buf.buffer
+    old_buffer = state.buffers.active
 
     result =
       case Commands.execute(state, cmd) do
@@ -841,7 +841,7 @@ defmodule Minga.Editor do
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
-  defp find_buffer_for_path(%{buf: %{buffers: buffers}}, path) do
+  defp find_buffer_for_path(%{buffers: %{list: buffers}}, path) do
     expanded = Path.expand(path)
 
     Enum.find(buffers, fn buf ->
@@ -963,9 +963,9 @@ defmodule Minga.Editor do
 
   @doc false
   @spec log_message(state(), String.t()) :: state()
-  defp log_message(%{buf: %{messages_buffer: nil}} = state, _text), do: state
+  defp log_message(%{buffers: %{messages: nil}} = state, _text), do: state
 
-  defp log_message(%{buf: %{messages_buffer: buf}} = state, text) do
+  defp log_message(%{buffers: %{messages: buf}} = state, text) do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
     BufferServer.append(buf, "[#{time}] #{text}\n")
 
@@ -1012,9 +1012,9 @@ defmodule Minga.Editor do
   end
 
   @spec lsp_buffer_changed(state()) :: state()
-  defp lsp_buffer_changed(%{buf: %{buffer: nil}} = state), do: state
+  defp lsp_buffer_changed(%{buffers: %{active: nil}} = state), do: state
 
-  defp lsp_buffer_changed(%{buf: %{buffer: buf}} = state) do
+  defp lsp_buffer_changed(%{buffers: %{active: buf}} = state) do
     new_lsp = DocumentSync.on_buffer_change(state.lsp, buf)
     %{state | lsp: new_lsp}
   end
@@ -1027,7 +1027,7 @@ defmodule Minga.Editor do
   end
 
   @spec lsp_after_save(state(), Mode.command()) :: state()
-  defp lsp_after_save(%{buf: %{buffer: buf}} = state, cmd) when is_pid(buf) do
+  defp lsp_after_save(%{buffers: %{active: buf}} = state, cmd) when is_pid(buf) do
     if cmd in [
          :save,
          :force_save,
@@ -1051,7 +1051,7 @@ defmodule Minga.Editor do
   defp lsp_after_kill(state, cmd, old_buffer)
        when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
     # The old buffer was closed — notify LSP if it changed
-    if state.buf.buffer != old_buffer do
+    if state.buffers.active != old_buffer do
       new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
       %{state | lsp: new_lsp}
     else
@@ -1145,7 +1145,7 @@ defmodule Minga.Editor do
   defp handle_completion_key(_state, _completion, _cp, _mods), do: :passthrough
 
   @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
-  defp accept_completion_text(%{buf: %{buffer: buf}} = state, completion, text)
+  defp accept_completion_text(%{buffers: %{active: buf}} = state, completion, text)
        when is_pid(buf) do
     # Delete the text typed since the trigger position, then insert the completion text
     {trigger_line, trigger_col} = completion.trigger_position
@@ -1165,7 +1165,7 @@ defmodule Minga.Editor do
   defp accept_completion_text(state, _completion, _text), do: state
 
   @spec apply_completion_text_edit(state(), Completion.text_edit()) :: state()
-  defp apply_completion_text_edit(%{buf: %{buffer: buf}} = state, edit) when is_pid(buf) do
+  defp apply_completion_text_edit(%{buffers: %{active: buf}} = state, edit) when is_pid(buf) do
     BufferServer.apply_text_edit(
       buf,
       edit.range.start_line,
@@ -1182,7 +1182,7 @@ defmodule Minga.Editor do
 
   @spec maybe_update_completion(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp maybe_update_completion(state, codepoint, _mods) do
-    buf = state.buf.buffer
+    buf = state.buffers.active
     if buf == nil, do: state, else: do_update_completion(state, buf, codepoint)
   end
 

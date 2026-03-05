@@ -35,7 +35,7 @@ defmodule Minga.Editor.Mouse do
         ) :: state()
 
   # Ignore mouse events when no buffer is open.
-  def handle(%{buf: %{buffer: nil}} = state, _row, _col, _button, _type), do: state
+  def handle(%{buffers: %{active: nil}} = state, _row, _col, _button, _type), do: state
 
   # Ignore mouse events when picker is open.
   def handle(%{picker_ui: %{picker: picker}} = state, _row, _col, _button, _type)
@@ -48,13 +48,13 @@ defmodule Minga.Editor.Mouse do
 
   # ── Scroll wheel ──
 
-  def handle(%{buf: %{buffer: buf}, viewport: vp} = state, _row, _col, :wheel_down, :press) do
+  def handle(%{buffers: %{active: buf}, viewport: vp} = state, _row, _col, :wheel_down, :press) do
     total_lines = BufferServer.line_count(buf)
     new_vp = scroll_viewport(vp, @scroll_lines, total_lines)
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
-  def handle(%{buf: %{buffer: buf}, viewport: vp} = state, _row, _col, :wheel_up, :press) do
+  def handle(%{buffers: %{active: buf}, viewport: vp} = state, _row, _col, :wheel_up, :press) do
     total_lines = BufferServer.line_count(buf)
     new_vp = scroll_viewport(vp, -@scroll_lines, total_lines)
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
@@ -198,7 +198,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {target_line, target_col} ->
-        BufferServer.move_to(state.buf.buffer, {target_line, target_col})
+        BufferServer.move_to(state.buffers.active, {target_line, target_col})
 
         state = cancel_mode_for_mouse(state)
 
@@ -244,12 +244,12 @@ defmodule Minga.Editor.Mouse do
 
   # Auto-scroll when dragging near viewport edges.
   @spec maybe_auto_scroll(state(), integer()) :: state()
-  defp maybe_auto_scroll(%{buf: %{buffer: buf}, viewport: vp} = state, row) when row <= 0 do
+  defp maybe_auto_scroll(%{buffers: %{active: buf}, viewport: vp} = state, row) when row <= 0 do
     page_move(buf, vp, -1)
     state
   end
 
-  defp maybe_auto_scroll(%{buf: %{buffer: buf}, viewport: vp} = state, row) do
+  defp maybe_auto_scroll(%{buffers: %{active: buf}, viewport: vp} = state, row) do
     scroll_threshold = Viewport.content_rows(vp) - 1
     maybe_scroll_down(state, buf, vp, row, scroll_threshold)
   end
@@ -269,7 +269,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {line, col} ->
-        BufferServer.move_to(state.buf.buffer, {line, col})
+        BufferServer.move_to(state.buffers.active, {line, col})
         state
     end
   end
@@ -297,7 +297,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec mouse_to_buffer_pos_single(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos_single(%{buf: %{buffer: buf}, viewport: vp} = state, row, col) do
+  defp mouse_to_buffer_pos_single(%{buffers: %{active: buf}, viewport: vp} = state, row, col) do
     total_lines = BufferServer.line_count(buf)
     gutter_w = gutter_width(state, total_lines)
     visible_rows = Viewport.content_rows(vp)
@@ -369,7 +369,7 @@ defmodule Minga.Editor.Mouse do
 
   # Clamp cursor into the visible viewport after scrolling.
   @spec clamp_cursor_to_viewport(state()) :: state()
-  defp clamp_cursor_to_viewport(%{buf: %{buffer: buf}, viewport: vp} = state) do
+  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}, viewport: vp} = state) do
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     # Use the viewport directly — don't call scroll_to_cursor, which would
     # move the viewport back to the cursor and undo viewport-first scrolling.

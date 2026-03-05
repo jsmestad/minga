@@ -27,7 +27,7 @@ defmodule Minga.WhichKey do
 
   import Bitwise
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   defmodule Binding do
     @moduledoc "A formatted key binding entry for which-key popup display."
@@ -83,7 +83,7 @@ defmodule Minga.WhichKey do
   # ── Key formatting ────────────────────────────────────────────────────────────
 
   @doc """
-  Formats a single `t:Minga.Keymap.Trie.key/0` tuple into a human-readable string.
+  Formats a single `t:Minga.Keymap.Bindings.key/0` tuple into a human-readable string.
 
   ## Examples
 
@@ -96,7 +96,7 @@ defmodule Minga.WhichKey do
       iex> Minga.WhichKey.format_key({?j, 0x00})
       "j"
   """
-  @spec format_key(Trie.key()) :: String.t()
+  @spec format_key(Bindings.key()) :: String.t()
   def format_key({32, 0}), do: "SPC"
 
   def format_key({27, _}), do: "ESC"
@@ -109,7 +109,7 @@ defmodule Minga.WhichKey do
   # ── Binding display ───────────────────────────────────────────────────────────
 
   @doc """
-  Formats a list of `{key, label}` pairs (as returned by `Minga.Keymap.Trie.children/1`)
+  Formats a list of `{key, label}` pairs (as returned by `Minga.Keymap.Bindings.children/1`)
   into a list of `t:binding/0` maps suitable for rendering in a which-key popup.
 
   ## Examples
@@ -117,7 +117,7 @@ defmodule Minga.WhichKey do
       iex> Minga.WhichKey.format_bindings([{{?j, 0}, "Move cursor down"}])
       [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down"}]
   """
-  @spec format_bindings([{Trie.key(), String.t() | atom()}]) :: [binding()]
+  @spec format_bindings([{Bindings.key(), String.t() | atom()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
     Enum.map(children, fn {key, label} ->
       %Binding{
@@ -131,10 +131,10 @@ defmodule Minga.WhichKey do
   Produces a sorted list of `t:binding/0` maps from the direct children of a
   trie node. This is the primary function used to build which-key popup content.
   """
-  @spec bindings_from_node(Trie.node_t()) :: [binding()]
+  @spec bindings_from_node(Bindings.node_t()) :: [binding()]
   def bindings_from_node(node) do
     node
-    |> Trie.children()
+    |> Bindings.children()
     |> format_bindings()
     |> Enum.sort_by(& &1.key)
   end

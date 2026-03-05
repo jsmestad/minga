@@ -59,7 +59,7 @@ defmodule Minga.Editor.Renderer do
 
   @doc "Renders the no-buffer splash screen."
   @spec render(state()) :: :ok
-  def render(%{buf: %{buffer: nil}} = state) do
+  def render(%{buffers: %{active: nil}} = state) do
     commands = [
       Protocol.encode_clear(),
       Protocol.encode_draw(0, 0, "Minga v#{Minga.version()} — No file open"),
@@ -88,14 +88,14 @@ defmodule Minga.Editor.Renderer do
   defp render_single(state) do
     # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
     #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
-    {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buf.buffer)
+    {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
     cursor = {cursor_line, cursor_byte_col}
     viewport = Viewport.scroll_to_cursor(state.viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
     # 2. Fetch all remaining render data in a single GenServer call.
-    snapshot = BufferServer.render_snapshot(state.buf.buffer, first_line, visible_rows)
+    snapshot = BufferServer.render_snapshot(state.buffers.active, first_line, visible_rows)
     lines = snapshot.lines
     {cursor_line, _cursor_byte_col} = snapshot.cursor
     line_count = snapshot.line_count
@@ -210,8 +210,8 @@ defmodule Minga.Editor.Renderer do
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     line_count = snapshot.line_count
-    buf_count = length(state.buf.buffers)
-    buf_index = state.buf.active_buffer + 1
+    buf_count = length(state.buffers.list)
+    buf_index = state.buffers.active_index + 1
     modeline_row = viewport.rows - 2
 
     filetype = Map.get(snapshot, :filetype, :text)
@@ -465,8 +465,8 @@ defmodule Minga.Editor.Renderer do
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     filetype = Map.get(snapshot, :filetype, :text)
-    buf_count = length(state.buf.buffers)
-    buf_index = state.buf.active_buffer + 1
+    buf_count = length(state.buffers.list)
+    buf_index = state.buffers.active_index + 1
     modeline_row = row_off + win_viewport.rows - 1
 
     modeline_commands =
@@ -588,7 +588,7 @@ defmodule Minga.Editor.Renderer do
   @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
   defp window_highlight(state, window) do
     hl =
-      if window.buffer == state.buf.buffer do
+      if window.buffer == state.buffers.active do
         state.highlight
       else
         Map.get(state.highlight_cache, window.buffer, Minga.Highlight.from_theme(state.theme))
@@ -686,7 +686,7 @@ defmodule Minga.Editor.Renderer do
   end
 
   @spec diagnostic_signs_for_buffer(state()) :: %{non_neg_integer() => atom()}
-  defp diagnostic_signs_for_buffer(%{buf: %{buffer: buf}}) when is_pid(buf) do
+  defp diagnostic_signs_for_buffer(%{buffers: %{active: buf}}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
       path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))

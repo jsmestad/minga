@@ -92,7 +92,7 @@ defmodule Minga.Picker.FileSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buf: %{buffers: buffers}}, file_path) do
+  defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       Process.alive?(buf) && BufferServer.file_path(buf) == file_path
     end)

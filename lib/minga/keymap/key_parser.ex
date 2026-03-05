@@ -3,7 +3,7 @@ defmodule Minga.Keymap.KeyParser do
   Parses human-readable key sequence strings into trie key tuples.
 
   Converts strings like `"SPC g s"` or `"C-x C-s"` into the
-  `[{codepoint, modifiers}]` format used by `Minga.Keymap.Trie`.
+  `[{codepoint, modifiers}]` format used by `Minga.Keymap.Bindings`.
 
   ## Supported tokens
 
@@ -30,7 +30,7 @@ defmodule Minga.Keymap.KeyParser do
       {:error, "empty key sequence"}
   """
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   import Bitwise
 
@@ -53,7 +53,7 @@ defmodule Minga.Keymap.KeyParser do
 
   Returns `{:ok, keys}` on success or `{:error, reason}` on failure.
   """
-  @spec parse(String.t()) :: {:ok, [Trie.key()]} | {:error, String.t()}
+  @spec parse(String.t()) :: {:ok, [Bindings.key()]} | {:error, String.t()}
   def parse(str) when is_binary(str) do
     str = String.trim(str)
 
@@ -68,7 +68,7 @@ defmodule Minga.Keymap.KeyParser do
   @doc """
   Like `parse/1` but raises on error.
   """
-  @spec parse!(String.t()) :: [Trie.key()]
+  @spec parse!(String.t()) :: [Bindings.key()]
   def parse!(str) do
     case parse(str) do
       {:ok, keys} -> keys
@@ -78,8 +78,8 @@ defmodule Minga.Keymap.KeyParser do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec parse_tokens([String.t()], [Trie.key()]) ::
-          {:ok, [Trie.key()]} | {:error, String.t()}
+  @spec parse_tokens([String.t()], [Bindings.key()]) ::
+          {:ok, [Bindings.key()]} | {:error, String.t()}
   defp parse_tokens([], acc), do: {:ok, Enum.reverse(acc)}
 
   defp parse_tokens([token | rest], acc) do
@@ -89,7 +89,7 @@ defmodule Minga.Keymap.KeyParser do
     end
   end
 
-  @spec parse_token(String.t()) :: {:ok, Trie.key()} | {:error, String.t()}
+  @spec parse_token(String.t()) :: {:ok, Bindings.key()} | {:error, String.t()}
 
   # Named keys: SPC, TAB, RET, ESC, DEL
   defp parse_token(token) when is_map_key(@named_keys, token) do

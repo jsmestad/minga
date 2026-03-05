@@ -23,7 +23,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{buf: %{buffer: buf}}) when is_pid(buf) do
+  def candidates(%{buffers: %{active: buf}}) when is_pid(buf) do
     buf
     |> BufferServer.file_path()
     |> candidates_for_path()
@@ -55,7 +55,7 @@ defmodule Minga.Diagnostics.PickerSource do
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
   def on_select({{line, col}, _label, _desc}, state) do
-    case state.buf.buffer do
+    case state.buffers.active do
       nil ->
         state
 

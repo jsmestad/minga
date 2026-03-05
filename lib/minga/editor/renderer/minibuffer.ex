@@ -117,7 +117,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{buf: %{buffer: buf}, theme: theme} = state, row, cols)
+  def render(%{buffers: %{active: buf}, theme: theme} = state, row, cols)
       when is_pid(buf) and state.mode in [:normal, :insert, :replace] do
     mb = theme.minibuffer
 

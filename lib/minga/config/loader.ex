@@ -29,7 +29,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
-  alias Minga.Keymap.Store, as: KeymapStore
+  alias Minga.Keymap.Active, as: KeymapActive
 
   require Logger
 
@@ -100,7 +100,7 @@ defmodule Minga.Config.Loader do
   Reloads all config from scratch.
 
   Purges previously loaded user modules, resets Options, Hooks,
-  Keymap.Store, and Command.Registry to defaults, then re-runs the
+  Keymap.Active, and Command.Registry to defaults, then re-runs the
   full load sequence. Returns `:ok` on success or `{:error, reason}`
   if something went wrong (errors are also stored in state).
   """
@@ -124,7 +124,7 @@ defmodule Minga.Config.Loader do
     # Reset all registries to defaults
     Options.reset()
     Hooks.reset()
-    KeymapStore.reset()
+    KeymapActive.reset()
     CommandRegistry.reset()
     ExtRegistry.reset()
 

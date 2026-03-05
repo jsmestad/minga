@@ -30,7 +30,7 @@ defmodule Minga.Editor.Commands.EvalTest do
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       mode: :normal,
       mode_state: Mode.initial_state(),
-      buf: %Buffers{messages_buffer: messages_buf}
+      buffers: %Buffers{messages: messages_buf}
     }
   end
 

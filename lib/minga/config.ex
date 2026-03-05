@@ -32,7 +32,7 @@ defmodule Minga.Config do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
-  alias Minga.Keymap.Store, as: KeymapStore
+  alias Minga.Keymap.Active, as: KeymapActive
 
   require Logger
 
@@ -85,7 +85,7 @@ defmodule Minga.Config do
   def bind(mode, key_str, command_name, description)
       when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
              is_binary(description) do
-    case KeymapStore.bind(mode, key_str, command_name, description) do
+    case KeymapActive.bind(mode, key_str, command_name, description) do
       :ok -> :ok
       {:error, reason} -> Logger.warning("bind failed: #{reason}")
     end

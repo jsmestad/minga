@@ -10,7 +10,7 @@ defmodule Minga.Application do
 
       Minga.Supervisor (rest_for_one)
       ├── Minga.Config.Options
-      ├── Minga.Keymap.Store
+      ├── Minga.Keymap.Active
       ├── Minga.Config.Hooks
       ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
@@ -30,7 +30,7 @@ defmodule Minga.Application do
   def start(_type, _args) do
     base_children = [
       Minga.Config.Options,
-      Minga.Keymap.Store,
+      Minga.Keymap.Active,
       Minga.Config.Hooks,
       Minga.Config.Loader,
       Minga.Filetype.Registry,

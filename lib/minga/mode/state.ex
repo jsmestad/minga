@@ -8,7 +8,7 @@ defmodule Minga.Mode.State do
   plus mode-specific context.
   """
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   @enforce_keys []
   defstruct count: nil,
@@ -37,7 +37,7 @@ defmodule Minga.Mode.State do
 
   @type t :: %__MODULE__{
           count: non_neg_integer() | nil,
-          leader_node: Trie.node_t() | nil,
+          leader_node: Bindings.node_t() | nil,
           leader_keys: [String.t()],
           pending_g: boolean(),
           pending_find: find_direction() | nil,
@@ -48,7 +48,7 @@ defmodule Minga.Mode.State do
           pending_macro_replay: boolean(),
           pending_describe_key: boolean(),
           pending_bracket: pending_bracket(),
-          describe_key_leader_node: Trie.node_t() | nil,
+          describe_key_leader_node: Bindings.node_t() | nil,
           describe_key_keys: [String.t()]
         }
 end

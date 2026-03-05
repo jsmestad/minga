@@ -203,7 +203,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       # Should be focused on the remaining window with the same buffer
-      assert state.buf.buffer == buffer
+      assert state.buffers.active == buffer
       refute EditorState.split?(state)
     end
   end

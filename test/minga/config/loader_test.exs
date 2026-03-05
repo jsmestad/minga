@@ -7,11 +7,11 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config.Hooks
   alias Minga.Config.Loader
   alias Minga.Config.Options
-  alias Minga.Keymap.Store, as: KeymapStore
+  alias Minga.Keymap.Active, as: KeymapActive
 
   setup do
     # Ensure all global servers are running (config eval needs them)
-    for {mod, _} <- [{Options, nil}, {Hooks, nil}, {KeymapStore, nil}, {CommandRegistry, nil}] do
+    for {mod, _} <- [{Options, nil}, {Hooks, nil}, {KeymapActive, nil}, {CommandRegistry, nil}] do
       case mod.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> mod.reset()

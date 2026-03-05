@@ -23,7 +23,15 @@ defmodule Minga.FileWatcher do
 
   require Logger
 
-  @typep state :: %{
+  @enforce_keys [:subscriber, :debounce_ms]
+  defstruct subscriber: nil,
+            debounce_ms: nil,
+            watcher: nil,
+            watched_dirs: %{},
+            watched_files: MapSet.new(),
+            pending: %{}
+
+  @typep state :: %__MODULE__{
            subscriber: pid() | nil,
            watcher: pid() | nil,
            watched_dirs: %{String.t() => pos_integer()},
@@ -74,12 +82,8 @@ defmodule Minga.FileWatcher do
     debounce_ms = Keyword.get(opts, :debounce_ms, @default_debounce_ms)
     subscriber = Keyword.get(opts, :subscriber)
 
-    state = %{
+    state = %__MODULE__{
       subscriber: subscriber,
-      watcher: nil,
-      watched_dirs: %{},
-      watched_files: MapSet.new(),
-      pending: %{},
       debounce_ms: debounce_ms
     }
 
@@ -88,12 +92,12 @@ defmodule Minga.FileWatcher do
 
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, :ok, state()}
-  def handle_call({:subscribe, pid}, _from, state) do
+  def handle_call({:subscribe, pid}, _from, %__MODULE__{} = state) do
     Process.monitor(pid)
-    {:reply, :ok, %{state | subscriber: pid}}
+    {:reply, :ok, %__MODULE__{state | subscriber: pid}}
   end
 
-  def handle_call({:watch_path, path}, _from, state) do
+  def handle_call({:watch_path, path}, _from, %__MODULE__{} = state) do
     dir = Path.dirname(path)
 
     new_dirs =
@@ -104,10 +108,10 @@ defmodule Minga.FileWatcher do
     new_watcher = ensure_watcher(state.watcher, new_dirs)
 
     {:reply, :ok,
-     %{state | watched_dirs: new_dirs, watched_files: new_files, watcher: new_watcher}}
+     %__MODULE__{state | watched_dirs: new_dirs, watched_files: new_files, watcher: new_watcher}}
   end
 
-  def handle_call({:unwatch_path, path}, _from, state) do
+  def handle_call({:unwatch_path, path}, _from, %__MODULE__{} = state) do
     dir = Path.dirname(path)
 
     new_dirs =
@@ -119,19 +123,19 @@ defmodule Minga.FileWatcher do
 
     new_files = MapSet.delete(state.watched_files, path)
 
-    {:reply, :ok, %{state | watched_dirs: new_dirs, watched_files: new_files}}
+    {:reply, :ok, %__MODULE__{state | watched_dirs: new_dirs, watched_files: new_files}}
   end
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
-  def handle_cast(:check_all, state) do
+  def handle_cast(:check_all, %__MODULE__{} = state) do
     notify_all_watched(state)
     {:noreply, state}
   end
 
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
-  def handle_info({:file_event, _watcher_pid, {path, _events}}, state) do
+  def handle_info({:file_event, _watcher_pid, {path, _events}}, %__MODULE__{} = state) do
     path = to_string(path)
 
     if MapSet.member?(state.watched_files, path) do
@@ -141,22 +145,22 @@ defmodule Minga.FileWatcher do
     end
   end
 
-  def handle_info({:file_event, _watcher_pid, :stop}, state) do
+  def handle_info({:file_event, _watcher_pid, :stop}, %__MODULE__{} = state) do
     Logger.warning("File watcher stopped unexpectedly")
-    {:noreply, %{state | watcher: nil}}
+    {:noreply, %__MODULE__{state | watcher: nil}}
   end
 
-  def handle_info({:debounce_fire, path}, state) do
+  def handle_info({:debounce_fire, path}, %__MODULE__{} = state) do
     new_pending = Map.delete(state.pending, path)
     notify_subscriber(state.subscriber, path)
-    {:noreply, %{state | pending: new_pending}}
+    {:noreply, %__MODULE__{state | pending: new_pending}}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscriber: pid} = state) do
-    {:noreply, %{state | subscriber: nil}}
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %__MODULE__{subscriber: pid} = state) do
+    {:noreply, %__MODULE__{state | subscriber: nil}}
   end
 
-  def handle_info(_msg, state) do
+  def handle_info(_msg, %__MODULE__{} = state) do
     {:noreply, state}
   end
 
@@ -195,7 +199,7 @@ defmodule Minga.FileWatcher do
   end
 
   @spec schedule_debounce(state(), String.t()) :: state()
-  defp schedule_debounce(state, path) do
+  defp schedule_debounce(%__MODULE__{} = state, path) do
     # Cancel existing timer for this path if any
     case Map.get(state.pending, path) do
       nil -> :ok
@@ -203,7 +207,7 @@ defmodule Minga.FileWatcher do
     end
 
     ref = Process.send_after(self(), {:debounce_fire, path}, state.debounce_ms)
-    %{state | pending: Map.put(state.pending, path, ref)}
+    %__MODULE__{state | pending: Map.put(state.pending, path, ref)}
   end
 
   @spec notify_subscriber(pid() | nil, String.t()) :: :ok
@@ -215,7 +219,7 @@ defmodule Minga.FileWatcher do
   end
 
   @spec notify_all_watched(state()) :: :ok
-  defp notify_all_watched(state) do
+  defp notify_all_watched(%__MODULE__{} = state) do
     Enum.each(state.watched_files, fn path ->
       notify_subscriber(state.subscriber, path)
     end)

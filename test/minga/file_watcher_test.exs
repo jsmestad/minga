@@ -82,7 +82,7 @@ defmodule Minga.FileWatcherTest do
     # Give the DOWN message time to arrive
     Process.sleep(20)
 
-    state = :sys.get_state(watcher)
-    assert state.subscriber == nil
+    %FileWatcher{subscriber: subscriber} = :sys.get_state(watcher)
+    assert subscriber == nil
   end
 end

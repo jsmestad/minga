@@ -20,7 +20,7 @@ defmodule Minga.Mode.VisualState do
           visual_type: selection_type(),
           visual_anchor: {non_neg_integer(), non_neg_integer()},
           count: non_neg_integer() | nil,
-          leader_node: Minga.Keymap.Trie.node_t() | nil,
+          leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()]
         }
 end

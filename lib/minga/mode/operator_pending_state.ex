@@ -27,7 +27,7 @@ defmodule Minga.Mode.OperatorPendingState do
           count: non_neg_integer() | nil,
           pending_g: boolean(),
           text_object_modifier: text_object_modifier() | nil,
-          leader_node: Minga.Keymap.Trie.node_t() | nil,
+          leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()]
         }
 

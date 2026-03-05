@@ -217,7 +217,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
-  def apply_text_object(%{buf: %{buffer: buf}} = state, modifier, spec, action) do
+  def apply_text_object(%{buffers: %{active: buf}} = state, modifier, spec, action) do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
     range = compute_text_object_range(gb, cursor, modifier, spec)

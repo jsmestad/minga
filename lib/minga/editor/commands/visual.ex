@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.Visual do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %VisualState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
         :delete_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -43,7 +43,7 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %VisualState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
         :yank_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{buf: %{buffer: buf}, mode_state: %VisualState{} = ms} = state,
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
         {:wrap_visual_selection, open, close}
       ) do
     anchor = ms.visual_anchor

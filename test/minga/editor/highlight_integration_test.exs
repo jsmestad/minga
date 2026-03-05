@@ -133,7 +133,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       send(ctx.editor, {:minga_input, {:highlight_names, ["keyword"]}})
       send(ctx.editor, {:minga_input, {:highlight_spans, 1, spans_a}})
 
-      buf1_pid = :sys.get_state(ctx.editor).buf.buffer
+      buf1_pid = :sys.get_state(ctx.editor).buffers.active
 
       # Switch to file2 via picker
       send_keys(ctx, "<Space>ff")
