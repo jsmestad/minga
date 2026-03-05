@@ -302,6 +302,23 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  describe "set_title protocol" do
+    test "encode/decode round-trip" do
+      encoded = Protocol.encode_set_title("editor.ex [+] (lib) - Minga")
+      assert {:ok, {:set_title, "editor.ex [+] (lib) - Minga"}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode/decode empty title" do
+      encoded = Protocol.encode_set_title("")
+      assert {:ok, {:set_title, ""}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode/decode unicode title" do
+      encoded = Protocol.encode_set_title("файл.ex - Minga")
+      assert {:ok, {:set_title, "файл.ex - Minga"}} = Protocol.decode_command(encoded)
+    end
+  end
+
   describe "highlight protocol" do
     test "encode_set_language produces correct binary" do
       encoded = Protocol.encode_set_language("elixir")

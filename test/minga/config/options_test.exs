@@ -36,7 +36,8 @@ defmodule Minga.Config.OptionsTest do
                trim_trailing_whitespace: false,
                insert_final_newline: false,
                format_on_save: false,
-               formatter: nil
+               formatter: nil,
+               title_format: "{filename} {dirty}({directory}) - Minga"
              }
     end
   end

@@ -20,6 +20,7 @@ defmodule Minga.Config.Options do
   | `:insert_final_newline`     | boolean                             | `false`    |
   | `:format_on_save`           | boolean                             | `false`    |
   | `:formatter`    | string or `nil`                                  | `nil`      |
+  | `:title_format` | string with `{placeholder}` tokens               | `"{filename} {dirty}({directory}) - Minga"` |
 
   ## Per-filetype overrides
 
@@ -50,6 +51,7 @@ defmodule Minga.Config.Options do
           | :insert_final_newline
           | :format_on_save
           | :formatter
+          | :title_format
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -81,7 +83,8 @@ defmodule Minga.Config.Options do
     {:trim_trailing_whitespace, :boolean, false},
     {:insert_final_newline, :boolean, false},
     {:format_on_save, :boolean, false},
-    {:formatter, :string_or_nil, nil}
+    {:formatter, :string_or_nil, nil},
+    {:title_format, :string, "{filename} {dirty}({directory}) - Minga"}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
@@ -256,6 +259,12 @@ defmodule Minga.Config.Options do
 
   defp validate_type({:enum, allowed}, name, value) do
     {:error, "#{name} must be one of #{inspect(allowed)}, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:string, _name, value) when is_binary(value), do: :ok
+
+  defp validate_type(:string, name, value) do
+    {:error, "#{name} must be a string, got: #{inspect(value)}"}
   end
 
   defp validate_type(:string_or_nil, _name, nil), do: :ok

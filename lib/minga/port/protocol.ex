@@ -49,6 +49,7 @@ defmodule Minga.Port.Protocol do
   @op_clear 0x12
   @op_batch_end 0x13
   @op_set_cursor_shape 0x15
+  @op_set_title 0x16
 
   # Highlight commands (BEAM → Zig)
   @op_set_language 0x20
@@ -60,6 +61,16 @@ defmodule Minga.Port.Protocol do
   @op_highlight_spans 0x30
   @op_highlight_names 0x31
   @op_grammar_loaded 0x32
+
+  # Terminal commands (BEAM → Zig)
+  @op_open_terminal 0x40
+  @op_close_terminal 0x41
+  @op_resize_terminal 0x42
+  @op_terminal_input 0x43
+  @op_terminal_focus 0x44
+
+  # Terminal events (Zig → BEAM)
+  @op_terminal_exited 0x50
 
   # Cursor shapes
   @cursor_block 0x00
@@ -121,6 +132,7 @@ defmodule Minga.Port.Protocol do
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
           | {:highlight_names, [String.t()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
+          | {:terminal_exited, exit_code :: integer()}
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -202,6 +214,12 @@ defmodule Minga.Port.Protocol do
   def encode_cursor_shape(:beam), do: <<@op_set_cursor_shape, @cursor_beam>>
   def encode_cursor_shape(:underline), do: <<@op_set_cursor_shape, @cursor_underline>>
 
+  @doc "Encodes a set_title command to update the terminal window title."
+  @spec encode_set_title(String.t()) :: binary()
+  def encode_set_title(title) when is_binary(title) do
+    <<@op_set_title, byte_size(title)::16, title::binary>>
+  end
+
   # ── Encoding: highlight commands (BEAM → Zig) ──
 
   @doc "Encodes a set_language command."
@@ -227,6 +245,39 @@ defmodule Minga.Port.Protocol do
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
     <<@op_load_grammar, byte_size(name)::16, name::binary, byte_size(path)::16, path::binary>>
+  end
+
+  # ── Encoding: terminal commands (BEAM → Zig) ──
+
+  @doc "Encodes an open_terminal command."
+  @spec encode_open_terminal(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_open_terminal(shell, rows, cols, row_offset, col_offset)
+      when is_binary(shell) and is_integer(rows) and is_integer(cols) do
+    <<@op_open_terminal, byte_size(shell)::16, shell::binary,
+      rows::16, cols::16, row_offset::16, col_offset::16>>
+  end
+
+  @doc "Encodes a close_terminal command."
+  @spec encode_close_terminal() :: binary()
+  def encode_close_terminal, do: <<@op_close_terminal>>
+
+  @doc "Encodes a resize_terminal command."
+  @spec encode_resize_terminal(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_resize_terminal(rows, cols, row_offset, col_offset)
+      when is_integer(rows) and is_integer(cols) do
+    <<@op_resize_terminal, rows::16, cols::16, row_offset::16, col_offset::16>>
+  end
+
+  @doc "Encodes terminal input (keystrokes forwarded to PTY)."
+  @spec encode_terminal_input(binary()) :: binary()
+  def encode_terminal_input(data) when is_binary(data) do
+    <<@op_terminal_input, byte_size(data)::16, data::binary>>
+  end
+
+  @doc "Encodes a terminal focus command."
+  @spec encode_terminal_focus(boolean()) :: binary()
+  def encode_terminal_focus(focused) when is_boolean(focused) do
+    <<@op_terminal_focus, if(focused, do: 1, else: 0)::8>>
   end
 
   # ── Decoding (Zig → BEAM) ──
@@ -269,6 +320,10 @@ defmodule Minga.Port.Protocol do
 
   def decode_event(<<@op_grammar_loaded, success::8, name_len::16, name::binary-size(name_len)>>) do
     {:ok, {:grammar_loaded, success == 1, name}}
+  end
+
+  def decode_event(<<@op_terminal_exited, exit_code::32-signed>>) do
+    {:ok, {:terminal_exited, exit_code}}
   end
 
   def decode_event(<<opcode::8, _rest::binary>>)
@@ -325,6 +380,10 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(<<@op_set_cursor_shape, @cursor_underline>>) do
     {:ok, {:set_cursor_shape, :underline}}
+  end
+
+  def decode_command(<<@op_set_title, len::16, title::binary-size(len)>>) do
+    {:ok, {:set_title, title}}
   end
 
   def decode_command(<<_opcode::8, _rest::binary>>) do

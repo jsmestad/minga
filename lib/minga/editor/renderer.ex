@@ -17,6 +17,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DocumentSync
@@ -29,6 +30,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Title
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -80,6 +82,22 @@ defmodule Minga.Editor.Renderer do
     else
       render_single(state)
     end
+
+    send_title(state)
+  end
+
+  @spec send_title(state()) :: :ok
+  defp send_title(state) do
+    format = Options.get(:title_format) |> to_string()
+    title = Title.format(state, format)
+
+    # Only send when title changes (avoids redundant OSC writes every frame)
+    if title != Process.get(:last_title) do
+      Process.put(:last_title, title)
+      PortManager.send_commands([Protocol.encode_set_title(title)])
+    end
+
+    :ok
   end
 
   # ── Single window render (original path, no overhead) ─────────────────────
