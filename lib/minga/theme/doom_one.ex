@@ -90,6 +90,16 @@ defmodule Minga.Theme.DoomOne do
         fg: @base8,
         bg: 0x333333,
         border_fg: @base6
+      },
+      tree: %Minga.Theme.Tree{
+        bg: @base3,
+        fg: @fg,
+        dir_fg: @blue,
+        active_fg: @green,
+        cursor_bg: 0x3E4451,
+        header_fg: @blue,
+        header_bg: @base3,
+        separator_fg: @base5
       }
     }
   end

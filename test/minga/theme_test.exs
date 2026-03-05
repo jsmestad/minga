@@ -130,6 +130,16 @@ defmodule Minga.ThemeTest do
         assert is_integer(theme.popup.fg)
         assert is_integer(theme.popup.bg)
         assert is_integer(theme.popup.border_fg)
+
+        # Tree colors
+        assert is_integer(theme.tree.bg)
+        assert is_integer(theme.tree.fg)
+        assert is_integer(theme.tree.dir_fg)
+        assert is_integer(theme.tree.active_fg)
+        assert is_integer(theme.tree.cursor_bg)
+        assert is_integer(theme.tree.header_fg)
+        assert is_integer(theme.tree.header_bg)
+        assert is_integer(theme.tree.separator_fg)
       end
 
       test "#{theme_name} has syntax entries for common captures" do
@@ -164,6 +174,7 @@ defmodule Minga.ThemeTest do
         assert %Theme.Minibuffer{} = theme.minibuffer
         assert %Theme.Search{} = theme.search
         assert %Theme.Popup{} = theme.popup
+        assert %Theme.Tree{} = theme.tree
       end
 
       test "#{theme_name} all colors are non-negative integers" do
@@ -174,6 +185,10 @@ defmodule Minga.ThemeTest do
         end
 
         for {_key, color} <- Map.from_struct(theme.gutter) do
+          assert is_integer(color) and color >= 0
+        end
+
+        for {_key, color} <- Map.from_struct(theme.tree) do
           assert is_integer(color) and color >= 0
         end
       end

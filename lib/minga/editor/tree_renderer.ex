@@ -42,8 +42,8 @@ defmodule Minga.Editor.TreeRenderer do
 
     header = [
       Protocol.encode_draw(row_off, col_off, header_text,
-        fg: theme.editor.fg,
-        bg: theme.modeline.bar_bg,
+        fg: theme.tree.header_fg,
+        bg: theme.tree.header_bg,
         bold: true
       )
     ]
@@ -120,24 +120,24 @@ defmodule Minga.Editor.TreeRenderer do
 
   @spec entry_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: keyword()
   defp entry_style(entry, is_cursor, is_active, focused, theme) do
+    tree = theme.tree
+
     base_fg =
       case {entry.dir?, is_active} do
-        {true, _} -> theme.picker.border_fg
-        {_, true} -> theme.modeline.filetype_fg
-        _ -> theme.editor.fg
+        {true, _} -> tree.dir_fg
+        {_, true} -> tree.active_fg
+        _ -> tree.fg
       end
-
-    base_bg = theme.editor.bg
 
     case {is_cursor, focused} do
       {true, true} ->
-        [fg: base_bg, bg: base_fg, bold: entry.dir?]
+        [fg: tree.bg, bg: base_fg, bold: entry.dir?]
 
       {true, false} ->
-        [fg: base_fg, bg: theme.modeline.bar_bg, bold: entry.dir?]
+        [fg: base_fg, bg: tree.cursor_bg, bold: entry.dir?]
 
       _ ->
-        [fg: base_fg, bg: base_bg, bold: entry.dir?]
+        [fg: base_fg, bg: tree.bg, bold: entry.dir?]
     end
   end
 
@@ -151,7 +151,7 @@ defmodule Minga.Editor.TreeRenderer do
         ) :: [binary()]
   defp render_blanks(rendered, total, row_start, col, width, theme) do
     blank = String.duplicate(" ", width)
-    style = [fg: theme.editor.fg, bg: theme.editor.bg]
+    style = [fg: theme.tree.fg, bg: theme.tree.bg]
 
     for i <- rendered..(total - 1) do
       Protocol.encode_draw(row_start + i, col, blank, style)
@@ -165,7 +165,7 @@ defmodule Minga.Editor.TreeRenderer do
           Theme.t()
         ) :: [binary()]
   defp render_separator(col, row_start, height, theme) do
-    style = [fg: theme.editor.split_border_fg, bg: theme.editor.bg]
+    style = [fg: theme.tree.separator_fg, bg: theme.tree.bg]
 
     for row <- row_start..(row_start + height - 1) do
       Protocol.encode_draw(row, col, "│", style)

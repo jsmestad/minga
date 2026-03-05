@@ -87,6 +87,16 @@ defmodule Minga.Theme.OneLight do
         fg: @mono_1,
         bg: @syntax_guide,
         border_fg: @mono_3
+      },
+      tree: %Minga.Theme.Tree{
+        bg: 0xF0F0F0,
+        fg: @mono_1,
+        dir_fg: @hue_2,
+        active_fg: @hue_4,
+        cursor_bg: 0xE5E5E6,
+        header_fg: @hue_2,
+        header_bg: 0xF0F0F0,
+        separator_fg: @mono_3
       }
     }
   end

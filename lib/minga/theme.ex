@@ -29,7 +29,8 @@ defmodule Minga.Theme do
     :picker,
     :minibuffer,
     :search,
-    :popup
+    :popup,
+    :tree
   ]
 
   defstruct [
@@ -41,7 +42,8 @@ defmodule Minga.Theme do
     :picker,
     :minibuffer,
     :search,
-    :popup
+    :popup,
+    :tree
   ]
 
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
@@ -62,7 +64,8 @@ defmodule Minga.Theme do
           picker: Minga.Theme.Picker.t(),
           minibuffer: Minga.Theme.Minibuffer.t(),
           search: Minga.Theme.Search.t(),
-          popup: Minga.Theme.Popup.t()
+          popup: Minga.Theme.Popup.t(),
+          tree: Minga.Theme.Tree.t()
         }
 
   # ── Color group structs ─────────────────────────────────────────────────────
@@ -193,6 +196,32 @@ defmodule Minga.Theme do
             fg: Minga.Theme.color(),
             bg: Minga.Theme.color(),
             border_fg: Minga.Theme.color()
+          }
+  end
+
+  defmodule Tree do
+    @moduledoc "File tree sidebar colors."
+    @enforce_keys [
+      :bg,
+      :fg,
+      :dir_fg,
+      :active_fg,
+      :cursor_bg,
+      :header_fg,
+      :header_bg,
+      :separator_fg
+    ]
+    defstruct [:bg, :fg, :dir_fg, :active_fg, :cursor_bg, :header_fg, :header_bg, :separator_fg]
+
+    @type t :: %__MODULE__{
+            bg: Minga.Theme.color(),
+            fg: Minga.Theme.color(),
+            dir_fg: Minga.Theme.color(),
+            active_fg: Minga.Theme.color(),
+            cursor_bg: Minga.Theme.color(),
+            header_fg: Minga.Theme.color(),
+            header_bg: Minga.Theme.color(),
+            separator_fg: Minga.Theme.color()
           }
   end
 

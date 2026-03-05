@@ -72,6 +72,16 @@ defmodule Minga.Theme.Catppuccin do
         fg: p.text,
         bg: p.surface0,
         border_fg: p.overlay1
+      },
+      tree: %Minga.Theme.Tree{
+        bg: p.mantle,
+        fg: p.text,
+        dir_fg: p.blue,
+        active_fg: p.green,
+        cursor_bg: p.surface0,
+        header_fg: p.blue,
+        header_bg: p.mantle,
+        separator_fg: p.surface1
       }
     }
   end
