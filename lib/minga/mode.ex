@@ -39,7 +39,6 @@ defmodule Minga.Mode do
           | :search
           | :search_prompt
           | :substitute_confirm
-          | :terminal
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -126,7 +125,6 @@ defmodule Minga.Mode do
   def display(:search_prompt), do: "-- SEARCH PROJECT --"
   def display(:eval), do: "-- EVAL --"
   def display(:substitute_confirm), do: "-- SUBSTITUTE --"
-  def display(:terminal), do: "TERMINAL"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for

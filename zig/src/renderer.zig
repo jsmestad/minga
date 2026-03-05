@@ -103,9 +103,8 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     self.surface.tty_writer.print("\x1b]0;{s}\x07", .{title}) catch {};
                 },
 
-                // Highlight and terminal commands are handled by the event loop, not the renderer.
+                // Highlight commands are handled by the event loop, not the renderer.
                 .set_language, .parse_buffer, .set_highlight_query, .load_grammar => {},
-                .open_terminal, .close_terminal, .resize_terminal, .terminal_input, .terminal_focus => {},
             }
         }
     };

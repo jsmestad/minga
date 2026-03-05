@@ -42,16 +42,6 @@ pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
 pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
 pub const OP_GRAMMAR_LOADED: u8 = 0x32;
 
-// Terminal commands (BEAM → Zig)
-pub const OP_OPEN_TERMINAL: u8 = 0x40;
-pub const OP_CLOSE_TERMINAL: u8 = 0x41;
-pub const OP_RESIZE_TERMINAL: u8 = 0x42;
-pub const OP_TERMINAL_INPUT: u8 = 0x43;
-pub const OP_TERMINAL_FOCUS: u8 = 0x44;
-
-// Terminal events (Zig → BEAM)
-pub const OP_TERMINAL_EXITED: u8 = 0x50;
-
 // ── Cursor shapes ──
 
 pub const CURSOR_BLOCK: u8 = 0x00;
@@ -110,29 +100,6 @@ pub const RenderCommand = union(enum) {
     parse_buffer: ParseBuffer,
     set_highlight_query: []const u8,
     load_grammar: LoadGrammar,
-    // Terminal commands
-    open_terminal: OpenTerminal,
-    close_terminal: void,
-    resize_terminal: ResizeTerminal,
-    terminal_input: []const u8,
-    terminal_focus: bool,
-};
-
-pub const OpenTerminal = struct {
-    shell: []const u8,
-    rows: u16,
-    cols: u16,
-    row_offset: u16,
-    col_offset: u16,
-    fg_color: u24,
-    bg_color: u24,
-};
-
-pub const ResizeTerminal = struct {
-    rows: u16,
-    cols: u16,
-    row_offset: u16,
-    col_offset: u16,
 };
 
 pub const ParseBuffer = struct {
@@ -264,14 +231,6 @@ pub fn encodeHighlightNames(allocator: std.mem.Allocator, names: []const []const
     return buf;
 }
 
-/// Encodes terminal_exited event: opcode(1) + exit_code:i32
-pub fn encodeTerminalExited(buf: []u8, exit_code: i32) !usize {
-    if (buf.len < 5) return error.Malformed;
-    buf[0] = OP_TERMINAL_EXITED;
-    std.mem.writeInt(i32, buf[1..5], exit_code, .big);
-    return 5;
-}
-
 /// Encodes grammar_loaded: opcode(1) + success:u8 + name_len:2 + name
 pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
     const total = 4 + name.len;
@@ -371,45 +330,6 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .path = rest[path_off + 2 .. path_off + 2 + path_len],
             } };
         },
-        OP_OPEN_TERMINAL => {
-            // shell_len:2, shell, rows:2, cols:2, row_offset:2, col_offset:2, fg:3, bg:3
-            if (rest.len < 2) return error.Malformed;
-            const shell_len = std.mem.readInt(u16, rest[0..2], .big);
-            if (rest.len < 2 + shell_len + 14) return error.Malformed;
-            const shell = rest[2 .. 2 + shell_len];
-            const off = 2 + shell_len;
-            return .{ .open_terminal = .{
-                .shell = shell,
-                .rows = std.mem.readInt(u16, rest[off..][0..2], .big),
-                .cols = std.mem.readInt(u16, rest[off + 2 ..][0..2], .big),
-                .row_offset = std.mem.readInt(u16, rest[off + 4 ..][0..2], .big),
-                .col_offset = std.mem.readInt(u16, rest[off + 6 ..][0..2], .big),
-                .fg_color = readU24(rest[off + 8 ..][0..3]),
-                .bg_color = readU24(rest[off + 11 ..][0..3]),
-            } };
-        },
-        OP_CLOSE_TERMINAL => return .close_terminal,
-        OP_RESIZE_TERMINAL => {
-            // rows:2, cols:2, row_offset:2, col_offset:2
-            if (rest.len < 8) return error.Malformed;
-            return .{ .resize_terminal = .{
-                .rows = std.mem.readInt(u16, rest[0..2], .big),
-                .cols = std.mem.readInt(u16, rest[2..4], .big),
-                .row_offset = std.mem.readInt(u16, rest[4..6], .big),
-                .col_offset = std.mem.readInt(u16, rest[6..8], .big),
-            } };
-        },
-        OP_TERMINAL_INPUT => {
-            // data_len:2, data
-            if (rest.len < 2) return error.Malformed;
-            const data_len = std.mem.readInt(u16, rest[0..2], .big);
-            if (rest.len < 2 + data_len) return error.Malformed;
-            return .{ .terminal_input = rest[2 .. 2 + data_len] };
-        },
-        OP_TERMINAL_FOCUS => {
-            if (rest.len < 1) return error.Malformed;
-            return .{ .terminal_focus = rest[0] != 0 };
-        },
         else => return error.UnknownOpcode,
     }
 }
@@ -467,19 +387,6 @@ pub fn commandSize(payload: []const u8) usize {
             const title_len = std.mem.readInt(u16, payload[1..3], .big);
             break :blk 3 + title_len;
         },
-        OP_OPEN_TERMINAL => blk: {
-            if (payload.len < 3) break :blk payload.len;
-            const shell_len = std.mem.readInt(u16, payload[1..3], .big);
-            break :blk 3 + shell_len + 14; // opcode + shell_len:2 + shell + rows:2 + cols:2 + row_off:2 + col_off:2 + fg:3 + bg:3
-        },
-        OP_CLOSE_TERMINAL => 1,
-        OP_RESIZE_TERMINAL => 9, // opcode + rows:2 + cols:2 + row_off:2 + col_off:2
-        OP_TERMINAL_INPUT => blk: {
-            if (payload.len < 3) break :blk payload.len;
-            const data_len = std.mem.readInt(u16, payload[1..3], .big);
-            break :blk 3 + data_len;
-        },
-        OP_TERMINAL_FOCUS => 2, // opcode + bool:1
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };

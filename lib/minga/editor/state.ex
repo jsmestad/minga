@@ -75,8 +75,7 @@ defmodule Minga.Editor.State do
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
-            windows: %Windows{},
-            terminal: nil
+            windows: %Windows{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -104,8 +103,7 @@ defmodule Minga.Editor.State do
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
-          windows: Windows.t(),
-          terminal: Minga.Terminal.t() | nil
+          windows: Windows.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

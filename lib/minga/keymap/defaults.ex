@@ -69,9 +69,6 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
     {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
 
-    # ── Open ──────────────────────────────────────────────────────────────────
-    {[{?o, @none}, {?t, @none}], :toggle_terminal, "Toggle terminal"},
-
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
@@ -85,7 +82,6 @@ defmodule Minga.Keymap.Defaults do
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},
-    {[{?o, @none}], "+open"},
     {[{?t, @none}], "+toggle"}
   ]
 

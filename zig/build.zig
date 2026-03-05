@@ -98,55 +98,6 @@ pub fn build(b: *std.Build) void {
         grammar_libs[i] = addGrammar(b, target, c_optimize, g.name, g.has_scanner, g.scanner_extra_flags);
     }
 
-    // ── libvterm static library ──────────────────────────────────────────
-    const vterm_lib = b.addLibrary(.{
-        .name = "vterm",
-        .linkage = .static,
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = c_optimize,
-        }),
-    });
-    vterm_lib.root_module.link_libc = true;
-    vterm_lib.root_module.addIncludePath(b.path("vendor/libvterm/include"));
-    vterm_lib.root_module.addIncludePath(b.path("vendor/libvterm/src"));
-
-    const vterm_sources = [_][]const u8{
-        "vendor/libvterm/src/encoding.c",
-        "vendor/libvterm/src/keyboard.c",
-        "vendor/libvterm/src/mouse.c",
-        "vendor/libvterm/src/parser.c",
-        "vendor/libvterm/src/pen.c",
-        "vendor/libvterm/src/screen.c",
-        "vendor/libvterm/src/state.c",
-        "vendor/libvterm/src/unicode.c",
-        "vendor/libvterm/src/vterm.c",
-    };
-    for (vterm_sources) |src| {
-        vterm_lib.root_module.addCSourceFile(.{
-            .file = b.path(src),
-            .flags = &.{ "-std=c99", "-DINLINE=static inline", "-DUSE_POSIX" },
-        });
-    }
-
-    // ── libvterm C wrapper ──────────────────────────────────────────────
-    // Thin wrapper to avoid Zig cImport issues with C bitfield structs.
-    const vterm_wrapper = b.addLibrary(.{
-        .name = "vterm-wrapper",
-        .linkage = .static,
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = c_optimize,
-        }),
-    });
-    vterm_wrapper.root_module.link_libc = true;
-    vterm_wrapper.root_module.addIncludePath(b.path("vendor/libvterm/include"));
-    vterm_wrapper.root_module.addIncludePath(b.path("src"));
-    vterm_wrapper.root_module.addCSourceFile(.{
-        .file = b.path("src/vterm_wrapper.c"),
-        .flags = &.{"-std=c99"},
-    });
-
     // Main executable
     const exe = b.addExecutable(.{
         .name = "minga-renderer",
@@ -159,11 +110,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("build_options", build_options.createModule());
     exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
-    exe.root_module.addIncludePath(b.path("vendor/libvterm/include"));
-    exe.root_module.addIncludePath(b.path("src"));
     exe.linkLibrary(ts_lib);
-    exe.linkLibrary(vterm_lib);
-    exe.linkLibrary(vterm_wrapper);
     for (grammar_libs) |gl| exe.linkLibrary(gl);
 
     // GUI backend: compile Swift, link AppKit/Foundation frameworks.
@@ -193,11 +140,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
     tests.root_module.addImport("build_options", build_options.createModule());
     tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
-    tests.root_module.addIncludePath(b.path("vendor/libvterm/include"));
-    tests.root_module.addIncludePath(b.path("src"));
     tests.linkLibrary(ts_lib);
-    tests.linkLibrary(vterm_lib);
-    tests.linkLibrary(vterm_wrapper);
     for (grammar_libs) |gl| tests.linkLibrary(gl);
 
     if (backend == .gui) {

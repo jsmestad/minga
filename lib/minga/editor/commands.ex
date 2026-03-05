@@ -33,7 +33,6 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
   alias Minga.Editor.Commands.Search
-  alias Minga.Editor.Commands.Terminal
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -280,10 +279,6 @@ defmodule Minga.Editor.Commands do
   def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
   def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
-
-  # ── Terminal ──────────────────────────────────────────────────────────────
-
-  def execute(state, :toggle_terminal), do: Terminal.execute(state, :toggle_terminal)
 
   # ── Config reload ────────────────────────────────────────────────────────
 
