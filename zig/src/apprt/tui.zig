@@ -221,8 +221,7 @@ pub const TuiRuntime = struct {
             .{ .fd = -1, .events = std.posix.POLL.IN, .revents = 0 },
         };
 
-        // Track C-\ C-n escape sequence: saw_ctrl_backslash
-        var saw_ctrl_backslash = false;
+
 
         main_loop: while (true) {
             if (g_quit.load(.acquire)) break :main_loop;
@@ -356,26 +355,18 @@ pub const TuiRuntime = struct {
                         if (self.terminal_focused and self.term != null and self.term.?.alive) {
                             switch (event) {
                                 .key_press => |key| {
-                                    // Check for C-\ C-n escape sequence
-                                    if (saw_ctrl_backslash) {
-                                        saw_ctrl_backslash = false;
-                                        if (key.codepoint == 'n' and key.mods.ctrl) {
-                                            // C-\ C-n: unfocus terminal
-                                            self.terminal_focused = false;
-                                            var kbuf: [6]u8 = undefined;
-                                            const klen = protocol.encodeKeyPress(&kbuf, 27, 0) catch 0;
-                                            if (klen > 0) {
-                                                protocol.writeMessage(stdout, kbuf[0..klen]) catch {};
-                                                stdout.flush() catch {};
-                                            }
-                                            continue;
+                                    // ESC returns focus to the editor (Doom Emacs convention).
+                                    // Vaxis only reports standalone Escape here; arrow keys
+                                    // and other escape sequences are already parsed into
+                                    // their own key events.
+                                    if (key.codepoint == vaxis.Key.escape) {
+                                        self.terminal_focused = false;
+                                        var kbuf: [6]u8 = undefined;
+                                        const klen = protocol.encodeKeyPress(&kbuf, 27, 0) catch 0;
+                                        if (klen > 0) {
+                                            protocol.writeMessage(stdout, kbuf[0..klen]) catch {};
+                                            stdout.flush() catch {};
                                         }
-                                        // Not C-n, forward the pending C-\ and this key
-                                        self.term.?.writeInput(&[_]u8{0x1C}) catch {};
-                                    }
-
-                                    if (key.codepoint == '\\' and key.mods.ctrl) {
-                                        saw_ctrl_backslash = true;
                                         continue;
                                     }
 

@@ -91,7 +91,7 @@ defmodule Minga.Editor.Commands.Terminal do
         },
         terminal: terminal,
         mode: :terminal,
-        status_msg: "TERMINAL (C-\\ C-n to return)"
+        status_msg: "TERMINAL (ESC to return)"
     }
 
     resize_windows(state)
@@ -147,7 +147,7 @@ defmodule Minga.Editor.Commands.Terminal do
       state
       | terminal: terminal,
         mode: :terminal,
-        status_msg: "TERMINAL (C-\\ C-n to return)"
+        status_msg: "TERMINAL (ESC to return)"
     }
   end
 
