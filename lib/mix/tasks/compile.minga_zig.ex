@@ -12,15 +12,12 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @zig_dir "zig"
   @priv_dir "priv"
   @renderer_name "minga-renderer"
-  @renderer_gui_name "minga-renderer-gui"
 
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
   def run(_opts) do
     if File.dir?(@zig_dir) do
-      with {:ok, []} <- compile_zig_backend("tui", @renderer_name) do
-        compile_zig_gui()
-      end
+      compile_zig_backend("tui", @renderer_name)
     else
       {:ok, []}
     end
@@ -44,25 +41,6 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end
   end
 
-  # Build the GUI backend if on macOS (requires AppKit/Swift).
-  # Failures are warnings, not errors — GUI is optional.
-  @spec compile_zig_gui() :: {:ok, []} | {:error, []}
-  defp compile_zig_gui do
-    case :os.type() do
-      {:unix, :darwin} ->
-        case compile_zig_backend("gui", @renderer_gui_name) do
-          {:ok, []} ->
-            {:ok, []}
-
-          {:error, _} ->
-            Mix.shell().info("GUI backend failed to compile (optional, continuing)")
-            {:ok, []}
-        end
-
-      _ ->
-        {:ok, []}
-    end
-  end
 
   @spec copy_to_priv(String.t(), String.t()) :: :ok
   defp copy_to_priv(src_name, dest_name) do
