@@ -249,18 +249,20 @@ defmodule Minga.Port.Protocol do
 
   # ── Encoding: terminal commands (BEAM → Zig) ──
 
-  @doc "Encodes an open_terminal command."
+  @doc "Encodes an open_terminal command with theme colors for default fg/bg."
   @spec encode_open_terminal(
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: binary()
-  def encode_open_terminal(shell, rows, cols, row_offset, col_offset)
+  def encode_open_terminal(shell, rows, cols, row_offset, col_offset, fg_color, bg_color)
       when is_binary(shell) and is_integer(rows) and is_integer(cols) do
     <<@op_open_terminal, byte_size(shell)::16, shell::binary, rows::16, cols::16, row_offset::16,
-      col_offset::16>>
+      col_offset::16, fg_color::24, bg_color::24>>
   end
 
   @doc "Encodes a close_terminal command."

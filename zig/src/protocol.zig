@@ -124,6 +124,8 @@ pub const OpenTerminal = struct {
     cols: u16,
     row_offset: u16,
     col_offset: u16,
+    fg_color: u24,
+    bg_color: u24,
 };
 
 pub const ResizeTerminal = struct {
@@ -370,10 +372,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             } };
         },
         OP_OPEN_TERMINAL => {
-            // shell_len:2, shell, rows:2, cols:2, row_offset:2, col_offset:2
+            // shell_len:2, shell, rows:2, cols:2, row_offset:2, col_offset:2, fg:3, bg:3
             if (rest.len < 2) return error.Malformed;
             const shell_len = std.mem.readInt(u16, rest[0..2], .big);
-            if (rest.len < 2 + shell_len + 8) return error.Malformed;
+            if (rest.len < 2 + shell_len + 14) return error.Malformed;
             const shell = rest[2 .. 2 + shell_len];
             const off = 2 + shell_len;
             return .{ .open_terminal = .{
@@ -382,6 +384,8 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .cols = std.mem.readInt(u16, rest[off + 2 ..][0..2], .big),
                 .row_offset = std.mem.readInt(u16, rest[off + 4 ..][0..2], .big),
                 .col_offset = std.mem.readInt(u16, rest[off + 6 ..][0..2], .big),
+                .fg_color = readU24(rest[off + 8 ..][0..3]),
+                .bg_color = readU24(rest[off + 11 ..][0..3]),
             } };
         },
         OP_CLOSE_TERMINAL => return .close_terminal,
@@ -466,7 +470,7 @@ pub fn commandSize(payload: []const u8) usize {
         OP_OPEN_TERMINAL => blk: {
             if (payload.len < 3) break :blk payload.len;
             const shell_len = std.mem.readInt(u16, payload[1..3], .big);
-            break :blk 3 + shell_len + 8; // opcode + shell_len:2 + shell + rows:2 + cols:2 + row_off:2 + col_off:2
+            break :blk 3 + shell_len + 14; // opcode + shell_len:2 + shell + rows:2 + cols:2 + row_off:2 + col_off:2 + fg:3 + bg:3
         },
         OP_CLOSE_TERMINAL => 1,
         OP_RESIZE_TERMINAL => 9, // opcode + rows:2 + cols:2 + row_off:2 + col_off:2

@@ -3,18 +3,20 @@ defmodule Minga.Port.Protocol.TerminalTest do
 
   alias Minga.Port.Protocol
 
-  describe "encode_open_terminal/5" do
-    test "encodes shell path and dimensions" do
-      cmd = Protocol.encode_open_terminal("/bin/zsh", 24, 80, 10, 0)
+  describe "encode_open_terminal/7" do
+    test "encodes shell path, dimensions, and theme colors" do
+      cmd = Protocol.encode_open_terminal("/bin/zsh", 24, 80, 10, 0, 0xBBC2CF, 0x282C34)
 
       assert <<0x40, shell_len::16, shell::binary-size(shell_len), rows::16, cols::16,
-               row_off::16, col_off::16>> = cmd
+               row_off::16, col_off::16, fg::24, bg::24>> = cmd
 
       assert shell == "/bin/zsh"
       assert rows == 24
       assert cols == 80
       assert row_off == 10
       assert col_off == 0
+      assert fg == 0xBBC2CF
+      assert bg == 0x282C34
     end
   end
 

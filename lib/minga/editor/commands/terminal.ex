@@ -73,8 +73,22 @@ defmodule Minga.Editor.Commands.Terminal do
 
     terminal = Terminal.open(terminal, rows, cols, row_offset, col_offset, new_id)
 
-    # Send the open_terminal command to Zig
-    cmd = Protocol.encode_open_terminal(terminal.shell, rows, cols, row_offset, col_offset)
+    # Send the open_terminal command to Zig with theme colors
+    theme = state.theme
+    fg_color = theme.editor.fg
+    bg_color = theme.editor.bg
+
+    cmd =
+      Protocol.encode_open_terminal(
+        terminal.shell,
+        rows,
+        cols,
+        row_offset,
+        col_offset,
+        fg_color,
+        bg_color
+      )
+
     Manager.send_commands(state.port_manager, [cmd])
 
     # Resize existing windows to account for the new split

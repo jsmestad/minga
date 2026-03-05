@@ -356,9 +356,6 @@ pub const TuiRuntime = struct {
                             switch (event) {
                                 .key_press => |key| {
                                     // ESC returns focus to the editor (Doom Emacs convention).
-                                    // Vaxis only reports standalone Escape here; arrow keys
-                                    // and other escape sequences are already parsed into
-                                    // their own key events.
                                     if (key.codepoint == vaxis.Key.escape) {
                                         self.terminal_focused = false;
                                         var kbuf: [6]u8 = undefined;
@@ -418,6 +415,8 @@ pub const TuiRuntime = struct {
                     ot.cols,
                     ot.row_offset,
                     ot.col_offset,
+                    ot.fg_color,
+                    ot.bg_color,
                 ) catch |err| {
                     std.log.err("Failed to open terminal: {}", .{err});
                     // Send terminal_exited immediately

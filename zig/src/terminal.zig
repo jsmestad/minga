@@ -47,7 +47,7 @@ pub const Terminal = struct {
     alive: bool,
 
     /// Spawns a shell attached to a PTY and initializes libvterm.
-    pub fn init(shell: [*:0]const u8, rows: u16, cols: u16, row_offset: u16, col_offset: u16) !Terminal {
+    pub fn init(shell: [*:0]const u8, rows: u16, cols: u16, row_offset: u16, col_offset: u16, fg_color: u24, bg_color: u24) !Terminal {
         var ws: c.struct_winsize = .{
             .ws_row = rows,
             .ws_col = cols,
@@ -71,6 +71,17 @@ pub const Terminal = struct {
         const vt = c.minga_vterm_new(@intCast(rows), @intCast(cols));
         if (vt == null) return error.VTermInitFailed;
         c.minga_vterm_set_utf8(vt, 1);
+
+        // Set default terminal colors from the editor theme.
+        c.minga_vterm_set_default_colors(
+            vt,
+            @intCast((fg_color >> 16) & 0xFF),
+            @intCast((fg_color >> 8) & 0xFF),
+            @intCast(fg_color & 0xFF),
+            @intCast((bg_color >> 16) & 0xFF),
+            @intCast((bg_color >> 8) & 0xFF),
+            @intCast(bg_color & 0xFF),
+        );
 
         const screen = c.minga_vterm_obtain_screen(vt);
         if (screen == null) return error.VTermScreenFailed;

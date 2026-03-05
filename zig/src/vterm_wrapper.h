@@ -56,4 +56,9 @@ int minga_vterm_screen_get_cell(MingaVTermScreen screen, int row, int col, Minga
 /// Get the cursor position. Returns 1 if cursor is visible.
 int minga_vterm_get_cursor(MingaVTermScreen screen, int *row, int *col);
 
+/// Set the default foreground and background colors.
+void minga_vterm_set_default_colors(MingaVTerm vt,
+    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
+    uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
+
 #endif

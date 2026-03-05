@@ -53,28 +53,35 @@ int minga_vterm_screen_get_cell(MingaVTermScreen screen, int row, int col, Minga
     out->strike = cell.attrs.strike;
     out->blink = cell.attrs.blink;
 
-    // Extract colors
-    if (VTERM_COLOR_IS_RGB(&cell.fg)) {
-        out->fg_is_rgb = 1;
-        out->fg_red = cell.fg.rgb.red;
-        out->fg_green = cell.fg.rgb.green;
-        out->fg_blue = cell.fg.rgb.blue;
-    } else {
-        out->fg_is_rgb = 0;
-        out->fg_red = out->fg_green = out->fg_blue = 0;
-    }
+    // Resolve all color types (default, indexed, RGB) to RGB values.
+    // vterm_screen_convert_color_to_rgb handles indexed-to-RGB lookup
+    // and leaves RGB colors unchanged.
+    VTermColor fg = cell.fg;
+    VTermColor bg = cell.bg;
+    vterm_screen_convert_color_to_rgb((VTermScreen *)screen, &fg);
+    vterm_screen_convert_color_to_rgb((VTermScreen *)screen, &bg);
 
-    if (VTERM_COLOR_IS_RGB(&cell.bg)) {
-        out->bg_is_rgb = 1;
-        out->bg_red = cell.bg.rgb.red;
-        out->bg_green = cell.bg.rgb.green;
-        out->bg_blue = cell.bg.rgb.blue;
-    } else {
-        out->bg_is_rgb = 0;
-        out->bg_red = out->bg_green = out->bg_blue = 0;
-    }
+    out->fg_is_rgb = 1;
+    out->fg_red = fg.rgb.red;
+    out->fg_green = fg.rgb.green;
+    out->fg_blue = fg.rgb.blue;
+
+    out->bg_is_rgb = 1;
+    out->bg_red = bg.rgb.red;
+    out->bg_green = bg.rgb.green;
+    out->bg_blue = bg.rgb.blue;
 
     return 1;
+}
+
+void minga_vterm_set_default_colors(MingaVTerm vt,
+    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
+    uint8_t bg_r, uint8_t bg_g, uint8_t bg_b) {
+    VTermColor fg, bg;
+    vterm_color_rgb(&fg, fg_r, fg_g, fg_b);
+    vterm_color_rgb(&bg, bg_r, bg_g, bg_b);
+    vterm_state_set_default_colors(
+        vterm_obtain_state((VTerm *)vt), &fg, &bg);
 }
 
 int minga_vterm_get_cursor(MingaVTermScreen screen, int *row, int *col) {
