@@ -162,6 +162,8 @@ pub const TuiRuntime = struct {
         self.surface = .{ .vx = &self.vx, .tty_writer = self.tty.writer() };
         self.rend = renderer_mod.Renderer(VaxisSurface).init(&self.surface, alloc);
         self.hl = try highlighter_mod.Highlighter.init(alloc);
+        self.term = null;
+        self.terminal_focused = false;
 
         return self;
     }
@@ -320,52 +322,10 @@ pub const TuiRuntime = struct {
                 const n = try std.posix.read(self.tty.fd, tty_read_buf[tty_read_start..]);
                 if (n == 0) break :main_loop;
 
-                // When terminal is focused, forward raw bytes to PTY
-                // except for the C-\ C-n escape sequence.
-                if (self.terminal_focused and self.term != null and self.term.?.alive) {
-                    var i: usize = 0;
-                    var flush_start: usize = 0;
-                    while (i < n) : (i += 1) {
-                        if (saw_ctrl_backslash) {
-                            saw_ctrl_backslash = false;
-                            // C-n = 0x0E
-                            if (tty_read_buf[i] == 0x0E) {
-                                // C-\ C-n detected: flush preceding bytes, then unfocus
-                                if (i > flush_start + 1) {
-                                    // Write bytes before the C-\ (excluding C-\ itself)
-                                    self.term.?.writeInput(tty_read_buf[flush_start .. i - 1]) catch {};
-                                }
-                                flush_start = i + 1;
-                                self.terminal_focused = false;
-                                // Send a key event to Elixir to signal terminal unfocus
-                                // We use a synthetic "escape" key (codepoint 27) with no mods
-                                var kbuf: [6]u8 = undefined;
-                                const klen = protocol.encodeKeyPress(&kbuf, 27, 0) catch 0;
-                                if (klen > 0) {
-                                    protocol.writeMessage(stdout, kbuf[0..klen]) catch {};
-                                    stdout.flush() catch {};
-                                }
-                                break;
-                            }
-                            // Not C-n after C-\, forward both bytes
-                        }
-                        // C-\ = 0x1C
-                        if (tty_read_buf[i] == 0x1C) {
-                            saw_ctrl_backslash = true;
-                            // Flush bytes before C-\
-                            if (i > flush_start) {
-                                self.term.?.writeInput(tty_read_buf[flush_start..i]) catch {};
-                            }
-                            flush_start = i; // will include C-\ if not followed by C-n
-                            continue;
-                        }
-                    }
-                    // Flush remaining bytes
-                    if (flush_start < n and self.terminal_focused) {
-                        self.term.?.writeInput(tty_read_buf[flush_start..n]) catch {};
-                    }
-                } else {
-                    // Normal mode: parse key events and send to Elixir
+                // Always parse through vaxis. In terminal mode, key events
+                // are converted to bytes and sent to the PTY. Mouse events
+                // are always handled by the editor (never forwarded to PTY).
+                {
                     var seq_start: usize = 0;
                     tty_parse_loop: while (seq_start < n) {
                         const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
@@ -379,9 +339,52 @@ pub const TuiRuntime = struct {
                         seq_start += result.n;
 
                         const event = result.event orelse continue;
-                        handleTtyEvent(&self.vx, event, stdout) catch |err| {
-                            std.log.warn("tty event error: {}", .{err});
-                        };
+
+                        if (self.terminal_focused and self.term != null and self.term.?.alive) {
+                            switch (event) {
+                                .key_press => |key| {
+                                    // Check for C-\ C-n escape sequence
+                                    if (saw_ctrl_backslash) {
+                                        saw_ctrl_backslash = false;
+                                        if (key.codepoint == 'n' and key.mods.ctrl) {
+                                            // C-\ C-n: unfocus terminal
+                                            self.terminal_focused = false;
+                                            var kbuf: [6]u8 = undefined;
+                                            const klen = protocol.encodeKeyPress(&kbuf, 27, 0) catch 0;
+                                            if (klen > 0) {
+                                                protocol.writeMessage(stdout, kbuf[0..klen]) catch {};
+                                                stdout.flush() catch {};
+                                            }
+                                            continue;
+                                        }
+                                        // Not C-n, forward the pending C-\ and this key
+                                        self.term.?.writeInput(&[_]u8{0x1C}) catch {};
+                                    }
+
+                                    if (key.codepoint == '\\' and key.mods.ctrl) {
+                                        saw_ctrl_backslash = true;
+                                        continue;
+                                    }
+
+                                    // Convert key event to bytes and send to PTY
+                                    var input_buf: [16]u8 = undefined;
+                                    const input_len = keyToBytes(key, &input_buf);
+                                    if (input_len > 0) {
+                                        self.term.?.writeInput(input_buf[0..input_len]) catch {};
+                                    }
+                                },
+                                // Mouse events and capabilities always go to editor
+                                else => {
+                                    handleTtyEvent(&self.vx, event, stdout) catch |err| {
+                                        std.log.warn("tty event error: {}", .{err});
+                                    };
+                                },
+                            }
+                        } else {
+                            handleTtyEvent(&self.vx, event, stdout) catch |err| {
+                                std.log.warn("tty event error: {}", .{err});
+                            };
+                        }
                     }
                 }
             }
@@ -392,11 +395,12 @@ pub const TuiRuntime = struct {
     fn handleTerminalCommand(self: *TuiRuntime, cmd: protocol.RenderCommand, stdout: *std.Io.Writer) !void {
         switch (cmd) {
             .open_terminal => |ot| {
-                // Close existing terminal if any
                 std.log.info("open_terminal: shell={s} rows={d} cols={d}", .{ ot.shell, ot.rows, ot.cols });
+                // Close existing terminal if any
                 if (self.term) |*t| {
-                    std.log.info("open_terminal: closing existing terminal", .{});
+                    std.log.info("open_terminal: closing existing terminal (alive={}, fd={d})", .{ t.alive, t.pty_fd });
                     t.deinit();
+                    self.term = null;
                 }
 
                 // Need a null-terminated shell path for execvp
@@ -561,6 +565,105 @@ fn installSignalHandlers() void {
     };
     std.posix.sigaction(std.posix.SIG.TERM, &quit_act, null);
     std.posix.sigaction(std.posix.SIG.INT, &quit_act, null);
+}
+
+/// Converts a vaxis key event to bytes suitable for writing to a PTY.
+/// Returns the number of bytes written to `buf`.
+fn keyToBytes(key: vaxis.Key, buf: *[16]u8) usize {
+    const cp = key.codepoint;
+
+    // Special keys (arrows, function keys, etc.) use codepoints >= 57348
+    // Tab/Enter/Escape/Backspace use their ASCII values and are handled
+    // by specialKeyToBytes too.
+    if (cp >= 57348 or cp == vaxis.Key.escape or cp == vaxis.Key.enter or
+        cp == vaxis.Key.tab or cp == vaxis.Key.backspace)
+    {
+        return specialKeyToBytes(key, buf);
+    }
+
+    // Ctrl+key → control code
+    if (key.mods.ctrl and !key.mods.alt) {
+        if (cp >= 'a' and cp <= 'z') {
+            buf[0] = @intCast(cp - 'a' + 1);
+            return 1;
+        }
+        if (cp >= 'A' and cp <= 'Z') {
+            buf[0] = @intCast(cp - 'A' + 1);
+            return 1;
+        }
+        // Ctrl+[ = Escape, Ctrl+] = 0x1D, etc.
+        if (cp == '[') { buf[0] = 0x1B; return 1; }
+        if (cp == ']') { buf[0] = 0x1D; return 1; }
+        if (cp == '\\') { buf[0] = 0x1C; return 1; }
+        if (cp == '@') { buf[0] = 0x00; return 1; }
+        if (cp == '^') { buf[0] = 0x1E; return 1; }
+        if (cp == '_') { buf[0] = 0x1F; return 1; }
+    }
+
+    // Alt+key → ESC prefix + key
+    if (key.mods.alt) {
+        buf[0] = 0x1B;
+        if (cp < 0x80) {
+            if (key.mods.ctrl and cp >= 'a' and cp <= 'z') {
+                buf[1] = @intCast(cp - 'a' + 1);
+            } else {
+                buf[1] = @intCast(cp);
+            }
+            return 2;
+        }
+        // Alt + unicode: ESC + UTF-8
+        const n = std.unicode.utf8Encode(@intCast(cp), buf[1..]) catch return 0;
+        return 1 + n;
+    }
+
+    // Regular character → UTF-8
+    const n = std.unicode.utf8Encode(@intCast(cp), buf[0..]) catch return 0;
+    return n;
+}
+
+/// Encodes special keys (arrows, function keys, etc.) as ANSI escape sequences.
+fn specialKeyToBytes(key: vaxis.Key, buf: *[16]u8) usize {
+    // Map vaxis special key codepoints to escape sequences.
+    // vaxis uses codepoints from its Key enum for special keys.
+    const Seq = struct { seq: []const u8 };
+    const mapping: ?Seq = switch (key.codepoint) {
+        vaxis.Key.escape => .{ .seq = "\x1B" },
+        vaxis.Key.enter => .{ .seq = "\r" },
+        vaxis.Key.tab => .{ .seq = "\t" },
+        vaxis.Key.backspace => .{ .seq = "\x7F" },
+        vaxis.Key.delete => .{ .seq = "\x1B[3~" },
+        vaxis.Key.up => .{ .seq = "\x1B[A" },
+        vaxis.Key.down => .{ .seq = "\x1B[B" },
+        vaxis.Key.right => .{ .seq = "\x1B[C" },
+        vaxis.Key.left => .{ .seq = "\x1B[D" },
+        vaxis.Key.home => .{ .seq = "\x1B[H" },
+        vaxis.Key.end => .{ .seq = "\x1B[F" },
+        vaxis.Key.page_up => .{ .seq = "\x1B[5~" },
+        vaxis.Key.page_down => .{ .seq = "\x1B[6~" },
+        vaxis.Key.insert => .{ .seq = "\x1B[2~" },
+        vaxis.Key.f1 => .{ .seq = "\x1BOP" },
+        vaxis.Key.f2 => .{ .seq = "\x1BOQ" },
+        vaxis.Key.f3 => .{ .seq = "\x1BOR" },
+        vaxis.Key.f4 => .{ .seq = "\x1BOS" },
+        vaxis.Key.f5 => .{ .seq = "\x1B[15~" },
+        vaxis.Key.f6 => .{ .seq = "\x1B[17~" },
+        vaxis.Key.f7 => .{ .seq = "\x1B[18~" },
+        vaxis.Key.f8 => .{ .seq = "\x1B[19~" },
+        vaxis.Key.f9 => .{ .seq = "\x1B[20~" },
+        vaxis.Key.f10 => .{ .seq = "\x1B[21~" },
+        vaxis.Key.f11 => .{ .seq = "\x1B[23~" },
+        vaxis.Key.f12 => .{ .seq = "\x1B[24~" },
+        else => null,
+    };
+
+    if (mapping) |m| {
+        @memcpy(buf[0..m.seq.len], m.seq);
+        return m.seq.len;
+    }
+
+    // Unknown special key — try UTF-8 encoding the codepoint
+    const n = std.unicode.utf8Encode(@intCast(key.codepoint), buf[0..]) catch return 0;
+    return n;
 }
 
 /// Process a parsed terminal event.
