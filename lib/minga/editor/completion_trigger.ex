@@ -1,6 +1,6 @@
-defmodule Minga.Editor.CompletionBridge do
+defmodule Minga.Editor.CompletionTrigger do
   @moduledoc """
-  Bridges the Editor with LSP completion.
+  Manages LSP completion request lifecycle.
 
   Manages the lifecycle of completion requests: deciding when to trigger,
   sending async requests to the LSP client, handling responses, and
@@ -22,7 +22,7 @@ defmodule Minga.Editor.CompletionBridge do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.DocumentSync
   alias Minga.LSP.Client
 
   require Logger
@@ -53,7 +53,7 @@ defmodule Minga.Editor.CompletionBridge do
   @spec maybe_trigger(t(), String.t(), pid(), map()) ::
           {t(), Completion.t() | nil}
   def maybe_trigger(bridge, char, buffer_pid, lsp_state) do
-    clients = LspBridge.clients_for_buffer(lsp_state, buffer_pid)
+    clients = DocumentSync.clients_for_buffer(lsp_state, buffer_pid)
 
     case clients do
       [] ->
@@ -148,7 +148,7 @@ defmodule Minga.Editor.CompletionBridge do
         {bridge, nil}
 
       path ->
-        uri = LspBridge.path_to_uri(path)
+        uri = DocumentSync.path_to_uri(path)
         {line, col} = get_cursor_position(buffer_pid)
 
         params = %{

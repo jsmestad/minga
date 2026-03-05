@@ -1,6 +1,6 @@
-defmodule Minga.Editor.HighlightBridge do
+defmodule Minga.Editor.HighlightSync do
   @moduledoc """
-  Bridges the editor with tree-sitter highlighting via the Zig port.
+  Synchronizes syntax highlighting between the editor and the Zig tree-sitter parser.
 
   Handles sending language/query/parse commands to Zig and processing
   highlight response events back into editor state.

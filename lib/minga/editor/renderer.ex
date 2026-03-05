@@ -19,7 +19,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Buffer.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -689,7 +689,7 @@ defmodule Minga.Editor.Renderer do
   defp diagnostic_signs_for_buffer(%{buf: %{buffer: buf}}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
+      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
     end
   end
 
@@ -699,7 +699,7 @@ defmodule Minga.Editor.Renderer do
   defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(LspBridge.path_to_uri(path))
+      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
     end
   end
 

@@ -499,7 +499,7 @@ defmodule Minga.LSP.Client do
     # For position conversion we'd need the line text. For now, when using
     # UTF-8 encoding the character offset equals byte offset. For UTF-16,
     # we store the raw character offset — accurate conversion requires
-    # line text which will come from the buffer in the LspBridge integration.
+    # line text which will come from the buffer in the DocumentSync integration.
     start_line = Map.get(start_pos, "line", 0)
     start_col = Map.get(start_pos, "character", 0)
     end_line = Map.get(end_pos, "line", 0)

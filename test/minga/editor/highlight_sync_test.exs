@@ -1,7 +1,7 @@
-defmodule Minga.Editor.HighlightBridgeTest do
+defmodule Minga.Editor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.HighlightBridge
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Mode
@@ -21,7 +21,7 @@ defmodule Minga.Editor.HighlightBridgeTest do
     test "stores capture names in highlight state" do
       state = base_state()
       names = ["keyword", "string", "comment"]
-      new_state = HighlightBridge.handle_names(state, names)
+      new_state = HighlightSync.handle_names(state, names)
 
       assert new_state.highlight.capture_names == names
     end
@@ -29,8 +29,8 @@ defmodule Minga.Editor.HighlightBridgeTest do
     test "replaces previous capture names" do
       state =
         base_state()
-        |> HighlightBridge.handle_names(["old"])
-        |> HighlightBridge.handle_names(["new1", "new2"])
+        |> HighlightSync.handle_names(["old"])
+        |> HighlightSync.handle_names(["new1", "new2"])
 
       assert state.highlight.capture_names == ["new1", "new2"]
     end
@@ -45,7 +45,7 @@ defmodule Minga.Editor.HighlightBridgeTest do
 
       state =
         base_state()
-        |> HighlightBridge.handle_spans(1, spans)
+        |> HighlightSync.handle_spans(1, spans)
 
       assert state.highlight.version == 1
       assert state.highlight.spans == spans
@@ -57,8 +57,8 @@ defmodule Minga.Editor.HighlightBridgeTest do
 
       state =
         base_state()
-        |> HighlightBridge.handle_spans(5, spans1)
-        |> HighlightBridge.handle_spans(3, spans2)
+        |> HighlightSync.handle_spans(5, spans1)
+        |> HighlightSync.handle_spans(3, spans2)
 
       assert state.highlight.version == 5
       assert state.highlight.spans == spans1
@@ -70,8 +70,8 @@ defmodule Minga.Editor.HighlightBridgeTest do
 
       state =
         base_state()
-        |> HighlightBridge.handle_spans(5, spans1)
-        |> HighlightBridge.handle_spans(5, spans2)
+        |> HighlightSync.handle_spans(5, spans1)
+        |> HighlightSync.handle_spans(5, spans2)
 
       assert state.highlight.spans == spans2
     end
@@ -80,20 +80,20 @@ defmodule Minga.Editor.HighlightBridgeTest do
   describe "setup_for_buffer/1" do
     test "returns state unchanged when no buffer" do
       state = base_state()
-      assert HighlightBridge.setup_for_buffer(state) == state
+      assert HighlightSync.setup_for_buffer(state) == state
     end
   end
 
   describe "request_reparse/1" do
     test "returns state unchanged when no buffer" do
       state = base_state()
-      assert HighlightBridge.request_reparse(state) == state
+      assert HighlightSync.request_reparse(state) == state
     end
 
     test "returns state unchanged when no highlighting active" do
       state = base_state()
       assert state.highlight.capture_names == []
-      assert HighlightBridge.request_reparse(state) == state
+      assert HighlightSync.request_reparse(state) == state
     end
   end
 end

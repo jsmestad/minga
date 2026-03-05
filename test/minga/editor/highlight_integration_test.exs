@@ -9,7 +9,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   use Minga.Test.EditorCase, async: false
 
   alias Minga.Editor
-  alias Minga.Editor.HighlightBridge
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Highlight
@@ -301,8 +301,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "handle_names then handle_spans builds complete state" do
       state =
         base_state()
-        |> HighlightBridge.handle_names(["keyword", "string", "comment"])
-        |> HighlightBridge.handle_spans(1, [
+        |> HighlightSync.handle_names(["keyword", "string", "comment"])
+        |> HighlightSync.handle_spans(1, [
           %{start_byte: 0, end_byte: 9, capture_id: 0},
           %{start_byte: 10, end_byte: 15, capture_id: 1}
         ])
@@ -315,9 +315,9 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "receiving new names clears old names without affecting spans" do
       state =
         base_state()
-        |> HighlightBridge.handle_names(["keyword"])
-        |> HighlightBridge.handle_spans(1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
-        |> HighlightBridge.handle_names(["new_keyword", "new_string"])
+        |> HighlightSync.handle_names(["keyword"])
+        |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
+        |> HighlightSync.handle_names(["new_keyword", "new_string"])
 
       assert state.highlight.capture_names == ["new_keyword", "new_string"]
       assert length(state.highlight.spans) == 1

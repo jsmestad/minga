@@ -20,9 +20,9 @@ defmodule Minga.Editor do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
-  alias Minga.Editor.CompletionBridge
-  alias Minga.Editor.HighlightBridge
-  alias Minga.Editor.LspBridge
+  alias Minga.Editor.CompletionTrigger
+  alias Minga.Editor.DocumentSync
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
@@ -381,19 +381,19 @@ defmodule Minga.Editor do
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
-    new_state = HighlightBridge.setup_for_buffer(state)
+    new_state = HighlightSync.setup_for_buffer(state)
     {:noreply, new_state}
   end
 
   # ── Highlight events from Zig ────────────────────────────────────────────────
 
   def handle_info({:minga_input, {:highlight_names, names}}, state) do
-    new_state = HighlightBridge.handle_names(state, names)
+    new_state = HighlightSync.handle_names(state, names)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
-    new_state = HighlightBridge.handle_spans(state, version, spans)
+    new_state = HighlightSync.handle_spans(state, version, spans)
 
     # Cache the updated highlights for this buffer
     new_state =
@@ -413,14 +413,14 @@ defmodule Minga.Editor do
 
   # LSP debounced didChange timer fired — flush the change notification
   def handle_info({:lsp_did_change, buffer_pid}, state) do
-    new_lsp = LspBridge.flush_did_change(state.lsp, buffer_pid)
+    new_lsp = DocumentSync.flush_did_change(state.lsp, buffer_pid)
     {:noreply, %{state | lsp: new_lsp}}
   end
 
   # Completion debounce timer fired — send the actual completion request
   def handle_info({:completion_debounce, client, buffer_pid}, state) do
-    new_bridge = CompletionBridge.flush_debounce(state.completion_bridge, client, buffer_pid)
-    {:noreply, %{state | completion_bridge: new_bridge}}
+    new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, client, buffer_pid)
+    {:noreply, %{state | completion_trigger: new_bridge}}
   end
 
   # LSP async response — route completion responses to the completion bridge
@@ -433,9 +433,9 @@ defmodule Minga.Editor do
 
       _ ->
         {new_bridge, completion} =
-          CompletionBridge.handle_response(state.completion_bridge, ref, result, buffer_pid)
+          CompletionTrigger.handle_response(state.completion_trigger, ref, result, buffer_pid)
 
-        new_state = %{state | completion_bridge: new_bridge}
+        new_state = %{state | completion_trigger: new_bridge}
 
         new_state =
           case completion do
@@ -775,7 +775,7 @@ defmodule Minga.Editor do
       end
 
     if content_changed and state.highlight.capture_names != [] do
-      HighlightBridge.request_reparse(state)
+      HighlightSync.request_reparse(state)
     else
       state
     end
@@ -1007,7 +1007,7 @@ defmodule Minga.Editor do
 
   @spec lsp_buffer_opened(state(), pid()) :: state()
   defp lsp_buffer_opened(state, buffer_pid) do
-    new_lsp = LspBridge.on_buffer_open(state.lsp, buffer_pid)
+    new_lsp = DocumentSync.on_buffer_open(state.lsp, buffer_pid)
     %{state | lsp: new_lsp}
   end
 
@@ -1015,7 +1015,7 @@ defmodule Minga.Editor do
   defp lsp_buffer_changed(%{buf: %{buffer: nil}} = state), do: state
 
   defp lsp_buffer_changed(%{buf: %{buffer: buf}} = state) do
-    new_lsp = LspBridge.on_buffer_change(state.lsp, buf)
+    new_lsp = DocumentSync.on_buffer_change(state.lsp, buf)
     %{state | lsp: new_lsp}
   end
 
@@ -1038,7 +1038,7 @@ defmodule Minga.Editor do
       path = BufferServer.file_path(buf)
       if path, do: fire_hook(:after_save, [buf, path])
 
-      new_lsp = LspBridge.on_buffer_save(state.lsp, buf)
+      new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
       %{state | lsp: new_lsp}
     else
       state
@@ -1052,7 +1052,7 @@ defmodule Minga.Editor do
        when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
     # The old buffer was closed — notify LSP if it changed
     if state.buf.buffer != old_buffer do
-      new_lsp = LspBridge.on_buffer_close(state.lsp, old_buffer)
+      new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
       %{state | lsp: new_lsp}
     else
       state
@@ -1225,16 +1225,16 @@ defmodule Minga.Editor do
 
       char ->
         {new_bridge, _comp} =
-          CompletionBridge.maybe_trigger(state.completion_bridge, char, buf, state.lsp)
+          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf, state.lsp)
 
-        %{state | completion_bridge: new_bridge}
+        %{state | completion_trigger: new_bridge}
     end
   end
 
   @spec dismiss_completion(state()) :: state()
   defp dismiss_completion(state) do
-    new_bridge = CompletionBridge.dismiss(state.completion_bridge)
-    %{state | completion: nil, completion_bridge: new_bridge}
+    new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
+    %{state | completion: nil, completion_trigger: new_bridge}
   end
 
   @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
