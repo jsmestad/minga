@@ -37,7 +37,9 @@ defmodule Minga.Config.OptionsTest do
                insert_final_newline: false,
                format_on_save: false,
                formatter: nil,
-               title_format: "{filename} {dirty}({directory}) - Minga"
+               title_format: "{filename} {dirty}({directory}) - Minga",
+               recent_files_limit: 200,
+               persist_recent_files: true
              }
     end
   end

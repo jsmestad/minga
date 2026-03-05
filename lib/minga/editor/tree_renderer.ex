@@ -149,6 +149,11 @@ defmodule Minga.Editor.TreeRenderer do
           pos_integer(),
           Theme.t()
         ) :: [binary()]
+  defp render_blanks(rendered, total, _row_start, _col, _width, _theme)
+       when rendered >= total do
+    []
+  end
+
   defp render_blanks(rendered, total, row_start, col, width, theme) do
     blank = String.duplicate(" ", width)
     style = [fg: theme.tree.fg, bg: theme.tree.bg]

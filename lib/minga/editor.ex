@@ -83,6 +83,14 @@ defmodule Minga.Editor do
     GenServer.cast(server, :render)
   end
 
+  @doc "Log a message to the *Messages* buffer. Used by the custom Logger handler."
+  @spec log_to_messages(String.t(), GenServer.server()) :: :ok
+  def log_to_messages(text, server \\ __MODULE__) do
+    # Use cast (not call) to avoid deadlocking when Logger is invoked from
+    # inside the Editor GenServer itself.
+    GenServer.cast(server, {:log_to_messages, text})
+  end
+
   # ── Server Callbacks ─────────────────────────────────────────────────────────
 
   @impl true
@@ -158,7 +166,19 @@ defmodule Minga.Editor do
       }
     }
 
-    state = log_message(state, "Editor started")
+    # Redirect Logger and stderr to a log file when running with a real TUI.
+    # In headless tests the port_manager is a pid (HeadlessPort), not the
+    # registered PortManager atom, so we skip the redirect to keep ExUnit clean.
+    tui_active? = port_manager == PortManager
+
+    state =
+      if tui_active? do
+        log_path = Minga.LoggerHandler.install()
+        state = log_message(state, "Editor started")
+        log_message(state, "Log file: #{log_path}")
+      else
+        log_message(state, "Editor started")
+      end
 
     # Apply user config options
     state = apply_config_options(state)
@@ -167,6 +187,19 @@ defmodule Minga.Editor do
     Minga.Diagnostics.subscribe()
 
     {:ok, state}
+  end
+
+  @impl true
+  @spec terminate(term(), state()) :: :ok
+  def terminate(_reason, _state) do
+    # Only uninstall if we installed (i.e. real TUI, not headless test).
+    # Check for our handler presence rather than storing state.
+    case :logger.get_handler_config(:minga_messages) do
+      {:ok, _} -> Minga.LoggerHandler.uninstall()
+      _ -> :ok
+    end
+
+    :ok
   end
 
   @impl true
@@ -234,6 +267,10 @@ defmodule Minga.Editor do
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:log_to_messages, text}, state) do
+    {:noreply, log_message(state, text)}
+  end
+
   def handle_cast(:render, state) do
     Renderer.render(state)
     {:noreply, state}
