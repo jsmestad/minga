@@ -179,19 +179,24 @@ defmodule Minga.IntegrationTest do
     end
 
     test "multiple undo steps revert in order" do
-      ctx = start_editor("hello")
+      # Two separate normal-mode delete operations produce two undo entries.
+      # Undo reverts them one at a time.
+      ctx = start_editor("aaa\nbbb\nccc")
 
-      send_keys(ctx, "iab<Esc>")
-      assert buffer_content(ctx) == "abhello"
+      # Delete first line (dd), then delete next line (dd)
+      send_keys(ctx, "dd")
+      assert buffer_content(ctx) == "bbb\nccc"
 
+      send_keys(ctx, "dd")
+      assert buffer_content(ctx) == "ccc"
+
+      # First undo restores "bbb"
       send_key(ctx, ?u)
-      after_one_undo = buffer_content(ctx)
+      assert buffer_content(ctx) == "bbb\nccc"
 
+      # Second undo restores "aaa"
       send_key(ctx, ?u)
-      after_two_undo = buffer_content(ctx)
-
-      assert String.length(after_one_undo) < String.length("abhello")
-      assert String.length(after_two_undo) < String.length(after_one_undo)
+      assert buffer_content(ctx) == "aaa\nbbb\nccc"
     end
   end
 

@@ -68,7 +68,10 @@ defmodule Minga.Editor.Commands.Marks do
 
   def execute(state, :jump_to_last_pos_line), do: state
 
-  def execute(%{buffers: %{active: buf}, last_jump_pos: last_pos} = state, :jump_to_last_pos_exact)
+  def execute(
+        %{buffers: %{active: buf}, last_jump_pos: last_pos} = state,
+        :jump_to_last_pos_exact
+      )
       when is_pid(buf) and not is_nil(last_pos) do
     current_pos = BufferServer.cursor(buf)
     BufferServer.move_to(buf, last_pos)

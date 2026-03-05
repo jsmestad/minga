@@ -37,8 +37,6 @@ defmodule Minga.Buffer.Server do
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
 
-  @max_undo_stack 1000
-
   # ── Client API ──
 
   @doc "Starts a buffer server. Pass `file_path:` to open a file, or `content:` for a scratch buffer."
@@ -90,6 +88,27 @@ defmodule Minga.Buffer.Server do
       server,
       {:apply_text_edit, {start_line, start_col}, {end_line, end_col}, new_text}
     )
+  end
+
+  @typedoc "A single text edit: `{start_pos, end_pos, replacement_text}`."
+  @type text_edit ::
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()},
+           String.t()}
+
+  @doc """
+  Applies multiple text edits in a single GenServer call.
+
+  All edits are applied to the Document sequentially, but only one undo
+  entry is pushed and the version bumps once. Edits should be sorted in
+  reverse document order (last position first) so earlier offsets remain
+  valid as later text is replaced. If edits are not pre-sorted, this
+  function sorts them automatically.
+
+  Used by AI/LSP batch operations to avoid N round-trips and N undo entries.
+  """
+  @spec apply_text_edits(GenServer.server(), [text_edit()]) :: :ok
+  def apply_text_edits(server, edits) when is_list(edits) do
+    GenServer.call(server, {:apply_text_edits, edits})
   end
 
   @doc "Deletes the character before the cursor (backspace)."
@@ -309,6 +328,16 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :redo)
   end
 
+  @doc """
+  Resets the undo coalescing timer so the next mutation starts a fresh
+  undo entry. Call this at undo boundaries like mode transitions (e.g.,
+  leaving insert mode).
+  """
+  @spec break_undo_coalescing(GenServer.server()) :: :ok
+  def break_undo_coalescing(server) do
+    GenServer.call(server, :break_undo_coalescing)
+  end
+
   @doc "Deletes lines [start_line, end_line] inclusive. Cursor lands at the first remaining line."
   @spec delete_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: :ok
   def delete_lines(server, start_line, end_line)
@@ -432,6 +461,33 @@ defmodule Minga.Buffer.Server do
     doc = Document.move_to(state.document, from_pos)
     doc = Document.delete_range(doc, from_pos, to_pos)
     doc = Document.insert_text(doc, new_text)
+
+    {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
+  end
+
+  def handle_call({:apply_text_edits, _edits}, _from, %{read_only: true} = state) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:apply_text_edits, []}, _from, state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:apply_text_edits, edits}, _from, state) do
+    # Sort edits in reverse document order so earlier offsets stay valid
+    # as we apply edits from the end of the document backward.
+    sorted =
+      Enum.sort(edits, fn {from_a, _, _}, {from_b, _, _} ->
+        from_a >= from_b
+      end)
+
+    doc =
+      Enum.reduce(sorted, state.document, fn {from_pos, to_pos, new_text}, doc ->
+        doc
+        |> Document.move_to(from_pos)
+        |> Document.delete_range(from_pos, to_pos)
+        |> Document.insert_text(new_text)
+      end)
 
     {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
   end
@@ -574,7 +630,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:replace_content, new_content}, _from, state) do
-    new_state = push_undo(state, state.document)
+    new_state = push_undo_force(state, state.document)
     new_buf = Document.new(new_content)
     {:reply, :ok, mark_dirty(%{new_state | document: new_buf})}
   end
@@ -780,6 +836,10 @@ defmodule Minga.Buffer.Server do
     end
   end
 
+  def handle_call(:break_undo_coalescing, _from, state) do
+    {:reply, :ok, BufState.break_undo_coalescing(state)}
+  end
+
   # ── Private ──
 
   @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
@@ -816,19 +876,17 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  # Pushes the current document onto the undo stack (capped at @max_undo_stack),
-  # sets the new document, and clears the redo stack.
+  # Delegates to BufState for time-based undo coalescing.
   @spec push_undo(state(), Document.t()) :: state()
-  defp push_undo(state, new_buf) do
-    new_undo =
-      [state.document | state.undo_stack]
-      |> Enum.take(@max_undo_stack)
+  defp push_undo(state, new_buf), do: BufState.push_undo(state, new_buf)
 
-    %{state | document: new_buf, undo_stack: new_undo, redo_stack: []}
-  end
+  # Force-pushes an undo entry, bypassing coalescing. Used for explicit
+  # user actions like :replace_content.
+  @spec push_undo_force(state(), Document.t()) :: state()
+  defp push_undo_force(state, new_buf), do: BufState.push_undo_force(state, new_buf)
 
   @spec mark_dirty(state()) :: state()
-  defp mark_dirty(state), do: %{state | dirty: true, version: state.version + 1}
+  defp mark_dirty(state), do: BufState.mark_dirty(state)
 
   @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}
   defp write_file(file_path, content) do

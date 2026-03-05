@@ -64,7 +64,7 @@ r(MyMotion)
 
 ### 2. Advice system ✅
 
-Emacs's advice system (`advice-add`, `define-advice`) lets you wrap any function with `:before`, `:after`, `:around`, or `:override` behavior.
+Emacs's advice system (`advice-add`, `define-advice`) lets you wrap any function with `:before`, `:after`, `:around`, or `:override` behavior. Minga supports all four phases. Emacs also has conditional combinators (`:before-while`, `:before-until`, `:after-while`, `:after-until`) that depend on nil/non-nil return values; in Minga, use `:around` for those cases since it gives you full control over whether the command executes.
 
 **Elisp:**
 ```elisp
@@ -75,28 +75,36 @@ Emacs's advice system (`advice-add`, `define-advice`) lets you wrap any function
 
 **Elixir:**
 ```elixir
-# In your config.exs
+# :before — transform state before the command
 advise :before, :save, fn state ->
   strip_trailing_whitespace(state)
 end
 
-advise :after, :buffer_open, fn state, _path ->
-  log("Opened: #{buffer_name(state)}")
-  state
+# :around — conditionally skip a command (replaces Emacs :before-while)
+advise :around, :format_buffer, fn execute, state ->
+  errors =
+    state.buffers.active
+    |> Minga.Diagnostics.for_buffer()
+    |> Enum.count(fn d -> d.severity == :error end)
+
+  if errors == 0, do: execute.(state), else: state
 end
 
-advise :around, :format_buffer, fn original_fn, state ->
-  if get_option(state, :auto_format) do
-    original_fn.(state)
-  else
-    state
+# :override — replace a command entirely
+advise :override, :save, fn state ->
+  state = Minga.API.save()
+  case Minga.Buffer.Server.file_path(state.buffers.active) do
+    nil -> state
+    path ->
+      System.cmd("git", ["add", path], stderr_to_stdout: true)
+      %{state | status_msg: "Saved and staged: #{Path.basename(path)}"}
   end
 end
 ```
 
-The implementation is straightforward: the command registry wraps the original function with the advice chain. Because commands are dispatched through GenServers, the wrapping is atomic. You can't hit a half-applied advice state.
+The implementation uses an ETS table with `read_concurrency: true`, so advice lookup adds zero contention to the command dispatch path. This matters when AI agents or macros are issuing hundreds of commands per second. The `wrap/2` function composes all advice for a command into a single function at lookup time: before chain, then the core (possibly overridden and/or around-wrapped), then after chain.
 
-**Where Elixir is stronger:** Advice runs inside a supervised process. If your `:before` advice raises an error, it takes down that command execution, not the editor. The supervisor recovers, you see an error message, and you keep editing. In Emacs, badly written advice can leave the editor in a half-modified, inconsistent state.
+**Where Elixir is stronger:** If your advice function raises an error, it's caught, logged, and skipped. The command still runs, the editor stays up. In Emacs, badly written advice can leave the editor in a half-modified, inconsistent state.
 
 ### 3. Hooks ✅
 

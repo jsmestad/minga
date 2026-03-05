@@ -352,4 +352,94 @@ defmodule Minga.Buffer.ServerTest do
       assert Server.cursor(pid) == {1, 2}
     end
   end
+
+  describe "apply_text_edits/2" do
+    test "applies multiple edits in a single call" do
+      {:ok, pid} = Server.start_link(content: "aaa\nbbb\nccc")
+
+      # Replace "aaa" with "AAA" and "ccc" with "CCC"
+      edits = [
+        {{0, 0}, {0, 2}, "AAA"},
+        {{2, 0}, {2, 2}, "CCC"}
+      ]
+
+      assert :ok = Server.apply_text_edits(pid, edits)
+      assert Server.content(pid) == "AAA\nbbb\nCCC"
+    end
+
+    test "produces a single undo entry for all edits" do
+      {:ok, pid} = Server.start_link(content: "aaa\nbbb\nccc")
+
+      edits = [
+        {{0, 0}, {0, 2}, "AAA"},
+        {{2, 0}, {2, 2}, "CCC"}
+      ]
+
+      Server.apply_text_edits(pid, edits)
+      assert Server.content(pid) == "AAA\nbbb\nCCC"
+
+      # One undo reverts all edits
+      Server.undo(pid)
+      assert Server.content(pid) == "aaa\nbbb\nccc"
+    end
+
+    test "empty edit list is a no-op" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.apply_text_edits(pid, [])
+      assert Server.content(pid) == "hello"
+      refute Server.dirty?(pid)
+    end
+
+    test "returns error on read-only buffer" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert {:error, :read_only} = Server.apply_text_edits(pid, [{{0, 0}, {0, 0}, "X"}])
+    end
+
+    test "auto-sorts edits in reverse document order" do
+      {:ok, pid} = Server.start_link(content: "aaa\nbbb\nccc")
+
+      # Pass edits in forward order; they should be sorted automatically
+      edits = [
+        {{0, 0}, {0, 2}, "AAA"},
+        {{2, 0}, {2, 2}, "CCC"}
+      ]
+
+      Server.apply_text_edits(pid, edits)
+      assert Server.content(pid) == "AAA\nbbb\nCCC"
+    end
+  end
+
+  describe "undo coalescing" do
+    test "rapid edits within coalescing window produce one undo entry" do
+      {:ok, pid} = Server.start_link(content: "hello")
+
+      # Multiple rapid inserts without breaking coalescing
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+      Server.insert_char(pid, "c")
+      assert Server.content(pid) == "abchello"
+
+      # One undo reverts all three
+      Server.undo(pid)
+      assert Server.content(pid) == "hello"
+    end
+
+    test "break_undo_coalescing creates separate undo entries" do
+      {:ok, pid} = Server.start_link(content: "hello")
+
+      Server.insert_char(pid, "a")
+      Server.break_undo_coalescing(pid)
+      Server.insert_char(pid, "b")
+
+      assert Server.content(pid) == "abhello"
+
+      # First undo reverts "b" only
+      Server.undo(pid)
+      assert Server.content(pid) == "ahello"
+
+      # Second undo reverts "a"
+      Server.undo(pid)
+      assert Server.content(pid) == "hello"
+    end
+  end
 end

@@ -233,6 +233,77 @@ Multiple hooks on the same event fire in registration order.
 
 For the hooks API, see [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html).
 
+## Command advice
+
+`advise/3` wraps an existing command with before or after logic. This is similar to Emacs's advice system, but crash-isolated.
+
+Four phases are supported, matching Emacs's advice system:
+
+| Phase | Signature | Behavior |
+|-------|-----------|----------|
+| `:before` | `fn state -> state end` | Transforms state before the command |
+| `:after` | `fn state -> state end` | Transforms state after the command |
+| `:around` | `fn execute, state -> state end` | Receives the original command; decides whether/how to call it |
+| `:override` | `fn state -> state end` | Completely replaces the command |
+
+`:around` is the most powerful. It receives the original command as a function, so you can conditionally skip it, call it multiple times, or wrap it with custom logic:
+
+```elixir
+# Only format if there are no diagnostics errors. If the buffer has
+# errors, formatting often makes things worse.
+advise :around, :format_buffer, fn execute, state ->
+  errors =
+    state.buffers.active
+    |> Minga.Diagnostics.for_buffer()
+    |> Enum.count(fn d -> d.severity == :error end)
+
+  if errors == 0 do
+    execute.(state)
+  else
+    %{state | status_msg: "Format skipped: #{errors} error(s)"}
+  end
+end
+```
+
+`:override` replaces a command entirely. `:before` and `:after` still run around an overridden command, so you can override the core behavior while keeping other advice intact:
+
+```elixir
+# Replace the built-in save with one that also stages the file in git
+advise :override, :save, fn state ->
+  # Run the original save logic
+  state = Minga.API.save()
+
+  # Then auto-stage
+  case Minga.Buffer.Server.file_path(state.buffers.active) do
+    nil -> state
+    path ->
+      System.cmd("git", ["add", path], stderr_to_stdout: true)
+      %{state | status_msg: "Saved and staged: #{Path.basename(path)}"}
+  end
+end
+```
+
+`:before` and `:after` handle simpler cases where you just need to transform state on the way in or out:
+
+```elixir
+# Ensure cursor is at line start before any search, so results
+# are consistent regardless of where you were on the line
+advise :before, :search_project, fn state ->
+  Minga.API.move_to_column(0)
+  state
+end
+```
+
+Multiple advice functions for the same phase and command run in registration order. For `:around`, they nest outward (first registered is outermost). Crashes in any advice are logged and skipped; the editor keeps running.
+
+### When to use advice vs. hooks
+
+**Hooks** (`on/2`) are for fire-and-forget side effects: running an external tool after save, logging, sending notifications. They run asynchronously and can't change editor state.
+
+**Advice** (`advise/3`) is for changing how a command behaves: conditionally skipping it, transforming editor state before or after it runs, or replacing the command entirely. Advice runs synchronously as part of the command, so it can affect what happens next.
+
+For the advice API, see [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html).
+
 ## Error handling
 
 Minga is forgiving about config errors:
@@ -321,7 +392,7 @@ Press `SPC h r` to reload your config without restarting the editor. This:
 
 1. Stops all running extensions
 2. Purges user modules
-3. Resets options, keybindings, hooks, and commands to defaults
+3. Resets options, keybindings, hooks, advice, and commands to defaults
 4. Re-compiles modules, re-evaluates config.exs, .minga.exs, and after.exs
 5. Restarts extensions
 
@@ -483,6 +554,17 @@ on :after_save, fn _buf, path ->
   if String.ends_with?(path, ".ex"), do: System.cmd("mix", ["format", path])
 end
 
+# ── Command advice ───────────────────────────────────────────────────
+# Skip formatting if the buffer has errors
+advise :around, :format_buffer, fn execute, state ->
+  errors =
+    state.buffers.active
+    |> Minga.Diagnostics.for_buffer()
+    |> Enum.count(fn d -> d.severity == :error end)
+
+  if errors == 0, do: execute.(state), else: state
+end
+
 # ── Extensions ───────────────────────────────────────────────────────
 extension :minga_todo, path: "~/code/minga_todo"
 extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --stdin"
@@ -490,10 +572,11 @@ extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --st
 
 ## Further reading
 
-- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html) — the DSL module (`set`, `bind`, `command`, `on`, `for_filetype`)
+- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html) — the DSL module (`set`, `bind`, `command`, `on`, `advise`, `for_filetype`)
 - [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html) — typed option registry with per-filetype overrides
 - [`Minga.Config.Loader`](https://jsmestad.github.io/minga/Minga.Config.Loader.html) — config file discovery and evaluation
 - [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html) — lifecycle hook registry
+- [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html) — before/after command advice
 - [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
 - [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
 - [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) — user-friendly editor API for commands and eval

@@ -25,6 +25,7 @@ defmodule Minga.Config.Loader do
   use Agent
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Config.Advice
   alias Minga.Config.Hooks
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
@@ -124,6 +125,7 @@ defmodule Minga.Config.Loader do
     # Reset all registries to defaults
     Options.reset()
     Hooks.reset()
+    Advice.reset()
     KeymapActive.reset()
     CommandRegistry.reset()
     ExtRegistry.reset()

@@ -511,8 +511,12 @@ defmodule Minga.Editor do
 
     base_state = %{state | mode: new_mode, mode_state: new_mode_state}
 
-    # Fire mode change hook
+    # Fire mode change hook and break undo coalescing so the next edit
+    # in the new mode starts a fresh undo entry.
     if old_mode != new_mode do
+      if base_state.buffers.active,
+        do: BufferServer.break_undo_coalescing(base_state.buffers.active)
+
       fire_hook(:on_mode_change, [old_mode, new_mode])
     end
 
@@ -791,17 +795,16 @@ defmodule Minga.Editor do
     old_buffer = state.buffers.active
     cmd_name = command_name(cmd)
 
-    state = ConfigAdvice.run(:before, cmd_name, state)
-
-    result =
-      case Commands.execute(state, cmd) do
-        {s, {:dot_repeat, count}} -> replay_last_change(s, count)
-        {s, {:replay_macro, register}} -> replay_macro(s, register)
-        {s, {:whichkey_update, wk}} -> %{s | whichkey: wk}
-        s -> s
+    execute = fn s ->
+      case Commands.execute(s, cmd) do
+        {s2, {:dot_repeat, count}} -> replay_last_change(s2, count)
+        {s2, {:replay_macro, register}} -> replay_macro(s2, register)
+        {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
+        s2 -> s2
       end
+    end
 
-    result = ConfigAdvice.run(:after, cmd_name, result)
+    result = ConfigAdvice.wrap(cmd_name, execute).(state)
 
     lsp_after_command(result, cmd, old_buffer)
   end

@@ -152,6 +152,7 @@ Current status and planned features. Updated as development progresses.
 | Custom keybindings in config | ✅ | `bind :normal, "SPC g s", :cmd, "desc"` |
 | Custom commands in config | ✅ | `command :name, "desc" do ... end`, crash-isolated |
 | Lifecycle hooks | ✅ | `on :after_save`, `:after_open`, `:on_mode_change` |
+| Command advice | ✅ | `advise :before, :save, fn state -> ... end` (before/after wrapping) |
 | Per-filetype options | ✅ | `for_filetype :go, tab_width: 8` |
 | User modules | ✅ | `.ex` files in `~/.config/minga/modules/` compiled at startup |
 | Project-local config | ✅ | `.minga.exs` in project root overrides global settings |

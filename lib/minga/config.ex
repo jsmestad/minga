@@ -24,12 +24,18 @@ defmodule Minga.Config do
         Minga.API.message(output)
       end
 
+      # Command advice (skip formatting if buffer has errors)
+      advise :around, :format_buffer, fn execute, state ->
+        if error_free?(state), do: execute.(state), else: state
+      end
+
   ## Available options
 
   See `Minga.Config.Options` for the full list of supported options.
   """
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Config.Advice
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
@@ -91,6 +97,50 @@ defmodule Minga.Config do
     end
 
     :ok
+  end
+
+  @doc """
+  Wraps an existing command with advice.
+
+  Four phases are supported, matching Emacs's advice system:
+
+  * `:before` — `fn state -> state end` — transforms state before the command
+  * `:after` — `fn state -> state end` — transforms state after the command
+  * `:around` — `fn execute, state -> state end` — receives the original command function; full control over whether and how it runs
+  * `:override` — `fn state -> state end` — completely replaces the command
+
+  Multiple advice functions for the same phase and command run in
+  registration order. For `:around`, they nest outward (first registered
+  is outermost). Crashes in advice are logged but don't affect the editor.
+
+  ## Examples
+
+      # Run before save
+      advise :before, :save, fn state ->
+        state
+      end
+
+      # Conditionally skip formatting
+      advise :around, :format_buffer, fn execute, state ->
+        if state.diagnostics_count == 0 do
+          execute.(state)
+        else
+          %{state | status_msg: "Skipping format: has errors"}
+        end
+      end
+
+      # Replace a command entirely
+      advise :override, :save, fn state ->
+        my_custom_save(state)
+      end
+  """
+  @spec advise(Advice.phase(), atom(), function()) :: :ok
+  def advise(phase, command_name, fun)
+      when is_atom(phase) and is_atom(command_name) and is_function(fun) do
+    case Advice.register(phase, command_name, fun) do
+      :ok -> :ok
+      {:error, reason} -> raise ArgumentError, "advise failed: #{reason}"
+    end
   end
 
   @doc """

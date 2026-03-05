@@ -12,6 +12,7 @@ defmodule Minga.Application do
       ├── Minga.Config.Options
       ├── Minga.Keymap.Active
       ├── Minga.Config.Hooks
+      ├── Minga.Config.Advice
       ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
       ├── Minga.Extension.Registry
@@ -32,6 +33,7 @@ defmodule Minga.Application do
       Minga.Config.Options,
       Minga.Keymap.Active,
       Minga.Config.Hooks,
+      Minga.Config.Advice,
       Minga.Config.Loader,
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},

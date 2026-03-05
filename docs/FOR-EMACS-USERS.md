@@ -15,12 +15,12 @@ The extensibility model you love transfers directly. Minga's runtime is the BEAM
 | Emacs concept | Minga equivalent | Status |
 |--------------|-----------------|--------|
 | `defun` / `fset` (redefine anything) | Hot code reloading (swap modules at runtime) | ✅ |
-| `define-advice` (wrap any function) | `advise :before/:after/:around` | Planned |
-| `add-hook` (attach to events) | `on :after_save, :buffer_open, ...` | Planned |
+| `define-advice` (wrap any function) | `advise :before/:after/:around/:override` | ✅ |
+| `add-hook` (attach to events) | `on :after_save, :after_open, :on_mode_change` | ✅ |
 | Buffer-local variables | Per-process state (isolation enforced by VM) | Planned |
-| `M-:` / `eval-expression` | `Code.eval_string` / eval prompt | Planned |
-| `describe-function` / `describe-key` | `h/1`, `:sys.get_state`, runtime docs | Planned |
-| `init.el` is real Elisp | `config.exs` is real Elixir | Planned |
+| `M-:` / `eval-expression` | `Code.eval_string` / eval prompt | ✅ |
+| `describe-function` / `describe-key` | `h/1`, `:sys.get_state`, runtime docs | ✅ |
+| `init.el` is real Elisp | `config.exs` is real Elixir | ✅ |
 | MELPA packages | Hex packages + supervised extensions | Future |
 
 Every property that makes Emacs Emacs, Minga is building on the BEAM. The [Elixir as Elisp](EXTENSIBILITY.md) doc proves it point by point.
@@ -166,25 +166,71 @@ The BEAM's code server manages two versions of a module simultaneously. Old call
 
 ### 2. Advice system ✅
 
+Emacs has eight advice combinators. Minga implements four that cover all the same use cases. The conditional combinators (`:before-while`, `:before-until`, `:after-while`, `:after-until`) rely on Elisp's nil/non-nil truthiness, which doesn't map to Elixir. Use `:around` instead; it gives you full control over whether the command runs.
+
+| Emacs | Minga | Notes |
+|-------|-------|-------|
+| `:before` | `:before` | Transforms state before the command |
+| `:after` | `:after` | Transforms state after the command |
+| `:around` | `:around` | Receives original function; full control |
+| `:override` | `:override` | Replaces the command entirely |
+| `:before-while` | Use `:around` | `if condition, do: execute.(state), else: state` |
+| `:before-until` | Use `:around` | Same pattern, inverted condition |
+| `:after-while` | Use `:around` | Check result after calling `execute.(state)` |
+| `:after-until` | Use `:around` | Same pattern, inverted condition |
+
 **Elisp:**
 ```elisp
 (define-advice save-buffer (:before (&rest _args))
   "Strip trailing whitespace before every save."
   (delete-trailing-whitespace))
+
+;; :before-while — only save if buffer has a file
+(advice-add 'save-buffer :before-while
+  (lambda (&rest _) (buffer-file-name)))
+
+;; :around — full control
+(define-advice format-buffer (:around (orig-fn &rest args))
+  "Skip formatting if buffer has errors."
+  (if (zerop (length (flymake-diagnostics)))
+      (apply orig-fn args)
+    (message "Format skipped: buffer has errors")))
 ```
 
 **Elixir:**
 ```elixir
+# :before — transform state on the way in
 advise :before, :save, fn state ->
   strip_trailing_whitespace(state)
 end
 
-advise :around, :format_buffer, fn original_fn, state ->
-  if get_option(state, :auto_format), do: original_fn.(state), else: state
+# :around — conditionally skip formatting (replaces :before-while pattern)
+advise :around, :format_buffer, fn execute, state ->
+  errors =
+    state.buffers.active
+    |> Minga.Diagnostics.for_buffer()
+    |> Enum.count(fn d -> d.severity == :error end)
+
+  if errors == 0 do
+    execute.(state)
+  else
+    %{state | status_msg: "Format skipped: #{errors} error(s)"}
+  end
+end
+
+# :override — replace save with a version that also stages in git
+advise :override, :save, fn state ->
+  state = Minga.API.save()
+  case Minga.Buffer.Server.file_path(state.buffers.active) do
+    nil -> state
+    path ->
+      System.cmd("git", ["add", path], stderr_to_stdout: true)
+      %{state | status_msg: "Saved and staged: #{Path.basename(path)}"}
+  end
 end
 ```
 
-**Where Elixir is stronger:** Advice runs inside a supervised process. If your advice function raises an error, it takes down that command execution, not the editor. The supervisor recovers, you see an error message, and you keep editing. In Emacs, badly written advice can leave the editor in a half-modified state.
+**Where Elixir is stronger:** Advice runs inside a supervised process. If your advice function raises an error, it's caught, logged, and skipped. The command still runs, the editor stays up. In Emacs, badly written advice can leave the editor in a half-modified state. Minga also stores advice in an ETS table with `read_concurrency`, so looking up advice adds zero contention to the command dispatch path, even under heavy programmatic editing (AI agents, macros).
 
 ### 3. Hooks ✅
 
