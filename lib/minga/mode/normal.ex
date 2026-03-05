@@ -64,8 +64,8 @@ defmodule Minga.Mode.Normal do
   import Bitwise
 
   alias Minga.Keymap.Defaults
-  alias Minga.Keymap.Store, as: KeymapStore
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
   alias Minga.WhichKey
@@ -122,7 +122,7 @@ defmodule Minga.Mode.Normal do
     formatted = WhichKey.format_key(key)
     keys_so_far = [formatted | state.describe_key_keys]
 
-    case Trie.lookup(node, key) do
+    case Bindings.lookup(node, key) do
       {:command, command} ->
         child = node.children[key]
         description = child.description || ""
@@ -195,7 +195,7 @@ defmodule Minga.Mode.Normal do
 
   # Any other key while in leader mode → walk the trie.
   def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
-    case Trie.lookup(node, key) do
+    case Bindings.lookup(node, key) do
       :not_found ->
         new_state = %{state | leader_node: nil, leader_keys: []}
         {:execute, :leader_cancel, new_state}
@@ -786,16 +786,16 @@ defmodule Minga.Mode.Normal do
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
-  @spec get_leader_trie() :: Trie.node_t()
+  @spec get_leader_trie() :: Bindings.node_t()
   defp get_leader_trie do
-    KeymapStore.leader_trie()
+    KeymapActive.leader_trie()
   catch
     :exit, _ -> Defaults.leader_trie()
   end
 
-  @spec get_normal_bindings() :: %{Trie.key() => {atom(), String.t()}}
+  @spec get_normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
   defp get_normal_bindings do
-    KeymapStore.normal_bindings()
+    KeymapActive.normal_bindings()
   catch
     :exit, _ -> Defaults.normal_bindings()
   end

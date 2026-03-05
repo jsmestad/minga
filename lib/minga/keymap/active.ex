@@ -1,4 +1,4 @@
-defmodule Minga.Keymap.Store do
+defmodule Minga.Keymap.Active do
   @moduledoc """
   Mutable keymap store backed by an Agent.
 
@@ -15,14 +15,14 @@ defmodule Minga.Keymap.Store do
 
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.KeyParser
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   require Logger
 
   @typedoc "Store state: leader trie + normal binding overrides."
   @type state :: %{
-          leader_trie: Trie.node_t(),
-          normal_overrides: %{Trie.key() => {atom(), String.t()}}
+          leader_trie: Bindings.node_t(),
+          normal_overrides: %{Bindings.key() => {atom(), String.t()}}
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -46,8 +46,8 @@ defmodule Minga.Keymap.Store do
   @doc """
   Returns the current leader trie (defaults + user overrides).
   """
-  @spec leader_trie() :: Trie.node_t()
-  @spec leader_trie(GenServer.server()) :: Trie.node_t()
+  @spec leader_trie() :: Bindings.node_t()
+  @spec leader_trie(GenServer.server()) :: Bindings.node_t()
   def leader_trie, do: leader_trie(__MODULE__)
   def leader_trie(server), do: Agent.get(server, & &1.leader_trie)
 
@@ -56,16 +56,16 @@ defmodule Minga.Keymap.Store do
 
   These are merged on top of `Defaults.normal_bindings()` at lookup time.
   """
-  @spec normal_overrides() :: %{Trie.key() => {atom(), String.t()}}
-  @spec normal_overrides(GenServer.server()) :: %{Trie.key() => {atom(), String.t()}}
+  @spec normal_overrides() :: %{Bindings.key() => {atom(), String.t()}}
+  @spec normal_overrides(GenServer.server()) :: %{Bindings.key() => {atom(), String.t()}}
   def normal_overrides, do: normal_overrides(__MODULE__)
   def normal_overrides(server), do: Agent.get(server, & &1.normal_overrides)
 
   @doc """
   Returns the merged normal-mode bindings (defaults + user overrides).
   """
-  @spec normal_bindings() :: %{Trie.key() => {atom(), String.t()}}
-  @spec normal_bindings(GenServer.server()) :: %{Trie.key() => {atom(), String.t()}}
+  @spec normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
+  @spec normal_bindings(GenServer.server()) :: %{Bindings.key() => {atom(), String.t()}}
   def normal_bindings, do: normal_bindings(__MODULE__)
 
   def normal_bindings(server) do
@@ -83,8 +83,8 @@ defmodule Minga.Keymap.Store do
 
   ## Examples
 
-      Minga.Keymap.Store.bind(:normal, "SPC g s", :git_status, "Git status")
-      Minga.Keymap.Store.bind(:normal, "Q", :replay_macro_q, "Replay macro q")
+      Minga.Keymap.Active.bind(:normal, "SPC g s", :git_status, "Git status")
+      Minga.Keymap.Active.bind(:normal, "Q", :replay_macro_q, "Replay macro q")
   """
   @spec bind(atom(), String.t(), atom(), String.t()) ::
           :ok | {:error, String.t()}
@@ -123,11 +123,11 @@ defmodule Minga.Keymap.Store do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec do_bind(GenServer.server(), atom(), [Trie.key()], atom(), String.t()) :: :ok
+  @spec do_bind(GenServer.server(), atom(), [Bindings.key()], atom(), String.t()) :: :ok
   defp do_bind(server, :normal, [{32, 0} | rest], command, description) when rest != [] do
     # Leader sequence: SPC + more keys → insert into leader trie
     Agent.update(server, fn %{leader_trie: trie} = state ->
-      %{state | leader_trie: Trie.bind(trie, rest, command, description)}
+      %{state | leader_trie: Bindings.bind(trie, rest, command, description)}
     end)
   end
 

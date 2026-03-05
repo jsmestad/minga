@@ -1,4 +1,4 @@
-defmodule Minga.Keymap.Trie do
+defmodule Minga.Keymap.Bindings do
   @moduledoc """
   Prefix tree (trie) for key sequence → command bindings.
 
@@ -19,12 +19,12 @@ defmodule Minga.Keymap.Trie do
 
   ## Usage
 
-      trie = Minga.Keymap.Trie.new()
-      trie = Minga.Keymap.Trie.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
-      trie = Minga.Keymap.Trie.bind(trie, [{?g, 0}, {?g, 0}], :file_start, "Go to first line")
+      trie = Minga.Keymap.Bindings.new()
+      trie = Minga.Keymap.Bindings.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      trie = Minga.Keymap.Bindings.bind(trie, [{?g, 0}, {?g, 0}], :file_start, "Go to first line")
 
-      {:command, :move_down} = Minga.Keymap.Trie.lookup(trie, {?j, 0})
-      {:prefix, node}        = Minga.Keymap.Trie.lookup(trie, {?g, 0})
+      {:command, :move_down} = Minga.Keymap.Bindings.lookup(trie, {?j, 0})
+      {:prefix, node}        = Minga.Keymap.Bindings.lookup(trie, {?g, 0})
   """
 
   @typedoc """
@@ -44,7 +44,7 @@ defmodule Minga.Keymap.Trie do
               description: nil
 
     @type t :: %__MODULE__{
-            children: %{Minga.Keymap.Trie.key() => t()},
+            children: %{Minga.Keymap.Bindings.key() => t()},
             command: atom() | nil,
             description: String.t() | nil
           }
@@ -60,8 +60,8 @@ defmodule Minga.Keymap.Trie do
 
   ## Examples
 
-      iex> trie = Minga.Keymap.Trie.new()
-      iex> Minga.Keymap.Trie.lookup(trie, {?j, 0})
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> Minga.Keymap.Bindings.lookup(trie, {?j, 0})
       :not_found
   """
   @spec new() :: node_t()
@@ -84,11 +84,11 @@ defmodule Minga.Keymap.Trie do
 
   ## Examples
 
-      iex> trie = Minga.Keymap.Trie.new()
-      iex> trie = Minga.Keymap.Trie.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
-      iex> Minga.Keymap.Trie.lookup(trie, {?j, 0})
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      iex> Minga.Keymap.Bindings.lookup(trie, {?j, 0})
       {:command, :move_down}
-      iex> Minga.Keymap.Trie.lookup(trie, {?k, 0})
+      iex> Minga.Keymap.Bindings.lookup(trie, {?k, 0})
       :not_found
   """
   @spec bind(node_t(), [key()], atom(), String.t()) :: node_t()
@@ -120,11 +120,11 @@ defmodule Minga.Keymap.Trie do
 
   ## Examples
 
-      iex> trie = Minga.Keymap.Trie.new()
-      iex> trie = Minga.Keymap.Trie.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
-      iex> match?({:prefix, _}, Minga.Keymap.Trie.lookup(trie, {?g, 0}))
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
+      iex> match?({:prefix, _}, Minga.Keymap.Bindings.lookup(trie, {?g, 0}))
       true
-      iex> Minga.Keymap.Trie.lookup(trie, {?z, 0})
+      iex> Minga.Keymap.Bindings.lookup(trie, {?z, 0})
       :not_found
   """
   @spec lookup(node_t(), key()) :: {:command, atom()} | {:prefix, node_t()} | :not_found
@@ -175,13 +175,13 @@ defmodule Minga.Keymap.Trie do
 
   ## Examples
 
-      iex> trie = Minga.Keymap.Trie.new()
-      iex> trie = Minga.Keymap.Trie.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
-      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?g, 0}, {?g, 0}])
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?g, 0}, {?g, 0}], :document_start, "Go to first line")
+      iex> Minga.Keymap.Bindings.lookup_sequence(trie, [{?g, 0}, {?g, 0}])
       {:command, :document_start, "Go to first line"}
-      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?g, 0}])
-      {:prefix, %Minga.Keymap.Trie.Node{children: %{{103, 0} => %Minga.Keymap.Trie.Node{children: %{}, command: :document_start, description: "Go to first line"}}, command: nil, description: nil}}
-      iex> Minga.Keymap.Trie.lookup_sequence(trie, [{?z, 0}])
+      iex> Minga.Keymap.Bindings.lookup_sequence(trie, [{?g, 0}])
+      {:prefix, %Minga.Keymap.Bindings.Node{children: %{{103, 0} => %Minga.Keymap.Bindings.Node{children: %{}, command: :document_start, description: "Go to first line"}}, command: nil, description: nil}}
+      iex> Minga.Keymap.Bindings.lookup_sequence(trie, [{?z, 0}])
       :not_found
   """
   @spec lookup_sequence(node_t(), [key()]) ::
@@ -219,9 +219,9 @@ defmodule Minga.Keymap.Trie do
 
   ## Examples
 
-      iex> trie = Minga.Keymap.Trie.new()
-      iex> trie = Minga.Keymap.Trie.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
-      iex> Minga.Keymap.Trie.children(trie)
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      iex> Minga.Keymap.Bindings.children(trie)
       [{{106, 0}, "Move cursor down"}]
   """
   @spec children(node_t()) :: [{key(), String.t() | atom()}]

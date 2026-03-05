@@ -47,9 +47,9 @@ lib/
       hooks.ex                # Lifecycle hook registry (after_save, after_open, etc.)
     keymap.ex                 # Mode-specific keymap management
     keymap/
-      trie.ex                 # Prefix tree for key sequences
+      bindings.ex             # Prefix tree for key sequences
       defaults.ex             # Default Doom-style keybindings
-      store.ex                # Mutable keymap store (defaults + user overrides)
+      active.ex               # Mutable keymap store (defaults + user overrides)
       key_parser.ex           # Human-readable key string parser
     which_key.ex              # Which-key popup logic
     cli.ex                    # CLI entry point

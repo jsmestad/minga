@@ -4,8 +4,8 @@ defmodule Minga.ConfigTest do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Hooks
   alias Minga.Config.Options
-  alias Minga.Keymap.Store, as: KeymapStore
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
 
   setup do
     # Ensure required servers are running
@@ -14,9 +14,9 @@ defmodule Minga.ConfigTest do
       {:error, {:already_started, _}} -> Options.reset()
     end
 
-    case KeymapStore.start_link() do
+    case KeymapActive.start_link() do
       {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> KeymapStore.reset()
+      {:error, {:already_started, _}} -> KeymapActive.reset()
     end
 
     case CommandRegistry.start_link() do
@@ -30,7 +30,7 @@ defmodule Minga.ConfigTest do
     end
 
     on_exit(fn ->
-      for mod <- [KeymapStore, Options, Hooks] do
+      for mod <- [KeymapActive, Options, Hooks] do
         try do
           mod.reset()
         catch
@@ -76,9 +76,9 @@ defmodule Minga.ConfigTest do
     test "adds a leader key binding" do
       Minga.Config.bind(:normal, "SPC g s", :git_status, "Git status")
 
-      trie = KeymapStore.leader_trie()
-      {:prefix, g_node} = Trie.lookup(trie, {?g, 0})
-      assert {:command, :git_status} = Trie.lookup(g_node, {?s, 0})
+      trie = KeymapActive.leader_trie()
+      {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
+      assert {:command, :git_status} = Bindings.lookup(g_node, {?s, 0})
     end
 
     test "invalid key sequence logs warning but does not crash" do

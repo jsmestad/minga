@@ -14,7 +14,7 @@ defmodule Minga.Keymap do
   * `0x08` — Super
   """
 
-  alias Minga.Keymap.Trie
+  alias Minga.Keymap.Bindings
 
   @typedoc "Supported editor modes."
   @type mode :: :normal | :insert | :visual | :command
@@ -71,18 +71,18 @@ defmodule Minga.Keymap do
   Each call builds a fresh trie from the static binding data. The result
   can be cached by the caller if needed.
   """
-  @spec keymap_for(mode()) :: Trie.node_t()
+  @spec keymap_for(mode()) :: Bindings.node_t()
   def keymap_for(mode) when mode in [:normal, :insert, :visual, :command] do
     bindings_for(mode)
-    |> Enum.reduce(Trie.new(), fn {keys, command, description}, trie ->
-      Trie.bind(trie, keys, command, description)
+    |> Enum.reduce(Bindings.new(), fn {keys, command, description}, trie ->
+      Bindings.bind(trie, keys, command, description)
     end)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   @spec bindings_for(mode()) ::
-          [{[Trie.key()], atom(), String.t()}]
+          [{[Bindings.key()], atom(), String.t()}]
   defp bindings_for(:normal), do: @normal_bindings
   defp bindings_for(:insert), do: @insert_bindings
   defp bindings_for(:visual), do: @visual_bindings

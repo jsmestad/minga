@@ -7,7 +7,7 @@ defmodule Minga.Editor.State.WhichKey do
   """
 
   @type t :: %__MODULE__{
-          node: Minga.Keymap.Trie.node_t() | nil,
+          node: Minga.Keymap.Bindings.node_t() | nil,
           timer: Minga.WhichKey.timer_ref() | nil,
           show: boolean()
         }
