@@ -32,6 +32,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
 | `:format_on_save` | boolean | `false` | Run the filetype's formatter before saving |
 | `:formatter` | string or `nil` | `nil` | Override the default formatter command (see [Formatters](#formatters)) |
+| `:title_format` | string | `"{filename} {dirty}({directory}) - Minga"` | Terminal window title format (see [Window Title](#window-title)) |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 
@@ -86,6 +87,37 @@ You can use any of these name formats:
 - **PostScript name**: `"FiraCode-Regular"`, `"JetBrainsMonoNF-Regular"`
 
 If the font isn't found, Minga falls back to the system monospace font. The default is `"Menlo"` at size 13, which ships with every Mac.
+
+## Window title
+
+Minga updates the terminal window title to reflect the active buffer, just like Neovim and Doom Emacs. The default format is `{filename} {dirty}({directory}) - Minga`, which produces titles like `editor.ex (lib) - Minga` or `editor.ex [+] (lib) - Minga` for modified files.
+
+Customize it with `:title_format`:
+
+```elixir
+# Just the filename
+set :title_format, "{filename} - Minga"
+
+# Include the mode
+set :title_format, "{filename} {dirty}[{mode}] - Minga"
+
+# Full path, no branding
+set :title_format, "{filepath}"
+```
+
+Available placeholders:
+
+| Placeholder | Expands to |
+|-------------|------------|
+| `{filename}` | File basename (e.g. `editor.ex`) |
+| `{filepath}` | Full file path |
+| `{directory}` | Parent directory name |
+| `{dirty}` | `[+] ` if modified, empty otherwise |
+| `{readonly}` | `[-] ` if read-only, empty otherwise |
+| `{mode}` | Current mode in uppercase (e.g. `NORMAL`, `INSERT`) |
+| `{bufname}` | Buffer display name (filename, or `*scratch*` for unnamed buffers) |
+
+The title is restored to its previous value when Minga exits.
 
 ## Per-filetype settings
 
