@@ -40,6 +40,7 @@ lib/
     command/
       registry.ex             # Named command lookup
       parser.ex               # :command parsing
+    comment.ex                 # Line comment toggling per filetype (tree-sitter injection-aware)
     git.ex                     # Git shell utilities (root, show HEAD, stage, blame)
     git/
       buffer.ex              # Per-buffer GenServer: caches HEAD, computes diffs

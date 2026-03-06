@@ -220,6 +220,7 @@ Current status and planned features. Updated as development progresses.
 | Diagnostic gutter signs | ✅ | 2-char sign column: `E`/`W`/`I`/`H` in Doom One colors |
 | Git gutter indicators | ✅ | `▎` added/modified, `▁` deleted; diagnostics take priority; in-memory diffing |
 | Git hunk operations | ✅ | `]c`/`[c` navigation, `SPC g s/r/p/b` stage/revert/preview/blame |
+| Line commenting | ✅ | `gcc` toggle line, `gc{motion}` toggle range, `gc` visual; tree-sitter injection-aware |
 | Diagnostic navigation | ✅ | `]d` / `[d` next/prev, `SPC c d` picker |
 | Minibuffer diagnostic hint | ✅ | Shows message when cursor is on a diagnostic line |
 | `:LspInfo` command | ✅ | Server name, status, encoding in minibuffer |
