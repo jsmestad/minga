@@ -42,10 +42,7 @@ defmodule Minga.Picker.BufferSource do
       buffers
       |> Enum.with_index()
       |> Enum.reject(fn {buf, _idx} ->
-        alive = Process.alive?(buf)
-
-        (alive and BufferServer.unlisted?(buf)) or
-          (not include_special and alive and special?(buf))
+        reject_buffer?(buf, include_special)
       end)
       |> Enum.map(fn {buf, idx} -> format_candidate(buf, idx) end)
 
@@ -142,6 +139,25 @@ defmodule Minga.Picker.BufferSource do
       nil -> false
       name -> String.match?(name, ~r/^\*.+\*$/)
     end
+  end
+
+  # Returns true if a buffer should be excluded from the picker.
+  # Special buffers (like *Messages*) are unlisted by default but should
+  # appear when include_special is true.
+  @spec reject_buffer?(pid(), boolean()) :: boolean()
+  defp reject_buffer?(buf, include_special) do
+    Process.alive?(buf) and do_reject?(buf, include_special)
+  end
+
+  @spec do_reject?(pid(), boolean()) :: boolean()
+  defp do_reject?(buf, true = _include_special) do
+    # When showing all: only reject unlisted non-special buffers
+    BufferServer.unlisted?(buf) and not special?(buf)
+  end
+
+  defp do_reject?(buf, false = _include_special) do
+    # Default: reject unlisted buffers and special buffers
+    BufferServer.unlisted?(buf) or special?(buf)
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

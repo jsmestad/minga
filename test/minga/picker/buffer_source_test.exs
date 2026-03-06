@@ -173,6 +173,46 @@ defmodule Minga.Picker.BufferSourceTest do
     end
   end
 
+  describe "unlisted special buffers" do
+    test "SPC b B shows unlisted special buffers that are in the list" do
+      messages = start_buffer(content: "", buffer_name: "*Messages*", unlisted: true)
+
+      state = fake_state([messages], messages: messages)
+      candidates = BufferAllSource.candidates(state)
+
+      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+    end
+
+    test "SPC b B shows unlisted special buffers from struct fields" do
+      messages =
+        start_buffer(content: "", buffer_name: "*Messages*", unlisted: true, persistent: true)
+
+      state = fake_state([], messages: messages)
+      candidates = BufferAllSource.candidates(state)
+
+      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      assert length(candidates) == 1
+      assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+    end
+
+    test "SPC b b still hides unlisted special buffers" do
+      messages = start_buffer(content: "", buffer_name: "*Messages*", unlisted: true)
+
+      state = fake_state([messages], messages: messages)
+      candidates = BufferSource.candidates(state)
+
+      assert candidates == []
+    end
+
+    test "SPC b B still hides unlisted non-special buffers" do
+      internal = start_buffer(content: "", buffer_name: "internal", unlisted: true)
+
+      candidates = BufferAllSource.candidates(fake_state([internal]))
+      assert candidates == []
+    end
+  end
+
   describe "edge case: all buffers are special" do
     test "SPC b b returns empty list even with special buffers on struct" do
       scratch = start_buffer(content: "", buffer_name: "*scratch*")
