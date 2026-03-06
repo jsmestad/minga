@@ -283,6 +283,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, :reload), do: BufferManagement.execute(state, :reload)
   def execute(state, :quit), do: BufferManagement.execute(state, :quit)
   def execute(state, :buffer_list), do: BufferManagement.execute(state, :buffer_list)
+  def execute(state, :buffer_list_all), do: BufferManagement.execute(state, :buffer_list_all)
   def execute(state, :buffer_next), do: BufferManagement.execute(state, :buffer_next)
   def execute(state, :buffer_prev), do: BufferManagement.execute(state, :buffer_prev)
   def execute(state, :kill_buffer), do: BufferManagement.execute(state, :kill_buffer)
