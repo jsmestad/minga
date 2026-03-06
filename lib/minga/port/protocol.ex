@@ -57,11 +57,14 @@ defmodule Minga.Port.Protocol do
   @op_set_highlight_query 0x22
   @op_load_grammar 0x23
   @op_set_injection_query 0x24
+  @op_query_language_at 0x25
 
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
   @op_highlight_names 0x31
   @op_grammar_loaded 0x32
+  @op_language_at_response 0x33
+  @op_injection_ranges 0x34
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -126,6 +129,9 @@ defmodule Minga.Port.Protocol do
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
           | {:highlight_names, [String.t()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
+          | {:injection_ranges,
+             [%{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}]}
+          | {:language_at_response, request_id :: non_neg_integer(), language :: String.t()}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -247,6 +253,13 @@ defmodule Minga.Port.Protocol do
     <<@op_load_grammar, byte_size(name)::16, name::binary, byte_size(path)::16, path::binary>>
   end
 
+  @doc "Encodes a query_language_at request: request_id(4) + byte_offset(4)."
+  @spec encode_query_language_at(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_query_language_at(request_id, byte_offset)
+      when is_integer(request_id) and is_integer(byte_offset) do
+    <<@op_query_language_at, request_id::32, byte_offset::32>>
+  end
+
   # ── Decoding (Zig → BEAM) ──
 
   @doc "Decodes an input event from a binary payload."
@@ -287,6 +300,16 @@ defmodule Minga.Port.Protocol do
 
   def decode_event(<<@op_grammar_loaded, success::8, name_len::16, name::binary-size(name_len)>>) do
     {:ok, {:grammar_loaded, success == 1, name}}
+  end
+
+  def decode_event(
+        <<@op_language_at_response, request_id::32, name_len::16, name::binary-size(name_len)>>
+      ) do
+    {:ok, {:language_at_response, request_id, name}}
+  end
+
+  def decode_event(<<@op_injection_ranges, count::16, rest::binary>>) do
+    {:ok, {:injection_ranges, decode_injection_ranges(rest, count, [])}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
@@ -448,4 +471,17 @@ defmodule Minga.Port.Protocol do
   defp decode_log_level(2), do: "INFO"
   defp decode_log_level(3), do: "DEBUG"
   defp decode_log_level(_), do: "UNKNOWN"
+
+  @spec decode_injection_ranges(binary(), non_neg_integer(), [map()]) :: [map()]
+  defp decode_injection_ranges(_rest, 0, acc), do: Enum.reverse(acc)
+
+  defp decode_injection_ranges(
+         <<start_byte::32, end_byte::32, name_len::16, name::binary-size(name_len),
+           rest::binary>>,
+         remaining,
+         acc
+       ) do
+    range = %{start_byte: start_byte, end_byte: end_byte, language: name}
+    decode_injection_ranges(rest, remaining - 1, [range | acc])
+  end
 end

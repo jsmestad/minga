@@ -6,6 +6,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Comment
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
@@ -367,6 +368,43 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
+  # ── Comment toggling ────────────────────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, :comment_line) when is_pid(buf) do
+    {line, _col} = BufferServer.cursor(buf)
+    filetype = BufferServer.filetype(buf)
+    injection_ranges = Map.get(state.injection_ranges, buf, [])
+    Comment.toggle_lines(buf, line, line, filetype, injection_ranges)
+    state
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:comment_motion, motion}) when is_pid(buf) do
+    {cursor_line, _col} = BufferServer.cursor(buf)
+    target_line = resolve_motion_line(buf, motion, cursor_line)
+    start_line = min(cursor_line, target_line)
+    end_line = max(cursor_line, target_line)
+    filetype = BufferServer.filetype(buf)
+    injection_ranges = Map.get(state.injection_ranges, buf, [])
+    Comment.toggle_lines(buf, start_line, end_line, filetype, injection_ranges)
+    state
+  end
+
+  def execute(
+        %{buffers: %{active: buf}, mode_state: %VisualState{} = ms} = state,
+        :comment_visual_selection
+      ) do
+    anchor = ms.visual_anchor
+    cursor = BufferServer.cursor(buf)
+    {anchor_line, _} = anchor
+    {cursor_line, _} = cursor
+    start_line = min(anchor_line, cursor_line)
+    end_line = max(anchor_line, cursor_line)
+    filetype = BufferServer.filetype(buf)
+    injection_ranges = Map.get(state.injection_ranges, buf, [])
+    Comment.toggle_lines(buf, start_line, end_line, filetype, injection_ranges)
+    state
+  end
+
   # ── Private indent helpers ────────────────────────────────────────────────
 
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
@@ -486,5 +524,60 @@ defmodule Minga.Editor.Commands.Editing do
     Options.get_for_filetype(:tab_width, filetype)
   catch
     :exit, _ -> 2
+  end
+
+  @spec resolve_motion_line(pid(), atom(), non_neg_integer()) :: non_neg_integer()
+  defp resolve_motion_line(_buf, :line_down, cursor_line), do: cursor_line + 1
+
+  defp resolve_motion_line(_buf, :line_up, cursor_line),
+    do: max(0, cursor_line - 1)
+
+  defp resolve_motion_line(_buf, :document_start, _cursor_line), do: 0
+
+  defp resolve_motion_line(buf, :document_end, _cursor_line) do
+    max(0, BufferServer.line_count(buf) - 1)
+  end
+
+  defp resolve_motion_line(buf, :paragraph_forward, cursor_line) do
+    content = BufferServer.content(buf)
+    lines = String.split(content, "\n")
+    find_paragraph_boundary(lines, cursor_line, :forward)
+  end
+
+  defp resolve_motion_line(buf, :paragraph_backward, cursor_line) do
+    content = BufferServer.content(buf)
+    lines = String.split(content, "\n")
+    find_paragraph_boundary(lines, cursor_line, :backward)
+  end
+
+  defp resolve_motion_line(_buf, _motion, cursor_line), do: cursor_line
+
+  @spec find_paragraph_boundary([String.t()], non_neg_integer(), :forward | :backward) ::
+          non_neg_integer()
+  defp find_paragraph_boundary(lines, cursor_line, :forward) do
+    total = length(lines)
+
+    lines
+    |> Enum.drop(cursor_line + 1)
+    |> Enum.with_index(cursor_line + 1)
+    |> Enum.drop_while(fn {line, _idx} -> String.trim(line) != "" end)
+    |> Enum.find(fn {line, _idx} -> String.trim(line) == "" end)
+    |> case do
+      {_, idx} -> idx
+      nil -> max(0, total - 1)
+    end
+  end
+
+  defp find_paragraph_boundary(lines, cursor_line, :backward) do
+    lines
+    |> Enum.take(cursor_line)
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.drop_while(fn {line, _idx} -> String.trim(line) != "" end)
+    |> Enum.find(fn {line, _idx} -> String.trim(line) == "" end)
+    |> case do
+      {_, idx} -> idx
+      nil -> 0
+    end
   end
 end

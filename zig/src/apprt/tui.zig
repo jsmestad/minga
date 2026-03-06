@@ -250,7 +250,7 @@ pub const TuiRuntime = struct {
                         break;
                     };
                     switch (cmd) {
-                        .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar => {
+                        .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at => {
                             self.handleHighlightCommand(cmd, stdout) catch |err| {
                                 std.log.warn("highlight error: {}", .{err});
                             };
@@ -328,6 +328,13 @@ pub const TuiRuntime = struct {
                     defer self.alloc.free(spans_buf);
                     try protocol.writeMessage(stdout, spans_buf);
 
+                    // Send injection language ranges (if any)
+                    if (self.hl.injection_ranges.len > 0) {
+                        const inj_buf = try protocol.encodeInjectionRanges(self.alloc, self.hl.injection_ranges);
+                        defer self.alloc.free(inj_buf);
+                        try protocol.writeMessage(stdout, inj_buf);
+                    }
+
                     try stdout.flush();
                 }
             },
@@ -352,6 +359,13 @@ pub const TuiRuntime = struct {
                 };
                 var rbuf: [260]u8 = undefined;
                 const rlen = try protocol.encodeGrammarLoaded(&rbuf, true, lg.name);
+                try protocol.writeMessage(stdout, rbuf[0..rlen]);
+                try stdout.flush();
+            },
+            .query_language_at => |q| {
+                const lang = self.hl.languageAt(q.byte_offset);
+                var rbuf: [260]u8 = undefined;
+                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, lang) catch return;
                 try protocol.writeMessage(stdout, rbuf[0..rlen]);
                 try stdout.flush();
             },

@@ -16,7 +16,7 @@ defmodule Minga.Mode.OperatorPendingState do
             leader_keys: []
 
   @typedoc "The pending operator."
-  @type operator :: :delete | :change | :yank | :indent | :dedent
+  @type operator :: :comment | :delete | :change | :yank | :indent | :dedent
 
   @typedoc "Text object modifier (inner vs around)."
   @type text_object_modifier :: :inner | :around
@@ -30,6 +30,12 @@ defmodule Minga.Mode.OperatorPendingState do
           leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()]
         }
+
+  @doc "Creates a new operator-pending state."
+  @spec new(operator(), pos_integer()) :: t()
+  def new(operator, op_count \\ 1) do
+    %__MODULE__{operator: operator, op_count: op_count}
+  end
 
   @doc """
   Total repeat count: `op_count` (from before the operator key) × motion count.

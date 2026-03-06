@@ -41,6 +41,13 @@ const BuiltinGrammar = struct {
     injection_query: ?[]const u8 = null,
 };
 
+/// An injection language region: a byte range mapped to a language name.
+pub const InjectionRange = struct {
+    start_byte: u32,
+    end_byte: u32,
+    language: []const u8,
+};
+
 /// Tree-sitter highlighter. Owns a parser, optional tree, and query.
 /// Grammar languages are registered at init time (compiled-in) or
 /// loaded dynamically via `loadGrammar`.
@@ -57,6 +64,11 @@ pub const Highlighter = struct {
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
+
+    /// After `highlightWithInjections`, holds the injection language regions.
+    /// Callers can read this to determine which language is at a given byte offset.
+    /// Owned by the Highlighter; freed on the next call to `highlightWithInjections`.
+    injection_ranges: []InjectionRange = &.{},
 
     /// Tracks background pre-compilation state.
     prewarm_thread: ?std.Thread = null,
@@ -165,6 +177,10 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.injection_query_cache.deinit(self.allocator);
+
+        if (self.injection_ranges.len > 0) {
+            self.allocator.free(self.injection_ranges);
+        }
 
         if (self.tree) |t| c.ts_tree_delete(t);
         c.ts_parser_delete(self.parser);
@@ -499,6 +515,25 @@ pub const Highlighter = struct {
             });
         }
 
+        // ── Expose injection regions for language-at-position queries ──
+        // Free previous injection ranges, then save current ones.
+        if (self.injection_ranges.len > 0) {
+            alloc.free(self.injection_ranges);
+        }
+        if (regions.items.len > 0) {
+            const inj_ranges = try alloc.alloc(InjectionRange, regions.items.len);
+            for (regions.items, 0..) |reg, i| {
+                inj_ranges[i] = .{
+                    .start_byte = reg.start_byte,
+                    .end_byte = reg.end_byte,
+                    .language = reg.language,
+                };
+            }
+            self.injection_ranges = inj_ranges;
+        } else {
+            self.injection_ranges = &.{};
+        }
+
         // ── Phase 3: Highlight injected regions ──────────────────────────
         // Group regions by language for combined parsing
         var lang_regions = std.StringHashMapUnmanaged(std.ArrayListUnmanaged(InjectionRegion)).empty;
@@ -645,13 +680,13 @@ pub const Highlighter = struct {
         // remove outer spans that overlap with any injection region.
         if (regions.items.len > 0) {
             // Build sorted injection range list
-            var inj_ranges = try alloc.alloc(InjectionRange, regions.items.len);
+            var inj_ranges = try alloc.alloc(TrimRange, regions.items.len);
             defer alloc.free(inj_ranges);
             for (regions.items, 0..) |reg, i| {
                 inj_ranges[i] = .{ .start_byte = reg.start_byte, .end_byte = reg.end_byte };
             }
-            std.mem.sortUnstable(InjectionRange, inj_ranges, {}, struct {
-                fn cmp(_: void, a: InjectionRange, b: InjectionRange) bool {
+            std.mem.sortUnstable(TrimRange, inj_ranges, {}, struct {
+                fn cmp(_: void, a: TrimRange, b: TrimRange) bool {
                     return a.start_byte < b.start_byte;
                 }
             }.cmp);
@@ -685,6 +720,20 @@ pub const Highlighter = struct {
             .capture_names = names,
             .allocator = alloc,
         };
+    }
+
+    /// Returns the language name at a given byte offset.
+    /// Checks injection regions first; falls back to the current (outer) language.
+    /// Returns null only if no language is set at all.
+    pub fn languageAt(self: *const Highlighter, byte_offset: u32) ?[]const u8 {
+        // Check injection regions (inner languages win over outer)
+        for (self.injection_ranges) |range| {
+            if (byte_offset >= range.start_byte and byte_offset < range.end_byte) {
+                return range.language;
+            }
+        }
+        // Fall back to the outer language
+        return self.current_language_name;
     }
 
     /// Dynamically load a grammar from a shared library.
@@ -768,8 +817,8 @@ fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const
     return null;
 }
 
-/// A byte range representing an injection region.
-const InjectionRange = struct {
+/// A byte range representing an injection region (for internal trimming).
+const TrimRange = struct {
     start_byte: u32,
     end_byte: u32,
 };
@@ -780,7 +829,7 @@ const InjectionRange = struct {
 fn trimOuterSpan(
     alloc: std.mem.Allocator,
     span: Span,
-    ranges: []const InjectionRange,
+    ranges: []const TrimRange,
     out: *std.ArrayListUnmanaged(Span),
 ) !void {
     // Check if this span overlaps any injection range

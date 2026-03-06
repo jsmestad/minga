@@ -172,6 +172,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :content)
   end
 
+  @doc "Returns the byte offset for the start of a given line."
+  @spec byte_offset_for_line(GenServer.server(), non_neg_integer()) :: non_neg_integer()
+  def byte_offset_for_line(server, line) when is_integer(line) and line >= 0 do
+    GenServer.call(server, {:byte_offset_for_line, line})
+  end
+
   @doc "Returns a range of lines from the buffer."
   @spec get_lines(GenServer.server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   def get_lines(server, start, count)
@@ -644,6 +650,11 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:content, _from, state) do
     {:reply, Document.content(state.document), state}
+  end
+
+  def handle_call({:byte_offset_for_line, line}, _from, state) do
+    offset = Document.position_to_offset(state.buffer, {line, 0})
+    {:reply, offset, state}
   end
 
   def handle_call({:get_lines, start, count}, _from, state) do

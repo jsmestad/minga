@@ -461,6 +461,22 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  def handle_info({:minga_input, {:injection_ranges, ranges}}, state) do
+    new_state =
+      if state.buffers.active do
+        %{state | injection_ranges: Map.put(state.injection_ranges, state.buffers.active, ranges)}
+      else
+        state
+      end
+
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:language_at_response, _request_id, _language}}, state) do
+    # Reserved for future use (synchronous language queries)
+    {:noreply, state}
+  end
+
   def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
     new_state = HighlightSync.handle_spans(state, version, spans)
 

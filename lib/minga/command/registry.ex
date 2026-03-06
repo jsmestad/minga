@@ -72,7 +72,9 @@ defmodule Minga.Command.Registry do
     {:git_stage_hunk, "Stage hunk"},
     {:git_revert_hunk, "Revert hunk"},
     {:git_preview_hunk, "Preview hunk"},
-    {:git_blame_line, "Blame line"}
+    {:git_blame_line, "Blame line"},
+    {:toggle_comment_line, "Toggle comment on line"},
+    {:toggle_comment_selection, "Toggle comment on selection"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

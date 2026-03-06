@@ -460,6 +460,14 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_to_document_start, %{state | pending_g: false}}
   end
 
+  # gc — enter comment operator-pending mode
+  def handle_key({?c, 0}, %ModeState{pending_g: true} = state) do
+    count = state.count || 1
+
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :comment, op_count: count || 1}}
+  end
+
   # gd — go to definition
   def handle_key({?d, 0}, %ModeState{pending_g: true} = state) do
     {:execute, :goto_definition, %{state | pending_g: false}}

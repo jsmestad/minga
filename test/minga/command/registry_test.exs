@@ -64,7 +64,9 @@ defmodule Minga.Command.RegistryTest do
           :goto_definition,
           :hover,
           :next_git_hunk,
-          :theme_picker
+          :theme_picker,
+          :toggle_comment_line,
+          :toggle_comment_selection
         ]
         |> Enum.sort()
 

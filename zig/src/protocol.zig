@@ -37,11 +37,14 @@ pub const OP_PARSE_BUFFER: u8 = 0x21;
 pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
 pub const OP_LOAD_GRAMMAR: u8 = 0x23;
 pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
+pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
 pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
 pub const OP_GRAMMAR_LOADED: u8 = 0x32;
+pub const OP_LANGUAGE_AT_RESPONSE: u8 = 0x33;
+pub const OP_INJECTION_RANGES: u8 = 0x34;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -111,6 +114,12 @@ pub const RenderCommand = union(enum) {
     set_highlight_query: []const u8,
     set_injection_query: []const u8,
     load_grammar: LoadGrammar,
+    query_language_at: QueryLanguageAt,
+};
+
+pub const QueryLanguageAt = struct {
+    request_id: u32,
+    byte_offset: u32,
 };
 
 pub const ParseBuffer = struct {
@@ -361,6 +370,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .path = rest[path_off + 2 .. path_off + 2 + path_len],
             } };
         },
+        OP_QUERY_LANGUAGE_AT => {
+            // request_id:4, byte_offset:4
+            if (rest.len < 8) return error.Malformed;
+            const request_id = std.mem.readInt(u32, rest[0..4], .big);
+            const byte_offset = std.mem.readInt(u32, rest[4..8], .big);
+            return .{ .query_language_at = .{
+                .request_id = request_id,
+                .byte_offset = byte_offset,
+            } };
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -418,9 +437,46 @@ pub fn commandSize(payload: []const u8) usize {
             const title_len = std.mem.readInt(u16, payload[1..3], .big);
             break :blk 3 + title_len;
         },
+        OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };
+}
+
+/// Encodes a language_at_response: opcode(1) + request_id(4) + name_len(2) + name
+pub fn encodeLanguageAtResponse(buf: []u8, request_id: u32, language: ?[]const u8) !usize {
+    const name = language orelse "";
+    const total = 7 + name.len;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_LANGUAGE_AT_RESPONSE;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    std.mem.writeInt(u16, buf[5..7], @intCast(name.len), .big);
+    if (name.len > 0) {
+        @memcpy(buf[7 .. 7 + name.len], name);
+    }
+    return total;
+}
+
+/// Encodes injection_ranges: opcode(1) + count(2) + (start_byte:4, end_byte:4, name_len:2, name) for each
+pub fn encodeInjectionRanges(allocator: std.mem.Allocator, ranges: []const @import("highlighter.zig").InjectionRange) ![]u8 {
+    var total: usize = 1 + 2; // opcode + count
+    for (ranges) |r| {
+        total += 4 + 4 + 2 + r.language.len;
+    }
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_INJECTION_RANGES;
+    std.mem.writeInt(u16, buf[1..3], @intCast(ranges.len), .big);
+
+    var off: usize = 3;
+    for (ranges) |r| {
+        std.mem.writeInt(u32, buf[off..][0..4], r.start_byte, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], r.end_byte, .big);
+        std.mem.writeInt(u16, buf[off + 8 ..][0..2], @intCast(r.language.len), .big);
+        @memcpy(buf[off + 10 .. off + 10 + r.language.len], r.language);
+        off += 10 + r.language.len;
+    }
+
+    return buf;
 }
 
 /// Reads a 4-byte big-endian length header from the reader.

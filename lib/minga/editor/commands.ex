@@ -207,6 +207,12 @@ defmodule Minga.Editor.Commands do
   def execute(state, :paste_after), do: Editing.execute(state, :paste_after)
   def execute(state, :indent_line), do: Editing.execute(state, :indent_line)
   def execute(state, :dedent_line), do: Editing.execute(state, :dedent_line)
+  def execute(state, :comment_line), do: Editing.execute(state, :comment_line)
+  def execute(state, {:comment_motion, _} = cmd), do: Editing.execute(state, cmd)
+
+  def execute(state, :comment_visual_selection),
+    do: Editing.execute(state, :comment_visual_selection)
+
   def execute(state, {:indent_lines, _} = cmd), do: Editing.execute(state, cmd)
   def execute(state, {:dedent_lines, _} = cmd), do: Editing.execute(state, cmd)
   def execute(state, {:indent_motion, _} = cmd), do: Editing.execute(state, cmd)

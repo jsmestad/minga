@@ -80,7 +80,8 @@ defmodule Minga.Editor.State do
             windows: %Windows{},
             file_tree: nil,
             file_tree_focused: false,
-            git_buffers: %{}
+            git_buffers: %{},
+            injection_ranges: %{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -112,7 +113,12 @@ defmodule Minga.Editor.State do
           windows: Windows.t(),
           file_tree: FileTree.t() | nil,
           file_tree_focused: boolean(),
-          git_buffers: %{pid() => pid()}
+          git_buffers: %{pid() => pid()},
+          injection_ranges: %{
+            pid() => [
+              %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
+            ]
+          }
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
