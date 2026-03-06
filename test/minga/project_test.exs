@@ -12,6 +12,26 @@ defmodule Minga.ProjectTest do
     {pid, name}
   end
 
+  # Waits for any pending cast to be processed by the GenServer.
+  # :sys.get_state is a synchronous call that sits behind any queued
+  # casts in the GenServer mailbox, so when it returns we know all
+  # prior casts have been handled.
+  defp flush(name), do: :sys.get_state(name)
+
+  # Polls until the async rebuild Task completes and files are cached.
+  # The rebuild is a Task.async that sends its result back to the
+  # GenServer via handle_info.
+  defp await_rebuild(name, max_attempts \\ 50) do
+    state = :sys.get_state(name)
+
+    if state.rebuilding? and max_attempts > 0 do
+      Process.sleep(10)
+      await_rebuild(name, max_attempts - 1)
+    else
+      state
+    end
+  end
+
   describe "detect_and_set/2" do
     test "detects project root from a file inside a git repo", %{tmp_dir: tmp} do
       project = Path.join(tmp, "myproject")
@@ -22,8 +42,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(lib, "app.ex"))
-      # Give the cast time to process
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.root(name) == project
     end
@@ -37,7 +56,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(lib, "foo.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.root(name) == project
     end
@@ -50,7 +69,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "index.js"))
-      :timer.sleep(50)
+      flush(name)
 
       known = Project.known_projects(name)
       assert project in known
@@ -65,12 +84,12 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
       assert Project.root(name) == project
 
       # Detecting from another file in the same project should not change root
       Project.detect_and_set(name, Path.join(project, "b.ex"))
-      :timer.sleep(50)
+      flush(name)
       assert Project.root(name) == project
     end
 
@@ -83,9 +102,9 @@ defmodule Minga.ProjectTest do
       {_pid, name} = start_project!()
       file = Path.join(project, "main.go")
       Project.detect_and_set(name, file)
-      :timer.sleep(50)
+      flush(name)
       Project.detect_and_set(name, file)
-      :timer.sleep(50)
+      flush(name)
 
       known = Project.known_projects(name)
       count = Enum.count(known, &(&1 == project))
@@ -104,8 +123,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
-      # Wait for async rebuild
-      :timer.sleep(200)
+      await_rebuild(name)
 
       files = Project.files(name)
       assert is_list(files)
@@ -129,11 +147,11 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project_a, "mix.exs"))
-      :timer.sleep(50)
+      flush(name)
       assert Project.root(name) == project_a
 
       Project.switch(name, project_b)
-      :timer.sleep(50)
+      flush(name)
       assert Project.root(name) == project_b
     end
 
@@ -143,7 +161,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.switch(name, project)
-      :timer.sleep(50)
+      flush(name)
 
       assert project in Project.known_projects(name)
     end
@@ -158,14 +176,14 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "file.ex"))
-      :timer.sleep(200)
+      await_rebuild(name)
 
       # Should have files
       assert Project.files(name) != []
 
       # Invalidate
       Project.invalidate(name)
-      :timer.sleep(200)
+      await_rebuild(name)
 
       # Should have files again after rebuild
       assert Project.files(name) != []
@@ -179,12 +197,12 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.add(name, project)
-      :timer.sleep(50)
+      flush(name)
 
       assert project in Project.known_projects(name)
 
       Project.remove(name, project)
-      :timer.sleep(50)
+      flush(name)
 
       refute project in Project.known_projects(name)
     end
@@ -194,7 +212,7 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.add(name, bogus)
-      :timer.sleep(50)
+      flush(name)
 
       refute bogus in Project.known_projects(name)
     end
@@ -209,10 +227,10 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "lib/app.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       Project.record_file(name, Path.join(project, "lib/app.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       recent = Project.recent_files(name)
       assert "lib/app.ex" in recent
@@ -229,14 +247,14 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(lib, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       Project.record_file(name, Path.join(lib, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
       Project.record_file(name, Path.join(lib, "b.ex"))
-      :timer.sleep(50)
+      flush(name)
       Project.record_file(name, Path.join(lib, "c.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       recent = Project.recent_files(name)
       assert recent == ["lib/c.ex", "lib/b.ex", "lib/a.ex"]
@@ -252,18 +270,18 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(lib, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       Project.record_file(name, Path.join(lib, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
       Project.record_file(name, Path.join(lib, "b.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == ["lib/b.ex", "lib/a.ex"]
 
       # Reopen a.ex — should move to front
       Project.record_file(name, Path.join(lib, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == ["lib/a.ex", "lib/b.ex"]
     end
@@ -278,10 +296,10 @@ defmodule Minga.ProjectTest do
 
       {_pid, name} = start_project!()
       Project.detect_and_set(name, Path.join(project, "mix.exs"))
-      :timer.sleep(50)
+      flush(name)
 
       Project.record_file(name, outside_file)
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == []
     end
@@ -295,7 +313,7 @@ defmodule Minga.ProjectTest do
       {_pid, name} = start_project!()
 
       Project.record_file(name, "/some/random/file.ex")
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == []
     end
@@ -314,23 +332,23 @@ defmodule Minga.ProjectTest do
 
       # Record file in project A
       Project.detect_and_set(name, Path.join(project_a, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
       Project.record_file(name, Path.join(project_a, "a.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == ["a.ex"]
 
       # Switch to project B and record a different file
       Project.switch(name, project_b)
-      :timer.sleep(50)
+      flush(name)
       Project.record_file(name, Path.join(project_b, "b.ex"))
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == ["b.ex"]
 
       # Switch back to A — should see A's recent files
       Project.switch(name, project_a)
-      :timer.sleep(50)
+      flush(name)
 
       assert Project.recent_files(name) == ["a.ex"]
     end
