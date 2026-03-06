@@ -1,6 +1,6 @@
 defmodule Minga.APITest do
   @moduledoc false
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.API
   alias Minga.Buffer.Server, as: BufferServer

@@ -45,11 +45,15 @@ defmodule Minga.Editor.HighlightSync do
     query_override = user_query_override(language)
     injection_override = user_injection_query_override(language)
 
+    parse_cmd = Protocol.encode_parse_buffer(version, content)
+
     commands =
-      [Protocol.encode_set_language(language)] ++
-        query_override ++
-        injection_override ++
-        [Protocol.encode_parse_buffer(version, content)]
+      Enum.concat([
+        [Protocol.encode_set_language(language)],
+        query_override,
+        injection_override,
+        [parse_cmd]
+      ])
 
     PortManager.send_commands(state.port_manager, commands)
 

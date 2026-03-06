@@ -6,7 +6,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   - Invalid byte boundaries in spans produce safe output
   """
 
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   alias Minga.Editor
   alias Minga.Editor.HighlightSync

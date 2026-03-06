@@ -122,7 +122,8 @@ defmodule Minga.Highlight do
     # the first span that could overlap this line, then collect forward.
     start_idx = bsearch_first_overlap(spans, span_count, line_start_byte)
 
-    overlapping = collect_overlapping(spans, span_count, start_idx, line_start_byte, line_end_byte, [])
+    overlapping =
+      collect_overlapping(spans, span_count, start_idx, line_start_byte, line_end_byte, [])
 
     case overlapping do
       [] ->

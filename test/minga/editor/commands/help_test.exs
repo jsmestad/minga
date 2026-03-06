@@ -1,6 +1,6 @@
 defmodule Minga.Editor.Commands.HelpTest do
   @moduledoc false
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Help
