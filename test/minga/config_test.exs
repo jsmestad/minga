@@ -114,9 +114,6 @@ defmodule Minga.ConfigTest do
       state = %{some: :state}
       result = cmd.execute.(state)
       assert result == state
-
-      # Give the task a moment to crash
-      Process.sleep(50)
     end
   end
 

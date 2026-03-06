@@ -239,12 +239,12 @@ defmodule Minga.Editor.DocumentSyncTest do
 
       # Flush the debounce
       lsp_state = DocumentSync.flush_did_change(lsp_state, buffer)
-      Process.sleep(100)
+      :sys.get_state(client)
       assert Client.status(client) == :ready
 
       # Save
       _lsp_state = DocumentSync.on_buffer_save(lsp_state, buffer)
-      Process.sleep(100)
+      :sys.get_state(client)
       assert Client.status(client) == :ready
     end
   end

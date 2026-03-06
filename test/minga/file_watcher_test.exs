@@ -57,9 +57,8 @@ defmodule Minga.FileWatcherTest do
     end
 
     # Should receive only one notification after debounce
-    Process.sleep(100)
-    assert_receive {:file_changed_on_disk, ^path}
-    refute_receive {:file_changed_on_disk, ^path}, 50
+    assert_receive {:file_changed_on_disk, ^path}, 200
+    refute_receive {:file_changed_on_disk, ^path}, 100
   end
 
   test "events for unwatched files are ignored" do
@@ -68,8 +67,9 @@ defmodule Minga.FileWatcherTest do
     FileWatcher.watch_path(watcher, "/tmp/watched.txt")
     send(watcher, {:file_event, nil, {"/tmp/other.txt", [:modified]}})
 
-    Process.sleep(50)
-    refute_receive {:file_changed_on_disk, _}
+    # Flush the watcher's mailbox so the event is processed
+    :sys.get_state(watcher)
+    refute_receive {:file_changed_on_disk, _}, 50
   end
 
   test "subscriber down clears subscriber" do
@@ -79,9 +79,7 @@ defmodule Minga.FileWatcherTest do
     watcher = start_watcher()
     FileWatcher.subscribe(watcher, task.pid)
 
-    # Give the DOWN message time to arrive
-    Process.sleep(20)
-
+    # Flush mailbox so the DOWN message is processed
     %FileWatcher{subscriber: subscriber} = :sys.get_state(watcher)
     assert subscriber == nil
   end

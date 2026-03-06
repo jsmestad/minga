@@ -80,10 +80,10 @@ defmodule Minga.LSP.ClientTest do
 
     test "didChange does not crash", %{client: client} do
       Client.did_open(client, @uri, "elixir", "original")
-      Process.sleep(100)
+      :sys.get_state(client)
 
       Client.did_change(client, @uri, "modified")
-      Process.sleep(100)
+      :sys.get_state(client)
 
       # Still alive and ready
       assert Client.status(client) == :ready
@@ -91,10 +91,10 @@ defmodule Minga.LSP.ClientTest do
 
     test "didSave does not crash", %{client: client} do
       Client.did_open(client, @uri, "elixir", "content")
-      Process.sleep(100)
+      :sys.get_state(client)
 
       Client.did_save(client, @uri)
-      Process.sleep(100)
+      :sys.get_state(client)
 
       assert Client.status(client) == :ready
     end
@@ -113,7 +113,7 @@ defmodule Minga.LSP.ClientTest do
 
     test "didChange on unknown URI is a no-op", %{client: client} do
       Client.did_change(client, "file:///unknown", "text")
-      Process.sleep(100)
+      :sys.get_state(client)
       assert Client.status(client) == :ready
     end
   end

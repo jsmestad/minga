@@ -330,8 +330,8 @@ defmodule Minga.DiagnosticsTest do
 
       Task.await(task)
 
-      # Give the DOWN message time to be processed
-      Process.sleep(50)
+      # Flush the mailbox so the DOWN message is processed
+      :sys.get_state(s)
 
       # Publishing should not crash even though subscriber is dead
       assert :ok = Diagnostics.publish(s, :server_a, @uri, [make_diag()])

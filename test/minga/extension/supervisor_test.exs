@@ -358,9 +358,10 @@ defmodule Minga.Extension.SupervisorTest do
       {:ok, entry} = ExtRegistry.get(ctx.registry, :crasher)
       {:ok, pid} = ExtSupervisor.start_extension(ctx.supervisor, ctx.registry, :crasher, entry)
 
-      # Kill the extension process
+      # Kill the extension process and wait for the supervisor to handle it
+      ref = Process.monitor(pid)
       Process.exit(pid, :kill)
-      Process.sleep(50)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
 
       # Supervisor is still alive
       assert Process.alive?(Process.whereis(ctx.supervisor))

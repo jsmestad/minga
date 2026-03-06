@@ -245,9 +245,6 @@ defmodule Minga.IntegrationTest do
       # Type some content, then save via :w
       send_keys(ctx, "iextra <Esc>:w<CR>")
 
-      # Wait for the file system write
-      Process.sleep(50)
-
       assert File.exists?(path)
       assert String.contains?(File.read!(path), "extra")
     end
