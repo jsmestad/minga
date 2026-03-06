@@ -1149,7 +1149,7 @@ defmodule Minga.Editor do
       end
 
     scratch_content =
-      ";; This buffer is for notes you don't want to save.\n;; It will persist across buffer switches.\n\n"
+      "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
 
     scratch_buf =
       case DynamicSupervisor.start_child(
