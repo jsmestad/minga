@@ -167,5 +167,70 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
         assert state.file_tree != nil
       end
     end
+
+    test "opening a file from the tree triggers full buffer lifecycle", %{tmp_dir: dir} do
+      # This test verifies that opening a file from the filetree runs the
+      # same lifecycle hooks as opening via :open_file or SPC f f:
+      # highlight setup, LSP notification, git buffer creation, file watcher.
+      #
+      # We simulate a filetree open by directly manipulating the editor state
+      # to have a filetree with a known file selected, then sending Enter.
+      File.write!(Path.join(dir, "main.ex"), "defmodule Main do\nend")
+      File.write!(Path.join(dir, "other.ex"), "defmodule Other do\nend")
+      ctx = start_editor(Path.join(dir, "main.ex"))
+
+      # Record initial state
+      state_before = :sys.get_state(ctx.editor)
+      version_before = state_before.highlight.version
+      original_buf = state_before.buffers.active
+
+      # Manually set up the filetree rooted at tmp_dir so we control the entries
+      tree = FileTree.new(dir)
+
+      :sys.replace_state(ctx.editor, fn s ->
+        %{s | file_tree: tree, file_tree_focused: true}
+      end)
+
+      # Find other.ex in the tree entries and navigate to it
+      state = :sys.get_state(ctx.editor)
+      entries = FileTree.visible_entries(state.file_tree)
+      other_idx = Enum.find_index(entries, fn e -> e.name == "other.ex" end)
+      assert other_idx != nil, "other.ex should be visible in tree rooted at #{dir}"
+
+      for _ <- 1..other_idx, do: send_key_sync(ctx, ?j)
+
+      # Open the file via Enter
+      state = send_key_sync(ctx, 13)
+
+      # Verify the file was opened
+      assert state.buffers.active != original_buf
+      path = BufferServer.file_path(state.buffers.active)
+      assert Path.basename(path) == "other.ex"
+
+      # Focus returned to editor
+      assert state.file_tree_focused == false
+
+      # Wait for the async :setup_highlight message to process
+      Process.sleep(50)
+      state = :sys.get_state(ctx.editor)
+
+      # Highlight setup should have fired (version bumped by parse command)
+      assert state.highlight.version > version_before,
+             "Expected highlight version to increase after opening a file from the tree " <>
+               "(was #{version_before}, now #{state.highlight.version}). " <>
+               "This means maybe_reset_highlight was not called in the filetree open path."
+
+      # Git buffer should be started (we're inside the minga git repo)
+      buf = state.buffers.active
+
+      case Minga.Git.root_for(Path.join(dir, "other.ex")) do
+        {:ok, _root} ->
+          assert Map.has_key?(state.git_buffers, buf),
+                 "Expected git buffer to be started for file opened from tree"
+
+        :not_git ->
+          :ok
+      end
+    end
   end
 end

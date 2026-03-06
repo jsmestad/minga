@@ -346,6 +346,8 @@ defmodule Minga.Editor do
         {:minga_input, {:key_press, codepoint, modifiers}},
         %{file_tree: %FileTree{}, file_tree_focused: true} = state
       ) do
+    old_buffer = state.buffers.active
+
     case handle_file_tree_key(state, codepoint, modifiers) do
       :passthrough ->
         # Key not handled by tree; unfocus and forward to normal processing
@@ -354,6 +356,7 @@ defmodule Minga.Editor do
         {:noreply, new_state}
 
       new_state ->
+        new_state = maybe_reset_highlight(new_state, old_buffer)
         Renderer.render(new_state)
         {:noreply, new_state}
     end
@@ -1130,9 +1133,14 @@ defmodule Minga.Editor do
 
         case Commands.start_buffer(path) do
           {:ok, pid} ->
+            maybe_watch_buffer(file_watcher_pid(), pid)
+            maybe_detect_project(path)
+            maybe_record_file(path)
             new_state = Commands.add_buffer(state, pid)
             new_state = log_message(new_state, "Opened: #{path}")
-            # Reveal the opened file in the tree
+            new_state = lsp_buffer_opened(new_state, pid)
+            new_state = git_buffer_opened(new_state, pid)
+            fire_hook(:after_open, [pid, path])
             %{new_state | file_tree: FileTree.reveal(tree, path)}
 
           {:error, _} ->
