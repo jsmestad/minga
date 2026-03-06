@@ -84,6 +84,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
     PickerUI.open(state, Minga.Picker.BufferSource)
   end
 
+  def execute(state, :buffer_list_all) do
+    PickerUI.open(state, Minga.Picker.BufferAllSource)
+  end
+
   def execute(state, :buffer_next), do: next_buffer(state)
   def execute(state, :buffer_prev), do: prev_buffer(state)
   def execute(state, :kill_buffer), do: remove_current_buffer(state)

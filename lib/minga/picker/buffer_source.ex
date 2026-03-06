@@ -23,11 +23,27 @@ defmodule Minga.Picker.BufferSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{buffers: %{list: buffers}}) do
+  def candidates(state), do: build_candidates(state, include_special: false)
+
+  @doc """
+  Builds picker candidates from the buffer list.
+
+  ## Options
+
+  * `:include_special` — when `true`, includes special buffers (`*scratch*`,
+    `*Messages*`, etc.) in the results. Defaults to `false`.
+  """
+  @spec build_candidates(term(), keyword()) :: [Minga.Picker.item()]
+  def build_candidates(%{buffers: %{list: buffers}}, opts \\ []) do
+    include_special = Keyword.get(opts, :include_special, false)
+
     buffers
     |> Enum.with_index()
     |> Enum.reject(fn {buf, _idx} ->
-      Process.alive?(buf) and BufferServer.unlisted?(buf)
+      alive = Process.alive?(buf)
+
+      (alive and BufferServer.unlisted?(buf)) or
+        (not include_special and alive and special?(buf))
     end)
     |> Enum.map(fn {buf, idx} ->
       name = display_name(buf)
@@ -93,6 +109,17 @@ defmodule Minga.Picker.BufferSource do
   end
 
   def on_action(_action, _item, state), do: state
+
+  @doc """
+  Returns `true` if the buffer is a special buffer (name matches `*...*` pattern).
+  """
+  @spec special?(pid()) :: boolean()
+  def special?(buf) do
+    case BufferServer.buffer_name(buf) do
+      nil -> false
+      name -> String.match?(name, ~r/^\*.+\*$/)
+    end
+  end
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

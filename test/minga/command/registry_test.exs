@@ -32,6 +32,7 @@ defmodule Minga.Command.RegistryTest do
           :find_file,
           :search_project,
           :buffer_list,
+          :buffer_list_all,
           :buffer_next,
           :buffer_prev,
           :kill_buffer,

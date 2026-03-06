@@ -40,6 +40,7 @@ defmodule Minga.Command.Registry do
     {:find_file, "Find file in project"},
     {:search_project, "Search across project files"},
     {:buffer_list, "Switch buffer"},
+    {:buffer_list_all, "Switch buffer (all)"},
     {:buffer_next, "Next buffer"},
     {:buffer_prev, "Previous buffer"},
     {:kill_buffer, "Kill current buffer"},
