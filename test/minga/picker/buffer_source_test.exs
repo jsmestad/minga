@@ -4,6 +4,7 @@ defmodule Minga.Picker.BufferSourceTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
   alias Minga.Picker.BufferAllSource
   alias Minga.Picker.BufferSource
 
@@ -13,8 +14,14 @@ defmodule Minga.Picker.BufferSourceTest do
     pid
   end
 
-  defp fake_state(buffers) do
-    %{buffers: %{list: buffers}}
+  defp fake_state(buffers, opts \\ []) do
+    %{
+      buffers: %Buffers{
+        list: buffers,
+        scratch: Keyword.get(opts, :scratch),
+        messages: Keyword.get(opts, :messages)
+      }
+    }
   end
 
   describe "special?/1" do
@@ -106,7 +113,7 @@ defmodule Minga.Picker.BufferSourceTest do
       assert BufferAllSource.preview?()
     end
 
-    test "candidates includes special buffers" do
+    test "candidates includes special buffers in the list" do
       file_buf = start_buffer(content: "code")
       special_buf = start_buffer(content: "", buffer_name: "*Messages*")
 
@@ -118,16 +125,74 @@ defmodule Minga.Picker.BufferSourceTest do
     end
   end
 
-  describe "edge case: all buffers are special" do
-    test "SPC b b returns empty list" do
+  describe "extra special buffers not in list" do
+    test "SPC b B includes scratch and messages even when not in buffer list" do
+      file_buf = start_buffer(content: "code")
       scratch = start_buffer(content: "", buffer_name: "*scratch*")
       messages = start_buffer(content: "", buffer_name: "*Messages*")
 
-      candidates = BufferSource.candidates(fake_state([scratch, messages]))
+      state = fake_state([file_buf], scratch: scratch, messages: messages)
+      candidates = BufferAllSource.candidates(state)
+
+      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+
+      assert length(candidates) == 3
+      assert Enum.any?(labels, &String.contains?(&1, "*scratch*"))
+      assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+    end
+
+    test "extra special buffers use {:pid, pid} keys" do
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
+
+      state = fake_state([], scratch: scratch)
+      candidates = BufferAllSource.candidates(state)
+
+      assert [{key, _label, _desc}] = candidates
+      assert {:pid, ^scratch} = key
+    end
+
+    test "does not duplicate special buffers already in the list" do
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
+
+      state = fake_state([scratch], scratch: scratch)
+      candidates = BufferAllSource.candidates(state)
+
+      assert length(candidates) == 1
+    end
+
+    test "SPC b b does not include extra special buffers" do
+      file_buf = start_buffer(content: "code")
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
+
+      state = fake_state([file_buf], scratch: scratch)
+      candidates = BufferSource.candidates(state)
+
+      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      assert length(candidates) == 1
+      refute Enum.any?(labels, &String.contains?(&1, "*scratch*"))
+    end
+  end
+
+  describe "edge case: all buffers are special" do
+    test "SPC b b returns empty list even with special buffers on struct" do
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
+      messages = start_buffer(content: "", buffer_name: "*Messages*")
+
+      candidates = BufferSource.candidates(fake_state([], scratch: scratch, messages: messages))
       assert candidates == []
     end
 
-    test "SPC b B still shows them" do
+    test "SPC b B shows special buffers from struct fields" do
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
+      messages = start_buffer(content: "", buffer_name: "*Messages*")
+
+      candidates =
+        BufferAllSource.candidates(fake_state([], scratch: scratch, messages: messages))
+
+      assert length(candidates) == 2
+    end
+
+    test "SPC b B shows special buffers already in the list" do
       scratch = start_buffer(content: "", buffer_name: "*scratch*")
       messages = start_buffer(content: "", buffer_name: "*Messages*")
 

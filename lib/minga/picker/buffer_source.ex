@@ -34,30 +34,53 @@ defmodule Minga.Picker.BufferSource do
     `*Messages*`, etc.) in the results. Defaults to `false`.
   """
   @spec build_candidates(term(), keyword()) :: [Minga.Picker.item()]
-  def build_candidates(%{buffers: %{list: buffers}}, opts \\ []) do
+  def build_candidates(%{buffers: buffers_state}, opts \\ []) do
+    %{list: buffers} = buffers_state
     include_special = Keyword.get(opts, :include_special, false)
 
-    buffers
-    |> Enum.with_index()
-    |> Enum.reject(fn {buf, _idx} ->
-      alive = Process.alive?(buf)
+    listed =
+      buffers
+      |> Enum.with_index()
+      |> Enum.reject(fn {buf, _idx} ->
+        alive = Process.alive?(buf)
 
-      (alive and BufferServer.unlisted?(buf)) or
-        (not include_special and alive and special?(buf))
-    end)
-    |> Enum.map(fn {buf, idx} ->
-      name = display_name(buf)
-      desc = BufferServer.file_path(buf) || ""
-      dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
-      ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
+        (alive and BufferServer.unlisted?(buf)) or
+          (not include_special and alive and special?(buf))
+      end)
+      |> Enum.map(fn {buf, idx} -> format_candidate(buf, idx) end)
 
-      {idx, name <> dirty <> ro, desc}
-    end)
+    if include_special do
+      extra = extra_special_buffers(buffers_state)
+      listed ++ extra
+    else
+      listed
+    end
+  end
+
+  @doc """
+  Returns candidate entries for special buffers (scratch, messages) that are
+  alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
+  key so `on_select` can distinguish them from list-indexed buffers.
+  """
+  @spec extra_special_buffers(Buffers.t()) :: [Minga.Picker.item()]
+  def extra_special_buffers(%Buffers{list: list} = bs) do
+    special_fields = [bs.scratch, bs.messages]
+
+    special_fields
+    |> Enum.reject(&is_nil/1)
+    |> Enum.filter(&Process.alive?/1)
+    |> Enum.reject(fn pid -> Enum.member?(list, pid) end)
+    |> Enum.map(fn pid -> format_candidate(pid, {:pid, pid}) end)
   end
 
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({idx, _label, _desc}, state) do
+  def on_select({{:pid, pid}, _label, _desc}, state) do
+    # Special buffer not yet in the list: add it (which also switches to it)
+    EditorState.add_buffer(state, pid)
+  end
+
+  def on_select({idx, _label, _desc}, state) when is_integer(idx) do
     EditorState.switch_buffer(state, idx)
   end
 
@@ -122,6 +145,15 @@ defmodule Minga.Picker.BufferSource do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec format_candidate(pid(), term()) :: Minga.Picker.item()
+  defp format_candidate(buf, key) do
+    name = display_name(buf)
+    desc = BufferServer.file_path(buf) || ""
+    dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
+    ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
+    {key, name <> dirty <> ro, desc}
+  end
 
   @spec display_name(pid()) :: String.t()
   defp display_name(buf) do
