@@ -35,6 +35,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
@@ -168,8 +169,10 @@ defmodule Minga.Editor.Renderer do
       confirm_match: SearchHighlight.current_confirm_match(state),
       highlight: highlight,
       diagnostic_signs: diagnostic_signs_for_buffer(state),
+      git_signs: git_signs_for_buffer(state),
       search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter
+      gutter_colors: state.theme.gutter,
+      git_colors: state.theme.git
     }
 
     {gutter_commands, line_commands, _byte_offset} =
@@ -180,19 +183,25 @@ defmodule Minga.Editor.Renderer do
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
           buf_line = first_line + screen_row
 
-          sign_w =
-            if render_ctx.diagnostic_signs == %{},
-              do: 0,
-              else: Gutter.sign_column_width()
+          has_signs =
+            render_ctx.diagnostic_signs != %{} or render_ctx.git_signs != %{}
+
+          sign_w = if has_signs, do: Gutter.sign_column_width(), else: 0
 
           sign_cmd =
-            Gutter.render_sign(
-              screen_row,
-              0,
-              buf_line,
-              render_ctx.diagnostic_signs,
-              render_ctx.gutter_colors
-            )
+            if has_signs do
+              Gutter.render_sign(
+                screen_row,
+                0,
+                buf_line,
+                render_ctx.diagnostic_signs,
+                render_ctx.git_signs,
+                render_ctx.gutter_colors,
+                render_ctx.git_colors
+              )
+            else
+              []
+            end
 
           gutter_cmd =
             Gutter.render_number(
@@ -619,8 +628,10 @@ defmodule Minga.Editor.Renderer do
       confirm_match: SearchHighlight.current_confirm_match(state),
       highlight: highlight,
       diagnostic_signs: diagnostic_signs_for_window(state, window),
+      git_signs: git_signs_for_window(state, window),
       search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter
+      gutter_colors: state.theme.gutter,
+      git_colors: state.theme.git
     }
   end
 
@@ -664,19 +675,25 @@ defmodule Minga.Editor.Renderer do
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
           buf_line = first_line + screen_row
 
-          sign_w =
-            if render_ctx.diagnostic_signs == %{},
-              do: 0,
-              else: Gutter.sign_column_width()
+          has_signs =
+            render_ctx.diagnostic_signs != %{} or render_ctx.git_signs != %{}
+
+          sign_w = if has_signs, do: Gutter.sign_column_width(), else: 0
 
           sign_cmd =
-            Gutter.render_sign(
-              screen_row,
-              0,
-              buf_line,
-              render_ctx.diagnostic_signs,
-              render_ctx.gutter_colors
-            )
+            if has_signs do
+              Gutter.render_sign(
+                screen_row,
+                0,
+                buf_line,
+                render_ctx.diagnostic_signs,
+                render_ctx.git_signs,
+                render_ctx.gutter_colors,
+                render_ctx.git_colors
+              )
+            else
+              []
+            end
 
           gutter_cmd =
             Gutter.render_number(
@@ -733,6 +750,25 @@ defmodule Minga.Editor.Renderer do
   end
 
   defp diagnostic_signs_for_buffer(_state), do: %{}
+
+  @spec git_signs_for_buffer(state()) :: %{non_neg_integer() => atom()}
+  defp git_signs_for_buffer(%{buffers: %{active: buf}, git_buffers: git_buffers})
+       when is_pid(buf) do
+    case Map.get(git_buffers, buf) do
+      nil -> %{}
+      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
+    end
+  end
+
+  defp git_signs_for_buffer(_state), do: %{}
+
+  @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
+  defp git_signs_for_window(%{git_buffers: git_buffers}, %{buffer: buf}) when is_pid(buf) do
+    case Map.get(git_buffers, buf) do
+      nil -> %{}
+      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
+    end
+  end
 
   @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do

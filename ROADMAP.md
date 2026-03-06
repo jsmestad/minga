@@ -253,7 +253,7 @@ Roughly in priority order:
 5. ~~**Theme runtime picker**~~ — ✅ Done. `SPC h t` to preview and switch themes without restart.
 6. **Visual block mode** — Column selection and editing
 7. ~~**File tree sidebar**~~ — ✅ Done
-8. **Git integration** — Gutter indicators, blame, hunk staging
+8. ~~**Git integration**~~ — ✅ Gutter indicators, hunk navigation/stage/revert/preview, blame
 9. **Terminal emulator** — 📋 Embedded terminal split (SPC o t toggle) #122
 
 ---

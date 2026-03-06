@@ -52,12 +52,18 @@ defmodule Minga.Command.RegistryTest do
           :diagnostics_list,
           :next_diagnostic,
           :prev_diagnostic,
+          :prev_git_hunk,
           :lsp_info,
           :open_config,
           :reload_config,
           :format_buffer,
+          :git_blame_line,
+          :git_preview_hunk,
+          :git_revert_hunk,
+          :git_stage_hunk,
           :goto_definition,
           :hover,
+          :next_git_hunk,
           :theme_picker
         ]
         |> Enum.sort()

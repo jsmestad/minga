@@ -1,0 +1,163 @@
+defmodule Minga.Git.Buffer do
+  @moduledoc """
+  Per-buffer GenServer that tracks git diff state.
+
+  Caches the HEAD version of the file on startup, then recomputes an
+  in-memory diff (via `Minga.Git.Diff`) whenever the buffer content
+  changes. This design means buffer edits never spawn git processes;
+  only buffer open and git index invalidation do.
+
+  One `Git.Buffer` exists per file-backed buffer in a git repository.
+  Managed under `Minga.Buffer.Supervisor`.
+  """
+
+  use GenServer
+
+  alias Minga.Git
+  alias Minga.Git.Diff
+
+  require Logger
+
+  @typedoc "Internal state."
+  @type state :: %{
+          git_root: String.t(),
+          relative_path: String.t(),
+          base_lines: [String.t()],
+          hunks: [Diff.hunk()],
+          signs: %{non_neg_integer() => Diff.hunk_type()}
+        }
+
+  # ── Client API ─────────────────────────────────────────────────────────────
+
+  @typedoc "Options for starting a git buffer."
+  @type start_opt ::
+          {:git_root, String.t()}
+          | {:file_path, String.t()}
+          | {:initial_content, String.t()}
+
+  @doc "Starts a git buffer for a file in a git repository."
+  @spec start_link([start_opt()]) :: GenServer.on_start()
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
+  @doc "Recomputes the diff against the cached base content."
+  @spec update(GenServer.server(), String.t()) :: :ok
+  def update(server, current_content) when is_binary(current_content) do
+    GenServer.cast(server, {:update, current_content})
+  end
+
+  @doc "Re-reads the HEAD version and recomputes the diff."
+  @spec invalidate_base(GenServer.server(), String.t()) :: :ok
+  def invalidate_base(server, current_content) when is_binary(current_content) do
+    GenServer.cast(server, {:invalidate_base, current_content})
+  end
+
+  @doc "Returns the per-line sign map for the gutter."
+  @spec signs(GenServer.server()) :: %{non_neg_integer() => Diff.hunk_type()}
+  def signs(server) do
+    GenServer.call(server, :signs)
+  end
+
+  @doc "Returns the list of hunks."
+  @spec hunks(GenServer.server()) :: [Diff.hunk()]
+  def hunks(server) do
+    GenServer.call(server, :hunks)
+  end
+
+  @doc "Returns the hunk at a specific buffer line, or nil."
+  @spec hunk_at(GenServer.server(), non_neg_integer()) :: Diff.hunk() | nil
+  def hunk_at(server, line) when is_integer(line) do
+    GenServer.call(server, {:hunk_at, line})
+  end
+
+  @doc "Returns the git root path."
+  @spec git_root(GenServer.server()) :: String.t()
+  def git_root(server) do
+    GenServer.call(server, :git_root)
+  end
+
+  @doc "Returns the file path relative to git root."
+  @spec relative_path(GenServer.server()) :: String.t()
+  def relative_path(server) do
+    GenServer.call(server, :relative_path)
+  end
+
+  # ── Server Callbacks ───────────────────────────────────────────────────────
+
+  @impl true
+  @spec init(keyword()) :: {:ok, state()}
+  def init(opts) do
+    git_root = Keyword.fetch!(opts, :git_root)
+    file_path = Keyword.fetch!(opts, :file_path)
+    initial_content = Keyword.get(opts, :initial_content, "")
+
+    rel_path = Git.relative_path(git_root, file_path)
+    base_lines = load_base_lines(git_root, rel_path)
+    current_lines = split_lines(initial_content)
+
+    hunks = Diff.diff_lines(base_lines, current_lines)
+    signs = Diff.signs_for_hunks(hunks)
+
+    state = %{
+      git_root: git_root,
+      relative_path: rel_path,
+      base_lines: base_lines,
+      hunks: hunks,
+      signs: signs
+    }
+
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_call(:signs, _from, state) do
+    {:reply, state.signs, state}
+  end
+
+  def handle_call(:hunks, _from, state) do
+    {:reply, state.hunks, state}
+  end
+
+  def handle_call({:hunk_at, line}, _from, state) do
+    {:reply, Diff.hunk_at_line(state.hunks, line), state}
+  end
+
+  def handle_call(:git_root, _from, state) do
+    {:reply, state.git_root, state}
+  end
+
+  def handle_call(:relative_path, _from, state) do
+    {:reply, state.relative_path, state}
+  end
+
+  @impl true
+  def handle_cast({:update, content}, state) do
+    current_lines = split_lines(content)
+    hunks = Diff.diff_lines(state.base_lines, current_lines)
+    signs = Diff.signs_for_hunks(hunks)
+    {:noreply, %{state | hunks: hunks, signs: signs}}
+  end
+
+  def handle_cast({:invalidate_base, content}, state) do
+    base_lines = load_base_lines(state.git_root, state.relative_path)
+    current_lines = split_lines(content)
+    hunks = Diff.diff_lines(base_lines, current_lines)
+    signs = Diff.signs_for_hunks(hunks)
+    {:noreply, %{state | base_lines: base_lines, hunks: hunks, signs: signs}}
+  end
+
+  # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec load_base_lines(String.t(), String.t()) :: [String.t()]
+  defp load_base_lines(git_root, relative_path) do
+    case Git.show_head(git_root, relative_path) do
+      {:ok, content} -> split_lines(content)
+      :error -> []
+    end
+  end
+
+  @spec split_lines(String.t()) :: [String.t()]
+  defp split_lines(""), do: []
+  defp split_lines(content), do: String.split(content, "\n")
+end

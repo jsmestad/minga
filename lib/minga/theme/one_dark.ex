@@ -42,6 +42,11 @@ defmodule Minga.Theme.OneDark do
         info_fg: @hue_2,
         hint_fg: @syntax_gutter
       },
+      git: %Minga.Theme.Git{
+        added_fg: @hue_4,
+        modified_fg: @hue_2,
+        deleted_fg: @hue_5
+      },
       modeline: %Minga.Theme.Modeline{
         bar_fg: @ui_fg,
         bar_bg: @ui_bg,

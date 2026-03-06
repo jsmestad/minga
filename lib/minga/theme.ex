@@ -38,6 +38,7 @@ defmodule Minga.Theme do
     :syntax,
     :editor,
     :gutter,
+    :git,
     :modeline,
     :picker,
     :minibuffer,
@@ -60,6 +61,7 @@ defmodule Minga.Theme do
           syntax: syntax(),
           editor: Minga.Theme.Editor.t(),
           gutter: Minga.Theme.Gutter.t(),
+          git: Minga.Theme.Git.t(),
           modeline: Minga.Theme.Modeline.t(),
           picker: Minga.Theme.Picker.t(),
           minibuffer: Minga.Theme.Minibuffer.t(),
@@ -95,6 +97,18 @@ defmodule Minga.Theme do
             warning_fg: Minga.Theme.color(),
             info_fg: Minga.Theme.color(),
             hint_fg: Minga.Theme.color()
+          }
+  end
+
+  defmodule Git do
+    @moduledoc "Git gutter indicator colors."
+    @enforce_keys [:added_fg, :modified_fg, :deleted_fg]
+    defstruct [:added_fg, :modified_fg, :deleted_fg]
+
+    @type t :: %__MODULE__{
+            added_fg: Minga.Theme.color(),
+            modified_fg: Minga.Theme.color(),
+            deleted_fg: Minga.Theme.color()
           }
   end
 

@@ -45,6 +45,11 @@ defmodule Minga.Theme.DoomOne do
         info_fg: @blue,
         hint_fg: @base5
       },
+      git: %Minga.Theme.Git{
+        added_fg: @green,
+        modified_fg: @blue,
+        deleted_fg: @red
+      },
       modeline: %Minga.Theme.Modeline{
         bar_fg: @fg,
         bar_bg: @base3,

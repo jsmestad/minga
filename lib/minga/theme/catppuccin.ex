@@ -27,6 +27,11 @@ defmodule Minga.Theme.Catppuccin do
         info_fg: p.blue,
         hint_fg: p.overlay0
       },
+      git: %Minga.Theme.Git{
+        added_fg: p.green,
+        modified_fg: p.blue,
+        deleted_fg: p.red
+      },
       modeline: %Minga.Theme.Modeline{
         bar_fg: p.text,
         bar_bg: p.mantle,

@@ -73,6 +73,12 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}, {?g, @none}], :goto_definition, "Go to definition"},
     {[{?c, @none}, {?k, @none}], :hover, "Hover documentation"},
 
+    # ── Git ──────────────────────────────────────────────────────────────────────
+    {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
+    {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
+    {[{?g, @none}, {?p, @none}], :git_preview_hunk, "Preview hunk"},
+    {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
+
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},
     {[{?p, @none}, {?p, @none}], :project_switch, "Switch project"},
@@ -95,6 +101,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}], "+buffer"},
     {[{?p, @none}], "+project"},
     {[{?c, @none}], "+code"},
+    {[{?g, @none}], "+git"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},

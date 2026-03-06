@@ -79,7 +79,8 @@ defmodule Minga.Editor.State do
             render_timer: nil,
             windows: %Windows{},
             file_tree: nil,
-            file_tree_focused: false
+            file_tree_focused: false,
+            git_buffers: %{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -110,7 +111,8 @@ defmodule Minga.Editor.State do
           render_timer: reference() | nil,
           windows: Windows.t(),
           file_tree: FileTree.t() | nil,
-          file_tree_focused: boolean()
+          file_tree_focused: boolean(),
+          git_buffers: %{pid() => pid()}
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

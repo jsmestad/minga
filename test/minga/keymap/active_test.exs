@@ -80,15 +80,15 @@ defmodule Minga.Keymap.ActiveTest do
 
   describe "reset/1" do
     test "removes all user overrides", %{store: s} do
-      Active.bind(s, :normal, "SPC g s", :git_status, "Git status")
+      Active.bind(s, :normal, "SPC z z", :custom_cmd, "Custom command")
       Active.bind(s, :normal, "Q", :replay, "Replay")
       Active.reset(s)
 
       trie = Active.leader_trie(s)
-      # SPC g should not have s anymore (unless it's in defaults)
-      case Bindings.lookup(trie, {?g, 0}) do
-        {:prefix, g_node} ->
-          assert :not_found = Bindings.lookup(g_node, {?s, 0})
+      # SPC z should not exist after reset (not in defaults)
+      case Bindings.lookup(trie, {?z, 0}) do
+        {:prefix, z_node} ->
+          assert :not_found = Bindings.lookup(z_node, {?z, 0})
 
         :not_found ->
           assert true

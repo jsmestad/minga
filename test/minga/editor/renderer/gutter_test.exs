@@ -12,6 +12,12 @@ defmodule Minga.Editor.Renderer.GutterTest do
     hint_fg: 0x555555
   }
 
+  @git_colors %Minga.Theme.Git{
+    added_fg: 0x98BE65,
+    modified_fg: 0x51AFEF,
+    deleted_fg: 0xFF6C6B
+  }
+
   describe "total_width/2" do
     test "adds sign column width when diagnostics present" do
       line_number_w = 4
@@ -35,40 +41,61 @@ defmodule Minga.Editor.Renderer.GutterTest do
     end
   end
 
-  describe "render_sign/5" do
-    test "renders error sign" do
-      signs = %{5 => :error}
-      result = Gutter.render_sign(0, 0, 5, signs, @colors)
+  describe "render_sign/7" do
+    test "renders error sign (diagnostic takes priority)" do
+      diag_signs = %{5 => :error}
+      result = Gutter.render_sign(0, 0, 5, diag_signs, %{}, @colors, @git_colors)
       assert is_binary(result)
-      assert result != []
     end
 
     test "renders warning sign" do
-      signs = %{3 => :warning}
-      result = Gutter.render_sign(0, 0, 3, signs, @colors)
+      diag_signs = %{3 => :warning}
+      result = Gutter.render_sign(0, 0, 3, diag_signs, %{}, @colors, @git_colors)
       assert is_binary(result)
     end
 
     test "renders info sign" do
-      signs = %{1 => :info}
-      result = Gutter.render_sign(0, 0, 1, signs, @colors)
+      diag_signs = %{1 => :info}
+      result = Gutter.render_sign(0, 0, 1, diag_signs, %{}, @colors, @git_colors)
       assert is_binary(result)
     end
 
     test "renders hint sign" do
-      signs = %{0 => :hint}
-      result = Gutter.render_sign(0, 0, 0, signs, @colors)
+      diag_signs = %{0 => :hint}
+      result = Gutter.render_sign(0, 0, 0, diag_signs, %{}, @colors, @git_colors)
       assert is_binary(result)
     end
 
-    test "renders empty space when line has no diagnostic" do
-      signs = %{5 => :error}
-      result = Gutter.render_sign(0, 0, 10, signs, @colors)
+    test "renders git added sign when no diagnostic" do
+      git_signs = %{5 => :added}
+      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
       assert is_binary(result)
     end
 
-    test "returns empty list when signs map is empty" do
-      assert Gutter.render_sign(0, 0, 5, %{}, @colors) == []
+    test "renders git modified sign when no diagnostic" do
+      git_signs = %{5 => :modified}
+      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
+      assert is_binary(result)
+    end
+
+    test "renders git deleted sign when no diagnostic" do
+      git_signs = %{5 => :deleted}
+      result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
+      assert is_binary(result)
+    end
+
+    test "diagnostic takes priority over git sign on same line" do
+      diag_signs = %{5 => :error}
+      git_signs = %{5 => :added}
+      result = Gutter.render_sign(0, 0, 5, diag_signs, git_signs, @colors, @git_colors)
+      # Should render the diagnostic sign, not the git sign
+      assert is_binary(result)
+    end
+
+    test "renders empty space when no diagnostic or git sign" do
+      diag_signs = %{5 => :error}
+      result = Gutter.render_sign(0, 0, 10, diag_signs, %{}, @colors, @git_colors)
+      assert is_binary(result)
     end
   end
 

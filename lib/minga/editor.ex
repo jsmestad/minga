@@ -34,6 +34,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
   alias Minga.FileWatcher
+  alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.EvalState
@@ -214,6 +215,7 @@ defmodule Minga.Editor do
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = lsp_buffer_opened(new_state, pid)
+        new_state = git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
         Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -897,7 +899,9 @@ defmodule Minga.Editor do
 
     state =
       if content_changed do
-        lsp_buffer_changed(state)
+        state
+        |> lsp_buffer_changed()
+        |> git_buffer_changed()
       else
         state
       end
@@ -1296,6 +1300,55 @@ defmodule Minga.Editor do
 
   defp lsp_after_kill(state, _cmd, _old_buffer), do: state
 
+  # ── Git buffer lifecycle ───────────────────────────────────────────────
+
+  @spec git_buffer_opened(state(), pid()) :: state()
+  defp git_buffer_opened(state, buffer_pid) do
+    with path when is_binary(path) <- BufferServer.file_path(buffer_pid),
+         {:ok, git_root} <- Minga.Git.root_for(path) do
+      start_git_buffer(state, buffer_pid, git_root, path)
+    else
+      _ -> state
+    end
+  end
+
+  @spec start_git_buffer(state(), pid(), String.t(), String.t()) :: state()
+  defp start_git_buffer(state, buffer_pid, git_root, path) do
+    {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+
+    case DynamicSupervisor.start_child(
+           Minga.Buffer.Supervisor,
+           {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
+         ) do
+      {:ok, git_pid} ->
+        %{state | git_buffers: Map.put(state.git_buffers, buffer_pid, git_pid)}
+
+      {:error, reason} ->
+        Logger.warning("Failed to start git buffer: #{inspect(reason)}")
+        state
+    end
+  end
+
+  @spec git_buffer_changed(state()) :: state()
+  defp git_buffer_changed(%{buffers: %{active: nil}} = state), do: state
+
+  defp git_buffer_changed(%{buffers: %{active: buf}} = state) do
+    case Map.get(state.git_buffers, buf) do
+      nil -> state
+      git_pid -> git_buffer_update(state, buf, git_pid)
+    end
+  end
+
+  @spec git_buffer_update(state(), pid(), pid()) :: state()
+  defp git_buffer_update(state, buf, git_pid) do
+    if Process.alive?(git_pid) do
+      {content, _cursor} = BufferServer.content_and_cursor(buf)
+      GitBuffer.update(git_pid, content)
+    end
+
+    state
+  end
+
   # ── Config options ──────────────────────────────────────────────────────
 
   alias Minga.Config.Hooks, as: ConfigHooks
@@ -1390,7 +1443,7 @@ defmodule Minga.Editor do
       BufferServer.insert_text(buf, text)
     end
 
-    lsp_buffer_changed(state)
+    state |> lsp_buffer_changed() |> git_buffer_changed()
   end
 
   defp accept_completion_text(state, _completion, _text), do: state
@@ -1406,7 +1459,7 @@ defmodule Minga.Editor do
       edit.new_text
     )
 
-    lsp_buffer_changed(state)
+    state |> lsp_buffer_changed() |> git_buffer_changed()
   end
 
   defp apply_completion_text_edit(state, _edit), do: state

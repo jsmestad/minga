@@ -66,7 +66,13 @@ defmodule Minga.Command.Registry do
     {:reload_config, "Reload config"},
     {:format_buffer, "Format buffer"},
     {:goto_definition, "Go to definition"},
-    {:hover, "Hover documentation"}
+    {:hover, "Hover documentation"},
+    {:next_git_hunk, "Next git hunk"},
+    {:prev_git_hunk, "Previous git hunk"},
+    {:git_stage_hunk, "Stage hunk"},
+    {:git_revert_hunk, "Revert hunk"},
+    {:git_preview_hunk, "Preview hunk"},
+    {:git_blame_line, "Blame line"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

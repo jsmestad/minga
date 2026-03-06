@@ -25,10 +25,16 @@ defmodule Minga.Editor.Renderer.Context do
             confirm_match: nil,
             highlight: nil,
             diagnostic_signs: %{},
+            git_signs: %{},
             search_colors: %Minga.Theme.Search{
               highlight_fg: 0x000000,
               highlight_bg: 0xECBE7B,
               current_bg: 0xFF6C6B
+            },
+            git_colors: %Minga.Theme.Git{
+              added_fg: 0x98BE65,
+              modified_fg: 0x51AFEF,
+              deleted_fg: 0xFF6C6B
             },
             gutter_colors: %Minga.Theme.Gutter{
               fg: 0x555555,
@@ -61,6 +67,8 @@ defmodule Minga.Editor.Renderer.Context do
           confirm_match: SearchHighlight.search_match() | nil,
           highlight: Highlight.t() | nil,
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
+          git_signs: %{non_neg_integer() => Minga.Git.Diff.hunk_type()},
+          git_colors: Minga.Theme.Git.t(),
           search_colors: Minga.Theme.Search.t(),
           gutter_colors: Minga.Theme.Gutter.t()
         }

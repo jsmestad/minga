@@ -28,6 +28,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Diagnostics
   alias Minga.Editor.Commands.Editing
   alias Minga.Editor.Commands.Eval
+  alias Minga.Editor.Commands.Git, as: GitCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
@@ -347,6 +348,13 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :goto_definition), do: LspActions.goto_definition(state)
   def execute(state, :hover), do: LspActions.hover(state)
+
+  def execute(state, :next_git_hunk), do: GitCommands.execute(state, :next_git_hunk)
+  def execute(state, :prev_git_hunk), do: GitCommands.execute(state, :prev_git_hunk)
+  def execute(state, :git_stage_hunk), do: GitCommands.execute(state, :git_stage_hunk)
+  def execute(state, :git_revert_hunk), do: GitCommands.execute(state, :git_revert_hunk)
+  def execute(state, :git_preview_hunk), do: GitCommands.execute(state, :git_preview_hunk)
+  def execute(state, :git_blame_line), do: GitCommands.execute(state, :git_blame_line)
 
   # ── Macro recording ──────────────────────────────────────────────────────
 

@@ -35,22 +35,28 @@ defmodule Minga.Editor.Renderer.Gutter do
   @spec sign_column_width() :: non_neg_integer()
   def sign_column_width, do: @sign_col_width
 
-  @doc "Renders the sign column for a line. Returns a draw command or empty list."
+  @typedoc "Git sign color set from the active theme."
+  @type git_colors :: Minga.Theme.Git.t()
+
+  @doc """
+  Renders the sign column for a line.
+
+  Diagnostics take priority over git signs. If no diagnostic exists for
+  the line, a git sign is shown instead. Returns a draw command or empty list.
+  """
   @spec render_sign(
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           %{non_neg_integer() => Diagnostic.severity()},
-          colors()
+          %{non_neg_integer() => atom()},
+          colors(),
+          git_colors()
         ) :: binary() | []
-  def render_sign(_screen_row, _col_offset, _buf_line, signs, _colors)
-      when map_size(signs) == 0,
-      do: []
-
-  def render_sign(screen_row, col_offset, buf_line, signs, colors) do
-    case Map.get(signs, buf_line) do
+  def render_sign(screen_row, col_offset, buf_line, diag_signs, git_signs, colors, git_colors) do
+    case Map.get(diag_signs, buf_line) do
       nil ->
-        Protocol.encode_draw(screen_row, col_offset, "  ")
+        render_git_sign(screen_row, col_offset, buf_line, git_signs, git_colors)
 
       severity ->
         {icon, fg} = sign_for_severity(severity, colors)
@@ -80,6 +86,29 @@ defmodule Minga.Editor.Renderer.Gutter do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec render_git_sign(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          %{non_neg_integer() => atom()},
+          git_colors()
+        ) :: binary() | []
+  defp render_git_sign(screen_row, col_offset, buf_line, git_signs, git_colors) do
+    case Map.get(git_signs, buf_line) do
+      nil ->
+        Protocol.encode_draw(screen_row, col_offset, "  ")
+
+      :added ->
+        Protocol.encode_draw(screen_row, col_offset, "▎ ", fg: git_colors.added_fg)
+
+      :modified ->
+        Protocol.encode_draw(screen_row, col_offset, "▎ ", fg: git_colors.modified_fg)
+
+      :deleted ->
+        Protocol.encode_draw(screen_row, col_offset, "▁ ", fg: git_colors.deleted_fg)
+    end
+  end
 
   @spec sign_for_severity(Diagnostic.severity(), colors()) :: {String.t(), non_neg_integer()}
   defp sign_for_severity(:error, colors), do: {"E ", colors.error_fg}

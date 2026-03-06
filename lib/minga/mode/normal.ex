@@ -434,6 +434,16 @@ defmodule Minga.Mode.Normal do
     {:execute, :prev_diagnostic, %{state | pending_bracket: nil}}
   end
 
+  # ]c — next git hunk
+  def handle_key({?c, 0}, %ModeState{pending_bracket: :next} = state) do
+    {:execute, :next_git_hunk, %{state | pending_bracket: nil}}
+  end
+
+  # [c — previous git hunk
+  def handle_key({?c, 0}, %ModeState{pending_bracket: :prev} = state) do
+    {:execute, :prev_git_hunk, %{state | pending_bracket: nil}}
+  end
+
   # Cancel bracket prefix on any unrecognized key
   def handle_key(_key, %ModeState{pending_bracket: bracket} = state)
       when bracket != nil do
