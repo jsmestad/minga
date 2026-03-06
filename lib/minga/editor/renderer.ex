@@ -40,6 +40,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.Theme
   alias Minga.WhichKey
 
   @typedoc "Internal editor state."
@@ -109,12 +110,16 @@ defmodule Minga.Editor.Renderer do
     # When the file tree is open, the editor content is shifted right.
     {_row, col_off, editor_width, _editor_height} = EditorState.screen_rect(state)
 
+    # Calculate agent panel dimensions if visible
+    agent_panel_height = agent_panel_height(state)
+    editor_rows = state.viewport.rows - agent_panel_height
+
     # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
     #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
     {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
     cursor = {cursor_line, cursor_byte_col}
-    # Use full terminal rows but editor-area width (tree may reduce it).
-    viewport = Viewport.new(state.viewport.rows, editor_width)
+    # Use editor rows (minus agent panel) but editor-area width (tree may reduce it).
+    viewport = Viewport.new(editor_rows, editor_width)
     viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
@@ -262,7 +267,10 @@ defmodule Minga.Editor.Renderer do
           line_count: line_count,
           buf_index: buf_index,
           buf_count: buf_count,
-          macro_recording: MacroRecorder.recording?(state.macro_recorder)
+          macro_recording: MacroRecorder.recording?(state.macro_recorder),
+          agent_status: state.agent_status,
+          agent_theme_colors:
+            if(state.agent_status, do: Theme.agent_theme(state.theme), else: nil)
         },
         state.theme
       )
@@ -319,6 +327,9 @@ defmodule Minga.Editor.Renderer do
         gutter_w
       )
 
+    # ── Agent panel (below editor content) ──
+    agent_commands = render_agent_panel(state, editor_rows, col_off, editor_width)
+
     all_commands =
       clear ++
         tree_commands ++
@@ -330,6 +341,7 @@ defmodule Minga.Editor.Renderer do
         whichkey_commands ++
         completion_commands ++
         picker_commands ++
+        agent_commands ++
         [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
@@ -531,7 +543,10 @@ defmodule Minga.Editor.Renderer do
           buf_index: buf_index,
           buf_count: buf_count,
           macro_recording:
-            if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false)
+            if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
+          agent_status: if(is_active, do: state.agent_status, else: nil),
+          agent_theme_colors:
+            if(is_active && state.agent_status, do: Theme.agent_theme(state.theme), else: nil)
         },
         state.theme
       )
@@ -1093,5 +1108,64 @@ defmodule Minga.Editor.Renderer do
 
     ro = if Map.get(snapshot, :read_only, false), do: " [RO]", else: ""
     base <> ro
+  end
+
+  # ── Agent panel rendering ────────────────────────────────────────────────
+
+  alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.Session
+
+  @spec agent_panel_height(state()) :: non_neg_integer()
+  defp agent_panel_height(%{agent_panel: %{visible: true}} = state) do
+    div(state.viewport.rows * 35, 100)
+  end
+
+  defp agent_panel_height(_state), do: 0
+
+  @spec render_agent_panel(state(), non_neg_integer(), non_neg_integer(), pos_integer()) :: [
+          binary()
+        ]
+  defp render_agent_panel(%{agent_panel: %{visible: false}}, _editor_rows, _col, _width), do: []
+
+  defp render_agent_panel(state, editor_rows, col, width) do
+    panel_height = agent_panel_height(state)
+    row_start = editor_rows
+    rect = {row_start, col, width, panel_height}
+
+    # Gather messages from the session if available
+    messages =
+      if state.agent_session do
+        try do
+          Session.messages(state.agent_session)
+        catch
+          :exit, _ -> []
+        end
+      else
+        []
+      end
+
+    usage =
+      if state.agent_session do
+        try do
+          Session.usage(state.agent_session)
+        catch
+          :exit, _ -> %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
+        end
+      else
+        %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
+      end
+
+    panel_state = %{
+      messages: messages,
+      status: state.agent_status || :idle,
+      input_text: state.agent_panel.input_text,
+      scroll_offset: state.agent_panel.scroll_offset,
+      spinner_frame: state.agent_panel.spinner_frame,
+      usage: usage,
+      model_name: state.agent_panel.model_name,
+      error_message: state.agent_error
+    }
+
+    ChatRenderer.render(rect, panel_state, state.theme)
   end
 end

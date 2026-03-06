@@ -74,7 +74,10 @@ defmodule Minga.Command.Registry do
     {:git_preview_hunk, "Preview hunk"},
     {:git_blame_line, "Blame line"},
     {:toggle_comment_line, "Toggle comment on line"},
-    {:toggle_comment_selection, "Toggle comment on selection"}
+    {:toggle_comment_selection, "Toggle comment on selection"},
+    {:toggle_agent_panel, "Toggle AI agent panel"},
+    {:agent_abort, "Stop AI agent"},
+    {:agent_new_session, "New AI agent session"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

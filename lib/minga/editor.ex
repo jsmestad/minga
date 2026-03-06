@@ -19,6 +19,7 @@ defmodule Minga.Editor do
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionTrigger
@@ -554,8 +555,82 @@ defmodule Minga.Editor do
     {:noreply, %{state | render_timer: nil}}
   end
 
+  # ── Agent events ──────────────────────────────────────────────────────────
+
+  def handle_info({:agent_event, {:status_changed, status}}, state) do
+    state = %{state | agent_status: status}
+
+    # Start/stop spinner timer based on status
+    state =
+      case status do
+        s when s in [:thinking, :tool_executing] ->
+          start_spinner_timer(state)
+
+        _ ->
+          stop_spinner_timer(state)
+      end
+
+    Renderer.render(state)
+    {:noreply, state}
+  end
+
+  def handle_info({:agent_event, {:text_delta, _delta}}, state) do
+    # Auto-scroll and re-render on new text
+    state = %{state | agent_panel: Minga.Agent.PanelState.scroll_to_bottom(state.agent_panel)}
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:agent_event, {:thinking_delta, _delta}}, state) do
+    {:noreply, schedule_render(state, 50)}
+  end
+
+  def handle_info({:agent_event, :messages_changed}, state) do
+    state = %{state | agent_panel: Minga.Agent.PanelState.scroll_to_bottom(state.agent_panel)}
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:agent_event, {:tool_update, _id}}, state) do
+    {:noreply, schedule_render(state, 50)}
+  end
+
+  def handle_info({:agent_event, {:error, message}}, state) do
+    state = %{state | agent_status: :error, agent_error: message}
+    Renderer.render(state)
+    {:noreply, state}
+  end
+
+  def handle_info(:agent_spinner_tick, state) do
+    if state.agent_panel.visible and state.agent_status in [:thinking, :tool_executing] do
+      state = %{state | agent_panel: Minga.Agent.PanelState.tick_spinner(state.agent_panel)}
+      {:noreply, schedule_render(state, 16)}
+    else
+      {:noreply, stop_spinner_timer(state)}
+    end
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @spec start_spinner_timer(state()) :: state()
+  defp start_spinner_timer(%{agent_spinner_timer: nil} = state) do
+    timer = :timer.send_interval(100, :agent_spinner_tick)
+    %{state | agent_spinner_timer: timer}
+  end
+
+  defp start_spinner_timer(state), do: state
+
+  @spec stop_spinner_timer(state()) :: state()
+  defp stop_spinner_timer(%{agent_spinner_timer: nil} = state), do: state
+
+  defp stop_spinner_timer(%{agent_spinner_timer: timer} = state) do
+    case timer do
+      {:ok, ref} -> :timer.cancel(ref)
+      ref when is_reference(ref) -> :timer.cancel(ref)
+      _ -> :ok
+    end
+
+    %{state | agent_spinner_timer: nil}
   end
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
@@ -603,6 +678,39 @@ defmodule Minga.Editor do
 
   # Global bindings — processed before the Mode FSM.
   # Ctrl+S → save (works in any mode).
+  # ── Agent panel input routing ─────────────────────────────────────────────
+  # When the agent panel is visible and input is focused, route keystrokes
+  # to the agent input area instead of the normal mode FSM.
+
+  # C-c C-c in agent input: submit prompt
+  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, ?c, mods)
+       when band(mods, @ctrl) != 0 do
+    AgentCommands.submit_prompt(state)
+  end
+
+  # Escape in agent input: unfocus the input (return to normal editing)
+  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 27, _mods) do
+    %{state | agent_panel: Minga.Agent.PanelState.set_input_focused(state.agent_panel, false)}
+  end
+
+  # Backspace in agent input
+  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 127, _mods) do
+    AgentCommands.input_backspace(state)
+  end
+
+  # Enter in agent input (normal mode): submit
+  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 13, _mods) do
+    AgentCommands.submit_prompt(state)
+  end
+
+  # Printable characters in agent input
+  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, cp, _mods)
+       when cp >= 32 do
+    char = <<cp::utf8>>
+    AgentCommands.input_char(state, char)
+  end
+
+  # Ctrl+S → save (works in any mode, including agent panel focus).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
     if state.buffers.active do
       case BufferServer.save(state.buffers.active) do

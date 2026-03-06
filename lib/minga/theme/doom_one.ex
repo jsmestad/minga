@@ -105,6 +105,29 @@ defmodule Minga.Theme.DoomOne do
         header_fg: @blue,
         header_bg: @base3,
         separator_fg: @base5
+      },
+      agent: %Minga.Theme.Agent{
+        panel_bg: @base3,
+        panel_border: @base5,
+        header_fg: @blue,
+        header_bg: 0x1E2127,
+        user_border: @blue,
+        user_label: @blue,
+        assistant_border: @green,
+        assistant_label: @green,
+        tool_border: @yellow,
+        tool_header: @yellow,
+        code_bg: 0x1E2127,
+        code_border: @base5,
+        input_border: @blue,
+        input_bg: 0x1E2127,
+        input_placeholder: @base5,
+        thinking_fg: @yellow,
+        status_thinking: @yellow,
+        status_tool: @cyan,
+        status_error: @red,
+        status_idle: @base5,
+        text_fg: @fg
       }
     }
   end

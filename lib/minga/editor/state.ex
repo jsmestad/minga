@@ -19,6 +19,7 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
+  alias Minga.Agent.PanelState, as: AgentPanel
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -81,7 +82,12 @@ defmodule Minga.Editor.State do
             file_tree: nil,
             file_tree_focused: false,
             git_buffers: %{},
-            injection_ranges: %{}
+            injection_ranges: %{},
+            agent_session: nil,
+            agent_status: nil,
+            agent_panel: AgentPanel.new(),
+            agent_error: nil,
+            agent_spinner_timer: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -118,7 +124,12 @@ defmodule Minga.Editor.State do
             pid() => [
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
             ]
-          }
+          },
+          agent_session: pid() | nil,
+          agent_status: :idle | :thinking | :tool_executing | :error | nil,
+          agent_panel: AgentPanel.t(),
+          agent_error: String.t() | nil,
+          agent_spinner_timer: reference() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

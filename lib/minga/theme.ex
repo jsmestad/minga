@@ -44,7 +44,8 @@ defmodule Minga.Theme do
     :minibuffer,
     :search,
     :popup,
-    :tree
+    :tree,
+    :agent
   ]
 
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
@@ -67,7 +68,8 @@ defmodule Minga.Theme do
           minibuffer: Minga.Theme.Minibuffer.t(),
           search: Minga.Theme.Search.t(),
           popup: Minga.Theme.Popup.t(),
-          tree: Minga.Theme.Tree.t()
+          tree: Minga.Theme.Tree.t(),
+          agent: Minga.Theme.Agent.t() | nil
         }
 
   # ── Color group structs ─────────────────────────────────────────────────────
@@ -213,6 +215,81 @@ defmodule Minga.Theme do
           }
   end
 
+  defmodule Agent do
+    @moduledoc "AI agent chat panel colors."
+    @enforce_keys [
+      :panel_bg,
+      :panel_border,
+      :header_fg,
+      :header_bg,
+      :user_border,
+      :user_label,
+      :assistant_border,
+      :assistant_label,
+      :tool_border,
+      :tool_header,
+      :code_bg,
+      :code_border,
+      :input_border,
+      :input_bg,
+      :input_placeholder,
+      :thinking_fg,
+      :status_thinking,
+      :status_tool,
+      :status_error,
+      :status_idle,
+      :text_fg
+    ]
+
+    defstruct [
+      :panel_bg,
+      :panel_border,
+      :header_fg,
+      :header_bg,
+      :user_border,
+      :user_label,
+      :assistant_border,
+      :assistant_label,
+      :tool_border,
+      :tool_header,
+      :code_bg,
+      :code_border,
+      :input_border,
+      :input_bg,
+      :input_placeholder,
+      :thinking_fg,
+      :status_thinking,
+      :status_tool,
+      :status_error,
+      :status_idle,
+      :text_fg
+    ]
+
+    @type t :: %__MODULE__{
+            panel_bg: Minga.Theme.color(),
+            panel_border: Minga.Theme.color(),
+            header_fg: Minga.Theme.color(),
+            header_bg: Minga.Theme.color(),
+            user_border: Minga.Theme.color(),
+            user_label: Minga.Theme.color(),
+            assistant_border: Minga.Theme.color(),
+            assistant_label: Minga.Theme.color(),
+            tool_border: Minga.Theme.color(),
+            tool_header: Minga.Theme.color(),
+            code_bg: Minga.Theme.color(),
+            code_border: Minga.Theme.color(),
+            input_border: Minga.Theme.color(),
+            input_bg: Minga.Theme.color(),
+            input_placeholder: Minga.Theme.color(),
+            thinking_fg: Minga.Theme.color(),
+            status_thinking: Minga.Theme.color(),
+            status_tool: Minga.Theme.color(),
+            status_error: Minga.Theme.color(),
+            status_idle: Minga.Theme.color(),
+            text_fg: Minga.Theme.color()
+          }
+  end
+
   defmodule Tree do
     @moduledoc "File tree sidebar colors."
     @enforce_keys [
@@ -280,6 +357,37 @@ defmodule Minga.Theme do
   @doc "Returns the default theme name atom."
   @spec default() :: atom()
   def default, do: :doom_one
+
+  @doc "Returns the agent theme section, falling back to a basic default."
+  @spec agent_theme(t()) :: Agent.t()
+  def agent_theme(%__MODULE__{agent: nil}) do
+    # Fallback for themes that don't define agent colors
+    %Agent{
+      panel_bg: 0x23272E,
+      panel_border: 0x5B6268,
+      header_fg: 0x51AFEF,
+      header_bg: 0x1E2127,
+      user_border: 0x51AFEF,
+      user_label: 0x51AFEF,
+      assistant_border: 0x98BE65,
+      assistant_label: 0x98BE65,
+      tool_border: 0xECBE7B,
+      tool_header: 0xECBE7B,
+      code_bg: 0x1E2127,
+      code_border: 0x5B6268,
+      input_border: 0x51AFEF,
+      input_bg: 0x1E2127,
+      input_placeholder: 0x5B6268,
+      thinking_fg: 0xECBE7B,
+      status_thinking: 0xECBE7B,
+      status_tool: 0x46D9FF,
+      status_error: 0xFF6C6B,
+      status_idle: 0x5B6268,
+      text_fg: 0xBBC2CF
+    }
+  end
+
+  def agent_theme(%__MODULE__{agent: agent}), do: agent
 
   @doc """
   Returns the style for a tree-sitter capture name, using suffix fallback.

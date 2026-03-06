@@ -70,12 +70,38 @@ defmodule Minga.Editor.Modeline do
     filetype_fg = ml.filetype_fg
     filetype_bg = bar_bg
 
-    left_segments = [
-      {mode_segment, mode_fg, mode_bg, bold: true},
-      {@separator, mode_bg, info_bg, []},
-      {file_segment, info_fg, info_bg, []},
-      {@separator, info_bg, bar_bg, []}
-    ]
+    # Agent status indicator (only shown when an agent session is active)
+    agent_status = Map.get(data, :agent_status)
+    agent_theme_colors = Map.get(data, :agent_theme_colors)
+
+    agent_segments =
+      case {agent_status, agent_theme_colors} do
+        {nil, _} ->
+          []
+
+        {:idle, colors} ->
+          [{" ◯ ", colors.status_idle, bar_bg, []}]
+
+        {:thinking, colors} ->
+          [{" ⟳ ", colors.status_thinking, bar_bg, bold: true}]
+
+        {:tool_executing, colors} ->
+          [{" ⚡ ", colors.status_tool, bar_bg, bold: true}]
+
+        {:error, colors} ->
+          [{" ✗ ", colors.status_error, bar_bg, bold: true}]
+
+        _ ->
+          []
+      end
+
+    left_segments =
+      [
+        {mode_segment, mode_fg, mode_bg, bold: true},
+        {@separator, mode_bg, info_bg, []},
+        {file_segment, info_fg, info_bg, []},
+        {@separator, info_bg, bar_bg, []}
+      ] ++ agent_segments
 
     right_segments = [
       {filetype_segment, filetype_fg, filetype_bg, []},

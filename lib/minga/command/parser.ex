@@ -47,6 +47,8 @@ defmodule Minga.Command.Parser do
           | {:new_buffer, []}
           | {:lsp_info, []}
           | {:extensions, []}
+          | {:agent_abort, []}
+          | {:agent_new_session, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
@@ -106,6 +108,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("lspinfo"), do: {:lsp_info, []}
   defp do_parse("extensions"), do: {:extensions, []}
   defp do_parse("ext"), do: {:extensions, []}
+  defp do_parse("agent-stop"), do: {:agent_abort, []}
+  defp do_parse("agent-new"), do: {:agent_new_session, []}
   defp do_parse("vsplit"), do: {:split_vertical, []}
   defp do_parse("vs"), do: {:split_vertical, []}
   defp do_parse("split"), do: {:split_horizontal, []}

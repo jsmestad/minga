@@ -245,6 +245,25 @@ Current status and planned features. Updated as development progresses.
 
 ---
 
+## AI Agent
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Agent provider behaviour | ✅ | `Minga.Agent.Provider` with callbacks for prompt, abort, new_session |
+| Pi RPC provider | ✅ | Spawns `pi --mode rpc` as supervised BEAM Port |
+| Agent session GenServer | ✅ | Manages conversation, status, token usage, subscriber broadcasts |
+| Agent supervisor | ✅ | `DynamicSupervisor` with crash isolation |
+| Chat panel renderer | ✅ | Bordered message blocks, tool cards, thinking spinner, input area |
+| Markdown parser | ✅ | Bold, italic, code, headers, code blocks, blockquotes, lists |
+| Agent theme section | ✅ | `theme.agent` colors for all 7 built-in themes (Doom One default) |
+| Modeline status | ✅ | ◯ idle, ⟳ thinking, ⚡ tool executing, ✗ error |
+| Leader keybindings | ✅ | `SPC a a` toggle, `SPC a s` stop, `SPC a n` new session |
+| Ex commands | ✅ | `:agent-stop`, `:agent-new` |
+| Inline completions (ghost text) | 📋 | #74 |
+| Agent-aware undo | 📋 | #76 |
+| Edit boundaries | 📋 | #78 |
+| Inline diff review | 📋 | #79 |
+
 ## What's Next
 
 Roughly in priority order:

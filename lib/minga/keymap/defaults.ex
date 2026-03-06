@@ -90,6 +90,11 @@ defmodule Minga.Keymap.Defaults do
     # ── Open ──────────────────────────────────────────────────────────────────
     {[{?o, @none}, {?p, @none}], :toggle_file_tree, "Toggle file tree"},
 
+    # ── AI agent ─────────────────────────────────────────────────────────────
+    {[{?a, @none}, {?a, @none}], :toggle_agent_panel, "Toggle agent panel"},
+    {[{?a, @none}, {?s, @none}], :agent_abort, "Stop agent"},
+    {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
   ]
@@ -106,6 +111,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},
     {[{?o, @none}], "+open"},
+    {[{?a, @none}], "+ai"},
     {[{?t, @none}], "+toggle"}
   ]
 

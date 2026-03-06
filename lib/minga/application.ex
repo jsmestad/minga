@@ -17,6 +17,7 @@ defmodule Minga.Application do
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
       ├── Minga.Extension.Registry
       ├── Minga.Extension.Supervisor (DynamicSupervisor)
+      ├── Minga.Agent.Supervisor (DynamicSupervisor)
       ├── Minga.Port.Manager
       └── Minga.Editor
 
@@ -43,7 +44,8 @@ defmodule Minga.Application do
       Minga.Extension.Supervisor,
       Minga.Diagnostics,
       Minga.LSP.Supervisor,
-      Minga.Project
+      Minga.Project,
+      Minga.Agent.Supervisor
     ]
 
     editor_children =

@@ -57,6 +57,8 @@ defmodule Minga.Command.RegistryTest do
           :open_config,
           :reload_config,
           :format_buffer,
+          :agent_abort,
+          :agent_new_session,
           :git_blame_line,
           :git_preview_hunk,
           :git_revert_hunk,
@@ -65,6 +67,7 @@ defmodule Minga.Command.RegistryTest do
           :hover,
           :next_git_hunk,
           :theme_picker,
+          :toggle_agent_panel,
           :toggle_comment_line,
           :toggle_comment_selection
         ]
