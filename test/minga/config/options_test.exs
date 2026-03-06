@@ -39,7 +39,8 @@ defmodule Minga.Config.OptionsTest do
                formatter: nil,
                title_format: "{filename} {dirty}({directory}) - Minga",
                recent_files_limit: 200,
-               persist_recent_files: true
+               persist_recent_files: true,
+               scratch_filetype: :markdown
              }
     end
   end

@@ -158,7 +158,7 @@ defmodule Minga.BufferManagementTest do
 
       # Should show scratch buffer as fallback
       row0 = screen_row(ctx, 0)
-      assert String.contains?(row0, ";;") or String.contains?(row0, "Minga")
+      assert String.contains?(row0, "# This buffer") or String.contains?(row0, "Minga")
     end
 
     @tag :tmp_dir
@@ -206,7 +206,7 @@ defmodule Minga.BufferManagementTest do
     test "SPC b s shows scratch buffer" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bs")
-      assert_row_contains(ctx, 0, ";; This buffer is for notes")
+      assert_row_contains(ctx, 0, "# This buffer is for notes")
     end
 
     test "scratch buffer is editable" do

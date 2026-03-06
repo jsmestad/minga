@@ -1148,6 +1148,8 @@ defmodule Minga.Editor do
         _ -> nil
       end
 
+    scratch_filetype = ConfigOptions.get(:scratch_filetype)
+
     scratch_content =
       "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
 
@@ -1155,7 +1157,11 @@ defmodule Minga.Editor do
       case DynamicSupervisor.start_child(
              Minga.Buffer.Supervisor,
              {BufferServer,
-              content: scratch_content, buffer_name: "*scratch*", unlisted: true, persistent: true}
+              content: scratch_content,
+              buffer_name: "*scratch*",
+              unlisted: true,
+              persistent: true,
+              filetype: scratch_filetype}
            ) do
         {:ok, pid} -> pid
         _ -> nil

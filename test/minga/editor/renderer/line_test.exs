@@ -198,7 +198,7 @@ defmodule Minga.Editor.Renderer.LineTest do
 
       row0 = HeadlessPort.get_row_text(port, 0)
       # With special buffers, the editor now starts with *scratch* instead of splash
-      assert String.contains?(row0, ";;") or String.contains?(row0, "Minga")
+      assert String.contains?(row0, "# This buffer") or String.contains?(row0, "Minga")
     end
   end
 end

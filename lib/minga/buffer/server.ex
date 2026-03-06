@@ -381,8 +381,15 @@ defmodule Minga.Buffer.Server do
 
     case load_content(file_path, initial_content) do
       {:ok, text, path, {mtime, size}} ->
-        first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Filetype.detect_from_content(path, first_line)
+        filetype =
+          case Keyword.get(opts, :filetype) do
+            nil ->
+              first_line = text |> String.split("\n", parts: 2) |> List.first("")
+              Filetype.detect_from_content(path, first_line)
+
+            ft when is_atom(ft) ->
+              ft
+          end
 
         state = %BufState{
           document: Document.new(text),

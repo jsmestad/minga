@@ -23,6 +23,7 @@ defmodule Minga.Config.Options do
   | `:title_format` | string with `{placeholder}` tokens               | `"{filename} {dirty}({directory}) - Minga"` |
   | `:recent_files_limit` | positive integer                            | `200`      |
   | `:persist_recent_files` | boolean                                  | `true`     |
+  | `:scratch_filetype`     | filetype atom                              | `:markdown`|
 
   ## Per-filetype overrides
 
@@ -56,6 +57,7 @@ defmodule Minga.Config.Options do
           | :title_format
           | :recent_files_limit
           | :persist_recent_files
+          | :scratch_filetype
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -67,6 +69,7 @@ defmodule Minga.Config.Options do
            :pos_integer
            | :non_neg_integer
            | :boolean
+           | :atom
            | {:enum, [atom()]}
            | :theme_atom
            | :string_or_nil
@@ -90,7 +93,8 @@ defmodule Minga.Config.Options do
     {:formatter, :string_or_nil, nil},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga"},
     {:recent_files_limit, :pos_integer, 200},
-    {:persist_recent_files, :boolean, true}
+    {:persist_recent_files, :boolean, true},
+    {:scratch_filetype, :atom, :markdown}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
@@ -253,6 +257,12 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:boolean, name, value) do
     {:error, "#{name} must be a boolean, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:atom, _name, value) when is_atom(value), do: :ok
+
+  defp validate_type(:atom, name, value) do
+    {:error, "#{name} must be an atom, got: #{inspect(value)}"}
   end
 
   defp validate_type({:enum, allowed}, name, value) when is_atom(value) do
