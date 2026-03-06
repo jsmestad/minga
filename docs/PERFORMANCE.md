@@ -15,6 +15,7 @@ The following optimizations have been completed (see commit `8beec9d`):
 - **Motion: binary pattern matching for char classification** `classify_char/1` with guards replaces `word_char?` regex. Hot helpers inlined with `@compile {:inline, ...}`.
 - **Motion: multi-clause functions replacing `cond`** `advance_word_forward/4`, `advance_word_end/4`, bracket scan helpers extracted as multi-clause functions.
 - **Editor: `content_and_cursor/1`** 12 separate `content()` + `cursor()` GenServer call pairs replaced with single round-trip.
+- **Git: in-memory diffing** `Git.Buffer` caches HEAD content and diffs against current buffer using `List.myers_difference/2` in pure Elixir. No `git diff` subprocess spawned on edits. Git commands only run at buffer open and explicit stage operations.
 
 ---
 

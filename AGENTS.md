@@ -40,6 +40,10 @@ lib/
     command/
       registry.ex             # Named command lookup
       parser.ex               # :command parsing
+    git.ex                     # Git shell utilities (root, show HEAD, stage, blame)
+    git/
+      buffer.ex              # Per-buffer GenServer: caches HEAD, computes diffs
+      diff.ex                # Pure in-memory line diffing via List.myers_difference/2
     config.ex                 # Config DSL (use Minga.Config)
     config/
       options.ex              # Typed option registry with per-filetype overrides

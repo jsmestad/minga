@@ -218,6 +218,8 @@ Current status and planned features. Updated as development progresses.
 | Multi-server per buffer | ✅ | e.g., typescript-language-server + eslint on same file |
 | Document sync (full) | ✅ | `didOpen`, debounced `didChange` (150ms), `didSave`, `didClose` |
 | Diagnostic gutter signs | ✅ | 2-char sign column: `E`/`W`/`I`/`H` in Doom One colors |
+| Git gutter indicators | ✅ | `▎` added/modified, `▁` deleted; diagnostics take priority; in-memory diffing |
+| Git hunk operations | ✅ | `]c`/`[c` navigation, `SPC g s/r/p/b` stage/revert/preview/blame |
 | Diagnostic navigation | ✅ | `]d` / `[d` next/prev, `SPC c d` picker |
 | Minibuffer diagnostic hint | ✅ | Shows message when cursor is on a diagnostic line |
 | `:LspInfo` command | ✅ | Server name, status, encoding in minibuffer |

@@ -19,7 +19,9 @@ Minga splits the editor into **two OS processes** with completely isolated memor
 │  │  ├── Buffer.Supervisor    │  │     │  Tree-sitter parsing      │
 │  │  │    ├── Buffer A        │  │ ◄──►│  Screen drawing           │
 │  │  │    ├── Buffer B        │  │     │  Floating panels          │
-│  │  │    └── Buffer C        │  │     │                           │
+│  │  │    ├── Buffer C        │  │     │                           │
+│  │  │    ├── Git.Buffer A    │  │     │                           │
+│  │  │    └── Git.Buffer B    │  │     │                           │
 │  │  ├── Port.Manager ────────│──│─────│──► stdin/stdout           │
 │  │  └── Editor               │  │     │                           │
 │  └───────────────────────────┘  │     └───────────────────────────┘
@@ -98,6 +100,8 @@ Minga.Supervisor (rest_for_one)
 ├── Config.Loader            ← config file discovery and evaluation
 ├── Filetype.Registry        ← static data, rarely fails
 ├── Buffer.Supervisor        ← if this restarts, buffers survive
+│    ├── Buffer processes    ← one per open file/scratch buffer
+│    └── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
 ├── Eval.TaskSupervisor      ← supervised tasks for user code
 ├── Command.Registry         ← rebuilt from module attributes on restart
 ├── Extension.Registry       ← extension metadata store
@@ -270,6 +274,26 @@ All positions in Minga are `{line, byte_col}`, byte offsets within a line, not g
 - **ASCII fast path:** for ASCII text (>95% of code), byte offset equals grapheme index. Zero overhead for the common case.
 
 Grapheme conversion happens only at the **render boundary**, when converting cursor position to screen column. This runs only for visible lines (~40–50 per frame), which is negligible.
+
+---
+
+## Git Integration
+
+Git awareness runs as a lightweight per-buffer process (`Minga.Git.Buffer`) under `Buffer.Supervisor`. When the editor opens a file that lives inside a git repository, it spawns a `Git.Buffer` that:
+
+1. Detects the git root via `git rev-parse --show-toplevel`
+2. Fetches the HEAD version of the file via `git show HEAD:<path>`
+3. Splits both the HEAD version and current buffer content into lines
+4. Diffs them in pure Elixir using `List.myers_difference/2` (no external process needed)
+5. Produces a hunk list and a sign map (line number → `:added` | `:modified` | `:deleted`)
+
+The sign map feeds the gutter renderer. Each line gets a 2-character sign column showing `▎` for added/modified lines and `▁` for deleted lines. Diagnostic signs (errors, warnings) take priority on the same line.
+
+This design avoids shelling out to `git diff` on every keystroke. The diff runs entirely in-memory against cached base content. The only git commands happen at buffer open (to fetch HEAD content) and on explicit stage operations. This matters for AI agent scenarios where edits arrive in rapid bursts.
+
+When a hunk is staged, the `Git.Buffer` re-fetches HEAD content to rebase its diff. Reverting a hunk splices the original lines back into the buffer content.
+
+The `Git.Buffer` processes are supervised under `Buffer.Supervisor` alongside the buffer processes themselves. If a git buffer crashes, it doesn't affect editing. The gutter simply stops showing signs for that buffer until the process restarts.
 
 ---
 
