@@ -64,7 +64,9 @@ defmodule Minga.Command.Registry do
     {:lsp_info, "Show LSP server status"},
     {:open_config, "Open config file"},
     {:reload_config, "Reload config"},
-    {:format_buffer, "Format buffer"}
+    {:format_buffer, "Format buffer"},
+    {:goto_definition, "Go to definition"},
+    {:hover, "Hover documentation"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

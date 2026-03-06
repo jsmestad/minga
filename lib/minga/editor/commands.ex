@@ -35,6 +35,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Project
   alias Minga.Editor.Commands.Search
   alias Minga.Editor.Commands.Visual
+  alias Minga.Editor.LspActions
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
@@ -343,6 +344,9 @@ defmodule Minga.Editor.Commands do
   def execute(state, :lsp_info) do
     Diagnostics.execute(state, :lsp_info)
   end
+
+  def execute(state, :goto_definition), do: LspActions.goto_definition(state)
+  def execute(state, :hover), do: LspActions.hover(state)
 
   # ── Macro recording ──────────────────────────────────────────────────────
 

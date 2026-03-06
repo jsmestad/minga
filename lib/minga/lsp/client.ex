@@ -616,6 +616,13 @@ defmodule Minga.LSP.Client do
           "completionItemKind" => %{
             "valueSet" => Enum.to_list(1..25)
           }
+        },
+        "definition" => %{
+          "dynamicRegistration" => false
+        },
+        "hover" => %{
+          "dynamicRegistration" => false,
+          "contentFormat" => ["plaintext"]
         }
       }
     }

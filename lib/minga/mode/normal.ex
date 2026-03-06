@@ -450,6 +450,11 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_to_document_start, %{state | pending_g: false}}
   end
 
+  # gd — go to definition
+  def handle_key({?d, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :goto_definition, %{state | pending_g: false}}
+  end
+
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do
@@ -607,6 +612,11 @@ defmodule Minga.Mode.Normal do
   # J — join current line with next
   def handle_key({?J, 0}, state) do
     {:execute, :join_lines, state}
+  end
+
+  # K — hover documentation
+  def handle_key({?K, 0}, state) do
+    {:execute, :hover, state}
   end
 
   # ~ — toggle case

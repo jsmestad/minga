@@ -24,6 +24,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.HighlightSync
+  alias Minga.Editor.LspActions
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
   alias Minga.Editor.PickerUI
@@ -499,8 +500,45 @@ defmodule Minga.Editor do
     {:noreply, %{state | completion_trigger: new_bridge}}
   end
 
-  # LSP async response — route completion responses to the completion bridge
+  # LSP async response — route to the appropriate handler based on lsp_pending
   def handle_info({:lsp_response, ref, result}, state) do
+    case Map.pop(state.lsp_pending, ref) do
+      {:definition, pending} ->
+        new_state = %{state | lsp_pending: pending}
+        new_state = LspActions.handle_definition_response(new_state, result)
+        Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:hover, pending} ->
+        new_state = %{state | lsp_pending: pending}
+        new_state = LspActions.handle_hover_response(new_state, result)
+        Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {nil, _} ->
+        # Not a tracked request — try completion handler
+        handle_lsp_completion_response(ref, result, state)
+    end
+  end
+
+  # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
+  # Debounced because multiple diagnostics may arrive in rapid succession.
+  def handle_info({:diagnostics_changed, _uri}, state) do
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  # Debounced render timer fired — perform the actual render.
+  def handle_info(:debounced_render, state) do
+    Renderer.render(state)
+    {:noreply, %{state | render_timer: nil}}
+  end
+
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
+  @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
+  defp handle_lsp_completion_response(ref, result, state) do
     buffer_pid = state.buffers.active
 
     case buffer_pid do
@@ -522,22 +560,6 @@ defmodule Minga.Editor do
         Renderer.render(new_state)
         {:noreply, new_state}
     end
-  end
-
-  # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
-  # Debounced because multiple diagnostics may arrive in rapid succession.
-  def handle_info({:diagnostics_changed, _uri}, state) do
-    {:noreply, schedule_render(state, 16)}
-  end
-
-  # Debounced render timer fired — perform the actual render.
-  def handle_info(:debounced_render, state) do
-    Renderer.render(state)
-    {:noreply, %{state | render_timer: nil}}
-  end
-
-  def handle_info(_msg, state) do
-    {:noreply, state}
   end
 
   # ── Render scheduling ────────────────────────────────────────────────────────

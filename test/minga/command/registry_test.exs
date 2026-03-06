@@ -56,6 +56,8 @@ defmodule Minga.Command.RegistryTest do
           :open_config,
           :reload_config,
           :format_buffer,
+          :goto_definition,
+          :hover,
           :theme_picker
         ]
         |> Enum.sort()

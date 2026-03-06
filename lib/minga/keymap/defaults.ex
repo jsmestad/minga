@@ -70,6 +70,8 @@ defmodule Minga.Keymap.Defaults do
     # ── Code ────────────────────────────────────────────────────────────────────
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
     {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
+    {[{?c, @none}, {?g, @none}], :goto_definition, "Go to definition"},
+    {[{?c, @none}, {?k, @none}], :hover, "Hover documentation"},
 
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},
@@ -203,6 +205,7 @@ defmodule Minga.Keymap.Defaults do
       {?s, 0} => {:substitute_char, "Substitute character"},
       {?S, 0} => {:substitute_line, "Substitute line"},
       {?J, 0} => {:join_lines, "Join lines"},
+      {?K, 0} => {:hover, "Hover documentation"},
       {?~, 0} => {:toggle_case, "Toggle case"},
       {?r, 0} => {:pending_replace_char, "Replace character (r{char})"},
       {?>, 0} => {:indent, "Indent (>{motion})"},

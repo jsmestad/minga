@@ -223,8 +223,8 @@ Current status and planned features. Updated as development progresses.
 | `:LspInfo` command | ✅ | Server name, status, encoding in minibuffer |
 | LSP DynamicSupervisor | ✅ | One client per (server, root), crash recovery |
 | Completion | ✅ | Inline popup with trigger chars, identifier debounce, C-n/C-p/Tab/Enter |
-| Go-to-definition | 📋 | |
-| Hover | 📋 | |
+| Go-to-definition | ✅ | `gd` or `SPC c g`; cross-file navigation |
+| Hover | ✅ | `K` or `SPC c k`; displays in minibuffer |
 | Rename | 📋 | |
 | Incremental document sync | 📋 | Full sync for now; incremental when perf requires it |
 
