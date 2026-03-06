@@ -653,7 +653,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:byte_offset_for_line, line}, _from, state) do
-    offset = Document.position_to_offset(state.buffer, {line, 0})
+    offset = Document.position_to_offset(state.document, {line, 0})
     {:reply, offset, state}
   end
 

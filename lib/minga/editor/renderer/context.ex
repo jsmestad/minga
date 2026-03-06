@@ -24,6 +24,7 @@ defmodule Minga.Editor.Renderer.Context do
             content_w: 0,
             confirm_match: nil,
             highlight: nil,
+            has_sign_column: false,
             diagnostic_signs: %{},
             git_signs: %{},
             search_colors: %Minga.Theme.Search{
@@ -66,6 +67,7 @@ defmodule Minga.Editor.Renderer.Context do
           content_w: pos_integer(),
           confirm_match: SearchHighlight.search_match() | nil,
           highlight: Highlight.t() | nil,
+          has_sign_column: boolean(),
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
           git_signs: %{non_neg_integer() => Minga.Git.Diff.hunk_type()},
           git_colors: Minga.Theme.Git.t(),
