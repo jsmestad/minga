@@ -135,18 +135,8 @@ defmodule Minga.Editor.Renderer do
     # 4. Compute gutter dimensions and horizontal scroll in display columns.
     line_number_style = state.line_numbers
 
-    # Always reserve sign column space when git or diagnostics could produce
-    # signs for this buffer (prevents gutter jumping on first edit).
-    has_sign_column =
-      Map.has_key?(state.git_buffers, state.buffers.active) or
-        BufferServer.file_path(state.buffers.active) != nil
-
-    sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    number_w =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
-
-    gutter_w = number_w + sign_w
+    {has_sign_column, gutter_w} =
+      gutter_dimensions(state, state.buffers.active, line_number_style, line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
 
@@ -481,16 +471,8 @@ defmodule Minga.Editor.Renderer do
 
     line_number_style = state.line_numbers
 
-    has_sign_column =
-      Map.has_key?(state.git_buffers, window.buffer) or
-        has_diagnostics_source?(window)
-
-    sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    number_w =
-      if line_number_style == :none, do: 0, else: Viewport.gutter_width(snapshot.line_count)
-
-    gutter_w = number_w + sign_w
+    {has_sign_column, gutter_w} =
+      gutter_dimensions(state, window.buffer, line_number_style, snapshot.line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
     viewport = scroll_to_cursor_modeline_only(viewport, {cursor_line, cursor_col})
@@ -507,7 +489,7 @@ defmodule Minga.Editor.Renderer do
       is_active: is_active
     }
 
-    render_ctx = build_window_render_ctx(state, window, frame)
+    render_ctx = build_window_render_ctx(state, window, frame, has_sign_column)
 
     {gutter_commands, line_commands} =
       render_window_lines(
@@ -622,9 +604,13 @@ defmodule Minga.Editor.Renderer do
   defp prepend_if(list, []), do: list
   defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
 
-  @spec build_window_render_ctx(state(), Window.t(), Minga.Editor.Renderer.WindowFrame.t()) ::
-          Context.t()
-  defp build_window_render_ctx(state, window, frame) do
+  @spec build_window_render_ctx(
+          state(),
+          Window.t(),
+          Minga.Editor.Renderer.WindowFrame.t(),
+          boolean()
+        ) :: Context.t()
+  defp build_window_render_ctx(state, window, frame, has_sign_column) do
     visual_selection =
       if frame.is_active do
         visual_selection_grapheme_bounds(state, frame.cursor, frame.lines, frame.first_line)
@@ -636,13 +622,6 @@ defmodule Minga.Editor.Renderer do
 
     diagnostic_signs = diagnostic_signs_for_window(state, window)
     git_signs = git_signs_for_window(state, window)
-
-    # Always reserve sign column space when git or diagnostics are capable of
-    # producing signs for this buffer. This prevents the gutter from jumping
-    # when the first sign appears (e.g., commenting a line triggers a git diff).
-    has_sign_column =
-      Map.has_key?(state.git_buffers, window.buffer) or
-        has_diagnostics_source?(window)
 
     %Context{
       viewport: frame.viewport,
@@ -802,12 +781,21 @@ defmodule Minga.Editor.Renderer do
     end
   end
 
-  # Returns true if the buffer has a file path (meaning LSP/linters could
-  # publish diagnostics for it). This is deliberately broad so the sign column
-  # stays stable rather than flickering when diagnostics come and go.
-  @spec has_diagnostics_source?(Window.t()) :: boolean()
-  defp has_diagnostics_source?(%{buffer: buf}) when is_pid(buf) do
-    BufferServer.file_path(buf) != nil
+  # Computes gutter dimensions for a buffer: whether the sign column is active,
+  # and the total gutter width (sign column + line number digits). Extracted to
+  # keep render_single and render_window_content under cyclomatic complexity limits.
+  @spec gutter_dimensions(state(), pid(), Gutter.line_number_style(), non_neg_integer()) ::
+          {boolean(), non_neg_integer()}
+  defp gutter_dimensions(state, buf, line_number_style, line_count) do
+    has_sign_column =
+      Map.has_key?(state.git_buffers, buf) or BufferServer.file_path(buf) != nil
+
+    sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
+
+    number_w =
+      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+
+    {has_sign_column, number_w + sign_w}
   end
 
   # Only offsets draw_text commands (opcode 0x10) — cursor commands are handled separately.
