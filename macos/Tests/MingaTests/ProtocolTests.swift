@@ -2,6 +2,7 @@
 
 import Testing
 import Foundation
+import os
 
 @Suite("Protocol Decoder")
 struct ProtocolDecoderTests {
@@ -156,21 +157,35 @@ struct ProtocolEncoderTests {
 
 /// Records calls to sendResize so tests can verify the view notifies the
 /// BEAM when its frame changes.
-final class SpyEncoder: InputEncoder, @unchecked Sendable {
-    var resizeCalls: [(cols: UInt16, rows: UInt16)] = []
-    var readyCalls: [(cols: UInt16, rows: UInt16)] = []
-    var logCalls: [(level: UInt8, message: String)] = []
+/// Spy that records encoder calls for test assertions. Uses
+/// OSAllocatedUnfairLock so it satisfies Sendable without @unchecked.
+final class SpyEncoder: InputEncoder, Sendable {
+    struct Resize: Sendable { let cols: UInt16; let rows: UInt16 }
+    struct Ready: Sendable { let cols: UInt16; let rows: UInt16 }
+    struct Log: Sendable { let level: UInt8; let message: String }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    struct State: Sendable {
+        var resizeCalls: [Resize] = []
+        var readyCalls: [Ready] = []
+        var logCalls: [Log] = []
+    }
+
+    var resizeCalls: [Resize] { state.withLock { $0.resizeCalls } }
+    var readyCalls: [Ready] { state.withLock { $0.readyCalls } }
+    var logCalls: [Log] { state.withLock { $0.logCalls } }
 
     func sendReady(cols: UInt16, rows: UInt16) {
-        readyCalls.append((cols, rows))
+        state.withLock { $0.readyCalls.append(Ready(cols: cols, rows: rows)) }
     }
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {}
     func sendResize(cols: UInt16, rows: UInt16) {
-        resizeCalls.append((cols, rows))
+        state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }
     }
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {}
     func sendLog(level: UInt8, message: String) {
-        logCalls.append((level, message))
+        state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
     }
 }
 
