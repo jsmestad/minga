@@ -14,6 +14,7 @@ defmodule Minga.Buffer.State do
   """
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.EditDelta
 
   @typedoc """
   Buffer type controlling behavior:
@@ -41,7 +42,8 @@ defmodule Minga.Buffer.State do
             name: nil,
             read_only: false,
             unlisted: false,
-            persistent: false
+            persistent: false,
+            pending_edits: []
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -58,7 +60,8 @@ defmodule Minga.Buffer.State do
           name: String.t() | nil,
           read_only: boolean(),
           unlisted: boolean(),
-          persistent: boolean()
+          persistent: boolean(),
+          pending_edits: [EditDelta.t()]
         }
 
   @max_undo_stack 1000

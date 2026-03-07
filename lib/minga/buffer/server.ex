@@ -19,6 +19,7 @@ defmodule Minga.Buffer.Server do
   use GenServer
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.EditDelta
   alias Minga.Buffer.Unicode
   alias Minga.Filetype
 
@@ -215,6 +216,17 @@ defmodule Minga.Buffer.Server do
   @spec version(GenServer.server()) :: non_neg_integer()
   def version(server) do
     GenServer.call(server, :version)
+  end
+
+  @doc """
+  Returns and clears pending edit deltas accumulated since the last flush.
+
+  Used by `HighlightSync` to send incremental content updates to the
+  parser process instead of full file content.
+  """
+  @spec flush_edits(GenServer.server()) :: [EditDelta.t()]
+  def flush_edits(server) do
+    GenServer.call(server, :flush_edits)
   end
 
   @doc "Returns the file path associated with this buffer, if any."
@@ -475,8 +487,19 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:insert_char, char}, _from, state) do
-    new_buf = Document.insert_char(state.document, char)
-    {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+    old_doc = state.document
+    new_buf = Document.insert_char(old_doc, char)
+
+    delta =
+      EditDelta.insertion(
+        byte_size(old_doc.before),
+        Document.cursor(old_doc),
+        char,
+        Document.cursor(new_buf)
+      )
+
+    state = push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)
+    {:reply, :ok, state}
   end
 
   def handle_call({:insert_text, _text}, _from, %{read_only: true} = state) do
@@ -484,8 +507,19 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:insert_text, text}, _from, state) do
-    new_doc = Document.insert_text(state.document, text)
-    {:reply, :ok, push_undo(state, new_doc) |> mark_dirty()}
+    old_doc = state.document
+    new_doc = Document.insert_text(old_doc, text)
+
+    delta =
+      EditDelta.insertion(
+        byte_size(old_doc.before),
+        Document.cursor(old_doc),
+        text,
+        Document.cursor(new_doc)
+      )
+
+    state = push_undo(state, new_doc) |> mark_dirty() |> record_edit(delta)
+    {:reply, :ok, state}
   end
 
   def handle_call(
@@ -537,12 +571,23 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_before, _from, state) do
-    new_buf = Document.delete_before(state.document)
+    old_doc = state.document
+    new_buf = Document.delete_before(old_doc)
 
-    if new_buf == state.document do
+    if new_buf == old_doc do
       {:reply, :ok, state}
     else
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+      new_cursor = Document.cursor(new_buf)
+
+      delta =
+        EditDelta.deletion(
+          byte_size(new_buf.before),
+          byte_size(old_doc.before),
+          new_cursor,
+          Document.cursor(old_doc)
+        )
+
+      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -551,12 +596,36 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:delete_at, _from, state) do
-    new_buf = Document.delete_at(state.document)
+    old_doc = state.document
+    new_buf = Document.delete_at(old_doc)
 
-    if new_buf == state.document do
+    if new_buf == old_doc do
       {:reply, :ok, state}
     else
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+      # delete_at removes the char after cursor; cursor position stays the same
+      old_end_byte =
+        byte_size(old_doc.before) + byte_size(old_doc.after) - byte_size(new_buf.after)
+
+      old_content = Document.content(old_doc)
+      # Compute old_end_position from the removed text
+      removed =
+        binary_part(
+          old_content,
+          byte_size(old_doc.before),
+          old_end_byte - byte_size(old_doc.before)
+        )
+
+      old_end_pos = advance_position(Document.cursor(old_doc), removed)
+
+      delta =
+        EditDelta.deletion(
+          byte_size(old_doc.before),
+          old_end_byte,
+          Document.cursor(old_doc),
+          old_end_pos
+        )
+
+      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -714,6 +783,11 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:dirty?, _from, state) do
     {:reply, state.dirty, state}
+  end
+
+  def handle_call(:flush_edits, _from, state) do
+    edits = Enum.reverse(state.pending_edits)
+    {:reply, edits, %{state | pending_edits: []}}
   end
 
   def handle_call(:version, _from, state) do
@@ -961,6 +1035,29 @@ defmodule Minga.Buffer.Server do
     |> case do
       :ok -> File.write(file_path, content)
       error -> error
+    end
+  end
+
+  # ── Edit delta tracking ──
+
+  @spec record_edit(state(), EditDelta.t()) :: state()
+  defp record_edit(state, delta) do
+    %{state | pending_edits: [delta | state.pending_edits]}
+  end
+
+  @spec advance_position({non_neg_integer(), non_neg_integer()}, String.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp advance_position({line, col}, text) do
+    text
+    |> String.split("\n")
+    |> case do
+      [single] ->
+        {line, col + String.length(single)}
+
+      parts ->
+        new_lines = length(parts) - 1
+        last_part = List.last(parts)
+        {line + new_lines, String.length(last_part)}
     end
   end
 end

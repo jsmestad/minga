@@ -508,4 +508,50 @@ defmodule Minga.Buffer.ServerTest do
       assert Server.content(pid) == "hello"
     end
   end
+
+  describe "edit delta tracking" do
+    test "insert_char records an insertion delta" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "!")
+      edits = Server.flush_edits(pid)
+      assert [delta] = edits
+      assert delta.start_byte == 5
+      assert delta.old_end_byte == 5
+      assert delta.new_end_byte == 6
+      assert delta.inserted_text == "!"
+    end
+
+    test "delete_before records a deletion delta" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.delete_before(pid)
+      edits = Server.flush_edits(pid)
+      assert [delta] = edits
+      assert delta.start_byte == 4
+      assert delta.old_end_byte == 5
+      assert delta.new_end_byte == 4
+      assert delta.inserted_text == ""
+    end
+
+    test "flush_edits clears pending deltas" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "!")
+      assert [_] = Server.flush_edits(pid)
+      assert [] = Server.flush_edits(pid)
+    end
+
+    test "multiple edits accumulate in order" do
+      {:ok, pid} = Server.start_link(content: "ab")
+      Server.move_to(pid, {0, 2})
+      Server.insert_char(pid, "c")
+      Server.insert_char(pid, "d")
+      edits = Server.flush_edits(pid)
+      assert length(edits) == 2
+      assert [first, second] = edits
+      assert first.inserted_text == "c"
+      assert second.inserted_text == "d"
+    end
+  end
 end

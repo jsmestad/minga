@@ -127,11 +127,22 @@ defmodule Minga.Editor.HighlightSync do
   def request_reparse(%EditorState{} = state) do
     hl = state.highlight
     version = hl.version + 1
-    content = BufferServer.content(state.buffers.active)
 
-    ParserManager.send_commands([
-      Protocol.encode_parse_buffer(version, content)
-    ])
+    # Try incremental sync first: if the buffer has pending edit deltas,
+    # send them as an edit_buffer command instead of the full content.
+    edits = BufferServer.flush_edits(state.buffers.active)
+
+    commands =
+      if edits != [] do
+        delta_maps = Enum.map(edits, &Map.from_struct/1)
+        [Protocol.encode_edit_buffer(version, delta_maps)]
+      else
+        # No deltas (e.g., undo/redo, content replaced externally): full sync
+        content = BufferServer.content(state.buffers.active)
+        [Protocol.encode_parse_buffer(version, content)]
+      end
+
+    ParserManager.send_commands(commands)
 
     %{state | highlight: %{hl | version: version}}
   end
