@@ -430,7 +430,25 @@ fn initTty(buffer: []u8) !vaxis.Tty {
 }
 
 /// Install SIGWINCH (resize), SIGTERM, and SIGINT handlers.
+///
+/// The BEAM VM blocks most signals (including SIGWINCH) in its thread
+/// signal mask. Child processes inherit this mask after fork+exec, so
+/// SIGWINCH would never be delivered unless we explicitly unblock it.
 fn installSignalHandlers() void {
+    // Unblock SIGWINCH (and SIGTERM/SIGINT) in case the parent (BEAM)
+    // blocked them. The BEAM VM blocks most signals in worker threads
+    // via sigprocmask, and child processes inherit that mask after
+    // fork+exec. Without this, SIGWINCH never reaches our handler and
+    // the editor never learns about terminal resizes.
+    {
+        var unblock_set = std.posix.sigemptyset();
+        std.posix.sigaddset(&unblock_set, std.posix.SIG.WINCH);
+        std.posix.sigaddset(&unblock_set, std.posix.SIG.TERM);
+        std.posix.sigaddset(&unblock_set, std.posix.SIG.INT);
+        const SIG_UNBLOCK = 2;
+        std.posix.sigprocmask(SIG_UNBLOCK, &unblock_set, null);
+    }
+
     const mask = switch (builtin.os.tag) {
         .macos => @as(u32, 0),
         else => std.posix.sigemptyset(),
