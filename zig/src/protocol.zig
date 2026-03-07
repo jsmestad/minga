@@ -136,6 +136,27 @@ pub const REGION_POPUP: u8 = 4;
 pub const REGION_PANEL: u8 = 5;
 pub const REGION_BORDER: u8 = 6;
 
+// ── Highlight types (shared between renderer and parser) ──
+
+/// A syntax highlight span: a byte range tagged with a capture ID.
+pub const Span = struct {
+    start_byte: u32,
+    end_byte: u32,
+    capture_id: u16,
+    pattern_index: u16,
+    /// Priority layer: 0 = outer language, 1+ = injection depth.
+    /// Higher layers win when spans overlap at the same byte position.
+    /// Not serialized in the port protocol.
+    layer: u16 = 0,
+};
+
+/// An injection language region: a byte range mapped to a language name.
+pub const InjectionRange = struct {
+    start_byte: u32,
+    end_byte: u32,
+    language: []const u8,
+};
+
 /// A layout region defines a rectangular area on screen.
 pub const Region = struct {
     id: u16,
@@ -354,7 +375,7 @@ pub fn writeMessage(writer: anytype, payload: []const u8) !void {
 
 /// Encodes highlight_spans: opcode(1) + version(4) + count(4) + spans(count * 10)
 /// Each span: start_byte:u32, end_byte:u32, capture_id:u16
-pub fn encodeHighlightSpans(allocator: std.mem.Allocator, version: u32, spans: []const @import("highlighter.zig").Span) ![]u8 {
+pub fn encodeHighlightSpans(allocator: std.mem.Allocator, version: u32, spans: []const Span) ![]u8 {
     const header_size = 1 + 4 + 4; // opcode + version + count
     const span_size = 10; // 4 + 4 + 2
     const total = header_size + spans.len * span_size;
@@ -716,7 +737,7 @@ pub fn encodeLanguageAtResponse(buf: []u8, request_id: u32, language: ?[]const u
 }
 
 /// Encodes injection_ranges: opcode(1) + count(2) + (start_byte:4, end_byte:4, name_len:2, name) for each
-pub fn encodeInjectionRanges(allocator: std.mem.Allocator, ranges: []const @import("highlighter.zig").InjectionRange) ![]u8 {
+pub fn encodeInjectionRanges(allocator: std.mem.Allocator, ranges: []const InjectionRange) ![]u8 {
     var total: usize = 1 + 2; // opcode + count
     for (ranges) |r| {
         total += 4 + 4 + 2 + r.language.len;
@@ -1429,8 +1450,7 @@ test "commandSize: load_grammar" {
 }
 
 test "encodeHighlightSpans round-trip" {
-    const hl = @import("highlighter.zig");
-    const spans = [_]hl.Span{
+    const spans = [_]Span{
         .{ .start_byte = 0, .end_byte = 9, .capture_id = 0, .pattern_index = 0 },
         .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 1 },
     };

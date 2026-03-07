@@ -109,9 +109,7 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
     exe.root_module.addImport("build_options", build_options.createModule());
-    exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
-    exe.linkLibrary(ts_lib);
-    for (grammar_libs) |gl| exe.linkLibrary(gl);
+    // Note: tree-sitter and grammars are linked only to minga-parser, not the renderer.
 
     // GUI backend: compile Swift, link AppKit/Foundation frameworks.
     if (backend == .gui) {
@@ -153,9 +151,6 @@ pub fn build(b: *std.Build) void {
     });
     tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
     tests.root_module.addImport("build_options", build_options.createModule());
-    tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
-    tests.linkLibrary(ts_lib);
-    for (grammar_libs) |gl| tests.linkLibrary(gl);
 
     if (backend == .gui) {
         addGuiBuildSteps(b, tests);

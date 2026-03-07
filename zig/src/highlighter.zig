@@ -7,16 +7,8 @@ const c = @cImport({
 /// A highlight span: byte range + capture index.
 /// `pattern_index` is used for priority sorting (higher = more specific)
 /// but is NOT serialized in the port protocol.
-pub const Span = struct {
-    start_byte: u32,
-    end_byte: u32,
-    capture_id: u16,
-    pattern_index: u16,
-    /// Priority layer: 0 = outer language, 1+ = injection depth.
-    /// Higher layers win when spans overlap at the same byte position.
-    /// Not serialized in the port protocol.
-    layer: u16 = 0,
-};
+const protocol = @import("protocol.zig");
+pub const Span = protocol.Span;
 
 /// Result of a highlight operation.
 pub const HighlightResult = struct {
@@ -41,12 +33,7 @@ const BuiltinGrammar = struct {
     injection_query: ?[]const u8 = null,
 };
 
-/// An injection language region: a byte range mapped to a language name.
-pub const InjectionRange = struct {
-    start_byte: u32,
-    end_byte: u32,
-    language: []const u8,
-};
+pub const InjectionRange = protocol.InjectionRange;
 
 /// Tree-sitter highlighter. Owns a parser, optional tree, and query.
 /// Grammar languages are registered at init time (compiled-in) or

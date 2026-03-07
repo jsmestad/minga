@@ -13,7 +13,8 @@ const root = @import("../main.zig");
 const protocol = @import("../protocol.zig");
 const renderer_mod = @import("../renderer.zig");
 const surface_mod = @import("../surface.zig");
-const highlighter_mod = @import("../highlighter.zig");
+// Note: tree-sitter highlighting is handled by the separate minga-parser
+// process. The renderer does not embed any grammars or the highlighter.
 const Cell = surface_mod.Cell;
 
 // ── VaxisSurface ──────────────────────────────────────────────────────────────
@@ -121,7 +122,6 @@ pub const TuiRuntime = struct {
     vx: vaxis.Vaxis,
     surface: VaxisSurface,
     rend: renderer_mod.Renderer(VaxisSurface),
-    hl: highlighter_mod.Highlighter,
     tty_write_buf: [4096]u8,
 
     /// Initialize the TUI runtime: open TTY, set up vaxis, enter alt screen.
@@ -156,10 +156,9 @@ pub const TuiRuntime = struct {
         // Install signal handlers.
         installSignalHandlers();
 
-        // Initialize surface, renderer, and highlighter.
+        // Initialize surface and renderer.
         self.surface = .{ .vx = &self.vx, .tty_writer = self.tty.writer() };
         self.rend = renderer_mod.Renderer(VaxisSurface).init(&self.surface, alloc);
-        self.hl = try highlighter_mod.Highlighter.init(alloc);
 
         return self;
     }
@@ -171,7 +170,6 @@ pub const TuiRuntime = struct {
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
-        self.hl.startPrewarm();
 
         // Stdout (Port protocol channel).
         var stdout_buf: [4096]u8 = undefined;
@@ -200,7 +198,6 @@ pub const TuiRuntime = struct {
 
     /// Clean up: free renderer, vaxis, and restore terminal.
     pub fn deinit(self: *TuiRuntime) void {
-        self.hl.deinit();
         self.rend.deinit();
         // Restore the terminal title saved at init.
         self.tty.writer().writeAll("\x1b[23;0t") catch {};
@@ -276,15 +273,15 @@ pub const TuiRuntime = struct {
                         break;
                     };
                     switch (cmd) {
-                        .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at => {
-                            self.handleHighlightCommand(cmd, stdout) catch |err| {
-                                std.log.warn("highlight error: {}", .{err});
-                            };
-                        },
                         .measure_text => |mt| {
                             self.handleMeasureText(mt, stdout) catch |err| {
                                 std.log.warn("measure_text error: {}", .{err});
                             };
+                        },
+                        // Highlight commands should not arrive at the renderer
+                        // (they go to the parser process), but handle gracefully.
+                        .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at, .edit_buffer => {
+                            std.log.warn("renderer received highlight command (should go to parser)", .{});
                         },
                         else => {
                             self.rend.handleCommand(cmd) catch |err| {
@@ -340,83 +337,6 @@ pub const TuiRuntime = struct {
         const rlen = try protocol.encodeTextWidth(&rbuf, mt.request_id, total_width);
         try protocol.writeMessage(stdout, rbuf[0..rlen]);
         try stdout.flush();
-    }
-
-    /// Dispatch a highlight-related command to the Highlighter and send responses.
-    fn handleHighlightCommand(self: *TuiRuntime, cmd: protocol.RenderCommand, stdout: *std.Io.Writer) !void {
-        switch (cmd) {
-            .set_language => |name| {
-                if (!self.hl.setLanguage(name)) {
-                    std.log.warn("unknown language: {s}", .{name});
-                }
-            },
-            .parse_buffer => |pb| {
-                self.hl.parse(pb.source) catch |err| {
-                    std.log.warn("parse failed: {}", .{err});
-                    return;
-                };
-
-                // If a query is loaded, run highlighting (with injection support) and send results
-                if (self.hl.query != null) {
-                    var result = self.hl.highlightWithInjections() catch |err| {
-                        std.log.warn("highlight failed: {}", .{err});
-                        return;
-                    };
-                    defer result.deinit();
-
-                    // Send capture names first
-                    const names_buf = try protocol.encodeHighlightNames(self.alloc, result.capture_names);
-                    defer self.alloc.free(names_buf);
-                    try protocol.writeMessage(stdout, names_buf);
-
-                    // Send spans with version
-                    const spans_buf = try protocol.encodeHighlightSpans(self.alloc, pb.version, result.spans);
-                    defer self.alloc.free(spans_buf);
-                    try protocol.writeMessage(stdout, spans_buf);
-
-                    // Send injection language ranges (if any)
-                    if (self.hl.injection_ranges.len > 0) {
-                        const inj_buf = try protocol.encodeInjectionRanges(self.alloc, self.hl.injection_ranges);
-                        defer self.alloc.free(inj_buf);
-                        try protocol.writeMessage(stdout, inj_buf);
-                    }
-
-                    try stdout.flush();
-                }
-            },
-            .set_highlight_query => |source| {
-                self.hl.setHighlightQuery(source) catch |err| {
-                    std.log.warn("query compile failed: {}", .{err});
-                };
-            },
-            .set_injection_query => |source| {
-                self.hl.setInjectionQuery(source) catch |err| {
-                    std.log.warn("injection query compile failed: {}", .{err});
-                };
-            },
-            .load_grammar => |lg| {
-                self.hl.loadGrammar(lg.name, lg.path) catch |err| {
-                    std.log.warn("grammar load failed: {}", .{err});
-                    var rbuf: [260]u8 = undefined;
-                    const rlen = protocol.encodeGrammarLoaded(&rbuf, false, lg.name) catch return;
-                    try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                    try stdout.flush();
-                    return;
-                };
-                var rbuf: [260]u8 = undefined;
-                const rlen = try protocol.encodeGrammarLoaded(&rbuf, true, lg.name);
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
-            },
-            .query_language_at => |q| {
-                const lang = self.hl.languageAt(q.byte_offset);
-                var rbuf: [260]u8 = undefined;
-                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, lang) catch return;
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
-            },
-            else => {},
-        }
     }
 
     fn handleResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {

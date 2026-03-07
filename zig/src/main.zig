@@ -13,7 +13,7 @@ pub const renderer = @import("renderer.zig");
 pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
 pub const font = if (build_options.backend == .gui) @import("font/main.zig") else struct {};
-pub const highlighter = @import("highlighter.zig");
+// Note: highlighter.zig is compiled into minga-parser, not the renderer.
 
 
 // Vaxis is only needed for the TUI panic recovery path.
@@ -93,7 +93,6 @@ test {
     _ = renderer;
     _ = surface;
     _ = apprt;
-    _ = highlighter;
     if (build_options.backend == .gui) {
         _ = font;
     }
