@@ -28,7 +28,8 @@ defmodule Mix.Tasks.Minga do
 
     # Keep the process alive
     unless "--help" in args or "-h" in args do
-      Process.sleep(:infinity)
+      receive do
+      end
     end
 
     :ok

@@ -382,6 +382,7 @@ defmodule Minga.Editor do
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path}, state) do
     new_state = handle_file_change(state, path)
+    new_state = log_message(new_state, "External change detected: #{path}")
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -576,6 +577,14 @@ defmodule Minga.Editor do
   def handle_info({:agent_event, {:status_changed, status}}, state) do
     state = %{state | agent_status: status}
 
+    state =
+      case status do
+        :error -> log_message(state, "Agent: error")
+        :idle -> state
+        :thinking -> state
+        :tool_executing -> state
+      end
+
     # Start/stop spinner timer based on status
     state =
       case status do
@@ -611,6 +620,7 @@ defmodule Minga.Editor do
 
   def handle_info({:agent_event, {:error, message}}, state) do
     state = %{state | agent_status: :error, agent_error: message}
+    state = log_message(state, "Agent error: #{message}")
     Renderer.render(state)
     {:noreply, state}
   end

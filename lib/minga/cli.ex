@@ -99,8 +99,10 @@ defmodule Minga.CLI do
   defp wait_for_editor(interval, retries) do
     case Process.whereis(Minga.Editor) do
       nil ->
-        Process.sleep(interval)
-        wait_for_editor(interval, retries - 1)
+        receive do
+        after
+          interval -> wait_for_editor(interval, retries - 1)
+        end
 
       _pid ->
         :ok

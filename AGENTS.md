@@ -88,6 +88,7 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
 - **No `cond` blocks** — use multi-clause functions with pattern matching and guards instead. `cond` defeats BEAM JIT optimizations and hides control flow that the type system and compiler can reason about. Extract a private helper with multiple `defp` clauses rather than inlining a `cond`.
 - **`[head | tail]`** over `list ++ [item]` — appending to a list is O(n); prepend and reverse if order matters
 - **Bulk text operations** — when inserting or replacing multi-character text in a `Document`, always use bulk operations (`Document.insert_text/2`, `Buffer.Server.apply_text_edit/6`). Never decompose a string into graphemes and reduce over `insert_char` in a loop. Character-by-character insertion is O(n²) on the gap buffer's binary and creates pathological undo stack growth.
+- **No `Process.sleep/1`** — never use `Process.sleep` anywhere in production code. It blocks the calling process, defeats the BEAM's concurrency model, and hides real timing bugs. Use `Process.send_after/3`, GenServer state machines, or `receive` with `after` clauses instead. If you need to defer work until a resource is ready, store the intent in state and act on it when the ready signal arrives (e.g., set a pending field and apply it in the `handle_info` that confirms the resource is up). `Process.sleep` in tests is acceptable only in integration tests that interact with external processes.
 - `mix compile --warnings-as-errors` must pass clean
 
 ### Pre-commit Checks
