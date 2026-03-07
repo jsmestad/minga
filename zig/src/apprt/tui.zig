@@ -224,9 +224,19 @@ pub const TuiRuntime = struct {
                 try self.handleResize(stdout);
             }
 
-            _ = try std.posix.poll(&pollfds, 1000);
+            // Use raw poll to avoid std.posix.poll's automatic EINTR retry.
+            // SIGWINCH sets g_winch and interrupts poll with EINTR. We need
+            // to break out of poll immediately so we can process the resize
+            // before rendering the next frame. With the standard retry, each
+            // SIGWINCH during a window drag resets the 1000ms timeout, delaying
+            // resize processing by seconds.
+            const poll_rc = std.posix.system.poll(@ptrCast(&pollfds), 2, 1000);
+            const poll_errno = std.posix.errno(poll_rc);
+            if (poll_errno != .SUCCESS and poll_errno != .INTR) {
+                return error.PollError;
+            }
 
-            // Check for resize again after poll (SIGWINCH can fire during poll).
+            // Check for resize after poll (SIGWINCH can fire during poll).
             // This ensures the surface dimensions match the terminal before we
             // process any render batch, preventing one-frame garbling where the
             // BEAM's 80-col frame is rendered to a 40-col surface.
@@ -383,12 +393,14 @@ pub const TuiRuntime = struct {
 
     fn handleResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
         const ws = try vaxis.Tty.getWinsize(self.tty.fd);
+        std.log.info("handleResize: cols={d} rows={d}", .{ ws.cols, ws.rows });
         try self.vx.resize(self.alloc, self.tty.writer(), ws);
 
         var rbuf: [5]u8 = undefined;
         const rlen = try protocol.encodeResize(&rbuf, ws.cols, ws.rows);
         try protocol.writeMessage(stdout, rbuf[0..rlen]);
         try stdout.flush();
+        std.log.info("handleResize: sent resize event to BEAM", .{});
     }
 };
 
