@@ -13,14 +13,48 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @priv_dir "priv"
   @renderer_name "minga-renderer"
 
+  # File extensions that should trigger a Zig rebuild when modified.
+  @zig_source_extensions ~w(.zig .zon .c .h .scm)
+
   @impl true
   @spec run(keyword()) :: {:ok, []} | {:error, []}
   def run(_opts) do
     if File.dir?(@zig_dir) do
-      compile_zig_backend("tui", @renderer_name)
+      output = Path.join(@priv_dir, @renderer_name)
+
+      if needs_rebuild?(output) do
+        compile_zig_backend("tui", @renderer_name)
+      else
+        {:ok, []}
+      end
     else
       {:ok, []}
     end
+  end
+
+  @spec needs_rebuild?(String.t()) :: boolean()
+  defp needs_rebuild?(output_path) do
+    case File.stat(output_path, time: :posix) do
+      {:error, :enoent} ->
+        true
+
+      {:ok, %{mtime: output_mtime}} ->
+        zig_source_files()
+        |> Enum.any?(fn src ->
+          case File.stat(src, time: :posix) do
+            {:ok, %{mtime: src_mtime}} -> src_mtime > output_mtime
+            _ -> true
+          end
+        end)
+    end
+  end
+
+  @spec zig_source_files() :: [String.t()]
+  defp zig_source_files do
+    Path.wildcard(Path.join(@zig_dir, "**/*"))
+    |> Enum.filter(fn path ->
+      Path.extname(path) in @zig_source_extensions
+    end)
   end
 
   @spec compile_zig_backend(String.t(), String.t()) :: {:ok, []} | {:error, []}

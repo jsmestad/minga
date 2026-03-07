@@ -263,6 +263,7 @@ Current status and planned features. Updated as development progresses.
 | Modeline status | ✅ | ◯ idle, ⟳ thinking, ⚡ tool executing, ✗ error |
 | Leader keybindings | ✅ | `SPC a a` toggle, `SPC a s` stop, `SPC a n` new session |
 | Ex commands | ✅ | `:agent-stop`, `:agent-new` |
+| Full-screen agentic view | ✅ | `SPC a t` two-panel layout: chat + file viewer, vim nav, `Minga.Agent.View.*` #133 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |
