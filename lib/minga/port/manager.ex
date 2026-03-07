@@ -250,11 +250,16 @@ defmodule Minga.Port.Manager do
     if File.exists?(priv_path) do
       priv_path
     else
-      # Dev/test fallback: compiled Zig binary in the source tree.
-      # Both backends produce "minga-renderer" in zig-out/bin (Zig build
-      # output name doesn't change), but we copy them to priv/ with
-      # distinct names.
-      Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+      # Dev/test fallback: look in the source tree.
+      case backend do
+        :gui ->
+          # Swift GUI binary built by SPM under macos/.build/
+          Path.join([File.cwd!(), "macos", ".build", "debug", "minga-mac"])
+
+        _tui ->
+          # Zig TUI binary in zig-out/bin/
+          Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+      end
     end
   end
 
@@ -270,5 +275,5 @@ defmodule Minga.Port.Manager do
 
   @spec renderer_binary_name(backend()) :: String.t()
   defp renderer_binary_name(:tui), do: "minga-renderer"
-  defp renderer_binary_name(:gui), do: "minga-renderer-gui"
+  defp renderer_binary_name(:gui), do: "minga-mac"
 end

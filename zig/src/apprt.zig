@@ -1,13 +1,11 @@
 /// AppRuntime — backend selection and dispatch.
 ///
-/// The backend is selected at build time via `-Dbackend=tui` (default).
-/// Each backend implements init/run/deinit and provides a Surface type
-/// for the generic Renderer.
+/// The TUI backend is built by default. The macOS GUI is a separate
+/// Swift app (macos/) that speaks the same Port protocol.
 const build_options = @import("build_options");
 
 pub const Backend = switch (build_options.backend) {
     .tui => @import("apprt/tui.zig"),
-    .gui => @import("apprt/gui.zig"),
 };
 
 test {

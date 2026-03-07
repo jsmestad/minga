@@ -13,7 +13,7 @@ import SwiftUI
 import AppKit
 
 /// Default font settings.
-private let defaultFontName = "JetBrainsMonoNF-Regular"
+private let defaultFontName = "Menlo"
 private let defaultFontSize: CGFloat = 13.0
 
 /// Default window dimensions in pixels.

@@ -11,6 +11,10 @@ minga-*.tar
 zig/zig-out/
 zig/.zig-cache/
 
+# Swift (SPM)
+macos/.build/
+macos/.swiftpm/
+
 # Generated
 erl_crash.dump
 /priv/minga-renderer

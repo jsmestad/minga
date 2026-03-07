@@ -12,8 +12,8 @@ pub const protocol = @import("protocol.zig");
 pub const renderer = @import("renderer.zig");
 pub const surface = @import("surface.zig");
 pub const apprt = @import("apprt.zig");
-pub const font = if (build_options.backend == .gui) @import("font/main.zig") else struct {};
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
+// Font rendering (CoreText, atlas) lives in the macOS Swift app (macos/).
 
 
 // Vaxis is only needed for the TUI panic recovery path.
@@ -70,7 +70,6 @@ pub const std_options = std.Options{
 
 const Runtime = switch (build_options.backend) {
     .tui => apprt.Backend.TuiRuntime,
-    .gui => apprt.Backend.GuiRuntime,
 };
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -93,7 +92,5 @@ test {
     _ = renderer;
     _ = surface;
     _ = apprt;
-    if (build_options.backend == .gui) {
-        _ = font;
-    }
+
 }

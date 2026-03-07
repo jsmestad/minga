@@ -75,6 +75,25 @@ jobs:
       - name: Zig tests
         run: cd zig && zig build test
 
+  swift:
+    name: Swift (macOS GUI)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SPM
+        uses: actions/cache@v4
+        with:
+          path: macos/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('macos/Package.swift', 'macos/Sources/**/*.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build
+        run: cd macos && swift build
+
+      - name: Test
+        run: cd macos && swift test
+
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
