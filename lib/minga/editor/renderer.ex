@@ -25,9 +25,9 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
+  alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
-  alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.State, as: EditorState
@@ -659,8 +659,6 @@ defmodule Minga.Editor.Renderer do
       collect_separators(bottom, {row + top_height, col, width, bottom_height})
   end
 
-  # Offsets draw command row/col positions by the given amounts.
-  @spec prepend_if([binary()], binary() | []) :: [binary()]
   # ── Line rendering (no wrap) ──────────────────────────────────────────────
 
   @spec render_lines_nowrap(
@@ -681,25 +679,29 @@ defmodule Minga.Editor.Renderer do
          gutter_w,
          first_byte_off
        ) do
+    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+
     {gutters, contents_rev, _byte_off} =
       lines
       |> Enum.with_index()
       |> Enum.reduce(
         {[], [], first_byte_off},
         fn {line_text, screen_row}, {g, c, byte_off} ->
-          buf_line = first_line + screen_row
-
-          {g_cmds, c_cmds} =
-            render_line_row(
-              line_text,
-              screen_row,
-              buf_line,
-              cursor_line,
-              ctx,
-              ln_style,
-              gutter_w,
-              byte_off
-            )
+          {g_cmds, c_cmds, _rows} =
+            BufferLine.render(%{
+              line_text: line_text,
+              buf_line: first_line + screen_row,
+              cursor_line: cursor_line,
+              byte_offset: byte_off,
+              screen_row: screen_row,
+              ctx: ctx,
+              ln_style: ln_style,
+              gutter_w: gutter_w,
+              sign_w: sign_w,
+              wrap_entry: nil,
+              row_offset: 0,
+              col_offset: 0
+            })
 
           next_byte_off = byte_off + byte_size(line_text) + 1
           {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off}
@@ -748,18 +750,23 @@ defmodule Minga.Editor.Renderer do
       |> Enum.reduce_while(
         {[], [], 0, first_byte_off},
         fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
-          buf_line = first_line + line_idx
+          {g2, c2, rows_used} =
+            BufferLine.render(%{
+              line_text: line_text,
+              buf_line: first_line + line_idx,
+              cursor_line: cursor_line,
+              byte_offset: byte_off,
+              screen_row: sr,
+              ctx: ctx,
+              ln_style: ln_style,
+              gutter_w: gutter_w,
+              sign_w: sign_w,
+              wrap_entry: visual_rows,
+              row_offset: 0,
+              col_offset: 0
+            })
 
-          {g2, c2, sr2} =
-            render_wrapped_logical_line(
-              {line_text, buf_line, cursor_line, byte_off},
-              visual_rows,
-              {sr, max_rows},
-              ctx,
-              ln_style,
-              {sign_w, gutter_w}
-            )
-
+          sr2 = sr + rows_used
           next_byte_off = byte_off + byte_size(line_text) + 1
 
           if sr2 >= max_rows do
@@ -771,177 +778,6 @@ defmodule Minga.Editor.Renderer do
       )
 
     {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
-  end
-
-  # Renders one logical line as multiple visual rows with full syntax
-  # highlighting. For each visual row, calls LineRenderer.render with
-  # viewport.left set to the visual row's display column offset, so the
-  # existing horizontal-scroll clipping produces the correct slice.
-  @spec render_wrapped_logical_line(
-          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
-          WrapMap.wrap_entry(),
-          {non_neg_integer(), pos_integer()},
-          Context.t(),
-          Gutter.line_number_style(),
-          {non_neg_integer(), non_neg_integer()}
-        ) :: {[binary()], [binary()], non_neg_integer()}
-  defp render_wrapped_logical_line(
-         {line_text, buf_line, cursor_line, line_byte_off},
-         visual_rows,
-         {screen_row, max_rows},
-         ctx,
-         ln_style,
-         gutters
-       ) do
-    Enum.reduce_while(
-      Enum.with_index(visual_rows),
-      {[], [], screen_row},
-      fn {vrow, vrow_idx}, {g, c, sr} ->
-        render_one_visual_row(
-          {vrow, vrow_idx},
-          {g, c, sr},
-          max_rows,
-          {line_text, buf_line, cursor_line, line_byte_off},
-          ctx,
-          ln_style,
-          gutters
-        )
-      end
-    )
-  end
-
-  @spec render_one_visual_row(
-          {WrapMap.visual_row(), non_neg_integer()},
-          {[binary()], [binary()], non_neg_integer()},
-          pos_integer(),
-          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
-          Context.t(),
-          Gutter.line_number_style(),
-          {non_neg_integer(), non_neg_integer()}
-        ) :: {:halt | :cont, {[binary()], [binary()], non_neg_integer()}}
-  defp render_one_visual_row(
-         _vrow_info,
-         {g, c, sr},
-         max_rows,
-         _line_info,
-         _ctx,
-         _ln_style,
-         _gutters
-       )
-       when sr >= max_rows do
-    {:halt, {g, c, sr}}
-  end
-
-  defp render_one_visual_row(
-         {vrow, vrow_idx},
-         {g, c, sr},
-         _max_rows,
-         {line_text, buf_line, cursor_line, line_byte_off},
-         ctx,
-         ln_style,
-         {sign_w, gutter_w}
-       ) do
-    vrow_display_off = Unicode.display_col(line_text, vrow.byte_offset)
-    vrow_display_w = Unicode.display_width(vrow.text)
-
-    # Per-visual-row context: viewport.left slides to this row's offset,
-    # content_w limits rendering to this row's width.
-    vrow_viewport = %{ctx.viewport | left: vrow_display_off}
-    vrow_ctx = %{ctx | viewport: vrow_viewport, content_w: vrow_display_w}
-
-    content_cmds = LineRenderer.render(line_text, sr, buf_line, vrow_ctx, line_byte_off)
-    g_cmd = wrap_gutter(vrow_idx, sr, sign_w, gutter_w, buf_line, cursor_line, ln_style, ctx)
-    g2 = if is_binary(g_cmd), do: [g_cmd | g], else: g
-    {:cont, {g2, prepend_all(c, content_cmds), sr + 1}}
-  end
-
-  # Gutter for wrapped visual rows: line number on first row, blank on rest.
-  @spec wrap_gutter(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Gutter.line_number_style(),
-          Context.t()
-        ) :: binary() | []
-  defp wrap_gutter(0 = _first, sr, sign_w, gutter_w, buf_line, cursor_line, ln_style, ctx) do
-    Gutter.render_number(
-      sr,
-      sign_w,
-      buf_line,
-      cursor_line,
-      gutter_w - sign_w,
-      ln_style,
-      ctx.gutter_colors
-    )
-  end
-
-  defp wrap_gutter(_continuation, sr, sign_w, gutter_w, _buf_line, _cursor_line, _ln_style, ctx) do
-    Protocol.encode_draw(sr, sign_w, String.duplicate(" ", max(gutter_w - sign_w, 0)),
-      fg: ctx.gutter_colors.fg
-    )
-  end
-
-  # Renders gutter + content for a single non-wrapped line row.
-  @spec render_line_row(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Context.t(),
-          Gutter.line_number_style(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {[binary()], [binary()]}
-  defp render_line_row(
-         line_text,
-         screen_row,
-         buf_line,
-         cursor_line,
-         ctx,
-         ln_style,
-         gutter_w,
-         byte_offset
-       ) do
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    sign_cmd =
-      if ctx.has_sign_column do
-        Gutter.render_sign(
-          screen_row,
-          0,
-          buf_line,
-          ctx.diagnostic_signs,
-          ctx.git_signs,
-          ctx.gutter_colors,
-          ctx.git_colors
-        )
-      else
-        []
-      end
-
-    gutter_cmd =
-      Gutter.render_number(
-        screen_row,
-        sign_w,
-        buf_line,
-        cursor_line,
-        gutter_w - sign_w,
-        ln_style,
-        ctx.gutter_colors
-      )
-
-    content_cmds =
-      LineRenderer.render(line_text, screen_row, buf_line, ctx, byte_offset)
-
-    gutters =
-      []
-      |> prepend_if(sign_cmd)
-      |> prepend_if(gutter_cmd)
-
-    {gutters, content_cmds}
   end
 
   @spec wrap_enabled?() :: boolean()
@@ -968,9 +804,6 @@ defmodule Minga.Editor.Renderer do
   catch
     :exit, _ -> true
   end
-
-  defp prepend_if(list, []), do: list
-  defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
 
   # Prepend all items from `new_items` onto `acc` (reverse order).
   # Used instead of `acc ++ new_items` to avoid O(n²) list appending.
@@ -1047,52 +880,31 @@ defmodule Minga.Editor.Renderer do
          row_off,
          col_off
        ) do
+    sign_w = if render_ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+
     {gutters, contents, _byte_offset} =
       lines
       |> Enum.with_index()
       |> Enum.reduce(
         {[], [], 0},
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
-          buf_line = first_line + screen_row
+          {g_cmds, c_cmds, _rows} =
+            BufferLine.render(%{
+              line_text: line_text,
+              buf_line: first_line + screen_row,
+              cursor_line: cursor_line,
+              byte_offset: byte_offset,
+              screen_row: screen_row,
+              ctx: render_ctx,
+              ln_style: line_number_style,
+              gutter_w: gutter_w,
+              sign_w: sign_w,
+              wrap_entry: nil,
+              row_offset: row_off,
+              col_offset: col_off
+            })
 
-          sign_w = if render_ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-          sign_cmd =
-            if render_ctx.has_sign_column do
-              Gutter.render_sign(
-                screen_row,
-                0,
-                buf_line,
-                render_ctx.diagnostic_signs,
-                render_ctx.git_signs,
-                render_ctx.gutter_colors,
-                render_ctx.git_colors
-              )
-            else
-              []
-            end
-
-          gutter_cmd =
-            Gutter.render_number(
-              screen_row,
-              sign_w,
-              buf_line,
-              cursor_line,
-              gutter_w - sign_w,
-              line_number_style,
-              render_ctx.gutter_colors
-            )
-
-          content_cmds =
-            LineRenderer.render(line_text, screen_row, buf_line, render_ctx, byte_offset)
-
-          gutter_cmds =
-            (List.wrap(sign_cmd) ++ List.wrap(gutter_cmd))
-            |> offset_commands(row_off, col_off)
-
-          content_cmds = offset_commands(content_cmds, row_off, col_off)
-
-          {prepend_all(gutters, gutter_cmds), prepend_all(contents, content_cmds),
+          {prepend_all(gutters, g_cmds), prepend_all(contents, c_cmds),
            byte_offset + byte_size(line_text) + 1}
         end
       )
