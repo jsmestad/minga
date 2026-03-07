@@ -13,6 +13,7 @@ defmodule Minga.Agent.PanelState do
           scroll_offset: non_neg_integer(),
           input_text: String.t(),
           spinner_frame: non_neg_integer(),
+          provider_name: String.t(),
           model_name: String.t(),
           input_focused: boolean()
         }
@@ -22,6 +23,7 @@ defmodule Minga.Agent.PanelState do
             scroll_offset: 0,
             input_text: "",
             spinner_frame: 0,
+            provider_name: "anthropic",
             model_name: "claude-sonnet-4",
             input_focused: false
 

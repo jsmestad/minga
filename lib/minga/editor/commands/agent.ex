@@ -123,12 +123,41 @@ defmodule Minga.Editor.Commands.Agent do
     %{state | agent_panel: PanelState.delete_char(state.agent_panel)}
   end
 
+  @doc "Sets the agent provider and restarts the session."
+  @spec set_provider(state(), String.t()) :: state()
+  def set_provider(state, provider) do
+    state = %{state | agent_panel: %{state.agent_panel | provider_name: provider}}
+    restart_session(state, "Provider set to #{provider}")
+  end
+
+  @doc "Sets the agent model and restarts the session."
+  @spec set_model(state(), String.t()) :: state()
+  def set_model(state, model) do
+    state = %{state | agent_panel: %{state.agent_panel | model_name: model}}
+    restart_session(state, "Model set to #{model}")
+  end
+
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec restart_session(state(), String.t()) :: state()
+  defp restart_session(state, message) do
+    if state.agent_session do
+      try do
+        GenServer.stop(state.agent_session, :normal, 1000)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    state = %{state | agent_session: nil, agent_status: :idle, status_msg: message}
+    if state.agent_panel.visible, do: start_agent_session(state), else: state
+  end
 
   @spec start_agent_session(state()) :: state()
   defp start_agent_session(state) do
     opts = [
       provider_opts: [
+        provider: state.agent_panel.provider_name,
         model: state.agent_panel.model_name
       ]
     ]

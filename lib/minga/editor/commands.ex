@@ -137,6 +137,11 @@ defmodule Minga.Editor.Commands do
   def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
   def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)
 
+  def execute(state, {:agent_set_provider, [provider]}),
+    do: AgentCommands.set_provider(state, provider)
+
+  def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
+
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
   def execute(%{buffers: %{active: nil}} = state, _cmd), do: state

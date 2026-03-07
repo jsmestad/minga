@@ -70,6 +70,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   def init(opts) do
     subscriber = Keyword.fetch!(opts, :subscriber)
     pi_path = Keyword.get(opts, :pi_path) || find_pi()
+    provider = Keyword.get(opts, :provider)
     model = Keyword.get(opts, :model)
 
     case pi_path do
@@ -83,6 +84,7 @@ defmodule Minga.Agent.Providers.PiRpc do
           port: nil,
           subscriber: subscriber,
           pi_path: path,
+          provider: provider,
           model: model,
           buffer: "",
           request_id: 0
@@ -172,6 +174,12 @@ defmodule Minga.Agent.Providers.PiRpc do
   @spec spawn_pi(state()) :: {:ok, port()} | {:error, term()}
   defp spawn_pi(state) do
     args = ["--mode", "rpc", "--no-session"]
+
+    args =
+      case state.provider do
+        nil -> args
+        provider -> args ++ ["--provider", provider]
+      end
 
     args =
       case state.model do
