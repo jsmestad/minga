@@ -97,6 +97,7 @@ defmodule Minga.Editor.Renderer do
     end
 
     send_title(state)
+    send_window_bg(state)
   end
 
   @spec send_title(state()) :: :ok
@@ -108,6 +109,18 @@ defmodule Minga.Editor.Renderer do
     if title != Process.get(:last_title) do
       Process.put(:last_title, title)
       PortManager.send_commands([Protocol.encode_set_title(title)])
+    end
+
+    :ok
+  end
+
+  @spec send_window_bg(state()) :: :ok
+  defp send_window_bg(state) do
+    bg = state.theme.editor.bg
+
+    if bg != Process.get(:last_window_bg) do
+      Process.put(:last_window_bg, bg)
+      PortManager.send_commands([Protocol.encode_set_window_bg(bg)])
     end
 
     :ok

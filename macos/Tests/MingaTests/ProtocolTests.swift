@@ -122,6 +122,20 @@ struct ProtocolDecoderTests {
         #expect(commands.count == 3)
     }
 
+    @Test("Decode set_window_bg command")
+    func decodeSetWindowBg() throws {
+        let data = Data([OP_SET_WINDOW_BG, 0x28, 0x2C, 0x34])
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 4)
+        guard case .setWindowBg(let r, let g, let b) = cmd else {
+            Issue.record("Expected .setWindowBg, got \(String(describing: cmd))")
+            return
+        }
+        #expect(r == 0x28)
+        #expect(g == 0x2C)
+        #expect(b == 0x34)
+    }
+
     @Test("Skip highlight opcodes without error")
     func skipHighlightOpcodes() throws {
         // set_language with name "elixir"

@@ -128,6 +128,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appState?.windowTitle = title
             }
         }
+        disp.onWindowBgChanged = { color in
+            // Apply to all windows (typically just one).
+            for window in NSApp.windows {
+                window.backgroundColor = color
+                window.titlebarAppearsTransparent = true
+                // Pick light/dark appearance based on luminance so the
+                // title text stays readable.
+                let luma = color.redComponent * 0.299 +
+                           color.greenComponent * 0.587 +
+                           color.blueComponent * 0.114
+                window.appearance = NSAppearance(named: luma < 0.5 ? .darkAqua : .aqua)
+            }
+        }
         self.dispatcher = disp
 
         // The ready event is deferred: EditorNSView.setFrameSize sends it

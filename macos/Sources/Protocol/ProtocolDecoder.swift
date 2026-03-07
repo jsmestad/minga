@@ -15,6 +15,7 @@ enum RenderCommand: Sendable {
     case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
+    case setWindowBg(r: UInt8, g: UInt8, b: UInt8)
     case defineRegion(id: UInt16, parentId: UInt16, role: UInt8, row: UInt16, col: UInt16, width: UInt16, height: UInt16, zOrder: UInt8)
     case clearRegion(id: UInt16)
     case destroyRegion(id: UInt16)
@@ -101,6 +102,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let titleData = data[(rest + 2)..<(rest + 2 + titleLen)]
         let title = String(data: titleData, encoding: .utf8) ?? ""
         return (.setTitle(title), 1 + 2 + titleLen)
+
+    case OP_SET_WINDOW_BG:
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        return (.setWindowBg(r: data[rest], g: data[rest + 1], b: data[rest + 2]), 4)
 
     case OP_DEFINE_REGION:
         // id:2, parent_id:2, role:1, row:2, col:2, width:2, height:2, z_order:1 = 14

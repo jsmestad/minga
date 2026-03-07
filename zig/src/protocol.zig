@@ -32,6 +32,7 @@ pub const OP_BATCH_END: u8 = 0x13;
 pub const OP_DEFINE_REGION: u8 = 0x14;
 pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
 pub const OP_SET_TITLE: u8 = 0x16;
+pub const OP_SET_WINDOW_BG: u8 = 0x17;
 pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
@@ -211,6 +212,8 @@ pub const RenderCommand = union(enum) {
     edit_buffer: EditBuffer,
     // Text measurement
     measure_text: MeasureText,
+    // No-op (command was decoded and skipped; GUI-only opcodes, etc.)
+    noop: void,
     // Highlight commands
     set_language: []const u8,
     parse_buffer: ParseBuffer,
@@ -489,6 +492,11 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 2 + title_len) return error.Malformed;
             return .{ .set_title = rest[2 .. 2 + title_len] };
         },
+        OP_SET_WINDOW_BG => {
+            // r:1, g:1, b:1 = 3 bytes. GUI-only; TUI ignores.
+            if (rest.len < 3) return error.Malformed;
+            return .noop;
+        },
         OP_SET_LANGUAGE => {
             // name_len:2, name
             if (rest.len < 2) return error.Malformed;
@@ -667,6 +675,7 @@ pub fn commandSize(payload: []const u8) usize {
             const text_len = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + text_len;
         },
+        OP_SET_WINDOW_BG => 4, // opcode(1) + r(1) + g(1) + b(1)
         OP_DEFINE_REGION => 15, // opcode(1) + id(2) + parent_id(2) + role(1) + row(2) + col(2) + width(2) + height(2) + z_order(1)
         OP_CLEAR_REGION => 3, // opcode(1) + id(2)
         OP_DESTROY_REGION => 3, // opcode(1) + id(2)

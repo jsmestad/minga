@@ -4,6 +4,7 @@
 /// offset and clipping, matching the Zig renderer.zig logic.
 
 import Foundation
+import AppKit
 
 /// Tracks a defined region for coordinate offset/clipping.
 struct Region {
@@ -29,6 +30,9 @@ final class CommandDispatcher {
 
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
+
+    /// Called when the BEAM sends a window background color.
+    var onWindowBgChanged: ((NSColor) -> Void)?
 
     init(grid: CellGrid) {
         self.grid = grid
@@ -60,6 +64,15 @@ final class CommandDispatcher {
 
         case .setTitle(let title):
             onTitleChanged?(title)
+
+        case .setWindowBg(let r, let g, let b):
+            let color = NSColor(
+                red: CGFloat(r) / 255.0,
+                green: CGFloat(g) / 255.0,
+                blue: CGFloat(b) / 255.0,
+                alpha: 1.0
+            )
+            onWindowBgChanged?(color)
 
         case .defineRegion(let id, let parentId, let role, let row, let col, let width, let height, let zOrder):
             let region = Region(id: id, parentId: parentId, role: role, row: row, col: col, width: width, height: height, zOrder: zOrder)

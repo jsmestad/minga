@@ -54,6 +54,7 @@ defmodule Minga.Port.Protocol do
   @op_define_region 0x14
   @op_set_cursor_shape 0x15
   @op_set_title 0x16
+  @op_set_window_bg 0x17
   @op_clear_region 0x18
   @op_destroy_region 0x19
   @op_set_active_region 0x1A
@@ -229,6 +230,15 @@ defmodule Minga.Port.Protocol do
   @spec encode_set_title(String.t()) :: binary()
   def encode_set_title(title) when is_binary(title) do
     <<@op_set_title, byte_size(title)::16, title::binary>>
+  end
+
+  @doc "Encodes a set_window_bg command to set the window chrome background color."
+  @spec encode_set_window_bg(non_neg_integer()) :: binary()
+  def encode_set_window_bg(rgb) when is_integer(rgb) do
+    r = Bitwise.band(Bitwise.bsr(rgb, 16), 0xFF)
+    g = Bitwise.band(Bitwise.bsr(rgb, 8), 0xFF)
+    b = Bitwise.band(rgb, 0xFF)
+    <<@op_set_window_bg, r::8, g::8, b::8>>
   end
 
   # ── Encoding: region commands (BEAM → Zig) ──
