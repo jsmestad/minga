@@ -177,13 +177,17 @@ defmodule Minga.Editor.Renderer do
     {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
     cursor = {cursor_line, cursor_byte_col}
     # Use editor rows (minus agent panel) but editor-area width (tree may reduce it).
+    wrap_on = wrap_enabled?()
     viewport = Viewport.new(editor_rows, editor_width)
     viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
     # 2. Fetch all remaining render data in a single GenServer call.
-    snapshot = BufferServer.render_snapshot(state.buffers.active, first_line, visible_rows)
+    #    When wrap is on, fetch extra lines since wrapped lines consume
+    #    more visual rows, potentially pushing the cursor off-screen.
+    fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
+    snapshot = BufferServer.render_snapshot(state.buffers.active, first_line, fetch_rows)
     lines = snapshot.lines
     {cursor_line, _cursor_byte_col} = snapshot.cursor
     line_count = snapshot.line_count
@@ -203,7 +207,7 @@ defmodule Minga.Editor.Renderer do
 
     content_w = max(viewport.cols - gutter_w, 1)
 
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, cursor_col})
+    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
 
     clear = [Protocol.encode_clear()]
 
@@ -239,10 +243,8 @@ defmodule Minga.Editor.Renderer do
       git_colors: state.theme.git
     }
 
-    wrap_enabled = wrap_enabled?()
-
     {gutter_commands, line_commands, rows_used} =
-      if wrap_enabled do
+      if wrap_on do
         render_lines_wrapped(
           lines,
           visible_rows,
@@ -960,6 +962,17 @@ defmodule Minga.Editor.Renderer do
   end
 
   @spec wrap_enabled?() :: boolean()
+  # When wrap is on, disable horizontal scroll; lines don't extend past the viewport.
+  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean()) ::
+          Viewport.t()
+  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on) do
+    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0})
+  end
+
+  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on) do
+    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
+  end
+
   defp wrap_enabled? do
     Minga.Config.Options.get(:wrap)
   catch

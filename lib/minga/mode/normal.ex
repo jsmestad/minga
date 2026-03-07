@@ -473,6 +473,16 @@ defmodule Minga.Mode.Normal do
     {:execute, :goto_definition, %{state | pending_g: false}}
   end
 
+  # gj — logical line down (always moves by logical lines, even with wrap on)
+  def handle_key({?j, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :move_logical_down, %{state | pending_g: false}}
+  end
+
+  # gk — logical line up (always moves by logical lines, even with wrap on)
+  def handle_key({?k, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :move_logical_up, %{state | pending_g: false}}
+  end
+
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do

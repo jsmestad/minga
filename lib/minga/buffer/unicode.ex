@@ -403,6 +403,54 @@ defmodule Minga.Buffer.Unicode do
   end
 
   @doc """
+  Converts a display column (terminal columns) to a byte offset.
+
+  Walks graphemes from the start of `text`, accumulating display width,
+  until the target display column is reached or exceeded. Returns the
+  byte offset of the grapheme at that display column.
+
+  ## Examples
+
+      iex> Minga.Buffer.Unicode.display_col_to_byte("hello", 3)
+      3
+
+      iex> Minga.Buffer.Unicode.display_col_to_byte("你好世界", 2)
+      3
+  """
+  @spec display_col_to_byte(String.t(), non_neg_integer()) :: non_neg_integer()
+  def display_col_to_byte(_text, 0), do: 0
+
+  def display_col_to_byte(text, target_col) when is_binary(text) and target_col > 0 do
+    do_display_col_to_byte(text, target_col, 0, 0)
+  end
+
+  @spec do_display_col_to_byte(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          non_neg_integer()
+  defp do_display_col_to_byte("", _target, _col, bytes), do: bytes
+
+  defp do_display_col_to_byte(text, target, col, bytes) do
+    case String.next_grapheme(text) do
+      {g, rest} ->
+        w = grapheme_width(g)
+        new_col = col + w
+
+        if new_col >= target do
+          bytes
+        else
+          do_display_col_to_byte(rest, target, new_col, bytes + byte_size(g))
+        end
+
+      nil ->
+        bytes
+    end
+  end
+
+  @doc """
   Returns the display width (terminal columns) of a single grapheme.
 
   ## Examples

@@ -7,12 +7,14 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Mode
+  alias Minga.Motion.VisualLine
 
   @type state :: EditorState.t()
 
@@ -52,12 +54,32 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_up) do
-    BufferServer.move(buf, :up)
-    state
+    if wrap_enabled?() do
+      visual_line_move(buf, state, :up)
+    else
+      BufferServer.move(buf, :up)
+      state
+    end
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_down) do
+    if wrap_enabled?() do
+      visual_line_move(buf, state, :down)
+    else
+      BufferServer.move(buf, :down)
+      state
+    end
+  end
+
+  # Logical line movement (gj/gk). Always moves by logical lines regardless
+  # of wrap setting.
+  def execute(%{buffers: %{active: buf}} = state, :move_logical_down) do
     BufferServer.move(buf, :down)
+    state
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :move_logical_up) do
+    BufferServer.move(buf, :up)
     state
   end
 
@@ -369,5 +391,37 @@ defmodule Minga.Editor.Commands.Movement do
       :error ->
         %{state | status_msg: "Cannot close the last window"}
     end
+  end
+
+  # ── Private helpers ──────────────────────────────────────────────────────
+
+  @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
+  defp visual_line_move(buf, state, direction) do
+    doc = BufferServer.snapshot(buf)
+    pos = Document.cursor(doc)
+    content_w = content_width(state)
+
+    new_pos =
+      case direction do
+        :down -> VisualLine.visual_down(doc, pos, content_w)
+        :up -> VisualLine.visual_up(doc, pos, content_w)
+      end
+
+    BufferServer.move_to(buf, new_pos)
+    state
+  end
+
+  @spec content_width(state()) :: pos_integer()
+  defp content_width(state) do
+    vp = Viewport.new(state.viewport.rows, state.viewport.cols)
+    line_count = BufferServer.line_count(state.buffers.active)
+    Viewport.content_cols(vp, line_count)
+  end
+
+  @spec wrap_enabled?() :: boolean()
+  defp wrap_enabled? do
+    ConfigOptions.get(:wrap)
+  catch
+    :exit, _ -> false
   end
 end
