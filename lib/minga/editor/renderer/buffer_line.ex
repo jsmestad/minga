@@ -36,6 +36,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   - `gutter_w`      — total gutter width (sign column + line numbers)
   - `sign_w`        — sign column width (0 when no diagnostics)
   - `wrap_entry`    — nil for nowrap; list of visual rows for wrapped lines
+  - `max_rows`      — maximum screen rows available (prevents overflow into modeline)
   - `row_offset`    — row shift for split windows (0 for single buffer)
   - `col_offset`    — column shift for split windows (0 for single buffer)
   """
@@ -50,6 +51,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
           gutter_w: non_neg_integer(),
           sign_w: non_neg_integer(),
           wrap_entry: WrapMap.wrap_entry() | nil,
+          max_rows: pos_integer(),
           row_offset: non_neg_integer(),
           col_offset: non_neg_integer()
         }
@@ -94,10 +96,14 @@ defmodule Minga.Editor.Renderer.BufferLine do
           {[binary()], [binary()], pos_integer()}
   defp render_wrapped_rows(p, visual_rows) do
     {g_acc, c_acc, sr} =
-      Enum.reduce(visual_rows, {[], [], p.screen_row}, fn vrow, {g, c, sr} ->
-        is_first = sr == p.screen_row
-        {g_cmds, c_cmds} = render_visual_row(p, vrow, sr, is_first)
-        {prepend_all(g, g_cmds), prepend_all(c, c_cmds), sr + 1}
+      Enum.reduce_while(visual_rows, {[], [], p.screen_row}, fn vrow, {g, c, sr} ->
+        if sr >= p.max_rows do
+          {:halt, {g, c, sr}}
+        else
+          is_first = sr == p.screen_row
+          {g_cmds, c_cmds} = render_visual_row(p, vrow, sr, is_first)
+          {:cont, {prepend_all(g, g_cmds), prepend_all(c, c_cmds), sr + 1}}
+        end
       end)
 
     {Enum.reverse(g_acc), Enum.reverse(c_acc), sr - p.screen_row}

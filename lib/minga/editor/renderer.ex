@@ -699,6 +699,7 @@ defmodule Minga.Editor.Renderer do
               gutter_w: gutter_w,
               sign_w: sign_w,
               wrap_entry: nil,
+              max_rows: length(lines),
               row_offset: 0,
               col_offset: 0
             })
@@ -762,6 +763,7 @@ defmodule Minga.Editor.Renderer do
               gutter_w: gutter_w,
               sign_w: sign_w,
               wrap_entry: visual_rows,
+              max_rows: max_rows,
               row_offset: 0,
               col_offset: 0
             })
@@ -900,6 +902,7 @@ defmodule Minga.Editor.Renderer do
               gutter_w: gutter_w,
               sign_w: sign_w,
               wrap_entry: nil,
+              max_rows: length(lines),
               row_offset: row_off,
               col_offset: col_off
             })

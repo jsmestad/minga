@@ -8,7 +8,9 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
   # ── Test helpers ──────────────────────────────────────────────────────────
 
   # Decodes a draw command binary into a map for easy assertion.
-  defp decode_draw(<<0x10, row::16, col::16, fg::24, bg::24, attrs::8, len::16, text::binary-size(len)>>) do
+  defp decode_draw(
+         <<0x10, row::16, col::16, fg::24, bg::24, attrs::8, len::16, text::binary-size(len)>>
+       ) do
     %{row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text}
   end
 
@@ -41,6 +43,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       gutter_w: 4,
       sign_w: 0,
       wrap_entry: nil,
+      max_rows: 24,
       row_offset: 0,
       col_offset: 0
     }
@@ -69,7 +72,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
     test "produces content commands with text on the correct screen row" do
       {_g, content, 1} = BufferLine.render(make_params(%{screen_row: 5}))
       decoded = decode_all(content)
-      assert length(decoded) >= 1
+      assert decoded != []
       Enum.each(decoded, fn cmd -> assert cmd.row == 5 end)
     end
 
@@ -87,7 +90,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
     test "produces gutter commands (line number)" do
       {gutters, _c, 1} = BufferLine.render(make_params(%{ln_style: :absolute}))
       decoded = decode_all(gutters)
-      assert length(decoded) >= 1
+      assert decoded != []
       # Line number for buf_line 0 in :absolute mode is "1"
       number_cmd = Enum.find(decoded, fn cmd -> String.contains?(cmd.text, "1") end)
       assert number_cmd != nil
@@ -299,6 +302,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
         BufferLine.render(make_params(%{row_offset: 10, col_offset: 20, screen_row: 0}))
 
       decoded = decode_all(gutters)
+
       Enum.each(decoded, fn cmd ->
         assert cmd.row >= 10
         assert cmd.col >= 20
@@ -317,6 +321,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
         )
 
       decoded = decode_all(content)
+
       Enum.each(decoded, fn cmd ->
         assert cmd.row >= 5
         assert cmd.col >= 34
@@ -395,6 +400,81 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
         BufferLine.render(make_params(%{ln_style: :none, gutter_w: 0, ctx: ctx}))
 
       assert gutters == []
+    end
+  end
+
+  # ── max_rows clamping ───────────────────────────────────────────────────
+
+  describe "max_rows clamping for wrapped lines" do
+    test "stops rendering when screen_row reaches max_rows" do
+      # 5 visual rows but only 3 fit on screen
+      wrap_entry = [
+        %{text: "aaa ", byte_offset: 0},
+        %{text: "bbb ", byte_offset: 4},
+        %{text: "ccc ", byte_offset: 8},
+        %{text: "ddd ", byte_offset: 12},
+        %{text: "eee", byte_offset: 16}
+      ]
+
+      {_g, content, rows} =
+        BufferLine.render(
+          make_params(%{
+            line_text: "aaa bbb ccc ddd eee",
+            wrap_entry: wrap_entry,
+            screen_row: 0,
+            max_rows: 3
+          })
+        )
+
+      assert rows == 3
+
+      decoded = decode_all(content)
+      rows_rendered = decoded |> Enum.map(& &1.row) |> Enum.uniq() |> Enum.sort()
+      assert rows_rendered == [0, 1, 2]
+      # No commands on row 3 or 4
+      refute Enum.any?(decoded, fn cmd -> cmd.row >= 3 end)
+    end
+
+    test "renders all rows when max_rows is large enough" do
+      wrap_entry = [
+        %{text: "aaa ", byte_offset: 0},
+        %{text: "bbb", byte_offset: 4}
+      ]
+
+      {_g, _c, rows} =
+        BufferLine.render(
+          make_params(%{
+            line_text: "aaa bbb",
+            wrap_entry: wrap_entry,
+            max_rows: 100
+          })
+        )
+
+      assert rows == 2
+    end
+
+    test "starting mid-screen respects max_rows boundary" do
+      wrap_entry = [
+        %{text: "aaa ", byte_offset: 0},
+        %{text: "bbb ", byte_offset: 4},
+        %{text: "ccc", byte_offset: 8}
+      ]
+
+      # Start at row 8 with max 10 rows: only 2 visual rows fit (rows 8, 9)
+      {_g, content, rows} =
+        BufferLine.render(
+          make_params(%{
+            line_text: "aaa bbb ccc",
+            wrap_entry: wrap_entry,
+            screen_row: 8,
+            max_rows: 10
+          })
+        )
+
+      assert rows == 2
+
+      decoded = decode_all(content)
+      refute Enum.any?(decoded, fn cmd -> cmd.row >= 10 end)
     end
   end
 
