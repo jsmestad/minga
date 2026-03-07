@@ -681,7 +681,7 @@ defmodule Minga.Editor.Renderer do
          gutter_w,
          first_byte_off
        ) do
-    {gutters, contents, _byte_off} =
+    {gutters, contents_rev, _byte_off} =
       lines
       |> Enum.with_index()
       |> Enum.reduce(
@@ -702,11 +702,11 @@ defmodule Minga.Editor.Renderer do
             )
 
           next_byte_off = byte_off + byte_size(line_text) + 1
-          {g_cmds ++ g, c ++ c_cmds, next_byte_off}
+          {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off}
         end
       )
 
-    {Enum.reverse(gutters), contents, length(lines)}
+    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines)}
   end
 
   # ── Line rendering (wrapped) ────────────────────────────────────────────────
@@ -765,14 +765,14 @@ defmodule Minga.Editor.Renderer do
           next_byte_off = byte_off + byte_size(line_text) + 1
 
           if sr2 >= max_rows do
-            {:halt, {g2 ++ g, c ++ c2, sr2, next_byte_off}}
+            {:halt, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
           else
-            {:cont, {g2 ++ g, c ++ c2, sr2, next_byte_off}}
+            {:cont, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
           end
         end
       )
 
-    {Enum.reverse(gutters), contents, screen_row}
+    {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
   end
 
   # Renders the visual rows for a single logical line in wrapped mode.
@@ -989,6 +989,12 @@ defmodule Minga.Editor.Renderer do
   defp prepend_if(list, []), do: list
   defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
 
+  # Prepend all items from `new_items` onto `acc` (reverse order).
+  # Used instead of `acc ++ new_items` to avoid O(n²) list appending.
+  @spec prepend_all([binary()], [binary()]) :: [binary()]
+  defp prepend_all(acc, []), do: acc
+  defp prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
+
   @spec build_window_render_ctx(
           state(),
           Window.t(),
@@ -1103,12 +1109,12 @@ defmodule Minga.Editor.Renderer do
 
           content_cmds = offset_commands(content_cmds, row_off, col_off)
 
-          {gutters ++ gutter_cmds, contents ++ content_cmds,
+          {prepend_all(gutters, gutter_cmds), prepend_all(contents, content_cmds),
            byte_offset + byte_size(line_text) + 1}
         end
       )
 
-    {gutters, contents}
+    {Enum.reverse(gutters), Enum.reverse(contents)}
   end
 
   @spec render_tildes(
