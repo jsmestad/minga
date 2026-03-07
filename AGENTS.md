@@ -91,15 +91,17 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
 - **No `Process.sleep/1`** — never use `Process.sleep` anywhere in production code. It blocks the calling process, defeats the BEAM's concurrency model, and hides real timing bugs. Use `Process.send_after/3`, GenServer state machines, or `receive` with `after` clauses instead. If you need to defer work until a resource is ready, store the intent in state and act on it when the ready signal arrives (e.g., set a pending field and apply it in the `handle_info` that confirms the resource is up). `Process.sleep` in tests is acceptable only in integration tests that interact with external processes.
 - `mix compile --warnings-as-errors` must pass clean
 
-### Pre-commit Checks
+### Pre-commit Checks (mandatory, no exceptions)
 
-All must pass before committing any Elixir changes:
+**STOP. Before every `git commit` that touches Elixir files, run these commands and confirm they pass. Do not skip this step. Do not commit with "I'll fix it later." If a check fails, fix the issue before committing.**
 
 ```bash
 mix lint                          # Formatting, credo --strict, compile --warnings-as-errors
 mix test --warnings-as-errors     # Tests
 mix dialyzer                      # Typespec consistency
 ```
+
+If any check fails, fix it before committing. No exceptions.
 
 Example:
 
