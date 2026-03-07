@@ -209,7 +209,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   defp send_command(nil, _command), do: {:error, :no_port}
 
   defp send_command(port, command) do
-    json = Jason.encode!(command)
+    json = JSON.encode!(command)
     Port.command(port, [json, "\n"])
     :ok
   end
@@ -219,7 +219,7 @@ defmodule Minga.Agent.Providers.PiRpc do
     full_line = state.buffer <> line
     state = %{state | buffer: ""}
 
-    case Jason.decode(full_line) do
+    case JSON.decode(full_line) do
       {:ok, event} ->
         handle_event(event, state)
 

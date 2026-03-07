@@ -46,17 +46,27 @@ defmodule Minga.Editor.Commands.Agent do
   @spec submit_prompt(state()) :: state()
   def submit_prompt(%{agent_panel: %{input_text: ""}} = state), do: state
 
-  def submit_prompt(%{agent_session: nil} = state), do: state
+  def submit_prompt(%{agent_session: nil} = state) do
+    %{state | status_msg: "No agent session — try closing and reopening the panel"}
+  end
 
   def submit_prompt(state) do
     text = state.agent_panel.input_text
-    Session.send_prompt(state.agent_session, text)
 
-    %{
-      state
-      | agent_panel:
-          state.agent_panel |> PanelState.clear_input() |> PanelState.scroll_to_bottom()
-    }
+    case Session.send_prompt(state.agent_session, text) do
+      :ok ->
+        %{
+          state
+          | agent_panel:
+              state.agent_panel |> PanelState.clear_input() |> PanelState.scroll_to_bottom()
+        }
+
+      {:error, :provider_not_ready} ->
+        %{state | status_msg: "Agent provider still starting — try again in a moment"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Agent error: #{inspect(reason)}"}
+    end
   end
 
   @doc "Aborts the current agent operation."

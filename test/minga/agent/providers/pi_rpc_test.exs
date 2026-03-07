@@ -96,30 +96,30 @@ defmodule Minga.Agent.Providers.PiRpcTest do
   describe "JSON command encoding" do
     test "encodes prompt command" do
       command = %{"id" => "req-1", "type" => "prompt", "message" => "Hello!"}
-      json = Jason.encode!(command)
-      decoded = Jason.decode!(json)
+      json = JSON.encode!(command)
+      decoded = JSON.decode!(json)
       assert decoded["type"] == "prompt"
       assert decoded["message"] == "Hello!"
     end
 
     test "encodes abort command" do
       command = %{"type" => "abort"}
-      json = Jason.encode!(command)
-      decoded = Jason.decode!(json)
+      json = JSON.encode!(command)
+      decoded = JSON.decode!(json)
       assert decoded["type"] == "abort"
     end
 
     test "encodes new_session command" do
       command = %{"type" => "new_session"}
-      json = Jason.encode!(command)
-      decoded = Jason.decode!(json)
+      json = JSON.encode!(command)
+      decoded = JSON.decode!(json)
       assert decoded["type"] == "new_session"
     end
 
     test "encodes get_state command" do
       command = %{"id" => "req-1", "type" => "get_state"}
-      json = Jason.encode!(command)
-      decoded = Jason.decode!(json)
+      json = JSON.encode!(command)
+      decoded = JSON.decode!(json)
       assert decoded["type"] == "get_state"
     end
   end
@@ -142,7 +142,7 @@ defmodule Minga.Agent.Providers.PiRpcTest do
         end
       end)
 
-    case Jason.decode(json_line) do
+    case JSON.decode(json_line) do
       {:ok, event} ->
         map_event(event, receiver)
 
