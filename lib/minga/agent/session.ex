@@ -25,6 +25,7 @@ defmodule Minga.Agent.Session do
 
   alias Minga.Agent.Event
   alias Minga.Agent.Message
+  alias Minga.Agent.Providers.PiRpc
 
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
@@ -250,7 +251,7 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call({:set_thinking_level, level}, _from, state) do
-    result = Minga.Agent.Providers.PiRpc.set_thinking_level(state.provider, level)
+    result = PiRpc.set_thinking_level(state.provider, level)
     {:reply, result, state}
   end
 
@@ -259,7 +260,7 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call(:cycle_thinking_level, _from, state) do
-    result = Minga.Agent.Providers.PiRpc.cycle_thinking_level(state.provider)
+    result = PiRpc.cycle_thinking_level(state.provider)
     {:reply, result, state}
   end
 
@@ -469,7 +470,7 @@ defmodule Minga.Agent.Session do
 
   defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do
     try do
-      Minga.Agent.Providers.PiRpc.set_thinking_level(state.provider, level)
+      PiRpc.set_thinking_level(state.provider, level)
     catch
       :exit, _ -> :ok
     end

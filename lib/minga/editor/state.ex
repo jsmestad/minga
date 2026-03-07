@@ -19,7 +19,6 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
-  alias Minga.Agent.PanelState, as: AgentPanel
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -27,6 +26,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.State.Mouse
@@ -52,6 +52,7 @@ defmodule Minga.Editor.State do
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
+  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct port_manager: nil,
             viewport: nil,
             mode: :normal,
@@ -83,11 +84,7 @@ defmodule Minga.Editor.State do
             file_tree_focused: false,
             git_buffers: %{},
             injection_ranges: %{},
-            agent_session: nil,
-            agent_status: nil,
-            agent_panel: AgentPanel.new(),
-            agent_error: nil,
-            agent_spinner_timer: nil
+            agent: %AgentState{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -125,11 +122,7 @@ defmodule Minga.Editor.State do
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
             ]
           },
-          agent_session: pid() | nil,
-          agent_status: :idle | :thinking | :tool_executing | :error | nil,
-          agent_panel: AgentPanel.t(),
-          agent_error: String.t() | nil,
-          agent_spinner_timer: reference() | nil
+          agent: AgentState.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

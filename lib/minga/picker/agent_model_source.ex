@@ -21,7 +21,7 @@ defmodule Minga.Picker.AgentModelSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{agent_session: session}) when is_pid(session) do
+  def candidates(%{agent: %{session: session}}) when is_pid(session) do
     case Session.get_available_models(session) do
       {:ok, %{"models" => models}} when is_list(models) ->
         Enum.map(models, fn model ->

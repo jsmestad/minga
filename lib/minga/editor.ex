@@ -13,7 +13,6 @@ defmodule Minga.Editor do
 
   use GenServer
 
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -63,6 +62,7 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -1499,6 +1499,7 @@ defmodule Minga.Editor do
          ) do
       {:ok, git_pid} ->
         rel_path = Path.relative_to(path, git_root)
+
         log_message(state, "Git: tracking #{rel_path}")
         |> then(&%{&1 | git_buffers: Map.put(&1.git_buffers, buffer_pid, git_pid)})
 

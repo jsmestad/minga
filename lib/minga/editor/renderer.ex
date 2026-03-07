@@ -274,9 +274,9 @@ defmodule Minga.Editor.Renderer do
           buf_index: buf_index,
           buf_count: buf_count,
           macro_recording: MacroRecorder.recording?(state.macro_recorder),
-          agent_status: state.agent_status,
+          agent_status: state.agent.status,
           agent_theme_colors:
-            if(state.agent_status, do: Theme.agent_theme(state.theme), else: nil)
+            if(state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
         },
         state.theme
       )
@@ -561,9 +561,9 @@ defmodule Minga.Editor.Renderer do
           buf_count: buf_count,
           macro_recording:
             if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
-          agent_status: if(is_active, do: state.agent_status, else: nil),
+          agent_status: if(is_active, do: state.agent.status, else: nil),
           agent_theme_colors:
-            if(is_active && state.agent_status, do: Theme.agent_theme(state.theme), else: nil)
+            if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
         },
         state.theme
       )
@@ -1142,7 +1142,7 @@ defmodule Minga.Editor.Renderer do
         ) ::
           {binary(), binary()}
   defp agent_cursor_override(
-         %{agent_panel: %{visible: true, input_focused: true}} = state,
+         %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
          _cursor_cmd,
          _shape_cmd,
          editor_rows,
@@ -1150,7 +1150,7 @@ defmodule Minga.Editor.Renderer do
          col_off
        ) do
     input_row = editor_rows + panel_height - @agent_input_height + 1
-    input_col = col_off + 2 + String.length(state.agent_panel.input_text)
+    input_col = col_off + 2 + String.length(state.agent.panel.input_text)
     {Protocol.encode_cursor(input_row, input_col), Protocol.encode_cursor_shape(:beam)}
   end
 
@@ -1159,7 +1159,7 @@ defmodule Minga.Editor.Renderer do
   end
 
   @spec agent_panel_height(state()) :: non_neg_integer()
-  defp agent_panel_height(%{agent_panel: %{visible: true}} = state) do
+  defp agent_panel_height(%{agent: %{panel: %{visible: true}}} = state) do
     div(state.viewport.rows * 35, 100)
   end
 
@@ -1168,7 +1168,8 @@ defmodule Minga.Editor.Renderer do
   @spec render_agent_panel(state(), non_neg_integer(), non_neg_integer(), pos_integer()) :: [
           binary()
         ]
-  defp render_agent_panel(%{agent_panel: %{visible: false}}, _editor_rows, _col, _width), do: []
+  defp render_agent_panel(%{agent: %{panel: %{visible: false}}}, _editor_rows, _col, _width),
+    do: []
 
   defp render_agent_panel(state, editor_rows, col, width) do
     panel_height = agent_panel_height(state)
@@ -1176,10 +1177,12 @@ defmodule Minga.Editor.Renderer do
     rect = {row_start, col, width, panel_height}
 
     # Gather messages from the session if available
+    agent = state.agent
+
     messages =
-      if state.agent_session do
+      if agent.session do
         try do
-          Session.messages(state.agent_session)
+          Session.messages(agent.session)
         catch
           :exit, _ -> []
         end
@@ -1188,9 +1191,9 @@ defmodule Minga.Editor.Renderer do
       end
 
     usage =
-      if state.agent_session do
+      if agent.session do
         try do
-          Session.usage(state.agent_session)
+          Session.usage(agent.session)
         catch
           :exit, _ -> %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
         end
@@ -1200,13 +1203,14 @@ defmodule Minga.Editor.Renderer do
 
     panel_state = %{
       messages: messages,
-      status: state.agent_status || :idle,
-      input_text: state.agent_panel.input_text,
-      scroll_offset: state.agent_panel.scroll_offset,
-      spinner_frame: state.agent_panel.spinner_frame,
+      status: agent.status || :idle,
+      input_text: agent.panel.input_text,
+      scroll_offset: agent.panel.scroll_offset,
+      spinner_frame: agent.panel.spinner_frame,
       usage: usage,
-      model_name: state.agent_panel.model_name,
-      error_message: state.agent_error
+      model_name: agent.panel.model_name,
+      thinking_level: agent.panel.thinking_level,
+      error_message: agent.error
     }
 
     ChatRenderer.render(rect, panel_state, state.theme)

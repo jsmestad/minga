@@ -1,0 +1,172 @@
+defmodule Minga.Editor.State.Agent do
+  @moduledoc """
+  Agent-related editor state: session pid, status, panel UI, error, and spinner timer.
+
+  All mutations go through functions in this module so callers never
+  reach into the nested struct directly.
+  """
+
+  alias Minga.Agent.PanelState
+
+  @typedoc "Agent status."
+  @type status :: :idle | :thinking | :tool_executing | :error | nil
+
+  @typedoc "Agent sub-state."
+  @type t :: %__MODULE__{
+          session: pid() | nil,
+          status: status(),
+          panel: PanelState.t(),
+          error: String.t() | nil,
+          spinner_timer: reference() | nil
+        }
+
+  defstruct session: nil,
+            status: nil,
+            panel: PanelState.new(),
+            error: nil,
+            spinner_timer: nil
+
+  # ── Status ──────────────────────────────────────────────────────────────────
+
+  @doc "Sets the agent status."
+  @spec set_status(t(), status()) :: t()
+  def set_status(%__MODULE__{} = agent, status), do: %{agent | status: status}
+
+  @doc "Sets the agent into an error state with a message."
+  @spec set_error(t(), String.t()) :: t()
+  def set_error(%__MODULE__{} = agent, message) do
+    %{agent | status: :error, error: message}
+  end
+
+  # ── Session lifecycle ───────────────────────────────────────────────────────
+
+  @doc "Stores the session pid and sets status to :idle."
+  @spec set_session(t(), pid()) :: t()
+  def set_session(%__MODULE__{} = agent, pid) when is_pid(pid) do
+    %{agent | session: pid, status: :idle}
+  end
+
+  @doc "Clears the session and resets status to :idle."
+  @spec clear_session(t()) :: t()
+  def clear_session(%__MODULE__{} = agent) do
+    %{agent | session: nil, status: :idle}
+  end
+
+  # ── Panel delegation ────────────────────────────────────────────────────────
+  # Thin wrappers that update the nested PanelState so callers avoid
+  # `%{agent | panel: PanelState.foo(agent.panel, ...)}` boilerplate.
+
+  @doc "Sets whether the agent input is focused."
+  @spec focus_input(t(), boolean()) :: t()
+  def focus_input(%__MODULE__{} = agent, focused) do
+    %{agent | panel: PanelState.set_input_focused(agent.panel, focused)}
+  end
+
+  @doc "Scrolls the chat to the bottom."
+  @spec scroll_to_bottom(t()) :: t()
+  def scroll_to_bottom(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.scroll_to_bottom(agent.panel)}
+  end
+
+  @doc "Scrolls the chat up by `amount` lines."
+  @spec scroll_up(t(), non_neg_integer()) :: t()
+  def scroll_up(%__MODULE__{} = agent, amount) do
+    %{agent | panel: PanelState.scroll_up(agent.panel, amount)}
+  end
+
+  @doc "Scrolls the chat down by `amount` lines."
+  @spec scroll_down(t(), non_neg_integer()) :: t()
+  def scroll_down(%__MODULE__{} = agent, amount) do
+    %{agent | panel: PanelState.scroll_down(agent.panel, amount)}
+  end
+
+  @doc "Advances the spinner animation frame."
+  @spec tick_spinner(t()) :: t()
+  def tick_spinner(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.tick_spinner(agent.panel)}
+  end
+
+  @doc "Inserts a character into the agent input."
+  @spec insert_char(t(), String.t()) :: t()
+  def insert_char(%__MODULE__{} = agent, char) do
+    %{agent | panel: PanelState.insert_char(agent.panel, char)}
+  end
+
+  @doc "Deletes the last character from the agent input."
+  @spec delete_char(t()) :: t()
+  def delete_char(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.delete_char(agent.panel)}
+  end
+
+  @doc "Clears the input and scrolls to the bottom."
+  @spec clear_input_and_scroll(t()) :: t()
+  def clear_input_and_scroll(%__MODULE__{} = agent) do
+    %{agent | panel: agent.panel |> PanelState.clear_input() |> PanelState.scroll_to_bottom()}
+  end
+
+  @doc "Toggles the panel visibility."
+  @spec toggle_panel(t()) :: t()
+  def toggle_panel(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.toggle(agent.panel)}
+  end
+
+  # ── Panel config ────────────────────────────────────────────────────────────
+
+  @doc "Sets the thinking level."
+  @spec set_thinking_level(t(), String.t()) :: t()
+  def set_thinking_level(%__MODULE__{} = agent, level) do
+    %{agent | panel: %{agent.panel | thinking_level: level}}
+  end
+
+  @doc "Sets the provider name."
+  @spec set_provider_name(t(), String.t()) :: t()
+  def set_provider_name(%__MODULE__{} = agent, provider) do
+    %{agent | panel: %{agent.panel | provider_name: provider}}
+  end
+
+  @doc "Sets the model name."
+  @spec set_model_name(t(), String.t()) :: t()
+  def set_model_name(%__MODULE__{} = agent, model) do
+    %{agent | panel: %{agent.panel | model_name: model}}
+  end
+
+  # ── Spinner timer ───────────────────────────────────────────────────────────
+
+  @doc "Starts the spinner timer if not already running."
+  @spec start_spinner_timer(t()) :: t()
+  def start_spinner_timer(%__MODULE__{spinner_timer: nil} = agent) do
+    timer = :timer.send_interval(100, :agent_spinner_tick)
+    %{agent | spinner_timer: timer}
+  end
+
+  def start_spinner_timer(%__MODULE__{} = agent), do: agent
+
+  @doc "Stops the spinner timer if running."
+  @spec stop_spinner_timer(t()) :: t()
+  def stop_spinner_timer(%__MODULE__{spinner_timer: nil} = agent), do: agent
+
+  def stop_spinner_timer(%__MODULE__{spinner_timer: timer} = agent) do
+    case timer do
+      {:ok, ref} -> :timer.cancel(ref)
+      ref when is_reference(ref) -> :timer.cancel(ref)
+      _ -> :ok
+    end
+
+    %{agent | spinner_timer: nil}
+  end
+
+  # ── Queries ─────────────────────────────────────────────────────────────────
+
+  @doc "Returns true if the panel is visible."
+  @spec visible?(t()) :: boolean()
+  def visible?(%__MODULE__{panel: panel}), do: panel.visible
+
+  @doc "Returns true if the agent input is focused."
+  @spec input_focused?(t()) :: boolean()
+  def input_focused?(%__MODULE__{panel: panel}), do: panel.input_focused
+
+  @doc "Returns true if the agent is actively working."
+  @spec busy?(t()) :: boolean()
+  def busy?(%__MODULE__{status: s}) when s in [:thinking, :tool_executing], do: true
+  def busy?(%__MODULE__{}), do: false
+end
