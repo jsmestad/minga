@@ -126,6 +126,29 @@ end
 - `std.log` for debug output (stderr), never stdout (that's the Port channel)
 - `zig build test` must pass
 
+### Logging and the `*Messages*` Buffer
+
+Minga has a `*Messages*` buffer (viewable via `SPC b m`) that acts as the editor's runtime log, similar to Emacs's `*Messages*`. Use it liberally to surface information that helps users understand what the editor is doing and to aid debugging when things go wrong.
+
+**When to log to `*Messages*`:**
+- State transitions the user should know about: file opened, file saved, LSP server connected/disconnected, agent session started, config reloaded.
+- Errors and warnings that don't warrant a hard failure: clipboard write failed, formatter returned non-zero, file watcher couldn't watch a path.
+- Diagnostic context: which LSP server was chosen for a buffer, why a filetype was detected a certain way, what config file was loaded.
+- Performance-relevant events during development: parse times, highlight setup duration, port restart recovery.
+
+**How to log:**
+- Inside the Editor GenServer, call `log_message(state, "your message")`. This appends a timestamped line to the `*Messages*` buffer.
+- Outside the Editor (other processes, extensions, commands), call `Minga.Editor.log_to_messages("your message")`. This sends an async cast to avoid deadlocks.
+- For structured logging that also writes to the log file (`~/.local/share/minga/minga.log`), use `Logger.info/warning/error` as normal. The custom `Minga.LoggerHandler` routes Logger output to both the log file and `*Messages*`.
+
+**Zig side:** Use `std.log` for debug output. The Port.Manager captures log messages from the Zig process's stderr and forwards them to `*Messages*` prefixed with `[ZIG/{level}]`.
+
+**Guidelines:**
+- Keep messages concise and actionable. `"LSP: elixir-ls connected (pid 42031)"` is better than `"The language server process has successfully been started."`
+- Include relevant context (file paths, server names, error reasons) so the user doesn't have to guess.
+- Don't log per-keystroke or per-frame events to `*Messages*`. Those belong in the log file only (via `Logger.debug`).
+- When in doubt, log it. A message the user never reads costs nothing. A missing message when debugging costs time.
+
 ### Commit Messages
 
 ```
