@@ -24,8 +24,9 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
-  # Submodule — Caps is Minga.Editor.Renderer.Caps
+  # Submodules
   alias __MODULE__.Caps
+  alias __MODULE__.Regions
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.BufferLine
@@ -153,8 +154,12 @@ defmodule Minga.Editor.Renderer do
         nil -> Protocol.encode_cursor(cursor_row, cursor_col)
       end
 
+    layout = Layout.get(state)
+    region_commands = Regions.define_regions(layout)
+
     all_commands =
       [Protocol.encode_clear()] ++
+        region_commands ++
         panel_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
@@ -219,6 +224,7 @@ defmodule Minga.Editor.Renderer do
     viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
 
     clear = [Protocol.encode_clear()]
+    region_commands = Regions.define_regions(layout)
 
     # Apply live substitution preview if typing :%s/pattern/replacement
     {lines, preview_matches} =
@@ -390,6 +396,7 @@ defmodule Minga.Editor.Renderer do
 
     all_commands =
       clear ++
+        region_commands ++
         tree_commands ++
         gutter_commands ++
         line_commands ++
@@ -417,6 +424,7 @@ defmodule Minga.Editor.Renderer do
     full_viewport = state.viewport
 
     clear = [Protocol.encode_clear()]
+    region_commands = Regions.define_regions(layout)
 
     # Render each window's buffer content + modeline within its rect
     {window_commands, active_cursor_info} =
@@ -479,6 +487,7 @@ defmodule Minga.Editor.Renderer do
 
     all_commands =
       clear ++
+        region_commands ++
         tree_commands ++
         window_commands ++
         separator_commands ++
