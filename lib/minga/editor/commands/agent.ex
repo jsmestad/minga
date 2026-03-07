@@ -130,7 +130,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls the chat panel up by half the panel height."
   @spec scroll_chat_up(state()) :: state()
-  def scroll_chat_up(%{agent: %{panel: %{visible: false}}} = state), do: state
+  def scroll_chat_up(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
+    do: state
 
   def scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
@@ -139,7 +140,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls the chat panel down by half the panel height."
   @spec scroll_chat_down(state()) :: state()
-  def scroll_chat_down(%{agent: %{panel: %{visible: false}}} = state), do: state
+  def scroll_chat_down(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
+    do: state
 
   def scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
@@ -148,7 +150,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
-  def input_char(%{agent: %{panel: %{visible: false}}} = state, _char), do: state
+  def input_char(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state, _char),
+    do: state
 
   def input_char(state, char) do
     update_agent(state, &AgentState.insert_char(&1, char))
@@ -156,7 +159,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
-  def input_backspace(%{agent: %{panel: %{visible: false}}} = state), do: state
+  def input_backspace(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
+    do: state
 
   def input_backspace(state) do
     update_agent(state, &AgentState.delete_char/1)
