@@ -72,7 +72,8 @@ defmodule Minga.Command.RegistryTest do
           :toggle_agent_panel,
           :toggle_agentic_view,
           :toggle_comment_line,
-          :toggle_comment_selection
+          :toggle_comment_selection,
+          :toggle_wrap
         ]
         |> Enum.sort()
 

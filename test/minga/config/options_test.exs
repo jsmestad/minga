@@ -41,7 +41,10 @@ defmodule Minga.Config.OptionsTest do
                recent_files_limit: 200,
                persist_recent_files: true,
                scratch_filetype: :markdown,
-               clipboard: :unnamedplus
+               clipboard: :unnamedplus,
+               wrap: false,
+               linebreak: true,
+               breakindent: true
              }
     end
   end

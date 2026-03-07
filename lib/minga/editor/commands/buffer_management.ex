@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
-  alias Minga.Config.Options
+  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
@@ -156,6 +156,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     %{state | line_numbers: next}
   end
 
+  def execute(state, :toggle_wrap) do
+    current = ConfigOptions.get(:wrap)
+    ConfigOptions.set(:wrap, !current)
+    label = if current, do: "nowrap", else: "wrap"
+    %{state | status_msg: "wrap #{label}"}
+  end
+
   # ── Ex commands ───────────────────────────────────────────────────────────
 
   def execute(state, {:execute_ex_command, {:save, []}}) do
@@ -241,6 +248,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
       end
 
     %{state | line_numbers: new_style}
+  end
+
+  def execute(state, {:execute_ex_command, {:set, :wrap}}) do
+    ConfigOptions.set(:wrap, true)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:set, :nowrap}}) do
+    ConfigOptions.set(:wrap, false)
+    state
   end
 
   def execute(
@@ -476,7 +493,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec maybe_format_on_save(state(), pid(), atom()) :: state()
   defp maybe_format_on_save(state, buf, filetype) do
-    if Options.get_for_filetype(:format_on_save, filetype) do
+    if ConfigOptions.get_for_filetype(:format_on_save, filetype) do
       run_format_on_save(state, buf, filetype)
     else
       state
@@ -507,8 +524,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec apply_whitespace_transforms(pid(), atom()) :: :ok
   defp apply_whitespace_transforms(buf, filetype) do
-    needs_trim = Options.get_for_filetype(:trim_trailing_whitespace, filetype)
-    needs_final_newline = Options.get_for_filetype(:insert_final_newline, filetype)
+    needs_trim = ConfigOptions.get_for_filetype(:trim_trailing_whitespace, filetype)
+    needs_final_newline = ConfigOptions.get_for_filetype(:insert_final_newline, filetype)
 
     if needs_trim or needs_final_newline do
       content = BufferServer.content(buf)

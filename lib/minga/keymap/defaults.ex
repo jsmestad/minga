@@ -99,7 +99,8 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
 
     # ── Toggle ────────────────────────────────────────────────────────────────
-    {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}
+    {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"},
+    {[{?t, @none}, {?w, @none}], :toggle_wrap, "Toggle word wrap"}
   ]
 
   # Group prefix descriptions shown in which-key at the SPC level.

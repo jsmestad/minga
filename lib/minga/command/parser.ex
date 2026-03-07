@@ -132,6 +132,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("set rnu"), do: {:set, :relativenumber}
   defp do_parse("set norelativenumber"), do: {:set, :norelativenumber}
   defp do_parse("set nornu"), do: {:set, :norelativenumber}
+  defp do_parse("set wrap"), do: {:set, :wrap}
+  defp do_parse("set nowrap"), do: {:set, :nowrap}
 
   defp do_parse("%s" <> rest), do: parse_substitute(rest)
   defp do_parse("s" <> rest), do: parse_substitute(rest)

@@ -58,6 +58,7 @@ defmodule Minga.Command.Registry do
     {:page_down, "Scroll page down"},
     {:page_up, "Scroll page up"},
     {:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)"},
+    {:toggle_wrap, "Toggle word wrap for the current buffer"},
     {:diagnostics_list, "List buffer diagnostics"},
     {:next_diagnostic, "Jump to next diagnostic"},
     {:prev_diagnostic, "Jump to previous diagnostic"},

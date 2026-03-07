@@ -315,6 +315,9 @@ defmodule Minga.Editor.Commands do
   def execute(state, :cycle_line_numbers),
     do: BufferManagement.execute(state, :cycle_line_numbers)
 
+  def execute(state, :toggle_wrap),
+    do: BufferManagement.execute(state, :toggle_wrap)
+
   def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
   def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)

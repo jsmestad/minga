@@ -24,6 +24,9 @@ defmodule Minga.Config.Options do
   | `:recent_files_limit` | positive integer                            | `200`      |
   | `:persist_recent_files` | boolean                                  | `true`     |
   | `:scratch_filetype`     | filetype atom                              | `:markdown`|
+  | `:wrap`                 | boolean                                    | `false`    |
+  | `:linebreak`            | boolean                                    | `true`     |
+  | `:breakindent`          | boolean                                    | `true`     |
 
   ## Per-filetype overrides
 
@@ -59,6 +62,9 @@ defmodule Minga.Config.Options do
           | :persist_recent_files
           | :scratch_filetype
           | :clipboard
+          | :wrap
+          | :linebreak
+          | :breakindent
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -96,7 +102,10 @@ defmodule Minga.Config.Options do
     {:recent_files_limit, :pos_integer, 200},
     {:persist_recent_files, :boolean, true},
     {:scratch_filetype, :atom, :markdown},
-    {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus}
+    {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus},
+    {:wrap, :boolean, false},
+    {:linebreak, :boolean, true},
+    {:breakindent, :boolean, true}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
