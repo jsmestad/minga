@@ -132,6 +132,11 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :toggle_file_tree), do: toggle_file_tree(state)
 
+  # ── AI Agent (before no-buffer guard — agent works without a buffer) ─────
+  def execute(state, :toggle_agent_panel), do: AgentCommands.toggle_panel(state)
+  def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
+  def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)
+
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
   def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
@@ -438,11 +443,6 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
-
-  # ── AI Agent ──────────────────────────────────────────────────────────────
-  def execute(state, :toggle_agent_panel), do: AgentCommands.toggle_panel(state)
-  def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
-  def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state

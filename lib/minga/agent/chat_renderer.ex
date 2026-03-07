@@ -232,17 +232,16 @@ defmodule Minga.Agent.ChatRenderer do
       end)
 
     # Add thinking indicator if active
-    lines =
-      if status == :thinking do
-        char = spinner(spinner_frame)
+    if status == :thinking do
+      char = spinner(spinner_frame)
 
-        lines ++
-          [{[{"  #{char} Thinking...", [fg: at.thinking_fg, italic: true]}], :text, at.panel_bg}]
-      else
-        lines
-      end
+      indicator =
+        {[{"  #{char} Thinking...", [fg: at.thinking_fg, italic: true]}], :text, at.panel_bg}
 
-    lines
+      Enum.reverse([indicator | Enum.reverse(lines)])
+    else
+      lines
+    end
   end
 
   @spec message_lines(Message.t(), Theme.Agent.t(), pos_integer()) :: [render_line()]

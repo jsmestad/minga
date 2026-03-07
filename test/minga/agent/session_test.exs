@@ -141,7 +141,7 @@ defmodule Minga.Agent.SessionTest do
       :ok = Session.send_prompt(session, "First")
       Process.sleep(50)
 
-      assert length(Session.messages(session)) > 0
+      assert Session.messages(session) != []
 
       :ok = Session.new_session(session)
 

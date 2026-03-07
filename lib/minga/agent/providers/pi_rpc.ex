@@ -160,12 +160,9 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   @impl GenServer
   def terminate(_reason, %{port: port}) when is_port(port) do
-    # Try graceful shutdown
-    try do
-      Port.close(port)
-    catch
-      _, _ -> :ok
-    end
+    Port.close(port)
+  catch
+    _, _ -> :ok
   end
 
   def terminate(_reason, _state), do: :ok

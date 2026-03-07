@@ -13,15 +13,16 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Agent.PanelState, as: AgentPanelState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
-  alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
+  alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.HighlightSync
@@ -342,6 +343,18 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  # ── Agent panel key interception ──
+  # When the agent panel is visible and input is focused, route keystrokes
+  # directly to the agent input, bypassing the mode FSM entirely.
+  def handle_info(
+        {:minga_input, {:key_press, codepoint, modifiers}},
+        %{agent_panel: %{visible: true, input_focused: true}} = state
+      ) do
+    new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
+    Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
   # ── File tree key interception ──
   def handle_info(
         {:minga_input, {:key_press, codepoint, modifiers}},
@@ -576,7 +589,7 @@ defmodule Minga.Editor do
 
   def handle_info({:agent_event, {:text_delta, _delta}}, state) do
     # Auto-scroll and re-render on new text
-    state = %{state | agent_panel: Minga.Agent.PanelState.scroll_to_bottom(state.agent_panel)}
+    state = %{state | agent_panel: AgentPanelState.scroll_to_bottom(state.agent_panel)}
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -585,7 +598,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:agent_event, :messages_changed}, state) do
-    state = %{state | agent_panel: Minga.Agent.PanelState.scroll_to_bottom(state.agent_panel)}
+    state = %{state | agent_panel: AgentPanelState.scroll_to_bottom(state.agent_panel)}
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -601,7 +614,7 @@ defmodule Minga.Editor do
 
   def handle_info(:agent_spinner_tick, state) do
     if state.agent_panel.visible and state.agent_status in [:thinking, :tool_executing] do
-      state = %{state | agent_panel: Minga.Agent.PanelState.tick_spinner(state.agent_panel)}
+      state = %{state | agent_panel: AgentPanelState.tick_spinner(state.agent_panel)}
       {:noreply, schedule_render(state, 16)}
     else
       {:noreply, stop_spinner_timer(state)}
@@ -690,7 +703,7 @@ defmodule Minga.Editor do
 
   # Escape in agent input: unfocus the input (return to normal editing)
   defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 27, _mods) do
-    %{state | agent_panel: Minga.Agent.PanelState.set_input_focused(state.agent_panel, false)}
+    %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}
   end
 
   # Backspace in agent input
