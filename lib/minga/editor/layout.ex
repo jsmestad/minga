@@ -123,9 +123,15 @@ defmodule Minga.Editor.Layout do
   defp file_tree_layout(%{file_tree: %{tree: %FileTree{width: tw}}} = state, total_cols) do
     # Tree occupies the full height minus the minibuffer row.
     tree_height = state.viewport.rows - 1
-    tree_rect = {0, 0, tw, tree_height}
-    # Separator at column tw, editor starts at tw+1
-    editor_col = tw + 1
+    # Clamp tree width so tree + separator + minimum editor width fits.
+    # Minimum editor width is 3 to support vertical splits (left + separator + right).
+    min_editor_w = 3
+    max_tree_w = max(total_cols - 1 - min_editor_w, 1)
+    clamped_tw = min(tw, max_tree_w)
+    tree_rect = {0, 0, clamped_tw, tree_height}
+    # Separator at column clamped_tw, editor starts at clamped_tw+1.
+    # editor_col + editor_width must not exceed total_cols.
+    editor_col = clamped_tw + 1
     editor_width = max(total_cols - editor_col, 1)
     {tree_rect, editor_col, editor_width}
   end
@@ -148,10 +154,28 @@ defmodule Minga.Editor.Layout do
   # ── Window layouts ─────────────────────────────────────────────────────────
 
   @spec single_window_layout(rect()) :: window_layout()
-  defp single_window_layout({row, col, width, height}) do
-    # In single-window mode, modeline is the second-to-last row of the
-    # editor area (last row before minibuffer). Content gets the rest.
-    content_height = max(height - 1, 1)
+  defp single_window_layout(rect), do: subdivide_window(rect)
+
+  @spec compute_window_layouts(WindowTree.t(), rect()) :: %{Window.id() => window_layout()}
+  defp compute_window_layouts(tree, editor_area) do
+    layouts = WindowTree.layout(tree, editor_area)
+    Map.new(layouts, fn {win_id, rect} -> {win_id, subdivide_window(rect)} end)
+  end
+
+  # Subdivides a window rect into content and modeline sub-rects.
+  # When the window is too short for both (height < 2), content gets
+  # all the space and modeline collapses to zero height (hidden).
+  @spec subdivide_window(rect()) :: window_layout()
+  defp subdivide_window({row, col, width, height}) when height < 2 do
+    %{
+      total: {row, col, width, height},
+      content: {row, col, width, height},
+      modeline: {row + height, col, width, 0}
+    }
+  end
+
+  defp subdivide_window({row, col, width, height}) do
+    content_height = height - 1
     modeline_row = row + content_height
 
     %{
@@ -159,22 +183,6 @@ defmodule Minga.Editor.Layout do
       content: {row, col, width, content_height},
       modeline: {modeline_row, col, width, 1}
     }
-  end
-
-  @spec compute_window_layouts(WindowTree.t(), rect()) :: %{Window.id() => window_layout()}
-  defp compute_window_layouts(tree, editor_area) do
-    layouts = WindowTree.layout(tree, editor_area)
-
-    Map.new(layouts, fn {win_id, {row, col, width, height}} ->
-      content_height = max(height - 1, 1)
-      modeline_row = row + content_height
-
-      {win_id, %{
-        total: {row, col, width, height},
-        content: {row, col, width, content_height},
-        modeline: {modeline_row, col, width, 1}
-      }}
-    end)
   end
 
   # ── Queries ────────────────────────────────────────────────────────────────

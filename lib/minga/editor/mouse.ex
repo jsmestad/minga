@@ -10,6 +10,7 @@ defmodule Minga.Editor.Mouse do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Mouse, as: MouseState
@@ -157,7 +158,7 @@ defmodule Minga.Editor.Mouse do
   defp maybe_start_separator_drag(%{windows: %{tree: nil}} = state, _row, _col), do: state
 
   defp maybe_start_separator_drag(state, row, col) do
-    screen = EditorState.screen_rect(state)
+    screen = Layout.compute(state).editor_area
 
     case WindowTree.separator_at(state.windows.tree, screen, row, col) do
       {:ok, {dir, sep_pos}} ->
@@ -182,7 +183,7 @@ defmodule Minga.Editor.Mouse do
   @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
           state()
   defp handle_separator_drag(state, dir, sep_pos, new_pos) do
-    screen = EditorState.screen_rect(state)
+    screen = Layout.compute(state).editor_area
 
     case WindowTree.resize_at(state.windows.tree, screen, dir, sep_pos, new_pos) do
       {:ok, new_tree} ->
@@ -201,10 +202,10 @@ defmodule Minga.Editor.Mouse do
 
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
-    screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.windows.tree, screen)
+    layout = Layout.compute(state)
 
-    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+    Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
+      {_r, _c, width, height} = wl.total
       EditorState.update_window(acc, id, &Window.resize(&1, height, width))
     end)
   end
@@ -236,7 +237,7 @@ defmodule Minga.Editor.Mouse do
   defp maybe_focus_window_at(%{windows: %{tree: nil}} = state, _row, _col), do: state
 
   defp maybe_focus_window_at(state, row, col) do
-    screen = EditorState.screen_rect(state)
+    screen = Layout.compute(state).editor_area
 
     case WindowTree.window_at(state.windows.tree, screen, row, col) do
       {:ok, id, _rect} -> EditorState.focus_window(state, id)
@@ -330,7 +331,7 @@ defmodule Minga.Editor.Mouse do
   @spec mouse_to_buffer_pos_split(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp mouse_to_buffer_pos_split(state, row, col) do
-    screen = EditorState.screen_rect(state)
+    screen = Layout.compute(state).editor_area
 
     case WindowTree.window_at(state.windows.tree, screen, row, col) do
       {:ok, id, {win_row, win_col, _win_w, win_h}} ->

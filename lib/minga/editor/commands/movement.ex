@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands.Helpers
+  alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -338,10 +339,10 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
-    screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.windows.tree, screen)
+    layout = Layout.compute(state)
 
-    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+    Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
+      {_r, _c, width, height} = wl.total
       EditorState.update_window(acc, id, &Window.resize(&1, height, width))
     end)
   end
@@ -355,7 +356,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   defp navigate_window(state, direction) do
-    screen = EditorState.screen_rect(state)
+    screen = Layout.compute(state).editor_area
 
     case WindowTree.focus_neighbor(state.windows.tree, state.windows.active, direction, screen) do
       {:ok, neighbor_id} ->

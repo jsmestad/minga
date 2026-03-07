@@ -44,6 +44,8 @@ defmodule Minga.Port.Protocol do
   @op_mouse_event 0x04
   @op_capabilities_updated 0x05
 
+  alias Minga.Port.Capabilities
+
   # Render commands (BEAM → Zig)
   @op_draw_text 0x10
   @op_set_cursor 0x11
@@ -130,8 +132,8 @@ defmodule Minga.Port.Protocol do
           {:key_press, codepoint :: non_neg_integer(), modifiers()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
-          | {:ready, width :: pos_integer(), height :: pos_integer(), Minga.Port.Capabilities.t()}
-          | {:capabilities_updated, Minga.Port.Capabilities.t()}
+          | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t()}
+          | {:capabilities_updated, Capabilities.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type()}
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
@@ -387,7 +389,7 @@ defmodule Minga.Port.Protocol do
         <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len)>>
       ) do
-    caps = Minga.Port.Capabilities.from_binary(caps_data)
+    caps = Capabilities.from_binary(caps_data)
     {:ok, {:ready, width, height, caps}}
   end
 
@@ -401,7 +403,7 @@ defmodule Minga.Port.Protocol do
         <<@op_capabilities_updated, _caps_version::8, caps_len::8,
           caps_data::binary-size(caps_len)>>
       ) do
-    caps = Minga.Port.Capabilities.from_binary(caps_data)
+    caps = Capabilities.from_binary(caps_data)
     {:ok, {:capabilities_updated, caps}}
   end
 

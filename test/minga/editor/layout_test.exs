@@ -1,5 +1,6 @@
 defmodule Minga.Editor.LayoutTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
@@ -250,6 +251,63 @@ defmodule Minga.Editor.LayoutTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
+  # ── Property-based tests ──────────────────────────────────────────────────
+
+  describe "property: no overlap for random configurations" do
+    property "no regions overlap for random terminal sizes and split trees" do
+      check all rows <- StreamData.integer(5..100),
+                cols <- StreamData.integer(20..300),
+                split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
+                has_tree <- StreamData.boolean(),
+                has_agent <- StreamData.boolean() do
+        state = new_state(rows, cols)
+
+        state =
+          case split_type do
+            :none -> with_window(state)
+            :vertical -> with_vsplit(state)
+            :horizontal -> with_hsplit(state)
+          end
+
+        state = if has_tree, do: with_file_tree(state, 20), else: state
+        state = if has_agent, do: with_agent_panel(state), else: state
+
+        layout = Layout.compute(state)
+
+        # All rects fit within terminal bounds
+        {_tr, _tc, term_w, term_h} = layout.terminal
+        all_rects = collect_all_rects(layout)
+
+        for rect <- all_rects do
+          {r, c, w, h} = rect
+          assert r >= 0, "row #{r} < 0 in #{inspect(rect)}"
+          assert c >= 0, "col #{c} < 0 in #{inspect(rect)}"
+          assert r + h <= term_h, "rect #{inspect(rect)} exceeds terminal height #{term_h}"
+          assert c + w <= term_w, "rect #{inspect(rect)} exceeds terminal width #{term_w}"
+        end
+
+        # Non-overlay rects don't overlap
+        assert_no_overlap(layout)
+      end
+    end
+  end
+
+  # ── Helpers ──────────────────────────────────────────────────────────────────
+
+  defp collect_all_rects(layout) do
+    base = [layout.minibuffer]
+    base = if layout.file_tree, do: [layout.file_tree | base], else: base
+    base = if layout.agent_panel, do: [layout.agent_panel | base], else: base
+
+    window_rects =
+      layout.window_layouts
+      |> Map.values()
+      |> Enum.flat_map(fn wl -> [wl.content, wl.modeline] end)
+      |> Enum.reject(fn {_r, _c, _w, h} -> h == 0 end)
+
+    base ++ window_rects
+  end
+
   # Asserts that no two non-overlay regions share any cells.
   defp assert_no_overlap(layout) do
     rects =
@@ -260,11 +318,13 @@ defmodule Minga.Editor.LayoutTest do
       ]
       |> Enum.reject(&is_nil/1)
 
-    # Add window content and modeline rects (not total, to avoid double-counting)
+    # Add window content and modeline rects (not total, to avoid double-counting).
+    # Skip zero-height rects (collapsed modelines in tiny windows).
     window_rects =
       layout.window_layouts
       |> Map.values()
       |> Enum.flat_map(fn wl -> [wl.content, wl.modeline] end)
+      |> Enum.reject(fn {_r, _c, _w, h} -> h == 0 end)
 
     all_rects = rects ++ window_rects
 

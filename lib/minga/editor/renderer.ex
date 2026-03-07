@@ -801,14 +801,14 @@ defmodule Minga.Editor.Renderer do
   end
 
   defp wrap_enabled? do
-    Minga.Config.Options.get(:wrap)
+    Options.get(:wrap)
   catch
     :exit, _ -> false
   end
 
   @spec wrap_option(atom()) :: boolean()
   defp wrap_option(name) do
-    Minga.Config.Options.get(name)
+    Options.get(name)
   catch
     :exit, _ -> true
   end
