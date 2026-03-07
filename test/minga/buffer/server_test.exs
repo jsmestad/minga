@@ -553,5 +553,36 @@ defmodule Minga.Buffer.ServerTest do
       assert first.inserted_text == "c"
       assert second.inserted_text == "d"
     end
+
+    test "delete_range records a deletion delta" do
+      {:ok, pid} = Server.start_link(content: "hello world")
+      Server.delete_range(pid, {0, 5}, {0, 11})
+      edits = Server.flush_edits(pid)
+      assert [delta] = edits
+      assert delta.start_byte == 5
+      assert delta.old_end_byte == 11
+      assert delta.new_end_byte == 5
+      assert delta.inserted_text == ""
+    end
+
+    test "undo clears pending edits" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "!")
+      assert [_] = Server.flush_edits(pid)
+      # Make another edit then undo
+      Server.insert_char(pid, "?")
+      Server.undo(pid)
+      # Undo clears edits to force full sync
+      assert [] = Server.flush_edits(pid)
+    end
+
+    test "replace_content clears pending edits" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "!")
+      Server.replace_content(pid, "goodbye")
+      assert [] = Server.flush_edits(pid)
+    end
   end
 end

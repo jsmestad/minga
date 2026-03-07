@@ -531,12 +531,20 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_text_edit, from_pos, to_pos, new_text}, _from, state) do
-    # Move to start, delete range, then bulk insert new text
+    old_content = Document.content(state.document)
+    start_byte = byte_offset_at(old_content, from_pos)
+    old_end_byte = byte_offset_at(old_content, to_pos)
+
     doc = Document.move_to(state.document, from_pos)
     doc = Document.delete_range(doc, from_pos, to_pos)
     doc = Document.insert_text(doc, new_text)
 
-    {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
+    new_end_pos = advance_position(from_pos, new_text)
+
+    delta =
+      EditDelta.replacement(start_byte, old_end_byte, from_pos, to_pos, new_text, new_end_pos)
+
+    {:reply, :ok, push_undo(state, doc) |> mark_dirty() |> record_edit(delta)}
   end
 
   def handle_call({:apply_text_edits, _edits}, _from, %{read_only: true} = state) do
@@ -563,7 +571,9 @@ defmodule Minga.Buffer.Server do
         |> Document.insert_text(new_text)
       end)
 
-    {:reply, :ok, push_undo(state, doc) |> mark_dirty()}
+    # Multi-edit batches are complex to delta-track (offsets shift between
+    # edits). Clear pending edits to force a full content sync.
+    {:reply, :ok, push_undo(state, doc) |> mark_dirty() |> clear_edits()}
   end
 
   def handle_call(:delete_before, _from, %{read_only: true} = state) do
@@ -750,14 +760,14 @@ defmodule Minga.Buffer.Server do
   def handle_call({:replace_content, new_content}, _from, state) do
     new_state = push_undo_force(state, state.document)
     new_buf = Document.new(new_content)
-    {:reply, :ok, mark_dirty(%{new_state | document: new_buf})}
+    {:reply, :ok, mark_dirty(%{new_state | document: new_buf}) |> clear_edits()}
   end
 
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
   # that are read-only to the user but need programmatic content updates.
   def handle_call({:replace_content_force, new_content}, _from, state) do
     new_buf = Document.new(new_content)
-    {:reply, :ok, %{state | document: new_buf, version: state.version + 1}}
+    {:reply, :ok, %{state | document: new_buf, version: state.version + 1, pending_edits: []}}
   end
 
   def handle_call(:content, _from, state) do
@@ -874,12 +884,17 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
-    new_buf = Document.delete_range(state.document, from_pos, to_pos)
+    old_doc = state.document
+    new_buf = Document.delete_range(old_doc, from_pos, to_pos)
 
-    if new_buf == state.document do
+    if new_buf == old_doc do
       {:reply, :ok, state}
     else
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+      old_content = Document.content(old_doc)
+      start_byte = byte_offset_at(old_content, from_pos)
+      old_end_byte = byte_offset_at(old_content, to_pos)
+      delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
+      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -898,12 +913,20 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
-    new_buf = Document.delete_lines(state.document, start_line, end_line)
+    old_doc = state.document
+    new_buf = Document.delete_lines(old_doc, start_line, end_line)
 
-    if new_buf == state.document do
+    if new_buf == old_doc do
       {:reply, :ok, state}
     else
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+      old_content = Document.content(old_doc)
+      from_pos = {start_line, 0}
+      # end_line is inclusive; delete through end of that line (including newline)
+      to_pos = {end_line + 1, 0}
+      start_byte = byte_offset_at(old_content, from_pos)
+      old_end_byte = byte_offset_at(old_content, to_pos)
+      delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
+      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -920,7 +943,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_snapshot, new_buf}, _from, state) do
-    {:reply, :ok, push_undo(state, new_buf) |> mark_dirty()}
+    {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> clear_edits()}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
@@ -951,6 +974,7 @@ defmodule Minga.Buffer.Server do
               redo_stack: [state.document | state.redo_stack]
           }
           |> mark_dirty()
+          |> clear_edits()
 
         {:reply, :ok, new_state}
     end
@@ -970,6 +994,7 @@ defmodule Minga.Buffer.Server do
               undo_stack: [state.document | state.undo_stack]
           }
           |> mark_dirty()
+          |> clear_edits()
 
         {:reply, :ok, new_state}
     end
@@ -1043,6 +1068,34 @@ defmodule Minga.Buffer.Server do
   @spec record_edit(state(), EditDelta.t()) :: state()
   defp record_edit(state, delta) do
     %{state | pending_edits: [delta | state.pending_edits]}
+  end
+
+  # Clear pending edits to force HighlightSync into full content sync.
+  # Used for operations where computing accurate deltas is impractical
+  # (undo, redo, multi-edit batches, full content replacement).
+  @spec clear_edits(state()) :: state()
+  defp clear_edits(state), do: %{state | pending_edits: []}
+
+  # Compute byte offset for a {line, col} position in content.
+  @spec byte_offset_at(String.t(), {non_neg_integer(), non_neg_integer()}) :: non_neg_integer()
+  defp byte_offset_at(content, {target_line, target_col}) do
+    lines = String.split(content, "\n")
+
+    bytes_before_line =
+      lines
+      |> Enum.take(target_line)
+      |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+
+    line_text = Enum.at(lines, target_line, "")
+
+    col_bytes =
+      line_text
+      |> String.graphemes()
+      |> Enum.take(target_col)
+      |> IO.iodata_to_binary()
+      |> byte_size()
+
+    bytes_before_line + col_bytes
   end
 
   @spec advance_position({non_neg_integer(), non_neg_integer()}, String.t()) ::
