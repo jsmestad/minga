@@ -141,6 +141,7 @@ defmodule Minga.Editor.Commands do
     do: AgentCommands.set_provider(state, provider)
 
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
+  def execute(state, :agent_pick_model), do: PickerUI.open(state, Minga.Picker.AgentModelSource)
 
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 

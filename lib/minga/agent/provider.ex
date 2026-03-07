@@ -69,4 +69,12 @@ defmodule Minga.Agent.Provider do
 
   @doc "Returns the current session state (model info, streaming status, etc.)."
   @callback get_state(provider()) :: {:ok, session_state()} | {:error, term()}
+
+  @doc "Returns available models from the provider."
+  @callback get_available_models(provider()) :: {:ok, [map()]} | {:error, term()}
+
+  @doc "Returns available commands (extensions, skills, prompts) from the provider."
+  @callback get_commands(provider()) :: {:ok, [map()]} | {:error, term()}
+
+  @optional_callbacks [get_available_models: 1, get_commands: 1]
 end

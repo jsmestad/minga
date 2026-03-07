@@ -63,6 +63,20 @@ defmodule Minga.Agent.Providers.PiRpc do
     GenServer.call(pid, :get_state)
   end
 
+  @impl Minga.Agent.Provider
+  @doc "Fetches available models from the pi RPC backend."
+  @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  def get_available_models(pid) do
+    GenServer.call(pid, :get_available_models, 10_000)
+  end
+
+  @impl Minga.Agent.Provider
+  @doc "Fetches available commands (extensions, skills, prompts) from pi."
+  @spec get_commands(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  def get_commands(pid) do
+    GenServer.call(pid, :get_commands, 10_000)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -87,7 +101,8 @@ defmodule Minga.Agent.Providers.PiRpc do
           provider: provider,
           model: model,
           buffer: "",
-          request_id: 0
+          request_id: 0,
+          pending: %{}
         }
 
         case spawn_pi(state) do
@@ -131,14 +146,16 @@ defmodule Minga.Agent.Providers.PiRpc do
     end
   end
 
-  def handle_call(:get_state, _from, state) do
-    {id, state} = next_id(state)
-    command = %{"id" => "req-#{id}", "type" => "get_state"}
+  def handle_call(:get_state, from, state) do
+    send_request(state, "get_state", from)
+  end
 
-    case send_command(state.port, command) do
-      :ok -> {:reply, {:ok, %{model: nil, is_streaming: false, token_usage: nil}}, state}
-      {:error, _} = err -> {:reply, err, state}
-    end
+  def handle_call(:get_available_models, from, state) do
+    send_request(state, "get_available_models", from)
+  end
+
+  def handle_call(:get_commands, from, state) do
+    send_request(state, "get_commands", from)
   end
 
   @impl GenServer
@@ -214,6 +231,22 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   @spec send_command(port() | nil, map()) :: :ok | {:error, :no_port}
+  @spec send_request(map(), String.t(), GenServer.from()) :: {:noreply, map()}
+  defp send_request(state, type, from) do
+    {id, state} = next_id(state)
+    req_id = "req-#{id}"
+    command = %{"id" => req_id, "type" => type}
+
+    case send_command(state.port, command) do
+      :ok ->
+        state = %{state | pending: Map.put(state.pending, req_id, from)}
+        {:noreply, state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
   defp send_command(nil, _command), do: {:error, :no_port}
 
   defp send_command(port, command) do
@@ -340,8 +373,29 @@ defmodule Minga.Agent.Providers.PiRpc do
     {:noreply, state}
   end
 
+  defp handle_event(%{"type" => "response", "id" => id} = event, state) when is_binary(id) do
+    case Map.pop(state.pending, id) do
+      {nil, _pending} ->
+        # No pending caller (e.g. prompt ack) — ignore
+        {:noreply, state}
+
+      {from, pending} ->
+        state = %{state | pending: pending}
+
+        reply =
+          if event["success"] do
+            {:ok, event["data"]}
+          else
+            {:error, event["error"] || "unknown error"}
+          end
+
+        GenServer.reply(from, reply)
+        {:noreply, state}
+    end
+  end
+
   defp handle_event(%{"type" => "response"}, state) do
-    # Command responses (ack for prompt, abort, etc.) -- no action needed
+    # Response without id — prompt ack, abort ack, etc.
     {:noreply, state}
   end
 

@@ -94,6 +94,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?a, @none}], :toggle_agent_panel, "Toggle agent panel"},
     {[{?a, @none}, {?s, @none}], :agent_abort, "Stop agent"},
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
+    {[{?a, @none}, {?m, @none}], :agent_pick_model, "Pick agent model"},
 
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"}

@@ -97,6 +97,18 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, {:unsubscribe, self()})
   end
 
+  @doc "Fetches available models from the provider."
+  @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  def get_available_models(session) do
+    GenServer.call(session, :get_available_models, 10_000)
+  end
+
+  @doc "Fetches available commands from the provider."
+  @spec get_commands(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  def get_commands(session) do
+    GenServer.call(session, :get_commands, 10_000)
+  end
+
   @doc "Toggles the collapsed state of a tool call message."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
   def toggle_tool_collapse(session, message_index) do
@@ -198,6 +210,24 @@ defmodule Minga.Agent.Session do
 
   def handle_call({:unsubscribe, pid}, _from, state) do
     {:reply, :ok, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+  end
+
+  def handle_call(:get_available_models, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call(:get_available_models, _from, state) do
+    result = state.provider_module.get_available_models(state.provider)
+    {:reply, result, state}
+  end
+
+  def handle_call(:get_commands, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call(:get_commands, _from, state) do
+    result = state.provider_module.get_commands(state.provider)
+    {:reply, result, state}
   end
 
   def handle_call({:toggle_tool_collapse, index}, _from, state) do
