@@ -14,6 +14,7 @@ defmodule Minga.Editor.Renderer do
   * `Renderer.Minibuffer`      — command/search/status line
   """
 
+  alias Minga.Agent.View.Renderer, as: ViewRenderer
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -83,10 +84,10 @@ defmodule Minga.Editor.Renderer do
     # Keep active window's cursor in sync before rendering
     state = EditorState.sync_active_window_cursor(state)
 
-    if EditorState.split?(state) do
-      render_split(state)
-    else
-      render_single(state)
+    cond do
+      state.agentic.active -> render_agentic(state)
+      EditorState.split?(state) -> render_split(state)
+      true -> render_single(state)
     end
 
     send_title(state)
@@ -103,6 +104,57 @@ defmodule Minga.Editor.Renderer do
       PortManager.send_commands([Protocol.encode_set_title(title)])
     end
 
+    :ok
+  end
+
+  # ── Full-screen agentic view render ────────────────────────────────────────
+
+  @spec render_agentic(state()) :: :ok
+  defp render_agentic(state) do
+    full_viewport = state.viewport
+    minibuffer_row = full_viewport.rows - 1
+
+    # Build panel draw commands.
+    panel_commands = ViewRenderer.render(state)
+
+    # Minibuffer (always last row).
+    minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+
+    # Which-key popup works normally inside the agentic view.
+    whichkey_commands = render_whichkey(state, full_viewport)
+
+    # Picker overlay (e.g. SPC a m model picker).
+    {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
+
+    # Cursor placement: agentic renderer knows where the input cursor goes.
+    {cursor_row, cursor_col} = ViewRenderer.cursor_position(state)
+
+    cursor_shape_command =
+      if state.picker_ui.picker do
+        Protocol.encode_cursor_shape(:beam)
+      else
+        if state.agent.panel.input_focused do
+          Protocol.encode_cursor_shape(:beam)
+        else
+          Protocol.encode_cursor_shape(:block)
+        end
+      end
+
+    cursor_command =
+      case picker_cursor do
+        {pr, pc} -> Protocol.encode_cursor(pr, pc)
+        nil -> Protocol.encode_cursor(cursor_row, cursor_col)
+      end
+
+    all_commands =
+      [Protocol.encode_clear()] ++
+        panel_commands ++
+        [minibuffer_command] ++
+        whichkey_commands ++
+        picker_commands ++
+        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
+
+    PortManager.send_commands(state.port_manager, all_commands)
     :ok
   end
 

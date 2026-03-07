@@ -9,8 +9,10 @@ defmodule Minga.Editor.Commands.Agent do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.Windows
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -35,6 +37,43 @@ defmodule Minga.Editor.Commands.Agent do
       update_agent(state, &AgentState.focus_input(&1, true))
     else
       update_agent(state, &AgentState.focus_input(&1, false))
+    end
+  end
+
+  @doc """
+  Toggles the full-screen agentic view on or off.
+
+  On activate: saves the current window layout, sets `agentic_view: true`, and
+  ensures an agent session is running (starting one if needed). On deactivate:
+  restores the saved window layout and sets `agentic_view: false`.
+  """
+  @spec toggle_agentic_view(state()) :: state()
+  def toggle_agentic_view(%{agentic: %{active: true}} = state) do
+    {new_av, saved_windows} = ViewState.deactivate(state.agentic)
+
+    state =
+      if saved_windows do
+        %{state | windows: saved_windows}
+      else
+        state
+      end
+
+    %{state | agentic: new_av}
+  end
+
+  def toggle_agentic_view(%{agentic: %{active: false}} = state) do
+    # Save current window layout and activate the agentic view.
+    state = %{state | agentic: ViewState.activate(state.agentic, state.windows)}
+
+    # Close any open splits — the agentic view takes the full screen.
+    %Windows{} = ws = state.windows
+    state = %{state | windows: %{ws | tree: nil}}
+
+    # Ensure a session is running; start one if not.
+    if state.agent.session == nil do
+      start_agent_session(state)
+    else
+      state
     end
   end
 

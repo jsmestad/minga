@@ -10,15 +10,16 @@ defmodule Minga.Editor.State do
   Related fields are grouped into internal sub-structs to keep the top-level
   struct manageable:
 
-  * `Minga.Editor.State.Buffers`   — buffer list, active buffer, special buffers
-  * `Minga.Editor.State.Picker`    — picker instance, source, restore index
-  * `Minga.Editor.State.WhichKey`  — which-key popup node, timer, visibility
-  * `Minga.Editor.State.Search`    — last search pattern/direction, project results
-  * `Minga.Editor.State.Registers` — named registers and active register selection
-  * `Minga.Editor.State.Windows`    — window tree, window map, active/next id
+  * `Minga.Editor.State.Buffers`      — buffer list, active buffer, special buffers
+  * `Minga.Editor.State.Picker`       — picker instance, source, restore index
+  * `Minga.Editor.State.WhichKey`     — which-key popup node, timer, visibility
+  * `Minga.Editor.State.Search`       — last search pattern/direction, project results
+  * `Minga.Editor.State.Registers`    — named registers and active register selection
+  * `Minga.Editor.State.Windows`      — window tree, window map, active/next id
   * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -84,7 +85,8 @@ defmodule Minga.Editor.State do
             git_buffers: %{},
             injection_ranges: %{},
             agent: %AgentState{},
-            focus_stack: []
+            focus_stack: [],
+            agentic: %ViewState{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -121,7 +123,8 @@ defmodule Minga.Editor.State do
             ]
           },
           agent: AgentState.t(),
-          focus_stack: [module()]
+          focus_stack: [module()],
+          agentic: ViewState.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

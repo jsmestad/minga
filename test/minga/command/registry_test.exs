@@ -70,6 +70,7 @@ defmodule Minga.Command.RegistryTest do
           :next_git_hunk,
           :theme_picker,
           :toggle_agent_panel,
+          :toggle_agentic_view,
           :toggle_comment_line,
           :toggle_comment_selection
         ]

@@ -76,6 +76,7 @@ defmodule Minga.Command.Registry do
     {:toggle_comment_line, "Toggle comment on line"},
     {:toggle_comment_selection, "Toggle comment on selection"},
     {:toggle_agent_panel, "Toggle AI agent panel"},
+    {:toggle_agentic_view, "Toggle full-screen agentic view"},
     {:agent_abort, "Stop AI agent"},
     {:agent_new_session, "New AI agent session"},
     {:agent_pick_model, "Pick AI agent model"},
