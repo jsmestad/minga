@@ -132,9 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Apply to all windows (typically just one).
             for window in NSApp.windows {
                 window.backgroundColor = color
+                // Transparent titlebar lets the backgroundColor show through
+                // so the title bar blends with the editor theme. The content
+                // stays below the title bar (no fullSizeContentView) so we
+                // don't need to account for the title bar height in the BEAM's
+                // layout calculations.
                 window.titlebarAppearsTransparent = true
                 // Pick light/dark appearance based on luminance so the
-                // title text stays readable.
+                // title text and traffic lights stay readable.
                 let luma = color.redComponent * 0.299 +
                            color.greenComponent * 0.587 +
                            color.blueComponent * 0.114
