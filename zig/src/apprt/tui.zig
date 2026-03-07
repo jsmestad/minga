@@ -230,6 +230,8 @@ pub const TuiRuntime = struct {
             // before rendering the next frame. With the standard retry, each
             // SIGWINCH during a window drag resets the 1000ms timeout, delaying
             // resize processing by seconds.
+            pollfds[0].revents = 0;
+            pollfds[1].revents = 0;
             const poll_rc = std.posix.system.poll(@ptrCast(&pollfds), 2, 1000);
             const poll_errno = std.posix.errno(poll_rc);
             if (poll_errno != .SUCCESS and poll_errno != .INTR) {
@@ -237,9 +239,8 @@ pub const TuiRuntime = struct {
             }
 
             // Check for resize after poll (SIGWINCH can fire during poll).
-            // This ensures the surface dimensions match the terminal before we
-            // process any render batch, preventing one-frame garbling where the
-            // BEAM's 80-col frame is rendered to a 40-col surface.
+            // On EINTR, revents are undefined, so we skip fd processing and
+            // just handle the resize. On success, revents are valid.
             if (g_winch.swap(false, .acq_rel)) {
                 try self.handleResize(stdout);
             }
