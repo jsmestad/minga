@@ -41,6 +41,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
+  alias Minga.FileTree.BufferSync
   alias Minga.Formatter
   alias Minga.Mode
   alias Minga.WhichKey
@@ -498,6 +499,12 @@ defmodule Minga.Editor.Commands do
 
   @spec toggle_file_tree(state()) :: state()
   defp toggle_file_tree(%{file_tree: nil} = state), do: open_file_tree(state)
+
+  defp toggle_file_tree(%{file_tree_buffer: buf} = state) when is_pid(buf) do
+    GenServer.stop(buf, :normal)
+    %{state | file_tree: nil, file_tree_focused: false, file_tree_buffer: nil}
+  end
+
   defp toggle_file_tree(state), do: %{state | file_tree: nil, file_tree_focused: false}
 
   @spec open_file_tree(state()) :: state()
@@ -505,7 +512,8 @@ defmodule Minga.Editor.Commands do
     root = Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
     tree = reveal_active_in_tree(tree, state.buffers.active)
-    %{state | file_tree: tree, file_tree_focused: true}
+    buf = BufferSync.start_buffer(tree)
+    %{state | file_tree: tree, file_tree_focused: true, file_tree_buffer: buf}
   end
 
   @spec reveal_active_in_tree(FileTree.t(), pid() | nil) :: FileTree.t()

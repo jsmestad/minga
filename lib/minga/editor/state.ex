@@ -83,6 +83,7 @@ defmodule Minga.Editor.State do
             windows: %Windows{},
             file_tree: nil,
             file_tree_focused: false,
+            file_tree_buffer: nil,
             git_buffers: %{},
             injection_ranges: %{},
             agent: %AgentState{},
@@ -118,6 +119,7 @@ defmodule Minga.Editor.State do
           windows: Windows.t(),
           file_tree: FileTree.t() | nil,
           file_tree_focused: boolean(),
+          file_tree_buffer: pid() | nil,
           git_buffers: %{pid() => pid()},
           injection_ranges: %{
             pid() => [

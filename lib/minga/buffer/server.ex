@@ -167,6 +167,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:replace_content, new_content})
   end
 
+  @doc "Replaces buffer content bypassing read-only. For programmatic panel updates."
+  @spec replace_content_force(GenServer.server(), String.t()) :: :ok
+  def replace_content_force(server, new_content) when is_binary(new_content) do
+    GenServer.call(server, {:replace_content_force, new_content})
+  end
+
   @doc "Returns the full text content of the buffer."
   @spec content(GenServer.server()) :: String.t()
   def content(server) do
@@ -675,6 +681,13 @@ defmodule Minga.Buffer.Server do
     new_state = push_undo_force(state, state.document)
     new_buf = Document.new(new_content)
     {:reply, :ok, mark_dirty(%{new_state | document: new_buf})}
+  end
+
+  # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
+  # that are read-only to the user but need programmatic content updates.
+  def handle_call({:replace_content_force, new_content}, _from, state) do
+    new_buf = Document.new(new_content)
+    {:reply, :ok, %{state | document: new_buf, version: state.version + 1}}
   end
 
   def handle_call(:content, _from, state) do
