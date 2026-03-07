@@ -58,6 +58,7 @@ defmodule Minga.Config.Options do
           | :recent_files_limit
           | :persist_recent_files
           | :scratch_filetype
+          | :clipboard
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -94,7 +95,8 @@ defmodule Minga.Config.Options do
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga"},
     {:recent_files_limit, :pos_integer, 200},
     {:persist_recent_files, :boolean, true},
-    {:scratch_filetype, :atom, :markdown}
+    {:scratch_filetype, :atom, :markdown},
+    {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

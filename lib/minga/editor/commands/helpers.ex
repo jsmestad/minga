@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Clipboard
+  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
@@ -62,6 +63,7 @@ defmodule Minga.Editor.Commands.Helpers do
     |> put_in_register(lower, appended)
     |> write_unnamed(text)
     |> maybe_write_yank(text, kind)
+    |> maybe_sync_clipboard(text)
     |> reset_active_register()
   end
 
@@ -71,6 +73,7 @@ defmodule Minga.Editor.Commands.Helpers do
     |> put_in_register(name, text)
     |> write_unnamed(text)
     |> maybe_write_yank(text, kind)
+    |> maybe_sync_clipboard(text)
     |> reset_active_register()
   end
 
@@ -80,10 +83,18 @@ defmodule Minga.Editor.Commands.Helpers do
     state
     |> put_in_register(name, text)
     |> maybe_write_yank(text, kind)
+    |> maybe_sync_clipboard(text)
     |> reset_active_register()
   end
 
-  @doc "Reads from the active register, falling back to the unnamed register."
+  @doc """
+  Reads from the active register, falling back to the unnamed register.
+
+  When `clipboard: :unnamedplus` is set and the active register is unnamed
+  (no explicit `"x` prefix), the system clipboard is read and preferred
+  if it contains content that differs from the stored unnamed register
+  (indicating the user copied something in another app).
+  """
   @spec get_register(state()) :: {String.t() | nil, state()}
   def get_register(%{reg: %{active: "+"}} = state) do
     text = Clipboard.read()
@@ -92,8 +103,35 @@ defmodule Minga.Editor.Commands.Helpers do
 
   def get_register(%{reg: reg} = state) do
     key = if reg.active == "", do: "", else: reg.active
-    text = Registers.get(reg, key)
+    stored = Registers.get(reg, key)
+    text = maybe_read_clipboard(key, stored)
     {text, reset_active_register(state)}
+  end
+
+  # When pasting from the unnamed register with clipboard sync enabled,
+  # check the system clipboard. If its content differs from what we stored,
+  # the user copied something externally, so prefer the clipboard content.
+  @spec maybe_read_clipboard(String.t(), String.t() | nil) :: String.t() | nil
+  defp maybe_read_clipboard("", stored) do
+    clip_setting = ConfigOptions.get(:clipboard)
+
+    if clip_setting in [:unnamedplus, :unnamed] do
+      read_clipboard_or_fallback(stored)
+    else
+      stored
+    end
+  end
+
+  defp maybe_read_clipboard(_key, stored), do: stored
+
+  @spec read_clipboard_or_fallback(String.t() | nil) :: String.t() | nil
+  defp read_clipboard_or_fallback(stored) do
+    case Clipboard.read() do
+      nil -> stored
+      "" -> stored
+      clipboard_text when clipboard_text != stored -> clipboard_text
+      _same -> stored
+    end
   end
 
   @spec put_in_register(state(), String.t(), String.t()) :: state()
@@ -107,6 +145,29 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec maybe_write_yank(state(), String.t(), :yank | :delete) :: state()
   def maybe_write_yank(state, text, :yank), do: put_in_register(state, "0", text)
   def maybe_write_yank(state, _text, :delete), do: state
+
+  @doc """
+  Syncs text to the system clipboard when the `clipboard` option is set
+  to `:unnamedplus` or `:unnamed`. Called automatically by `put_register/3`
+  for all register writes except `"_"` (black hole) and `"+"` (explicit
+  clipboard, which already writes directly).
+  """
+  @spec maybe_sync_clipboard(state(), String.t()) :: state()
+  def maybe_sync_clipboard(state, text) do
+    case ConfigOptions.get(:clipboard) do
+      clip when clip in [:unnamedplus, :unnamed] ->
+        case Clipboard.write(text) do
+          :ok -> :ok
+          :unavailable -> :ok
+          {:error, _} -> :ok
+        end
+
+        state
+
+      _ ->
+        state
+    end
+  end
 
   @spec reset_active_register(state()) :: state()
   def reset_active_register(state), do: %{state | reg: Registers.reset_active(state.reg)}
