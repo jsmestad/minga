@@ -22,13 +22,13 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree != nil
-      assert state.file_tree_focused == true
+      assert state.file_tree.tree != nil
+      assert state.file_tree.focused == true
 
       # Close tree (SPC o p again while focused)
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree == nil
-      assert state.file_tree_focused == false
+      assert state.file_tree.tree == nil
+      assert state.file_tree.focused == false
     end
 
     test "tree panel reduces editor viewport width", %{tmp_dir: dir} do
@@ -63,19 +63,19 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree.cursor == 0
+      assert state.file_tree.tree.cursor == 0
 
       # Move down
       state = send_key_sync(ctx, ?j)
-      assert state.file_tree.cursor == 1
+      assert state.file_tree.tree.cursor == 1
 
       # Move down again
       state = send_key_sync(ctx, ?j)
-      assert state.file_tree.cursor == 2
+      assert state.file_tree.tree.cursor == 2
 
       # Move up
       state = send_key_sync(ctx, ?k)
-      assert state.file_tree.cursor == 1
+      assert state.file_tree.tree.cursor == 1
     end
 
     test "q closes the tree", %{tmp_dir: dir} do
@@ -84,10 +84,10 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree != nil
+      assert state.file_tree.tree != nil
 
       state = send_key_sync(ctx, ?q)
-      assert state.file_tree == nil
+      assert state.file_tree.tree == nil
     end
 
     test "Escape closes the tree", %{tmp_dir: dir} do
@@ -97,7 +97,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "<Esc>")
-      assert state.file_tree == nil
+      assert state.file_tree.tree == nil
     end
   end
 
@@ -109,17 +109,17 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree (focused)
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree != nil
-      assert state.file_tree_focused == true
+      assert state.file_tree.tree != nil
+      assert state.file_tree.focused == true
 
       # SPC w l should passthrough from tree, unfocusing it
       state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.file_tree != nil
-      assert state.file_tree_focused == false
+      assert state.file_tree.tree != nil
+      assert state.file_tree.focused == false
 
       # SPC w h should focus the tree again
       state = send_keys_sync(ctx, "<SPC>wh")
-      assert state.file_tree_focused == true
+      assert state.file_tree.focused == true
     end
 
     test "SPC w l from the file tree returns focus to editor", %{tmp_dir: dir} do
@@ -129,12 +129,12 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree (focused)
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree_focused == true
+      assert state.file_tree.focused == true
 
       # SPC w l unfocuses tree, returns to editor
       state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.file_tree != nil
-      assert state.file_tree_focused == false
+      assert state.file_tree.tree != nil
+      assert state.file_tree.focused == false
     end
   end
 
@@ -146,7 +146,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree
       state = send_keys_sync(ctx, "<SPC>op")
-      entries = FileTree.visible_entries(state.file_tree)
+      entries = FileTree.visible_entries(state.file_tree.tree)
       # Find beta.txt index (tree may be rooted at project root, not tmp_dir)
       beta_idx = Enum.find_index(entries, fn e -> e.name == "beta.txt" end)
 
@@ -158,14 +158,14 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
         state = send_key_sync(ctx, 13)
 
         # Focus returned to editor
-        assert state.file_tree_focused == false
+        assert state.file_tree.focused == false
         # Active buffer should be beta.txt
         path = BufferServer.file_path(state.buffers.active)
         assert Path.basename(path) == "beta.txt"
       else
         # Tree rooted at project root, not tmp_dir; beta.txt not visible.
         # Verify tree opened at least.
-        assert state.file_tree != nil
+        assert state.file_tree.tree != nil
       end
     end
 
@@ -190,12 +190,12 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       tree_buf = BufferSync.start_buffer(tree)
 
       :sys.replace_state(ctx.editor, fn s ->
-        %{s | file_tree: tree, file_tree_focused: true, file_tree_buffer: tree_buf}
+        put_in(s.file_tree, %{s.file_tree | tree: tree, focused: true, buffer: tree_buf})
       end)
 
       # Find other.ex in the tree entries and navigate to it
       state = :sys.get_state(ctx.editor)
-      entries = FileTree.visible_entries(state.file_tree)
+      entries = FileTree.visible_entries(state.file_tree.tree)
       other_idx = Enum.find_index(entries, fn e -> e.name == "other.ex" end)
       assert other_idx != nil, "other.ex should be visible in tree rooted at #{dir}"
 
@@ -210,7 +210,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       assert Path.basename(path) == "other.ex"
 
       # Focus returned to editor
-      assert state.file_tree_focused == false
+      assert state.file_tree.focused == false
 
       # Wait for the async :setup_highlight message to process
       Process.sleep(50)

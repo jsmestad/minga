@@ -320,8 +320,8 @@ defmodule Minga.Editor.Commands.Movement do
   defp navigate_window(%{windows: %{tree: nil}} = state, _direction), do: state
 
   # When file tree is focused, navigating right unfocuses the tree
-  defp navigate_window(%{file_tree_focused: true} = state, :right) do
-    %{state | file_tree_focused: false}
+  defp navigate_window(%{file_tree: %{focused: true}} = state, :right) do
+    put_in(state.file_tree.focused, false)
   end
 
   defp navigate_window(state, direction) do
@@ -338,8 +338,8 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
-  defp maybe_focus_file_tree(%{file_tree: %Minga.FileTree{}} = state, :left) do
-    %{state | file_tree_focused: true}
+  defp maybe_focus_file_tree(%{file_tree: %{tree: %Minga.FileTree{}}} = state, :left) do
+    put_in(state.file_tree.focused, true)
   end
 
   defp maybe_focus_file_tree(state, _direction), do: state

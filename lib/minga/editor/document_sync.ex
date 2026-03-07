@@ -35,13 +35,14 @@ defmodule Minga.Editor.DocumentSync do
   @typedoc "LSP bridge state tracked in the Editor."
   @type t :: %{
           buffer_clients: %{pid() => [pid()]},
-          debounce_timers: %{pid() => reference()}
+          debounce_timers: %{pid() => reference()},
+          pending: %{reference() => atom()}
         }
 
   @doc "Returns initial LSP bridge state."
   @spec new() :: t()
   def new do
-    %{buffer_clients: %{}, debounce_timers: %{}}
+    %{buffer_clients: %{}, debounce_timers: %{}, pending: %{}}
   end
 
   @doc """

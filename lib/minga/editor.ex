@@ -399,17 +399,17 @@ defmodule Minga.Editor do
     {:noreply, %{state | completion_trigger: new_bridge}}
   end
 
-  # LSP async response — route to the appropriate handler based on lsp_pending
+  # LSP async response — route to the appropriate handler based on lsp.pending
   def handle_info({:lsp_response, ref, result}, state) do
-    case Map.pop(state.lsp_pending, ref) do
+    case Map.pop(state.lsp.pending, ref) do
       {:definition, pending} ->
-        new_state = %{state | lsp_pending: pending}
+        new_state = put_in(state.lsp.pending, pending)
         new_state = LspActions.handle_definition_response(new_state, result)
         Renderer.render(new_state)
         {:noreply, new_state}
 
       {:hover, pending} ->
-        new_state = %{state | lsp_pending: pending}
+        new_state = put_in(state.lsp.pending, pending)
         new_state = LspActions.handle_hover_response(new_state, result)
         Renderer.render(new_state)
         {:noreply, new_state}
@@ -1061,7 +1061,7 @@ defmodule Minga.Editor do
     new_state = lsp_buffer_opened(new_state, pid)
     new_state = git_buffer_opened(new_state, pid)
     fire_hook(:after_open, [pid, path])
-    %{new_state | file_tree: FileTree.reveal(tree, path)}
+    put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
 
   # ── Special buffers ──────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ defmodule Minga.Editor.LspActions do
   One-shot LSP request/response handlers for go-to-definition and hover.
 
   Follows the same async pattern as completion: sends a request via
-  `Client.request/3`, stores the reference in `state.lsp_pending`, and
+  `Client.request/3`, stores the reference in `state.lsp.pending`, and
   processes the response when it arrives in `Editor.handle_info`.
   """
 
@@ -191,8 +191,7 @@ defmodule Minga.Editor.LspActions do
         }
 
         ref = Client.request(client, method, params)
-        lsp_pending = Map.put(state.lsp_pending, ref, kind)
-        %{state | lsp_pending: lsp_pending}
+        put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, kind))
     end
   end
 

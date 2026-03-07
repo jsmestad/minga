@@ -39,8 +39,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       registers: %{},
       change_recorder: ChangeRecorder.new(),
       macro_recorder: MacroRecorder.new(),
-      file_tree: nil,
-      file_tree_focused: false,
+      file_tree: %{tree: nil, focused: false, buffer: nil},
       completion: nil,
       conflict: nil,
       focus_stack: [AgentPanelHandler, Minga.Input.ModeFSM]

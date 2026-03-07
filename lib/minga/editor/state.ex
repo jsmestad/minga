@@ -28,6 +28,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.State.Mouse
   alias Minga.Editor.State.Picker
@@ -53,7 +54,6 @@ defmodule Minga.Editor.State do
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
   @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
-  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct port_manager: nil,
             viewport: nil,
             mode: :normal,
@@ -76,14 +76,11 @@ defmodule Minga.Editor.State do
             macro_recorder: MacroRecorder.new(),
             highlight: %Highlighting{},
             lsp: DocumentSync.new(),
-            lsp_pending: %{},
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
             windows: %Windows{},
-            file_tree: nil,
-            file_tree_focused: false,
-            file_tree_buffer: nil,
+            file_tree: %FileTreeState{},
             git_buffers: %{},
             injection_ranges: %{},
             agent: %AgentState{},
@@ -112,14 +109,11 @@ defmodule Minga.Editor.State do
           macro_recorder: MacroRecorder.t(),
           highlight: Highlighting.t(),
           lsp: DocumentSync.t(),
-          lsp_pending: %{reference() => atom()},
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
           windows: Windows.t(),
-          file_tree: FileTree.t() | nil,
-          file_tree_focused: boolean(),
-          file_tree_buffer: pid() | nil,
+          file_tree: FileTreeState.t(),
           git_buffers: %{pid() => pid()},
           injection_ranges: %{
             pid() => [
@@ -169,11 +163,11 @@ defmodule Minga.Editor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{viewport: vp, file_tree: nil}) do
+  def screen_rect(%__MODULE__{viewport: vp, file_tree: %{tree: nil}}) do
     {0, 0, vp.cols, vp.rows - 1}
   end
 
-  def screen_rect(%__MODULE__{viewport: vp, file_tree: %FileTree{width: tw}}) do
+  def screen_rect(%__MODULE__{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}) do
     # Tree occupies columns 0..tw-1, separator at column tw,
     # editor content starts at column tw+1.
     editor_col = tw + 1
@@ -183,9 +177,9 @@ defmodule Minga.Editor.State do
 
   @doc "Returns the screen rect for the file tree panel, or nil if closed."
   @spec tree_rect(t()) :: WindowTree.rect() | nil
-  def tree_rect(%__MODULE__{file_tree: nil}), do: nil
+  def tree_rect(%__MODULE__{file_tree: %{tree: nil}}), do: nil
 
-  def tree_rect(%__MODULE__{viewport: vp, file_tree: %FileTree{width: tw}}) do
+  def tree_rect(%__MODULE__{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}) do
     {0, 0, tw, vp.rows - 1}
   end
 

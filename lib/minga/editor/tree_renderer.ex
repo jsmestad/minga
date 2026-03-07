@@ -22,9 +22,9 @@ defmodule Minga.Editor.TreeRenderer do
   separator, and header.
   """
   @spec render(EditorState.t()) :: [binary()]
-  def render(%EditorState{file_tree: nil}), do: []
+  def render(%EditorState{file_tree: %{tree: nil}}), do: []
 
-  def render(%EditorState{file_tree: tree, file_tree_focused: focused} = state) do
+  def render(%EditorState{file_tree: %{tree: tree, focused: focused}} = state) do
     case EditorState.tree_rect(state) do
       nil -> []
       rect -> do_render(tree, rect, focused, state)
