@@ -49,6 +49,7 @@ defmodule Minga.Editor do
   import Bitwise
 
   @ctrl Protocol.mod_ctrl()
+  @alt Protocol.mod_alt()
   @escape 27
   @enter 13
   @tab 9
@@ -345,14 +346,24 @@ defmodule Minga.Editor do
 
   # ── Agent panel key interception ──
   # When the agent panel is visible and input is focused, route keystrokes
-  # directly to the agent input, bypassing the mode FSM entirely.
+  # to the agent input. Unhandled keys (Ctrl+Q, Ctrl+S, etc.) pass through
+  # to the normal handler via :passthrough.
   def handle_info(
         {:minga_input, {:key_press, codepoint, modifiers}},
         %{agent_panel: %{visible: true, input_focused: true}} = state
       ) do
-    new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
-    Renderer.render(new_state)
-    {:noreply, new_state}
+    case handle_agent_key(%{state | status_msg: nil}, codepoint, modifiers) do
+      :passthrough ->
+        # Not an agent key; forward to normal processing
+        send(self(), {:minga_input, {:key_press, codepoint, modifiers}})
+
+        {:noreply,
+         %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}}
+
+      new_state ->
+        Renderer.render(new_state)
+        {:noreply, new_state}
+    end
   end
 
   # ── File tree key interception ──
@@ -692,36 +703,42 @@ defmodule Minga.Editor do
   # Global bindings — processed before the Mode FSM.
   # Ctrl+S → save (works in any mode).
   # ── Agent panel input routing ─────────────────────────────────────────────
-  # When the agent panel is visible and input is focused, route keystrokes
-  # to the agent input area instead of the normal mode FSM.
+  # ── Agent panel key dispatch ──────────────────────────────────────────────
+  # Returns updated state for handled keys, or :passthrough for keys that
+  # should fall through to normal editor handling (Ctrl+Q, Ctrl+S, etc.).
 
-  # C-c C-c in agent input: submit prompt
-  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, ?c, mods)
-       when band(mods, @ctrl) != 0 do
+  @spec handle_agent_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t() | :passthrough
+
+  # C-c in agent input: submit prompt
+  defp handle_agent_key(state, ?c, mods) when band(mods, @ctrl) != 0 do
     AgentCommands.submit_prompt(state)
   end
 
-  # Escape in agent input: unfocus the input (return to normal editing)
-  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 27, _mods) do
+  # Escape: unfocus the input (return to normal editing)
+  defp handle_agent_key(state, 27, _mods) do
     %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}
   end
 
-  # Backspace in agent input
-  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 127, _mods) do
+  # Backspace
+  defp handle_agent_key(state, 127, _mods) do
     AgentCommands.input_backspace(state)
   end
 
-  # Enter in agent input (normal mode): submit
-  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, 13, _mods) do
+  # Enter: submit prompt
+  defp handle_agent_key(state, 13, _mods) do
     AgentCommands.submit_prompt(state)
   end
 
-  # Printable characters in agent input
-  defp handle_key(%{agent_panel: %{visible: true, input_focused: true}} = state, cp, _mods)
-       when cp >= 32 do
+  # Printable characters (only unmodified or shift-modified, not Ctrl/Alt)
+  defp handle_agent_key(state, cp, mods)
+       when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
     char = <<cp::utf8>>
     AgentCommands.input_char(state, char)
   end
+
+  # Anything else (Ctrl+Q, Ctrl+S, arrows, etc.): pass through
+  defp handle_agent_key(_state, _cp, _mods), do: :passthrough
 
   # Ctrl+S → save (works in any mode, including agent panel focus).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
