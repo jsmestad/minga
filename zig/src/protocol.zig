@@ -36,6 +36,9 @@ pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 
+// Incremental content sync (BEAM → Zig)
+pub const OP_EDIT_BUFFER: u8 = 0x26;
+
 // Text measurement (BEAM → Zig)
 pub const OP_MEASURE_TEXT: u8 = 0x27;
 
@@ -183,6 +186,8 @@ pub const RenderCommand = union(enum) {
     clear_region: u16,
     destroy_region: u16,
     set_active_region: u16,
+    // Incremental content sync
+    edit_buffer: EditBuffer,
     // Text measurement
     measure_text: MeasureText,
     // Highlight commands
@@ -192,6 +197,26 @@ pub const RenderCommand = union(enum) {
     set_injection_query: []const u8,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
+};
+
+/// A single edit delta for incremental content sync.
+pub const EditDelta = struct {
+    start_byte: u32,
+    old_end_byte: u32,
+    new_end_byte: u32,
+    start_row: u32,
+    start_col: u32,
+    old_end_row: u32,
+    old_end_col: u32,
+    new_end_row: u32,
+    new_end_col: u32,
+    inserted_text: []const u8,
+};
+
+/// An edit_buffer command containing one or more edit deltas.
+pub const EditBuffer = struct {
+    version: u32,
+    edits: []const EditDelta,
 };
 
 pub const MeasureText = struct {
@@ -499,6 +524,15 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .byte_offset = byte_offset,
             } };
         },
+        OP_EDIT_BUFFER => {
+            // Variable-length command. Decoded via decodeEditBuffer() with an allocator.
+            // Here we just validate the header and return the version + empty edits.
+            if (rest.len < 6) return error.Malformed;
+            return .{ .edit_buffer = .{
+                .version = std.mem.readInt(u32, rest[0..4], .big),
+                .edits = &.{},
+            } };
+        },
         OP_MEASURE_TEXT => {
             // request_id:4, text_len:2, text
             if (rest.len < 6) return error.Malformed;
@@ -594,6 +628,19 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
+        OP_EDIT_BUFFER => blk: {
+            // opcode(1) + version(4) + edit_count(2) + variable per edit
+            if (payload.len < 7) break :blk payload.len;
+            const edit_count = std.mem.readInt(u16, payload[5..7], .big);
+            var off: usize = 7;
+            for (0..edit_count) |_| {
+                // 9 × u32 fields + text_len:u32 = 40 bytes header per edit
+                if (off + 40 > payload.len) break :blk payload.len;
+                const text_len = std.mem.readInt(u32, payload[off + 36 ..][0..4], .big);
+                off += 40 + text_len;
+            }
+            break :blk off;
+        },
         OP_MEASURE_TEXT => blk: {
             if (payload.len < 7) break :blk payload.len;
             const text_len = std.mem.readInt(u16, payload[5..7], .big);
@@ -606,6 +653,43 @@ pub fn commandSize(payload: []const u8) usize {
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };
+}
+
+/// Fully decodes an edit_buffer command payload (after the opcode byte).
+/// Returns the version and an allocated slice of EditDelta structs.
+/// Caller owns the returned slice and must free it.
+pub fn decodeEditBuffer(data: []const u8, alloc: std.mem.Allocator) !struct { version: u32, edits: []EditDelta } {
+    if (data.len < 6) return error.Malformed;
+    const version = std.mem.readInt(u32, data[0..4], .big);
+    const edit_count = std.mem.readInt(u16, data[4..6], .big);
+
+    const edits = try alloc.alloc(EditDelta, edit_count);
+    errdefer alloc.free(edits);
+
+    var off: usize = 6;
+    for (0..edit_count) |i| {
+        if (off + 40 > data.len) return error.Malformed;
+        edits[i] = .{
+            .start_byte = std.mem.readInt(u32, data[off..][0..4], .big),
+            .old_end_byte = std.mem.readInt(u32, data[off + 4 ..][0..4], .big),
+            .new_end_byte = std.mem.readInt(u32, data[off + 8 ..][0..4], .big),
+            .start_row = std.mem.readInt(u32, data[off + 12 ..][0..4], .big),
+            .start_col = std.mem.readInt(u32, data[off + 16 ..][0..4], .big),
+            .old_end_row = std.mem.readInt(u32, data[off + 20 ..][0..4], .big),
+            .old_end_col = std.mem.readInt(u32, data[off + 24 ..][0..4], .big),
+            .new_end_row = std.mem.readInt(u32, data[off + 28 ..][0..4], .big),
+            .new_end_col = std.mem.readInt(u32, data[off + 32 ..][0..4], .big),
+            .inserted_text = blk: {
+                const text_len = std.mem.readInt(u32, data[off + 36 ..][0..4], .big);
+                if (off + 40 + text_len > data.len) return error.Malformed;
+                break :blk data[off + 40 .. off + 40 + text_len];
+            },
+        };
+        const text_len = std.mem.readInt(u32, data[off + 36 ..][0..4], .big);
+        off += 40 + text_len;
+    }
+
+    return .{ .version = version, .edits = edits };
 }
 
 /// Encodes a text_width response: opcode(1) + request_id(4) + width(2) = 7 bytes.

@@ -331,6 +331,45 @@ pub const Highlighter = struct {
         self.current_source = source;
     }
 
+    /// Apply edit deltas to the existing tree and incrementally reparse.
+    /// Falls back to full reparse if no tree exists.
+    pub fn parseIncremental(self: *Highlighter, edits: []const @import("protocol.zig").EditDelta, new_source: []const u8) !void {
+        const old_tree = self.tree orelse {
+            // No existing tree; fall back to full parse.
+            return self.parse(new_source);
+        };
+
+        // Apply each edit to the old tree (tells tree-sitter what changed).
+        for (edits) |edit| {
+            const input_edit = c.TSInputEdit{
+                .start_byte = edit.start_byte,
+                .old_end_byte = edit.old_end_byte,
+                .new_end_byte = edit.new_end_byte,
+                .start_point = .{ .row = edit.start_row, .column = edit.start_col },
+                .old_end_point = .{ .row = edit.old_end_row, .column = edit.old_end_col },
+                .new_end_point = .{ .row = edit.new_end_row, .column = edit.new_end_col },
+            };
+            c.ts_tree_edit(old_tree, &input_edit);
+        }
+
+        // Incremental parse: pass old_tree so tree-sitter reuses unchanged subtrees.
+        const new_tree = c.ts_parser_parse_string(
+            self.parser,
+            old_tree,
+            new_source.ptr,
+            @intCast(new_source.len),
+        ) orelse {
+            // Incremental parse failed; fall back to full parse.
+            c.ts_tree_delete(old_tree);
+            self.tree = null;
+            return self.parse(new_source);
+        };
+
+        c.ts_tree_delete(old_tree);
+        self.tree = new_tree;
+        self.current_source = new_source;
+    }
+
     /// Run highlight query on the current tree, returning spans.
     pub fn highlight(self: *Highlighter) !HighlightResult {
         const tree = self.tree orelse return error.NoTree;

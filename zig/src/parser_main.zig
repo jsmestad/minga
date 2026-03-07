@@ -26,6 +26,8 @@ pub fn main() !void {
 
     const stdin_fd = std.posix.STDIN_FILENO;
     var msg_buf: [65536]u8 = undefined;
+    var ps = ParserState.init(alloc);
+    defer ps.deinit();
 
     while (true) {
         // Read the 4-byte length header.
@@ -52,14 +54,54 @@ pub fn main() !void {
         var offset: usize = 0;
         while (offset < msg_len) {
             const remaining = payload[offset..];
-            const cmd = protocol.decodeCommand(remaining) catch {
-                break;
-            };
-            handleCommand(&hl, cmd, stdout, alloc) catch {};
-            offset += protocol.commandSize(remaining);
+            const cmd_size = protocol.commandSize(remaining);
+
+            // edit_buffer needs special handling: decode full edits from raw payload.
+            if (remaining[0] == protocol.OP_EDIT_BUFFER) {
+                handleEditBuffer(&hl, remaining[1..cmd_size], stdout, alloc, &ps) catch {};
+            } else {
+                const cmd = protocol.decodeCommand(remaining) catch break;
+                handleCommand(&hl, cmd, stdout, alloc, &ps) catch {};
+            }
+            offset += cmd_size;
         }
     }
 }
+
+/// Parser state: keeps a mutable copy of the source so edit_buffer can
+/// patch it in-place instead of receiving the full content each time.
+const ParserState = struct {
+    source: std.ArrayListUnmanaged(u8) = .empty,
+    alloc: std.mem.Allocator,
+
+    fn init(alloc: std.mem.Allocator) ParserState {
+        return .{ .alloc = alloc };
+    }
+
+    fn deinit(self: *ParserState) void {
+        self.source.deinit(self.alloc);
+    }
+
+    /// Replace the entire source (used by parse_buffer).
+    fn setSource(self: *ParserState, content: []const u8) !void {
+        self.source.clearRetainingCapacity();
+        try self.source.appendSlice(self.alloc, content);
+    }
+
+    /// Apply edit deltas to the stored source, in order.
+    fn applyEdits(self: *ParserState, edits: []const protocol.EditDelta) !void {
+        for (edits) |edit| {
+            const start: usize = @intCast(edit.start_byte);
+            const old_end: usize = @intCast(edit.old_end_byte);
+
+            if (start > self.source.items.len) continue;
+            const clamped_old_end = @min(old_end, self.source.items.len);
+
+            // Replace [start..old_end) with inserted_text.
+            try self.source.replaceRange(self.alloc, start, clamped_old_end - start, edit.inserted_text);
+        }
+    }
+};
 
 /// Dispatch a highlight-related command to the Highlighter and send responses.
 fn handleCommand(
@@ -67,6 +109,7 @@ fn handleCommand(
     cmd: protocol.RenderCommand,
     stdout: *std.Io.Writer,
     alloc: std.mem.Allocator,
+    ps: *ParserState,
 ) !void {
     switch (cmd) {
         .set_language => |name| {
@@ -75,31 +118,16 @@ fn handleCommand(
             }
         },
         .parse_buffer => |pb| {
-            hl.parse(pb.source) catch return;
+            // Full content sync: update stored source and do a full parse.
+            ps.setSource(pb.source) catch return;
+            hl.parse(ps.source.items) catch return;
 
             if (hl.query != null) {
-                var result = hl.highlightWithInjections() catch return;
-                defer result.deinit();
-
-                // Send capture names.
-                const names_buf = try protocol.encodeHighlightNames(alloc, result.capture_names);
-                defer alloc.free(names_buf);
-                try protocol.writeMessage(stdout, names_buf);
-
-                // Send spans with version.
-                const spans_buf = try protocol.encodeHighlightSpans(alloc, pb.version, result.spans);
-                defer alloc.free(spans_buf);
-                try protocol.writeMessage(stdout, spans_buf);
-
-                // Send injection ranges if any.
-                if (hl.injection_ranges.len > 0) {
-                    const inj_buf = try protocol.encodeInjectionRanges(alloc, hl.injection_ranges);
-                    defer alloc.free(inj_buf);
-                    try protocol.writeMessage(stdout, inj_buf);
-                }
-
-                try stdout.flush();
+                try sendHighlightResults(hl, pb.version, stdout, alloc);
             }
+        },
+        .edit_buffer => {
+            // Handled at dispatch level via handleEditBuffer().
         },
         .set_highlight_query => |source| {
             hl.setHighlightQuery(source) catch {};
@@ -130,6 +158,59 @@ fn handleCommand(
         // Render commands are not handled by the parser process.
         else => {},
     }
+}
+
+/// Handle an edit_buffer command: decode edits, patch stored source,
+/// incrementally reparse, send highlight results.
+fn handleEditBuffer(
+    hl: *highlighter_mod.Highlighter,
+    data: []const u8,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+    ps: *ParserState,
+) !void {
+    const decoded = protocol.decodeEditBuffer(data, alloc) catch return;
+    defer alloc.free(decoded.edits);
+
+    // Apply edits to stored source.
+    ps.applyEdits(decoded.edits) catch return;
+
+    // Incremental parse using the patched source.
+    hl.parseIncremental(decoded.edits, ps.source.items) catch {
+        // Fallback: full parse on the patched source.
+        hl.parse(ps.source.items) catch return;
+    };
+
+    if (hl.query != null) {
+        try sendHighlightResults(hl, decoded.version, stdout, alloc);
+    }
+}
+
+/// Send highlight results (names, spans, injection ranges) to stdout.
+fn sendHighlightResults(
+    hl: *highlighter_mod.Highlighter,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    var result = hl.highlightWithInjections() catch return;
+    defer result.deinit();
+
+    const names_buf = try protocol.encodeHighlightNames(alloc, result.capture_names);
+    defer alloc.free(names_buf);
+    try protocol.writeMessage(stdout, names_buf);
+
+    const spans_buf = try protocol.encodeHighlightSpans(alloc, version, result.spans);
+    defer alloc.free(spans_buf);
+    try protocol.writeMessage(stdout, spans_buf);
+
+    if (hl.injection_ranges.len > 0) {
+        const inj_buf = try protocol.encodeInjectionRanges(alloc, hl.injection_ranges);
+        defer alloc.free(inj_buf);
+        try protocol.writeMessage(stdout, inj_buf);
+    }
+
+    try stdout.flush();
 }
 
 /// Read exactly `buf.len` bytes from `fd`, blocking until done.

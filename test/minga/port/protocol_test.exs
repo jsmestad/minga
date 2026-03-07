@@ -475,6 +475,58 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  describe "incremental content sync" do
+    test "encode_edit_buffer with a single edit" do
+      edits = [
+        %{
+          start_byte: 10,
+          old_end_byte: 10,
+          new_end_byte: 11,
+          start_position: {2, 5},
+          old_end_position: {2, 5},
+          new_end_position: {2, 6},
+          inserted_text: "x"
+        }
+      ]
+
+      result = Protocol.encode_edit_buffer(1, edits)
+
+      assert <<0x26, 1::32, 1::16, 10::32, 10::32, 11::32, 2::32, 5::32, 2::32, 5::32, 2::32,
+               6::32, 1::32, "x">> = result
+    end
+
+    test "encode_edit_buffer with multiple edits" do
+      edits = [
+        %{
+          start_byte: 0,
+          old_end_byte: 5,
+          new_end_byte: 3,
+          start_position: {0, 0},
+          old_end_position: {0, 5},
+          new_end_position: {0, 3},
+          inserted_text: "abc"
+        },
+        %{
+          start_byte: 10,
+          old_end_byte: 10,
+          new_end_byte: 12,
+          start_position: {1, 2},
+          old_end_position: {1, 2},
+          new_end_position: {1, 4},
+          inserted_text: "de"
+        }
+      ]
+
+      result = Protocol.encode_edit_buffer(42, edits)
+      assert <<0x26, 42::32, 2::16, _rest::binary>> = result
+    end
+
+    test "encode_edit_buffer with empty edits list" do
+      result = Protocol.encode_edit_buffer(1, [])
+      assert <<0x26, 1::32, 0::16>> = result
+    end
+  end
+
   describe "text measurement" do
     test "encode_measure_text" do
       result = Protocol.encode_measure_text(42, "hello")

@@ -280,6 +280,45 @@ defmodule Minga.Port.Protocol do
   defp encode_region_role(:panel), do: @region_panel
   defp encode_region_role(:border), do: @region_border
 
+  # ── Encoding: incremental content sync (BEAM → Zig) ──
+
+  @op_edit_buffer 0x26
+
+  @typedoc "A single edit delta for incremental content sync."
+  @type edit_delta :: %{
+          start_byte: non_neg_integer(),
+          old_end_byte: non_neg_integer(),
+          new_end_byte: non_neg_integer(),
+          start_position: {non_neg_integer(), non_neg_integer()},
+          old_end_position: {non_neg_integer(), non_neg_integer()},
+          new_end_position: {non_neg_integer(), non_neg_integer()},
+          inserted_text: String.t()
+        }
+
+  @doc """
+  Encodes an edit_buffer command with a version and a list of edit deltas.
+
+  Each delta describes a replacement: the range [start_byte, old_end_byte) is
+  replaced with `inserted_text`, producing a range [start_byte, new_end_byte).
+  """
+  @spec encode_edit_buffer(non_neg_integer(), [edit_delta()]) :: binary()
+  def encode_edit_buffer(version, edits) when is_integer(version) and is_list(edits) do
+    header = <<@op_edit_buffer, version::32, length(edits)::16>>
+
+    edit_data =
+      for edit <- edits, into: <<>> do
+        {sr, sc} = edit.start_position
+        {oer, oec} = edit.old_end_position
+        {ner, nec} = edit.new_end_position
+        text = edit.inserted_text
+
+        <<edit.start_byte::32, edit.old_end_byte::32, edit.new_end_byte::32, sr::32, sc::32,
+          oer::32, oec::32, ner::32, nec::32, byte_size(text)::32, text::binary>>
+      end
+
+    <<header::binary, edit_data::binary>>
+  end
+
   # ── Encoding: text measurement (BEAM → Zig) ──
 
   @op_measure_text 0x27

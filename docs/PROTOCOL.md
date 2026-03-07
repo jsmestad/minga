@@ -51,6 +51,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x23` | load_grammar | 5 + name_len + path_len | Load a grammar from a shared library |
 | `0x24` | set_injection_query | 5 + query_len | Set a custom injection query |
 | `0x25` | query_language_at | 9 | Query the language at a byte offset |
+| `0x26` | edit_buffer | 7 + variable | Incremental edit deltas |
 
 ### Frontend → BEAM (Input Events)
 
@@ -730,8 +731,35 @@ The BEAM uses a two-tier approach based on the frontend's `text_rendering` capab
 - **Monospace frontends** (TUI, monospace GUI): The BEAM uses its own UAX #11 width tables. `measure_text` is available for spot-checking alignment on startup but is not used per-keystroke.
 - **Proportional frontends** (native GUI): The BEAM queries the frontend via `measure_text` for layout-critical computations (cursor placement, column alignment, menu truncation). Results are cached keyed by text content. The cache is flushed when the frontend sends `capabilities_updated` (e.g., after a font size change).
 
-## Future: Incremental Content Sync
+## Incremental Content Sync
 
-_This section describes a planned extension. See #154._
+### `0x26` edit_buffer
 
-A new `0x26 edit_buffer` opcode will send compact edit deltas instead of full file content, reducing IPC bandwidth from O(file_size) to O(edit_size) per keystroke and enabling tree-sitter's incremental parsing.
+Send compact edit deltas instead of full file content. Enables tree-sitter incremental parsing (sub-millisecond reparse for single-character edits).
+
+```
+opcode:     u8  = 0x26
+version:    u32           buffer version counter
+edit_count: u16           number of edits
+
+per edit:
+  start_byte:     u32     byte offset where the edit begins
+  old_end_byte:   u32     byte offset where the old text ends
+  new_end_byte:   u32     byte offset where the new text ends
+  start_row:      u32     row at start_byte
+  start_col:      u32     column at start_byte
+  old_end_row:    u32     row at old_end_byte
+  old_end_col:    u32     column at old_end_byte
+  new_end_row:    u32     row at new_end_byte
+  new_end_col:    u32     column at new_end_byte
+  text_len:       u32     byte length of inserted text
+  text:           [text_len]u8  the inserted text (empty for deletions)
+```
+
+Total size: 7 + (40 + text_len) per edit.
+
+**Behavior:** The parser applies each edit to its stored copy of the source, calls `ts_tree_edit()` on the existing parse tree, then performs an incremental reparse. Unchanged subtrees are reused, making the reparse cost proportional to the edit size rather than the file size.
+
+**Fallback:** `parse_buffer` (opcode `0x21`) remains available for initial file load, language switches, and error recovery. If incremental parsing fails, the parser falls back to full reparse automatically.
+
+**Edit semantics:** Each edit replaces the byte range `[start_byte, old_end_byte)` with the inserted text. For insertions, `old_end_byte == start_byte`. For deletions, `text_len == 0`. The row/col positions are needed by tree-sitter's `TSInputEdit` for invalidating the correct tree nodes.
