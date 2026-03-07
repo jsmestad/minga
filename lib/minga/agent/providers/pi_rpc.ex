@@ -250,6 +250,15 @@ defmodule Minga.Agent.Providers.PiRpc do
     Logger.info("[Pi → Agent] message_update/#{summary}")
   end
 
+  defp log_received_event(%{"type" => "response", "command" => cmd, "success" => success} = event) do
+    error = if event["error"], do: " error=#{event["error"]}", else: ""
+    Logger.info("[Pi → Agent] response cmd=#{cmd} success=#{success}#{error}")
+  end
+
+  defp log_received_event(%{"type" => "extension_ui_request", "method" => method} = event) do
+    Logger.info("[Pi → Agent] extension_ui_request method=#{method} id=#{event["id"]}")
+  end
+
   defp log_received_event(%{"type" => type}) do
     Logger.info("[Pi → Agent] #{type}")
   end
@@ -325,6 +334,20 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   defp handle_event(%{"type" => "response"}, state) do
     # Command responses (ack for prompt, abort, etc.) -- no action needed
+    {:noreply, state}
+  end
+
+  defp handle_event(%{"type" => "extension_ui_request", "method" => method, "id" => id}, state)
+       when method in ["select", "confirm", "input", "editor"] do
+    # Dialog methods block pi until we respond. Auto-cancel for now.
+    Logger.info("[Agent.PiRpc] auto-cancelling dialog: #{method} (id=#{id})")
+    response = %{"type" => "extension_ui_response", "id" => id, "cancelled" => true}
+    send_command(state.port, response)
+    {:noreply, state}
+  end
+
+  defp handle_event(%{"type" => "extension_ui_request"}, state) do
+    # Fire-and-forget methods (setStatus, notify, setWidget, etc.) — ignore
     {:noreply, state}
   end
 
