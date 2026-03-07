@@ -23,6 +23,9 @@ Current status and planned features. Updated as development progresses.
 | Undo coalescing (time-based) | ✅ | 300ms window; mode transitions break coalescing |
 | Bulk text insert | ✅ | `Document.insert_text/2`; single binary op instead of char-by-char |
 | Batch edit API | ✅ | `Buffer.Server.apply_text_edits/2`; one undo entry per batch |
+| Buffer types (`buffer_type`) | ✅ | `:file`, `:nofile`, `:nowrite`, `:prompt`, `:terminal`; blocks save on non-file types |
+| Input router + focus stack | ✅ | Centralized key dispatch via `Input.Handler` behaviour; single `handle_info` clause |
+| Panel buffer backing | ✅ | File tree and agent chat backed by BufferServer; vim navigation via mode FSM delegation |
 | Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots |
 | Line index cache (O(1) line access) | ✅ | Lazy line offset tuple; `line_at`/`lines`/`position_to_offset` use `binary_part` |
 
@@ -254,6 +257,7 @@ Current status and planned features. Updated as development progresses.
 | Agent session GenServer | ✅ | Manages conversation, status, token usage, subscriber broadcasts |
 | Agent supervisor | ✅ | `DynamicSupervisor` with crash isolation |
 | Chat panel renderer | ✅ | Bordered message blocks, tool cards, thinking spinner, input area |
+| Agent buffer backing | ✅ | `*Agent*` BufferServer with markdown content, vim navigation via mode FSM |
 | Markdown parser | ✅ | Bold, italic, code, headers, code blocks, blockquotes, lists |
 | Agent theme section | ✅ | `theme.agent` colors for all 7 built-in themes (Doom One default) |
 | Modeline status | ✅ | ◯ idle, ⟳ thinking, ⚡ tool executing, ✗ error |
@@ -274,7 +278,7 @@ Roughly in priority order:
 4. **Extension system** — ✅ Local-path loading with `Minga.Extension` behaviour, crash-isolated supervision. Package registry (#80) is next.
 5. ~~**Theme runtime picker**~~ — ✅ Done. `SPC h t` to preview and switch themes without restart.
 6. **Visual block mode** — Column selection and editing
-7. ~~**File tree sidebar**~~ — ✅ Done
+7. ~~**File tree sidebar**~~ — ✅ Done (buffer-backed with vim navigation via `*File Tree*` BufferServer)
 8. ~~**Git integration**~~ — ✅ Gutter indicators, hunk navigation/stage/revert/preview, blame
 9. **Terminal emulator** — 📋 Embedded terminal split (SPC o t toggle) #122
 
@@ -288,4 +292,4 @@ These guide what we build and how:
 - **Two-process isolation** — Editor state and rendering never share memory; either can fail independently
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus
 - **Elixir for logic, Zig for pixels** — Each language where it excels
-- **Test everything** — 1,855 tests and counting; property-based tests for data structures
+- **Test everything** — 2,284 tests and counting; property-based tests for data structures
