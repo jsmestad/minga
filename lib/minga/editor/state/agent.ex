@@ -17,7 +17,7 @@ defmodule Minga.Editor.State.Agent do
           status: status(),
           panel: PanelState.t(),
           error: String.t() | nil,
-          spinner_timer: reference() | nil
+          spinner_timer: {:ok, :timer.tref()} | nil
         }
 
   defstruct session: nil,
@@ -145,13 +145,8 @@ defmodule Minga.Editor.State.Agent do
   @spec stop_spinner_timer(t()) :: t()
   def stop_spinner_timer(%__MODULE__{spinner_timer: nil} = agent), do: agent
 
-  def stop_spinner_timer(%__MODULE__{spinner_timer: timer} = agent) do
-    case timer do
-      {:ok, ref} -> :timer.cancel(ref)
-      ref when is_reference(ref) -> :timer.cancel(ref)
-      _ -> :ok
-    end
-
+  def stop_spinner_timer(%__MODULE__{spinner_timer: {:ok, ref}} = agent) do
+    :timer.cancel(ref)
     %{agent | spinner_timer: nil}
   end
 

@@ -39,7 +39,8 @@ defmodule Minga.Agent.Session do
           messages: [Message.t()],
           subscribers: MapSet.t(pid()),
           total_usage: Event.token_usage(),
-          error_message: String.t() | nil
+          error_message: String.t() | nil,
+          pending_thinking_level: String.t() | nil
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -99,7 +100,7 @@ defmodule Minga.Agent.Session do
   end
 
   @doc "Fetches available models from the provider."
-  @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
     GenServer.call(session, :get_available_models, 10_000)
   end
@@ -117,7 +118,7 @@ defmodule Minga.Agent.Session do
   end
 
   @doc "Cycles to the next thinking level."
-  @spec cycle_thinking_level(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  @spec cycle_thinking_level(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def cycle_thinking_level(session) do
     GenServer.call(session, :cycle_thinking_level, 10_000)
   end
@@ -131,6 +132,7 @@ defmodule Minga.Agent.Session do
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
+  @dialyzer {:no_contracts, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     provider_module = Keyword.get(opts, :provider, Minga.Agent.Providers.PiRpc)

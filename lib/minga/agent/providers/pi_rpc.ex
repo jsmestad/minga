@@ -25,9 +25,11 @@ defmodule Minga.Agent.Providers.PiRpc do
           port: port() | nil,
           subscriber: pid(),
           pi_path: String.t(),
+          provider: String.t() | nil,
           model: String.t() | nil,
           buffer: String.t(),
-          request_id: non_neg_integer()
+          request_id: non_neg_integer(),
+          pending: %{optional(String.t()) => GenServer.from()}
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -65,14 +67,14 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   @impl Minga.Agent.Provider
   @doc "Fetches available models from the pi RPC backend."
-  @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(pid) do
     GenServer.call(pid, :get_available_models, 10_000)
   end
 
   @impl Minga.Agent.Provider
   @doc "Fetches available commands (extensions, skills, prompts) from pi."
-  @spec get_commands(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  @spec get_commands(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_commands(pid) do
     GenServer.call(pid, :get_commands, 10_000)
   end
@@ -84,7 +86,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   @doc "Cycles to the next thinking level on the pi backend."
-  @spec cycle_thinking_level(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  @spec cycle_thinking_level(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def cycle_thinking_level(pid) do
     GenServer.call(pid, :cycle_thinking_level, 10_000)
   end
@@ -257,7 +259,8 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   @spec send_command(port() | nil, map()) :: :ok | {:error, :no_port}
-  @spec send_request(map(), String.t(), GenServer.from()) :: {:noreply, map()}
+  @spec send_request(state(), String.t(), GenServer.from()) ::
+          {:noreply, state()} | {:reply, {:error, :no_port}, state()}
   defp send_request(state, type, from) do
     {id, state} = next_id(state)
     req_id = "req-#{id}"
