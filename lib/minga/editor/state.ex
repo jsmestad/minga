@@ -39,6 +39,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
+
   alias Minga.Mode
   alias Minga.Theme
 
@@ -84,7 +85,8 @@ defmodule Minga.Editor.State do
             file_tree_focused: false,
             git_buffers: %{},
             injection_ranges: %{},
-            agent: %AgentState{}
+            agent: %AgentState{},
+            focus_stack: []
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -122,7 +124,8 @@ defmodule Minga.Editor.State do
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
             ]
           },
-          agent: AgentState.t()
+          agent: AgentState.t(),
+          focus_stack: [module()]
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

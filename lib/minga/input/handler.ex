@@ -1,0 +1,44 @@
+defmodule Minga.Input.Handler do
+  @moduledoc """
+  Behaviour for key input handlers in the focus stack.
+
+  Each handler module decides whether to consume a key press or pass it
+  through to the next handler in the stack. Handlers self-gate: they
+  return `{:passthrough, state}` when their feature is inactive (e.g.,
+  the picker handler passes through when no picker is open).
+
+  ## Implementing a handler
+
+      defmodule MyHandler do
+        @behaviour Minga.Input.Handler
+
+        @impl true
+        def handle_key(state, _codepoint, _modifiers) do
+          if my_feature_active?(state) do
+            {:handled, do_something(state)}
+          else
+            {:passthrough, state}
+          end
+        end
+      end
+  """
+
+  alias Minga.Editor.State, as: EditorState
+
+  @typedoc "Result of handling a key press."
+  @type result :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+
+  @doc """
+  Processes a key press event.
+
+  Returns `{:handled, state}` if this handler consumed the key, or
+  `{:passthrough, state}` if the key should be forwarded to the next
+  handler in the stack. The handler may modify state even when passing
+  through (e.g., clearing a transient flag).
+  """
+  @callback handle_key(
+              EditorState.t(),
+              codepoint :: non_neg_integer(),
+              modifiers :: non_neg_integer()
+            ) :: result()
+end

@@ -21,14 +21,12 @@ defmodule Minga.Editor do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
-  alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.LspActions
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
-  alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -36,22 +34,15 @@ defmodule Minga.Editor do
   alias Minga.FileTree
   alias Minga.FileWatcher
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Input
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.EvalState
   alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol
+
   alias Minga.Project
 
   require Logger
-
-  import Bitwise
-
-  @ctrl Protocol.mod_ctrl()
-  @alt Protocol.mod_alt()
-  @escape 27
-  @enter 13
-  @tab 9
 
   @typedoc "Options for starting the editor."
   @type start_opt ::
@@ -168,7 +159,8 @@ defmodule Minga.Editor do
         map: windows,
         active: initial_window_id,
         next_id: initial_window_id + 1
-      }
+      },
+      focus_stack: Minga.Input.default_stack()
     }
 
     # Redirect Logger and stderr to a log file when running with a real TUI.
@@ -299,154 +291,20 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  # ── Conflict prompt: intercept r/k before normal key handling ──
-  def handle_info(
-        {:minga_input, {:key_press, ?r, _mods}},
-        %{pending_conflict: {buf, _path}} = state
-      )
-      when is_pid(buf) do
-    BufferServer.reload(buf)
-    name = Path.basename(BufferServer.file_path(buf) || "buffer")
-
-    new_state = %{
-      state
-      | pending_conflict: nil,
-        status_msg: "#{name} reloaded (changed on disk)"
-    }
-
-    Renderer.render(new_state)
+  # ── Key press dispatch ──
+  # All key presses go through the focus stack via Input.Router.
+  # The router walks ConflictPrompt → Picker → Completion → GlobalBindings → ModeFSM
+  # and runs centralized post-key housekeeping (highlight sync, reparse,
+  # completion, render) exactly once.
+  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
+    new_state = Input.Router.dispatch(state, codepoint, modifiers)
     {:noreply, new_state}
-  end
-
-  def handle_info(
-        {:minga_input, {:key_press, ?k, _mods}},
-        %{pending_conflict: {buf, _path}} = state
-      )
-      when is_pid(buf) do
-    # Keep local edits — update stored mtime+size so the prompt doesn't repeat
-    buf_state = :sys.get_state(buf)
-
-    case File.stat(buf_state.file_path, time: :posix) do
-      {:ok, %{mtime: mtime, size: size}} ->
-        :sys.replace_state(buf, fn s -> %{s | mtime: mtime, file_size: size} end)
-
-      {:error, _} ->
-        :ok
-    end
-
-    new_state = %{state | pending_conflict: nil, status_msg: nil}
-    Renderer.render(new_state)
-    {:noreply, new_state}
-  end
-
-  def handle_info({:minga_input, {:key_press, _cp, _mods}}, %{pending_conflict: {_, _}} = state) do
-    # Any other key while conflict prompt is active — ignore
-    {:noreply, state}
-  end
-
-  # ── Agent panel key interception ──
-  # When the agent panel is visible and input is focused, ALL keystrokes
-  # route here. Only Escape can unfocus the input. Ctrl+Q and Ctrl+S are
-  # handled directly. Unrecognized keys are silently ignored (never
-  # forwarded to the mode FSM, which would cause accidental unfocusing).
-  def handle_info(
-        {:minga_input, {:key_press, codepoint, modifiers}},
-        %{agent: %{panel: %{visible: true, input_focused: true}}} = state
-      ) do
-    new_state = handle_agent_key(%{state | status_msg: nil}, codepoint, modifiers)
-    Renderer.render(new_state)
-    {:noreply, new_state}
-  end
-
-  # ── File tree key interception ──
-  def handle_info(
-        {:minga_input, {:key_press, codepoint, modifiers}},
-        %{file_tree: %FileTree{}, file_tree_focused: true} = state
-      ) do
-    old_buffer = state.buffers.active
-
-    case handle_file_tree_key(state, codepoint, modifiers) do
-      :passthrough ->
-        # Key not handled by tree; unfocus and forward to normal processing
-        new_state = %{state | file_tree_focused: false}
-        send(self(), {:minga_input, {:key_press, codepoint, modifiers}})
-        {:noreply, new_state}
-
-      new_state ->
-        new_state = maybe_reset_highlight(new_state, old_buffer)
-        Renderer.render(new_state)
-        {:noreply, new_state}
-    end
   end
 
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path}, state) do
     new_state = handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
-    Renderer.render(new_state)
-    {:noreply, new_state}
-  end
-
-  def handle_info(
-        {:minga_input, {:key_press, codepoint, modifiers}},
-        %{picker_ui: %{picker: picker}} = state
-      )
-      when is_struct(picker, Minga.Picker) do
-    old_buffer = state.buffers.active
-
-    new_state =
-      case PickerUI.handle_key(%{state | status_msg: nil}, codepoint, modifiers) do
-        {s, {:execute_command, cmd}} -> dispatch_command(s, cmd)
-        s -> s
-      end
-
-    new_state = maybe_reset_highlight(new_state, old_buffer)
-    Renderer.render(new_state)
-    {:noreply, new_state}
-  end
-
-  # Completion popup key interception — when popup is visible in insert mode,
-  # intercept navigation and accept keys before normal insert mode handling.
-  def handle_info(
-        {:minga_input, {:key_press, codepoint, modifiers}},
-        %{mode: :insert, completion: %Completion{} = completion} = state
-      ) do
-    case handle_completion_key(state, completion, codepoint, modifiers) do
-      {:handled, new_state} ->
-        Renderer.render(new_state)
-        {:noreply, new_state}
-
-      :passthrough ->
-        # Not a completion key — fall through to normal insert handling
-        buf_version_before = buffer_version(state)
-        new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
-        new_state = maybe_reset_highlight(new_state, state.buffers.active)
-        new_state = maybe_reparse(new_state, buf_version_before)
-
-        # After insert mode edits, update completion filter or trigger new completions
-        new_state = maybe_update_completion(new_state, codepoint, modifiers)
-
-        Renderer.render(new_state)
-        {:noreply, new_state}
-    end
-  end
-
-  def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
-    buf_version_before = buffer_version(state)
-    old_mode = state.mode
-    new_state = handle_key(%{state | status_msg: nil}, codepoint, modifiers)
-    new_state = maybe_reset_highlight(new_state, state.buffers.active)
-    new_state = maybe_reparse(new_state, buf_version_before)
-
-    # Trigger completion after insert mode edits (no active popup)
-    new_state =
-      if new_state.mode == :insert and old_mode == :insert do
-        maybe_update_completion(new_state, codepoint, modifiers)
-      else
-        # Dismiss completion when leaving insert mode
-        dismiss_completion(new_state)
-      end
-
     Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -684,97 +542,11 @@ defmodule Minga.Editor do
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
 
-  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-
-  # Global bindings — processed before the Mode FSM.
-  # Ctrl+S → save (works in any mode).
-  # ── Agent panel input routing ─────────────────────────────────────────────
-  # ── Agent panel key dispatch ──────────────────────────────────────────────
-  # All keys handled inline. Only Escape unfocuses. Unrecognized keys are
-  # swallowed so stray terminal events can never break focus.
-
-  @spec handle_agent_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t()
-
-  # Ctrl+Q: quit (unfocus first, then forward the quit key)
-  defp handle_agent_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    send(self(), {:minga_input, {:key_press, ?q, mods}})
-    update_agent(state, &AgentState.focus_input(&1, false))
-  end
-
-  # Ctrl+S: save current buffer
-  defp handle_agent_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buffers.active do
-      case BufferServer.save(state.buffers.active) do
-        :ok -> :ok
-        {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
-      end
-    end
-
-    _ = mods
-    state
-  end
-
-  # Ctrl+C: submit prompt
-  defp handle_agent_key(state, ?c, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.submit_prompt(state)
-  end
-
-  # Ctrl+D: scroll chat down
-  defp handle_agent_key(state, ?d, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.scroll_chat_down(state)
-  end
-
-  # Ctrl+U: scroll chat up
-  defp handle_agent_key(state, ?u, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.scroll_chat_up(state)
-  end
-
-  # Escape: unfocus the input (return to normal editing)
-  defp handle_agent_key(state, 27, _mods) do
-    update_agent(state, &AgentState.focus_input(&1, false))
-  end
-
-  # Backspace
-  defp handle_agent_key(state, 127, _mods) do
-    AgentCommands.input_backspace(state)
-  end
-
-  # Enter: submit prompt
-  defp handle_agent_key(state, 13, _mods) do
-    AgentCommands.submit_prompt(state)
-  end
-
-  # Printable characters (only unmodified or shift-modified, not Ctrl/Alt)
-  defp handle_agent_key(state, cp, mods)
-       when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
-    char = <<cp::utf8>>
-    AgentCommands.input_char(state, char)
-  end
-
-  # Everything else (arrows, function keys, terminal responses): silently ignore
-  defp handle_agent_key(state, _cp, _mods), do: state
-
-  # Ctrl+S → save (works in any mode, including agent panel focus).
-  defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buffers.active do
-      case BufferServer.save(state.buffers.active) do
-        :ok -> :ok
-        {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
-      end
-    end
-
-    state
-  end
-
-  # Ctrl+Q → quit (works in any mode).
-  defp handle_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    System.stop(0)
-    state
-  end
-
-  # All other keys go through the Mode FSM.
-  defp handle_key(state, codepoint, modifiers) do
+  # All keys go through the Mode FSM.
+  # Called by Minga.Input.ModeFSM handler.
+  @doc false
+  @spec do_handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
+  def do_handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
     old_mode = state.mode
     {new_mode, commands, new_mode_state} = Mode.process(old_mode, key, state.mode_state)
@@ -1016,7 +788,7 @@ defmodule Minga.Editor do
         # Feed each key through handle_key sequentially.
         state =
           Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
-            handle_key(acc, codepoint, modifiers)
+            do_handle_key(acc, codepoint, modifiers)
           end)
 
         # Exit replay mode.
@@ -1028,8 +800,9 @@ defmodule Minga.Editor do
   # ── Command execution ────────────────────────────────────────────────────────
 
   # Detect active buffer change: save old highlights to cache, restore or setup new.
-  @spec maybe_reset_highlight(state(), pid() | nil) :: state()
-  defp maybe_reset_highlight(state, old_buffer) do
+  @doc false
+  @spec do_maybe_reset_highlight(state(), pid() | nil) :: state()
+  def do_maybe_reset_highlight(state, old_buffer) do
     new_buffer = state.buffers.active
 
     if new_buffer != old_buffer and new_buffer != nil do
@@ -1065,8 +838,9 @@ defmodule Minga.Editor do
   # Compares the buffer's mutation version before/after key handling to detect
   # any content change — covers insert mode, normal-mode operators (dd, p, x,
   # >>, <<, etc.), undo/redo, and any other mutation path.
-  @spec maybe_reparse(state(), non_neg_integer()) :: state()
-  defp maybe_reparse(state, version_before) do
+  @doc false
+  @spec do_maybe_reparse(state(), non_neg_integer()) :: state()
+  def do_maybe_reparse(state, version_before) do
     content_changed = buffer_version(state) != version_before
 
     state =
@@ -1089,8 +863,9 @@ defmodule Minga.Editor do
   defp buffer_version(%{buffers: %{active: nil}}), do: 0
   defp buffer_version(%{buffers: %{active: buf}}), do: BufferServer.version(buf)
 
+  @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
-  defp dispatch_command(state, cmd) do
+  def dispatch_command(state, cmd) do
     old_buffer = state.buffers.active
     cmd_name = command_name(cmd)
 
@@ -1246,7 +1021,7 @@ defmodule Minga.Editor do
 
         state =
           Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
-            handle_key(acc, codepoint, modifiers)
+            do_handle_key(acc, codepoint, modifiers)
           end)
 
         rec = MacroRecorder.stop_replay(state.macro_recorder)
@@ -1254,84 +1029,21 @@ defmodule Minga.Editor do
     end
   end
 
-  # ── File tree key handling ──────────────────────────────────────────────
+  # ── File tree helpers ───────────────────────────────────────────────────
 
-  @spec handle_file_tree_key(state(), non_neg_integer(), non_neg_integer()) ::
-          state() | :passthrough
-
-  # q or Escape — close the tree
-  defp handle_file_tree_key(state, cp, _mods) when cp in [?q, @escape] do
-    %{state | file_tree: nil, file_tree_focused: false}
+  @doc false
+  @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
+  def do_file_tree_open(state, pid, path, tree) do
+    maybe_watch_buffer(file_watcher_pid(), pid)
+    maybe_detect_project(path)
+    maybe_record_file(path)
+    new_state = Commands.add_buffer(state, pid)
+    new_state = log_message(new_state, "Opened: #{path}")
+    new_state = lsp_buffer_opened(new_state, pid)
+    new_state = git_buffer_opened(new_state, pid)
+    fire_hook(:after_open, [pid, path])
+    %{new_state | file_tree: FileTree.reveal(tree, path)}
   end
-
-  # j — move down
-  defp handle_file_tree_key(%{file_tree: tree} = state, ?j, _mods) do
-    %{state | file_tree: FileTree.move_down(tree)}
-  end
-
-  # k — move up
-  defp handle_file_tree_key(%{file_tree: tree} = state, ?k, _mods) do
-    %{state | file_tree: FileTree.move_up(tree)}
-  end
-
-  # Enter — open file or toggle directory
-  defp handle_file_tree_key(%{file_tree: tree} = state, @enter, _mods) do
-    case FileTree.selected_entry(tree) do
-      %{dir?: true} ->
-        %{state | file_tree: FileTree.toggle_expand(tree)}
-
-      %{dir?: false, path: path} ->
-        # Open the file and return focus to editor
-        state = %{state | file_tree_focused: false}
-
-        case Commands.start_buffer(path) do
-          {:ok, pid} ->
-            maybe_watch_buffer(file_watcher_pid(), pid)
-            maybe_detect_project(path)
-            maybe_record_file(path)
-            new_state = Commands.add_buffer(state, pid)
-            new_state = log_message(new_state, "Opened: #{path}")
-            new_state = lsp_buffer_opened(new_state, pid)
-            new_state = git_buffer_opened(new_state, pid)
-            fire_hook(:after_open, [pid, path])
-            %{new_state | file_tree: FileTree.reveal(tree, path)}
-
-          {:error, _} ->
-            state
-        end
-
-      nil ->
-        state
-    end
-  end
-
-  # Tab — same as Enter for directories
-  defp handle_file_tree_key(%{file_tree: tree} = state, @tab, _mods) do
-    %{state | file_tree: FileTree.toggle_expand(tree)}
-  end
-
-  # h — collapse (or jump to parent)
-  defp handle_file_tree_key(%{file_tree: tree} = state, ?h, _mods) do
-    %{state | file_tree: FileTree.collapse(tree)}
-  end
-
-  # l — expand (or move into first child)
-  defp handle_file_tree_key(%{file_tree: tree} = state, ?l, _mods) do
-    %{state | file_tree: FileTree.expand(tree)}
-  end
-
-  # H — toggle hidden files
-  defp handle_file_tree_key(%{file_tree: tree} = state, ?H, _mods) do
-    %{state | file_tree: FileTree.toggle_hidden(tree)}
-  end
-
-  # r or g — refresh
-  defp handle_file_tree_key(%{file_tree: tree} = state, cp, _mods) when cp in [?r, ?g] do
-    %{state | file_tree: FileTree.refresh(tree)}
-  end
-
-  # Any other key — pass through to normal mode processing
-  defp handle_file_tree_key(_state, _cp, _mods), do: :passthrough
 
   # ── Special buffers ──────────────────────────────────────────────────────
 
@@ -1565,49 +1277,40 @@ defmodule Minga.Editor do
     end
   end
 
-  # ── Completion helpers ───────────────────────────────────────────────────────
+  # ── Public housekeeping API for Input.Router ───────────────────────────────
 
-  @arrow_up 57_352
-  @arrow_down 57_353
-
-  @spec handle_completion_key(state(), Completion.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, state()} | :passthrough
-
-  # Escape — dismiss completion and stay in insert mode
-  defp handle_completion_key(state, _completion, @escape, _mods) do
-    {:handled, dismiss_completion(state)}
-  end
-
-  # C-n or arrow down — move selection down
-  defp handle_completion_key(state, completion, cp, mods)
-       when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
-    {:handled, %{state | completion: Completion.move_down(completion)}}
-  end
-
-  # C-p or arrow up — move selection up
-  defp handle_completion_key(state, completion, cp, mods)
-       when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
-    {:handled, %{state | completion: Completion.move_up(completion)}}
-  end
-
-  # Tab or Enter — accept the selected completion
-  defp handle_completion_key(state, completion, cp, _mods) when cp in [@tab, @enter] do
+  @doc false
+  @spec do_accept_completion(state(), Completion.t()) :: state()
+  def do_accept_completion(state, completion) do
     case Completion.accept(completion) do
       nil ->
-        {:handled, dismiss_completion(state)}
+        do_dismiss_completion(state)
 
       {:insert_text, text} ->
-        new_state = accept_completion_text(state, completion, text)
-        {:handled, dismiss_completion(new_state)}
+        state |> accept_completion_text(completion, text) |> do_dismiss_completion()
 
       {:text_edit, edit} ->
-        new_state = apply_completion_text_edit(state, edit)
-        {:handled, dismiss_completion(new_state)}
+        state |> apply_completion_text_edit(edit) |> do_dismiss_completion()
     end
   end
 
-  # All other keys — pass through to normal insert mode handling
-  defp handle_completion_key(_state, _completion, _cp, _mods), do: :passthrough
+  @doc false
+  @spec do_maybe_handle_completion(state(), atom(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  def do_maybe_handle_completion(state, old_mode, codepoint, modifiers) do
+    if state.mode == :insert and old_mode == :insert do
+      maybe_update_completion(state, codepoint, modifiers)
+    else
+      do_dismiss_completion(state)
+    end
+  end
+
+  @doc false
+  @spec do_render(state()) :: state()
+  def do_render(state) do
+    Renderer.render(state)
+    state
+  end
 
   @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
   defp accept_completion_text(%{buffers: %{active: buf}} = state, completion, text)
@@ -1668,8 +1371,8 @@ defmodule Minga.Editor do
   end
 
   @spec apply_completion_filter(state(), Completion.t(), String.t() | nil) :: state()
-  defp apply_completion_filter(state, _completion, nil), do: dismiss_completion(state)
-  defp apply_completion_filter(state, _completion, ""), do: dismiss_completion(state)
+  defp apply_completion_filter(state, _completion, nil), do: do_dismiss_completion(state)
+  defp apply_completion_filter(state, _completion, ""), do: do_dismiss_completion(state)
 
   defp apply_completion_filter(state, completion, prefix) do
     filtered = Completion.filter(completion, prefix)
@@ -1677,7 +1380,7 @@ defmodule Minga.Editor do
     if Completion.active?(filtered) do
       %{state | completion: filtered}
     else
-      dismiss_completion(state)
+      do_dismiss_completion(state)
     end
   end
 
@@ -1695,8 +1398,9 @@ defmodule Minga.Editor do
     end
   end
 
-  @spec dismiss_completion(state()) :: state()
-  defp dismiss_completion(state) do
+  @doc false
+  @spec do_dismiss_completion(state()) :: state()
+  def do_dismiss_completion(state) do
     new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
     %{state | completion: nil, completion_trigger: new_bridge}
   end
