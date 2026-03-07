@@ -56,6 +56,9 @@ struct ContentView: View {
             }
         }
         .navigationTitle(appState.windowTitle)
+        .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
     }
 }
 
@@ -64,6 +67,10 @@ struct ContentView: View {
 final class AppState: ObservableObject {
     @Published var windowTitle: String = "Minga"
     @Published var editorNSView: EditorNSView?
+    /// Theme background color for the title bar, sent by the BEAM via set_window_bg.
+    @Published var windowBgColor: Color?
+    /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
+    @Published var windowBgIsDark: Bool = true
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -128,22 +135,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appState?.windowTitle = title
             }
         }
-        disp.onWindowBgChanged = { color in
-            // Apply to all windows (typically just one).
-            for window in NSApp.windows {
-                window.backgroundColor = color
-                // Transparent titlebar lets the backgroundColor show through
-                // so the title bar blends with the editor theme. The content
-                // stays below the title bar (no fullSizeContentView) so we
-                // don't need to account for the title bar height in the BEAM's
-                // layout calculations.
-                window.titlebarAppearsTransparent = true
-                // Pick light/dark appearance based on luminance so the
-                // title text and traffic lights stay readable.
-                let luma = color.redComponent * 0.299 +
-                           color.greenComponent * 0.587 +
-                           color.blueComponent * 0.114
-                window.appearance = NSAppearance(named: luma < 0.5 ? .darkAqua : .aqua)
+        disp.onWindowBgChanged = { [weak appState] color in
+            Task { @MainActor in
+                guard let appState else { return }
+                let r = color.redComponent
+                let g = color.greenComponent
+                let b = color.blueComponent
+                appState.windowBgColor = Color(red: r, green: g, blue: b)
+                appState.windowBgIsDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
             }
         }
         self.dispatcher = disp

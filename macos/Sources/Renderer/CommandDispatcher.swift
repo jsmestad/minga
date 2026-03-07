@@ -31,7 +31,7 @@ final class CommandDispatcher {
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
 
-    /// Called when the BEAM sends a window background color.
+    /// Called when the BEAM sends a window background color (RGB).
     var onWindowBgChanged: ((NSColor) -> Void)?
 
     init(grid: CellGrid) {
@@ -72,6 +72,7 @@ final class CommandDispatcher {
                 blue: CGFloat(b) / 255.0,
                 alpha: 1.0
             )
+            PortLogger.info("Window bg received: r=\(r) g=\(g) b=\(b)")
             onWindowBgChanged?(color)
 
         case .defineRegion(let id, let parentId, let role, let row, let col, let width, let height, let zOrder):
