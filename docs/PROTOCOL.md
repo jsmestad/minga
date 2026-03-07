@@ -33,8 +33,12 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x11` | set_cursor | 5 | Position the cursor |
 | `0x12` | clear | 1 | Clear the entire screen |
 | `0x13` | batch_end | 1 | End of frame; flush to screen |
+| `0x14` | define_region | 15 | Create/update a layout region |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
+| `0x18` | clear_region | 3 | Clear a specific region |
+| `0x19` | destroy_region | 3 | Remove a region |
+| `0x1A` | set_active_region | 3 | Route draw commands to a region |
 
 ### BEAM → Frontend (Highlight Commands)
 
@@ -607,18 +611,86 @@ Total size: 9 bytes.
 
 The TUI backend sends `ready` with default capabilities immediately at startup, then sends `capabilities_updated` once libvaxis finishes its async terminal capability detection (triggered by the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
 
-## Future: Layout Regions
+## Layout Regions
 
-_This section describes a planned extension. See #152._
+Regions express layout structure so frontends can map editor areas to their native abstraction: virtual viewports with clipping (TUI), NSView hierarchy (AppKit), GtkWidget containers (GTK4).
 
-New opcodes will express layout structure so native GUIs can map editor areas to native views:
+Region ID 0 is the implicit root region (the entire screen). All draw commands before any `set_active_region` target the root.
 
-- `0x14 define_region` — create a named rectangular area with a role and z-order
-- `0x18 clear_region` — clear only a specific region
-- `0x19 destroy_region` — remove a region
-- `0x1A set_active_region` — route subsequent draw commands to a region
+### `0x14` define_region
 
-TUI frontends implement regions as virtual viewports with offset/clip. GUI frontends map them to native view hierarchies.
+Create or update a layout region.
+
+```
+opcode:    u8  = 0x14
+id:        u16           region identifier (must be > 0)
+parent_id: u16           parent region (0 = root)
+role:      u8            semantic role (see table below)
+row:       u16           top-left row relative to parent
+col:       u16           top-left column relative to parent
+width:     u16           width in columns
+height:    u16           height in rows
+z_order:   u8            stacking order (higher = on top)
+```
+
+Total size: 15 bytes.
+
+**Region roles:**
+
+| Value | Role | Description |
+|-------|------|-------------|
+| 0 | editor | Main editor viewport |
+| 1 | modeline | Status line |
+| 2 | minibuffer | Command/message input area |
+| 3 | gutter | Line numbers and signs |
+| 4 | popup | Floating completion, which-key, etc. |
+| 5 | panel | Side panel (file tree, etc.) |
+| 6 | border | Window split borders |
+
+### `0x18` clear_region
+
+Clear all cells within a region to blank.
+
+```
+opcode: u8  = 0x18
+id:     u16           region to clear
+```
+
+Total size: 3 bytes.
+
+### `0x19` destroy_region
+
+Remove a region and clear its area.
+
+```
+opcode: u8  = 0x19
+id:     u16           region to destroy
+```
+
+Total size: 3 bytes.
+
+If the destroyed region was the active region, the frontend resets to the root region.
+
+### `0x1A` set_active_region
+
+Route subsequent `draw_text` commands to a region.
+
+```
+opcode: u8  = 0x1A
+id:     u16           region to activate (0 = root)
+```
+
+Total size: 3 bytes.
+
+**Behavior:** After this command, `draw_text` coordinates are relative to the active region's origin. The frontend offsets and clips draw commands to stay within the region bounds. The active region resets to root on `clear`.
+
+### TUI Implementation
+
+The TUI renderer maintains a hash map of regions. When `set_active_region` is called, the renderer adds the region's row/col offset to every subsequent `draw_text` and clips at the region boundary. `clear_region` blanks only the cells within the region's bounds.
+
+### GUI Implementation
+
+Native GUI frontends should map regions to native view objects: `define_region` creates a view, `destroy_region` removes it, `set_active_region` targets draw commands into the view's coordinate space. The `role` field provides semantic hints for styling and layout behavior.
 
 ## Future: Incremental Content Sync
 

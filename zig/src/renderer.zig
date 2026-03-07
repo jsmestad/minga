@@ -27,6 +27,10 @@ pub fn Renderer(comptime SurfaceT: type) type {
 
         surface: *SurfaceT,
         arena: std.heap.ArenaAllocator,
+        /// Active region for coordinate offset/clipping. null = root (no offset).
+        active_region: ?protocol.Region = null,
+        /// All defined regions, keyed by region ID.
+        regions: std.AutoHashMap(u16, protocol.Region),
 
         /// Initialize a renderer bound to a surface.
         /// `alloc` backs the internal arena used for grapheme byte copies.
@@ -34,11 +38,13 @@ pub fn Renderer(comptime SurfaceT: type) type {
             return .{
                 .surface = s,
                 .arena = std.heap.ArenaAllocator.init(alloc),
+                .regions = std.AutoHashMap(u16, protocol.Region).init(alloc),
             };
         }
 
         /// Free all arena memory.
         pub fn deinit(self: *Self) void {
+            self.regions.deinit();
             self.arena.deinit();
         }
 
@@ -52,15 +58,27 @@ pub fn Renderer(comptime SurfaceT: type) type {
                 },
 
                 .draw_text => |dt| {
-                    var col: u16 = dt.col;
-                    const surf_width = self.surface.width();
+                    // Apply region offset and clipping.
+                    var abs_row = dt.row;
+                    var abs_col = dt.col;
+                    var max_col: u16 = self.surface.width();
+
+                    if (self.active_region) |region| {
+                        abs_row +|= region.row;
+                        abs_col +|= region.col;
+                        // Clip to region bounds: row out of range, skip.
+                        if (abs_row >= region.row +| region.height) return;
+                        max_col = @min(self.surface.width(), region.col +| region.width);
+                    }
+
+                    var col: u16 = abs_col;
 
                     // Iterate over the text grapheme by grapheme and write each
                     // one as a separate cell.
                     var iter = vaxis.unicode.graphemeIterator(dt.text);
 
                     while (iter.next()) |grapheme| {
-                        if (col >= surf_width) break;
+                        if (col >= max_col) break;
 
                         const raw = grapheme.bytes(dt.text);
 
@@ -71,7 +89,7 @@ pub fn Renderer(comptime SurfaceT: type) type {
                         // Compute display width.
                         const w: u16 = vaxis.gwidth.gwidth(stable, .wcwidth);
 
-                        self.surface.writeCell(col, dt.row, .{
+                        self.surface.writeCell(col, abs_row, .{
                             .grapheme = stable,
                             .width = @intCast(if (w == 0) 1 else w),
                             .fg = dt.fg,
@@ -103,8 +121,56 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     self.surface.tty_writer.print("\x1b]0;{s}\x07", .{title}) catch {};
                 },
 
+                .define_region => |region| {
+                    self.regions.put(region.id, region) catch {};
+                },
+
+                .clear_region => |id| {
+                    if (self.regions.get(id)) |region| {
+                        self.clearRegionArea(region);
+                    }
+                },
+
+                .destroy_region => |id| {
+                    if (self.regions.get(id)) |region| {
+                        self.clearRegionArea(region);
+                    }
+                    _ = self.regions.remove(id);
+                    // If the destroyed region was active, reset to root.
+                    if (self.active_region) |ar| {
+                        if (ar.id == id) self.active_region = null;
+                    }
+                },
+
+                .set_active_region => |id| {
+                    if (id == 0) {
+                        self.active_region = null;
+                    } else {
+                        self.active_region = self.regions.get(id);
+                    }
+                },
+
                 // Highlight commands are handled by the event loop, not the renderer.
                 .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at => {},
+            }
+        }
+
+        /// Clear all cells within a region's bounds to blank.
+        fn clearRegionArea(self: *Self, region: protocol.Region) void {
+            var r: u16 = region.row;
+            const row_end = region.row +| region.height;
+            const col_end = region.col +| region.width;
+            while (r < row_end) : (r += 1) {
+                var c: u16 = region.col;
+                while (c < col_end) : (c += 1) {
+                    self.surface.writeCell(c, r, .{
+                        .grapheme = " ",
+                        .width = 1,
+                        .fg = 0,
+                        .bg = 0,
+                        .attrs = 0,
+                    });
+                }
             }
         }
     };

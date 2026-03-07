@@ -49,8 +49,12 @@ defmodule Minga.Port.Protocol do
   @op_set_cursor 0x11
   @op_clear 0x12
   @op_batch_end 0x13
+  @op_define_region 0x14
   @op_set_cursor_shape 0x15
   @op_set_title 0x16
+  @op_clear_region 0x18
+  @op_destroy_region 0x19
+  @op_set_active_region 0x1A
 
   # Highlight commands (BEAM → Zig)
   @op_set_language 0x20
@@ -222,6 +226,57 @@ defmodule Minga.Port.Protocol do
   def encode_set_title(title) when is_binary(title) do
     <<@op_set_title, byte_size(title)::16, title::binary>>
   end
+
+  # ── Encoding: region commands (BEAM → Zig) ──
+
+  # Region role constants
+  @region_editor 0
+  @region_modeline 1
+  @region_minibuffer 2
+  @region_gutter 3
+  @region_popup 4
+  @region_panel 5
+  @region_border 6
+
+  @typedoc "Region role atom."
+  @type region_role :: :editor | :modeline | :minibuffer | :gutter | :popup | :panel | :border
+
+  @doc "Encodes a define_region command."
+  @spec encode_define_region(
+          non_neg_integer(),
+          non_neg_integer(),
+          region_role(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
+  def encode_define_region(id, parent_id, role, row, col, width, height, z_order) do
+    <<@op_define_region, id::16, parent_id::16, encode_region_role(role)::8, row::16, col::16,
+      width::16, height::16, z_order::8>>
+  end
+
+  @doc "Encodes a clear_region command."
+  @spec encode_clear_region(non_neg_integer()) :: binary()
+  def encode_clear_region(id), do: <<@op_clear_region, id::16>>
+
+  @doc "Encodes a destroy_region command."
+  @spec encode_destroy_region(non_neg_integer()) :: binary()
+  def encode_destroy_region(id), do: <<@op_destroy_region, id::16>>
+
+  @doc "Encodes a set_active_region command. Pass 0 to reset to root."
+  @spec encode_set_active_region(non_neg_integer()) :: binary()
+  def encode_set_active_region(id), do: <<@op_set_active_region, id::16>>
+
+  @spec encode_region_role(region_role()) :: non_neg_integer()
+  defp encode_region_role(:editor), do: @region_editor
+  defp encode_region_role(:modeline), do: @region_modeline
+  defp encode_region_role(:minibuffer), do: @region_minibuffer
+  defp encode_region_role(:gutter), do: @region_gutter
+  defp encode_region_role(:popup), do: @region_popup
+  defp encode_region_role(:panel), do: @region_panel
+  defp encode_region_role(:border), do: @region_border
 
   # ── Encoding: highlight commands (BEAM → Zig) ──
 

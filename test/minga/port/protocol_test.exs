@@ -474,4 +474,41 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:log_message, "INFO", ^text}} = Protocol.decode_event(payload)
     end
   end
+
+  describe "region commands" do
+    test "encode_define_region produces correct binary" do
+      result = Protocol.encode_define_region(1, 0, :modeline, 23, 0, 80, 1, 0)
+      assert <<0x14, 1::16, 0::16, 1, 23::16, 0::16, 80::16, 1::16, 0>> = result
+    end
+
+    test "encode_clear_region" do
+      assert <<0x18, 1::16>> = Protocol.encode_clear_region(1)
+    end
+
+    test "encode_destroy_region" do
+      assert <<0x19, 2::16>> = Protocol.encode_destroy_region(2)
+    end
+
+    test "encode_set_active_region" do
+      assert <<0x1A, 1::16>> = Protocol.encode_set_active_region(1)
+    end
+
+    test "encode_set_active_region with root (0)" do
+      assert <<0x1A, 0::16>> = Protocol.encode_set_active_region(0)
+    end
+
+    test "all region roles encode to unique values" do
+      roles = [:editor, :modeline, :minibuffer, :gutter, :popup, :panel, :border]
+
+      values =
+        Enum.map(roles, fn role ->
+          <<0x14, _::16, _::16, v::8, _rest::binary>> =
+            Protocol.encode_define_region(1, 0, role, 0, 0, 1, 1, 0)
+
+          v
+        end)
+
+      assert length(Enum.uniq(values)) == length(roles)
+    end
+  end
 end

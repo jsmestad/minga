@@ -29,8 +29,12 @@ pub const OP_DRAW_TEXT: u8 = 0x10;
 pub const OP_SET_CURSOR: u8 = 0x11;
 pub const OP_CLEAR: u8 = 0x12;
 pub const OP_BATCH_END: u8 = 0x13;
+pub const OP_DEFINE_REGION: u8 = 0x14;
 pub const OP_SET_CURSOR_SHAPE: u8 = 0x15;
 pub const OP_SET_TITLE: u8 = 0x16;
+pub const OP_CLEAR_REGION: u8 = 0x18;
+pub const OP_DESTROY_REGION: u8 = 0x19;
+pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 
 // Highlight commands (BEAM → Zig)
 pub const OP_SET_LANGUAGE: u8 = 0x20;
@@ -113,6 +117,28 @@ pub const FLOAT_NATIVE: u8 = 1;
 pub const TEXT_MONOSPACE: u8 = 0;
 pub const TEXT_PROPORTIONAL: u8 = 1;
 
+// ── Region roles ──
+
+pub const REGION_EDITOR: u8 = 0;
+pub const REGION_MODELINE: u8 = 1;
+pub const REGION_MINIBUFFER: u8 = 2;
+pub const REGION_GUTTER: u8 = 3;
+pub const REGION_POPUP: u8 = 4;
+pub const REGION_PANEL: u8 = 5;
+pub const REGION_BORDER: u8 = 6;
+
+/// A layout region defines a rectangular area on screen.
+pub const Region = struct {
+    id: u16,
+    parent_id: u16,
+    role: u8,
+    row: u16,
+    col: u16,
+    width: u16,
+    height: u16,
+    z_order: u8,
+};
+
 /// Frontend capabilities, reported in the extended ready event and
 /// capabilities_updated events.
 pub const Capabilities = struct {
@@ -146,6 +172,11 @@ pub const RenderCommand = union(enum) {
     set_title: []const u8,
     clear: void,
     batch_end: void,
+    // Region commands
+    define_region: Region,
+    clear_region: u16,
+    destroy_region: u16,
+    set_active_region: u16,
     // Highlight commands
     set_language: []const u8,
     parse_buffer: ParseBuffer,
@@ -455,6 +486,32 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .byte_offset = byte_offset,
             } };
         },
+        OP_DEFINE_REGION => {
+            // id:2, parent_id:2, role:1, row:2, col:2, width:2, height:2, z_order:1 = 14
+            if (rest.len < 14) return error.Malformed;
+            return .{ .define_region = .{
+                .id = std.mem.readInt(u16, rest[0..2], .big),
+                .parent_id = std.mem.readInt(u16, rest[2..4], .big),
+                .role = rest[4],
+                .row = std.mem.readInt(u16, rest[5..7], .big),
+                .col = std.mem.readInt(u16, rest[7..9], .big),
+                .width = std.mem.readInt(u16, rest[9..11], .big),
+                .height = std.mem.readInt(u16, rest[11..13], .big),
+                .z_order = rest[13],
+            } };
+        },
+        OP_CLEAR_REGION => {
+            if (rest.len < 2) return error.Malformed;
+            return .{ .clear_region = std.mem.readInt(u16, rest[0..2], .big) };
+        },
+        OP_DESTROY_REGION => {
+            if (rest.len < 2) return error.Malformed;
+            return .{ .destroy_region = std.mem.readInt(u16, rest[0..2], .big) };
+        },
+        OP_SET_ACTIVE_REGION => {
+            if (rest.len < 2) return error.Malformed;
+            return .{ .set_active_region = std.mem.readInt(u16, rest[0..2], .big) };
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -513,6 +570,10 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
+        OP_DEFINE_REGION => 15, // opcode(1) + id(2) + parent_id(2) + role(1) + row(2) + col(2) + width(2) + height(2) + z_order(1)
+        OP_CLEAR_REGION => 3, // opcode(1) + id(2)
+        OP_DESTROY_REGION => 3, // opcode(1) + id(2)
+        OP_SET_ACTIVE_REGION => 3, // opcode(1) + id(2)
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };
