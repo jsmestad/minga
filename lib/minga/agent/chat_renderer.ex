@@ -55,6 +55,18 @@ defmodule Minga.Agent.ChatRenderer do
     commands
   end
 
+  @doc """
+  Renders only the message content area (no header, no input, no separator).
+
+  Used by the agentic view renderer, which handles the title bar and input
+  area separately at full screen width.
+  """
+  @spec render_messages_only(rect(), panel_state(), Theme.t()) :: [binary()]
+  def render_messages_only({row_off, col_off, width, height}, panel, theme) do
+    at = Theme.agent_theme(theme)
+    render_content([], row_off, col_off, width, height, panel, at)
+  end
+
   # ── Separator line ──────────────────────────────────────────────────────────
 
   @spec render_separator(

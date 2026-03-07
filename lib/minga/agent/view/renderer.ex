@@ -1,11 +1,20 @@
 defmodule Minga.Agent.View.Renderer do
   @moduledoc """
-  Full-screen agentic view renderer.
+  Full-screen agentic view renderer (OpenCode-style layout).
 
-  Produces draw commands for a two-panel layout: chat panel on the left (~65%
-  width, full height) and a read-only file viewer on the right (~35%). A
-  vertical separator divides the panels. The modeline sits at row `rows - 2`
-  and the minibuffer is always reserved at the absolute last row.
+  Layout from top to bottom:
+
+      Row 0          Title bar (status, model, session info, token usage)
+      Row 1..H-6     Chat messages (left ~65%) │ File viewer (right ~35%)
+      Row H-5        Input border ─── Prompt ─── (full width)
+      Row H-4        Input text (full width)
+      Row H-3        Input padding (full width)
+      Row H-2        Modeline (full width)
+      Row H-1        Minibuffer (reserved by editor)
+
+  The chat panel has no internal header or input; those are rendered at
+  full width by this module. The file viewer has a header bar at the top
+  of its rect showing the filename.
 
   Called by `Minga.Editor.Renderer` when `state.agentic.active` is true.
   """
@@ -29,8 +38,9 @@ defmodule Minga.Agent.View.Renderer do
   @type state :: EditorState.t()
 
   @chat_width_pct 65
-  # Input area rows inside the ChatRenderer: border + text + padding
   @input_height 3
+
+  # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
   Renders the full-screen agentic view and returns a flat list of draw commands.
@@ -40,55 +50,136 @@ defmodule Minga.Agent.View.Renderer do
   """
   @spec render(state()) :: [binary()]
   def render(state) do
-    total_cols = state.viewport.cols
-    total_rows = state.viewport.rows
+    cols = state.viewport.cols
+    rows = state.viewport.rows
 
-    # Layout: last row = minibuffer, second-to-last row = modeline.
-    # Content height for the panels is everything above the minibuffer row.
-    content_height = total_rows - 1
+    # Layout math:
+    #   Row 0         = title bar
+    #   Row 1..P-1    = panels (chat + viewer)
+    #   Row P..P+2    = input area (3 rows)
+    #   Row P+3       = modeline
+    #   Row P+4       = minibuffer (reserved; rows - 1)
+    #
+    # P = rows - 1 (minibuffer) - 1 (modeline) - @input_height
+    panel_end = rows - 1 - 1 - @input_height
+    panel_start = 1
+    panel_height = max(panel_end - panel_start, 1)
 
-    chat_width = max(div(total_cols * @chat_width_pct, 100), 20)
+    chat_width = max(div(cols * @chat_width_pct, 100), 20)
     separator_col = chat_width
     viewer_col = chat_width + 1
-    viewer_width = max(total_cols - viewer_col, 10)
+    viewer_width = max(cols - viewer_col, 10)
 
-    # The chat panel gets full content height; it draws the separator row and
-    # header internally.
-    chat_rect = {0, 0, chat_width, content_height}
-    viewer_rect = {0, viewer_col, viewer_width, content_height}
+    input_row = panel_end
+    modeline_row = input_row + @input_height
 
-    chat_commands = render_chat(state, chat_rect)
-    separator_commands = render_separator(separator_col, content_height, state.theme)
-    viewer_commands = render_file_viewer(state, viewer_rect)
-    modeline_commands = render_agentic_modeline(state, total_cols)
+    title_commands = render_title_bar(state, 0, cols)
+    chat_commands = render_chat(state, {panel_start, 0, chat_width, panel_height})
+    separator_commands = render_separator(separator_col, panel_start, panel_height, state.theme)
 
-    chat_commands ++ separator_commands ++ viewer_commands ++ modeline_commands
+    viewer_commands =
+      render_file_viewer(state, {panel_start, viewer_col, viewer_width, panel_height})
+
+    input_commands = render_input(state, input_row, cols)
+    modeline_commands = render_modeline(state, modeline_row, cols)
+
+    title_commands ++
+      chat_commands ++
+      separator_commands ++
+      viewer_commands ++
+      input_commands ++
+      modeline_commands
   end
 
   @doc """
   Returns `{row, col}` for where the terminal cursor should be placed.
 
-  When the chat input is focused the cursor goes into the input text field.
-  Otherwise the cursor is hidden off-screen (bottom-right corner).
+  When the chat input is focused the cursor sits in the full-width input area.
+  Otherwise the cursor is hidden off-screen.
   """
   @spec cursor_position(state()) :: {non_neg_integer(), non_neg_integer()}
   def cursor_position(state) do
-    total_rows = state.viewport.rows
-    content_height = total_rows - 1
+    rows = state.viewport.rows
 
     if state.agent.panel.input_focused do
-      # The ChatRenderer places the input text at content_height - @input_height + 1
-      # (0-based: border is at -3, text is at -2 from content_height).
-      input_text_row = content_height - @input_height + 1
-      # "  " prefix + typed text
+      # Input text row = panel_end + 1 (border is panel_end, text is +1)
+      panel_end = rows - 1 - 1 - @input_height
+      input_text_row = panel_end + 1
       input_col = 2 + String.length(state.agent.panel.input_text)
       {input_text_row, input_col}
     else
-      {total_rows, 0}
+      {rows, 0}
     end
   end
 
-  # ── Chat panel ──────────────────────────────────────────────────────────────
+  # ── Title bar ───────────────────────────────────────────────────────────────
+
+  @spec render_title_bar(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  defp render_title_bar(state, row, cols) do
+    at = Theme.agent_theme(state.theme)
+    panel = state.agent.panel
+
+    status_icon =
+      case state.agent.status do
+        :idle -> "◯"
+        :thinking -> spinner(panel.spinner_frame)
+        :tool_executing -> "⚡"
+        :error -> "✗"
+        _ -> "◯"
+      end
+
+    status_fg =
+      case state.agent.status do
+        :idle -> at.status_idle
+        :thinking -> at.status_thinking
+        :tool_executing -> at.status_tool
+        :error -> at.status_error
+        _ -> at.status_idle
+      end
+
+    usage = fetch_usage(state)
+    usage_text = format_usage(usage)
+
+    left = " #{status_icon}  󰚩 #{panel.model_name}"
+    center = "Minga Agent"
+    right = if usage_text != "", do: "#{usage_text} ", else: ""
+
+    # Build the title bar with left/center/right alignment
+    left_len = String.length(left)
+    center_len = String.length(center)
+    right_len = String.length(right)
+
+    # Center the title text
+    center_start = max(div(cols - center_len, 2), left_len + 3)
+    gap_left = center_start - left_len
+    gap_right = max(cols - center_start - center_len - right_len, 0)
+
+    bar_text =
+      left <>
+        String.duplicate("─", max(gap_left - 2, 1)) <>
+        " " <>
+        center <>
+        " " <>
+        String.duplicate("─", max(gap_right - 1, 1)) <>
+        right
+
+    # Trim or pad to exact width
+    bar_text = String.slice(bar_text, 0, cols) |> String.pad_trailing(cols)
+
+    [
+      Protocol.encode_draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
+      # Re-draw the status icon with its color
+      Protocol.encode_draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
+      # Re-draw the center title with emphasis
+      Protocol.encode_draw(row, center_start, center,
+        fg: at.header_fg,
+        bg: at.header_bg,
+        bold: true
+      )
+    ]
+  end
+
+  # ── Chat panel (messages only) ──────────────────────────────────────────────
 
   @spec render_chat(state(), rect()) :: [binary()]
   defp render_chat(state, rect) do
@@ -105,16 +196,7 @@ defmodule Minga.Agent.View.Renderer do
         []
       end
 
-    usage =
-      if agent.session do
-        try do
-          Session.usage(agent.session)
-        catch
-          :exit, _ -> empty_usage()
-        end
-      else
-        empty_usage()
-      end
+    usage = fetch_usage(state)
 
     panel_state = %{
       messages: messages,
@@ -128,16 +210,17 @@ defmodule Minga.Agent.View.Renderer do
       error_message: agent.error
     }
 
-    ChatRenderer.render(rect, panel_state, state.theme)
+    ChatRenderer.render_messages_only(rect, panel_state, state.theme)
   end
 
   # ── Vertical separator ──────────────────────────────────────────────────────
 
-  @spec render_separator(non_neg_integer(), pos_integer(), Theme.t()) :: [binary()]
-  defp render_separator(col, height, theme) do
+  @spec render_separator(non_neg_integer(), non_neg_integer(), pos_integer(), Theme.t()) ::
+          [binary()]
+  defp render_separator(col, start_row, height, theme) do
     at = Theme.agent_theme(theme)
 
-    for row <- 0..(height - 1) do
+    for row <- start_row..(start_row + height - 1) do
       Protocol.encode_draw(row, col, "│", fg: at.panel_border, bg: at.panel_bg)
     end
   end
@@ -157,15 +240,14 @@ defmodule Minga.Agent.View.Renderer do
     buf = state.buffers.active
     scroll = state.agentic.file_viewer_scroll
 
-    # Reserve the last row in the viewer panel for a filename header bar.
+    # First row = filename header, remaining rows = file content
+    content_start = row_off + 1
     content_rows = max(height - 1, 1)
 
     snapshot = BufferServer.render_snapshot(buf, scroll, content_rows)
     lines = snapshot.lines
     line_count = snapshot.line_count
 
-    # Absolute column positions on the full terminal screen. Use max/2 so
-    # Dialyzer can prove these are non_neg_integer() for Gutter.render_number.
     abs_gutter_col = max(col_off, 0)
     local_gutter_w = file_viewer_gutter_width(line_count)
     abs_content_col = col_off + local_gutter_w
@@ -177,8 +259,6 @@ defmodule Minga.Agent.View.Renderer do
     highlight =
       if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
 
-    # gutter_w in Context is the absolute content column (LineRenderer uses it
-    # as the draw col for content). This lets us skip post-hoc offset patching.
     render_ctx = %Context{
       viewport: viewer_vp,
       visual_selection: nil,
@@ -201,10 +281,8 @@ defmodule Minga.Agent.View.Renderer do
         {[], [], snapshot.first_line_byte_offset},
         fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
           buf_line = max(scroll + screen_row, 0)
-          abs_row = max(row_off + screen_row, 0)
+          abs_row = max(content_start + screen_row, 0)
 
-          # cursor_line is irrelevant for :absolute style; pass 0 to satisfy the
-          # non_neg_integer() spec (absolute mode ignores it entirely).
           gutter_cmd =
             Gutter.render_number(
               abs_row,
@@ -227,8 +305,8 @@ defmodule Minga.Agent.View.Renderer do
 
     tilde_cmds =
       if length(lines) < content_rows do
-        tilde_start = row_off + length(lines)
-        tilde_end = row_off + content_rows - 1
+        tilde_start = content_start + length(lines)
+        tilde_end = content_start + content_rows - 1
 
         for r <- tilde_start..tilde_end do
           Protocol.encode_draw(r, abs_content_col, "~", fg: state.theme.editor.tilde_fg)
@@ -237,25 +315,55 @@ defmodule Minga.Agent.View.Renderer do
         []
       end
 
-    # File name header bar at the bottom of the viewer panel.
-    header_row = row_off + height - 1
+    # File name header bar at the TOP of the viewer panel
     at = Theme.agent_theme(state.theme)
     file_name = snapshot_display_name(snapshot)
-    header_text = String.pad_trailing(" #{file_name}", width)
+    header_text = String.pad_trailing(" 📄 #{file_name}", width)
 
     header_cmd =
-      Protocol.encode_draw(header_row, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
+      Protocol.encode_draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
 
     [header_cmd | gutter_cmds] ++ line_cmds ++ tilde_cmds
   end
 
-  # ── Agentic modeline ────────────────────────────────────────────────────────
+  # ── Full-width input area ───────────────────────────────────────────────────
 
-  @spec render_agentic_modeline(state(), pos_integer()) :: [binary()]
-  defp render_agentic_modeline(state, cols) do
-    # Row: second-to-last row (minibuffer is the very last row).
-    row = state.viewport.rows - 2
+  @spec render_input(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  defp render_input(state, row, cols) do
+    at = Theme.agent_theme(state.theme)
+    panel = state.agent.panel
 
+    # Border line (full width)
+    label = "─── Prompt "
+    border_rest = String.duplicate("─", max(cols - String.length(label), 0))
+    border = label <> border_rest
+    border_cmd = Protocol.encode_draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
+
+    # Input text row (full width)
+    input_row = row + 1
+    blank = String.duplicate(" ", cols)
+    blank_cmd = Protocol.encode_draw(input_row, 0, blank, bg: at.input_bg)
+
+    {text, fg} =
+      if panel.input_text == "" do
+        {"  Type a message, Enter to send", at.input_placeholder}
+      else
+        {"  " <> panel.input_text, at.text_fg}
+      end
+
+    text = String.slice(text, 0, cols)
+    text_cmd = Protocol.encode_draw(input_row, 0, text, fg: fg, bg: at.input_bg)
+
+    # Bottom padding row
+    pad_cmd = Protocol.encode_draw(row + 2, 0, blank, bg: at.input_bg)
+
+    [border_cmd, blank_cmd, text_cmd, pad_cmd]
+  end
+
+  # ── Modeline ────────────────────────────────────────────────────────────────
+
+  @spec render_modeline(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  defp render_modeline(state, row, cols) do
     Modeline.render(
       row,
       cols,
@@ -284,7 +392,6 @@ defmodule Minga.Agent.View.Renderer do
   @spec file_viewer_gutter_width(non_neg_integer()) :: non_neg_integer()
   defp file_viewer_gutter_width(line_count) do
     digits = line_count |> max(1) |> Integer.digits() |> length()
-    # digit columns + 1 space separator
     digits + 1
   end
 
@@ -292,6 +399,36 @@ defmodule Minga.Agent.View.Renderer do
   defp snapshot_display_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp snapshot_display_name(_), do: "[No Name]"
 
+  @spec fetch_usage(state()) :: map()
+  defp fetch_usage(state) do
+    if state.agent.session do
+      try do
+        Session.usage(state.agent.session)
+      catch
+        :exit, _ -> empty_usage()
+      end
+    else
+      empty_usage()
+    end
+  end
+
   @spec empty_usage() :: map()
   defp empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
+
+  @spec format_usage(map()) :: String.t()
+  defp format_usage(%{input: i, output: o, cost: c}) when i > 0 do
+    "↑#{format_tokens(i)} ↓#{format_tokens(o)} $#{Float.round(c, 3)}"
+  end
+
+  defp format_usage(_), do: ""
+
+  @spec format_tokens(non_neg_integer()) :: String.t()
+  defp format_tokens(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
+  defp format_tokens(n), do: "#{n}"
+
+  @spec spinner(non_neg_integer()) :: String.t()
+  defp spinner(frame) do
+    chars = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+    Enum.at(chars, rem(frame, length(chars)))
+  end
 end

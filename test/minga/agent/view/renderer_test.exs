@@ -102,7 +102,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "returns a non-empty list of binary commands" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
-      assert commands != []
+      assert [_ | _] = commands
       assert Enum.all?(commands, &is_binary/1)
     end
 
@@ -169,6 +169,65 @@ defmodule Minga.Agent.View.RendererTest do
 
       assert chat_cols != [], "expected draw commands in chat panel columns"
       assert viewer_cols != [], "expected draw commands in viewer panel columns"
+    end
+  end
+
+  describe "title bar" do
+    test "renders draw commands at row 0" do
+      state = base_state(rows: 30, cols: 100)
+      commands = Renderer.render(state)
+
+      row_0_cmds =
+        Enum.filter(commands, fn
+          <<0x10, row::16, _col::16, _rest::binary>> -> row == 0
+          _ -> false
+        end)
+
+      assert row_0_cmds != [], "expected draw commands at row 0 (title bar)"
+    end
+  end
+
+  describe "full-width input area" do
+    test "input area renders at columns starting from 0" do
+      state = base_state(rows: 30, cols: 100)
+      commands = Renderer.render(state)
+
+      # The input border should be at col 0 near the bottom
+      rows = state.viewport.rows
+      input_border_row = rows - 1 - 1 - 3
+
+      input_cmds =
+        Enum.filter(commands, fn
+          <<0x10, row::16, col::16, _rest::binary>> ->
+            row == input_border_row and col == 0
+
+          _ ->
+            false
+        end)
+
+      assert input_cmds != [], "expected input border at col 0"
+    end
+  end
+
+  describe "file viewer header" do
+    test "file viewer header is at the top of the viewer panel (row 1)" do
+      state = base_state(rows: 30, cols: 100)
+      commands = Renderer.render(state)
+
+      chat_width = div(100 * 65, 100)
+      viewer_col = chat_width + 1
+
+      # Header should be at row 1 (panel_start), at viewer_col
+      header_cmds =
+        Enum.filter(commands, fn
+          <<0x10, row::16, col::16, _rest::binary>> ->
+            row == 1 and col == viewer_col
+
+          _ ->
+            false
+        end)
+
+      assert header_cmds != [], "expected file viewer header at row 1"
     end
   end
 
