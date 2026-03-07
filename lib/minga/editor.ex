@@ -345,25 +345,17 @@ defmodule Minga.Editor do
   end
 
   # ── Agent panel key interception ──
-  # When the agent panel is visible and input is focused, route keystrokes
-  # to the agent input. Unhandled keys (Ctrl+Q, Ctrl+S, etc.) pass through
-  # to the normal handler via :passthrough.
+  # When the agent panel is visible and input is focused, ALL keystrokes
+  # route here. Only Escape can unfocus the input. Ctrl+Q and Ctrl+S are
+  # handled directly. Unrecognized keys are silently ignored (never
+  # forwarded to the mode FSM, which would cause accidental unfocusing).
   def handle_info(
         {:minga_input, {:key_press, codepoint, modifiers}},
         %{agent_panel: %{visible: true, input_focused: true}} = state
       ) do
-    case handle_agent_key(%{state | status_msg: nil}, codepoint, modifiers) do
-      :passthrough ->
-        # Not an agent key; forward to normal processing
-        send(self(), {:minga_input, {:key_press, codepoint, modifiers}})
-
-        {:noreply,
-         %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}}
-
-      new_state ->
-        Renderer.render(new_state)
-        {:noreply, new_state}
-    end
+    new_state = handle_agent_key(%{state | status_msg: nil}, codepoint, modifiers)
+    Renderer.render(new_state)
+    {:noreply, new_state}
   end
 
   # ── File tree key interception ──
@@ -704,15 +696,44 @@ defmodule Minga.Editor do
   # Ctrl+S → save (works in any mode).
   # ── Agent panel input routing ─────────────────────────────────────────────
   # ── Agent panel key dispatch ──────────────────────────────────────────────
-  # Returns updated state for handled keys, or :passthrough for keys that
-  # should fall through to normal editor handling (Ctrl+Q, Ctrl+S, etc.).
+  # All keys handled inline. Only Escape unfocuses. Unrecognized keys are
+  # swallowed so stray terminal events can never break focus.
 
   @spec handle_agent_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t() | :passthrough
+          EditorState.t()
 
-  # C-c in agent input: submit prompt
+  # Ctrl+Q: quit (unfocus first, then forward the quit key)
+  defp handle_agent_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
+    send(self(), {:minga_input, {:key_press, ?q, mods}})
+    %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}
+  end
+
+  # Ctrl+S: save current buffer
+  defp handle_agent_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
+    if state.buffers.active do
+      case BufferServer.save(state.buffers.active) do
+        :ok -> :ok
+        {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
+      end
+    end
+
+    _ = mods
+    state
+  end
+
+  # Ctrl+C: submit prompt
   defp handle_agent_key(state, ?c, mods) when band(mods, @ctrl) != 0 do
     AgentCommands.submit_prompt(state)
+  end
+
+  # Ctrl+D: scroll chat down
+  defp handle_agent_key(state, ?d, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.scroll_chat_down(state)
+  end
+
+  # Ctrl+U: scroll chat up
+  defp handle_agent_key(state, ?u, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.scroll_chat_up(state)
   end
 
   # Escape: unfocus the input (return to normal editing)
@@ -737,8 +758,8 @@ defmodule Minga.Editor do
     AgentCommands.input_char(state, char)
   end
 
-  # Anything else (Ctrl+Q, Ctrl+S, arrows, etc.): pass through
-  defp handle_agent_key(_state, _cp, _mods), do: :passthrough
+  # Everything else (arrows, function keys, terminal responses): silently ignore
+  defp handle_agent_key(state, _cp, _mods), do: state
 
   # Ctrl+S → save (works in any mode, including agent panel focus).
   defp handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do

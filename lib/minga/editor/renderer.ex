@@ -62,6 +62,9 @@ defmodule Minga.Editor.Renderer do
              {non_neg_integer(), non_neg_integer()}}
           | {:line, non_neg_integer(), non_neg_integer()}
 
+  # Agent input area = 3 rows (border + text + padding); cursor goes on the text row.
+  @agent_input_height 3
+
   @doc "Renders the no-buffer splash screen."
   @spec render(state()) :: :ok
   def render(%{buffers: %{active: nil}} = state) do
@@ -329,6 +332,17 @@ defmodule Minga.Editor.Renderer do
 
     # ── Agent panel (below editor content) ──
     agent_commands = render_agent_panel(state, editor_rows, col_off, editor_width)
+
+    # When the agent input is focused, place cursor in the input area
+    {cursor_command, cursor_shape_command} =
+      agent_cursor_override(
+        state,
+        cursor_command,
+        cursor_shape_command,
+        editor_rows,
+        agent_panel_height,
+        col_off
+      )
 
     all_commands =
       clear ++
@@ -1114,6 +1128,32 @@ defmodule Minga.Editor.Renderer do
 
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.Session
+
+  @spec agent_cursor_override(
+          state(),
+          binary(),
+          binary(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {binary(), binary()}
+  defp agent_cursor_override(
+         %{agent_panel: %{visible: true, input_focused: true}} = state,
+         _cursor_cmd,
+         _shape_cmd,
+         editor_rows,
+         panel_height,
+         col_off
+       ) do
+    input_row = editor_rows + panel_height - @agent_input_height + 1
+    input_col = col_off + 2 + String.length(state.agent_panel.input_text)
+    {Protocol.encode_cursor(input_row, input_col), Protocol.encode_cursor_shape(:beam)}
+  end
+
+  defp agent_cursor_override(_state, cursor_cmd, shape_cmd, _er, _ph, _co) do
+    {cursor_cmd, shape_cmd}
+  end
 
   @spec agent_panel_height(state()) :: non_neg_integer()
   defp agent_panel_height(%{agent_panel: %{visible: true}} = state) do
