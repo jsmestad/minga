@@ -411,7 +411,8 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:log_message, level, text}}, state) do
-    new_state = log_message(state, "[ZIG/#{level}] #{text}")
+    prefix = frontend_log_prefix(state)
+    new_state = log_message(state, "[#{prefix}/#{level}] #{text}")
     {:noreply, new_state}
   end
 
@@ -1183,6 +1184,10 @@ defmodule Minga.Editor do
 
     state
   end
+
+  @spec frontend_log_prefix(state()) :: String.t()
+  defp frontend_log_prefix(%{capabilities: %{frontend_type: :native_gui}}), do: "GUI"
+  defp frontend_log_prefix(_state), do: "ZIG"
 
   # ── Window resize ────────────────────────────────────────────────────────
 

@@ -11,10 +11,12 @@
 		07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
+		158393FF12EC30CAB1653526 /* PortLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23DC6E0ACB156F21293E87 /* PortLogger.swift */; };
 		16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A647814918768E62822D4A1 /* MingaApp.swift */; };
 		1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
 		48842D6AE71AA7EB08B9ED03 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
 		50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
+		5CADBD593C49EE44EBBD854E /* PortLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23DC6E0ACB156F21293E87 /* PortLogger.swift */; };
 		614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
 		6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
 		686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F220A60775A252A728477659 /* ProtocolTests.swift */; };
@@ -38,6 +40,7 @@
 /* Begin PBXFileReference section */
 		0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellGrid.swift; sourceTree = "<group>"; };
 		0C26E064D810299C0302F439 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
+		3E23DC6E0ACB156F21293E87 /* PortLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortLogger.swift; sourceTree = "<group>"; };
 		3F56CBF3A086193F8775262B /* GlyphAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphAtlas.swift; sourceTree = "<group>"; };
 		4A647814918768E62822D4A1 /* MingaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaApp.swift; sourceTree = "<group>"; };
 		4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolReader.swift; sourceTree = "<group>"; };
@@ -95,6 +98,7 @@
 		BE05074760AA9D5983E99402 /* Protocol */ = {
 			isa = PBXGroup;
 			children = (
+				3E23DC6E0ACB156F21293E87 /* PortLogger.swift */,
 				C441427A427E23B912F70092 /* ProtocolConstants.swift */,
 				56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */,
 				7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */,
@@ -245,6 +249,7 @@
 				6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */,
 				50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */,
 				16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */,
+				158393FF12EC30CAB1653526 /* PortLogger.swift in Sources */,
 				0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */,
 				CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */,
 				0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */,
@@ -264,6 +269,7 @@
 				78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */,
 				F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */,
 				1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */,
+				5CADBD593C49EE44EBBD854E /* PortLogger.swift in Sources */,
 				A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */,
 				93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */,
 				7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */,

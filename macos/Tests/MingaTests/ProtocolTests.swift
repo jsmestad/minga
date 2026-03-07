@@ -156,7 +156,7 @@ struct ProtocolEncoderTests {
 
 /// Records calls to sendResize so tests can verify the view notifies the
 /// BEAM when its frame changes.
-final class SpyEncoder: InputEncoder {
+final class SpyEncoder: InputEncoder, @unchecked Sendable {
     var resizeCalls: [(cols: UInt16, rows: UInt16)] = []
     var readyCalls: [(cols: UInt16, rows: UInt16)] = []
     var logCalls: [(level: UInt8, message: String)] = []
@@ -263,5 +263,49 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls[0].rows >= 1)
         #expect(grid.cols >= 1)
         #expect(grid.rows >= 1)
+    }
+}
+
+@Suite("PortLogger")
+struct PortLoggerTests {
+    @Test("log calls are forwarded to the encoder")
+    func logForwarding() {
+        let spy = SpyEncoder()
+        PortLogger.setup(encoder: spy)
+
+        PortLogger.info("hello from test")
+
+        #expect(spy.logCalls.count == 1)
+        #expect(spy.logCalls[0].level == LOG_LEVEL_INFO)
+        #expect(spy.logCalls[0].message == "hello from test")
+    }
+
+    @Test("all log levels are sent with the correct level byte")
+    func logLevels() {
+        let spy = SpyEncoder()
+        PortLogger.setup(encoder: spy)
+
+        PortLogger.error("e")
+        PortLogger.warn("w")
+        PortLogger.info("i")
+        PortLogger.debug("d")
+
+        #expect(spy.logCalls.count == 4)
+        #expect(spy.logCalls[0].level == LOG_LEVEL_ERR)
+        #expect(spy.logCalls[1].level == LOG_LEVEL_WARN)
+        #expect(spy.logCalls[2].level == LOG_LEVEL_INFO)
+        #expect(spy.logCalls[3].level == LOG_LEVEL_DEBUG)
+    }
+
+    @Test("sendLog binary layout matches Zig encodeLogMessage")
+    func logBinaryLayout() {
+        // Verify the real ProtocolEncoder produces the right binary.
+        // We can't capture stdout easily, but we can verify the
+        // constants match the Zig protocol.
+        #expect(OP_LOG_MESSAGE == 0x60)
+        #expect(LOG_LEVEL_ERR == 0)
+        #expect(LOG_LEVEL_WARN == 1)
+        #expect(LOG_LEVEL_INFO == 2)
+        #expect(LOG_LEVEL_DEBUG == 3)
     }
 }

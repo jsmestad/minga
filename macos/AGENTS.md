@@ -140,6 +140,42 @@ This requires changes on both the BEAM and Swift sides:
 2. **Swift view**: Call the encoder from `EditorNSView` in the appropriate event handler
 3. **BEAM side**: Add decoder clause in `lib/minga/port/protocol.ex` and handler in `Port.Manager`
 
+## Logging
+
+The macOS app sends log messages to the BEAM over the port protocol (opcode `0x60`). They appear in the `*Messages*` buffer (viewable via `SPC b m`) prefixed with `[GUI/{level}]`, matching the TUI's `[ZIG/{level}]` pattern.
+
+### How to log
+
+Use `PortLogger` from anywhere in the Swift codebase:
+
+```swift
+PortLogger.info("Window resized: \(cols)x\(rows) cells")
+PortLogger.warn("Glyph atlas full, rebuilding")
+PortLogger.error("Metal pipeline creation failed: \(error)")
+PortLogger.debug("Frame render time: \(ms)ms")
+```
+
+`PortLogger` is thread-safe and silently drops messages before `setup(encoder:)` is called during startup (so it's safe to call during early init).
+
+### What to log
+
+Log things that help users and developers understand what the GUI frontend is doing:
+
+- **Startup info**: font name/size, cell dimensions, backing scale, initial grid size
+- **Resize events**: new cell dimensions when the window resizes
+- **Errors and warnings**: Metal pipeline failures, atlas rebuilds, protocol decode errors, missing glyphs
+- **Resource lifecycle**: atlas allocations, drawable acquisition failures
+
+### What NOT to log
+
+- Per-frame or per-keystroke events (too noisy for `*Messages*`; use `NSLog` for local-only debug output if needed)
+- Raw protocol data or binary dumps
+- Anything that would flood the buffer during normal editing
+
+### Fallback
+
+`NSLog` is acceptable for errors that happen before `PortLogger.setup()` is called (e.g., Metal device init failure during `applicationDidFinishLaunching` before the encoder is created). These messages only appear in the macOS Console app, not in `*Messages*`.
+
 ## What This Process Should Never Do
 
 - Parse or interpret text content

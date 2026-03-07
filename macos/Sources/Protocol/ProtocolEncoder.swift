@@ -8,7 +8,7 @@ import Foundation
 
 /// Protocol for sending input events to the BEAM. The real implementation
 /// writes to stdout; tests can use a spy conformance to verify calls.
-protocol InputEncoder: AnyObject {
+protocol InputEncoder: AnyObject, Sendable {
     func sendReady(cols: UInt16, rows: UInt16)
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
     func sendResize(cols: UInt16, rows: UInt16)

@@ -109,9 +109,11 @@ final class EditorNSView: NSView {
             readySent = true
             cellGrid.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
+            PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if newCols != cellGrid.cols || newRows != cellGrid.rows {
             cellGrid.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
+            PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }
     }
 

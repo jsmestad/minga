@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Metal renderer.
         guard let metalRenderer = MetalRenderer() else {
+            // PortLogger isn't set up yet, fall back to NSLog.
             NSLog("Failed to initialize Metal renderer")
             NSApp.terminate(nil)
             return
@@ -105,6 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
         self.encoder = enc
+
+        // Enable port-based logging so messages appear in *Messages*.
+        PortLogger.setup(encoder: enc)
+        PortLogger.info("macOS GUI frontend starting")
+        PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(face.cellWidth)x\(face.cellHeight), scale: \(scale)x")
+        PortLogger.info("Initial grid: \(cols)x\(rows) cells")
 
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, metalRenderer: metalRenderer, fontFace: face, cellGrid: grid)
@@ -162,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dispatcher.dispatch(command)
             }
         } catch {
-            NSLog("Protocol decode error: \(error)")
+            PortLogger.error("Protocol decode error: \(error)")
         }
     }
 }
