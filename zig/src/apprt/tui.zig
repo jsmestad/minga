@@ -226,6 +226,14 @@ pub const TuiRuntime = struct {
 
             _ = try std.posix.poll(&pollfds, 1000);
 
+            // Check for resize again after poll (SIGWINCH can fire during poll).
+            // This ensures the surface dimensions match the terminal before we
+            // process any render batch, preventing one-frame garbling where the
+            // BEAM's 80-col frame is rendered to a 40-col surface.
+            if (g_winch.swap(false, .acq_rel)) {
+                try self.handleResize(stdout);
+            }
+
             // stdin readable (Port command from BEAM)
             if (pollfds[0].revents & std.posix.POLL.IN != 0) {
                 var len_buf: [4]u8 = undefined;
