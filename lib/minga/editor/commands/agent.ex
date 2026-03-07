@@ -16,6 +16,11 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Toggles the agent chat panel."
   @spec toggle_panel(state()) :: state()
+  def toggle_panel(%{agent_panel: %{visible: true, input_focused: false}} = state) do
+    # Panel is open but unfocused: re-focus instead of closing
+    %{state | agent_panel: PanelState.set_input_focused(state.agent_panel, true)}
+  end
+
   def toggle_panel(%{agent_panel: panel} = state) do
     panel = PanelState.toggle(panel)
 
@@ -29,15 +34,12 @@ defmodule Minga.Editor.Commands.Agent do
         state
       end
 
-    # Focus the input when opening
-    state =
-      if panel.visible do
-        %{state | agent_panel: PanelState.set_input_focused(state.agent_panel, true)}
-      else
-        %{state | agent_panel: PanelState.set_input_focused(state.agent_panel, false)}
-      end
-
-    state
+    # Focus the input when opening, unfocus when closing
+    if panel.visible do
+      %{state | agent_panel: PanelState.set_input_focused(state.agent_panel, true)}
+    else
+      %{state | agent_panel: PanelState.set_input_focused(state.agent_panel, false)}
+    end
   end
 
   @doc "Submits the current input text as a prompt."

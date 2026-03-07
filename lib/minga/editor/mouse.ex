@@ -8,6 +8,7 @@ defmodule Minga.Editor.Mouse do
   GenServer state struct is returned unchanged or updated.
   """
 
+  alias Minga.Agent.PanelState, as: AgentPanelState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.State, as: EditorState
@@ -58,6 +59,28 @@ defmodule Minga.Editor.Mouse do
     total_lines = BufferServer.line_count(buf)
     new_vp = scroll_viewport(vp, -@scroll_lines, total_lines)
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
+  end
+
+  # ── Left click in the agent panel → focus input ──
+
+  def handle(%{agent_panel: %{visible: true}} = state, row, col, :left, :press)
+      when row >= 0 do
+    agent_panel_height = div(state.viewport.rows * 35, 100)
+    editor_rows = state.viewport.rows - agent_panel_height
+
+    if row >= editor_rows do
+      %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, true)}
+    else
+      # Click is in the editor area; unfocus agent input, fall through
+      state = %{
+        state
+        | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)
+      }
+
+      state
+      |> maybe_start_separator_drag(row, col)
+      |> maybe_handle_content_click(row, col)
+    end
   end
 
   # ── Left click (press) — separator resize, window focus, or cursor move ──
