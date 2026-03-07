@@ -257,7 +257,9 @@ defmodule Minga.Editor.Renderer do
           render_ctx,
           line_number_style,
           gutter_w,
-          snapshot.first_line_byte_offset
+          snapshot.first_line_byte_offset,
+          0,
+          col_off
         )
       else
         render_lines_nowrap(
@@ -267,14 +269,16 @@ defmodule Minga.Editor.Renderer do
           render_ctx,
           line_number_style,
           gutter_w,
-          snapshot.first_line_byte_offset
+          snapshot.first_line_byte_offset,
+          0,
+          col_off
         )
       end
 
     tilde_commands =
       if rows_used < visible_rows do
         for row <- rows_used..(visible_rows - 1) do
-          Protocol.encode_draw(row, gutter_w, "~", fg: state.theme.editor.tilde_fg)
+          Protocol.encode_draw(row, col_off + gutter_w, "~", fg: state.theme.editor.tilde_fg)
         end
       else
         []
@@ -292,7 +296,7 @@ defmodule Minga.Editor.Renderer do
     modeline_commands =
       Modeline.render(
         modeline_row,
-        viewport.cols,
+        editor_width,
         %{
           mode: state.mode,
           mode_state: state.mode_state,
@@ -309,7 +313,8 @@ defmodule Minga.Editor.Renderer do
           agent_theme_colors:
             if(state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
         },
-        state.theme
+        state.theme,
+        col_off
       )
 
     # ── Minibuffer (positioned by Layout, always the last row) ──
@@ -334,7 +339,7 @@ defmodule Minga.Editor.Renderer do
         state.completion,
         %{
           cursor_row: cursor_line - first_line,
-          cursor_col: cursor_col + gutter_w,
+          cursor_col: cursor_col + gutter_w + col_off,
           viewport_rows: viewport.rows,
           viewport_cols: viewport.cols
         },
@@ -342,13 +347,6 @@ defmodule Minga.Editor.Renderer do
       )
 
     tree_commands = TreeRenderer.render(state)
-
-    # Offset buffer content commands when file tree is open
-    gutter_commands = offset_commands(gutter_commands, 0, col_off)
-    line_commands = offset_commands(line_commands, 0, col_off)
-    tilde_commands = offset_commands(tilde_commands, 0, col_off)
-    modeline_commands = offset_commands(modeline_commands, 0, col_off)
-    completion_commands = offset_commands(completion_commands, 0, col_off)
 
     # Adjust cursor position for the tree offset
     cursor_command =
@@ -599,10 +597,9 @@ defmodule Minga.Editor.Renderer do
           agent_theme_colors:
             if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
         },
-        state.theme
+        state.theme,
+        col_off
       )
-
-    modeline_commands = offset_commands(modeline_commands, 0, col_off)
 
     commands =
       apply_inactive_dimming(
@@ -674,6 +671,8 @@ defmodule Minga.Editor.Renderer do
           Context.t(),
           Gutter.line_number_style(),
           non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: {[binary()], [binary()], non_neg_integer()}
   defp render_lines_nowrap(
@@ -683,7 +682,9 @@ defmodule Minga.Editor.Renderer do
          ctx,
          ln_style,
          gutter_w,
-         first_byte_off
+         first_byte_off,
+         row_off,
+         col_off
        ) do
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
 
@@ -706,8 +707,8 @@ defmodule Minga.Editor.Renderer do
               sign_w: sign_w,
               wrap_entry: nil,
               max_rows: length(lines),
-              row_offset: 0,
-              col_offset: 0
+              row_offset: row_off,
+              col_offset: col_off
             })
 
           next_byte_off = byte_off + byte_size(line_text) + 1
@@ -730,6 +731,8 @@ defmodule Minga.Editor.Renderer do
           Context.t(),
           Gutter.line_number_style(),
           non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
           non_neg_integer()
         ) :: {[binary()], [binary()], non_neg_integer()}
   defp render_lines_wrapped(
@@ -740,7 +743,9 @@ defmodule Minga.Editor.Renderer do
          ctx,
          ln_style,
          gutter_w,
-         first_byte_off
+         first_byte_off,
+         row_off,
+         col_off
        ) do
     breakindent = wrap_option(:breakindent)
     linebreak = wrap_option(:linebreak)
@@ -770,8 +775,8 @@ defmodule Minga.Editor.Renderer do
               sign_w: sign_w,
               wrap_entry: visual_rows,
               max_rows: max_rows,
-              row_offset: 0,
-              col_offset: 0
+              row_offset: row_off,
+              col_offset: col_off
             })
 
           sr2 = sr + rows_used
@@ -991,20 +996,6 @@ defmodule Minga.Editor.Renderer do
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
 
     {has_sign_column, number_w + sign_w}
-  end
-
-  # Only offsets draw_text commands (opcode 0x10) — cursor commands are handled separately.
-  @spec offset_commands([binary()], non_neg_integer(), non_neg_integer()) :: [binary()]
-  defp offset_commands(commands, 0, 0), do: commands
-
-  defp offset_commands(commands, row_off, col_off) do
-    Enum.map(commands, fn
-      <<0x10, row::16, col::16, rest::binary>> ->
-        <<0x10, row + row_off::16, col + col_off::16, rest::binary>>
-
-      other ->
-        other
-    end)
   end
 
   # Active window reads live cursor from buffer; inactive windows use stored cursor.

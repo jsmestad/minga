@@ -35,8 +35,9 @@ defmodule Minga.Editor.Modeline do
         }
 
   @doc "Renders the modeline at the given row using the provided data."
-  @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t()) :: [binary()]
-  def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one)) do
+  @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
+          [binary()]
+  def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one), col_off \\ 0) do
     ml = theme.modeline
 
     {mode_fg, mode_bg} =
@@ -133,7 +134,7 @@ defmodule Minga.Editor.Modeline do
         right_segments
 
     {commands, _} =
-      Enum.reduce(all_segments, {[], 0}, fn {text, fg, bg, opts}, {cmds, col} ->
+      Enum.reduce(all_segments, {[], col_off}, fn {text, fg, bg, opts}, {cmds, col} ->
         cmd = Protocol.encode_draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
         {[cmd | cmds], col + Unicode.display_width(text)}
       end)
