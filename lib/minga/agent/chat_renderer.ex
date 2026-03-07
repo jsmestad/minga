@@ -162,10 +162,11 @@ defmodule Minga.Agent.ChatRenderer do
         blank = String.duplicate(" ", width)
         bg_cmd = Protocol.encode_draw(row, col, blank, bg: bg)
 
+        right_edge = col + width
+
         {seg_cmds_rev, _} =
           Enum.reduce(segments, {[], col}, fn {text, style_opts}, {seg_acc, c} ->
-            draw = Protocol.encode_draw(row, c, text, style_opts)
-            {[draw | seg_acc], c + String.length(text)}
+            render_segment(seg_acc, row, c, text, style_opts, right_edge)
           end)
 
         # Forward order: bg first, then segments
@@ -374,6 +375,28 @@ defmodule Minga.Agent.ChatRenderer do
   defp style_to_opts(:blockquote, at), do: [fg: at.thinking_fg, italic: true]
   defp style_to_opts(:list_bullet, at), do: [fg: at.assistant_border]
   defp style_to_opts(:rule, at), do: [fg: at.panel_border]
+
+  # ── Segment rendering ────────────────────────────────────────────────────────
+
+  # Renders a single text segment, truncating at the panel's right edge.
+  @spec render_segment(
+          [binary()],
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          keyword(),
+          non_neg_integer()
+        ) :: {[binary()], non_neg_integer()}
+  defp render_segment(acc, _row, col, _text, _style_opts, right_edge) when col >= right_edge do
+    {acc, col}
+  end
+
+  defp render_segment(acc, row, col, text, style_opts, right_edge) do
+    remaining = right_edge - col
+    truncated = String.slice(text, 0, remaining)
+    draw = Protocol.encode_draw(row, col, truncated, style_opts)
+    {[draw | acc], col + String.length(truncated)}
+  end
 
   # ── Text helpers ────────────────────────────────────────────────────────────
 
