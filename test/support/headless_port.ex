@@ -18,6 +18,8 @@ defmodule Minga.Test.HeadlessPort do
 
   use GenServer
 
+  @behaviour Minga.Port.Frontend
+
   alias Minga.Port.Protocol
 
   @typedoc "A single cell in the screen grid."
@@ -74,12 +76,45 @@ defmodule Minga.Test.HeadlessPort do
   # ── Client API ──────────────────────────────────────────────────────────────
 
   @doc "Starts the headless port."
+  @impl Minga.Port.Frontend
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name)
     gen_opts = if name, do: [name: name], else: []
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
+
+  # ── Frontend behaviour ────────────────────────────────────────────────────────
+
+  @doc "Sends encoded render commands to the headless screen grid."
+  @impl Minga.Port.Frontend
+  @spec send_commands(GenServer.server(), [binary()]) :: :ok
+  def send_commands(server, commands) when is_list(commands) do
+    GenServer.cast(server, {:send_commands, commands})
+  end
+
+  @doc "Subscribes the calling process to receive input events."
+  @impl Minga.Port.Frontend
+  @spec subscribe(GenServer.server()) :: :ok
+  def subscribe(server) do
+    GenServer.call(server, {:subscribe, self()})
+  end
+
+  @doc "Returns the screen dimensions as `{width, height}`."
+  @impl Minga.Port.Frontend
+  @spec terminal_size(GenServer.server()) :: {pos_integer(), pos_integer()} | nil
+  def terminal_size(server) do
+    GenServer.call(server, :terminal_size)
+  end
+
+  @doc "Returns whether the headless port is ready (always true)."
+  @impl Minga.Port.Frontend
+  @spec ready?(GenServer.server()) :: boolean()
+  def ready?(server) do
+    GenServer.call(server, :ready?)
+  end
+
+  # ── Screen query API ────────────────────────────────────────────────────────
 
   @doc "Returns the screen as a list of strings (one per row)."
   @spec get_screen_text(GenServer.server()) :: [String.t()]

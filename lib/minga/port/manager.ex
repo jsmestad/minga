@@ -15,6 +15,8 @@ defmodule Minga.Port.Manager do
 
   use GenServer
 
+  @behaviour Minga.Port.Frontend
+
   alias Minga.Port.Protocol
 
   require Logger
@@ -36,6 +38,7 @@ defmodule Minga.Port.Manager do
   # ── Client API ──
 
   @doc "Starts the port manager."
+  @impl Minga.Port.Frontend
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -43,24 +46,28 @@ defmodule Minga.Port.Manager do
   end
 
   @doc "Sends a list of encoded render command binaries to the Zig renderer."
+  @impl Minga.Port.Frontend
   @spec send_commands(GenServer.server(), [binary()]) :: :ok
   def send_commands(server \\ __MODULE__, commands) when is_list(commands) do
     GenServer.cast(server, {:send_commands, commands})
   end
 
   @doc "Subscribes the calling process to receive input events."
+  @impl Minga.Port.Frontend
   @spec subscribe(GenServer.server()) :: :ok
   def subscribe(server \\ __MODULE__) do
     GenServer.call(server, {:subscribe, self()})
   end
 
   @doc "Returns the terminal size as `{width, height}`, or nil if not yet ready."
+  @impl Minga.Port.Frontend
   @spec terminal_size(GenServer.server()) :: {pos_integer(), pos_integer()} | nil
   def terminal_size(server \\ __MODULE__) do
     GenServer.call(server, :terminal_size)
   end
 
   @doc "Returns whether the Zig renderer has sent its ready signal."
+  @impl Minga.Port.Frontend
   @spec ready?(GenServer.server()) :: boolean()
   def ready?(server \\ __MODULE__) do
     GenServer.call(server, :ready?)
