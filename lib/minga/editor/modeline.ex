@@ -18,17 +18,19 @@ defmodule Minga.Editor.Modeline do
 
   @typedoc "Data for rendering the modeline."
   @type modeline_data :: %{
-          mode: Mode.mode(),
-          mode_state: Mode.state(),
-          file_name: String.t(),
-          filetype: atom(),
-          dirty_marker: String.t(),
-          cursor_line: non_neg_integer(),
-          cursor_col: non_neg_integer(),
-          line_count: non_neg_integer(),
-          buf_index: pos_integer(),
-          buf_count: non_neg_integer(),
-          macro_recording: {true, String.t()} | false
+          :mode => Mode.mode(),
+          :mode_state => Mode.state() | nil,
+          :file_name => String.t(),
+          :filetype => atom(),
+          :dirty_marker => String.t(),
+          :cursor_line => non_neg_integer(),
+          :cursor_col => non_neg_integer(),
+          :line_count => non_neg_integer(),
+          :buf_index => pos_integer(),
+          :buf_count => non_neg_integer(),
+          :macro_recording => {true, String.t()} | false,
+          optional(:agent_status) => Minga.Editor.State.Agent.status(),
+          optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil
         }
 
   @doc "Renders the modeline at the given row using the provided data."
