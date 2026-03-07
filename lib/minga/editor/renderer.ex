@@ -113,9 +113,12 @@ defmodule Minga.Editor.Renderer do
     # When the file tree is open, the editor content is shifted right.
     {_row, col_off, editor_width, _editor_height} = EditorState.screen_rect(state)
 
-    # Calculate agent panel dimensions if visible
+    # Layout (Emacs-style): editor | agent panel | minibuffer (always last row).
+    # When the agent panel is visible, it sits between editor and minibuffer.
+    # The minibuffer row is reserved from the total before sizing the panel.
     agent_panel_height = agent_panel_height(state)
-    editor_rows = state.viewport.rows - agent_panel_height
+    reserved_for_minibuffer = if agent_panel_height > 0, do: 1, else: 0
+    editor_rows = state.viewport.rows - agent_panel_height - reserved_for_minibuffer
 
     # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
     #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
@@ -278,7 +281,7 @@ defmodule Minga.Editor.Renderer do
         state.theme
       )
 
-    # ── Minibuffer (row N-1, full terminal width) ──
+    # ── Minibuffer (always the absolute last row, Emacs-style) ──
     full_viewport = state.viewport
     minibuffer_row = full_viewport.rows - 1
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
@@ -351,11 +354,11 @@ defmodule Minga.Editor.Renderer do
         line_commands ++
         tilde_commands ++
         modeline_commands ++
+        agent_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
         completion_commands ++
         picker_commands ++
-        agent_commands ++
         [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
 
     PortManager.send_commands(state.port_manager, all_commands)
