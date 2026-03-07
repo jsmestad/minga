@@ -152,22 +152,28 @@ defmodule Minga.Agent.ChatRenderer do
     scroll = min(panel.scroll_offset, max(total - content_height, 0))
     visible = lines |> Enum.drop(scroll) |> Enum.take(content_height)
 
-    # Render visible lines
-    {cmds, _row} =
-      Enum.reduce(visible, {cmds, row_start}, fn {segments, _type, bg}, {acc, row} ->
-        # Fill background
+    # Render visible lines.
+    # The Zig renderer processes commands head-to-tail, so the background
+    # fill must appear BEFORE its row's segments in the final list
+    # (background painted first, text drawn on top). We accumulate each
+    # row's commands in forward order and append to the list.
+    {row_cmds_acc, _row} =
+      Enum.reduce(visible, {[], row_start}, fn {segments, _type, bg}, {acc, row} ->
         blank = String.duplicate(" ", width)
-        acc = [Protocol.encode_draw(row, col, blank, bg: bg) | acc]
+        bg_cmd = Protocol.encode_draw(row, col, blank, bg: bg)
 
-        # Render segments
-        {acc, _} =
-          Enum.reduce(segments, {acc, col}, fn {text, style_opts}, {inner_acc, c} ->
+        {seg_cmds_rev, _} =
+          Enum.reduce(segments, {[], col}, fn {text, style_opts}, {seg_acc, c} ->
             draw = Protocol.encode_draw(row, c, text, style_opts)
-            {[draw | inner_acc], c + String.length(text)}
+            {[draw | seg_acc], c + String.length(text)}
           end)
 
-        {acc, row + 1}
+        # Forward order: bg first, then segments
+        row_cmds = [bg_cmd | Enum.reverse(seg_cmds_rev)]
+        {acc ++ row_cmds, row + 1}
       end)
+
+    cmds = cmds ++ row_cmds_acc
 
     # Fill remaining rows with empty background
     remaining = content_height - length(visible)
