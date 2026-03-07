@@ -88,6 +88,12 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       state = base_state(session: nil)
       new_state = AgentCommands.toggle_agentic_view(state)
       assert new_state.agentic.active == true
+
+      # When pi isn't installed, the session start fails gracefully
+      # and sets an error instead of crashing.
+      if new_state.agent.session == nil do
+        assert new_state.agent.panel.error != nil
+      end
     end
 
     test "does not double-start a session when one is already running" do

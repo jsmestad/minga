@@ -215,10 +215,8 @@ defmodule Minga.Editor.Commands.Agent do
       ]
     ]
 
-    case Minga.Agent.Supervisor.start_session(opts) do
+    case start_and_subscribe(opts) do
       {:ok, pid} ->
-        Session.subscribe(pid)
-
         state =
           if state.agent.buffer == nil do
             buf = AgentBufferSync.start_buffer()
@@ -231,8 +229,30 @@ defmodule Minga.Editor.Commands.Agent do
 
       {:error, reason} ->
         require Logger
-        Logger.error("[Agent] Failed to start session: #{inspect(reason)}")
-        update_agent(state, &AgentState.set_error(&1, inspect(reason)))
+        msg = format_session_error(reason)
+        Logger.error("[Agent] #{msg}")
+        Minga.Editor.log_to_messages("[Agent] #{msg}")
+        update_agent(state, &AgentState.set_error(&1, msg))
+    end
+  end
+
+  @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
+  defp start_and_subscribe(opts) do
+    case Minga.Agent.Supervisor.start_session(opts) do
+      {:ok, pid} ->
+        try do
+          Session.subscribe(pid)
+          {:ok, pid}
+        catch
+          :exit, reason ->
+            # Session died before we could subscribe (e.g. provider binary missing).
+            # Clean up the child so the supervisor doesn't hold a dead reference.
+            Minga.Agent.Supervisor.stop_session(pid)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -240,6 +260,11 @@ defmodule Minga.Editor.Commands.Agent do
   defp update_agent(state, fun) do
     %{state | agent: fun.(state.agent)}
   end
+
+  @spec format_session_error(term()) :: String.t()
+  defp format_session_error({:pi_not_found, msg}) when is_binary(msg), do: msg
+  defp format_session_error({:noproc, _}), do: "Agent supervisor not running"
+  defp format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   @spec panel_height(state()) :: non_neg_integer()
   defp panel_height(state) do
