@@ -1,0 +1,47 @@
+name: Minga
+options:
+  bundleIdPrefix: com.minga
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
+    # Remove once `metal --version` works without this (check Xcode Settings > Components).
+    TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
+
+targets:
+  minga-mac:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources
+        type: group
+    settings:
+      base:
+        PRODUCT_NAME: minga-mac
+        SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        INFOPLIST_FILE: ""
+        MTL_LANGUAGE_REVISION: UseDeploymentTarget
+    dependencies: []
+    postBuildScripts:
+      - name: Codesign
+        script: |
+          codesign --force --sign - "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}"
+        basedOnDependencyAnalysis: false
+
+  MingaTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        type: group
+    dependencies:
+      - target: minga-mac
+    settings:
+      base:
+        PRODUCT_NAME: MingaTests

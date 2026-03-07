@@ -6,17 +6,21 @@ defmodule Mix.Tasks.Minga do
 
   ## Usage
 
-      mix minga [--gui] [filename]
+      mix minga [filename]
+      mix minga +gui [filename]
 
   ## Options
 
-      --gui    Launch the native macOS GUI instead of the TUI
+      +gui    Launch the native macOS GUI instead of the TUI
+
+  The `+gui` flag uses a `+` prefix to avoid conflicts with Mix's
+  built-in option parser.
 
   ## Examples
 
-      mix minga README.md        # Open a file in TUI
-      mix minga --gui README.md  # Open a file in GUI
-      mix minga                  # Start with empty buffer
+      mix minga README.md       # Open a file in TUI
+      mix minga +gui README.md  # Open a file in GUI
+      mix minga                 # Start with empty buffer
   """
 
   use Mix.Task
@@ -48,8 +52,8 @@ defmodule Mix.Tasks.Minga do
 
   @spec extract_gui_flag([String.t()]) :: {boolean(), [String.t()]}
   defp extract_gui_flag(args) do
-    if "--gui" in args do
-      {true, List.delete(args, "--gui")}
+    if "+gui" in args do
+      {true, List.delete(args, "+gui")}
     else
       {false, args}
     end

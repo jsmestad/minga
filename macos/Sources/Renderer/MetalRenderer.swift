@@ -8,14 +8,17 @@ import Metal
 import QuartzCore
 import AppKit
 
-/// GPU cell data (must match CellData in Shaders.metal, 72 bytes).
+/// GPU cell data (must match CellData in Shaders.metal).
+///
+/// Uses SIMD3<Float> for colors, which is 16-byte aligned and matches
+/// MSL's float3. Total size: 80 bytes per cell.
 struct CellGPU {
     var uvOrigin: SIMD2<Float> = .zero
     var uvSize: SIMD2<Float> = .zero
     var glyphSize: SIMD2<Float> = .zero
     var glyphOffset: SIMD2<Float> = .zero
-    var fgColor: (Float, Float, Float) = (1, 1, 1)
-    var bgColor: (Float, Float, Float) = (0.12, 0.12, 0.14)
+    var fgColor: SIMD3<Float> = .init(1, 1, 1)
+    var bgColor: SIMD3<Float> = .init(0.12, 0.12, 0.14)
     var gridPos: SIMD2<Float> = .zero
     var hasGlyph: Float = 0
     var isColor: Float = 0
@@ -53,9 +56,13 @@ final class MetalRenderer {
         self.device = device
         self.commandQueue = queue
 
-        // Compile Metal shaders from the bundled .metal file.
-        guard let library = try? device.makeDefaultLibrary(bundle: Bundle.module) else {
-            NSLog("Failed to load Metal shader library from bundle")
+        // Load the compiled Metal shader library.
+        // Xcode compiles .metal files into default.metallib at build time
+        // and places it next to the executable.
+        let executableURL = Bundle.main.executableURL!
+        let metallibURL = executableURL.deletingLastPathComponent().appendingPathComponent("default.metallib")
+        guard let library = try? device.makeLibrary(URL: metallibURL) else {
+            NSLog("Failed to load Metal library from \(metallibURL.path)")
             return nil
         }
 
@@ -111,8 +118,8 @@ final class MetalRenderer {
 
             var gpu = CellGPU()
             gpu.gridPos = SIMD2<Float>(Float(col), Float(row))
-            gpu.bgColor = colorFromU24(cell.bg, default: (0.12, 0.12, 0.14))
-            gpu.fgColor = colorFromU24(cell.fg, default: (1, 1, 1))
+            gpu.bgColor = colorFromU24(cell.bg, default: SIMD3<Float>(0.12, 0.12, 0.14))
+            gpu.fgColor = colorFromU24(cell.fg, default: SIMD3<Float>(1, 1, 1))
 
             // Look up glyph if cell has content.
             if !cell.grapheme.isEmpty, cell.grapheme != " " {
@@ -121,9 +128,9 @@ final class MetalRenderer {
                     gpu.hasGlyph = 1.0
                     gpu.isColor = glyph.isColor ? 1.0 : 0.0
                     gpu.uvOrigin = SIMD2<Float>(Float(glyph.atlasX) / atlasSize,
-                                                 Float(glyph.atlasY) / atlasSize)
+                                                Float(glyph.atlasY) / atlasSize)
                     gpu.uvSize = SIMD2<Float>(Float(glyph.width) / atlasSize,
-                                               Float(glyph.height) / atlasSize)
+                                              Float(glyph.height) / atlasSize)
                     gpu.glyphSize = SIMD2<Float>(Float(glyph.width), Float(glyph.height))
                     let baseline = Float(face.ascent)
                     gpu.glyphOffset = SIMD2<Float>(
@@ -185,8 +192,8 @@ final class MetalRenderer {
                 let cursorIdx = Int(grid.cursorRow) * Int(grid.cols) + Int(grid.cursorCol)
                 if cursorIdx >= 0, cursorIdx < count {
                     var cursorCell = gpuCells[cursorIdx]
-                    cursorCell.fgColor = (1.0, 1.0, 1.0)
-                    cursorCell.bgColor = (0.8, 0.8, 0.8)
+                    cursorCell.fgColor = SIMD3<Float>(1, 1, 1)
+                    cursorCell.bgColor = SIMD3<Float>(0.8, 0.8, 0.8)
                     cursorCell.hasGlyph = 0.0
 
                     encoder.setRenderPipelineState(bgPipeline)
@@ -225,12 +232,13 @@ final class MetalRenderer {
         atlasTexture = texture
     }
 
-    /// Convert a 24-bit RGB color to 3 floats. 0 maps to the provided default.
-    private func colorFromU24(_ color: UInt32, default defaultColor: (Float, Float, Float)) -> (Float, Float, Float) {
+    /// Convert a 24-bit RGB color to SIMD3<Float>. 0 maps to the provided default.
+    private func colorFromU24(_ color: UInt32, default defaultColor: SIMD3<Float>) -> SIMD3<Float> {
         if color == 0 { return defaultColor }
-        let r = Float((color >> 16) & 0xFF) / 255.0
-        let g = Float((color >> 8) & 0xFF) / 255.0
-        let b = Float(color & 0xFF) / 255.0
-        return (r, g, b)
+        return SIMD3<Float>(
+            Float((color >> 16) & 0xFF) / 255.0,
+            Float((color >> 8) & 0xFF) / 255.0,
+            Float(color & 0xFF) / 255.0
+        )
     }
 }

@@ -1,0 +1,494 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
+		0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
+		16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A647814918768E62822D4A1 /* MingaApp.swift */; };
+		48842D6AE71AA7EB08B9ED03 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
+		50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
+		6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
+		686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F220A60775A252A728477659 /* ProtocolTests.swift */; };
+		8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */; };
+		9BAECBE2506FC3893151FD6C /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
+		AE619C9C5E8A6C337F6283F1 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
+		C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
+		CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
+		EDF83D0ACFCCB4ED91C1813C /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
+		F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		759627BE7CA1AB72FDAFC484 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 408C02F1934F748B5B5586FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB99946B54F4654DA02F2A34;
+			remoteInfo = "minga-mac";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellGrid.swift; sourceTree = "<group>"; };
+		0C26E064D810299C0302F439 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
+		3F56CBF3A086193F8775262B /* GlyphAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlyphAtlas.swift; sourceTree = "<group>"; };
+		4A647814918768E62822D4A1 /* MingaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaApp.swift; sourceTree = "<group>"; };
+		4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolReader.swift; sourceTree = "<group>"; };
+		4BC98120D82BD7548347875E /* FontFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontFace.swift; sourceTree = "<group>"; };
+		4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolDecoder.swift; sourceTree = "<group>"; };
+		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
+		83165B89231936674C54B513 /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
+		89DAA6AEFA6A62A1172EABF2 /* minga-mac */ = {isa = PBXFileReference; includeInIndex = 0; path = "minga-mac"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandDispatcher.swift; sourceTree = "<group>"; };
+		C441427A427E23B912F70092 /* ProtocolConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolConstants.swift; sourceTree = "<group>"; };
+		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		11BD8FE058FA53674B42329F /* Renderer */ = {
+			isa = PBXGroup;
+			children = (
+				0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */,
+				C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */,
+				F57909975ED8C2222150ABE2 /* MetalRenderer.swift */,
+				4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */,
+			);
+			path = Renderer;
+			sourceTree = "<group>";
+		};
+		4AACF7C989E8FDB12B3EC840 /* Font */ = {
+			isa = PBXGroup;
+			children = (
+				4BC98120D82BD7548347875E /* FontFace.swift */,
+				3F56CBF3A086193F8775262B /* GlyphAtlas.swift */,
+			);
+			path = Font;
+			sourceTree = "<group>";
+		};
+		616EA584E8B34ECF2CD77B29 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				EF010AC81BF7F66D126A242B /* MingaTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		B26C6BDB50303355902FB133 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				83165B89231936674C54B513 /* EditorNSView.swift */,
+				0C26E064D810299C0302F439 /* EditorView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		BE05074760AA9D5983E99402 /* Protocol */ = {
+			isa = PBXGroup;
+			children = (
+				C441427A427E23B912F70092 /* ProtocolConstants.swift */,
+				56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */,
+				7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */,
+				4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */,
+			);
+			path = Protocol;
+			sourceTree = "<group>";
+		};
+		C6B8D946BE6392AA3F4AE5E9 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				4A647814918768E62822D4A1 /* MingaApp.swift */,
+				4AACF7C989E8FDB12B3EC840 /* Font */,
+				BE05074760AA9D5983E99402 /* Protocol */,
+				11BD8FE058FA53674B42329F /* Renderer */,
+				B26C6BDB50303355902FB133 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		E8F5FA5379F05A4CFD1B29AA = {
+			isa = PBXGroup;
+			children = (
+				C6B8D946BE6392AA3F4AE5E9 /* Sources */,
+				616EA584E8B34ECF2CD77B29 /* Tests */,
+				EAC6A96BCF212D9B7E7CEF60 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EAC6A96BCF212D9B7E7CEF60 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				89DAA6AEFA6A62A1172EABF2 /* minga-mac */,
+				64CEFB02A774E5E8EF19029F /* MingaTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EF010AC81BF7F66D126A242B /* MingaTests */ = {
+			isa = PBXGroup;
+			children = (
+				F220A60775A252A728477659 /* ProtocolTests.swift */,
+			);
+			path = MingaTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2734C1C657DD572768745C3F /* MingaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D780919DB5E11DE4AB14FA57 /* Build configuration list for PBXNativeTarget "MingaTests" */;
+			buildPhases = (
+				C8F3C47EE52117DADE97B9F9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8EBD3ED691F2A873067DF9A9 /* PBXTargetDependency */,
+			);
+			name = MingaTests;
+			packageProductDependencies = (
+			);
+			productName = MingaTests;
+			productReference = 64CEFB02A774E5E8EF19029F /* MingaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		AB99946B54F4654DA02F2A34 /* minga-mac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BEC4852E67E77008BC01B1D6 /* Build configuration list for PBXNativeTarget "minga-mac" */;
+			buildPhases = (
+				57A5E7D23FC6D5271E0D927A /* Sources */,
+				9461805708F48669CDAFF6D6 /* Codesign */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "minga-mac";
+			packageProductDependencies = (
+			);
+			productName = "minga-mac";
+			productReference = 89DAA6AEFA6A62A1172EABF2 /* minga-mac */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		408C02F1934F748B5B5586FC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 089DCE5763E96542DB8ACF33 /* Build configuration list for PBXProject "Minga" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E8F5FA5379F05A4CFD1B29AA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EAC6A96BCF212D9B7E7CEF60 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2734C1C657DD572768745C3F /* MingaTests */,
+				AB99946B54F4654DA02F2A34 /* minga-mac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9461805708F48669CDAFF6D6 /* Codesign */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = Codesign;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "codesign --force --sign - \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		57A5E7D23FC6D5271E0D927A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */,
+				EDF83D0ACFCCB4ED91C1813C /* CommandDispatcher.swift in Sources */,
+				48842D6AE71AA7EB08B9ED03 /* EditorNSView.swift in Sources */,
+				AE619C9C5E8A6C337F6283F1 /* EditorView.swift in Sources */,
+				9BAECBE2506FC3893151FD6C /* FontFace.swift in Sources */,
+				6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */,
+				50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */,
+				16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */,
+				0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */,
+				CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */,
+				0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */,
+				C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */,
+				F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C8F3C47EE52117DADE97B9F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8EBD3ED691F2A873067DF9A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AB99946B54F4654DA02F2A34 /* minga-mac */;
+			targetProxy = 759627BE7CA1AB72FDAFC484 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		03D1C4FA288798B824DB15EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
+			};
+			name = Release;
+		};
+		23DBB5921F5420FD3005CCFA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MTL_LANGUAGE_REVISION = UseDeploymentTarget;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.minga.minga-mac";
+				PRODUCT_NAME = "minga-mac";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		333BBE9DFB9A1207127F43FA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
+			};
+			name = Debug;
+		};
+		3DFDCCCABE804CEC45ADD300 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.minga.MingaTests;
+				PRODUCT_NAME = MingaTests;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		876030776C01B0A254472860 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MTL_LANGUAGE_REVISION = UseDeploymentTarget;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.minga.minga-mac";
+				PRODUCT_NAME = "minga-mac";
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Release;
+		};
+		9DD36755A82F358FF8E42F34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.minga.MingaTests;
+				PRODUCT_NAME = MingaTests;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		089DCE5763E96542DB8ACF33 /* Build configuration list for PBXProject "Minga" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				333BBE9DFB9A1207127F43FA /* Debug */,
+				03D1C4FA288798B824DB15EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BEC4852E67E77008BC01B1D6 /* Build configuration list for PBXNativeTarget "minga-mac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				23DBB5921F5420FD3005CCFA /* Debug */,
+				876030776C01B0A254472860 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D780919DB5E11DE4AB14FA57 /* Build configuration list for PBXNativeTarget "MingaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9DD36755A82F358FF8E42F34 /* Debug */,
+				3DFDCCCABE804CEC45ADD300 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 408C02F1934F748B5B5586FC /* Project object */;
+}

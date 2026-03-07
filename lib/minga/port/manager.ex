@@ -253,8 +253,9 @@ defmodule Minga.Port.Manager do
       # Dev/test fallback: look in the source tree.
       case backend do
         :gui ->
-          # Swift GUI binary built by SPM under macos/.build/
-          Path.join([File.cwd!(), "macos", ".build", "debug", "minga-mac"])
+          # Swift GUI binary built by Xcode.
+          # In dev, find it in DerivedData via the build settings output.
+          find_xcode_build_product("minga-mac")
 
         _tui ->
           # Zig TUI binary in zig-out/bin/
@@ -276,4 +277,32 @@ defmodule Minga.Port.Manager do
   @spec renderer_binary_name(backend()) :: String.t()
   defp renderer_binary_name(:tui), do: "minga-renderer"
   defp renderer_binary_name(:gui), do: "minga-mac"
+
+  # Find the Xcode build product in DerivedData.
+  # Uses `xcodebuild -showBuildSettings` to get the exact path.
+  @spec find_xcode_build_product(String.t()) :: String.t()
+  defp find_xcode_build_product(product_name) do
+    project_path = Path.join([File.cwd!(), "macos", "Minga.xcodeproj"])
+
+    case System.cmd("xcodebuild", [
+           "-project",
+           project_path,
+           "-scheme",
+           "minga-mac",
+           "-configuration",
+           "Debug",
+           "-showBuildSettings"
+         ],
+         stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case Regex.run(~r/BUILT_PRODUCTS_DIR = (.+)/, output) do
+          [_, dir] -> Path.join(String.trim(dir), product_name)
+          _ -> Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
+        end
+
+      _ ->
+        Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
+    end
+  end
 end

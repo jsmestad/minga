@@ -11,9 +11,11 @@ minga-*.tar
 zig/zig-out/
 zig/.zig-cache/
 
-# Swift (SPM)
+# Swift / Xcode
 macos/.build/
 macos/.swiftpm/
+macos/Minga.xcodeproj/xcuserdata/
+macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Generated
 erl_crash.dump

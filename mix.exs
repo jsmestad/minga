@@ -203,7 +203,16 @@ defmodule Minga.MixProject do
       # NOTE: Prefer `bin/minga` which captures the tty device path for the
       # Zig renderer.  `mix minga` works if MINGA_TTY is set manually.
       minga: [
-        "run --no-halt --no-start -e 'Application.put_env(:minga, :start_editor, true); Application.ensure_all_started(:minga); Minga.CLI.main(System.argv())'"
+        "run --no-halt --no-start -e '
+          {gui, argv} = case System.argv() do
+            [\"+gui\" | rest] -> {true, rest}
+            other -> {false, other}
+          end
+          if gui, do: Application.put_env(:minga, :backend, :gui)
+          Application.put_env(:minga, :start_editor, true)
+          Application.ensure_all_started(:minga)
+          Minga.CLI.main(argv)
+        '"
       ],
       test: ["test --warnings-as-errors"],
       lint: [
