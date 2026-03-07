@@ -10,6 +10,7 @@ defmodule Minga.Agent.View.State do
   stays within Credo's 31-field limit.
   """
 
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
 
   @typedoc "Which panel has keyboard focus inside the agentic view."
@@ -20,29 +21,47 @@ defmodule Minga.Agent.View.State do
           active: boolean(),
           focus: focus(),
           file_viewer_scroll: non_neg_integer(),
-          saved_windows: Windows.t() | nil
+          saved_windows: Windows.t() | nil,
+          pending_g: boolean(),
+          saved_file_tree: FileTreeState.t() | nil
         }
 
   @enforce_keys []
   defstruct active: false,
             focus: :chat,
             file_viewer_scroll: 0,
-            saved_windows: nil
+            saved_windows: nil,
+            pending_g: false,
+            saved_file_tree: nil
 
   @doc "Returns a new agentic view state with all defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
   @doc "Activates the view, saving the current window layout."
-  @spec activate(t(), Windows.t()) :: t()
-  def activate(%__MODULE__{} = av, windows) do
-    %{av | active: true, focus: :chat, saved_windows: windows}
+  @spec activate(t(), Windows.t(), FileTreeState.t()) :: t()
+  def activate(%__MODULE__{} = av, windows, file_tree) do
+    %{
+      av
+      | active: true,
+        focus: :chat,
+        saved_windows: windows,
+        saved_file_tree: file_tree,
+        pending_g: false
+    }
   end
 
   @doc "Deactivates the view and returns the restored window layout."
-  @spec deactivate(t()) :: {t(), Windows.t() | nil}
-  def deactivate(%__MODULE__{saved_windows: saved} = av) do
-    {%{av | active: false, focus: :chat, saved_windows: nil}, saved}
+  @spec deactivate(t()) :: {t(), Windows.t() | nil, FileTreeState.t() | nil}
+  def deactivate(%__MODULE__{saved_windows: saved_windows, saved_file_tree: saved_file_tree} = av) do
+    {%{
+       av
+       | active: false,
+         focus: :chat,
+         saved_windows: nil,
+         saved_file_tree: nil,
+         pending_g: false
+     }, saved_windows, saved_file_tree}
   end
 
   @doc "Switches focus to the given panel."
@@ -73,5 +92,11 @@ defmodule Minga.Agent.View.State do
   @spec scroll_viewer_to_bottom(t()) :: t()
   def scroll_viewer_to_bottom(%__MODULE__{} = av) do
     %{av | file_viewer_scroll: 999_999}
+  end
+
+  @doc "Sets the pending_g flag for tracking gg two-key sequences."
+  @spec set_pending_g(t(), boolean()) :: t()
+  def set_pending_g(%__MODULE__{} = av, pending) when is_boolean(pending) do
+    %{av | pending_g: pending}
   end
 end

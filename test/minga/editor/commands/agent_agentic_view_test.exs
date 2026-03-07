@@ -40,7 +40,9 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       active: Keyword.get(opts, :active, false),
       focus: :chat,
       file_viewer_scroll: 0,
-      saved_windows: Keyword.get(opts, :saved_windows, nil)
+      saved_windows: Keyword.get(opts, :saved_windows, nil),
+      pending_g: false,
+      saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
     }
 
     %EditorState{

@@ -43,7 +43,9 @@ defmodule Minga.Agent.View.RendererTest do
       active: true,
       focus: Keyword.get(opts, :focus, :chat),
       file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
-      saved_windows: nil
+      saved_windows: nil,
+      pending_g: false,
+      saved_file_tree: nil
     }
 
     %EditorState{
@@ -167,6 +169,30 @@ defmodule Minga.Agent.View.RendererTest do
 
       assert chat_cols != [], "expected draw commands in chat panel columns"
       assert viewer_cols != [], "expected draw commands in viewer panel columns"
+    end
+  end
+
+  describe "resize re-layout" do
+    test "different viewport sizes produce different chat widths" do
+      state_80 = base_state(rows: 24, cols: 80)
+      state_120 = base_state(rows: 24, cols: 120)
+
+      cmds_80 = Renderer.render(state_80)
+      cmds_120 = Renderer.render(state_120)
+
+      cols_80 =
+        cmds_80
+        |> Enum.filter(&(binary_part(&1, 0, 1) == <<0x10>>))
+        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        |> Enum.max(fn -> 0 end)
+
+      cols_120 =
+        cmds_120
+        |> Enum.filter(&(binary_part(&1, 0, 1) == <<0x10>>))
+        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        |> Enum.max(fn -> 0 end)
+
+      assert cols_120 > cols_80, "wider viewport should use more columns"
     end
   end
 end

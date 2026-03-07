@@ -42,7 +42,9 @@ defmodule Minga.Agent.View.KeysTest do
       active: Keyword.get(opts, :active, true),
       focus: Keyword.get(opts, :focus, :chat),
       file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
-      saved_windows: nil
+      saved_windows: nil,
+      pending_g: Keyword.get(opts, :pending_g, false),
+      saved_file_tree: nil
     }
 
     %EditorState{
@@ -117,10 +119,44 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agent.panel.scroll_offset == 0
     end
 
+    test "g sets pending_g flag" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?g, 0)
+      assert new_state.agentic.pending_g == true
+    end
+
+    test "gg scrolls chat to top" do
+      state = base_state(focus: :chat)
+      # Scroll down first
+      {:handled, scrolled} = Keys.handle_key(state, ?j, 0)
+      {:handled, scrolled} = Keys.handle_key(scrolled, ?j, 0)
+      assert scrolled.agent.panel.scroll_offset == 2
+      # Now gg
+      {:handled, with_g} = Keys.handle_key(scrolled, ?g, 0)
+      {:handled, at_top} = Keys.handle_key(with_g, ?g, 0)
+      assert at_top.agent.panel.scroll_offset == 0
+      refute at_top.agentic.pending_g
+    end
+
+    test "g then another key cancels pending_g and processes the key" do
+      state = base_state(focus: :chat)
+      {:handled, with_g} = Keys.handle_key(state, ?g, 0)
+      assert with_g.agentic.pending_g
+      {:handled, result} = Keys.handle_key(with_g, ?j, 0)
+      refute result.agentic.pending_g
+      assert result.agent.panel.scroll_offset == 1
+    end
+
     test "G scrolls to bottom (large offset)" do
       state = base_state(focus: :chat)
       {:handled, new_state} = Keys.handle_key(state, ?G, 0)
       assert new_state.agent.panel.scroll_offset > 0
+    end
+
+    test "o is handled without crashing (no session)" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?o, 0)
+      assert new_state == state
     end
 
     test "i focuses the input field" do
@@ -259,10 +295,27 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agentic.file_viewer_scroll == 0
     end
 
-    test "g scrolls to top" do
+    test "g sets pending_g flag" do
       state = viewer_state(50)
       {:handled, new_state} = Keys.handle_key(state, ?g, 0)
-      assert new_state.agentic.file_viewer_scroll == 0
+      assert new_state.agentic.pending_g == true
+      assert new_state.agentic.file_viewer_scroll == 50
+    end
+
+    test "gg scrolls to top" do
+      state = viewer_state(50)
+      {:handled, with_g} = Keys.handle_key(state, ?g, 0)
+      {:handled, at_top} = Keys.handle_key(with_g, ?g, 0)
+      assert at_top.agentic.file_viewer_scroll == 0
+      refute at_top.agentic.pending_g
+    end
+
+    test "g then another key cancels pending_g and processes the key" do
+      state = viewer_state(50)
+      {:handled, with_g} = Keys.handle_key(state, ?g, 0)
+      {:handled, result} = Keys.handle_key(with_g, ?j, 0)
+      refute result.agentic.pending_g
+      assert result.agentic.file_viewer_scroll == 51
     end
 
     test "G scrolls to a large offset (approximate bottom)" do

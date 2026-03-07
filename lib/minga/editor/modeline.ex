@@ -30,7 +30,8 @@ defmodule Minga.Editor.Modeline do
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => Minga.Editor.State.Agent.status(),
-          optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil
+          optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil,
+          optional(:mode_override) => String.t() | nil
         }
 
   @doc "Renders the modeline at the given row using the provided data."
@@ -47,7 +48,8 @@ defmodule Minga.Editor.Modeline do
     info_bg = ml.info_bg
 
     # Build segments
-    mode_segment = " #{mode_badge(data.mode, data.mode_state)} "
+    badge = data[:mode_override] || mode_badge(data.mode, data.mode_state)
+    mode_segment = " #{badge} "
     buf_indicator = if data.buf_count > 1, do: " [#{data.buf_index}/#{data.buf_count}]", else: ""
 
     macro_indicator =

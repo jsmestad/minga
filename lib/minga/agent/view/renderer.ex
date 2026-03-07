@@ -262,6 +262,7 @@ defmodule Minga.Agent.View.Renderer do
       %{
         mode: state.mode,
         mode_state: state.mode_state,
+        mode_override: "AGENT",
         file_name: "AGENT",
         filetype: :text,
         dirty_marker: "",

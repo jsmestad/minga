@@ -129,6 +129,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, {:toggle_tool_collapse, message_index})
   end
 
+  @doc "Toggles all tool call messages between collapsed and expanded."
+  @spec toggle_all_tool_collapses(GenServer.server()) :: :ok
+  def toggle_all_tool_collapses(session) do
+    GenServer.call(session, :toggle_all_tool_collapses)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -270,6 +276,27 @@ defmodule Minga.Agent.Session do
     messages =
       List.update_at(state.messages, index, fn
         {:tool_call, tc} -> {:tool_call, %{tc | collapsed: !tc.collapsed}}
+        other -> other
+      end)
+
+    state = %{state | messages: messages}
+    broadcast(state, :messages_changed)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:toggle_all_tool_collapses, _from, state) do
+    # If any tool call is collapsed, expand all; otherwise collapse all.
+    any_collapsed =
+      Enum.any?(state.messages, fn
+        {:tool_call, %{collapsed: true}} -> true
+        _ -> false
+      end)
+
+    target = !any_collapsed
+
+    messages =
+      Enum.map(state.messages, fn
+        {:tool_call, tc} -> {:tool_call, %{tc | collapsed: target}}
         other -> other
       end)
 

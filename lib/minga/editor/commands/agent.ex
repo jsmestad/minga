@@ -49,11 +49,18 @@ defmodule Minga.Editor.Commands.Agent do
   """
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(%{agentic: %{active: true}} = state) do
-    {new_av, saved_windows} = ViewState.deactivate(state.agentic)
+    {new_av, saved_windows, saved_file_tree} = ViewState.deactivate(state.agentic)
 
     state =
       if saved_windows do
         %{state | windows: saved_windows}
+      else
+        state
+      end
+
+    state =
+      if saved_file_tree do
+        %{state | file_tree: saved_file_tree}
       else
         state
       end
@@ -63,11 +70,12 @@ defmodule Minga.Editor.Commands.Agent do
 
   def toggle_agentic_view(%{agentic: %{active: false}} = state) do
     # Save current window layout and activate the agentic view.
-    state = %{state | agentic: ViewState.activate(state.agentic, state.windows)}
+    state = %{state | agentic: ViewState.activate(state.agentic, state.windows, state.file_tree)}
 
-    # Close any open splits — the agentic view takes the full screen.
+    # Close any open splits and file tree — the agentic view takes the full screen.
     %Windows{} = ws = state.windows
-    state = %{state | windows: %{ws | tree: nil}}
+    alias Minga.Editor.State.FileTree, as: FileTreeState
+    state = %{state | windows: %{ws | tree: nil}, file_tree: FileTreeState.close(state.file_tree)}
 
     # Ensure a session is running; start one if not.
     if state.agent.session == nil do

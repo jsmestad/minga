@@ -35,17 +35,23 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @spec needs_rebuild?(String.t()) :: boolean()
   defp needs_rebuild?(output_path) do
     case File.stat(output_path, time: :posix) do
-      {:error, :enoent} ->
-        true
+      {:error, :enoent} -> true
+      {:ok, %{mtime: output_mtime}} -> any_source_newer?(output_mtime)
+    end
+  end
 
-      {:ok, %{mtime: output_mtime}} ->
-        zig_source_files()
-        |> Enum.any?(fn src ->
-          case File.stat(src, time: :posix) do
-            {:ok, %{mtime: src_mtime}} -> src_mtime > output_mtime
-            _ -> true
-          end
-        end)
+  @spec any_source_newer?(integer()) :: boolean()
+  defp any_source_newer?(output_mtime) do
+    Enum.any?(zig_source_files(), fn src ->
+      source_newer?(src, output_mtime)
+    end)
+  end
+
+  @spec source_newer?(String.t(), integer()) :: boolean()
+  defp source_newer?(src, output_mtime) do
+    case File.stat(src, time: :posix) do
+      {:ok, %{mtime: src_mtime}} -> src_mtime > output_mtime
+      _ -> true
     end
   end
 

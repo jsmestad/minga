@@ -88,6 +88,12 @@ defmodule Minga.Agent.PanelState do
     %{state | scroll_offset: 999_999}
   end
 
+  @doc "Scrolls to the top of the chat."
+  @spec scroll_to_top(t()) :: t()
+  def scroll_to_top(%__MODULE__{} = state) do
+    %{state | scroll_offset: 0}
+  end
+
   @doc "Sets the input focus state."
   @spec set_input_focused(t(), boolean()) :: t()
   def set_input_focused(%__MODULE__{} = state, focused) do

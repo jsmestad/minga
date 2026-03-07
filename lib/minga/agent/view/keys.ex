@@ -23,6 +23,7 @@ defmodule Minga.Agent.View.Keys do
 
   import Bitwise
 
+  alias Minga.Agent.Session
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -111,6 +112,19 @@ defmodule Minga.Agent.View.Keys do
   @spec handle_chat_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
 
+  # gg: second g completes scroll-to-top
+  defp handle_chat_nav(%{agentic: %{pending_g: true}} = state, ?g, _mods) do
+    state
+    |> update_agentic(&ViewState.set_pending_g(&1, false))
+    |> update_agent(&AgentState.scroll_to_top/1)
+  end
+
+  # Any other key after g cancels the pending g
+  defp handle_chat_nav(%{agentic: %{pending_g: true}} = state, cp, mods) do
+    state = update_agentic(state, &ViewState.set_pending_g(&1, false))
+    handle_chat_nav(state, cp, mods)
+  end
+
   # q or Escape: close the agentic view
   defp handle_chat_nav(state, cp, _mods) when cp in [?q, @escape] do
     AgentCommands.toggle_agentic_view(state)
@@ -146,14 +160,22 @@ defmodule Minga.Agent.View.Keys do
     scroll_chat_up_half(state)
   end
 
+  # g: first press of gg sequence
+  defp handle_chat_nav(state, ?g, _mods) do
+    update_agentic(state, &ViewState.set_pending_g(&1, true))
+  end
+
   # G: scroll to bottom
   defp handle_chat_nav(state, ?G, _mods) do
     update_agent(state, &AgentState.scroll_to_bottom/1)
   end
 
-  # o: toggle tool call collapse — placeholder; full implementation requires
-  # mapping scroll offset to message index (see ticket #133 risks section).
+  # o: toggle all tool call expand/collapse
   defp handle_chat_nav(state, ?o, _mods) do
+    if state.agent.session do
+      Session.toggle_all_tool_collapses(state.agent.session)
+    end
+
     state
   end
 
@@ -163,6 +185,19 @@ defmodule Minga.Agent.View.Keys do
 
   @spec handle_viewer_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
+
+  # gg: second g completes scroll-to-top
+  defp handle_viewer_nav(%{agentic: %{pending_g: true}} = state, ?g, _mods) do
+    state
+    |> update_agentic(&ViewState.set_pending_g(&1, false))
+    |> update_agentic(&ViewState.scroll_viewer_to_top/1)
+  end
+
+  # Any other key after g cancels the pending g
+  defp handle_viewer_nav(%{agentic: %{pending_g: true}} = state, cp, mods) do
+    state = update_agentic(state, &ViewState.set_pending_g(&1, false))
+    handle_viewer_nav(state, cp, mods)
+  end
 
   # Tab: switch focus back to chat
   defp handle_viewer_nav(state, @tab, _mods) do
@@ -196,9 +231,9 @@ defmodule Minga.Agent.View.Keys do
     update_agentic(state, &ViewState.scroll_viewer_up(&1, amount))
   end
 
-  # gg: scroll to top (first press — we handle single-key for simplicity)
+  # g: first press of gg sequence
   defp handle_viewer_nav(state, ?g, _mods) do
-    update_agentic(state, &ViewState.scroll_viewer_to_top/1)
+    update_agentic(state, &ViewState.set_pending_g(&1, true))
   end
 
   # G: scroll to bottom (approximate — jump to a large offset; renderer clamps)

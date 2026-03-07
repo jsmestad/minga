@@ -76,6 +76,12 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.scroll_to_bottom(agent.panel)}
   end
 
+  @doc "Scrolls the chat to the top."
+  @spec scroll_to_top(t()) :: t()
+  def scroll_to_top(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.scroll_to_top(agent.panel)}
+  end
+
   @doc "Scrolls the chat up by `amount` lines."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{} = agent, amount) do

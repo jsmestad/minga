@@ -2,6 +2,7 @@ defmodule Minga.Agent.View.StateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
 
   describe "new/0" do
@@ -24,58 +25,90 @@ defmodule Minga.Agent.View.StateTest do
       av = ViewState.new()
       assert av.saved_windows == nil
     end
+
+    test "starts with pending_g false" do
+      av = ViewState.new()
+      refute av.pending_g
+    end
+
+    test "starts with no saved file tree" do
+      av = ViewState.new()
+      assert av.saved_file_tree == nil
+    end
   end
 
-  describe "activate/2" do
+  describe "activate/3" do
     test "sets active to true" do
-      av = ViewState.new() |> ViewState.activate(%Windows{})
+      av = ViewState.new() |> ViewState.activate(%Windows{}, %FileTreeState{})
       assert av.active
     end
 
     test "saves the windows layout" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 3}
-      av = ViewState.new() |> ViewState.activate(windows)
+      av = ViewState.new() |> ViewState.activate(windows, %FileTreeState{})
       assert av.saved_windows == windows
+    end
+
+    test "saves the file tree state" do
+      ft = %FileTreeState{focused: true}
+      av = ViewState.new() |> ViewState.activate(%Windows{}, ft)
+      assert av.saved_file_tree == ft
     end
 
     test "resets focus to :chat" do
       av = %{ViewState.new() | focus: :file_viewer}
-      av = ViewState.activate(av, %Windows{})
+      av = ViewState.activate(av, %Windows{}, %FileTreeState{})
       assert av.focus == :chat
+    end
+
+    test "resets pending_g to false" do
+      av = %{ViewState.new() | pending_g: true}
+      av = ViewState.activate(av, %Windows{}, %FileTreeState{})
+      refute av.pending_g
     end
   end
 
   describe "deactivate/1" do
-    test "sets active to false and returns saved windows" do
+    test "sets active to false and returns saved windows and file tree" do
       windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 2}
+      ft = %FileTreeState{focused: true}
 
       av =
         ViewState.new()
-        |> ViewState.activate(windows)
+        |> ViewState.activate(windows, ft)
 
-      {new_av, restored} = ViewState.deactivate(av)
+      {new_av, restored_win, restored_ft} = ViewState.deactivate(av)
       refute new_av.active
-      assert restored == windows
+      assert restored_win == windows
+      assert restored_ft == ft
     end
 
-    test "clears saved_windows after deactivation" do
+    test "clears saved_windows and saved_file_tree after deactivation" do
       av =
         ViewState.new()
-        |> ViewState.activate(%Windows{})
+        |> ViewState.activate(%Windows{}, %FileTreeState{})
 
-      {new_av, _} = ViewState.deactivate(av)
+      {new_av, _, _} = ViewState.deactivate(av)
       assert new_av.saved_windows == nil
+      assert new_av.saved_file_tree == nil
     end
 
-    test "returns nil when no saved windows exist" do
-      {_av, restored} = ViewState.deactivate(ViewState.new())
-      assert restored == nil
+    test "returns nil when no saved state exists" do
+      {_av, restored_win, restored_ft} = ViewState.deactivate(ViewState.new())
+      assert restored_win == nil
+      assert restored_ft == nil
     end
 
     test "resets focus to :chat" do
       av = %{ViewState.new() | active: true, focus: :file_viewer}
-      {new_av, _} = ViewState.deactivate(av)
+      {new_av, _, _} = ViewState.deactivate(av)
       assert new_av.focus == :chat
+    end
+
+    test "resets pending_g to false" do
+      av = %{ViewState.new() | active: true, pending_g: true}
+      {new_av, _, _} = ViewState.deactivate(av)
+      refute new_av.pending_g
     end
   end
 
@@ -91,6 +124,18 @@ defmodule Minga.Agent.View.StateTest do
         |> ViewState.set_focus(:chat)
 
       assert av.focus == :chat
+    end
+  end
+
+  describe "set_pending_g/2" do
+    test "sets pending_g to true" do
+      av = ViewState.new() |> ViewState.set_pending_g(true)
+      assert av.pending_g
+    end
+
+    test "sets pending_g to false" do
+      av = %{ViewState.new() | pending_g: true} |> ViewState.set_pending_g(false)
+      refute av.pending_g
     end
   end
 
