@@ -145,35 +145,13 @@ A Port is an OS-level process boundary. The Zig renderer can fail completely, an
 
 ## The Port Protocol
 
-BEAM and Zig communicate via `{:packet, 4}`. Each message is prefixed with a 4-byte big-endian length, followed by a 1-byte opcode and opcode-specific binary fields. This is a simple, fast, zero-copy-friendly wire format.
+BEAM and the frontend communicate via `{:packet, 4}`: each message is prefixed with a 4-byte big-endian length, followed by a 1-byte opcode and opcode-specific binary fields. This is a simple, fast, zero-copy-friendly wire format.
 
-### Zig → BEAM (input events)
+Every render frame follows the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. The frontend double-buffers and only writes changed cells to the terminal (TUI) or triggers a display refresh (GUI).
 
-| Opcode | Event | Payload |
-|--------|-------|---------|
-| `0x01` | Key press | `codepoint::32, modifiers::8` |
-| `0x02` | Resize | `width::16, height::16` |
-| `0x03` | Ready | `width::16, height::16` |
-| `0x04` | Mouse event | `row::16, col::16, button::8, mods::8, type::8` |
-| `0x30` | Highlight spans | `version::32, count::32, [start::32, end::32, id::8]...` |
-| `0x31` | Highlight names | `count::16, [len::16, name]...` |
-| `0x32` | Grammar loaded | `success::8, name_len::16, name` |
+The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and diagnostics. For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. That document is the authoritative reference for anyone implementing a Minga frontend.
 
-### BEAM → Zig (render commands)
-
-| Opcode | Command | Payload |
-|--------|---------|---------|
-| `0x10` | Draw text | `row::16, col::16, fg::24, bg::24, attrs::8, len::16, text` |
-| `0x11` | Set cursor | `row::16, col::16` |
-| `0x12` | Clear | (empty) |
-| `0x13` | Batch end | (empty); signals Zig to flush the frame |
-| `0x15` | Cursor shape | `shape::8` (block / beam / underline) |
-| `0x20` | Set language | `len::16, name` |
-| `0x21` | Parse buffer | `version::32, len::32, content` |
-| `0x22` | Set highlight query | `len::32, query_text` |
-| `0x23` | Load grammar | `name_len::16, name, path_len::16, path` |
-
-Every render frame follows the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. The Zig renderer double-buffers and only writes changed cells to the terminal.
+Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend.
 
 ---
 
