@@ -104,8 +104,8 @@ defmodule Minga.Input.FileTree do
     {:tree_handled, sync_and_update(state, new_tree)}
   end
 
-  # r or g: refresh
-  defp do_handle(%{file_tree: %{tree: tree}} = state, cp, _mods) when cp in [?r, ?g] do
+  # r: refresh (g is reserved for gg motion)
+  defp do_handle(%{file_tree: %{tree: tree}} = state, cp, _mods) when cp == ?r do
     new_tree = FileTree.refresh(tree)
     {:tree_handled, sync_and_update(state, new_tree)}
   end

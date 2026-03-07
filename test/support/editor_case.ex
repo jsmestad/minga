@@ -89,6 +89,37 @@ defmodule Minga.Test.EditorCase do
     })
   end
 
+  @doc "Starts a headless editor with a pre-existing buffer."
+  @spec start_editor_with_buffer(pid(), keyword()) :: editor_ctx()
+  def start_editor_with_buffer(buffer, opts \\ []) do
+    width = Keyword.get(opts, :width, 80)
+    height = Keyword.get(opts, :height, 24)
+    id = :erlang.unique_integer([:positive])
+
+    {:ok, port} = HeadlessPort.start_link(width: width, height: height)
+
+    {:ok, editor} =
+      Editor.start_link(
+        name: :"headless_editor_#{id}",
+        port_manager: port,
+        buffer: buffer,
+        width: width,
+        height: height
+      )
+
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:ready, width, height}})
+    :ok = HeadlessPort.collect_frame(ref)
+
+    %{
+      editor: editor,
+      buffer: buffer,
+      port: port,
+      width: width,
+      height: height
+    }
+  end
+
   # ── Highlight injection helpers ─────────────────────────────────────────────
 
   @doc """
