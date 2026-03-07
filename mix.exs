@@ -160,6 +160,7 @@ defmodule Minga.MixProject do
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:hammox, "~> 0.7", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: :dev, runtime: false}
     ]

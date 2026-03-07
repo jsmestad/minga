@@ -1,3 +1,6 @@
+Hammox.defmock(Minga.Clipboard.Mock, for: Minga.Clipboard.Behaviour)
+Application.put_env(:minga, :clipboard_module, Minga.Clipboard.Mock)
+
 ExUnit.start(capture_log: true)
 
 # Disable clipboard sync during tests to avoid race conditions from
