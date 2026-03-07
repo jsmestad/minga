@@ -21,10 +21,13 @@ lib/
     buffer/
       document.ex           # Pure data structure (no GenServer)
       server.ex               # GenServer wrapper for gap buffer
+      edit_delta.ex           # Edit delta struct for incremental sync
+      state.ex                # Buffer GenServer internal state
     port/
       protocol.ex             # Port protocol encoder/decoder
       manager.ex              # GenServer managing the Zig renderer Port
       frontend.ex             # Behaviour for pluggable rendering backends
+      capabilities.ex         # Frontend capabilities struct
     parser/
       manager.ex              # GenServer managing the tree-sitter parser Port
     editor.ex                 # Editor orchestration GenServer

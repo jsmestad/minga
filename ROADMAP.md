@@ -240,9 +240,16 @@ Current status and planned features. Updated as development progresses.
 |---------|--------|-------|
 | OTP supervision tree | ✅ | `rest_for_one` — renderer crash doesn't lose state |
 | Port protocol (BEAM ↔ Zig) | ✅ | Length-prefixed binary, typed opcodes |
+| Port protocol spec (`docs/PROTOCOL.md`) | ✅ | Authoritative reference for frontend implementors (#149) |
+| Frontend behaviour | ✅ | `Minga.Port.Frontend` formalizes renderer contract (#148) |
+| Separate parser process | ✅ | `minga-parser` binary handles tree-sitter, renderer is 1.8MB (#150) |
+| Frontend capability negotiation | ✅ | Extended ready event + capabilities_updated opcode (#151) |
+| Layout regions | ✅ | define/clear/destroy/set_active_region opcodes (#152) |
+| Text measurement | ✅ | measure_text/text_width opcodes for proportional fonts (#153) |
+| Incremental content sync | ✅ | edit_buffer opcode + edit delta tracking in Buffer.Server (#154) |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 1,760 Elixir tests | ✅ | Including property-based tests |
+| 2,489 Elixir tests | ✅ | Including property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 
