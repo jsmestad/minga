@@ -251,7 +251,7 @@ Current status and planned features. Updated as development progresses.
 | Incremental content sync | ✅ | edit_buffer opcode + edit delta tracking in Buffer.Server (#154) |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 2,530 Elixir tests | ✅ | Including 7 property-based tests |
+| 2,556 Elixir tests | ✅ | Including 10 property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 
