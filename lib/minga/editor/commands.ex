@@ -159,6 +159,13 @@ defmodule Minga.Editor.Commands do
   def execute(state, :move_down), do: Movement.execute(state, :move_down)
   def execute(state, :move_logical_up), do: Movement.execute(state, :move_logical_up)
   def execute(state, :move_logical_down), do: Movement.execute(state, :move_logical_down)
+
+  def execute(state, :move_to_logical_line_start),
+    do: Movement.execute(state, :move_to_logical_line_start)
+
+  def execute(state, :move_to_logical_line_end),
+    do: Movement.execute(state, :move_to_logical_line_end)
+
   def execute(state, :move_to_line_start), do: Movement.execute(state, :move_to_line_start)
   def execute(state, :move_to_line_end), do: Movement.execute(state, :move_to_line_end)
   def execute(state, :word_forward), do: Movement.execute(state, :word_forward)

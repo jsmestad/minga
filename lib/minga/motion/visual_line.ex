@@ -91,7 +91,47 @@ defmodule Minga.Motion.VisualLine do
     end
   end
 
+  @doc """
+  Move to the start of the current visual row.
+
+  When the cursor is on a continuation row of a wrapped line, moves to
+  the first column of that visual row (not the logical line start).
+  """
+  @spec visual_line_start(Document.t(), position(), pos_integer()) :: position()
+  def visual_line_start(doc, {line, col}, content_width) do
+    line_text = Document.line_at(doc, line)
+    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    display_col = Unicode.display_col(line_text, col)
+    {_vrow_idx, _vrow_col, vrow} = find_visual_row(wrap_entry, display_col)
+    {line, vrow.byte_offset}
+  end
+
+  @doc """
+  Move to the end of the current visual row.
+
+  When the cursor is on a visual row within a wrapped line, moves to
+  the last column of that visual row.
+  """
+  @spec visual_line_end(Document.t(), position(), pos_integer()) :: position()
+  def visual_line_end(doc, {line, col}, content_width) do
+    line_text = Document.line_at(doc, line)
+    wrap_entry = WrapMap.compute([line_text], content_width) |> hd()
+    display_col = Unicode.display_col(line_text, col)
+    {_vrow_idx, _vrow_col, vrow} = find_visual_row(wrap_entry, display_col)
+    trimmed = String.trim_trailing(vrow.text)
+    end_byte = max(byte_size(trimmed) - 1, 0)
+    {line, vrow.byte_offset + end_byte}
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────
+
+  # Returns {visual_row_index, col_within_row, visual_row_map} for a display column.
+  @spec find_visual_row(WrapMap.wrap_entry(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer(), WrapMap.visual_row()}
+  defp find_visual_row(wrap_entry, display_col) do
+    {idx, remaining} = display_col_to_visual(wrap_entry, display_col)
+    {idx, remaining, Enum.at(wrap_entry, idx)}
+  end
 
   # Given a display column within the full logical line, returns
   # {visual_row_index, column_within_that_visual_row}.

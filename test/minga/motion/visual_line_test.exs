@@ -76,6 +76,43 @@ defmodule Minga.Motion.VisualLineTest do
     end
   end
 
+  describe "visual_line_start/3" do
+    test "returns start of current visual row in a wrapped line" do
+      doc = Document.new("hello world foo bar baz")
+      # Move to second visual row first
+      down_pos = VisualLine.visual_down(doc, {0, 0}, 12)
+      start_pos = VisualLine.visual_line_start(doc, down_pos, 12)
+      assert {0, byte_off} = start_pos
+      # Should be at the byte offset of the second visual row
+      assert byte_off > 0
+      # Start should be <= down position
+      assert byte_off <= elem(down_pos, 1)
+    end
+
+    test "returns column 0 for first visual row" do
+      doc = Document.new("hello world")
+      pos = VisualLine.visual_line_start(doc, {0, 5}, 40)
+      assert pos == {0, 0}
+    end
+  end
+
+  describe "visual_line_end/3" do
+    test "returns end of current visual row in a wrapped line" do
+      doc = Document.new("hello world foo bar baz")
+      end_pos = VisualLine.visual_line_end(doc, {0, 0}, 12)
+      assert {0, byte_off} = end_pos
+      # Should be within the first visual row
+      assert byte_off < byte_size("hello world foo bar baz")
+    end
+
+    test "returns end of line for unwrapped line" do
+      doc = Document.new("short")
+      pos = VisualLine.visual_line_end(doc, {0, 0}, 40)
+      assert {0, byte_off} = pos
+      assert byte_off == byte_size("short") - 1
+    end
+  end
+
   describe "round-trip consistency" do
     test "down then up returns to same logical line" do
       doc = Document.new("hello world foo bar baz\nsecond line")

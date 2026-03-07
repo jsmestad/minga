@@ -86,23 +86,31 @@ defmodule Minga.Editor.Commands.Movement do
   # ── Line start / end ──────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :move_to_line_start) do
-    gb = BufferServer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
-    BufferServer.move_to(buf, {line, 0})
-    state
+    if wrap_enabled?() do
+      visual_line_edge(buf, state, :start)
+    else
+      logical_line_start(buf)
+      state
+    end
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_to_line_end) do
-    gb = BufferServer.snapshot(buf)
-    {line, _col} = Document.cursor(gb)
+    if wrap_enabled?() do
+      visual_line_edge(buf, state, :end)
+    else
+      logical_line_end(buf)
+      state
+    end
+  end
 
-    end_col =
-      case Document.lines(gb, line, 1) do
-        [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
-        _ -> 0
-      end
+  # g0/g$ — logical line start/end (always logical, even with wrap on)
+  def execute(%{buffers: %{active: buf}} = state, :move_to_logical_line_start) do
+    logical_line_start(buf)
+    state
+  end
 
-    BufferServer.move_to(buf, {line, end_col})
+  def execute(%{buffers: %{active: buf}} = state, :move_to_logical_line_end) do
+    logical_line_end(buf)
     state
   end
 
@@ -409,6 +417,43 @@ defmodule Minga.Editor.Commands.Movement do
 
     BufferServer.move_to(buf, new_pos)
     state
+  end
+
+  @spec visual_line_edge(GenServer.server(), state(), :start | :end) :: state()
+  defp visual_line_edge(buf, state, edge) do
+    doc = BufferServer.snapshot(buf)
+    pos = Document.cursor(doc)
+    content_w = content_width(state)
+
+    new_pos =
+      case edge do
+        :start -> VisualLine.visual_line_start(doc, pos, content_w)
+        :end -> VisualLine.visual_line_end(doc, pos, content_w)
+      end
+
+    BufferServer.move_to(buf, new_pos)
+    state
+  end
+
+  @spec logical_line_start(GenServer.server()) :: :ok
+  defp logical_line_start(buf) do
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = Document.cursor(gb)
+    BufferServer.move_to(buf, {line, 0})
+  end
+
+  @spec logical_line_end(GenServer.server()) :: :ok
+  defp logical_line_end(buf) do
+    gb = BufferServer.snapshot(buf)
+    {line, _col} = Document.cursor(gb)
+
+    end_col =
+      case Document.lines(gb, line, 1) do
+        [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
+        _ -> 0
+      end
+
+    BufferServer.move_to(buf, {line, end_col})
   end
 
   @spec content_width(state()) :: pos_integer()
