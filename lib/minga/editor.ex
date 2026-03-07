@@ -13,6 +13,8 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Agent.BufferSync, as: AgentBufferSync
+  alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -468,6 +470,7 @@ defmodule Minga.Editor do
 
   def handle_info({:agent_event, :messages_changed}, state) do
     state = update_agent(state, &AgentState.scroll_to_bottom/1)
+    state = sync_agent_buffer(state)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -500,6 +503,22 @@ defmodule Minga.Editor do
   defp update_agent(state, fun) do
     %{state | agent: fun.(state.agent)}
   end
+
+  @spec sync_agent_buffer(state()) :: state()
+  defp sync_agent_buffer(%{agent: %{buffer: buf, session: session}} = state)
+       when is_pid(buf) and is_pid(session) do
+    messages =
+      try do
+        AgentSession.messages(session)
+      catch
+        :exit, _ -> []
+      end
+
+    AgentBufferSync.sync(buf, messages)
+    state
+  end
+
+  defp sync_agent_buffer(state), do: state
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do

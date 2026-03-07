@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Agent do
   `state → state` transformations.
   """
 
+  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -178,6 +179,15 @@ defmodule Minga.Editor.Commands.Agent do
     case Minga.Agent.Supervisor.start_session(opts) do
       {:ok, pid} ->
         Session.subscribe(pid)
+
+        state =
+          if state.agent.buffer == nil do
+            buf = AgentBufferSync.start_buffer()
+            update_agent(state, &AgentState.set_buffer(&1, buf))
+          else
+            state
+          end
+
         update_agent(state, &AgentState.set_session(&1, pid))
 
       {:error, reason} ->

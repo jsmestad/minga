@@ -31,6 +31,7 @@ defmodule Minga.Buffer.Server do
           | {:name, GenServer.name()}
           | {:buffer_name, String.t()}
           | {:buffer_type, BufState.buffer_type()}
+          | {:filetype, atom()}
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
           | {:persistent, boolean()}

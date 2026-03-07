@@ -17,14 +17,16 @@ defmodule Minga.Editor.State.Agent do
           status: status(),
           panel: PanelState.t(),
           error: String.t() | nil,
-          spinner_timer: {:ok, :timer.tref()} | nil
+          spinner_timer: {:ok, :timer.tref()} | nil,
+          buffer: pid() | nil
         }
 
   defstruct session: nil,
             status: nil,
             panel: PanelState.new(),
             error: nil,
-            spinner_timer: nil
+            spinner_timer: nil,
+            buffer: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +46,12 @@ defmodule Minga.Editor.State.Agent do
   @spec set_session(t(), pid()) :: t()
   def set_session(%__MODULE__{} = agent, pid) when is_pid(pid) do
     %{agent | session: pid, status: :idle}
+  end
+
+  @doc "Sets the agent buffer pid."
+  @spec set_buffer(t(), pid()) :: t()
+  def set_buffer(%__MODULE__{} = agent, pid) when is_pid(pid) do
+    %{agent | buffer: pid}
   end
 
   @doc "Clears the session and resets status to :idle."

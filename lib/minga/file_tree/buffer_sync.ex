@@ -16,18 +16,21 @@ defmodule Minga.FileTree.BufferSync do
 
   Returns the buffer pid.
   """
-  @spec start_buffer(FileTree.t()) :: pid()
+  @spec start_buffer(FileTree.t()) :: pid() | nil
   def start_buffer(tree) do
-    {:ok, pid} =
-      BufferServer.start_link(
-        content: "",
-        buffer_type: :nofile,
-        buffer_name: "*File Tree*",
-        read_only: true,
-        unlisted: true
-      )
+    pid =
+      case BufferServer.start_link(
+             content: "",
+             buffer_type: :nofile,
+             buffer_name: "*File Tree*",
+             read_only: true,
+             unlisted: true
+           ) do
+        {:ok, p} -> p
+        _ -> nil
+      end
 
-    sync(pid, tree)
+    if pid, do: sync(pid, tree)
     pid
   end
 
