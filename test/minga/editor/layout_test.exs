@@ -255,11 +255,13 @@ defmodule Minga.Editor.LayoutTest do
 
   describe "property: no overlap for random configurations" do
     property "no regions overlap for random terminal sizes and split trees" do
-      check all rows <- StreamData.integer(5..100),
-                cols <- StreamData.integer(20..300),
-                split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
-                has_tree <- StreamData.boolean(),
-                has_agent <- StreamData.boolean() do
+      check all(
+              rows <- StreamData.integer(5..100),
+              cols <- StreamData.integer(20..300),
+              split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
+              has_tree <- StreamData.boolean(),
+              has_agent <- StreamData.boolean()
+            ) do
         state = new_state(rows, cols)
 
         state =
@@ -332,7 +334,7 @@ defmodule Minga.Editor.LayoutTest do
         {r2, j} <- Enum.with_index(all_rects),
         i < j do
       refute rects_overlap?(r1, r2),
-        "Regions #{i} #{inspect(r1)} and #{j} #{inspect(r2)} overlap"
+             "Regions #{i} #{inspect(r1)} and #{j} #{inspect(r2)} overlap"
     end
   end
 

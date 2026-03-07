@@ -258,32 +258,22 @@ defmodule Minga.Editor.Renderer do
       git_colors: state.theme.git
     }
 
+    line_opts = %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: render_ctx,
+      ln_style: line_number_style,
+      gutter_w: gutter_w,
+      first_byte_off: snapshot.first_line_byte_offset,
+      row_off: 0,
+      col_off: col_off
+    }
+
     {gutter_commands, line_commands, rows_used} =
       if wrap_on do
-        render_lines_wrapped(
-          lines,
-          visible_rows,
-          first_line,
-          cursor_line,
-          render_ctx,
-          line_number_style,
-          gutter_w,
-          snapshot.first_line_byte_offset,
-          0,
-          col_off
-        )
+        render_lines_wrapped(lines, visible_rows, line_opts)
       else
-        render_lines_nowrap(
-          lines,
-          first_line,
-          cursor_line,
-          render_ctx,
-          line_number_style,
-          gutter_w,
-          snapshot.first_line_byte_offset,
-          0,
-          col_off
-        )
+        render_lines_nowrap(lines, line_opts)
       end
 
     tilde_commands =
@@ -335,7 +325,59 @@ defmodule Minga.Editor.Renderer do
     # ── Picker overlay (uses full terminal viewport) ──
     {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
 
-    # ── Cursor placement + shape ──
+    # ── Overlays, cursor, tree, agent panel ──
+    {overlay_commands, cursor_command, cursor_shape_command} =
+      render_single_chrome(state, %{
+        layout: layout,
+        viewport: viewport,
+        full_viewport: full_viewport,
+        picker_cursor: picker_cursor,
+        picker_commands: picker_commands,
+        cursor_line: cursor_line,
+        cursor_col: cursor_col,
+        first_line: first_line,
+        gutter_w: gutter_w,
+        col_off: col_off,
+        content_height: content_height,
+        editor_width: editor_width,
+        minibuffer_row: minibuffer_row
+      })
+
+    all_commands =
+      clear ++
+        region_commands ++
+        gutter_commands ++
+        line_commands ++
+        tilde_commands ++
+        modeline_commands ++
+        [minibuffer_command] ++
+        overlay_commands ++
+        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
+
+    PortManager.send_commands(state.port_manager, all_commands)
+    :ok
+  end
+
+  # Extracts overlay, cursor, tree, and agent panel rendering from render_single to
+  # keep render_single under cyclomatic complexity limits.
+  @spec render_single_chrome(state(), map()) :: {[binary()], binary(), binary()}
+  defp render_single_chrome(state, params) do
+    %{
+      layout: layout,
+      viewport: viewport,
+      full_viewport: full_viewport,
+      picker_cursor: picker_cursor,
+      picker_commands: picker_commands,
+      cursor_line: cursor_line,
+      cursor_col: cursor_col,
+      first_line: first_line,
+      gutter_w: gutter_w,
+      col_off: col_off,
+      content_height: content_height,
+      editor_width: editor_width,
+      minibuffer_row: minibuffer_row
+    } = params
+
     cursor_shape_command =
       if state.picker_ui.picker do
         Protocol.encode_cursor_shape(:beam)
@@ -343,8 +385,6 @@ defmodule Minga.Editor.Renderer do
         Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
       end
 
-    # Overlay popups: skip when frontend has native float support (GUI).
-    # Native frontends render popups using their own windowing system.
     caps = state.capabilities
     render_overlays = Caps.render_overlays?(caps)
 
@@ -365,7 +405,6 @@ defmodule Minga.Editor.Renderer do
 
     tree_commands = TreeRenderer.render(state)
 
-    # Adjust cursor position for the tree offset
     cursor_command =
       resolve_cursor_command(
         picker_cursor,
@@ -378,10 +417,8 @@ defmodule Minga.Editor.Renderer do
         gutter_w
       )
 
-    # ── Agent panel (below editor content, positioned by Layout) ──
     agent_commands = render_agent_panel(state, content_height, col_off, editor_width)
 
-    # When the agent input is focused, place cursor in the input area
     agent_panel_h = if layout.agent_panel, do: elem(layout.agent_panel, 3), else: 0
 
     {cursor_command, cursor_shape_command} =
@@ -394,23 +431,14 @@ defmodule Minga.Editor.Renderer do
         col_off
       )
 
-    all_commands =
-      clear ++
-        region_commands ++
-        tree_commands ++
-        gutter_commands ++
-        line_commands ++
-        tilde_commands ++
-        modeline_commands ++
+    overlay_commands =
+      tree_commands ++
         agent_commands ++
-        [minibuffer_command] ++
         whichkey_commands ++
         completion_commands ++
-        picker_commands ++
-        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
+        picker_commands
 
-    PortManager.send_commands(state.port_manager, all_commands)
-    :ok
+    {overlay_commands, cursor_command, cursor_shape_command}
   end
 
   # ── Multi-window render ──────────────────────────────────────────────────
@@ -685,28 +713,30 @@ defmodule Minga.Editor.Renderer do
 
   # ── Line rendering (no wrap) ──────────────────────────────────────────────
 
-  @spec render_lines_nowrap(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          Context.t(),
-          Gutter.line_number_style(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {[binary()], [binary()], non_neg_integer()}
-  defp render_lines_nowrap(
-         lines,
-         first_line,
-         cursor_line,
-         ctx,
-         ln_style,
-         gutter_w,
-         first_byte_off,
-         row_off,
-         col_off
-       ) do
+  @typep line_render_opts :: %{
+           first_line: non_neg_integer(),
+           cursor_line: non_neg_integer(),
+           ctx: Context.t(),
+           ln_style: Gutter.line_number_style(),
+           gutter_w: non_neg_integer(),
+           first_byte_off: non_neg_integer(),
+           row_off: non_neg_integer(),
+           col_off: non_neg_integer()
+         }
+
+  @spec render_lines_nowrap([String.t()], line_render_opts()) ::
+          {[binary()], [binary()], non_neg_integer()}
+  defp render_lines_nowrap(lines, opts) do
+    %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      first_byte_off: first_byte_off,
+      row_off: row_off,
+      col_off: col_off
+    } = opts
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
 
     {gutters, contents_rev, _byte_off} =
@@ -744,30 +774,19 @@ defmodule Minga.Editor.Renderer do
 
   alias Minga.Editor.WrapMap
 
-  @spec render_lines_wrapped(
-          [String.t()],
-          pos_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Context.t(),
-          Gutter.line_number_style(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {[binary()], [binary()], non_neg_integer()}
-  defp render_lines_wrapped(
-         lines,
-         max_rows,
-         first_line,
-         cursor_line,
-         ctx,
-         ln_style,
-         gutter_w,
-         first_byte_off,
-         row_off,
-         col_off
-       ) do
+  @spec render_lines_wrapped([String.t()], pos_integer(), line_render_opts()) ::
+          {[binary()], [binary()], non_neg_integer()}
+  defp render_lines_wrapped(lines, max_rows, opts) do
+    %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      first_byte_off: first_byte_off,
+      row_off: row_off,
+      col_off: col_off
+    } = opts
     breakindent = wrap_option(:breakindent)
     linebreak = wrap_option(:linebreak)
 

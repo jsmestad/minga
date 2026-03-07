@@ -4,7 +4,6 @@ defmodule Minga.Editor.Renderer.RegionsTest do
   alias Minga.Editor.Layout
   alias Minga.Editor.Renderer.Regions
 
-
   describe "define_regions/1" do
     test "generates minibuffer region for minimal layout" do
       layout = %Layout{
@@ -148,7 +147,9 @@ defmodule Minga.Editor.Renderer.RegionsTest do
         # Each command starts with define_region opcode (0x14)
         # and has the right size: 1 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 1 = 15 bytes
         assert byte_size(cmd) == 15
-        assert <<0x14, _id::16, _parent::16, _role::8, _row::16, _col::16, _w::16, _h::16, _z::8>> = cmd
+
+        assert <<0x14, _id::16, _parent::16, _role::8, _row::16, _col::16, _w::16, _h::16, _z::8>> =
+                 cmd
       end
     end
   end

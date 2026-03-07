@@ -1,0 +1,236 @@
+/// Metal renderer for the cell grid.
+///
+/// Two-pass instanced drawing: background quads, then glyph quads with
+/// alpha blending. The cursor is drawn as an overlay. Atlas texture is
+/// re-uploaded when the font face reports modifications.
+
+import Metal
+import QuartzCore
+import AppKit
+
+/// GPU cell data (must match CellData in Shaders.metal, 72 bytes).
+struct CellGPU {
+    var uvOrigin: SIMD2<Float> = .zero
+    var uvSize: SIMD2<Float> = .zero
+    var glyphSize: SIMD2<Float> = .zero
+    var glyphOffset: SIMD2<Float> = .zero
+    var fgColor: (Float, Float, Float) = (1, 1, 1)
+    var bgColor: (Float, Float, Float) = (0.12, 0.12, 0.14)
+    var gridPos: SIMD2<Float> = .zero
+    var hasGlyph: Float = 0
+    var isColor: Float = 0
+}
+
+/// Uniforms shared across all cells (must match Uniforms in Shaders.metal).
+struct Uniforms {
+    var cellSize: SIMD2<Float>
+    var viewportSize: SIMD2<Float>
+}
+
+/// Background clear color (dark gray matching the default bg).
+private let bgClearColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
+
+/// Renders the cell grid to a CAMetalLayer using instanced drawing.
+final class MetalRenderer {
+    let device: MTLDevice
+    let commandQueue: MTLCommandQueue
+    private let bgPipeline: MTLRenderPipelineState
+    private let glyphPipeline: MTLRenderPipelineState
+
+    /// Reusable Metal buffer for cell data (avoids setVertexBytes 4KB limit).
+    private var cellBuffer: MTLBuffer?
+    private var cellBufferCapacity: Int = 0
+
+    /// Atlas texture on the GPU.
+    private var atlasTexture: MTLTexture?
+    private var atlasVersion: Int = 0
+
+    init?() {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue() else {
+            return nil
+        }
+        self.device = device
+        self.commandQueue = queue
+
+        // Compile Metal shaders from the bundled .metal file.
+        guard let library = try? device.makeDefaultLibrary(bundle: Bundle.module) else {
+            NSLog("Failed to load Metal shader library from bundle")
+            return nil
+        }
+
+        // Background pipeline.
+        let bgDesc = MTLRenderPipelineDescriptor()
+        bgDesc.vertexFunction = library.makeFunction(name: "bg_vertex")
+        bgDesc.fragmentFunction = library.makeFunction(name: "bg_fragment")
+        bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+
+        // Glyph pipeline (premultiplied alpha blending).
+        let glyphDesc = MTLRenderPipelineDescriptor()
+        glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
+        glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
+        glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        glyphDesc.colorAttachments[0].isBlendingEnabled = true
+        glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .one
+        glyphDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        glyphDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        glyphDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        do {
+            self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
+            self.glyphPipeline = try device.makeRenderPipelineState(descriptor: glyphDesc)
+        } catch {
+            NSLog("Failed to create Metal pipeline: \(error)")
+            return nil
+        }
+    }
+
+    /// Render the cell grid to the given Metal layer.
+    func render(grid: CellGrid, face: FontFace, layer: CAMetalLayer) {
+        guard let drawable = layer.nextDrawable() else { return }
+
+        let cellW = Float(face.cellWidth)
+        let cellH = Float(face.cellHeight)
+        let atlasSize = Float(face.atlas.size)
+        let contentScale = Float(layer.contentsScale)
+
+        // Re-upload atlas if it changed.
+        if face.atlas.modified != atlasVersion {
+            uploadAtlas(face.atlas)
+            atlasVersion = face.atlas.modified
+        }
+
+        // Build GPU cell data.
+        let count = Int(grid.cols) * Int(grid.rows)
+        var gpuCells = [CellGPU](repeating: CellGPU(), count: count)
+
+        for i in 0..<count {
+            let row = UInt16(i / Int(grid.cols))
+            let col = UInt16(i % Int(grid.cols))
+            let cell = grid.cells[i]
+
+            var gpu = CellGPU()
+            gpu.gridPos = SIMD2<Float>(Float(col), Float(row))
+            gpu.bgColor = colorFromU24(cell.bg, default: (0.12, 0.12, 0.14))
+            gpu.fgColor = colorFromU24(cell.fg, default: (1, 1, 1))
+
+            // Look up glyph if cell has content.
+            if !cell.grapheme.isEmpty, cell.grapheme != " " {
+                if let scalar = cell.grapheme.unicodeScalars.first,
+                   let glyph = face.getGlyph(scalar.value) {
+                    gpu.hasGlyph = 1.0
+                    gpu.isColor = glyph.isColor ? 1.0 : 0.0
+                    gpu.uvOrigin = SIMD2<Float>(Float(glyph.atlasX) / atlasSize,
+                                                 Float(glyph.atlasY) / atlasSize)
+                    gpu.uvSize = SIMD2<Float>(Float(glyph.width) / atlasSize,
+                                               Float(glyph.height) / atlasSize)
+                    gpu.glyphSize = SIMD2<Float>(Float(glyph.width), Float(glyph.height))
+                    let baseline = Float(face.ascent)
+                    gpu.glyphOffset = SIMD2<Float>(
+                        Float(glyph.offsetX) * contentScale,
+                        (baseline - Float(glyph.offsetY)) * contentScale
+                    )
+                }
+            }
+
+            gpuCells[i] = gpu
+        }
+
+        // Ensure the Metal buffer is large enough.
+        let cellDataSize = count * MemoryLayout<CellGPU>.stride
+        if cellBuffer == nil || cellBufferCapacity < cellDataSize {
+            let newCapacity = max(cellDataSize, 65536)
+            cellBuffer = device.makeBuffer(length: newCapacity, options: .storageModeShared)
+            cellBufferCapacity = newCapacity
+        }
+        guard let buffer = cellBuffer else { return }
+
+        // Copy cell data into the Metal buffer.
+        buffer.contents().copyMemory(from: &gpuCells, byteCount: cellDataSize)
+
+        // Set up render pass.
+        let renderDesc = MTLRenderPassDescriptor()
+        renderDesc.colorAttachments[0].texture = drawable.texture
+        renderDesc.colorAttachments[0].loadAction = .clear
+        renderDesc.colorAttachments[0].storeAction = .store
+        renderDesc.colorAttachments[0].clearColor = bgClearColor
+
+        guard let cmdBuf = commandQueue.makeCommandBuffer(),
+              let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
+
+        let drawableSize = layer.drawableSize
+        var uniforms = Uniforms(
+            cellSize: SIMD2<Float>(cellW * contentScale, cellH * contentScale),
+            viewportSize: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        )
+
+        if count > 0 {
+            // Background pass.
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
+
+            // Glyph pass.
+            if let atlas = atlasTexture {
+                encoder.setRenderPipelineState(glyphPipeline)
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.setFragmentTexture(atlas, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
+            }
+
+            // Cursor overlay.
+            if grid.cursorVisible {
+                let cursorIdx = Int(grid.cursorRow) * Int(grid.cols) + Int(grid.cursorCol)
+                if cursorIdx >= 0, cursorIdx < count {
+                    var cursorCell = gpuCells[cursorIdx]
+                    cursorCell.fgColor = (1.0, 1.0, 1.0)
+                    cursorCell.bgColor = (0.8, 0.8, 0.8)
+                    cursorCell.hasGlyph = 0.0
+
+                    encoder.setRenderPipelineState(bgPipeline)
+                    encoder.setVertexBytes(&cursorCell, length: MemoryLayout<CellGPU>.stride, index: 0)
+                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+                }
+            }
+        }
+
+        encoder.endEncoding()
+        cmdBuf.present(drawable)
+        cmdBuf.commit()
+    }
+
+    // MARK: - Private
+
+    private func uploadAtlas(_ atlas: GlyphAtlas) {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: Int(atlas.size),
+            height: Int(atlas.size),
+            mipmapped: false
+        )
+        desc.usage = .shaderRead
+
+        guard let texture = device.makeTexture(descriptor: desc) else { return }
+
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, Int(atlas.size), Int(atlas.size)),
+            mipmapLevel: 0,
+            withBytes: atlas.data,
+            bytesPerRow: Int(atlas.size) * 4
+        )
+
+        atlasTexture = texture
+    }
+
+    /// Convert a 24-bit RGB color to 3 floats. 0 maps to the provided default.
+    private func colorFromU24(_ color: UInt32, default defaultColor: (Float, Float, Float)) -> (Float, Float, Float) {
+        if color == 0 { return defaultColor }
+        let r = Float((color >> 16) & 0xFF) / 255.0
+        let g = Float((color >> 8) & 0xFF) / 255.0
+        let b = Float(color & 0xFF) / 255.0
+        return (r, g, b)
+    }
+}

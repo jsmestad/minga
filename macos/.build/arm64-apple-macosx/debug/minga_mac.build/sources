@@ -1,0 +1,13 @@
+/Users/justinsmestad/code/self/minga/macos/Sources/Font/FontFace.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Font/GlyphAtlas.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/MingaApp.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Protocol/ProtocolConstants.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Protocol/ProtocolDecoder.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Protocol/ProtocolEncoder.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Protocol/ProtocolReader.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Renderer/CellGrid.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Renderer/CommandDispatcher.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Renderer/MetalRenderer.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Views/EditorNSView.swift
+/Users/justinsmestad/code/self/minga/macos/Sources/Views/EditorView.swift
+/Users/justinsmestad/code/self/minga/macos/.build/arm64-apple-macosx/debug/minga_mac.build/DerivedSources/resource_bundle_accessor.swift

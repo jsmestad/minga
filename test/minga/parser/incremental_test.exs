@@ -62,7 +62,15 @@ defmodule Minga.Parser.IncrementalTest do
     end
   end
 
-  defp make_edit(start_byte, old_end_byte, new_end_byte, start_pos, old_end_pos, new_end_pos, text) do
+  defp make_edit(
+         start_byte,
+         old_end_byte,
+         new_end_byte,
+         start_pos,
+         old_end_pos,
+         new_end_pos,
+         text
+       ) do
     %{
       start_byte: start_byte,
       old_end_byte: old_end_byte,
@@ -99,7 +107,7 @@ defmodule Minga.Parser.IncrementalTest do
       assert is_list(incremental_spans), "Expected spans list, got: #{inspect(incremental_spans)}"
 
       assert full_spans == incremental_spans,
-        "Incremental spans differ from full reparse.\nFull: #{inspect(full_spans)}\nIncremental: #{inspect(incremental_spans)}"
+             "Incremental spans differ from full reparse.\nFull: #{inspect(full_spans)}\nIncremental: #{inspect(incremental_spans)}"
     end
 
     @tag timeout: 30_000
@@ -123,7 +131,7 @@ defmodule Minga.Parser.IncrementalTest do
       assert is_list(incremental_spans)
 
       assert full_spans == incremental_spans,
-        "Deletion: incremental spans differ from full reparse"
+             "Deletion: incremental spans differ from full reparse"
     end
 
     @tag timeout: 30_000
@@ -147,7 +155,7 @@ defmodule Minga.Parser.IncrementalTest do
       assert is_list(incremental_spans)
 
       assert full_spans == incremental_spans,
-        "Replacement: incremental spans differ from full reparse"
+             "Replacement: incremental spans differ from full reparse"
     end
 
     @tag timeout: 60_000
@@ -173,13 +181,23 @@ defmodule Minga.Parser.IncrementalTest do
       # Edit 2: insert new line before "end"
       insert2 = byte_size("defmodule Foo do\n  def bar, do: :ok!\n")
       new_line = "  def baz, do: :err\n"
-      edit2 = make_edit(insert2, insert2, insert2 + byte_size(new_line), {2, 0}, {2, 0}, {3, 0}, new_line)
+
+      edit2 =
+        make_edit(
+          insert2,
+          insert2,
+          insert2 + byte_size(new_line),
+          {2, 0},
+          {2, 0},
+          {3, 0},
+          new_line
+        )
 
       incremental_spans = incremental_parse(parser, 4, [edit2])
       assert is_list(incremental_spans)
 
       assert full_spans == incremental_spans,
-        "Multi-edit: incremental spans differ from full reparse"
+             "Multi-edit: incremental spans differ from full reparse"
     end
   end
 end

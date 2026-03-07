@@ -45,7 +45,19 @@ defmodule Minga.Editor.Renderer.Regions do
     commands =
       case layout.file_tree do
         {row, col, width, height} ->
-          [Protocol.encode_define_region(@region_file_tree, 0, :panel, row, col, width, height, 0) | commands]
+          [
+            Protocol.encode_define_region(
+              @region_file_tree,
+              0,
+              :panel,
+              row,
+              col,
+              width,
+              height,
+              0
+            )
+            | commands
+          ]
 
         nil ->
           commands
@@ -53,13 +65,29 @@ defmodule Minga.Editor.Renderer.Regions do
 
     # Minibuffer region (always present)
     {mr, mc, mw, mh} = layout.minibuffer
-    commands = [Protocol.encode_define_region(@region_minibuffer, 0, :minibuffer, mr, mc, mw, mh, 0) | commands]
+
+    commands = [
+      Protocol.encode_define_region(@region_minibuffer, 0, :minibuffer, mr, mc, mw, mh, 0)
+      | commands
+    ]
 
     # Agent panel region
     commands =
       case layout.agent_panel do
         {row, col, width, height} ->
-          [Protocol.encode_define_region(@region_agent_panel, 0, :panel, row, col, width, height, 0) | commands]
+          [
+            Protocol.encode_define_region(
+              @region_agent_panel,
+              0,
+              :panel,
+              row,
+              col,
+              width,
+              height,
+              0
+            )
+            | commands
+          ]
 
         nil ->
           commands
@@ -76,7 +104,9 @@ defmodule Minga.Editor.Renderer.Regions do
         content_cmd = Protocol.encode_define_region(content_id, 0, :editor, cr, cc, cw, ch, 0)
 
         if mlh > 0 do
-          modeline_cmd = Protocol.encode_define_region(modeline_id, 0, :modeline, mlr, mlc, mlw, mlh, 0)
+          modeline_cmd =
+            Protocol.encode_define_region(modeline_id, 0, :modeline, mlr, mlc, mlw, mlh, 0)
+
           [content_cmd, modeline_cmd]
         else
           [content_cmd]

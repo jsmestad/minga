@@ -1194,6 +1194,7 @@ defmodule Minga.Editor do
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total
+
       EditorState.update_window(acc, id, fn window ->
         Window.resize(window, height, width)
       end)

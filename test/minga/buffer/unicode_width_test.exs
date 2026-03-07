@@ -130,13 +130,13 @@ defmodule Minga.Buffer.UnicodeWidthTest do
 
   describe "property: width is non-negative and bounded" do
     property "display_width is always non-negative" do
-      check all text <- StreamData.string(:printable, min_length: 0, max_length: 50) do
+      check all(text <- StreamData.string(:printable, min_length: 0, max_length: 50)) do
         assert Unicode.display_width(text) >= 0
       end
     end
 
     property "display_width <= 2 * grapheme count (no grapheme wider than 2)" do
-      check all text <- StreamData.string(:printable, min_length: 1, max_length: 50) do
+      check all(text <- StreamData.string(:printable, min_length: 1, max_length: 50)) do
         width = Unicode.display_width(text)
         grapheme_count = String.length(text)
         assert width <= 2 * grapheme_count
@@ -144,7 +144,7 @@ defmodule Minga.Buffer.UnicodeWidthTest do
     end
 
     property "display_width >= grapheme count for ASCII-only strings" do
-      check all text <- StreamData.string(:ascii, min_length: 1, max_length: 50) do
+      check all(text <- StreamData.string(:ascii, min_length: 1, max_length: 50)) do
         width = Unicode.display_width(text)
         # ASCII printable chars are all width 1, control chars may be 0 or 1
         assert width >= 0

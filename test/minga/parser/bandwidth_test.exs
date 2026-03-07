@@ -38,10 +38,14 @@ defmodule Minga.Parser.BandwidthTest do
 
       # Full sync should be ~50KB, incremental should be ~50 bytes
       assert full_size > 50_000, "Full sync should be > 50KB, got #{full_size}"
-      assert incremental_size < 100, "Incremental sync should be < 100 bytes, got #{incremental_size}"
+
+      assert incremental_size < 100,
+             "Incremental sync should be < 100 bytes, got #{incremental_size}"
 
       ratio = div(full_size, incremental_size)
-      assert ratio > 500, "Expected >500x reduction, got #{ratio}x (#{full_size} vs #{incremental_size})"
+
+      assert ratio > 500,
+             "Expected >500x reduction, got #{ratio}x (#{full_size} vs #{incremental_size})"
     end
 
     test "edit_buffer is small for multi-character paste" do

@@ -167,7 +167,12 @@ defmodule Minga.Editor.Layout do
 
   @spec agent_panel_layout(EditorState.t(), non_neg_integer(), non_neg_integer(), pos_integer()) ::
           {rect() | nil, non_neg_integer()}
-  defp agent_panel_layout(%{agent: %{panel: %{visible: true}}} = state, remaining_height, editor_col, editor_width) do
+  defp agent_panel_layout(
+         %{agent: %{panel: %{visible: true}}} = state,
+         remaining_height,
+         editor_col,
+         editor_width
+       ) do
     panel_height = div(state.viewport.rows * 35, 100)
     editor_height = remaining_height - panel_height
     agent_rect = {editor_height, editor_col, editor_width, panel_height}

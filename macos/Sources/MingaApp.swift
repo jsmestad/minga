@@ -1,0 +1,149 @@
+/// Minga macOS GUI frontend.
+///
+/// A SwiftUI app that speaks the Port protocol on stdin/stdout. The BEAM
+/// spawns this process as a child; it reads render commands from stdin,
+/// renders with Metal, and writes input events to stdout.
+///
+/// Architecture:
+///   ProtocolReader (background thread) → decodes commands → dispatches to main thread
+///   CommandDispatcher (main thread) → updates CellGrid → triggers MetalRenderer
+///   EditorNSView (main thread) → keyboard/mouse → ProtocolEncoder → stdout
+
+import SwiftUI
+import AppKit
+
+/// Default font settings.
+private let defaultFontName = "JetBrainsMonoNF-Regular"
+private let defaultFontSize: CGFloat = 13.0
+
+/// Default window dimensions in pixels.
+private let defaultWindowWidth: CGFloat = 800
+private let defaultWindowHeight: CGFloat = 600
+
+@main
+struct MingaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView(appState: appDelegate.appState)
+                .frame(minWidth: 160, minHeight: 80)
+        }
+        .windowStyle(.titleBar)
+    }
+}
+
+/// Observable state shared between the app delegate and views.
+@MainActor
+final class AppState: ObservableObject {
+    @Published var windowTitle: String = "Minga"
+    var editorNSView: EditorNSView?
+}
+
+/// ContentView hosts the Metal editor surface.
+struct ContentView: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        Group {
+            if let nsView = appState.editorNSView {
+                EditorView(editorNSView: nsView)
+            } else {
+                Color(red: 0.12, green: 0.12, blue: 0.14)
+            }
+        }
+        .navigationTitle(appState.windowTitle)
+    }
+}
+
+/// App delegate that sets up the protocol reader, renderer, and wiring.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let appState = AppState()
+
+    private var protocolReader: ProtocolReader?
+    private var encoder: ProtocolEncoder?
+    private var dispatcher: CommandDispatcher?
+    private var fontFace: FontFace?
+    private var editorNSView: EditorNSView?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Backing scale factor for Retina rendering.
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+
+        // Initialize font.
+        let face = FontFace(name: defaultFontName, size: defaultFontSize, scale: scale)
+        face.preloadAscii()
+        self.fontFace = face
+
+        // Initial grid dimensions.
+        let cols = UInt16(defaultWindowWidth / CGFloat(face.cellWidth))
+        let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
+        let grid = CellGrid(cols: cols, rows: rows)
+
+        // Metal renderer.
+        guard let metalRenderer = MetalRenderer() else {
+            NSLog("Failed to initialize Metal renderer")
+            NSApp.terminate(nil)
+            return
+        }
+
+        // Protocol encoder (writes to stdout).
+        let enc = ProtocolEncoder()
+        self.encoder = enc
+
+        // Create the editor view.
+        let nsView = EditorNSView(encoder: enc, metalRenderer: metalRenderer, fontFace: face, cellGrid: grid)
+        self.editorNSView = nsView
+        appState.editorNSView = nsView
+
+        // Command dispatcher.
+        let disp = CommandDispatcher(grid: grid)
+        disp.onFrameReady = { [weak nsView] in
+            nsView?.renderFrame()
+        }
+        disp.onTitleChanged = { [weak appState] title in
+            Task { @MainActor in
+                appState?.windowTitle = title
+            }
+        }
+        self.dispatcher = disp
+
+        // Send ready event with initial dimensions and capabilities.
+        enc.sendReady(cols: cols, rows: rows)
+
+        // Start reading protocol commands from stdin.
+        let reader = ProtocolReader(
+            handler: { [weak self] data in
+                DispatchQueue.main.async {
+                    self?.handleProtocolData(data)
+                }
+            },
+            onDisconnect: {
+                // BEAM has exited; shut down gracefully.
+                DispatchQueue.main.async {
+                    NSApp.terminate(nil)
+                }
+            }
+        )
+        reader.start()
+        self.protocolReader = reader
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        protocolReader?.stop()
+    }
+
+    // MARK: - Protocol handling
+
+    private func handleProtocolData(_ data: Data) {
+        guard let dispatcher else { return }
+        do {
+            try decodeCommands(from: data) { command in
+                dispatcher.dispatch(command)
+            }
+        } catch {
+            NSLog("Protocol decode error: \(error)")
+        }
+    }
+}
