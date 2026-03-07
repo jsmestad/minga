@@ -42,6 +42,7 @@ defmodule Minga.Port.Protocol do
   @op_resize 0x02
   @op_ready 0x03
   @op_mouse_event 0x04
+  @op_capabilities_updated 0x05
 
   # Render commands (BEAM → Zig)
   @op_draw_text 0x10
@@ -124,6 +125,8 @@ defmodule Minga.Port.Protocol do
           {:key_press, codepoint :: non_neg_integer(), modifiers()}
           | {:resize, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer()}
+          | {:ready, width :: pos_integer(), height :: pos_integer(), Minga.Port.Capabilities.t()}
+          | {:capabilities_updated, Minga.Port.Capabilities.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type()}
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
@@ -272,8 +275,27 @@ defmodule Minga.Port.Protocol do
     {:ok, {:resize, width, height}}
   end
 
+  # Extended ready with capabilities: opcode(1) + width(2) + height(2) + caps_version(1) + caps_len(1) + caps_data
+  def decode_event(
+        <<@op_ready, width::16, height::16, _caps_version::8, caps_len::8,
+          caps_data::binary-size(caps_len)>>
+      ) do
+    caps = Minga.Port.Capabilities.from_binary(caps_data)
+    {:ok, {:ready, width, height, caps}}
+  end
+
+  # Short ready (backward compat with old frontends).
   def decode_event(<<@op_ready, width::16, height::16>>) do
     {:ok, {:ready, width, height}}
+  end
+
+  # Capabilities updated event (sent after async capability detection).
+  def decode_event(
+        <<@op_capabilities_updated, _caps_version::8, caps_len::8,
+          caps_data::binary-size(caps_len)>>
+      ) do
+    caps = Minga.Port.Capabilities.from_binary(caps_data)
+    {:ok, {:capabilities_updated, caps}}
   end
 
   def decode_event(
@@ -318,7 +340,13 @@ defmodule Minga.Port.Protocol do
   end
 
   def decode_event(<<opcode::8, _rest::binary>>)
-      when opcode in [@op_key_press, @op_resize, @op_ready, @op_mouse_event] do
+      when opcode in [
+             @op_key_press,
+             @op_resize,
+             @op_ready,
+             @op_mouse_event,
+             @op_capabilities_updated
+           ] do
     {:error, :malformed}
   end
 

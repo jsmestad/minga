@@ -114,6 +114,13 @@ defmodule Minga.Test.HeadlessPort do
     GenServer.call(server, :ready?)
   end
 
+  @doc "Returns default headless capabilities."
+  @impl Minga.Port.Frontend
+  @spec capabilities(GenServer.server()) :: Minga.Port.Capabilities.t()
+  def capabilities(_server) do
+    Minga.Port.Capabilities.default()
+  end
+
   # ── Screen query API ────────────────────────────────────────────────────────
 
   @doc "Returns the screen as a list of strings (one per row)."

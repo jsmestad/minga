@@ -181,10 +181,17 @@ pub const TuiRuntime = struct {
         // Enable log routing over the port protocol now that stdout is ready.
         root.g_port_writer = stdout;
 
-        // Send ready event with initial dimensions.
+        // Send ready event with initial dimensions and default capabilities.
+        // Actual capabilities are detected asynchronously (DA1 response).
+        // We send a capabilities_updated event once detection completes.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
-        var ready_payload: [5]u8 = undefined;
-        const ready_len = try protocol.encodeReady(&ready_payload, initial_ws.cols, initial_ws.rows);
+        var ready_payload: [13]u8 = undefined;
+        const ready_len = try protocol.encodeReadyWithCaps(
+            &ready_payload,
+            initial_ws.cols,
+            initial_ws.rows,
+            .{}, // defaults: tui, rgb, wcwidth, no images, emulated floats, monospace
+        );
         try protocol.writeMessage(stdout, ready_payload[0..ready_len]);
         try stdout.flush();
 
@@ -500,6 +507,21 @@ fn handleTtyEvent(vx: *vaxis.Vaxis, event: vaxis.Event, stdout: *std.Io.Writer) 
         .cap_da1 => {
             std.Thread.Futex.wake(&vx.query_futex, 10);
             vx.queries_done.store(true, .unordered);
+
+            // Terminal capability detection is complete. Send a
+            // capabilities_updated event with the actual detected caps.
+            const caps = protocol.Capabilities{
+                .frontend_type = protocol.FRONTEND_TUI,
+                .color_depth = if (vx.caps.rgb) protocol.COLOR_RGB else protocol.COLOR_256,
+                .unicode_width = if (vx.caps.unicode == .unicode) protocol.UNICODE_15 else protocol.UNICODE_WCWIDTH,
+                .image_support = if (vx.caps.kitty_graphics) protocol.IMAGE_KITTY else protocol.IMAGE_NONE,
+                .float_support = protocol.FLOAT_EMULATED,
+                .text_rendering = protocol.TEXT_MONOSPACE,
+            };
+            var caps_buf: [9]u8 = undefined;
+            const caps_len = protocol.encodeCapabilitiesUpdated(&caps_buf, caps) catch return;
+            protocol.writeMessage(stdout, caps_buf[0..caps_len]) catch return;
+            stdout.flush() catch return;
         },
 
         .mouse => |mouse| {

@@ -53,8 +53,9 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 |--------|------|------|-------------|
 | `0x01` | key_press | 6 | A key was pressed |
 | `0x02` | resize | 5 | Terminal/window was resized |
-| `0x03` | ready | 5 | Frontend is initialized and ready |
+| `0x03` | ready | 5 or 13 | Frontend is initialized and ready |
 | `0x04` | mouse_event | 8 | Mouse button, wheel, or motion |
+| `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
 
 ### Frontend → BEAM (Highlight Responses)
 
@@ -244,17 +245,26 @@ Total size: 5 bytes.
 
 The frontend has initialized and is ready to receive render commands.
 
+**Short format (5 bytes):**
 ```
 opcode: u8  = 0x03
 width:  u16           initial width
 height: u16           initial height
 ```
 
-Total size: 5 bytes.
+**Extended format (13 bytes):**
+```
+opcode:       u8  = 0x03
+width:        u16           initial width
+height:       u16           initial height
+caps_version: u8            capability format version (currently 1)
+caps_len:     u8            length of capability data
+caps_data:    [caps_len]u8  capability fields (see "Capability Negotiation" section)
+```
 
-**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending any render commands. No commands should be sent to the frontend before `ready` is received.
+**Behavior:** Sent exactly once, during startup, after the frontend has set up its rendering surface. The BEAM waits for this event before sending any render commands.
 
-**Future extension:** This event will be extended with capability negotiation fields (see "Future: Capability Negotiation" section). The extended format appends additional fields after `height`. Frontends sending the 5-byte short form are assumed to be TUI frontends with default capabilities.
+Frontends should use the extended format when possible. The BEAM detects which format was sent by checking the payload length: 5 bytes = short format with default capabilities, 13+ bytes = extended format with explicit capabilities.
 
 ### `0x04` mouse_event
 
@@ -538,11 +548,11 @@ This separation means new rendering frontends (Swift, GTK4) only need to impleme
 
 ---
 
-## Future: Capability Negotiation
+## Capability Negotiation
 
-_This section describes a planned extension. See #151._
+The `ready` event supports an extended format with capability fields. This lets the BEAM adapt rendering strategy based on what the frontend supports.
 
-The `ready` event will be extended with a capability payload so the BEAM can adapt rendering strategy based on what the frontend supports:
+### Extended Ready Format
 
 ```
 0x03 ready (extended):
@@ -558,7 +568,44 @@ The `ready` event will be extended with a capability payload so the BEAM can ada
   text_rendering: u8    (0=monospace, 1=proportional)
 ```
 
+Total size: 13 bytes.
+
 Frontends that send the short 5-byte `ready` format are assumed to have default capabilities: `{tui, rgb, wcwidth, none, emulated, monospace}`.
+
+### `0x05` capabilities_updated
+
+Sent after the initial `ready` event when the frontend detects additional capabilities asynchronously (e.g., a TUI terminal responds to capability queries like DA1 after startup).
+
+```
+opcode:         u8  = 0x05
+caps_version:   u8    (currently 1)
+caps_len:       u8    (length of remaining fields)
+frontend_type:  u8
+color_depth:    u8
+unicode_width:  u8
+image_support:  u8
+float_support:  u8
+text_rendering: u8
+```
+
+Total size: 9 bytes.
+
+**Behavior:** The BEAM updates its stored capabilities for this frontend. No re-render is triggered; the updated caps take effect on the next frame.
+
+### Capability Fields
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `frontend_type` | 0=tui, 1=native_gui, 2=web | Type of rendering surface |
+| `color_depth` | 0=mono, 1=256color, 2=rgb | Color support level |
+| `unicode_width` | 0=wcwidth, 1=unicode_15 | Character width calculation method |
+| `image_support` | 0=none, 1=kitty, 2=sixel, 3=native | Inline image protocol |
+| `float_support` | 0=emulated, 1=native | Floating window support |
+| `text_rendering` | 0=monospace, 1=proportional | Font rendering model |
+
+### Implementation Notes
+
+The TUI backend sends `ready` with default capabilities immediately at startup, then sends `capabilities_updated` once libvaxis finishes its async terminal capability detection (triggered by the DA1 response). The GUI backend sends `ready` with full native capabilities upfront since there is no detection delay.
 
 ## Future: Layout Regions
 

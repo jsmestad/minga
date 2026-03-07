@@ -73,6 +73,13 @@ defmodule Minga.Port.Manager do
     GenServer.call(server, :ready?)
   end
 
+  @doc "Returns the frontend's reported capabilities."
+  @impl Minga.Port.Frontend
+  @spec capabilities(GenServer.server()) :: Minga.Port.Capabilities.t()
+  def capabilities(server \\ __MODULE__) do
+    GenServer.call(server, :capabilities)
+  end
+
   # ── Server Callbacks ──
 
   @impl true
@@ -101,6 +108,10 @@ defmodule Minga.Port.Manager do
     {:reply, state.ready, state}
   end
 
+  def handle_call(:capabilities, _from, state) do
+    {:reply, state.capabilities, state}
+  end
+
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:send_commands, _commands}, %{port: nil} = state) do
@@ -117,9 +128,19 @@ defmodule Minga.Port.Manager do
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
+      {:ok, {:ready, width, height, caps}} ->
+        new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
+        broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
+        {:noreply, new_state}
+
       {:ok, {:ready, width, height}} ->
         new_state = %{state | ready: true, terminal_size: {width, height}}
         broadcast(new_state.subscribers, {:minga_input, {:ready, width, height}})
+        {:noreply, new_state}
+
+      {:ok, {:capabilities_updated, caps}} ->
+        new_state = %{state | capabilities: caps}
+        broadcast(new_state.subscribers, {:minga_input, {:capabilities_updated, caps}})
         {:noreply, new_state}
 
       {:ok, {:resize, width, height}} ->

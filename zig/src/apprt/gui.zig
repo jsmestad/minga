@@ -287,12 +287,20 @@ pub const GuiRuntime = struct {
         g_runtime = self;
         defer g_runtime = null;
 
-        // Send ready event with initial dimensions.
+        // Send ready event with initial dimensions and native GUI capabilities.
         {
             const cols = self.surface.grid_width;
             const rows = self.surface.grid_height;
-            var ready_payload: [5]u8 = undefined;
-            const ready_len = try protocol.encodeReady(&ready_payload, cols, rows);
+            const caps = protocol.Capabilities{
+                .frontend_type = protocol.FRONTEND_NATIVE_GUI,
+                .color_depth = protocol.COLOR_RGB,
+                .unicode_width = protocol.UNICODE_15,
+                .image_support = protocol.IMAGE_NATIVE,
+                .float_support = protocol.FLOAT_NATIVE,
+                .text_rendering = protocol.TEXT_PROPORTIONAL,
+            };
+            var ready_payload: [13]u8 = undefined;
+            const ready_len = try protocol.encodeReadyWithCaps(&ready_payload, cols, rows, caps);
             try self.writeStdout(ready_payload[0..ready_len]);
         }
 

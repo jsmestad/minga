@@ -55,4 +55,13 @@ defmodule Minga.Port.Frontend do
   (e.g., the Zig renderer sends a `ready` event with terminal dimensions).
   """
   @callback ready?(server :: GenServer.server()) :: boolean()
+
+  @doc """
+  Returns the frontend's reported capabilities.
+
+  Capabilities are populated from the `ready` event (extended format)
+  or from a subsequent `capabilities_updated` event. Returns default
+  capabilities if the frontend has not reported any.
+  """
+  @callback capabilities(server :: GenServer.server()) :: Minga.Port.Capabilities.t()
 end

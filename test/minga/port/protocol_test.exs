@@ -67,9 +67,46 @@ defmodule Minga.Port.ProtocolTest do
   end
 
   describe "decode_event/1 — ready" do
-    test "decodes a ready event" do
+    test "decodes a short ready event (backward compat)" do
       payload = <<0x03, 80::16, 24::16>>
       assert {:ok, {:ready, 80, 24}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes an extended ready event with capabilities" do
+      # caps_version=1, caps_len=6, frontend_type=0(tui), color_depth=2(rgb),
+      # unicode_width=1(unicode_15), image_support=1(kitty), float_support=0(emulated),
+      # text_rendering=0(monospace)
+      payload = <<0x03, 120::16, 40::16, 1, 6, 0, 2, 1, 1, 0, 0>>
+
+      assert {:ok, {:ready, 120, 40, caps}} = Protocol.decode_event(payload)
+      assert caps.frontend_type == :tui
+      assert caps.color_depth == :rgb
+      assert caps.unicode_width == :unicode_15
+      assert caps.image_support == :kitty
+      assert caps.float_support == :emulated
+      assert caps.text_rendering == :monospace
+    end
+
+    test "decodes an extended ready with native GUI capabilities" do
+      payload = <<0x03, 200::16, 60::16, 1, 6, 1, 2, 1, 3, 1, 1>>
+
+      assert {:ok, {:ready, 200, 60, caps}} = Protocol.decode_event(payload)
+      assert caps.frontend_type == :native_gui
+      assert caps.image_support == :native
+      assert caps.float_support == :native
+      assert caps.text_rendering == :proportional
+    end
+  end
+
+  describe "decode_event/1 — capabilities_updated" do
+    test "decodes a capabilities_updated event" do
+      payload = <<0x05, 1, 6, 0, 2, 1, 1, 0, 0>>
+
+      assert {:ok, {:capabilities_updated, caps}} = Protocol.decode_event(payload)
+      assert caps.frontend_type == :tui
+      assert caps.color_depth == :rgb
+      assert caps.unicode_width == :unicode_15
+      assert caps.image_support == :kitty
     end
   end
 

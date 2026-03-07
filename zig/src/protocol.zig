@@ -24,6 +24,7 @@ pub const OP_KEY_PRESS: u8 = 0x01;
 pub const OP_RESIZE: u8 = 0x02;
 pub const OP_READY: u8 = 0x03;
 pub const OP_MOUSE_EVENT: u8 = 0x04;
+pub const OP_CAPABILITIES_UPDATED: u8 = 0x05;
 pub const OP_DRAW_TEXT: u8 = 0x10;
 pub const OP_SET_CURSOR: u8 = 0x11;
 pub const OP_CLEAR: u8 = 0x12;
@@ -85,6 +86,43 @@ pub const MOUSE_PRESS: u8 = 0x00;
 pub const MOUSE_RELEASE: u8 = 0x01;
 pub const MOUSE_MOTION: u8 = 0x02;
 pub const MOUSE_DRAG: u8 = 0x03;
+
+// ── Frontend capability constants ──
+
+pub const CAPS_VERSION: u8 = 1;
+
+pub const FRONTEND_TUI: u8 = 0;
+pub const FRONTEND_NATIVE_GUI: u8 = 1;
+pub const FRONTEND_WEB: u8 = 2;
+
+pub const COLOR_MONO: u8 = 0;
+pub const COLOR_256: u8 = 1;
+pub const COLOR_RGB: u8 = 2;
+
+pub const UNICODE_WCWIDTH: u8 = 0;
+pub const UNICODE_15: u8 = 1;
+
+pub const IMAGE_NONE: u8 = 0;
+pub const IMAGE_KITTY: u8 = 1;
+pub const IMAGE_SIXEL: u8 = 2;
+pub const IMAGE_NATIVE: u8 = 3;
+
+pub const FLOAT_EMULATED: u8 = 0;
+pub const FLOAT_NATIVE: u8 = 1;
+
+pub const TEXT_MONOSPACE: u8 = 0;
+pub const TEXT_PROPORTIONAL: u8 = 1;
+
+/// Frontend capabilities, reported in the extended ready event and
+/// capabilities_updated events.
+pub const Capabilities = struct {
+    frontend_type: u8 = FRONTEND_TUI,
+    color_depth: u8 = COLOR_RGB,
+    unicode_width: u8 = UNICODE_WCWIDTH,
+    image_support: u8 = IMAGE_NONE,
+    float_support: u8 = FLOAT_EMULATED,
+    text_rendering: u8 = TEXT_MONOSPACE,
+};
 
 // ── Attribute flags ──
 
@@ -174,13 +212,50 @@ pub fn encodeResize(buf: []u8, width: u16, height: u16) !usize {
 }
 
 /// Encodes a ready event into the provided buffer.
-/// Returns the number of bytes written (always 5).
+/// If `caps` is non-null, encodes the extended format with capability fields (13 bytes).
+/// Otherwise encodes the short format (5 bytes).
 pub fn encodeReady(buf: []u8, width: u16, height: u16) !usize {
     if (buf.len < 5) return error.Malformed;
     buf[0] = OP_READY;
     std.mem.writeInt(u16, buf[1..3], width, .big);
     std.mem.writeInt(u16, buf[3..5], height, .big);
     return 5;
+}
+
+/// Encodes a ready event with capabilities into the provided buffer.
+/// Extended format: opcode(1) + width(2) + height(2) + caps_version(1) + caps_len(1) + caps(6) = 13 bytes.
+pub fn encodeReadyWithCaps(buf: []u8, width: u16, height: u16, caps: Capabilities) !usize {
+    const total = 13;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_READY;
+    std.mem.writeInt(u16, buf[1..3], width, .big);
+    std.mem.writeInt(u16, buf[3..5], height, .big);
+    buf[5] = CAPS_VERSION;
+    buf[6] = 6; // caps_len: 6 fields
+    buf[7] = caps.frontend_type;
+    buf[8] = caps.color_depth;
+    buf[9] = caps.unicode_width;
+    buf[10] = caps.image_support;
+    buf[11] = caps.float_support;
+    buf[12] = caps.text_rendering;
+    return total;
+}
+
+/// Encodes a capabilities_updated event (opcode 0x05).
+/// Same payload as the caps portion of extended ready: version(1) + len(1) + fields(6) = 8 bytes.
+pub fn encodeCapabilitiesUpdated(buf: []u8, caps: Capabilities) !usize {
+    const total = 9;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_CAPABILITIES_UPDATED;
+    buf[1] = CAPS_VERSION;
+    buf[2] = 6;
+    buf[3] = caps.frontend_type;
+    buf[4] = caps.color_depth;
+    buf[5] = caps.unicode_width;
+    buf[6] = caps.image_support;
+    buf[7] = caps.float_support;
+    buf[8] = caps.text_rendering;
+    return total;
 }
 
 /// Encodes a mouse event into the provided buffer.
