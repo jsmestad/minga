@@ -409,6 +409,72 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  describe "buffer_type" do
+    test "defaults to :file" do
+      {:ok, pid} = Server.start_link()
+      assert Server.buffer_type(pid) == :file
+    end
+
+    test "accepts buffer_type: :nofile and sets read_only implicitly" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, content: "read only content")
+      assert Server.buffer_type(pid) == :nofile
+      assert Server.read_only?(pid)
+    end
+
+    test "nofile buffer can override read_only to false" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, read_only: false, content: "editable")
+      assert Server.buffer_type(pid) == :nofile
+      refute Server.read_only?(pid)
+    end
+
+    test "nowrite buffer accepts buffer_type: :nowrite" do
+      {:ok, pid} = Server.start_link(buffer_type: :nowrite, content: "display only")
+      assert Server.buffer_type(pid) == :nowrite
+      refute Server.read_only?(pid)
+    end
+
+    test "nofile buffer blocks save" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, content: "no save")
+      assert Server.save(pid) == {:error, :buffer_not_saveable}
+    end
+
+    test "nowrite buffer blocks save" do
+      {:ok, pid} = Server.start_link(buffer_type: :nowrite, content: "no save")
+      assert Server.save(pid) == {:error, :buffer_not_saveable}
+    end
+
+    test "nofile buffer blocks force_save" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, content: "no save")
+      assert Server.force_save(pid) == {:error, :buffer_not_saveable}
+    end
+
+    test "nowrite buffer blocks force_save" do
+      {:ok, pid} = Server.start_link(buffer_type: :nowrite, content: "no save")
+      assert Server.force_save(pid) == {:error, :buffer_not_saveable}
+    end
+
+    test "file buffer saves normally", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "saveable.txt")
+      File.write!(path, "original")
+      {:ok, pid} = Server.start_link(file_path: path, buffer_type: :file)
+      Server.insert_char(pid, "x")
+      assert Server.save(pid) == :ok
+    end
+
+    test "buffer_type appears in render_snapshot" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, content: "test")
+      snapshot = Server.render_snapshot(pid, 0, 10)
+      assert snapshot.buffer_type == :nofile
+    end
+
+    test "append bypasses read_only on nofile buffer" do
+      {:ok, pid} = Server.start_link(buffer_type: :nofile, buffer_name: "*Test*", content: "")
+      assert Server.read_only?(pid)
+      Server.append(pid, "appended text")
+      assert Server.content(pid) == "appended text"
+    end
+  end
+
   describe "undo coalescing" do
     test "rapid edits within coalescing window produce one undo entry" do
       {:ok, pid} = Server.start_link(content: "hello")

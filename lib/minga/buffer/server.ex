@@ -22,17 +22,18 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.Unicode
   alias Minga.Filetype
 
+  alias Minga.Buffer.State, as: BufState
+
   @typedoc "Options for starting a buffer server."
   @type start_opt ::
           {:file_path, String.t()}
           | {:content, String.t()}
           | {:name, GenServer.name()}
           | {:buffer_name, String.t()}
+          | {:buffer_type, BufState.buffer_type()}
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
           | {:persistent, boolean()}
-
-  alias Minga.Buffer.State, as: BufState
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
@@ -245,6 +246,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :persistent?)
   end
 
+  @doc "Returns the buffer's type (`:file`, `:nofile`, `:nowrite`, `:prompt`, `:terminal`)."
+  @spec buffer_type(GenServer.server()) :: BufState.buffer_type()
+  def buffer_type(server) do
+    GenServer.call(server, :buffer_type)
+  end
+
   @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
   @spec append(GenServer.server(), String.t()) :: :ok
   def append(server, text) when is_binary(text) do
@@ -258,6 +265,7 @@ defmodule Minga.Buffer.Server do
           lines: [String.t()],
           file_path: String.t() | nil,
           filetype: atom(),
+          buffer_type: BufState.buffer_type(),
           dirty: boolean(),
           name: String.t() | nil,
           read_only: boolean()
@@ -397,14 +405,26 @@ defmodule Minga.Buffer.Server do
               ft
           end
 
+        buffer_type = Keyword.get(opts, :buffer_type, :file)
+
+        # :nofile buffers are implicitly read-only unless explicitly overridden
+        read_only =
+          case {buffer_type, Keyword.get(opts, :read_only)} do
+            {:nofile, nil} -> true
+            {:nofile, explicit} -> explicit
+            {_, nil} -> false
+            {_, explicit} -> explicit
+          end
+
         state = %BufState{
           document: Document.new(text),
           file_path: path,
           filetype: filetype,
+          buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
           name: Keyword.get(opts, :buffer_name),
-          read_only: Keyword.get(opts, :read_only, false),
+          read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
           persistent: Keyword.get(opts, :persistent, false)
         }
@@ -543,6 +563,10 @@ defmodule Minga.Buffer.Server do
     {:reply, :ok, %{state | document: new_buf}}
   end
 
+  def handle_call(:save, _from, %{buffer_type: bt} = state) when bt in [:nofile, :nowrite] do
+    {:reply, {:error, :buffer_not_saveable}, state}
+  end
+
   def handle_call(:save, _from, %{file_path: nil} = state) do
     {:reply, {:error, :no_file_path}, state}
   end
@@ -562,6 +586,11 @@ defmodule Minga.Buffer.Server do
           {:reply, {:error, reason}, state}
       end
     end
+  end
+
+  def handle_call(:force_save, _from, %{buffer_type: bt} = state)
+      when bt in [:nofile, :nowrite] do
+    {:reply, {:error, :buffer_not_saveable}, state}
   end
 
   def handle_call(:force_save, _from, %{file_path: nil} = state) do
@@ -701,6 +730,10 @@ defmodule Minga.Buffer.Server do
     {:reply, state.persistent, state}
   end
 
+  def handle_call(:buffer_type, _from, state) do
+    {:reply, state.buffer_type, state}
+  end
+
   def handle_call({:append, text}, _from, state) do
     content = Document.content(state.document)
     new_content = content <> text
@@ -733,6 +766,7 @@ defmodule Minga.Buffer.Server do
       lines: Document.lines(buf, first_line, count),
       file_path: state.file_path,
       filetype: state.filetype,
+      buffer_type: state.buffer_type,
       dirty: state.dirty,
       name: state.name,
       read_only: state.read_only,

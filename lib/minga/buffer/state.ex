@@ -15,10 +15,22 @@ defmodule Minga.Buffer.State do
 
   alias Minga.Buffer.Document
 
+  @typedoc """
+  Buffer type controlling behavior:
+
+  * `:file` — (default) normal file buffer, supports save/dirty/undo
+  * `:nofile` — no file association, implicitly read-only, no save
+  * `:nowrite` — has a file path for display but cannot save
+  * `:prompt` — like `:nofile` but the last line is editable (for agent input, command input)
+  * `:terminal` — backed by an external process writing into the buffer
+  """
+  @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
+
   @enforce_keys [:document]
   defstruct document: nil,
             file_path: nil,
             filetype: :text,
+            buffer_type: :file,
             dirty: false,
             version: 0,
             mtime: nil,
@@ -35,6 +47,7 @@ defmodule Minga.Buffer.State do
           document: Document.t(),
           file_path: String.t() | nil,
           filetype: atom(),
+          buffer_type: buffer_type(),
           dirty: boolean(),
           version: non_neg_integer(),
           mtime: integer() | nil,
