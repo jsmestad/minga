@@ -319,6 +319,11 @@ defmodule Minga.Editor.Commands.Movement do
   @spec navigate_window(state(), WindowTree.nav_direction()) :: state()
   defp navigate_window(%{windows: %{tree: nil}} = state, _direction), do: state
 
+  # When file tree is focused, navigating right unfocuses the tree
+  defp navigate_window(%{file_tree_focused: true} = state, :right) do
+    %{state | file_tree_focused: false}
+  end
+
   defp navigate_window(state, direction) do
     screen = EditorState.screen_rect(state)
 

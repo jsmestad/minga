@@ -10,6 +10,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
+  alias Minga.FileTree.BufferSync
 
   @moduletag :tmp_dir
 
@@ -186,9 +187,10 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Manually set up the filetree rooted at tmp_dir so we control the entries
       tree = FileTree.new(dir)
+      tree_buf = BufferSync.start_buffer(tree)
 
       :sys.replace_state(ctx.editor, fn s ->
-        %{s | file_tree: tree, file_tree_focused: true}
+        %{s | file_tree: tree, file_tree_focused: true, file_tree_buffer: tree_buf}
       end)
 
       # Find other.ex in the tree entries and navigate to it
