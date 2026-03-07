@@ -26,6 +26,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.HighlightSync
+  alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Mouse
@@ -1186,10 +1187,10 @@ defmodule Minga.Editor do
   defp resize_all_windows(%{windows: %{tree: nil}} = state), do: state
 
   defp resize_all_windows(state) do
-    screen = EditorState.screen_rect(state)
-    layouts = WindowTree.layout(state.windows.tree, screen)
+    layout = Layout.compute(state)
 
-    Enum.reduce(layouts, state, fn {id, {_row, _col, width, height}}, acc ->
+    Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
+      {_r, _c, width, height} = wl.total
       EditorState.update_window(acc, id, fn window ->
         Window.resize(window, height, width)
       end)
