@@ -281,10 +281,24 @@ defmodule Minga.Editor do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:minga_input, {:ready, width, height}}, state) do
-    new_state = %{state | viewport: Viewport.new(height, width)}
+    # Query capabilities from the frontend (may have been sent in extended ready).
+    caps = fetch_capabilities(state.port_manager)
+    new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps}
     Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
+    {:noreply, new_state}
+  end
+
+  def handle_info({:minga_input, {:capabilities_updated, caps}}, state) do
+    new_state = %{state | capabilities: caps}
+
+    new_state =
+      log_message(
+        new_state,
+        "Frontend capabilities updated: #{inspect(caps.frontend_type)}, color: #{inspect(caps.color_depth)}"
+      )
+
     {:noreply, new_state}
   end
 
@@ -507,6 +521,15 @@ defmodule Minga.Editor do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
+  defp fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
+
+  defp fetch_capabilities(port_manager) do
+    PortManager.capabilities(port_manager)
+  rescue
+    _ -> %Minga.Port.Capabilities{}
   end
 
   @spec subscribe_to_parser(GenServer.server() | nil) :: :ok

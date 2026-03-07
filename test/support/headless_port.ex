@@ -117,8 +117,8 @@ defmodule Minga.Test.HeadlessPort do
   @doc "Returns default headless capabilities."
   @impl Minga.Port.Frontend
   @spec capabilities(GenServer.server()) :: Minga.Port.Capabilities.t()
-  def capabilities(_server) do
-    Minga.Port.Capabilities.default()
+  def capabilities(server) do
+    GenServer.call(server, :capabilities)
   end
 
   # ── Screen query API ────────────────────────────────────────────────────────
@@ -239,6 +239,10 @@ defmodule Minga.Test.HeadlessPort do
 
   def handle_call(:terminal_size, _from, state) do
     {:reply, {state.width, state.height}, state}
+  end
+
+  def handle_call(:capabilities, _from, state) do
+    {:reply, Minga.Port.Capabilities.default(), state}
   end
 
   def handle_call(:ready?, _from, state) do

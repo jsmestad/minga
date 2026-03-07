@@ -43,6 +43,7 @@ defmodule Minga.Editor.State do
   alias Minga.FileTree
 
   alias Minga.Mode
+  alias Minga.Port.Capabilities
   alias Minga.Theme
 
   @typedoc "Stored last find-char motion for ; and , repeat."
@@ -86,7 +87,8 @@ defmodule Minga.Editor.State do
             injection_ranges: %{},
             agent: %AgentState{},
             focus_stack: [],
-            agentic: %ViewState{}
+            agentic: %ViewState{},
+            capabilities: %Capabilities{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -124,7 +126,8 @@ defmodule Minga.Editor.State do
           },
           agent: AgentState.t(),
           focus_stack: [module()],
-          agentic: ViewState.t()
+          agentic: ViewState.t(),
+          capabilities: Capabilities.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
