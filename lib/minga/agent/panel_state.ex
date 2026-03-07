@@ -7,6 +7,9 @@ defmodule Minga.Agent.PanelState do
   by agent event handlers.
   """
 
+  @typedoc "Thinking level for models that support extended reasoning."
+  @type thinking_level :: String.t()
+
   @typedoc "Agent panel UI state."
   @type t :: %__MODULE__{
           visible: boolean(),
@@ -15,6 +18,7 @@ defmodule Minga.Agent.PanelState do
           spinner_frame: non_neg_integer(),
           provider_name: String.t(),
           model_name: String.t(),
+          thinking_level: thinking_level(),
           input_focused: boolean()
         }
 
@@ -25,6 +29,7 @@ defmodule Minga.Agent.PanelState do
             spinner_frame: 0,
             provider_name: "anthropic",
             model_name: "claude-sonnet-4",
+            thinking_level: "medium",
             input_focused: false
 
   @doc "Creates a new panel state."

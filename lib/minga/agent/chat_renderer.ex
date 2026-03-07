@@ -27,6 +27,7 @@ defmodule Minga.Agent.ChatRenderer do
           spinner_frame: non_neg_integer(),
           usage: map(),
           model_name: String.t(),
+          thinking_level: String.t(),
           error_message: String.t() | nil
         }
 

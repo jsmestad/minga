@@ -123,6 +123,29 @@ defmodule Minga.Editor.Commands.Agent do
     %{state | agent_panel: PanelState.delete_char(state.agent_panel)}
   end
 
+  @doc "Cycles the thinking level (off → low → medium → high)."
+  @spec cycle_thinking_level(state()) :: state()
+  def cycle_thinking_level(%{agent_session: nil} = state) do
+    %{state | status_msg: "No agent session"}
+  end
+
+  def cycle_thinking_level(state) do
+    case Session.cycle_thinking_level(state.agent_session) do
+      {:ok, %{"level" => level}} when is_binary(level) ->
+        %{
+          state
+          | agent_panel: %{state.agent_panel | thinking_level: level},
+            status_msg: "Thinking: #{level}"
+        }
+
+      {:ok, nil} ->
+        %{state | status_msg: "Model does not support thinking levels"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Error: #{inspect(reason)}"}
+    end
+  end
+
   @doc "Sets the agent provider and restarts the session."
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do
@@ -156,6 +179,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec start_agent_session(state()) :: state()
   defp start_agent_session(state) do
     opts = [
+      thinking_level: state.agent_panel.thinking_level,
       provider_opts: [
         provider: state.agent_panel.provider_name,
         model: state.agent_panel.model_name

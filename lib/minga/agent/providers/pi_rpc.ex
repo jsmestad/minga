@@ -77,6 +77,18 @@ defmodule Minga.Agent.Providers.PiRpc do
     GenServer.call(pid, :get_commands, 10_000)
   end
 
+  @doc "Sets the thinking level on the pi backend."
+  @spec set_thinking_level(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def set_thinking_level(pid, level) when is_binary(level) do
+    GenServer.call(pid, {:set_thinking_level, level})
+  end
+
+  @doc "Cycles to the next thinking level on the pi backend."
+  @spec cycle_thinking_level(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  def cycle_thinking_level(pid) do
+    GenServer.call(pid, :cycle_thinking_level, 10_000)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -158,6 +170,20 @@ defmodule Minga.Agent.Providers.PiRpc do
     send_request(state, "get_commands", from)
   end
 
+  def handle_call({:set_thinking_level, level}, _from, state) do
+    {id, state} = next_id(state)
+    command = %{"id" => "req-#{id}", "type" => "set_thinking_level", "level" => level}
+
+    case send_command(state.port, command) do
+      :ok -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call(:cycle_thinking_level, from, state) do
+    send_request(state, "cycle_thinking_level", from)
+  end
+
   @impl GenServer
   def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
     handle_line(line, state)
@@ -212,7 +238,7 @@ defmodule Minga.Agent.Providers.PiRpc do
           :use_stdio,
           {:line, 1_048_576},
           {:args, args},
-          {:cd, File.cwd!()},
+          {:cd, project_root()},
           {:env, env_vars()}
         ])
 
@@ -245,6 +271,16 @@ defmodule Minga.Agent.Providers.PiRpc do
       {:error, _} = err ->
         {:reply, err, state}
     end
+  end
+
+  @spec project_root() :: String.t()
+  defp project_root do
+    case Minga.Project.root() do
+      nil -> File.cwd!()
+      root -> root
+    end
+  catch
+    :exit, _ -> File.cwd!()
   end
 
   defp send_command(nil, _command), do: {:error, :no_port}

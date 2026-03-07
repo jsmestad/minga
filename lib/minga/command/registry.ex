@@ -78,7 +78,8 @@ defmodule Minga.Command.Registry do
     {:toggle_agent_panel, "Toggle AI agent panel"},
     {:agent_abort, "Stop AI agent"},
     {:agent_new_session, "New AI agent session"},
-    {:agent_pick_model, "Pick AI agent model"}
+    {:agent_pick_model, "Pick AI agent model"},
+    {:agent_cycle_thinking, "Cycle AI thinking level"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

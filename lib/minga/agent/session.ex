@@ -109,6 +109,18 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :get_commands, 10_000)
   end
 
+  @doc "Sets the thinking level on the provider."
+  @spec set_thinking_level(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def set_thinking_level(session, level) when is_binary(level) do
+    GenServer.call(session, {:set_thinking_level, level})
+  end
+
+  @doc "Cycles to the next thinking level."
+  @spec cycle_thinking_level(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  def cycle_thinking_level(session) do
+    GenServer.call(session, :cycle_thinking_level, 10_000)
+  end
+
   @doc "Toggles the collapsed state of a tool call message."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
   def toggle_tool_collapse(session, message_index) do
@@ -128,6 +140,8 @@ defmodule Minga.Agent.Session do
         Keyword.get(opts, :provider_opts, [])
       )
 
+    initial_thinking_level = Keyword.get(opts, :thinking_level)
+
     state = %{
       provider: nil,
       provider_module: provider_module,
@@ -136,7 +150,8 @@ defmodule Minga.Agent.Session do
       messages: [],
       subscribers: MapSet.new(),
       total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
-      error_message: nil
+      error_message: nil,
+      pending_thinking_level: initial_thinking_level
     }
 
     # Start provider asynchronously so init doesn't block
@@ -230,6 +245,24 @@ defmodule Minga.Agent.Session do
     {:reply, result, state}
   end
 
+  def handle_call({:set_thinking_level, _level}, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call({:set_thinking_level, level}, _from, state) do
+    result = Minga.Agent.Providers.PiRpc.set_thinking_level(state.provider, level)
+    {:reply, result, state}
+  end
+
+  def handle_call(:cycle_thinking_level, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call(:cycle_thinking_level, _from, state) do
+    result = Minga.Agent.Providers.PiRpc.cycle_thinking_level(state.provider)
+    {:reply, result, state}
+  end
+
   def handle_call({:toggle_tool_collapse, index}, _from, state) do
     messages =
       List.update_at(state.messages, index, fn
@@ -247,7 +280,9 @@ defmodule Minga.Agent.Session do
     case start_provider(state) do
       {:ok, pid} ->
         Process.monitor(pid)
-        {:noreply, %{state | provider: pid}}
+        state = %{state | provider: pid}
+        state = apply_pending_thinking_level(state)
+        {:noreply, state}
 
       {:error, reason} ->
         Logger.error("[Agent.Session] failed to start provider: #{inspect(reason)}")
@@ -428,4 +463,17 @@ defmodule Minga.Agent.Session do
   defp format_error({:pi_not_found, msg}), do: msg
   defp format_error({:spawn_failed, msg}), do: "Failed to start agent: #{msg}"
   defp format_error(reason), do: inspect(reason)
+
+  @spec apply_pending_thinking_level(state()) :: state()
+  defp apply_pending_thinking_level(%{pending_thinking_level: nil} = state), do: state
+
+  defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do
+    try do
+      Minga.Agent.Providers.PiRpc.set_thinking_level(state.provider, level)
+    catch
+      :exit, _ -> :ok
+    end
+
+    %{state | pending_thinking_level: nil}
+  end
 end

@@ -52,6 +52,7 @@ defmodule Minga.Command.Parser do
           | {:agent_set_provider, [String.t()]}
           | {:agent_set_model, [String.t()]}
           | {:agent_pick_model, []}
+          | {:agent_cycle_thinking, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
@@ -116,6 +117,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-provider " <> provider), do: {:agent_set_provider, [String.trim(provider)]}
   defp do_parse("agent-model " <> model), do: {:agent_set_model, [String.trim(model)]}
   defp do_parse("agent-models"), do: {:agent_pick_model, []}
+  defp do_parse("agent-thinking"), do: {:agent_cycle_thinking, []}
   defp do_parse("vsplit"), do: {:split_vertical, []}
   defp do_parse("vs"), do: {:split_vertical, []}
   defp do_parse("split"), do: {:split_horizontal, []}

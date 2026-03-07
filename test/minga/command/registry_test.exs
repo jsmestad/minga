@@ -60,6 +60,7 @@ defmodule Minga.Command.RegistryTest do
           :agent_abort,
           :agent_new_session,
           :agent_pick_model,
+          :agent_cycle_thinking,
           :git_blame_line,
           :git_preview_hunk,
           :git_revert_hunk,
