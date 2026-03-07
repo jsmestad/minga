@@ -26,9 +26,8 @@ struct MingaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            EditorView(editorNSView: appDelegate.appState.editorNSView)
+            ContentView(appState: appDelegate.appState)
                 .frame(minWidth: 160, minHeight: 80)
-                .navigationTitle(appDelegate.appState.windowTitle)
                 // Disable SwiftUI's focus system so it doesn't steal
                 // first responder from the EditorNSView.
                 .focusable(false)
@@ -43,11 +42,28 @@ struct MingaApp: App {
     }
 }
 
+/// ContentView observes AppState and switches from a placeholder to the
+/// editor surface once the AppDelegate finishes initialization.
+struct ContentView: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        Group {
+            if let nsView = appState.editorNSView {
+                EditorView(editorNSView: nsView)
+            } else {
+                Color(red: 0.12, green: 0.12, blue: 0.14)
+            }
+        }
+        .navigationTitle(appState.windowTitle)
+    }
+}
+
 /// Observable state shared between the app delegate and views.
 @MainActor
 final class AppState: ObservableObject {
     @Published var windowTitle: String = "Minga"
-    var editorNSView: EditorNSView?
+    @Published var editorNSView: EditorNSView?
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -107,8 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.dispatcher = disp
 
-        // Send ready event with initial dimensions and capabilities.
-        enc.sendReady(cols: cols, rows: rows)
+        // The ready event is deferred: EditorNSView.setFrameSize sends it
+        // once SwiftUI assigns the real frame dimensions. This avoids
+        // the BEAM rendering at hardcoded 800x600 defaults.
 
         // Start reading protocol commands from stdin.
         let reader = ProtocolReader(

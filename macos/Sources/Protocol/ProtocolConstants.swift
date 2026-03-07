@@ -69,6 +69,17 @@ let MOUSE_BUTTON_NONE: UInt8 = 0x03
 let MOUSE_SCROLL_UP: UInt8 = 0x40
 let MOUSE_SCROLL_DOWN: UInt8 = 0x41
 
+// MARK: - Log message opcode (frontend → BEAM)
+
+let OP_LOG_MESSAGE: UInt8 = 0x60
+
+// MARK: - Log levels (must match Zig protocol.zig and Elixir protocol.ex)
+
+let LOG_LEVEL_ERR: UInt8 = 0
+let LOG_LEVEL_WARN: UInt8 = 1
+let LOG_LEVEL_INFO: UInt8 = 2
+let LOG_LEVEL_DEBUG: UInt8 = 3
+
 // MARK: - Mouse event types
 
 let MOUSE_PRESS: UInt8 = 0x00

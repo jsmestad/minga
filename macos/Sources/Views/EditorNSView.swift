@@ -27,6 +27,10 @@ final class EditorNSView: NSView {
     private var lastMoveRow: Int16 = -1
     private var lastMoveCol: Int16 = -1
 
+    /// Whether the ready event has been sent to the BEAM. Deferred until
+    /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
+    private var readySent = false
+
     init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
         self.encoder = encoder
         self.metalRenderer = metalRenderer
@@ -94,13 +98,18 @@ final class EditorNSView: NSView {
         super.setFrameSize(newSize)
         metalLayer?.drawableSize = convertToBacking(bounds.size)
 
-        // Recompute cell grid dimensions from the new frame size and notify
-        // the BEAM so it re-renders at the correct size. Without this, the
-        // editor keeps rendering to the initial default dimensions and the
-        // modeline ends up off-screen or in the wrong position.
+        guard newSize.width > 0, newSize.height > 0 else { return }
+
         let newCols = UInt16(max(newSize.width / cellWidth, 1))
         let newRows = UInt16(max(newSize.height / cellHeight, 1))
-        if newCols != cellGrid.cols || newRows != cellGrid.rows {
+
+        if !readySent {
+            // First real frame size: send the ready event with actual
+            // window dimensions so the BEAM never sees wrong defaults.
+            readySent = true
+            cellGrid.resize(newCols: newCols, newRows: newRows)
+            encoder.sendReady(cols: newCols, rows: newRows)
+        } else if newCols != cellGrid.cols || newRows != cellGrid.rows {
             cellGrid.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
         }

@@ -13,6 +13,7 @@ protocol InputEncoder: AnyObject {
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
     func sendResize(cols: UInt16, rows: UInt16)
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8)
+    func sendLog(level: UInt8, message: String)
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -64,6 +65,21 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[5] = button
         buf[6] = modifiers
         buf[7] = eventType
+        writeFrame(buf)
+    }
+
+    /// Send a log message to the BEAM for display in *Messages*.
+    /// Layout: opcode(1) + level(1) + msg_len(2, big-endian) + msg(msg_len).
+    func sendLog(level: UInt8, message: String) {
+        let utf8 = Array(message.utf8)
+        let msgLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + msgLen)
+        buf[0] = OP_LOG_MESSAGE
+        buf[1] = level
+        writeU16(&buf, 2, UInt16(msgLen))
+        if msgLen > 0 {
+            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+        }
         writeFrame(buf)
     }
 

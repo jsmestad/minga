@@ -159,6 +159,7 @@ struct ProtocolEncoderTests {
 final class SpyEncoder: InputEncoder {
     var resizeCalls: [(cols: UInt16, rows: UInt16)] = []
     var readyCalls: [(cols: UInt16, rows: UInt16)] = []
+    var logCalls: [(level: UInt8, message: String)] = []
 
     func sendReady(cols: UInt16, rows: UInt16) {
         readyCalls.append((cols, rows))
@@ -168,6 +169,9 @@ final class SpyEncoder: InputEncoder {
         resizeCalls.append((cols, rows))
     }
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {}
+    func sendLog(level: UInt8, message: String) {
+        logCalls.append((level, message))
+    }
 }
 
 @Suite("CellGrid Resize")
