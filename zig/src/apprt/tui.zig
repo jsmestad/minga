@@ -343,6 +343,11 @@ pub const TuiRuntime = struct {
         const ws = try vaxis.Tty.getWinsize(self.tty.fd);
         std.log.info("handleResize: cols={d} rows={d}", .{ ws.cols, ws.rows });
         try self.vx.resize(self.alloc, self.tty.writer(), ws);
+        // Force a full screen repaint on the next render. Without this,
+        // libvaxis's diff-based render skips cells in the newly exposed
+        // area (when growing the terminal) because both screen buffers
+        // were reinitialized with matching defaults.
+        self.vx.refresh = true;
 
         var rbuf: [5]u8 = undefined;
         const rlen = try protocol.encodeResize(&rbuf, ws.cols, ws.rows);

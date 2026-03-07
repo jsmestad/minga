@@ -284,7 +284,7 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = fetch_capabilities(state.port_manager)
-    new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps}
+    new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
     Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
@@ -305,6 +305,9 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
     new_state = %{state | viewport: Viewport.new(height, width)}
+    # Invalidate the cached layout so resize_all_windows computes fresh
+    # rectangles from the new viewport dimensions.
+    new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
     Renderer.render(new_state)
     {:noreply, new_state}
