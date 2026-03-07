@@ -123,16 +123,10 @@ pub const TuiRuntime = struct {
     surface: VaxisSurface,
     rend: renderer_mod.Renderer(VaxisSurface),
     tty_write_buf: [4096]u8,
-    /// After a resize, we must skip rendering the first batch_end because
-    /// it contains a stale frame generated before the BEAM learned about
-    /// the new terminal size. The stale frame's draw commands target old
-    /// positions (e.g. modeline at old row). We let those commands write
-    /// into the vaxis screen buffer (harmless) but skip the vx.render()
-    /// call so they never reach the physical terminal.
-    ///
-    /// The correct post-resize frame from the BEAM arrives next and gets
-    /// a full repaint via vx.refresh.
-    skip_next_render: bool = false,
+    /// Number of render batches remaining that need a full repaint after
+    /// a resize. Set to 2 on resize (enough for one stale pre-resize
+    /// batch + the correct post-resize batch). Decremented per batch.
+    refresh_batches: u8 = 0,
 
     /// Initialize the TUI runtime: open TTY, set up vaxis, enter alt screen.
     pub fn init(alloc: std.mem.Allocator) !TuiRuntime {
@@ -275,6 +269,17 @@ pub const TuiRuntime = struct {
                 const payload = msg_buf[0..msg_len];
                 if (!try readExact(stdin_fd, payload)) break :main_loop;
 
+                // After a resize, force libvaxis to fully repaint. The
+                // physical terminal was already cleared in handleResize,
+                // but vx.refresh ensures libvaxis writes every cell (not
+                // just the diff). We allow up to 2 batches with refresh:
+                // one for a possibly stale pre-resize batch already in the
+                // pipe, one for the correct post-resize batch from BEAM.
+                if (self.refresh_batches > 0) {
+                    self.vx.refresh = true;
+                    self.refresh_batches -= 1;
+                }
+
                 var offset: usize = 0;
                 while (offset < msg_len) {
                     const remaining = payload[offset..];
@@ -294,18 +299,9 @@ pub const TuiRuntime = struct {
                             std.log.warn("renderer received highlight command (should go to parser)", .{});
                         },
                         else => {
-                            // After a resize, skip the first batch_end (stale
-                            // frame) and force a full repaint on the next one.
-                            if (cmd == .batch_end and self.skip_next_render) {
-                                self.skip_next_render = false;
-                                self.vx.refresh = true;
-                                // Reset the arena but don't call surface.render().
-                                _ = self.rend.arena.reset(.retain_capacity);
-                            } else {
-                                self.rend.handleCommand(cmd) catch |err| {
-                                    std.log.warn("renderer error: {}", .{err});
-                                };
-                            }
+                            self.rend.handleCommand(cmd) catch |err| {
+                                std.log.warn("renderer error: {}", .{err});
+                            };
                         },
                     }
                     offset += protocol.commandSize(remaining);
@@ -369,9 +365,7 @@ pub const TuiRuntime = struct {
         // the new area. Clearing the terminal here ensures no ghost content
         // persists regardless of frame ordering.
         try self.tty.writer().writeAll("\x1b[2J\x1b[H"); // ED 2 (clear screen) + cursor home
-        // Skip the next batch_end render (stale frame), then force a
-        // full repaint on the one after (correct frame from BEAM).
-        self.skip_next_render = true;
+        self.refresh_batches = 2;
 
         var rbuf: [5]u8 = undefined;
         const rlen = try protocol.encodeResize(&rbuf, ws.cols, ws.rows);
