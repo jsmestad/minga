@@ -751,12 +751,10 @@ defmodule Minga.Editor.Renderer do
           buf_line = first_line + line_idx
 
           {g2, c2, sr2} =
-            render_visual_rows(
+            render_wrapped_logical_line(
+              {line_text, buf_line, cursor_line, byte_off},
               visual_rows,
-              sr,
-              max_rows,
-              buf_line,
-              cursor_line,
+              {sr, max_rows},
               ctx,
               ln_style,
               {sign_w, gutter_w}
@@ -775,24 +773,22 @@ defmodule Minga.Editor.Renderer do
     {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
   end
 
-  # Renders the visual rows for a single logical line in wrapped mode.
-  # Returns {gutter_commands, content_commands, next_screen_row}.
-  @spec render_visual_rows(
+  # Renders one logical line as multiple visual rows with full syntax
+  # highlighting. For each visual row, calls LineRenderer.render with
+  # viewport.left set to the visual row's display column offset, so the
+  # existing horizontal-scroll clipping produces the correct slice.
+  @spec render_wrapped_logical_line(
+          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
           WrapMap.wrap_entry(),
-          non_neg_integer(),
-          pos_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
+          {non_neg_integer(), pos_integer()},
           Context.t(),
           Gutter.line_number_style(),
           {non_neg_integer(), non_neg_integer()}
         ) :: {[binary()], [binary()], non_neg_integer()}
-  defp render_visual_rows(
+  defp render_wrapped_logical_line(
+         {line_text, buf_line, cursor_line, line_byte_off},
          visual_rows,
-         screen_row,
-         max_rows,
-         buf_line,
-         cursor_line,
+         {screen_row, max_rows},
          ctx,
          ln_style,
          gutters
@@ -801,12 +797,11 @@ defmodule Minga.Editor.Renderer do
       Enum.with_index(visual_rows),
       {[], [], screen_row},
       fn {vrow, vrow_idx}, {g, c, sr} ->
-        wrap_reduce_vrow(
+        render_one_visual_row(
           {vrow, vrow_idx},
           {g, c, sr},
           max_rows,
-          buf_line,
-          cursor_line,
+          {line_text, buf_line, cursor_line, line_byte_off},
           ctx,
           ln_style,
           gutters
@@ -815,22 +810,20 @@ defmodule Minga.Editor.Renderer do
     )
   end
 
-  @spec wrap_reduce_vrow(
+  @spec render_one_visual_row(
           {WrapMap.visual_row(), non_neg_integer()},
           {[binary()], [binary()], non_neg_integer()},
           pos_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
+          {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
           Context.t(),
           Gutter.line_number_style(),
           {non_neg_integer(), non_neg_integer()}
         ) :: {:halt | :cont, {[binary()], [binary()], non_neg_integer()}}
-  defp wrap_reduce_vrow(
-         {_vrow, _idx},
+  defp render_one_visual_row(
+         _vrow_info,
          {g, c, sr},
          max_rows,
-         _buf_line,
-         _cursor_line,
+         _line_info,
          _ctx,
          _ln_style,
          _gutters
@@ -839,66 +832,56 @@ defmodule Minga.Editor.Renderer do
     {:halt, {g, c, sr}}
   end
 
-  defp wrap_reduce_vrow(
+  defp render_one_visual_row(
          {vrow, vrow_idx},
          {g, c, sr},
          _max_rows,
-         buf_line,
-         cursor_line,
+         {line_text, buf_line, cursor_line, line_byte_off},
          ctx,
          ln_style,
-         gutters
-       ) do
-    {g_cmd, c_cmd} =
-      render_vrow(vrow, vrow_idx, sr, buf_line, cursor_line, ctx, ln_style, gutters)
-
-    g2 = if is_binary(g_cmd), do: [g_cmd | g], else: g
-    {:cont, {g2, [c_cmd | c], sr + 1}}
-  end
-
-  @spec render_vrow(
-          WrapMap.visual_row(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Context.t(),
-          Gutter.line_number_style(),
-          {non_neg_integer(), non_neg_integer()}
-        ) :: {binary() | [], binary()}
-  defp render_vrow(vrow, 0 = _first, sr, buf_line, cursor_line, ctx, ln_style, {sign_w, gutter_w}) do
-    gutter =
-      Gutter.render_number(
-        sr,
-        sign_w,
-        buf_line,
-        cursor_line,
-        gutter_w - sign_w,
-        ln_style,
-        ctx.gutter_colors
-      )
-
-    content = Protocol.encode_draw(sr, gutter_w, vrow.text)
-    {gutter, content}
-  end
-
-  defp render_vrow(
-         vrow,
-         _continuation,
-         sr,
-         _buf_line,
-         _cursor_line,
-         ctx,
-         _ln_style,
          {sign_w, gutter_w}
        ) do
-    blank =
-      Protocol.encode_draw(sr, sign_w, String.duplicate(" ", max(gutter_w - sign_w, 0)),
-        fg: ctx.gutter_colors.fg
-      )
+    vrow_display_off = Unicode.display_col(line_text, vrow.byte_offset)
+    vrow_display_w = Unicode.display_width(vrow.text)
 
-    content = Protocol.encode_draw(sr, gutter_w, vrow.text)
-    {blank, content}
+    # Per-visual-row context: viewport.left slides to this row's offset,
+    # content_w limits rendering to this row's width.
+    vrow_viewport = %{ctx.viewport | left: vrow_display_off}
+    vrow_ctx = %{ctx | viewport: vrow_viewport, content_w: vrow_display_w}
+
+    content_cmds = LineRenderer.render(line_text, sr, buf_line, vrow_ctx, line_byte_off)
+    g_cmd = wrap_gutter(vrow_idx, sr, sign_w, gutter_w, buf_line, cursor_line, ln_style, ctx)
+    g2 = if is_binary(g_cmd), do: [g_cmd | g], else: g
+    {:cont, {g2, prepend_all(c, content_cmds), sr + 1}}
+  end
+
+  # Gutter for wrapped visual rows: line number on first row, blank on rest.
+  @spec wrap_gutter(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Gutter.line_number_style(),
+          Context.t()
+        ) :: binary() | []
+  defp wrap_gutter(0 = _first, sr, sign_w, gutter_w, buf_line, cursor_line, ln_style, ctx) do
+    Gutter.render_number(
+      sr,
+      sign_w,
+      buf_line,
+      cursor_line,
+      gutter_w - sign_w,
+      ln_style,
+      ctx.gutter_colors
+    )
+  end
+
+  defp wrap_gutter(_continuation, sr, sign_w, gutter_w, _buf_line, _cursor_line, _ln_style, ctx) do
+    Protocol.encode_draw(sr, sign_w, String.duplicate(" ", max(gutter_w - sign_w, 0)),
+      fg: ctx.gutter_colors.fg
+    )
   end
 
   # Renders gutter + content for a single non-wrapped line row.
