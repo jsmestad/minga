@@ -210,6 +210,7 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   defp send_command(port, command) do
     json = JSON.encode!(command)
+    Logger.info("[Agent → Pi] #{json}")
     Port.command(port, [json, "\n"])
     :ok
   end
@@ -219,13 +220,47 @@ defmodule Minga.Agent.Providers.PiRpc do
     full_line = state.buffer <> line
     state = %{state | buffer: ""}
 
-    case JSON.decode(full_line) do
+    # Pi sometimes prepends OSC terminal notifications (e.g. ]777;notify;...)
+    # to a JSON line. Strip everything before the first '{'.
+    json_line = strip_to_json(full_line)
+
+    case JSON.decode(json_line) do
       {:ok, event} ->
+        log_received_event(event)
         handle_event(event, state)
 
       {:error, _} ->
         Logger.debug("[Agent.PiRpc] ignoring non-JSON line: #{String.slice(full_line, 0, 100)}")
         {:noreply, state}
+    end
+  end
+
+  @spec log_received_event(map()) :: :ok
+  defp log_received_event(%{
+         "type" => "message_update",
+         "assistantMessageEvent" => %{"type" => sub_type} = delta
+       }) do
+    summary =
+      case sub_type do
+        "text_delta" -> "text_delta: #{String.slice(delta["delta"] || "", 0, 80)}"
+        "thinking_delta" -> "thinking_delta: #{String.slice(delta["delta"] || "", 0, 80)}"
+        other -> other
+      end
+
+    Logger.info("[Pi → Agent] message_update/#{summary}")
+  end
+
+  defp log_received_event(%{"type" => type}) do
+    Logger.info("[Pi → Agent] #{type}")
+  end
+
+  defp log_received_event(_), do: :ok
+
+  @spec strip_to_json(String.t()) :: String.t()
+  defp strip_to_json(line) do
+    case :binary.match(line, "{") do
+      {pos, _} -> binary_part(line, pos, byte_size(line) - pos)
+      :nomatch -> line
     end
   end
 
