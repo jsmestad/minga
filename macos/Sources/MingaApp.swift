@@ -26,10 +26,20 @@ struct MingaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(appState: appDelegate.appState)
+            EditorView(editorNSView: appDelegate.appState.editorNSView)
                 .frame(minWidth: 160, minHeight: 80)
+                .navigationTitle(appDelegate.appState.windowTitle)
+                // Disable SwiftUI's focus system so it doesn't steal
+                // first responder from the EditorNSView.
+                .focusable(false)
+                .focusEffectDisabled()
         }
         .windowStyle(.titleBar)
+        // Remove default menu keyboard shortcuts that would intercept
+        // keys before our NSView sees them.
+        .commands {
+            CommandGroup(replacing: .textEditing) {}
+        }
     }
 }
 
@@ -38,22 +48,6 @@ struct MingaApp: App {
 final class AppState: ObservableObject {
     @Published var windowTitle: String = "Minga"
     var editorNSView: EditorNSView?
-}
-
-/// ContentView hosts the Metal editor surface.
-struct ContentView: View {
-    @ObservedObject var appState: AppState
-
-    var body: some View {
-        Group {
-            if let nsView = appState.editorNSView {
-                EditorView(editorNSView: nsView)
-            } else {
-                Color(red: 0.12, green: 0.12, blue: 0.14)
-            }
-        }
-        .navigationTitle(appState.windowTitle)
-    }
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -68,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register as a regular GUI app so macOS routes keyboard events to us.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+
         // Backing scale factor for Retina rendering.
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
 
@@ -128,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         reader.start()
         self.protocolReader = reader
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

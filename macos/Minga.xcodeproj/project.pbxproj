@@ -7,31 +7,33 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0507E71BCDE82EBBDD37DAEA /* CellGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */; };
+		07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A647814918768E62822D4A1 /* MingaApp.swift */; };
+		1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
 		48842D6AE71AA7EB08B9ED03 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
 		50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
+		614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
 		6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
 		686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F220A60775A252A728477659 /* ProtocolTests.swift */; };
+		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
+		7A21099CFC922D178A3079DF /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
+		7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */; };
+		93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
 		9BAECBE2506FC3893151FD6C /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
+		A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		AE619C9C5E8A6C337F6283F1 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
 		C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
 		CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
+		D1EEFBDAE315F717373F82BD /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
 		EDF83D0ACFCCB4ED91C1813C /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
+		F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
+		FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		759627BE7CA1AB72FDAFC484 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 408C02F1934F748B5B5586FC /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = AB99946B54F4654DA02F2A34;
-			remoteInfo = "minga-mac";
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellGrid.swift; sourceTree = "<group>"; };
@@ -151,7 +153,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				8EBD3ED691F2A873067DF9A9 /* PBXTargetDependency */,
 			);
 			name = MingaTests;
 			packageProductDependencies = (
@@ -256,19 +257,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0507E71BCDE82EBBDD37DAEA /* CellGrid.swift in Sources */,
+				07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */,
+				D1EEFBDAE315F717373F82BD /* EditorNSView.swift in Sources */,
+				7A21099CFC922D178A3079DF /* EditorView.swift in Sources */,
+				78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */,
+				F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */,
+				1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */,
+				A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */,
+				93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */,
+				7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */,
+				FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */,
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
+				614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		8EBD3ED691F2A873067DF9A9 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = AB99946B54F4654DA02F2A34 /* minga-mac */;
-			targetProxy = 759627BE7CA1AB72FDAFC484 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		03D1C4FA288798B824DB15EC /* Release */ = {
@@ -414,6 +419,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -447,6 +453,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

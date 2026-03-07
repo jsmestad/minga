@@ -11,7 +11,7 @@ import QuartzCore
 /// The main editor view. Owns the Metal layer, receives all input events,
 /// and triggers rendering when the CommandDispatcher signals a frame is ready.
 final class EditorNSView: NSView {
-    let encoder: ProtocolEncoder
+    let encoder: InputEncoder
     let metalRenderer: MetalRenderer
     let fontFace: FontFace
     let cellGrid: CellGrid
@@ -27,7 +27,7 @@ final class EditorNSView: NSView {
     private var lastMoveRow: Int16 = -1
     private var lastMoveCol: Int16 = -1
 
-    init(encoder: ProtocolEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
+    init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
         self.encoder = encoder
         self.metalRenderer = metalRenderer
         self.fontFace = fontFace
@@ -60,13 +60,50 @@ final class EditorNSView: NSView {
         super.viewDidMoveToWindow()
         if let window = window {
             metalLayer?.contentsScale = window.backingScaleFactor
+
+            // Observe window becoming key to reclaim first responder.
+            // SwiftUI can reassign it during layout passes.
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowDidBecomeKey),
+                name: NSWindow.didBecomeKeyNotification,
+                object: window
+            )
         }
         updateTrackingArea()
+        claimFirstResponder()
+    }
+
+    /// Claim first responder after a short delay so SwiftUI's layout pass
+    /// completes first. Without the async dispatch, SwiftUI can immediately
+    /// reassign first responder to its own focus system.
+    func claimFirstResponder() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            if window.firstResponder !== self {
+                window.makeFirstResponder(self)
+            }
+        }
+    }
+
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        claimFirstResponder()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         metalLayer?.drawableSize = convertToBacking(bounds.size)
+
+        // Recompute cell grid dimensions from the new frame size and notify
+        // the BEAM so it re-renders at the correct size. Without this, the
+        // editor keeps rendering to the initial default dimensions and the
+        // modeline ends up off-screen or in the wrong position.
+        let newCols = UInt16(max(newSize.width / cellWidth, 1))
+        let newRows = UInt16(max(newSize.height / cellHeight, 1))
+        if newCols != cellGrid.cols || newRows != cellGrid.rows {
+            cellGrid.resize(newCols: newCols, newRows: newRows)
+            encoder.sendResize(cols: newCols, rows: newRows)
+        }
     }
 
     /// Render the current cell grid state to the Metal layer.
@@ -97,6 +134,13 @@ final class EditorNSView: NSView {
     }
 
     // MARK: - Keyboard
+
+    /// Intercept key equivalents (Cmd+key, etc.) before AppKit/SwiftUI
+    /// can consume them for menus or focus navigation.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        keyDown(with: event)
+        return true
+    }
 
     override func keyDown(with event: NSEvent) {
         let mods = modifierBits(from: event.modifierFlags)

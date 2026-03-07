@@ -40,8 +40,21 @@ targets:
     sources:
       - path: Tests
         type: group
-    dependencies:
-      - target: minga-mac
+      - path: Sources
+        type: group
+        excludes:
+          - "MingaApp.swift"
     settings:
       base:
         PRODUCT_NAME: MingaTests
+        GENERATE_INFOPLIST_FILE: "YES"
+
+schemes:
+  minga-mac:
+    build:
+      targets:
+        minga-mac: all
+        MingaTests: [test]
+    test:
+      targets:
+        - MingaTests

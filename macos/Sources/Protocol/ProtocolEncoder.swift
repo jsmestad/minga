@@ -6,8 +6,17 @@
 
 import Foundation
 
+/// Protocol for sending input events to the BEAM. The real implementation
+/// writes to stdout; tests can use a spy conformance to verify calls.
+protocol InputEncoder: AnyObject {
+    func sendReady(cols: UInt16, rows: UInt16)
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
+    func sendResize(cols: UInt16, rows: UInt16)
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8)
+}
+
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
-final class ProtocolEncoder: @unchecked Sendable {
+final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private let lock = NSLock()
     private let stdout = FileHandle.standardOutput
 
