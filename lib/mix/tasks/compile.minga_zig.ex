@@ -12,6 +12,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @zig_dir "zig"
   @priv_dir "priv"
   @renderer_name "minga-renderer"
+  @parser_name "minga-parser"
 
   # File extensions that should trigger a Zig rebuild when modified.
   @zig_source_extensions ~w(.zig .zon .c .h .scm)
@@ -73,6 +74,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
       {_output, 0} ->
         Mix.shell().info("Zig renderer (#{backend}) compiled successfully")
         copy_to_priv(@renderer_name, output_name)
+        copy_to_priv(@parser_name, @parser_name)
         {:ok, []}
 
       {output, _code} ->

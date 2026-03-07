@@ -23,7 +23,10 @@ lib/
       server.ex               # GenServer wrapper for gap buffer
     port/
       protocol.ex             # Port protocol encoder/decoder
-      manager.ex              # GenServer managing the Zig Port
+      manager.ex              # GenServer managing the Zig renderer Port
+      frontend.ex             # Behaviour for pluggable rendering backends
+    parser/
+      manager.ex              # GenServer managing the tree-sitter parser Port
     editor.ex                 # Editor orchestration GenServer
     editor/
       viewport.ex             # Viewport scrolling logic

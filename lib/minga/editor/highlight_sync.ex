@@ -1,8 +1,8 @@
 defmodule Minga.Editor.HighlightSync do
   @moduledoc """
-  Synchronizes syntax highlighting between the editor and the Zig tree-sitter parser.
+  Synchronizes syntax highlighting between the editor and the tree-sitter parser process.
 
-  Handles sending language/query/parse commands to Zig and processing
+  Handles sending language/query/parse commands to the parser and processing
   highlight response events back into editor state.
   """
 
@@ -10,7 +10,7 @@ defmodule Minga.Editor.HighlightSync do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Highlight
   alias Minga.Highlight.Grammar
-  alias Minga.Port.Manager, as: PortManager
+  alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Port.Protocol
 
   @doc """
@@ -56,7 +56,7 @@ defmodule Minga.Editor.HighlightSync do
         [parse_cmd]
       ])
 
-    PortManager.send_commands(state.port_manager, commands)
+    ParserManager.send_commands(commands)
 
     %{state | highlight: %{hl | current: Highlight.from_theme(state.theme), version: version}}
   end
@@ -129,14 +129,14 @@ defmodule Minga.Editor.HighlightSync do
     version = hl.version + 1
     content = BufferServer.content(state.buffers.active)
 
-    PortManager.send_commands(state.port_manager, [
+    ParserManager.send_commands([
       Protocol.encode_parse_buffer(version, content)
     ])
 
     %{state | highlight: %{hl | version: version}}
   end
 
-  @doc "Handles a highlight_names event from Zig."
+  @doc "Handles a highlight_names event from the parser."
   @spec handle_names(EditorState.t(), [String.t()]) :: EditorState.t()
   def handle_names(%EditorState{} = state, names) do
     hl = state.highlight

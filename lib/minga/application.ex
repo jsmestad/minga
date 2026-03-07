@@ -18,6 +18,7 @@ defmodule Minga.Application do
       ├── Minga.Extension.Registry
       ├── Minga.Extension.Supervisor (DynamicSupervisor)
       ├── Minga.Agent.Supervisor (DynamicSupervisor)
+      ├── Minga.Parser.Manager
       ├── Minga.Port.Manager
       └── Minga.Editor
 
@@ -52,7 +53,13 @@ defmodule Minga.Application do
       if Application.get_env(:minga, :start_editor, false) or
            Burrito.Util.running_standalone?() do
         backend = Application.get_env(:minga, :backend, :tui)
-        [Minga.FileWatcher, {Minga.Port.Manager, [backend: backend]}, Minga.Editor]
+
+        [
+          Minga.FileWatcher,
+          Minga.Parser.Manager,
+          {Minga.Port.Manager, [backend: backend]},
+          Minga.Editor
+        ]
       else
         []
       end

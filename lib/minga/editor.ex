@@ -108,6 +108,8 @@ defmodule Minga.Editor do
       end
     end
 
+    subscribe_to_parser(Keyword.get(opts, :parser_manager))
+
     # Register initial buffer with file watcher
     maybe_watch_buffer(file_watcher, buffer)
 
@@ -335,14 +337,19 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  # ── Highlight events from Zig ────────────────────────────────────────────────
+  # ── Highlight events from Parser.Manager ──────────────────────────────────────
+  # These arrive as {:minga_highlight, event} from the dedicated parser process.
+  # Legacy {:minga_input, event} forms are also accepted for backward
+  # compatibility during the transition (headless tests, etc.).
 
-  def handle_info({:minga_input, {:highlight_names, names}}, state) do
+  def handle_info({tag, {:highlight_names, names}}, state)
+      when tag in [:minga_highlight, :minga_input] do
     new_state = HighlightSync.handle_names(state, names)
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:injection_ranges, ranges}}, state) do
+  def handle_info({tag, {:injection_ranges, ranges}}, state)
+      when tag in [:minga_highlight, :minga_input] do
     new_state =
       if state.buffers.active do
         %{state | injection_ranges: Map.put(state.injection_ranges, state.buffers.active, ranges)}
@@ -353,12 +360,14 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:language_at_response, _request_id, _language}}, state) do
+  def handle_info({tag, {:language_at_response, _request_id, _language}}, state)
+      when tag in [:minga_highlight, :minga_input] do
     # Reserved for future use (synchronous language queries)
     {:noreply, state}
   end
 
-  def handle_info({:minga_input, {:highlight_spans, version, spans}}, state) do
+  def handle_info({tag, {:highlight_spans, version, spans}}, state)
+      when tag in [:minga_highlight, :minga_input] do
     new_state = HighlightSync.handle_spans(state, version, spans)
 
     # Cache the updated highlights for this buffer
@@ -378,7 +387,8 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:grammar_loaded, _success, _name}}, state) do
+  def handle_info({tag, {:grammar_loaded, _success, _name}}, state)
+      when tag in [:minga_highlight, :minga_input] do
     {:noreply, state}
   end
 
@@ -497,6 +507,19 @@ defmodule Minga.Editor do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @spec subscribe_to_parser(GenServer.server() | nil) :: :ok
+  defp subscribe_to_parser(nil) do
+    Minga.Parser.Manager.subscribe()
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp subscribe_to_parser(parser_manager) do
+    Minga.Parser.Manager.subscribe(parser_manager)
+  catch
+    :exit, _ -> Logger.warning("Could not subscribe to parser manager")
   end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()

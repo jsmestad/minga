@@ -110,6 +110,7 @@ Minga.Supervisor (rest_for_one)
 ├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
 ├── Project                  ← project root detection, known-projects persistence, file cache
 ├── FileWatcher              ← OS file notifications
+├── Parser.Manager           ← owns the tree-sitter parser process
 ├── Port.Manager             ← owns the Zig renderer process
 └── Editor                   ← orchestration, depends on everything above
 ```

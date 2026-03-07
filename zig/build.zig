@@ -120,6 +120,20 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    // ── Parser executable (tree-sitter only, no renderer/libvaxis) ────────
+    const parser_exe = b.addExecutable(.{
+        .name = "minga-parser",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/parser_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    parser_exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    parser_exe.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| parser_exe.linkLibrary(gl);
+    b.installArtifact(parser_exe);
+
     // Run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
