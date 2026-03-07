@@ -22,6 +22,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -112,7 +113,8 @@ defmodule Minga.Editor.Renderer do
   @spec render_agentic(state()) :: :ok
   defp render_agentic(state) do
     full_viewport = state.viewport
-    minibuffer_row = full_viewport.rows - 1
+    layout = Layout.compute(state)
+    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
 
     # Build panel draw commands.
     panel_commands = ViewRenderer.render(state)
@@ -162,21 +164,23 @@ defmodule Minga.Editor.Renderer do
 
   @spec render_single(state()) :: :ok
   defp render_single(state) do
-    # When the file tree is open, the editor content is shifted right.
-    {_row, col_off, editor_width, _editor_height} = EditorState.screen_rect(state)
+    # Layout pass: compute all rectangles once, replacing inline coordinate math.
+    layout = Layout.compute(state)
+    win_layout = Layout.active_window_layout(layout, state)
+    {_content_row, col_off, editor_width, _content_height} = win_layout.content
+    {modeline_row, _mc, _mw, _mh} = win_layout.modeline
+    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
 
-    # Layout (Emacs-style): editor | agent panel | minibuffer (always last row).
-    # When the agent panel is visible, it sits between editor and minibuffer.
-    # The minibuffer row is reserved from the total before sizing the panel.
-    agent_panel_height = agent_panel_height(state)
-    reserved_for_minibuffer = if agent_panel_height > 0, do: 1, else: 0
-    editor_rows = state.viewport.rows - agent_panel_height - reserved_for_minibuffer
+    # Viewport height: content_height + footer_rows (Viewport subtracts footer_rows
+    # internally to get visible text rows). This replaces the old inline arithmetic:
+    #   editor_rows = state.viewport.rows - agent_panel_height - reserved_for_minibuffer
+    {_cr, _cc, _cw, content_height} = win_layout.content
+    editor_rows = content_height + Viewport.footer_rows()
 
     # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
     #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
     {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
     cursor = {cursor_line, cursor_byte_col}
-    # Use editor rows (minus agent panel) but editor-area width (tree may reduce it).
     wrap_on = wrap_enabled?()
     viewport = Viewport.new(editor_rows, editor_width)
     viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
@@ -276,13 +280,12 @@ defmodule Minga.Editor.Renderer do
         []
       end
 
-    # ── Modeline (row N-2) ──
+    # ── Modeline (positioned by Layout) ──
     file_name = snapshot_display_name(snapshot)
     dirty_marker = if snapshot.dirty, do: " ● ", else: ""
     line_count = snapshot.line_count
     buf_count = length(state.buffers.list)
     buf_index = state.buffers.active_index + 1
-    modeline_row = viewport.rows - 2
 
     filetype = Map.get(snapshot, :filetype, :text)
 
@@ -309,9 +312,8 @@ defmodule Minga.Editor.Renderer do
         state.theme
       )
 
-    # ── Minibuffer (always the absolute last row, Emacs-style) ──
+    # ── Minibuffer (positioned by Layout, always the last row) ──
     full_viewport = state.viewport
-    minibuffer_row = full_viewport.rows - 1
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     # ── Picker overlay (uses full terminal viewport) ──
@@ -361,17 +363,19 @@ defmodule Minga.Editor.Renderer do
         gutter_w
       )
 
-    # ── Agent panel (below editor content) ──
-    agent_commands = render_agent_panel(state, editor_rows, col_off, editor_width)
+    # ── Agent panel (below editor content, positioned by Layout) ──
+    agent_commands = render_agent_panel(state, content_height, col_off, editor_width)
 
     # When the agent input is focused, place cursor in the input area
+    agent_panel_h = if layout.agent_panel, do: elem(layout.agent_panel, 3), else: 0
+
     {cursor_command, cursor_shape_command} =
       agent_cursor_override(
         state,
         cursor_command,
         cursor_shape_command,
-        editor_rows,
-        agent_panel_height,
+        content_height,
+        agent_panel_h,
         col_off
       )
 
@@ -397,7 +401,9 @@ defmodule Minga.Editor.Renderer do
 
   @spec render_split(state()) :: :ok
   defp render_split(state) do
-    screen = EditorState.screen_rect(state)
+    # Layout pass: compute all rectangles once.
+    layout = Layout.compute(state)
+    screen = layout.editor_area
     layouts = WindowTree.layout(state.windows.tree, screen)
     full_viewport = state.viewport
 
@@ -414,7 +420,7 @@ defmodule Minga.Editor.Renderer do
     separator_commands = render_separators(state.windows.tree, screen, screen_h, state.theme)
 
     # ── Global elements (minibuffer, whichkey, picker) use full viewport ──
-    minibuffer_row = full_viewport.rows - 1
+    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
