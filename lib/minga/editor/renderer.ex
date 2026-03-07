@@ -24,6 +24,8 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
+  # Submodule — Caps is Minga.Editor.Renderer.Caps
+  alias __MODULE__.Caps
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.BufferLine
@@ -122,8 +124,9 @@ defmodule Minga.Editor.Renderer do
     # Minibuffer (always last row).
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
-    # Which-key popup works normally inside the agentic view.
-    whichkey_commands = render_whichkey(state, full_viewport)
+    # Overlay popups: skip when frontend has native float support.
+    render_overlays = Caps.render_overlays?(state.capabilities)
+    whichkey_commands = if render_overlays, do: render_whichkey(state, full_viewport), else: []
 
     # Picker overlay (e.g. SPC a m model picker).
     {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
@@ -332,7 +335,13 @@ defmodule Minga.Editor.Renderer do
         Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
       end
 
-    whichkey_commands = render_whichkey(state, full_viewport)
+    # Overlay popups: skip when frontend has native float support (GUI).
+    # Native frontends render popups using their own windowing system.
+    caps = state.capabilities
+    render_overlays = Caps.render_overlays?(caps)
+
+    whichkey_commands =
+      if render_overlays, do: render_whichkey(state, full_viewport), else: []
 
     completion_commands =
       CompletionUI.render(
@@ -421,8 +430,9 @@ defmodule Minga.Editor.Renderer do
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
+    render_overlays = Caps.render_overlays?(state.capabilities)
     {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
-    whichkey_commands = render_whichkey(state, full_viewport)
+    whichkey_commands = if render_overlays, do: render_whichkey(state, full_viewport), else: []
 
     # ── Cursor ──
     cursor_shape_command =

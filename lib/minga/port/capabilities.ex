@@ -57,6 +57,33 @@ defmodule Minga.Port.Capabilities do
 
   def from_binary(_), do: default()
 
+  # ── Query helpers ──
+
+  @doc "Returns true if the frontend supports inline images (kitty, sixel, or native)."
+  @spec images?(t()) :: boolean()
+  def images?(%__MODULE__{image_support: :none}), do: false
+  def images?(%__MODULE__{}), do: true
+
+  @doc "Returns true if the frontend supports native floating windows (not emulated overlays)."
+  @spec native_floats?(t()) :: boolean()
+  def native_floats?(%__MODULE__{float_support: :native}), do: true
+  def native_floats?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the frontend uses proportional (variable-width) fonts."
+  @spec proportional?(t()) :: boolean()
+  def proportional?(%__MODULE__{text_rendering: :proportional}), do: true
+  def proportional?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the frontend supports full 24-bit RGB color."
+  @spec rgb?(t()) :: boolean()
+  def rgb?(%__MODULE__{color_depth: :rgb}), do: true
+  def rgb?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the frontend is a native GUI (not a terminal)."
+  @spec gui?(t()) :: boolean()
+  def gui?(%__MODULE__{frontend_type: :native_gui}), do: true
+  def gui?(%__MODULE__{}), do: false
+
   # ── Decoders ──
 
   @spec decode_frontend_type(non_neg_integer()) :: frontend_type()
