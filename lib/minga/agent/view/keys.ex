@@ -49,8 +49,14 @@ defmodule Minga.Agent.View.Keys do
     {:passthrough, state}
   end
 
-  # SPC prefix — always delegate to the mode FSM so leader/which-key work.
-  def handle_key(state, @space, mods) when band(mods, @ctrl) == 0 do
+  # SPC prefix — delegate to the mode FSM so leader/which-key work,
+  # but NOT when the chat input is focused (space is a typeable character).
+  def handle_key(
+        %{agent: %{panel: %{input_focused: false}}} = state,
+        @space,
+        mods
+      )
+      when band(mods, @ctrl) == 0 do
     {:passthrough, state}
   end
 
