@@ -38,7 +38,17 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   def put_register(%{reg: %{active: "+"}} = state, text, kind) do
-    Clipboard.write(text)
+    case Clipboard.write(text) do
+      :ok ->
+        :ok
+
+      :unavailable ->
+        Minga.Editor.log_to_messages("Clipboard: no clipboard tool available")
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages("Clipboard: write failed (#{reason})")
+    end
+
     state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
   end
 

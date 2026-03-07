@@ -322,9 +322,11 @@ defmodule Minga.Editor.Commands do
   def execute(state, :reload_config) do
     case ConfigLoader.reload() do
       :ok ->
+        Minga.Editor.log_to_messages("Config reloaded")
         %{state | status_msg: "Config reloaded"}
 
       {:error, msg} ->
+        Minga.Editor.log_to_messages("Config reload error: #{msg}")
         %{state | status_msg: "Config reload error: #{msg}"}
     end
   end
@@ -459,6 +461,7 @@ defmodule Minga.Editor.Commands do
   @spec format_and_replace(state(), pid(), Formatter.formatter_spec()) :: state()
   defp format_and_replace(state, buf, spec) do
     content = BufferServer.content(buf)
+    buf_name = BufferServer.file_path(buf) |> Path.basename()
 
     case Formatter.format(content, spec) do
       {:ok, formatted} ->
@@ -467,9 +470,11 @@ defmodule Minga.Editor.Commands do
         line_count = BufferServer.line_count(buf)
         safe_line = min(cursor_line, max(line_count - 1, 0))
         BufferServer.move_to(buf, {safe_line, cursor_col})
+        Minga.Editor.log_to_messages("Formatted: #{buf_name}")
         %{state | status_msg: "Formatted"}
 
       {:error, msg} ->
+        Minga.Editor.log_to_messages("Formatter failed: #{buf_name} (#{msg})")
         %{state | status_msg: "Format error: #{msg}"}
     end
   end

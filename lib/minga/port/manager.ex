@@ -132,12 +132,14 @@ defmodule Minga.Port.Manager do
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
     Logger.info("Zig renderer exited normally")
+    Minga.Editor.log_to_messages("Renderer: exited normally")
     maybe_stop_system(0)
     {:noreply, %{state | port: nil, ready: false}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.error("Zig renderer exited with status #{status}")
+    Minga.Editor.log_to_messages("Renderer: crashed (exit #{status})")
     maybe_stop_system(1)
     {:noreply, %{state | port: nil, ready: false}}
   end

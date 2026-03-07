@@ -398,7 +398,15 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       %{state | status_msg: "Buffer is persistent — content cleared"}
     else
+      buf_name =
+        if buf && Process.alive?(buf) do
+          Helpers.buffer_display_name(buf)
+        else
+          "[unknown]"
+        end
+
       if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
+      Minga.Editor.log_to_messages("Closed: #{buf_name}")
 
       new_buffers = List.delete_at(buffers, idx)
 
@@ -479,6 +487,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp run_format_on_save(state, buf, filetype) do
     file_path = BufferServer.file_path(buf)
     spec = Formatter.resolve_formatter(filetype, file_path)
+    buf_name = Helpers.buffer_display_name(buf)
 
     case {spec, spec && Formatter.format(BufferServer.content(buf), spec)} do
       {nil, _} ->
@@ -486,9 +495,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       {_, {:ok, formatted}} ->
         BufferServer.replace_content(buf, formatted)
+        Minga.Editor.log_to_messages("Format-on-save: #{buf_name}")
         state
 
       {_, {:error, msg}} ->
+        Minga.Editor.log_to_messages("Format-on-save failed: #{buf_name} (#{msg})")
         Logger.warning("Format-on-save failed: #{msg}")
         state
     end

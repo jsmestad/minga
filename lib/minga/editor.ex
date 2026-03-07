@@ -13,7 +13,7 @@ defmodule Minga.Editor do
 
   use GenServer
 
-  alias Minga.Agent.PanelState, as: AgentPanelState
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -351,7 +351,7 @@ defmodule Minga.Editor do
   # forwarded to the mode FSM, which would cause accidental unfocusing).
   def handle_info(
         {:minga_input, {:key_press, codepoint, modifiers}},
-        %{agent_panel: %{visible: true, input_focused: true}} = state
+        %{agent: %{panel: %{visible: true, input_focused: true}}} = state
       ) do
     new_state = handle_agent_key(%{state | status_msg: nil}, codepoint, modifiers)
     Renderer.render(new_state)
@@ -575,7 +575,7 @@ defmodule Minga.Editor do
   # ── Agent events ──────────────────────────────────────────────────────────
 
   def handle_info({:agent_event, {:status_changed, status}}, state) do
-    state = %{state | agent_status: status}
+    state = update_agent(state, &AgentState.set_status(&1, status))
 
     state =
       case status do
@@ -589,10 +589,10 @@ defmodule Minga.Editor do
     state =
       case status do
         s when s in [:thinking, :tool_executing] ->
-          start_spinner_timer(state)
+          update_agent(state, &AgentState.start_spinner_timer/1)
 
         _ ->
-          stop_spinner_timer(state)
+          update_agent(state, &AgentState.stop_spinner_timer/1)
       end
 
     Renderer.render(state)
@@ -600,8 +600,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:agent_event, {:text_delta, _delta}}, state) do
-    # Auto-scroll and re-render on new text
-    state = %{state | agent_panel: AgentPanelState.scroll_to_bottom(state.agent_panel)}
+    state = update_agent(state, &AgentState.scroll_to_bottom/1)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -610,7 +609,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:agent_event, :messages_changed}, state) do
-    state = %{state | agent_panel: AgentPanelState.scroll_to_bottom(state.agent_panel)}
+    state = update_agent(state, &AgentState.scroll_to_bottom/1)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -619,18 +618,19 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:agent_event, {:error, message}}, state) do
-    state = %{state | agent_status: :error, agent_error: message}
+    state = update_agent(state, &AgentState.set_error(&1, message))
     state = log_message(state, "Agent error: #{message}")
     Renderer.render(state)
     {:noreply, state}
   end
 
   def handle_info(:agent_spinner_tick, state) do
-    if state.agent_panel.visible and state.agent_status in [:thinking, :tool_executing] do
-      state = %{state | agent_panel: AgentPanelState.tick_spinner(state.agent_panel)}
+    if AgentState.visible?(state.agent) and AgentState.busy?(state.agent) do
+      state = update_agent(state, &AgentState.tick_spinner/1)
       {:noreply, schedule_render(state, 16)}
     else
-      {:noreply, stop_spinner_timer(state)}
+      state = update_agent(state, &AgentState.stop_spinner_timer/1)
+      {:noreply, state}
     end
   end
 
@@ -638,25 +638,9 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  @spec start_spinner_timer(state()) :: state()
-  defp start_spinner_timer(%{agent_spinner_timer: nil} = state) do
-    timer = :timer.send_interval(100, :agent_spinner_tick)
-    %{state | agent_spinner_timer: timer}
-  end
-
-  defp start_spinner_timer(state), do: state
-
-  @spec stop_spinner_timer(state()) :: state()
-  defp stop_spinner_timer(%{agent_spinner_timer: nil} = state), do: state
-
-  defp stop_spinner_timer(%{agent_spinner_timer: timer} = state) do
-    case timer do
-      {:ok, ref} -> :timer.cancel(ref)
-      ref when is_reference(ref) -> :timer.cancel(ref)
-      _ -> :ok
-    end
-
-    %{state | agent_spinner_timer: nil}
+  @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
+  defp update_agent(state, fun) do
+    %{state | agent: fun.(state.agent)}
   end
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
@@ -715,7 +699,7 @@ defmodule Minga.Editor do
   # Ctrl+Q: quit (unfocus first, then forward the quit key)
   defp handle_agent_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
     send(self(), {:minga_input, {:key_press, ?q, mods}})
-    %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}
+    update_agent(state, &AgentState.focus_input(&1, false))
   end
 
   # Ctrl+S: save current buffer
@@ -748,7 +732,7 @@ defmodule Minga.Editor do
 
   # Escape: unfocus the input (return to normal editing)
   defp handle_agent_key(state, 27, _mods) do
-    %{state | agent_panel: AgentPanelState.set_input_focused(state.agent_panel, false)}
+    update_agent(state, &AgentState.focus_input(&1, false))
   end
 
   # Backspace
@@ -1514,7 +1498,9 @@ defmodule Minga.Editor do
            {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
          ) do
       {:ok, git_pid} ->
-        %{state | git_buffers: Map.put(state.git_buffers, buffer_pid, git_pid)}
+        rel_path = Path.relative_to(path, git_root)
+        log_message(state, "Git: tracking #{rel_path}")
+        |> then(&%{&1 | git_buffers: Map.put(&1.git_buffers, buffer_pid, git_pid)})
 
       {:error, reason} ->
         Logger.warning("Failed to start git buffer: #{inspect(reason)}")
