@@ -244,12 +244,14 @@ Current status and planned features. Updated as development progresses.
 | Frontend behaviour | ✅ | `Minga.Port.Frontend` formalizes renderer contract (#148) |
 | Separate parser process | ✅ | `minga-parser` binary handles tree-sitter, renderer is 1.8MB (#150) |
 | Frontend capability negotiation | ✅ | Extended ready event + capabilities_updated opcode (#151) |
-| Layout regions | ✅ | define/clear/destroy/set_active_region opcodes (#152) |
+| Layout regions | ✅ | define/clear/destroy/set_active_region opcodes (#152), BEAM sends per-frame |
+| Layout pass | ✅ | Pure `Layout.compute(state)` is single source of truth for all rects (#160) |
+| Capability-aware rendering | ✅ | Overlay/image/color decisions based on frontend caps |
 | Text measurement | ✅ | measure_text/text_width opcodes for proportional fonts (#153) |
 | Incremental content sync | ✅ | edit_buffer opcode + edit delta tracking in Buffer.Server (#154) |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 2,489 Elixir tests | ✅ | Including property-based tests |
+| 2,530 Elixir tests | ✅ | Including 7 property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 

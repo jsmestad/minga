@@ -32,6 +32,7 @@ lib/
       manager.ex              # GenServer managing the tree-sitter parser Port
     editor.ex                 # Editor orchestration GenServer
     editor/
+      layout.ex               # Pure layout computation (single source of truth for all rects)
       viewport.ex             # Viewport scrolling logic
     mode/
       normal.ex               # Vim normal mode
