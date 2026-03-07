@@ -339,7 +339,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
-    layout = Layout.compute(state)
+    layout = Layout.get(state)
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total
@@ -356,7 +356,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   defp navigate_window(state, direction) do
-    screen = Layout.compute(state).editor_area
+    screen = Layout.get(state).editor_area
 
     case WindowTree.focus_neighbor(state.windows.tree, state.windows.active, direction, screen) do
       {:ok, neighbor_id} ->

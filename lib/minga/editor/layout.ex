@@ -69,6 +69,33 @@ defmodule Minga.Editor.Layout do
   # ── Public API ─────────────────────────────────────────────────────────────
 
   @doc """
+  Returns the cached layout from state, or computes it fresh.
+
+  Prefer this over `compute/1` when you have a state that might already
+  have a cached layout. The cache is invalidated on resize, file tree
+  toggle, and agent panel toggle.
+  """
+  @spec get(EditorState.t()) :: t()
+  def get(%{layout: %__MODULE__{} = cached}), do: cached
+  def get(state), do: compute(state)
+
+  @doc """
+  Computes the layout and stores it in state for reuse within the same frame.
+
+  Call this once at the start of a render cycle or event handler, then
+  read `state.layout` downstream.
+  """
+  @spec put(EditorState.t()) :: EditorState.t()
+  def put(state), do: %{state | layout: compute(state)}
+
+  @doc """
+  Invalidates the cached layout. Call when layout-affecting state changes
+  (viewport resize, file tree toggle, agent panel toggle, window split/close).
+  """
+  @spec invalidate(EditorState.t()) :: EditorState.t()
+  def invalidate(state), do: %{state | layout: nil}
+
+  @doc """
   Computes the complete layout for the current frame.
 
   This is a pure function: given the same state, it always produces the

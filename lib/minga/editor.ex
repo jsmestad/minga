@@ -1187,7 +1187,7 @@ defmodule Minga.Editor do
   defp resize_all_windows(%{windows: %{tree: nil}} = state), do: state
 
   defp resize_all_windows(state) do
-    layout = Layout.compute(state)
+    layout = Layout.get(state)
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->
       {_r, _c, width, height} = wl.total

@@ -88,7 +88,8 @@ defmodule Minga.Editor.State do
             agent: %AgentState{},
             focus_stack: [],
             agentic: %ViewState{},
-            capabilities: %Capabilities{}
+            capabilities: %Capabilities{},
+            layout: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -127,7 +128,8 @@ defmodule Minga.Editor.State do
           agent: AgentState.t(),
           focus_stack: [module()],
           agentic: ViewState.t(),
-          capabilities: Capabilities.t()
+          capabilities: Capabilities.t(),
+          layout: Minga.Editor.Layout.t() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

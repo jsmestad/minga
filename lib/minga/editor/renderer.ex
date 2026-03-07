@@ -86,6 +86,8 @@ defmodule Minga.Editor.Renderer do
   def render(state) do
     # Keep active window's cursor in sync before rendering
     state = EditorState.sync_active_window_cursor(state)
+    # Compute layout once for the entire frame; downstream code reads state.layout.
+    state = Layout.put(state)
 
     cond do
       state.agentic.active -> render_agentic(state)
@@ -115,7 +117,7 @@ defmodule Minga.Editor.Renderer do
   @spec render_agentic(state()) :: :ok
   defp render_agentic(state) do
     full_viewport = state.viewport
-    layout = Layout.compute(state)
+    layout = Layout.get(state)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
 
     # Build panel draw commands.
@@ -168,7 +170,7 @@ defmodule Minga.Editor.Renderer do
   @spec render_single(state()) :: :ok
   defp render_single(state) do
     # Layout pass: compute all rectangles once, replacing inline coordinate math.
-    layout = Layout.compute(state)
+    layout = Layout.get(state)
     win_layout = Layout.active_window_layout(layout, state)
     {_content_row, col_off, editor_width, _content_height} = win_layout.content
     {modeline_row, _mc, _mw, _mh} = win_layout.modeline
@@ -409,7 +411,7 @@ defmodule Minga.Editor.Renderer do
   @spec render_split(state()) :: :ok
   defp render_split(state) do
     # Layout pass: compute all rectangles once.
-    layout = Layout.compute(state)
+    layout = Layout.get(state)
     screen = layout.editor_area
     layouts = WindowTree.layout(state.windows.tree, screen)
     full_viewport = state.viewport
