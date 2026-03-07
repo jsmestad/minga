@@ -81,6 +81,16 @@ zig/
 test/                         # Mirrors lib/ structure
 ```
 
+## Iterative Fixes (especially TUI/rendering)
+
+When a fix improves visible behavior (user confirms it's better), **commit it and stop**. Do not immediately try to "refine" or "optimize" the fix in the same session. The TUI rendering pipeline has race conditions between the BEAM, the Zig Port, and the physical terminal that are impossible to fully reason about without seeing real output. What looks like an obvious improvement in theory (e.g., "skip the stale frame") can make things worse because your mental model of the frame ordering is wrong.
+
+Rules:
+1. Make one change. Rebuild. Have the user test.
+2. If the user says it's better, commit. If there's a remaining glitch, ask the user to describe it before writing more code.
+3. Never stack a second speculative fix on top of an untested first fix.
+4. Never revert or replace a working fix with a "cleaner" version without user confirmation that the new version also works.
+
 ## Coding Standards
 
 ### Elixir Types (mandatory)
