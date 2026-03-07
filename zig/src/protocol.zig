@@ -36,6 +36,9 @@ pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 
+// Text measurement (BEAM → Zig)
+pub const OP_MEASURE_TEXT: u8 = 0x27;
+
 // Highlight commands (BEAM → Zig)
 pub const OP_SET_LANGUAGE: u8 = 0x20;
 pub const OP_PARSE_BUFFER: u8 = 0x21;
@@ -50,6 +53,9 @@ pub const OP_HIGHLIGHT_NAMES: u8 = 0x31;
 pub const OP_GRAMMAR_LOADED: u8 = 0x32;
 pub const OP_LANGUAGE_AT_RESPONSE: u8 = 0x33;
 pub const OP_INJECTION_RANGES: u8 = 0x34;
+
+// Text measurement responses (Zig → BEAM)
+pub const OP_TEXT_WIDTH: u8 = 0x35;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -177,6 +183,8 @@ pub const RenderCommand = union(enum) {
     clear_region: u16,
     destroy_region: u16,
     set_active_region: u16,
+    // Text measurement
+    measure_text: MeasureText,
     // Highlight commands
     set_language: []const u8,
     parse_buffer: ParseBuffer,
@@ -184,6 +192,11 @@ pub const RenderCommand = union(enum) {
     set_injection_query: []const u8,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
+};
+
+pub const MeasureText = struct {
+    request_id: u32,
+    text: []const u8,
 };
 
 pub const QueryLanguageAt = struct {
@@ -486,6 +499,17 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .byte_offset = byte_offset,
             } };
         },
+        OP_MEASURE_TEXT => {
+            // request_id:4, text_len:2, text
+            if (rest.len < 6) return error.Malformed;
+            const request_id = std.mem.readInt(u32, rest[0..4], .big);
+            const text_len = std.mem.readInt(u16, rest[4..6], .big);
+            if (rest.len < 6 + text_len) return error.Malformed;
+            return .{ .measure_text = .{
+                .request_id = request_id,
+                .text = rest[6 .. 6 + text_len],
+            } };
+        },
         OP_DEFINE_REGION => {
             // id:2, parent_id:2, role:1, row:2, col:2, width:2, height:2, z_order:1 = 14
             if (rest.len < 14) return error.Malformed;
@@ -570,6 +594,11 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
+        OP_MEASURE_TEXT => blk: {
+            if (payload.len < 7) break :blk payload.len;
+            const text_len = std.mem.readInt(u16, payload[5..7], .big);
+            break :blk 7 + text_len;
+        },
         OP_DEFINE_REGION => 15, // opcode(1) + id(2) + parent_id(2) + role(1) + row(2) + col(2) + width(2) + height(2) + z_order(1)
         OP_CLEAR_REGION => 3, // opcode(1) + id(2)
         OP_DESTROY_REGION => 3, // opcode(1) + id(2)
@@ -577,6 +606,15 @@ pub fn commandSize(payload: []const u8) usize {
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };
+}
+
+/// Encodes a text_width response: opcode(1) + request_id(4) + width(2) = 7 bytes.
+pub fn encodeTextWidth(buf: []u8, request_id: u32, width: u16) !usize {
+    if (buf.len < 7) return error.Malformed;
+    buf[0] = OP_TEXT_WIDTH;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    std.mem.writeInt(u16, buf[5..7], width, .big);
+    return 7;
 }
 
 /// Encodes a language_at_response: opcode(1) + request_id(4) + name_len(2) + name

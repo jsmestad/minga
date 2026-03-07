@@ -70,6 +70,7 @@ defmodule Minga.Port.Protocol do
   @op_grammar_loaded 0x32
   @op_language_at_response 0x33
   @op_injection_ranges 0x34
+  @op_text_width 0x35
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -139,6 +140,7 @@ defmodule Minga.Port.Protocol do
           | {:injection_ranges,
              [%{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}]}
           | {:language_at_response, request_id :: non_neg_integer(), language :: String.t()}
+          | {:text_width, request_id :: non_neg_integer(), width :: non_neg_integer()}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -278,6 +280,17 @@ defmodule Minga.Port.Protocol do
   defp encode_region_role(:panel), do: @region_panel
   defp encode_region_role(:border), do: @region_border
 
+  # ── Encoding: text measurement (BEAM → Zig) ──
+
+  @op_measure_text 0x27
+
+  @doc "Encodes a measure_text request: request_id(4) + text_len(2) + text."
+  @spec encode_measure_text(non_neg_integer(), String.t()) :: binary()
+  def encode_measure_text(request_id, text)
+      when is_integer(request_id) and request_id >= 0 and is_binary(text) do
+    <<@op_measure_text, request_id::32, byte_size(text)::16, text::binary>>
+  end
+
   # ── Encoding: highlight commands (BEAM → Zig) ──
 
   @doc "Encodes a set_language command."
@@ -387,6 +400,10 @@ defmodule Minga.Port.Protocol do
 
   def decode_event(<<@op_injection_ranges, count::16, rest::binary>>) do
     {:ok, {:injection_ranges, decode_injection_ranges(rest, count, [])}}
+  end
+
+  def decode_event(<<@op_text_width, request_id::32, width::16>>) do
+    {:ok, {:text_width, request_id, width}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do

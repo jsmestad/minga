@@ -39,6 +39,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x18` | clear_region | 3 | Clear a specific region |
 | `0x19` | destroy_region | 3 | Remove a region |
 | `0x1A` | set_active_region | 3 | Route draw commands to a region |
+| `0x27` | measure_text | 7 + text_len | Request display width of text |
 
 ### BEAM → Frontend (Highlight Commands)
 
@@ -70,6 +71,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x32` | grammar_loaded | 4 + name_len | Grammar load success/failure |
 | `0x33` | language_at_response | 7 + name_len | Language at a byte offset |
 | `0x34` | injection_ranges | 3 + variable | Injection language regions |
+| `0x35` | text_width | 7 | Display width of measured text |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -691,6 +693,42 @@ The TUI renderer maintains a hash map of regions. When `set_active_region` is ca
 ### GUI Implementation
 
 Native GUI frontends should map regions to native view objects: `define_region` creates a view, `destroy_region` removes it, `set_active_region` targets draw commands into the view's coordinate space. The `role` field provides semantic hints for styling and layout behavior.
+
+## Text Measurement
+
+For proportional-font frontends, the BEAM cannot compute display widths on its own. A request/response pair lets the BEAM query the frontend for rendered text width.
+
+### `0x27` measure_text (BEAM → Frontend)
+
+Request the display width of a text segment.
+
+```
+opcode:     u8  = 0x27
+request_id: u32           unique request identifier
+text_len:   u16           byte length of text
+text:       [text_len]u8  UTF-8 encoded text to measure
+```
+
+Total size: 7 + text_len bytes.
+
+### `0x35` text_width (Frontend → BEAM)
+
+Response with the measured display width.
+
+```
+opcode:     u8  = 0x35
+request_id: u32           matches the measure_text request
+width:      u16           display width in columns (monospace) or pixels (GUI)
+```
+
+Total size: 7 bytes.
+
+### Strategy
+
+The BEAM uses a two-tier approach based on the frontend's `text_rendering` capability:
+
+- **Monospace frontends** (TUI, monospace GUI): The BEAM uses its own UAX #11 width tables. `measure_text` is available for spot-checking alignment on startup but is not used per-keystroke.
+- **Proportional frontends** (native GUI): The BEAM queries the frontend via `measure_text` for layout-critical computations (cursor placement, column alignment, menu truncation). Results are cached keyed by text content. The cache is flushed when the frontend sends `capabilities_updated` (e.g., after a font size change).
 
 ## Future: Incremental Content Sync
 

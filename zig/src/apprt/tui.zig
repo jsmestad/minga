@@ -281,6 +281,11 @@ pub const TuiRuntime = struct {
                                 std.log.warn("highlight error: {}", .{err});
                             };
                         },
+                        .measure_text => |mt| {
+                            self.handleMeasureText(mt, stdout) catch |err| {
+                                std.log.warn("measure_text error: {}", .{err});
+                            };
+                        },
                         else => {
                             self.rend.handleCommand(cmd) catch |err| {
                                 std.log.warn("renderer error: {}", .{err});
@@ -320,6 +325,21 @@ pub const TuiRuntime = struct {
                 }
             }
         }
+    }
+
+    /// Compute monospace display width and send a text_width response.
+    fn handleMeasureText(_: *TuiRuntime, mt: protocol.MeasureText, stdout: *std.Io.Writer) !void {
+        var total_width: u16 = 0;
+        var iter = vaxis.unicode.graphemeIterator(mt.text);
+        while (iter.next()) |grapheme| {
+            const raw = grapheme.bytes(mt.text);
+            const w: u16 = vaxis.gwidth.gwidth(raw, .wcwidth);
+            total_width +|= if (w == 0) 1 else w;
+        }
+        var rbuf: [7]u8 = undefined;
+        const rlen = try protocol.encodeTextWidth(&rbuf, mt.request_id, total_width);
+        try protocol.writeMessage(stdout, rbuf[0..rlen]);
+        try stdout.flush();
     }
 
     /// Dispatch a highlight-related command to the Highlighter and send responses.

@@ -475,6 +475,18 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  describe "text measurement" do
+    test "encode_measure_text" do
+      result = Protocol.encode_measure_text(42, "hello")
+      assert <<0x27, 42::32, 5::16, "hello">> = result
+    end
+
+    test "decode text_width response" do
+      payload = <<0x35, 42::32, 5::16>>
+      assert {:ok, {:text_width, 42, 5}} = Protocol.decode_event(payload)
+    end
+  end
+
   describe "region commands" do
     test "encode_define_region produces correct binary" do
       result = Protocol.encode_define_region(1, 0, :modeline, 23, 0, 80, 1, 0)
