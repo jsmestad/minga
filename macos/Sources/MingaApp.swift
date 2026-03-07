@@ -59,6 +59,7 @@ struct ContentView: View {
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
+        .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
     }
 }
 
@@ -142,7 +143,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let g = color.greenComponent
                 let b = color.blueComponent
                 appState.windowBgColor = Color(red: r, green: g, blue: b)
-                appState.windowBgIsDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
+                let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
+                appState.windowBgIsDark = isDark
+                // Also set the NSWindow appearance directly. SwiftUI's
+                // toolbarColorScheme doesn't always update the title text
+                // color reliably, but NSAppearance does.
+                for window in NSApp.windows {
+                    window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+                }
             }
         }
         self.dispatcher = disp
