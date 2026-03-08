@@ -88,6 +88,7 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | Key | Action |
 |-----|--------|
 | `s` | Open session switcher |
+| `SPC a h` | Browse session history (load past conversations) |
 
 ### Panel Management
 

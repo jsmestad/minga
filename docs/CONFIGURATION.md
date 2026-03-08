@@ -37,6 +37,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:persist_recent_files` | boolean | `true` | Write recent file history to disk (see [Projects](PROJECTS.md)) |
 | `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
 | `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "shell"]` | Which tools are classified as destructive |
+| `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 
