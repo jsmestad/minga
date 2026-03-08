@@ -1,6 +1,6 @@
 # Agentic View Keymap
 
-The agentic view (`SPC t a`) is a full-screen OpenCode-style interface for interacting with AI agents. It follows Doom Emacs conventions for read-only special buffers: vim navigation motions are preserved, editing keys are repurposed for contextual actions, and multi-key sequences use standard vim prefixes.
+The agentic view (`SPC a t`) is a full-screen OpenCode-style interface for interacting with AI agents. It follows Doom Emacs conventions for read-only special buffers: vim navigation motions are preserved, editing keys are repurposed for contextual actions, and multi-key sequences use standard vim prefixes.
 
 ## Design Principles
 
@@ -104,7 +104,7 @@ The default mode when the agentic view is open and the input is not focused.
 | `SPC a s` | Stop / abort agent |
 | `SPC a m` | Pick agent model |
 | `SPC a T` | Cycle thinking level |
-| `SPC t a` | Toggle agentic view (close) |
+| `SPC a t` | Toggle agentic view (close) |
 
 ## Chat Input Mode
 

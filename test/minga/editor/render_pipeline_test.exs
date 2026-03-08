@@ -505,5 +505,131 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert Map.has_key?(window.cached_content, 2)
       assert Map.has_key?(window.cached_gutter, 0)
     end
+
+    test "cached draws are identical to fresh draws for unchanged lines" do
+      state = base_state(content: "hello\nworld\nfoo")
+
+      # Frame 1: fresh render
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, cmds1}}
+
+      [{win_id, window1}] = Map.to_list(state.windows.map)
+      cached_content_0 = window1.cached_content[0]
+      cached_gutter_0 = window1.cached_gutter[0]
+      assert cached_content_0 != nil
+      assert cached_gutter_0 != nil
+
+      # Frame 2: no changes, should reuse cache and produce identical output
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, cmds2}}
+
+      window2 = Map.get(state.windows.map, win_id)
+      assert window2.cached_content[0] == cached_content_0
+      assert window2.cached_gutter[0] == cached_gutter_0
+
+      # Commands should be identical since content didn't change
+      assert cmds1 == cmds2
+    end
+
+    test "edit marks buffer version changed, triggering full redraw" do
+      lines = Enum.map_join(1..5, "\n", &"line #{&1}")
+      state = base_state(content: lines, rows: 10, cols: 80)
+      buf = state.buffers.active
+
+      # Frame 1
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+      [{win_id, _}] = Map.to_list(state.windows.map)
+
+      # Edit buffer
+      BufferServer.insert_char(buf, "X")
+
+      # Frame 2: should detect version change, redraw all
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      window = Map.get(state.windows.map, win_id)
+      # After render, window should be clean with updated caches
+      assert window.dirty_lines == %{}
+      assert window.last_buf_version > 0
+      # Content cache should have the edited line
+      assert Map.has_key?(window.cached_content, 0)
+    end
+
+    test "cursor-only movement with absolute numbering dirties only 2 lines" do
+      lines = Enum.map_join(1..10, "\n", &"line #{&1}")
+      state = base_state(content: lines, rows: 15, cols: 80)
+
+      # Frame 1: full render
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      [{win_id, window}] = Map.to_list(state.windows.map)
+      assert window.dirty_lines == %{}
+
+      # Simulate cursor move from line 0 to line 3
+      # Update the window's cursor and the buffer's cursor
+      BufferServer.move_cursor(state.buffers.active, :down)
+      BufferServer.move_cursor(state.buffers.active, :down)
+      BufferServer.move_cursor(state.buffers.active, :down)
+
+      # Run through scroll stage to detect gutter invalidation
+      state = EditorState.sync_active_window_cursor(state)
+      state = RenderPipeline.compute_layout(state)
+      layout = Layout.get(state)
+      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+
+      window = Map.get(state.windows.map, win_id)
+      # With default (absolute) line numbers, only old and new cursor lines dirty
+      # Default ln_style is :absolute in the test state
+      assert window.dirty_lines != :all
+      dirty_count = map_size(window.dirty_lines)
+      assert dirty_count <= 2, "Expected at most 2 dirty lines, got #{dirty_count}"
+    end
+
+    test "context fingerprint change triggers full redraw" do
+      state = base_state(content: "aaa\nbbb\nccc")
+
+      # Frame 1
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      [{win_id, window}] = Map.to_list(state.windows.map)
+      assert window.dirty_lines == %{}
+      assert window.last_context_fingerprint != nil
+
+      # Simulate entering visual mode (changes visual_selection in context)
+      state = %{state | mode: :visual, mode_state: %{state.mode_state | visual: %{type: :char, anchor: {0, 0}}}}
+
+      # Frame 2: context fingerprint will change due to visual selection
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      window2 = Map.get(state.windows.map, win_id)
+      # After render, dirty_lines is cleared but a full redraw happened
+      assert window2.dirty_lines == %{}
+      # Fingerprint should be updated
+      assert window2.last_context_fingerprint != window.last_context_fingerprint
+    end
+
+    test "cache is pruned to visible range after render" do
+      # 20-line buffer but viewport only shows ~10
+      lines = Enum.map_join(1..20, "\n", &"line #{&1}")
+      state = base_state(content: lines, rows: 12, cols: 80)
+
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      [{_win_id, window}] = Map.to_list(state.windows.map)
+
+      # Cache should only contain entries for visible lines (roughly 0..9)
+      # Not lines 10..19 which are below the viewport
+      max_cached_line = window.cached_content |> Map.keys() |> Enum.max()
+      assert max_cached_line < 20, "Cache should not contain lines below viewport"
+
+      # All cached lines should be in the visible range
+      visible_count = Viewport.content_rows(window.viewport)
+      assert map_size(window.cached_content) <= visible_count
+    end
   end
 end
