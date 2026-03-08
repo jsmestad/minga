@@ -302,6 +302,7 @@ Current status and planned features. Updated as development progresses.
 | Session persistence | ✅ | Auto-save conversations to JSON, `SPC a h` picker to browse/resume, auto-prune after 30 days #139 |
 | Status animations | ✅ | Thinking dot progression, streaming cursor blink, tool braille spinner #187 |
 | @-mentions | ✅ | Type @path to attach file context; tab-completion popup with fuzzy filtering #190 |
+| Tool-reactive preview pane | ✅ | Right pane reacts to tool events; shell output streams in real time; Preview state machine with :empty/:shell/:diff/:file variants #218 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |
