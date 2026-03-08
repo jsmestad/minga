@@ -23,6 +23,7 @@ defmodule Minga.MixProject do
         main: "readme",
         extras: [
           "README.md",
+          "CHANGELOG.md",
           "ROADMAP.md",
           "docs/CONFIGURATION.md",
           "docs/ARCHITECTURE.md",
