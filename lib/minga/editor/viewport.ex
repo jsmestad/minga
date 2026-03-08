@@ -10,29 +10,42 @@ defmodule Minga.Editor.Viewport do
   alias Minga.Config.Options, as: ConfigOptions
 
   @enforce_keys [:top, :left, :rows, :cols]
-  defstruct [:top, :left, :rows, :cols]
+  defstruct [:top, :left, :rows, :cols, reserved: 2]
 
   @typedoc """
   A viewport representing the visible terminal region.
 
-  * `top`  — first visible buffer line (0-indexed)
-  * `left` — first visible **display column** (0-indexed, in terminal columns).
-             Wide characters (CJK, emoji) occupy 2 display columns, so
-             horizontal scroll advances by display columns, not grapheme counts.
-  * `rows` — total terminal rows (including footer)
-  * `cols` — total terminal columns
+  * `top`      — first visible buffer line (0-indexed)
+  * `left`     — first visible **display column** (0-indexed, in terminal columns).
+                 Wide characters (CJK, emoji) occupy 2 display columns, so
+                 horizontal scroll advances by display columns, not grapheme counts.
+  * `rows`     — total rows in this viewport (including reserved rows)
+  * `cols`     — total columns in this viewport
+  * `reserved` — rows reserved for non-content elements (modeline, minibuffer).
+                 Defaults to `footer_rows()` (2) for the terminal-level viewport.
+                 Set to 0 for per-window viewports where Layout already excluded
+                 the modeline from the content rect.
   """
   @type t :: %__MODULE__{
           top: non_neg_integer(),
           left: non_neg_integer(),
           rows: pos_integer(),
-          cols: pos_integer()
+          cols: pos_integer(),
+          reserved: non_neg_integer()
         }
 
-  @doc "Creates a new viewport with the given dimensions."
+  @doc "Creates a new viewport with the given dimensions and default reserved rows (2)."
   @spec new(pos_integer(), pos_integer()) :: t()
   def new(rows, cols) when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
-    %__MODULE__{top: 0, left: 0, rows: rows, cols: cols}
+    %__MODULE__{top: 0, left: 0, rows: rows, cols: cols, reserved: footer_rows()}
+  end
+
+  @doc "Creates a new viewport with the given dimensions and explicit reserved rows."
+  @spec new(pos_integer(), pos_integer(), non_neg_integer()) :: t()
+  def new(rows, cols, reserved)
+      when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 and
+             is_integer(reserved) and reserved >= 0 do
+    %__MODULE__{top: 0, left: 0, rows: rows, cols: cols, reserved: reserved}
   end
 
   @doc """
@@ -62,8 +75,8 @@ defmodule Minga.Editor.Viewport do
   """
   @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()) :: t()
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, margin) do
-    # Reserve rows for modeline + minibuffer
-    visible_rows = max(vp.rows - footer_rows(), 1)
+    # Reserve rows for non-content elements (modeline, minibuffer, etc.)
+    visible_rows = max(vp.rows - vp.reserved, 1)
     # Clamp margin so it can't exceed half the visible area
     effective_margin = min(margin, div(visible_rows - 1, 2))
 
@@ -91,15 +104,15 @@ defmodule Minga.Editor.Viewport do
 
   @doc "Returns the range of visible lines as `{first_line, last_line}` (inclusive)."
   @spec visible_range(t()) :: {non_neg_integer(), non_neg_integer()}
-  def visible_range(%__MODULE__{top: top, rows: rows}) do
-    visible_rows = max(rows - footer_rows(), 1)
+  def visible_range(%__MODULE__{top: top, rows: rows, reserved: reserved}) do
+    visible_rows = max(rows - reserved, 1)
     {top, top + visible_rows - 1}
   end
 
-  @doc "Returns the number of content rows (total rows minus footer)."
+  @doc "Returns the number of content rows (total rows minus reserved)."
   @spec content_rows(t()) :: pos_integer()
-  def content_rows(%__MODULE__{rows: rows}) do
-    max(rows - footer_rows(), 1)
+  def content_rows(%__MODULE__{rows: rows, reserved: reserved}) do
+    max(rows - reserved, 1)
   end
 
   @doc """

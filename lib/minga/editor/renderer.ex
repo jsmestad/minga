@@ -41,7 +41,6 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
@@ -90,10 +89,10 @@ defmodule Minga.Editor.Renderer do
     # Compute layout once for the entire frame; downstream code reads state.layout.
     state = Layout.put(state)
 
-    cond do
-      state.agentic.active -> render_agentic(state)
-      EditorState.split?(state) -> render_split(state)
-      true -> render_single(state)
+    if state.agentic.active do
+      render_agentic(state)
+    else
+      render_windows(state)
     end
 
     send_title(state)
@@ -183,329 +182,50 @@ defmodule Minga.Editor.Renderer do
     :ok
   end
 
-  # ── Single window render (original path, no overhead) ─────────────────────
+  # ── Unified window render (single + split use the same path) ───────────────
 
-  @spec render_single(state()) :: :ok
-  defp render_single(state) do
-    # Layout pass: compute all rectangles once, replacing inline coordinate math.
+  @spec render_windows(state()) :: :ok
+  defp render_windows(state) do
     layout = Layout.get(state)
-    win_layout = Layout.active_window_layout(layout, state)
-    {_content_row, col_off, editor_width, _content_height} = win_layout.content
-    {modeline_row, _mc, _mw, _mh} = win_layout.modeline
-    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
-
-    # Viewport height: content_height + footer_rows (Viewport subtracts footer_rows
-    # internally to get visible text rows). This replaces the old inline arithmetic:
-    #   editor_rows = state.viewport.rows - agent_panel_height - reserved_for_minibuffer
-    {_cr, _cc, _cw, content_height} = win_layout.content
-    editor_rows = content_height + Viewport.footer_rows()
-
-    # 1. Get cursor (byte-indexed) for vertical viewport scrolling.
-    #    Horizontal scroll is deferred until we have line text for byte→grapheme conversion.
-    {cursor_line, cursor_byte_col} = BufferServer.cursor(state.buffers.active)
-    cursor = {cursor_line, cursor_byte_col}
-    wrap_on = wrap_enabled?()
-    viewport = Viewport.new(editor_rows, editor_width)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
-    {first_line, _last_line} = Viewport.visible_range(viewport)
-    visible_rows = Viewport.content_rows(viewport)
-
-    # 2. Fetch all remaining render data in a single GenServer call.
-    #    When wrap is on, fetch extra lines since wrapped lines consume
-    #    more visual rows, potentially pushing the cursor off-screen.
-    fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
-    snapshot = BufferServer.render_snapshot(state.buffers.active, first_line, fetch_rows)
-    lines = snapshot.lines
-    {cursor_line, _cursor_byte_col} = snapshot.cursor
-    line_count = snapshot.line_count
-
-    # 3. Convert cursor byte_col → display col using current line text.
-    #    This is the render boundary: all downstream code uses display columns
-    #    (terminal columns). Wide chars (CJK, emoji) count as 2; combining
-    #    marks count as 0.
-    cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
-    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
-
-    # 4. Compute gutter dimensions and horizontal scroll in display columns.
-    line_number_style = state.line_numbers
-
-    {has_sign_column, gutter_w} =
-      gutter_dimensions(state, state.buffers.active, line_number_style, line_count)
-
-    content_w = max(viewport.cols - gutter_w, 1)
-
-    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
+    full_viewport = state.viewport
 
     clear = [Protocol.encode_clear()]
     region_commands = Regions.define_regions(layout)
 
-    # Apply live substitution preview if typing :%s/pattern/replacement
-    {lines, preview_matches} =
-      SearchHighlight.maybe_substitute_preview(state, lines, first_line)
+    # Render each window through the same path (single window = one-element map)
+    {window_commands, active_cursor_info} =
+      Enum.reduce(layout.window_layouts, {[], nil}, fn {win_id, win_layout}, acc ->
+        render_window_entry(state, win_id, win_layout, acc)
+      end)
 
-    visual_selection = visual_selection_grapheme_bounds(state, cursor, lines, first_line)
-
-    search_matches =
-      case preview_matches do
-        [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
-        _ -> preview_matches
-      end
-
-    # 4. Build render context (invariant per frame) and render lines.
-    highlight =
-      if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
-
-    render_ctx = %Context{
-      viewport: viewport,
-      visual_selection: visual_selection,
-      search_matches: search_matches,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      confirm_match: SearchHighlight.current_confirm_match(state),
-      highlight: highlight,
-      has_sign_column: has_sign_column,
-      diagnostic_signs: diagnostic_signs_for_buffer(state),
-      git_signs: git_signs_for_buffer(state),
-      search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git
-    }
-
-    line_opts = %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: render_ctx,
-      ln_style: line_number_style,
-      gutter_w: gutter_w,
-      first_byte_off: snapshot.first_line_byte_offset,
-      row_off: 0,
-      col_off: col_off
-    }
-
-    {gutter_commands, line_commands, rows_used} =
-      if wrap_on do
-        render_lines_wrapped(lines, visible_rows, line_opts)
-      else
-        render_lines_nowrap(lines, line_opts)
-      end
-
-    tilde_commands =
-      if rows_used < visible_rows do
-        for row <- rows_used..(visible_rows - 1) do
-          Protocol.encode_draw(row, col_off + gutter_w, "~", fg: state.theme.editor.tilde_fg)
-        end
+    # Separators between split panes (no-op for single window)
+    separator_commands =
+      if EditorState.split?(state) do
+        render_separators(
+          state.windows.tree,
+          layout.editor_area,
+          elem(layout.editor_area, 3),
+          state.theme
+        )
       else
         []
       end
 
-    # ── Modeline (positioned by Layout) ──
-    file_name = snapshot_display_name(snapshot)
-    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
-    line_count = snapshot.line_count
-    buf_count = length(state.buffers.list)
-    buf_index = state.buffers.active_index + 1
-
-    filetype = Map.get(snapshot, :filetype, :text)
-
-    modeline_commands =
-      Modeline.render(
-        modeline_row,
-        editor_width,
-        %{
-          mode: state.mode,
-          mode_state: state.mode_state,
-          file_name: file_name,
-          filetype: filetype,
-          dirty_marker: dirty_marker,
-          cursor_line: cursor_line,
-          cursor_col: cursor_col,
-          line_count: line_count,
-          buf_index: buf_index,
-          buf_count: buf_count,
-          macro_recording: MacroRecorder.recording?(state.macro_recorder),
-          agent_status: state.agent.status,
-          agent_theme_colors:
-            if(state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
-        },
-        state.theme,
-        col_off
-      )
-
-    # ── Minibuffer (positioned by Layout, always the last row) ──
-    full_viewport = state.viewport
-    minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
-
-    # ── Picker overlay (uses full terminal viewport) ──
-    {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
-
-    # ── Overlays, cursor, tree, agent panel ──
-    {overlay_commands, cursor_command, cursor_shape_command} =
-      render_single_chrome(state, %{
-        layout: layout,
-        viewport: viewport,
-        full_viewport: full_viewport,
-        picker_cursor: picker_cursor,
-        picker_commands: picker_commands,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        first_line: first_line,
-        gutter_w: gutter_w,
-        col_off: col_off,
-        content_height: content_height,
-        editor_width: editor_width,
-        minibuffer_row: minibuffer_row
-      })
-
-    all_commands =
-      clear ++
-        region_commands ++
-        gutter_commands ++
-        line_commands ++
-        tilde_commands ++
-        modeline_commands ++
-        [minibuffer_command] ++
-        overlay_commands ++
-        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
-
-    PortManager.send_commands(state.port_manager, all_commands)
-    :ok
-  end
-
-  # Extracts overlay, cursor, tree, and agent panel rendering from render_single to
-  # keep render_single under cyclomatic complexity limits.
-  @spec render_single_chrome(state(), map()) :: {[binary()], binary(), binary()}
-  defp render_single_chrome(state, params) do
-    %{
-      layout: layout,
-      viewport: viewport,
-      full_viewport: full_viewport,
-      picker_cursor: picker_cursor,
-      picker_commands: picker_commands,
-      cursor_line: cursor_line,
-      cursor_col: cursor_col,
-      first_line: first_line,
-      gutter_w: gutter_w,
-      col_off: col_off,
-      content_height: content_height,
-      editor_width: editor_width,
-      minibuffer_row: minibuffer_row
-    } = params
-
-    cursor_shape_command =
-      if state.picker_ui.picker do
-        Protocol.encode_cursor_shape(:beam)
-      else
-        Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
-      end
-
-    caps = state.capabilities
-    render_overlays = Caps.render_overlays?(caps)
-
-    whichkey_commands =
-      if render_overlays, do: render_whichkey(state, full_viewport), else: []
-
-    completion_commands =
-      CompletionUI.render(
-        state.completion,
-        %{
-          cursor_row: cursor_line - first_line,
-          cursor_col: cursor_col + gutter_w + col_off,
-          viewport_rows: viewport.rows,
-          viewport_cols: viewport.cols
-        },
-        state.theme
-      )
-
+    # File tree
     tree_commands = TreeRenderer.render(state)
 
-    cursor_command =
-      resolve_cursor_command(
-        picker_cursor,
-        state.mode,
-        state.mode_state,
-        minibuffer_row,
-        cursor_line,
-        cursor_col + col_off,
-        viewport,
-        gutter_w
-      )
+    # Agent panel (sidebar mode, not full-screen agentic view)
+    agent_commands = render_agent_panel_from_layout(state, layout)
 
-    agent_commands = render_agent_panel(state, content_height, col_off, editor_width)
-
-    agent_panel_h = if layout.agent_panel, do: elem(layout.agent_panel, 3), else: 0
-
-    {cursor_command, cursor_shape_command} =
-      agent_cursor_override(
-        state,
-        cursor_command,
-        cursor_shape_command,
-        content_height,
-        agent_panel_h,
-        col_off
-      )
-
-    overlay_commands =
-      tree_commands ++
-        agent_commands ++
-        whichkey_commands ++
-        completion_commands ++
-        picker_commands
-
-    {overlay_commands, cursor_command, cursor_shape_command}
-  end
-
-  # ── Multi-window render ──────────────────────────────────────────────────
-
-  @spec render_split(state()) :: :ok
-  defp render_split(state) do
-    # Layout pass: compute all rectangles once.
-    layout = Layout.get(state)
-    screen = layout.editor_area
-    layouts = WindowTree.layout(state.windows.tree, screen)
-    full_viewport = state.viewport
-
-    clear = [Protocol.encode_clear()]
-    region_commands = Regions.define_regions(layout)
-
-    # Render each window's buffer content + modeline within its rect
-    {window_commands, active_cursor_info} =
-      Enum.reduce(layouts, {[], nil}, fn layout_entry, acc ->
-        render_window_in_layout(state, layout_entry, acc)
-      end)
-
-    # Render vertical separators between side-by-side panes
-    {_screen_row, _screen_col, _screen_w, screen_h} = screen
-    separator_commands = render_separators(state.windows.tree, screen, screen_h, state.theme)
-
-    # ── Global elements (minibuffer, whichkey, picker) use full viewport ──
+    # Minibuffer (always last row)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
+    # Overlays (positioned relative to full terminal)
     render_overlays = Caps.render_overlays?(state.capabilities)
     {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
     whichkey_commands = if render_overlays, do: render_whichkey(state, full_viewport), else: []
 
-    # ── Cursor ──
-    cursor_shape_command =
-      if state.picker_ui.picker do
-        Protocol.encode_cursor_shape(:beam)
-      else
-        Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
-      end
-
-    cursor_command =
-      case picker_cursor do
-        {row, col} ->
-          Protocol.encode_cursor(row, col)
-
-        nil ->
-          case active_cursor_info do
-            {row, col} -> Protocol.encode_cursor(row, col)
-            nil -> Protocol.encode_cursor(0, 0)
-          end
-      end
-
-    # Completion popup in the active window
     completion_commands =
       case active_cursor_info do
         {cur_row, cur_col} ->
@@ -524,7 +244,27 @@ defmodule Minga.Editor.Renderer do
           []
       end
 
-    tree_commands = TreeRenderer.render(state)
+    # Cursor shape
+    cursor_shape_command =
+      if state.picker_ui.picker do
+        Protocol.encode_cursor_shape(:beam)
+      else
+        Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
+      end
+
+    # Cursor position (picker overrides mode overrides buffer position)
+    cursor_command =
+      case picker_cursor do
+        {row, col} ->
+          Protocol.encode_cursor(row, col)
+
+        nil ->
+          resolve_cursor_from_info(state, active_cursor_info, minibuffer_row)
+      end
+
+    # Agent panel input can steal the cursor
+    {cursor_command, cursor_shape_command} =
+      agent_cursor_override_from_layout(state, cursor_command, cursor_shape_command, layout)
 
     all_commands =
       clear ++
@@ -532,6 +272,7 @@ defmodule Minga.Editor.Renderer do
         tree_commands ++
         window_commands ++
         separator_commands ++
+        agent_commands ++
         [minibuffer_command] ++
         whichkey_commands ++
         completion_commands ++
@@ -542,127 +283,134 @@ defmodule Minga.Editor.Renderer do
     :ok
   end
 
-  @spec render_window_in_layout(
+  # Reduce callback: renders one window entry if its buffer is valid.
+  @spec render_window_entry(
           state(),
-          {Window.id(), WindowTree.rect()},
+          Window.id(),
+          Layout.window_layout(),
           {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
         ) ::
           {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
-  defp render_window_in_layout(
-         state,
-         {win_id, {row_off, col_off, width, height}},
-         {cmds_acc, cursor_acc}
-       ) do
+  defp render_window_entry(state, win_id, win_layout, {cmds, cursor}) do
     window = Map.get(state.windows.map, win_id)
 
     if window == nil or window.buffer == nil do
-      {cmds_acc, cursor_acc}
+      {cmds, cursor}
     else
       is_active = win_id == state.windows.active
-      win_viewport = Viewport.new(height, width)
-
-      {win_cmds, cursor_info} =
-        render_window_content(state, window, win_viewport, {row_off, col_off}, is_active)
-
-      new_cursor_acc = if is_active and cursor_info != nil, do: cursor_info, else: cursor_acc
-      {cmds_acc ++ win_cmds, new_cursor_acc}
+      {win_cmds, win_cursor} = render_window(state, window, win_layout, is_active)
+      new_cursor = if is_active and win_cursor != nil, do: win_cursor, else: cursor
+      {cmds ++ win_cmds, new_cursor}
     end
   end
 
-  # Renders a single window's buffer content within its rect.
-  # Returns {draw_commands, cursor_position | nil}.
-  @spec render_window_content(
-          state(),
-          Window.t(),
-          Viewport.t(),
-          {non_neg_integer(), non_neg_integer()},
-          boolean()
-        ) :: {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
-  defp render_window_content(state, window, win_viewport, {row_off, col_off}, is_active) do
-    cursor = window_cursor(window, is_active)
-    {cursor_line, cursor_byte_col} = cursor
+  # Renders a single window's buffer content + modeline within its layout rect.
+  # Used for both single-window and split-window cases.
+  @spec render_window(state(), Window.t(), Layout.window_layout(), boolean()) ::
+          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
+  defp render_window(state, window, win_layout, is_active) do
+    {row_off, col_off, content_width, content_height} = win_layout.content
 
-    visible_rows = max(win_viewport.rows - 1, 1)
-    viewport = scroll_to_cursor_modeline_only(win_viewport, {cursor_line, 0})
-    {first_line, _} = visible_range_modeline_only(viewport)
+    # Cursor: active window reads live from buffer; inactive uses stored position
+    {cursor_line, cursor_byte_col} = window_cursor(window, is_active)
 
-    snapshot = BufferServer.render_snapshot(window.buffer, first_line, visible_rows)
+    # Viewport from Layout content rect (reserved: 0 since Layout excluded modeline)
+    wrap_on = wrap_enabled?()
+    viewport = Viewport.new(content_height, content_width, 0)
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
+    {first_line, _last_line} = Viewport.visible_range(viewport)
+    visible_rows = Viewport.content_rows(viewport)
+
+    # Fetch buffer data (extra lines when wrapping since wrapped lines use more rows)
+    fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
+    snapshot = BufferServer.render_snapshot(window.buffer, first_line, fetch_rows)
     lines = snapshot.lines
+    line_count = snapshot.line_count
 
+    # Convert cursor byte_col → display col at the render boundary
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
+    # Gutter dimensions
     line_number_style = state.line_numbers
 
     {has_sign_column, gutter_w} =
-      gutter_dimensions(state, window.buffer, line_number_style, snapshot.line_count)
+      gutter_dimensions(state, window.buffer, line_number_style, line_count)
 
     content_w = max(viewport.cols - gutter_w, 1)
-    viewport = scroll_to_cursor_modeline_only(viewport, {cursor_line, cursor_col})
 
-    alias Minga.Editor.Renderer.WindowFrame
+    # Horizontal scroll (disabled when wrapping)
+    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
 
-    frame = %WindowFrame{
-      viewport: viewport,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      cursor: cursor,
-      lines: lines,
+    # Substitution preview (active window only)
+    {lines, preview_matches} =
+      if is_active do
+        SearchHighlight.maybe_substitute_preview(state, lines, first_line)
+      else
+        {lines, []}
+      end
+
+    cursor = {cursor_line, cursor_byte_col}
+
+    # Build per-frame render context
+    render_ctx =
+      build_render_ctx(state, window, %{
+        viewport: viewport,
+        cursor: cursor,
+        lines: lines,
+        first_line: first_line,
+        preview_matches: preview_matches,
+        gutter_w: gutter_w,
+        content_w: content_w,
+        has_sign_column: has_sign_column,
+        is_active: is_active
+      })
+
+    # Render lines
+    line_opts = %{
       first_line: first_line,
-      is_active: is_active
+      cursor_line: cursor_line,
+      ctx: render_ctx,
+      ln_style: line_number_style,
+      gutter_w: gutter_w,
+      first_byte_off: snapshot.first_line_byte_offset,
+      row_off: row_off,
+      col_off: col_off
     }
 
-    render_ctx = build_window_render_ctx(state, window, frame, has_sign_column)
+    {gutter_commands, line_commands, rows_used} =
+      if wrap_on do
+        render_lines_wrapped(lines, visible_rows, line_opts)
+      else
+        render_lines_nowrap(lines, line_opts)
+      end
 
-    {gutter_commands, line_commands} =
-      render_window_lines(
-        lines,
-        first_line,
-        cursor_line,
-        gutter_w,
-        line_number_style,
-        render_ctx,
-        row_off,
-        col_off
-      )
-
+    # Tilde lines for empty space below content
     tilde_commands =
-      render_tildes(lines, visible_rows, gutter_w, row_off, col_off, state.theme)
+      if rows_used < visible_rows do
+        for row <- rows_used..(visible_rows - 1) do
+          Protocol.encode_draw(row + row_off, col_off + gutter_w, "~",
+            fg: state.theme.editor.tilde_fg
+          )
+        end
+      else
+        []
+      end
 
-    # Per-window modeline (Doom Emacs style — each window has its own)
-    line_count = snapshot.line_count
-    file_name = snapshot_display_name(snapshot)
-    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
-    filetype = Map.get(snapshot, :filetype, :text)
-    buf_count = length(state.buffers.list)
-    buf_index = state.buffers.active_index + 1
-    modeline_row = row_off + win_viewport.rows - 1
-
+    # Per-window modeline (skip if layout gave it zero height)
     modeline_commands =
-      Modeline.render(
-        modeline_row,
-        win_viewport.cols,
-        %{
-          mode: if(is_active, do: state.mode, else: :normal),
-          mode_state: if(is_active, do: state.mode_state, else: nil),
-          file_name: file_name,
-          filetype: filetype,
-          dirty_marker: dirty_marker,
-          cursor_line: cursor_line,
-          cursor_col: cursor_col,
-          line_count: line_count,
-          buf_index: buf_index,
-          buf_count: buf_count,
-          macro_recording:
-            if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
-          agent_status: if(is_active, do: state.agent.status, else: nil),
-          agent_theme_colors:
-            if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
-        },
-        state.theme,
+      render_window_modeline(
+        state,
+        win_layout,
+        snapshot,
+        is_active,
+        cursor_line,
+        cursor_col,
+        line_count,
         col_off
       )
 
+    # Dim inactive windows (Doom Emacs style)
     commands =
       apply_inactive_dimming(
         is_active,
@@ -672,6 +420,7 @@ defmodule Minga.Editor.Renderer do
         modeline_commands
       )
 
+    # Return absolute cursor position for the active window
     cursor_info =
       if is_active do
         {cursor_line - viewport.top + row_off, gutter_w + cursor_col - viewport.left + col_off}
@@ -750,6 +499,7 @@ defmodule Minga.Editor.Renderer do
       row_off: row_off,
       col_off: col_off
     } = opts
+
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
 
     {gutters, contents_rev, _byte_off} =
@@ -800,6 +550,7 @@ defmodule Minga.Editor.Renderer do
       row_off: row_off,
       col_off: col_off
     } = opts
+
     breakindent = wrap_option(:breakindent)
     linebreak = wrap_option(:linebreak)
 
@@ -877,41 +628,115 @@ defmodule Minga.Editor.Renderer do
   defp prepend_all(acc, []), do: acc
   defp prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
 
-  @spec build_window_render_ctx(
-          state(),
-          Window.t(),
-          Minga.Editor.Renderer.WindowFrame.t(),
-          boolean()
-        ) :: Context.t()
-  defp build_window_render_ctx(state, window, frame, has_sign_column) do
+  # Builds the per-frame render context for a window.
+  @spec build_render_ctx(state(), Window.t(), map()) :: Context.t()
+  defp build_render_ctx(state, window, params) do
+    %{
+      viewport: viewport,
+      cursor: cursor,
+      lines: lines,
+      first_line: first_line,
+      preview_matches: preview_matches,
+      gutter_w: gutter_w,
+      content_w: content_w,
+      has_sign_column: has_sign_column,
+      is_active: is_active
+    } = params
+
     visual_selection =
-      if frame.is_active do
-        visual_selection_grapheme_bounds(state, frame.cursor, frame.lines, frame.first_line)
+      if is_active do
+        visual_selection_grapheme_bounds(state, cursor, lines, first_line)
       else
         nil
       end
 
-    highlight = window_highlight(state, window)
-
-    diagnostic_signs = diagnostic_signs_for_window(state, window)
-    git_signs = git_signs_for_window(state, window)
+    search_matches =
+      case preview_matches do
+        [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
+        _ -> preview_matches
+      end
 
     %Context{
-      viewport: frame.viewport,
+      viewport: viewport,
       visual_selection: visual_selection,
-      search_matches:
-        SearchHighlight.search_matches_for_lines(state, frame.lines, frame.first_line),
-      gutter_w: frame.gutter_w,
-      content_w: frame.content_w,
-      confirm_match: SearchHighlight.current_confirm_match(state),
-      highlight: highlight,
+      search_matches: search_matches,
+      gutter_w: gutter_w,
+      content_w: content_w,
+      confirm_match: if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil),
+      highlight: window_highlight(state, window),
       has_sign_column: has_sign_column,
-      diagnostic_signs: diagnostic_signs,
-      git_signs: git_signs,
+      diagnostic_signs: diagnostic_signs_for_window(state, window),
+      git_signs: git_signs_for_window(state, window),
       search_colors: state.theme.search,
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
     }
+  end
+
+  # Renders the per-window modeline, or empty list if the window is too short.
+  @spec render_window_modeline(
+          state(),
+          Layout.window_layout(),
+          map(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [binary()]
+  defp render_window_modeline(
+         _state,
+         %{modeline: {_, _, _, 0}},
+         _snapshot,
+         _active,
+         _cl,
+         _cc,
+         _lc,
+         _co
+       ) do
+    []
+  end
+
+  defp render_window_modeline(
+         state,
+         win_layout,
+         snapshot,
+         is_active,
+         cursor_line,
+         cursor_col,
+         line_count,
+         col_off
+       ) do
+    {modeline_row, _mc, modeline_width, _mh} = win_layout.modeline
+    file_name = snapshot_display_name(snapshot)
+    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
+    filetype = Map.get(snapshot, :filetype, :text)
+    buf_count = length(state.buffers.list)
+    buf_index = state.buffers.active_index + 1
+
+    Modeline.render(
+      modeline_row,
+      modeline_width,
+      %{
+        mode: if(is_active, do: state.mode, else: :normal),
+        mode_state: if(is_active, do: state.mode_state, else: nil),
+        file_name: file_name,
+        filetype: filetype,
+        dirty_marker: dirty_marker,
+        cursor_line: cursor_line,
+        cursor_col: cursor_col,
+        line_count: line_count,
+        buf_index: buf_index,
+        buf_count: buf_count,
+        macro_recording:
+          if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
+        agent_status: if(is_active, do: state.agent.status, else: nil),
+        agent_theme_colors:
+          if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
+      },
+      state.theme,
+      col_off
+    )
   end
 
   @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
@@ -925,98 +750,6 @@ defmodule Minga.Editor.Renderer do
 
     if hl.capture_names != [], do: hl, else: nil
   end
-
-  @spec render_window_lines(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Gutter.line_number_style(),
-          Context.t(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: {[binary()], [binary()]}
-  defp render_window_lines(
-         lines,
-         first_line,
-         cursor_line,
-         gutter_w,
-         line_number_style,
-         render_ctx,
-         row_off,
-         col_off
-       ) do
-    sign_w = if render_ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    {gutters, contents, _byte_offset} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce(
-        {[], [], 0},
-        fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
-          {g_cmds, c_cmds, _rows} =
-            BufferLine.render(%{
-              line_text: line_text,
-              buf_line: first_line + screen_row,
-              cursor_line: cursor_line,
-              byte_offset: byte_offset,
-              screen_row: screen_row,
-              ctx: render_ctx,
-              ln_style: line_number_style,
-              gutter_w: gutter_w,
-              sign_w: sign_w,
-              wrap_entry: nil,
-              max_rows: length(lines),
-              row_offset: row_off,
-              col_offset: col_off
-            })
-
-          {prepend_all(gutters, g_cmds), prepend_all(contents, c_cmds),
-           byte_offset + byte_size(line_text) + 1}
-        end
-      )
-
-    {Enum.reverse(gutters), Enum.reverse(contents)}
-  end
-
-  @spec render_tildes(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Minga.Theme.t()
-        ) :: [binary()]
-  defp render_tildes(lines, visible_rows, gutter_w, row_off, col_off, theme) do
-    if length(lines) < visible_rows do
-      for row <- length(lines)..(visible_rows - 1) do
-        Protocol.encode_draw(row + row_off, col_off + gutter_w, "~", fg: theme.editor.tilde_fg)
-      end
-    else
-      []
-    end
-  end
-
-  @spec diagnostic_signs_for_buffer(state()) :: %{non_neg_integer() => atom()}
-  defp diagnostic_signs_for_buffer(%{buffers: %{active: buf}}) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
-      nil -> %{}
-      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
-    end
-  end
-
-  defp diagnostic_signs_for_buffer(_state), do: %{}
-
-  @spec git_signs_for_buffer(state()) :: %{non_neg_integer() => atom()}
-  defp git_signs_for_buffer(%{buffers: %{active: buf}, git_buffers: git_buffers})
-       when is_pid(buf) do
-    case Map.get(git_buffers, buf) do
-      nil -> %{}
-      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
-    end
-  end
-
-  defp git_signs_for_buffer(_state), do: %{}
 
   @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   defp git_signs_for_window(%{git_buffers: git_buffers}, %{buffer: buf}) when is_pid(buf) do
@@ -1035,8 +768,7 @@ defmodule Minga.Editor.Renderer do
   end
 
   # Computes gutter dimensions for a buffer: whether the sign column is active,
-  # and the total gutter width (sign column + line number digits). Extracted to
-  # keep render_single and render_window_content under cyclomatic complexity limits.
+  # and the total gutter width (sign column + line number digits).
   @spec gutter_dimensions(state(), pid(), Gutter.line_number_style(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
   defp gutter_dimensions(state, buf, line_number_style, line_count) do
@@ -1056,38 +788,9 @@ defmodule Minga.Editor.Renderer do
   defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
-  # ── Split-mode viewport helpers (1 row for modeline only) ────────────────────
-
-  # Like Viewport.scroll_to_cursor/2 but reserves only 1 row for the per-window
-  # modeline (instead of the standard 2 for modeline + minibuffer).
-  @spec scroll_to_cursor_modeline_only(Viewport.t(), {non_neg_integer(), non_neg_integer()}) ::
-          Viewport.t()
-  defp scroll_to_cursor_modeline_only(%Viewport{} = vp, {cursor_line, cursor_col}) do
-    visible_rows = max(vp.rows - 1, 1)
-
-    top =
-      cond do
-        cursor_line < vp.top -> cursor_line
-        cursor_line >= vp.top + visible_rows -> cursor_line - visible_rows + 1
-        true -> vp.top
-      end
-
-    left =
-      cond do
-        cursor_col < vp.left -> cursor_col
-        cursor_col >= vp.left + vp.cols -> cursor_col - vp.cols + 1
-        true -> vp.left
-      end
-
-    %Viewport{vp | top: top, left: left}
-  end
-
-  # Like Viewport.visible_range/1 but reserves only 1 row for the per-window modeline.
-  @spec visible_range_modeline_only(Viewport.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp visible_range_modeline_only(%Viewport{top: top, rows: rows}) do
-    visible_rows = max(rows - 1, 1)
-    {top, top + visible_rows - 1}
-  end
+  # (scroll_to_cursor_modeline_only and visible_range_modeline_only removed;
+  # unified render path uses Viewport.new(height, width, 0) with reserved: 0
+  # since Layout's content rect already excludes the modeline row.)
 
   # ── Dimming (inactive window — Doom Emacs style) ────────────────────────────
 
@@ -1215,83 +918,48 @@ defmodule Minga.Editor.Renderer do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
-  @spec resolve_cursor_command(
+  # Resolves the cursor position from the active window's cursor info,
+  # with mode-specific overrides for search/command/eval (cursor in minibuffer).
+  @spec resolve_cursor_from_info(
+          state(),
           {non_neg_integer(), non_neg_integer()} | nil,
-          Mode.mode(),
-          Mode.state(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Viewport.t(),
           non_neg_integer()
-        ) :: binary()
-  defp resolve_cursor_command(
-         {row, col},
-         _mode,
-         _mode_state,
-         _mb_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
-       ) do
-    Protocol.encode_cursor(row, col)
-  end
-
-  defp resolve_cursor_command(
-         nil,
-         :search,
-         mode_state,
-         minibuffer_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
+        ) ::
+          binary()
+  defp resolve_cursor_from_info(
+         %{mode: :search, mode_state: mode_state},
+         _cursor_info,
+         minibuffer_row
        ) do
     search_col = Unicode.display_width(mode_state.input) + 1
     Protocol.encode_cursor(minibuffer_row, search_col)
   end
 
-  defp resolve_cursor_command(
-         nil,
-         :command,
-         mode_state,
-         minibuffer_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
+  defp resolve_cursor_from_info(
+         %{mode: :command, mode_state: mode_state},
+         _cursor_info,
+         minibuffer_row
        ) do
     cmd_col = Unicode.display_width(mode_state.input) + 1
     Protocol.encode_cursor(minibuffer_row, cmd_col)
   end
 
-  defp resolve_cursor_command(
-         nil,
-         :eval,
-         mode_state,
-         minibuffer_row,
-         _cur_line,
-         _cur_col,
-         _vp,
-         _gutter_w
+  defp resolve_cursor_from_info(
+         %{mode: :eval, mode_state: mode_state},
+         _cursor_info,
+         minibuffer_row
        ) do
     # "Eval: " prefix is 6 display columns
     eval_col = Unicode.display_width(mode_state.input) + 6
     Protocol.encode_cursor(minibuffer_row, eval_col)
   end
 
-  defp resolve_cursor_command(
-         nil,
-         _mode,
-         _mode_state,
-         _mb_row,
-         cursor_line,
-         cursor_col,
-         viewport,
-         gutter_w
-       ) do
-    Protocol.encode_cursor(cursor_line - viewport.top, gutter_w + cursor_col - viewport.left)
+  defp resolve_cursor_from_info(_state, {row, col}, _minibuffer_row) do
+    Protocol.encode_cursor(row, col)
+  end
+
+  defp resolve_cursor_from_info(_state, nil, _minibuffer_row) do
+    Protocol.encode_cursor(0, 0)
   end
 
   @spec render_whichkey(state(), Viewport.t()) :: [binary()]
@@ -1339,51 +1007,31 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.Session
 
-  @spec agent_cursor_override(
-          state(),
-          binary(),
-          binary(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
+  # Overrides cursor position when the agent panel input is focused.
+  # Uses Layout's pre-computed agent_panel rect.
+  @spec agent_cursor_override_from_layout(state(), binary(), binary(), Layout.t()) ::
           {binary(), binary()}
-  defp agent_cursor_override(
+  defp agent_cursor_override_from_layout(
          %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
          _cursor_cmd,
          _shape_cmd,
-         editor_rows,
-         panel_height,
-         col_off
-       ) do
-    input_row = editor_rows + panel_height - @agent_input_height + 1
-    input_col = col_off + 2 + String.length(state.agent.panel.input_text)
+         %{agent_panel: {row, col, _w, h}} = _layout
+       )
+       when h > 0 do
+    input_row = row + h - @agent_input_height + 1
+    input_col = col + 2 + String.length(state.agent.panel.input_text)
     {Protocol.encode_cursor(input_row, input_col), Protocol.encode_cursor_shape(:beam)}
   end
 
-  defp agent_cursor_override(_state, cursor_cmd, shape_cmd, _er, _ph, _co) do
+  defp agent_cursor_override_from_layout(_state, cursor_cmd, shape_cmd, _layout) do
     {cursor_cmd, shape_cmd}
   end
 
-  @spec agent_panel_height(state()) :: non_neg_integer()
-  defp agent_panel_height(%{agent: %{panel: %{visible: true}}} = state) do
-    div(state.viewport.rows * 35, 100)
-  end
+  # Renders the agent panel sidebar using Layout's pre-computed rect.
+  @spec render_agent_panel_from_layout(state(), Layout.t()) :: [binary()]
+  defp render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []
 
-  defp agent_panel_height(_state), do: 0
-
-  @spec render_agent_panel(state(), non_neg_integer(), non_neg_integer(), pos_integer()) :: [
-          binary()
-        ]
-  defp render_agent_panel(%{agent: %{panel: %{visible: false}}}, _editor_rows, _col, _width),
-    do: []
-
-  defp render_agent_panel(state, editor_rows, col, width) do
-    panel_height = agent_panel_height(state)
-    row_start = editor_rows
-    rect = {row_start, col, width, panel_height}
-
-    # Gather messages from the session if available
+  defp render_agent_panel_from_layout(state, %{agent_panel: rect}) do
     agent = state.agent
 
     messages =

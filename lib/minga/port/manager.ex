@@ -284,16 +284,18 @@ defmodule Minga.Port.Manager do
   defp find_xcode_build_product(product_name) do
     project_path = Path.join([File.cwd!(), "macos", "Minga.xcodeproj"])
 
-    case System.cmd("xcodebuild", [
-           "-project",
-           project_path,
-           "-scheme",
-           "minga-mac",
-           "-configuration",
-           "Debug",
-           "-showBuildSettings"
-         ],
-         stderr_to_stdout: true
+    case System.cmd(
+           "xcodebuild",
+           [
+             "-project",
+             project_path,
+             "-scheme",
+             "minga-mac",
+             "-configuration",
+             "Debug",
+             "-showBuildSettings"
+           ],
+           stderr_to_stdout: true
          ) do
       {output, 0} ->
         case Regex.run(~r/BUILT_PRODUCTS_DIR = (.+)/, output) do
