@@ -21,7 +21,6 @@ defmodule Minga.Agent.View.KeysTest do
     panel = %PanelState{
       visible: true,
       input_focused: false,
-      input_text: "",
       scroll_offset: 0,
       spinner_frame: 0,
       provider_name: "anthropic",
@@ -211,11 +210,11 @@ defmodule Minga.Agent.View.KeysTest do
       put_in(state.agent.panel.input_focused, true)
     end
 
-    test "printable characters are appended to input_text" do
+    test "printable characters are appended to input" do
       state = input_state()
       {:handled, s1} = Keys.handle_key(state, ?h, 0)
       {:handled, s2} = Keys.handle_key(s1, ?i, 0)
-      assert s2.agent.panel.input_text == "hi"
+      assert PanelState.input_text(s2.agent.panel) == "hi"
     end
 
     test "Backspace (127) removes the last character" do
@@ -223,13 +222,13 @@ defmodule Minga.Agent.View.KeysTest do
       {:handled, s1} = Keys.handle_key(state, ?h, 0)
       {:handled, s2} = Keys.handle_key(s1, ?i, 0)
       {:handled, s3} = Keys.handle_key(s2, 127, 0)
-      assert s3.agent.panel.input_text == "h"
+      assert PanelState.input_text(s3.agent.panel) == "h"
     end
 
     test "Backspace on empty input is a no-op" do
       state = input_state()
       {:handled, new_state} = Keys.handle_key(state, 127, 0)
-      assert new_state.agent.panel.input_text == ""
+      assert PanelState.input_text(new_state.agent.panel) == ""
     end
 
     test "Escape unfocuses the input (back to navigation)" do
@@ -247,7 +246,7 @@ defmodule Minga.Agent.View.KeysTest do
     test "ctrl modifier prevents printable char from appending" do
       state = input_state()
       {:handled, new_state} = Keys.handle_key(state, ?h, @ctrl)
-      assert new_state.agent.panel.input_text == ""
+      assert PanelState.input_text(new_state.agent.panel) == ""
     end
   end
 
@@ -492,7 +491,7 @@ defmodule Minga.Agent.View.KeysTest do
       state = base_state(focus: :chat)
       state = put_in(state.agent.panel.input_focused, true)
       {:handled, new_state} = Keys.handle_key(state, ?\s, 0)
-      assert new_state.agent.panel.input_text == " "
+      assert PanelState.input_text(new_state.agent.panel) == " "
     end
   end
 end

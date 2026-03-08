@@ -19,7 +19,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     panel = %PanelState{
       visible: false,
       input_focused: false,
-      input_text: "",
       scroll_offset: 0,
       spinner_frame: 0,
       provider_name: "anthropic",

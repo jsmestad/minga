@@ -22,7 +22,9 @@ defmodule Minga.Agent.View.RendererTest do
     panel = %PanelState{
       visible: true,
       input_focused: Keyword.get(opts, :input_focused, false),
-      input_text: Keyword.get(opts, :input_text, ""),
+      input_lines: Keyword.get(opts, :input_lines, [Keyword.get(opts, :input_text, "")]),
+      input_cursor:
+        Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))}),
       scroll_offset: 0,
       spinner_frame: 0,
       provider_name: "anthropic",
@@ -228,7 +230,8 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :idle,
         panel: %{
           input_focused: false,
-          input_text: "",
+          input_lines: [""],
+          input_cursor: {0, 0},
           scroll_offset: 0,
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
@@ -261,7 +264,8 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :thinking,
         panel: %{
           input_focused: true,
-          input_text: "hello",
+          input_lines: ["hello"],
+          input_cursor: {0, 5},
           scroll_offset: 0,
           spinner_frame: 3,
           model_name: "claude-sonnet-4",

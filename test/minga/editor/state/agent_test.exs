@@ -1,6 +1,7 @@
 defmodule Minga.Editor.State.AgentTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.PanelState
   alias Minga.Editor.State.Agent, as: AgentState
 
   defp new_agent, do: %AgentState{}
@@ -68,7 +69,7 @@ defmodule Minga.Editor.State.AgentTest do
         |> AgentState.insert_char("i")
         |> AgentState.delete_char()
 
-      assert agent.panel.input_text == "h"
+      assert PanelState.input_text(agent.panel) == "h"
     end
 
     test "clear_input_and_scroll empties input and scrolls" do
@@ -77,7 +78,7 @@ defmodule Minga.Editor.State.AgentTest do
         |> AgentState.insert_char("hello")
         |> AgentState.clear_input_and_scroll()
 
-      assert agent.panel.input_text == ""
+      assert PanelState.input_text(agent.panel) == ""
       assert agent.panel.scroll_offset > 0
     end
 

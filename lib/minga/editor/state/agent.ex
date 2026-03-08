@@ -124,6 +124,42 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.delete_char(agent.panel)}
   end
 
+  @doc "Inserts a newline at the cursor position."
+  @spec insert_newline(t()) :: t()
+  def insert_newline(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.insert_newline(agent.panel)}
+  end
+
+  @doc "Moves cursor up in the input. Returns `:at_top` if on the first line."
+  @spec move_cursor_up(t()) :: t() | :at_top
+  def move_cursor_up(%__MODULE__{} = agent) do
+    case PanelState.move_cursor_up(agent.panel) do
+      :at_top -> :at_top
+      panel -> %{agent | panel: panel}
+    end
+  end
+
+  @doc "Moves cursor down in the input. Returns `:at_bottom` if on the last line."
+  @spec move_cursor_down(t()) :: t() | :at_bottom
+  def move_cursor_down(%__MODULE__{} = agent) do
+    case PanelState.move_cursor_down(agent.panel) do
+      :at_bottom -> :at_bottom
+      panel -> %{agent | panel: panel}
+    end
+  end
+
+  @doc "Recalls the previous prompt from history."
+  @spec history_prev(t()) :: t()
+  def history_prev(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.history_prev(agent.panel)}
+  end
+
+  @doc "Recalls the next prompt from history."
+  @spec history_next(t()) :: t()
+  def history_next(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.history_next(agent.panel)}
+  end
+
   @doc "Clears the input and scrolls to the bottom."
   @spec clear_input_and_scroll(t()) :: t()
   def clear_input_and_scroll(%__MODULE__{} = agent) do

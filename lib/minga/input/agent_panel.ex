@@ -28,6 +28,9 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Port.Protocol
   @ctrl Protocol.mod_ctrl()
   @alt Protocol.mod_alt()
+  @shift Protocol.mod_shift()
+  @arrow_up 0x415B1B
+  @arrow_down 0x425B1B
 
   @impl true
   @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::
@@ -104,9 +107,34 @@ defmodule Minga.Input.AgentPanel do
     AgentCommands.input_backspace(state)
   end
 
+  # Shift+Enter or Alt+Enter: insert newline
+  defp handle_input(state, 13, mods) when band(mods, @shift) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_input(state, 13, mods) when band(mods, @alt) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
   # Enter: submit prompt
   defp handle_input(state, 13, _mods) do
     AgentCommands.submit_prompt(state)
+  end
+
+  # Up arrow: move cursor up or recall history
+  defp handle_input(state, @arrow_up, _mods) do
+    case AgentState.move_cursor_up(state.agent) do
+      :at_top -> update_agent(state, &AgentState.history_prev/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  # Down arrow: move cursor down or forward history
+  defp handle_input(state, @arrow_down, _mods) do
+    case AgentState.move_cursor_down(state.agent) do
+      :at_bottom -> update_agent(state, &AgentState.history_next/1)
+      agent -> %{state | agent: agent}
+    end
   end
 
   # Printable characters (no Ctrl/Alt)

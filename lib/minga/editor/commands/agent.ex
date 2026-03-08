@@ -8,6 +8,7 @@ defmodule Minga.Editor.Commands.Agent do
   """
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
+  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
@@ -87,14 +88,14 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Submits the current input text as a prompt."
   @spec submit_prompt(state()) :: state()
-  def submit_prompt(%{agent: %{panel: %{input_text: ""}}} = state), do: state
+  def submit_prompt(%{agent: %{panel: %{input_lines: [""]}}} = state), do: state
 
   def submit_prompt(%{agent: %{session: nil}} = state) do
-    %{state | status_msg: "No agent session — try closing and reopening the panel"}
+    %{state | status_msg: "No agent session, try closing and reopening the panel"}
   end
 
   def submit_prompt(state) do
-    text = state.agent.panel.input_text
+    text = PanelState.input_text(state.agent.panel)
 
     case Session.send_prompt(state.agent.session, text) do
       :ok ->

@@ -13,7 +13,8 @@ defmodule Minga.Agent.ChatRendererTest do
     %{
       messages: Keyword.get(opts, :messages, []),
       status: Keyword.get(opts, :status, :idle),
-      input_text: Keyword.get(opts, :input_text, ""),
+      input_lines: Keyword.get(opts, :input_lines, [""]),
+      input_cursor: Keyword.get(opts, :input_cursor, {0, 0}),
       scroll_offset: Keyword.get(opts, :scroll_offset, 0),
       spinner_frame: 0,
       usage: %{input: 0, output: 0, cost: 0.0},

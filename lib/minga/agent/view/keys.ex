@@ -39,6 +39,9 @@ defmodule Minga.Agent.View.Keys do
   @tab 9
   @enter 13
   @backspace 127
+  @shift Protocol.mod_shift()
+  @arrow_up 0x415B1B
+  @arrow_down 0x425B1B
 
   # ── Handler behaviour ───────────────────────────────────────────────────────
 
@@ -92,6 +95,15 @@ defmodule Minga.Agent.View.Keys do
     AgentCommands.input_backspace(state)
   end
 
+  # Shift+Enter or Alt+Enter: insert newline
+  defp handle_chat_input(state, @enter, mods) when band(mods, @shift) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_chat_input(state, @enter, mods) when band(mods, @alt) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
   defp handle_chat_input(state, @enter, _mods) do
     AgentCommands.submit_prompt(state)
   end
@@ -106,6 +118,22 @@ defmodule Minga.Agent.View.Keys do
 
   defp handle_chat_input(state, ?u, mods) when band(mods, @ctrl) != 0 do
     scroll_chat_up_half(state)
+  end
+
+  # Up arrow: move cursor up in multi-line input, or recall history if at top
+  defp handle_chat_input(state, @arrow_up, _mods) do
+    case AgentState.move_cursor_up(state.agent) do
+      :at_top -> update_agent(state, &AgentState.history_prev/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  # Down arrow: move cursor down in multi-line input, or forward history if at bottom
+  defp handle_chat_input(state, @arrow_down, _mods) do
+    case AgentState.move_cursor_down(state.agent) do
+      :at_bottom -> update_agent(state, &AgentState.history_next/1)
+      agent -> %{state | agent: agent}
+    end
   end
 
   defp handle_chat_input(state, cp, mods)

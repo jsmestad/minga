@@ -38,7 +38,7 @@ defmodule Minga.Agent.View.Renderer do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
-  @input_height 3
+  @max_input_lines 8
 
   # ── Focused input type ─────────────────────────────────────────────────────
 
@@ -91,7 +91,8 @@ defmodule Minga.Agent.View.Renderer do
     @typedoc "Agent panel fields needed for rendering."
     @type panel_data :: %{
             input_focused: boolean(),
-            input_text: String.t(),
+            input_lines: [String.t()],
+            input_cursor: {non_neg_integer(), non_neg_integer()},
             scroll_offset: non_neg_integer(),
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
@@ -119,7 +120,8 @@ defmodule Minga.Agent.View.Renderer do
     cols = input.viewport.cols
     rows = input.viewport.rows
 
-    panel_end = rows - 1 - 1 - @input_height
+    input_height = compute_input_height(input.panel.input_lines)
+    panel_end = rows - 1 - 1 - input_height
     panel_start = 1
     panel_height = max(panel_end - panel_start, 1)
 
@@ -130,7 +132,7 @@ defmodule Minga.Agent.View.Renderer do
     viewer_width = max(cols - viewer_col, 10)
 
     input_row = panel_end
-    modeline_row = input_row + @input_height
+    modeline_row = input_row + input_height
 
     title_commands = render_title_bar_from_input(input, 0, cols)
     chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, panel_height})
@@ -173,9 +175,13 @@ defmodule Minga.Agent.View.Renderer do
     rows = state.viewport.rows
 
     if state.agent.panel.input_focused do
-      panel_end = rows - 1 - 1 - @input_height
-      input_text_row = panel_end + 1
-      input_col = 2 + String.length(state.agent.panel.input_text)
+      panel = state.agent.panel
+      {cursor_line, cursor_col} = panel.input_cursor
+      visible_lines = min(length(panel.input_lines), @max_input_lines)
+      input_height = visible_lines + 2
+      panel_end = rows - 1 - 1 - input_height
+      input_text_row = panel_end + 1 + min(cursor_line, visible_lines - 1)
+      input_col = 2 + cursor_col
       {input_text_row, input_col}
     else
       {rows, 0}
@@ -214,7 +220,8 @@ defmodule Minga.Agent.View.Renderer do
     # Pre-fetch buffer snapshot for file viewer
     scroll = state.agentic.file_viewer_scroll
     rows = state.viewport.rows
-    content_rows = max(rows - 1 - 1 - @input_height - 1 - 1, 1)
+    input_h = compute_input_height(state.agent.panel.input_lines)
+    content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
 
     buffer_snapshot =
       case state.buffers.active do
@@ -235,7 +242,8 @@ defmodule Minga.Agent.View.Renderer do
       agent_status: agent.status,
       panel: %{
         input_focused: panel.input_focused,
-        input_text: panel.input_text,
+        input_lines: panel.input_lines,
+        input_cursor: panel.input_cursor,
         scroll_offset: panel.scroll_offset,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
@@ -311,7 +319,8 @@ defmodule Minga.Agent.View.Renderer do
     panel_state = %{
       messages: input.messages,
       status: input.agent_status || :idle,
-      input_text: input.panel.input_text,
+      input_lines: input.panel.input_lines,
+      input_cursor: input.panel.input_cursor,
       scroll_offset: input.panel.scroll_offset,
       spinner_frame: input.panel.spinner_frame,
       usage: input.usage,
@@ -444,23 +453,60 @@ defmodule Minga.Agent.View.Renderer do
     border = label <> border_rest
     border_cmd = DisplayList.draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
 
-    input_row = row + 1
     blank = String.duplicate(" ", cols)
-    blank_cmd = DisplayList.draw(input_row, 0, blank, bg: at.input_bg)
+    is_empty = panel.input_lines == [""]
+    visible_lines = min(length(panel.input_lines), @max_input_lines)
 
-    {text, fg} =
-      if panel.input_text == "" do
-        {"  Type a message, Enter to send", at.input_placeholder}
+    line_cmds =
+      if is_empty do
+        input_row = row + 1
+        blank_cmd = DisplayList.draw(input_row, 0, blank, bg: at.input_bg)
+        placeholder = String.slice("  Type a message, Enter to send", 0, cols)
+
+        text_cmd =
+          DisplayList.draw(input_row, 0, placeholder, fg: at.input_placeholder, bg: at.input_bg)
+
+        [blank_cmd, text_cmd]
       else
-        {"  " <> panel.input_text, at.text_fg}
+        # Render visible input lines (scroll to keep cursor visible)
+        {cursor_line, _cursor_col} = panel.input_cursor
+        total_lines = length(panel.input_lines)
+        scroll = input_scroll_offset(cursor_line, visible_lines, total_lines)
+
+        panel.input_lines
+        |> Enum.drop(scroll)
+        |> Enum.take(visible_lines)
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {line_text, idx} ->
+          r = row + 1 + idx
+          blank_cmd = DisplayList.draw(r, 0, blank, bg: at.input_bg)
+          display = String.slice("  " <> line_text, 0, cols)
+          text_cmd = DisplayList.draw(r, 0, display, fg: at.text_fg, bg: at.input_bg)
+          [blank_cmd, text_cmd]
+        end)
       end
 
-    text = String.slice(text, 0, cols)
-    text_cmd = DisplayList.draw(input_row, 0, text, fg: fg, bg: at.input_bg)
+    # Bottom padding
+    pad_row = row + 1 + visible_lines
+    pad_cmd = DisplayList.draw(pad_row, 0, blank, bg: at.input_bg)
 
-    pad_cmd = DisplayList.draw(row + 2, 0, blank, bg: at.input_bg)
+    [border_cmd | line_cmds] ++ [pad_cmd]
+  end
 
-    [border_cmd, blank_cmd, text_cmd, pad_cmd]
+  # Computes the dynamic input area height: border(1) + visible lines + padding(1).
+  @spec compute_input_height([String.t()]) :: pos_integer()
+  defp compute_input_height(input_lines) do
+    visible = min(length(input_lines), @max_input_lines)
+    visible + 2
+  end
+
+  # Computes scroll offset to keep the cursor visible within the input area.
+  @spec input_scroll_offset(non_neg_integer(), pos_integer(), pos_integer()) ::
+          non_neg_integer()
+  defp input_scroll_offset(cursor_line, visible_lines, total_lines) do
+    max_scroll = max(total_lines - visible_lines, 0)
+    # Keep cursor within the visible window
+    min(max(cursor_line - visible_lines + 1, 0), max_scroll)
   end
 
   # ── Modeline ────────────────────────────────────────────────────────────────

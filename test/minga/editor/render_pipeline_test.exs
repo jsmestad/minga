@@ -53,7 +53,6 @@ defmodule Minga.Editor.RenderPipelineTest do
         panel: %Minga.Agent.PanelState{
           visible: false,
           input_focused: false,
-          input_text: "",
           scroll_offset: 0,
           spinner_frame: 0,
           provider_name: "anthropic",

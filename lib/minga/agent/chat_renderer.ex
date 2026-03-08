@@ -23,7 +23,8 @@ defmodule Minga.Agent.ChatRenderer do
   @type panel_state :: %{
           messages: [Message.t()],
           status: :idle | :thinking | :tool_executing | :error,
-          input_text: String.t(),
+          input_lines: [String.t()],
+          input_cursor: {non_neg_integer(), non_neg_integer()},
           scroll_offset: non_neg_integer(),
           spinner_frame: non_neg_integer(),
           usage: map(),
@@ -232,25 +233,35 @@ defmodule Minga.Agent.ChatRenderer do
 
     cmds = [DisplayList.draw(row, col, border, fg: at.input_border, bg: at.panel_bg) | cmds]
 
-    # Input text or placeholder
-    input_row = row + 1
     blank = String.duplicate(" ", width)
-    cmds = [DisplayList.draw(input_row, col, blank, bg: at.input_bg) | cmds]
 
-    {text, fg} =
-      if panel.input_text == "" do
-        {"  Type a message, C-c C-c to send", at.input_placeholder}
-      else
-        {"  " <> panel.input_text, at.text_fg}
-      end
+    is_empty = panel.input_lines == [""]
 
-    text = String.slice(text, 0, width)
-    cmds = [DisplayList.draw(input_row, col, text, fg: fg, bg: at.input_bg) | cmds]
+    if is_empty do
+      # Placeholder
+      input_row = row + 1
+      cmds = [DisplayList.draw(input_row, col, blank, bg: at.input_bg) | cmds]
+      placeholder = String.slice("  Type a message, C-c C-c to send", 0, width)
 
-    # Bottom padding
-    cmds = [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+      cmds = [
+        DisplayList.draw(input_row, col, placeholder, fg: at.input_placeholder, bg: at.input_bg)
+        | cmds
+      ]
 
-    cmds
+      [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+    else
+      # Render the first visible line (in the side panel we only show 1 line)
+      input_row = row + 1
+      cmds = [DisplayList.draw(input_row, col, blank, bg: at.input_bg) | cmds]
+
+      first_line = "  " <> (List.first(panel.input_lines) || "")
+      line_count = length(panel.input_lines)
+      indicator = if line_count > 1, do: " [#{line_count}L]", else: ""
+      display = String.slice(first_line <> indicator, 0, width)
+
+      cmds = [DisplayList.draw(input_row, col, display, fg: at.text_fg, bg: at.input_bg) | cmds]
+      [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+    end
   end
 
   # ── Message → line conversion ───────────────────────────────────────────────
