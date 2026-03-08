@@ -70,6 +70,47 @@ defmodule Minga.Agent.View.Keys do
     {:passthrough, state}
   end
 
+  # Leader sequence in progress: pass ALL keys through to the mode FSM so
+  # the leader trie can advance (SPC f, SPC b m, etc.). Without this,
+  # chat nav's catch-all swallows the follow-up keys and the which-key
+  # popup is visible but non-interactive.
+  def handle_key(
+        %{mode_state: %{leader_node: node}, agent: %{panel: %{input_focused: false}}} = state,
+        _cp,
+        _mods
+      )
+      when is_map(node) do
+    {:passthrough, state}
+  end
+
+  # When a tool approval is pending, intercept y/n/a/Enter.
+  def handle_key(%{agent: %{pending_approval: approval}} = state, cp, _mods)
+      when is_map(approval) and cp in [?y, ?Y, @enter] do
+    if state.agent.session do
+      Session.respond_to_approval(state.agent.session, :approve)
+    end
+
+    {:handled, state}
+  end
+
+  def handle_key(%{agent: %{pending_approval: approval}} = state, cp, _mods)
+      when is_map(approval) and cp in [?n, ?N] do
+    if state.agent.session do
+      Session.respond_to_approval(state.agent.session, :reject)
+    end
+
+    {:handled, state}
+  end
+
+  def handle_key(%{agent: %{pending_approval: approval}} = state, cp, _mods)
+      when is_map(approval) and cp in [?a, ?A] do
+    if state.agent.session do
+      Session.respond_to_approval(state.agent.session, :approve_all)
+    end
+
+    {:handled, state}
+  end
+
   # When help overlay is visible, dismiss it. ? and ESC just dismiss;
   # any other key dismisses and is then processed normally.
   def handle_key(%{agentic: %{help_visible: true}} = state, cp, _mods)

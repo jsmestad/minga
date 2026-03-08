@@ -496,6 +496,101 @@ defmodule Minga.Agent.View.KeysTest do
     end
   end
 
+  # ── Leader sequence passthrough ───────────────────────────────────────────────
+
+  describe "leader sequence passthrough" do
+    test "keys pass through to mode FSM when leader_node is set" do
+      state = base_state(focus: :chat)
+      # Simulate leader mode active (SPC was already processed by mode FSM)
+      leader_trie = %{?f => {:prefix, %{}}, ?b => {:prefix, %{}}}
+      state = put_in(state.mode_state.leader_node, leader_trie)
+
+      # Follow-up key (e.g., f after SPC) should pass through, not be swallowed
+      assert {:passthrough, _} = Keys.handle_key(state, ?f, 0)
+    end
+
+    test "all keys pass through during leader sequence, not just recognized ones" do
+      state = base_state(focus: :chat)
+      leader_trie = %{?f => {:prefix, %{}}}
+      state = put_in(state.mode_state.leader_node, leader_trie)
+
+      # Even keys that chat nav would normally handle (j, k, etc.)
+      assert {:passthrough, _} = Keys.handle_key(state, ?j, 0)
+      assert {:passthrough, _} = Keys.handle_key(state, ?k, 0)
+      assert {:passthrough, _} = Keys.handle_key(state, ?q, 0)
+    end
+
+    test "leader passthrough does not apply when input is focused" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      leader_trie = %{?f => {:prefix, %{}}}
+      state = put_in(state.mode_state.leader_node, leader_trie)
+
+      # Input mode should still handle the key (typing into the input field)
+      assert {:handled, _} = Keys.handle_key(state, ?f, 0)
+    end
+
+    test "keys are handled normally when leader_node is nil" do
+      state = base_state(focus: :chat)
+      assert state.mode_state.leader_node == nil
+
+      # j should be handled by chat nav as usual
+      assert {:handled, _} = Keys.handle_key(state, ?j, 0)
+    end
+  end
+
+  # ── Tool approval ──────────────────────────────────────────────────────────
+
+  describe "tool approval keys" do
+    test "y when approval pending is handled (does not scroll)" do
+      state = base_state(focus: :chat)
+
+      state =
+        put_in(state.agent.pending_approval, %{tool_call_id: "tc1", name: "shell", args: %{}})
+
+      {:handled, new_state} = Keys.handle_key(state, ?y, 0)
+      # Key was consumed (no crash, no scroll)
+      assert new_state.agentic.active
+    end
+
+    test "n when approval pending is handled" do
+      state = base_state(focus: :chat)
+
+      state =
+        put_in(state.agent.pending_approval, %{tool_call_id: "tc1", name: "shell", args: %{}})
+
+      {:handled, new_state} = Keys.handle_key(state, ?n, 0)
+      assert new_state.agentic.active
+    end
+
+    test "a when approval pending is handled" do
+      state = base_state(focus: :chat)
+
+      state =
+        put_in(state.agent.pending_approval, %{tool_call_id: "tc1", name: "shell", args: %{}})
+
+      {:handled, new_state} = Keys.handle_key(state, ?a, 0)
+      assert new_state.agentic.active
+    end
+
+    test "j when approval pending is handled normally (not intercepted)" do
+      state = base_state(focus: :chat)
+
+      state =
+        put_in(state.agent.pending_approval, %{tool_call_id: "tc1", name: "shell", args: %{}})
+
+      {:handled, _new_state} = Keys.handle_key(state, ?j, 0)
+      # j still scrolls, not intercepted
+    end
+
+    test "y without approval pending behaves normally" do
+      state = base_state(focus: :chat)
+      # No pending_approval (nil by default)
+      {:handled, _new_state} = Keys.handle_key(state, ?y, 0)
+      # Should not crash, y is the clipboard copy handler
+    end
+  end
+
   # ── ESC behavior ──────────────────────────────────────────────────────────────
 
   describe "ESC behavior" do
