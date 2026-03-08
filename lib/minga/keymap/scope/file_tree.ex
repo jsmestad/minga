@@ -40,6 +40,31 @@ defmodule Minga.Keymap.Scope.FileTree do
   def shared_keymap, do: Bindings.new()
 
   @impl true
+  @spec help_groups(atom()) :: [Minga.Keymap.Scope.help_group()]
+  def help_groups(_focus) do
+    [
+      {"Navigation",
+       [
+         {"j / k", "Move cursor down / up"},
+         {"gg / G", "Jump to top / bottom"},
+         {"Ctrl-d / Ctrl-u", "Half page down / up"}
+       ]},
+      {"Tree",
+       [
+         {"Enter", "Open file / toggle directory"},
+         {"Tab", "Toggle directory expand"},
+         {"l / h", "Expand / collapse directory"},
+         {"H", "Toggle hidden files"},
+         {"r", "Refresh tree"}
+       ]},
+      {"View",
+       [
+         {"q / Esc", "Close file tree"}
+       ]}
+    ]
+  end
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 

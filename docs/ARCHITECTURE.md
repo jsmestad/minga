@@ -212,6 +212,30 @@ Here's what happens when you press `dd` (delete a line) in normal mode:
 
 Total time: under 1ms for the BEAM side. The Zig render is practically instant for typical terminal sizes.
 
+### Keymap Scopes
+
+Different views need different keybindings. The agentic chat view repurposes `j`/`k` for scrolling, the file tree uses `h`/`l` for collapse/expand, and the normal editor uses the full vim mode FSM. Rather than maintaining parallel focus stack handlers that manually pass keys through to the mode system, Minga uses **keymap scopes** to declare view-specific bindings as trie data.
+
+```
+Keystroke arrives
+    │
+    ▼
+Input.Scoped checks keymap_scope on EditorState
+    │
+    ├─ :editor → passthrough (vim mode FSM handles everything)
+    ├─ :agent  → resolve through Scope.Agent trie
+    │     ├─ Found → execute command
+    │     ├─ Prefix → store node, wait for next key
+    │     └─ Not found → swallow (agent owns all keys)
+    └─ :file_tree → resolve through Scope.FileTree trie
+          ├─ Found → execute command
+          └─ Not found → passthrough (vim mode FSM via buffer swap)
+```
+
+Each scope module implements the `Minga.Keymap.Scope` behaviour, declaring its keybindings as trie nodes per vim state (normal, insert). The `Input.Scoped` handler sits in the focus stack above the mode FSM and routes keys through the active scope before falling through to vim navigation.
+
+Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines which keys are active, the same way `python-mode` or `magit-status-mode` provide buffer-type-specific keymaps in Emacs.
+
 ---
 
 ## Syntax Highlighting Pipeline

@@ -25,6 +25,7 @@ Current status and planned features. Updated as development progresses.
 | Batch edit API | ✅ | `Buffer.Server.apply_text_edits/2`; one undo entry per batch |
 | Buffer types (`buffer_type`) | ✅ | `:file`, `:nofile`, `:nowrite`, `:prompt`, `:terminal`; blocks save on non-file types |
 | Input router + focus stack | ✅ | Centralized key dispatch via `Input.Handler` behaviour; single `handle_info` clause |
+| Keymap scopes (#223) | ✅ | Buffer-type-specific keybindings (agent, file_tree, editor) via `Keymap.Scope` behaviour; replaces per-view focus stack handlers |
 | Panel buffer backing | ✅ | File tree and agent chat backed by BufferServer; vim navigation via mode FSM delegation |
 | Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots |
 | Line index cache (O(1) line access) | ✅ | Lazy line offset tuple; `line_at`/`lines`/`position_to_offset` use `binary_part` |

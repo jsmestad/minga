@@ -25,7 +25,6 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
   alias Minga.Agent.View.DirectoryRenderer
-  alias Minga.Agent.View.Help
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.ShellRenderer
   alias Minga.Buffer.Server, as: BufferServer
@@ -36,6 +35,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Keymap.Scope
   alias Minga.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
@@ -892,11 +892,7 @@ defmodule Minga.Agent.View.Renderer do
   defp render_help_overlay(input, cols, rows) do
     at = Theme.agent_theme(input.theme)
 
-    groups =
-      case input.agentic.focus do
-        :file_viewer -> Help.viewer_bindings()
-        _ -> Help.chat_bindings()
-      end
+    groups = Scope.help_groups(:agent, input.agentic.focus)
 
     context_label =
       case input.agentic.focus do
@@ -1000,7 +996,7 @@ defmodule Minga.Agent.View.Renderer do
           | {:binding, String.t(), String.t()}
           | {:spacer, String.t(), String.t()}
 
-  @spec help_content_lines([Help.group()]) :: [help_line()]
+  @spec help_content_lines([Scope.help_group()]) :: [help_line()]
   defp help_content_lines(groups) do
     Enum.flat_map(groups, fn {category, bindings} ->
       header = [{:header, category, ""}]
