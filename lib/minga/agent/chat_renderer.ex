@@ -325,16 +325,25 @@ defmodule Minga.Agent.ChatRenderer do
         message_lines(msg, at, width)
       end)
 
-    # Add thinking indicator if active
-    if status == :thinking do
-      char = spinner(spinner_frame)
+    # Add thinking indicator or streaming cursor
+    case status do
+      :thinking ->
+        char = spinner(spinner_frame)
+        dots = thinking_dots(spinner_frame)
 
-      indicator =
-        {[{"  #{char} Thinking...", [fg: at.thinking_fg, italic: true]}], :text, at.panel_bg}
+        indicator =
+          {[{"  #{char} Thinking#{dots}", [fg: at.thinking_fg, italic: true]}], :text,
+           at.panel_bg}
 
-      lines ++ [indicator]
-    else
-      lines
+        # Append streaming cursor to the last assistant line if text is streaming
+        lines = append_streaming_cursor(lines, spinner_frame, at)
+        lines ++ [indicator]
+
+      :tool_executing ->
+        lines
+
+      _ ->
+        lines
     end
   end
 
@@ -402,16 +411,20 @@ defmodule Minga.Agent.ChatRenderer do
   end
 
   defp message_lines({:tool_call, tc}, at, width) do
+    # For running tools, use the spinner_frame from the tool's started_at
+    # to create a per-tool animation offset
+    tool_frame = tool_animation_frame(tc)
+
     status_icon =
       case tc.status do
-        :running -> "⟳"
+        :running -> tool_progress(tool_frame)
         :complete -> "✓"
         :error -> "✗"
       end
 
     status_fg =
       case tc.status do
-        :running -> at.status_thinking
+        :running -> at.status_tool
         :complete -> at.assistant_border
         :error -> at.status_error
       end
@@ -713,5 +726,69 @@ defmodule Minga.Agent.ChatRenderer do
   @spec spinner(non_neg_integer()) :: String.t()
   defp spinner(frame) do
     Enum.at(@spinner_chars, rem(frame, length(@spinner_chars)))
+  end
+
+  # ── Animation helpers ───────────────────────────────────────────────────────
+
+  @doc false
+  @spec thinking_dots(non_neg_integer()) :: String.t()
+  defp thinking_dots(frame) do
+    case rem(div(frame, 3), 4) do
+      0 -> ""
+      1 -> "."
+      2 -> ".."
+      3 -> "..."
+    end
+  end
+
+  @tool_progress_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+  @doc false
+  @spec tool_progress(non_neg_integer()) :: String.t()
+  defp tool_progress(frame) do
+    Enum.at(@tool_progress_chars, rem(frame, 10))
+  end
+
+  @spec tool_animation_frame(map()) :: non_neg_integer()
+  defp tool_animation_frame(%{started_at: started_at}) when is_integer(started_at) do
+    elapsed = System.monotonic_time(:millisecond) - started_at
+    div(elapsed, 100)
+  end
+
+  defp tool_animation_frame(_tc), do: 0
+
+  @spec append_streaming_cursor([render_line()], non_neg_integer(), Theme.Agent.t()) :: [
+          render_line()
+        ]
+  defp append_streaming_cursor(lines, spinner_frame, at) do
+    # Only show cursor on even frames (blink effect)
+    cursor_visible = rem(spinner_frame, 2) == 0
+
+    if cursor_visible do
+      append_cursor_to_last_assistant(lines, at)
+    else
+      lines
+    end
+  end
+
+  @spec append_cursor_to_last_assistant([render_line()], Theme.Agent.t()) :: [render_line()]
+  defp append_cursor_to_last_assistant([], _at), do: []
+
+  defp append_cursor_to_last_assistant(lines, at) do
+    # Find the last non-empty assistant content line and append ▌
+    {before, target_and_rest} =
+      lines
+      |> Enum.reverse()
+      |> Enum.split_while(fn {_segments, type, _bg} -> type == :empty end)
+
+    case target_and_rest do
+      [{segments, type, bg} | rest] ->
+        new_segments = segments ++ [{"▌", [fg: at.assistant_label, bold: true]}]
+        new_line = {new_segments, type, bg}
+        Enum.reverse(rest) ++ [new_line | Enum.reverse(before)]
+
+      [] ->
+        lines
+    end
   end
 end
