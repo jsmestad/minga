@@ -260,4 +260,93 @@ defmodule Minga.Agent.View.StateTest do
       refute av.help_visible
     end
   end
+
+  describe "search" do
+    test "starts with no search" do
+      av = ViewState.new()
+      refute ViewState.searching?(av)
+      refute ViewState.search_input_active?(av)
+    end
+
+    test "start_search activates search with saved scroll" do
+      av = ViewState.new() |> ViewState.start_search(42)
+      assert ViewState.searching?(av)
+      assert ViewState.search_input_active?(av)
+      assert ViewState.search_saved_scroll(av) == 42
+      assert ViewState.search_query(av) == ""
+    end
+
+    test "update_search_query modifies the query" do
+      av = ViewState.new() |> ViewState.start_search(0) |> ViewState.update_search_query("hello")
+      assert ViewState.search_query(av) == "hello"
+    end
+
+    test "set_search_matches stores matches and resets current" do
+      av = ViewState.new() |> ViewState.start_search(0)
+      matches = [{0, 5, 10}, {1, 0, 5}]
+      av = ViewState.set_search_matches(av, matches)
+      assert av.search.matches == matches
+      assert av.search.current == 0
+    end
+
+    test "next_search_match cycles forward" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}, {1, 0, 5}, {2, 0, 5}])
+
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 1
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 2
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 0
+    end
+
+    test "prev_search_match cycles backward" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}, {1, 0, 5}, {2, 0, 5}])
+
+      av = ViewState.prev_search_match(av)
+      assert av.search.current == 2
+      av = ViewState.prev_search_match(av)
+      assert av.search.current == 1
+    end
+
+    test "cancel_search clears the search state" do
+      av = ViewState.new() |> ViewState.start_search(10) |> ViewState.cancel_search()
+      refute ViewState.searching?(av)
+      assert av.search == nil
+    end
+
+    test "confirm_search clears search when no matches" do
+      av = ViewState.new() |> ViewState.start_search(0) |> ViewState.confirm_search()
+      refute ViewState.searching?(av)
+    end
+
+    test "confirm_search keeps matches and disables input" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}])
+        |> ViewState.confirm_search()
+
+      assert ViewState.searching?(av)
+      refute ViewState.search_input_active?(av)
+    end
+
+    test "next/prev no-op when no search" do
+      av = ViewState.new()
+      assert av == ViewState.next_search_match(av)
+      assert av == ViewState.prev_search_match(av)
+    end
+
+    test "next/prev no-op when no matches" do
+      av = ViewState.new() |> ViewState.start_search(0)
+      assert av == ViewState.next_search_match(av)
+      assert av == ViewState.prev_search_match(av)
+    end
+  end
 end

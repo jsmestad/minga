@@ -244,7 +244,8 @@ defmodule Minga.Agent.View.RendererTest do
         agentic: %{
           chat_width_pct: 65,
           help_visible: false,
-          focus: :chat
+          focus: :chat,
+          search: nil
         },
         messages: [],
         usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
@@ -281,7 +282,8 @@ defmodule Minga.Agent.View.RendererTest do
         agentic: %{
           chat_width_pct: 65,
           help_visible: false,
-          focus: :chat
+          focus: :chat,
+          search: nil
         },
         messages: [],
         usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
@@ -329,7 +331,7 @@ defmodule Minga.Agent.View.RendererTest do
           display_start_index: 0,
           mention_completion: nil
         },
-        agentic: %{chat_width_pct: 65, help_visible: false, focus: :chat},
+        agentic: %{chat_width_pct: 65, help_visible: false, focus: :chat, search: nil},
         messages: [],
         usage: %{input: 50_000, output: 50_000, cache_read: 0, cache_write: 0, cost: 0.05},
         buffer_snapshot: nil,

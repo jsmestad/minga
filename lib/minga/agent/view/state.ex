@@ -28,6 +28,20 @@ defmodule Minga.Agent.View.State do
   @typedoc "Active prefix key awaiting a follow-up keystroke."
   @type prefix :: nil | :g | :z | :bracket_next | :bracket_prev
 
+  @typedoc "A search match: message index, byte start, byte end."
+  @type search_match ::
+          {msg_index :: non_neg_integer(), col_start :: non_neg_integer(),
+           col_end :: non_neg_integer()}
+
+  @typedoc "Search state for the chat panel."
+  @type search_state :: %{
+          query: String.t(),
+          matches: [search_match()],
+          current: non_neg_integer(),
+          saved_scroll: non_neg_integer(),
+          input_active: boolean()
+        }
+
   @typedoc "Agentic view sub-state."
   @type t :: %__MODULE__{
           active: boolean(),
@@ -37,7 +51,8 @@ defmodule Minga.Agent.View.State do
           pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
           saved_file_tree: FileTreeState.t() | nil,
-          help_visible: boolean()
+          help_visible: boolean(),
+          search: search_state() | nil
         }
 
   @enforce_keys []
@@ -48,7 +63,8 @@ defmodule Minga.Agent.View.State do
             pending_prefix: nil,
             chat_width_pct: 65,
             saved_file_tree: nil,
-            help_visible: false
+            help_visible: false,
+            search: nil
 
   @min_chat_pct 30
   @max_chat_pct 80
@@ -174,4 +190,99 @@ defmodule Minga.Agent.View.State do
   @spec pending_g(t()) :: boolean()
   def pending_g(%__MODULE__{pending_prefix: :g}), do: true
   def pending_g(%__MODULE__{}), do: false
+
+  # ── Search ──────────────────────────────────────────────────────────────────
+
+  @doc "Starts a search, saving the current scroll position."
+  @spec start_search(t(), non_neg_integer()) :: t()
+  def start_search(%__MODULE__{} = av, current_scroll) do
+    %{
+      av
+      | search: %{
+          query: "",
+          matches: [],
+          current: 0,
+          saved_scroll: current_scroll,
+          input_active: true
+        }
+    }
+  end
+
+  @doc "Returns true if search is active (either inputting or confirmed with matches)."
+  @spec searching?(t()) :: boolean()
+  def searching?(%__MODULE__{search: nil}), do: false
+  def searching?(%__MODULE__{search: %{}}), do: true
+
+  @doc "Returns true if search input is being typed (vs confirmed)."
+  @spec search_input_active?(t()) :: boolean()
+  def search_input_active?(%__MODULE__{search: nil}), do: false
+  def search_input_active?(%__MODULE__{search: %{input_active: active}}), do: active
+
+  @doc "Updates the search query string."
+  @spec update_search_query(t(), String.t()) :: t()
+  def update_search_query(%__MODULE__{search: nil} = av, _query), do: av
+
+  def update_search_query(%__MODULE__{search: search} = av, query) do
+    %{av | search: %{search | query: query}}
+  end
+
+  @doc "Sets search matches and resets current to 0."
+  @spec set_search_matches(t(), [search_match()]) :: t()
+  def set_search_matches(%__MODULE__{search: nil} = av, _matches), do: av
+
+  def set_search_matches(%__MODULE__{search: search} = av, matches) do
+    %{av | search: %{search | matches: matches, current: 0}}
+  end
+
+  @doc "Moves to the next search match."
+  @spec next_search_match(t()) :: t()
+  def next_search_match(%__MODULE__{search: nil} = av), do: av
+
+  def next_search_match(%__MODULE__{search: %{matches: []}} = av), do: av
+
+  def next_search_match(%__MODULE__{search: search} = av) do
+    next = rem(search.current + 1, length(search.matches))
+    %{av | search: %{search | current: next}}
+  end
+
+  @doc "Moves to the previous search match."
+  @spec prev_search_match(t()) :: t()
+  def prev_search_match(%__MODULE__{search: nil} = av), do: av
+
+  def prev_search_match(%__MODULE__{search: %{matches: []}} = av), do: av
+
+  def prev_search_match(%__MODULE__{search: search} = av) do
+    count = length(search.matches)
+    prev = rem(search.current - 1 + count, count)
+    %{av | search: %{search | current: prev}}
+  end
+
+  @doc "Cancels search and returns nil (caller restores scroll)."
+  @spec cancel_search(t()) :: t()
+  def cancel_search(%__MODULE__{} = av) do
+    %{av | search: nil}
+  end
+
+  @doc "Confirms search (keeps matches for n/N navigation, disables input)."
+  @spec confirm_search(t()) :: t()
+  def confirm_search(%__MODULE__{search: nil} = av), do: av
+
+  def confirm_search(%__MODULE__{search: %{matches: []}} = av) do
+    # No matches found, cancel instead
+    cancel_search(av)
+  end
+
+  def confirm_search(%__MODULE__{search: search} = av) do
+    %{av | search: %{search | input_active: false}}
+  end
+
+  @doc "Returns the saved scroll position from before search started."
+  @spec search_saved_scroll(t()) :: non_neg_integer() | nil
+  def search_saved_scroll(%__MODULE__{search: nil}), do: nil
+  def search_saved_scroll(%__MODULE__{search: search}), do: search.saved_scroll
+
+  @doc "Returns the search query, or nil if not searching."
+  @spec search_query(t()) :: String.t() | nil
+  def search_query(%__MODULE__{search: nil}), do: nil
+  def search_query(%__MODULE__{search: search}), do: search.query
 end

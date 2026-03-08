@@ -116,7 +116,8 @@ defmodule Minga.Agent.View.Renderer do
     @type agentic_data :: %{
             chat_width_pct: non_neg_integer(),
             help_visible: boolean(),
-            focus: atom()
+            focus: atom(),
+            search: Minga.Agent.View.State.search_state() | nil
           }
   end
 
@@ -275,7 +276,8 @@ defmodule Minga.Agent.View.Renderer do
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
         help_visible: state.agentic.help_visible,
-        focus: state.agentic.focus
+        focus: state.agentic.focus,
+        search: state.agentic.search
       },
       messages: messages,
       usage: usage,
@@ -651,6 +653,23 @@ defmodule Minga.Agent.View.Renderer do
   @spec render_modeline_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
           [DisplayList.draw()]
   defp render_modeline_from_input(input, row, cols) do
+    case input.agentic.search do
+      %{input_active: true} = search ->
+        render_search_prompt(row, cols, search, input.theme)
+
+      %{input_active: false} = search ->
+        # Show match count in modeline when search is confirmed
+        render_search_modeline(row, cols, search, input)
+
+      nil ->
+        render_agent_modeline(row, cols, input)
+    end
+  end
+
+  @spec render_agent_modeline(non_neg_integer(), pos_integer(), RenderInput.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_agent_modeline(row, cols, input) do
     Modeline.render(
       row,
       cols,
@@ -672,6 +691,46 @@ defmodule Minga.Agent.View.Renderer do
       },
       input.theme
     )
+  end
+
+  @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_search_prompt(row, cols, search, theme) do
+    at = Theme.agent_theme(theme)
+    match_count = length(search.matches)
+    current = search.current + 1
+
+    suffix =
+      if match_count > 0 do
+        " (#{current}/#{match_count})"
+      else
+        ""
+      end
+
+    prompt = "/#{search.query}#{suffix}"
+    padded = String.pad_trailing(prompt, cols)
+    [DisplayList.draw(row, 0, padded, fg: at.text_fg, bg: at.input_bg)]
+  end
+
+  @spec render_search_modeline(non_neg_integer(), pos_integer(), map(), RenderInput.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_search_modeline(row, cols, search, input) do
+    modeline_cmds = render_agent_modeline(row, cols, input)
+    match_count = length(search.matches)
+    current = search.current + 1
+    indicator = " [#{current}/#{match_count} \"#{search.query}\"]"
+    at = Theme.agent_theme(input.theme)
+    indicator_col = max(cols - String.length(indicator), 0)
+
+    overlay =
+      DisplayList.draw(row, indicator_col, indicator,
+        fg: at.status_thinking,
+        bg: input.theme.modeline.normal_bg
+      )
+
+    modeline_cmds ++ [overlay]
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

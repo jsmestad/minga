@@ -26,6 +26,7 @@ defmodule Minga.Agent.View.Keys do
   import Bitwise
 
   alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
@@ -314,6 +315,12 @@ defmodule Minga.Agent.View.Keys do
   @spec handle_chat_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
 
+  # --- Search mode: intercept keys when search input is active ---
+
+  defp handle_chat_nav(%{agentic: %{search: %{input_active: true}}} = state, cp, mods) do
+    handle_search_input(state, cp, mods)
+  end
+
   # --- Prefix dispatch: if a prefix is pending, route to prefix handler ---
 
   defp handle_chat_nav(%{agentic: %{pending_prefix: prefix}} = state, cp, mods)
@@ -442,9 +449,29 @@ defmodule Minga.Agent.View.Keys do
     update_agentic(state, &ViewState.reset_split/1)
   end
 
+  # --- Search ---
+
+  # /: start search mode
+  defp handle_chat_nav(state, ?/, _mods) do
+    scroll = state.agent.panel.scroll_offset
+    update_agentic(state, &ViewState.start_search(&1, scroll))
+  end
+
+  # n: next search match (after confirmed search)
+  defp handle_chat_nav(%{agentic: %{search: %{input_active: false}}} = state, ?n, _mods) do
+    state = update_agentic(state, &ViewState.next_search_match/1)
+    scroll_to_current_match(state)
+  end
+
+  # N: previous search match (after confirmed search)
+  defp handle_chat_nav(%{agentic: %{search: %{input_active: false}}} = state, ?N, _mods) do
+    state = update_agentic(state, &ViewState.prev_search_match/1)
+    scroll_to_current_match(state)
+  end
+
   # --- Help ---
 
-  # ?: help overlay (stubbed until #173)
+  # ?: help overlay
   defp handle_chat_nav(state, ??, _mods) do
     update_agentic(state, &ViewState.toggle_help/1)
   end
@@ -1122,5 +1149,129 @@ defmodule Minga.Agent.View.Keys do
       update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
 
     {:handled, maybe_finish_review(state)}
+  end
+
+  # ── Search input handling ───────────────────────────────────────────────────
+
+  @backspace 127
+
+  @spec handle_search_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+
+  # Enter: confirm search
+  defp handle_search_input(state, @enter, _mods) do
+    update_agentic(state, &ViewState.confirm_search/1)
+  end
+
+  # Escape: cancel search, restore scroll
+  defp handle_search_input(state, @escape, _mods) do
+    saved = ViewState.search_saved_scroll(state.agentic)
+    state = update_agentic(state, &ViewState.cancel_search/1)
+
+    if saved do
+      update_agent(state, &AgentState.set_scroll(&1, saved))
+    else
+      state
+    end
+  end
+
+  # Backspace: delete last char from query
+  defp handle_search_input(state, @backspace, _mods) do
+    query = ViewState.search_query(state.agentic) || ""
+
+    if query == "" do
+      # Empty query + backspace = cancel search
+      handle_search_input(state, @escape, 0)
+    else
+      new_query = String.slice(query, 0..-2//1)
+      state = update_agentic(state, &ViewState.update_search_query(&1, new_query))
+      run_search(state, new_query)
+    end
+  end
+
+  # Printable char: append to query and search
+  defp handle_search_input(state, cp, _mods) when cp >= 32 and cp <= 126 do
+    char = <<cp::utf8>>
+    query = (ViewState.search_query(state.agentic) || "") <> char
+    state = update_agentic(state, &ViewState.update_search_query(&1, query))
+    run_search(state, query)
+  end
+
+  # Other keys: ignore during search input
+  defp handle_search_input(state, _cp, _mods), do: state
+
+  @spec run_search(EditorState.t(), String.t()) :: EditorState.t()
+  defp run_search(state, query) do
+    messages =
+      if state.agent.session do
+        try do
+          Session.messages(state.agent.session)
+        catch
+          :exit, _ -> []
+        end
+      else
+        []
+      end
+
+    matches = ChatSearch.find_matches(messages, query)
+    state = update_agentic(state, &ViewState.set_search_matches(&1, matches))
+
+    if matches != [] do
+      scroll_to_current_match(state)
+    else
+      state
+    end
+  end
+
+  @spec scroll_to_current_match(EditorState.t()) :: EditorState.t()
+  defp scroll_to_current_match(%{agentic: %{search: nil}} = state), do: state
+
+  defp scroll_to_current_match(%{agentic: %{search: search}} = state) do
+    case Enum.at(search.matches, search.current) do
+      nil ->
+        state
+
+      match ->
+        msg_idx = ChatSearch.match_message_index(match)
+        scroll_to_message(state, msg_idx)
+    end
+  end
+
+  @spec scroll_to_message(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  defp scroll_to_message(state, msg_idx) do
+    # Build the line map and find the first line of this message
+    session = state.agent.session
+
+    messages =
+      if session do
+        try do
+          Session.messages(session)
+        catch
+          :exit, _ -> []
+        end
+      else
+        []
+      end
+
+    line_map =
+      ChatRenderer.line_message_map(
+        messages,
+        state.viewport.cols,
+        state.theme,
+        state.agent.panel.display_start_index
+      )
+
+    total_lines = length(line_map)
+
+    # Find the first line index that maps to this message
+    case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
+      nil ->
+        state
+
+      line_idx ->
+        # Scroll offset counts from the bottom
+        scroll = max(total_lines - line_idx - 1, 0)
+        update_agent(state, &AgentState.set_scroll(&1, scroll))
+    end
   end
 end
