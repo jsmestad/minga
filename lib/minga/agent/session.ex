@@ -26,6 +26,7 @@ defmodule Minga.Agent.Session do
   alias Minga.Agent.Event
   alias Minga.Agent.Message
   alias Minga.Agent.ProviderResolver
+  alias Minga.Agent.SessionStore
 
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
@@ -42,6 +43,7 @@ defmodule Minga.Agent.Session do
 
   @typedoc "Internal session state."
   @type state :: %{
+          session_id: String.t(),
           provider: pid() | nil,
           provider_module: module(),
           provider_opts: keyword(),
@@ -51,7 +53,9 @@ defmodule Minga.Agent.Session do
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
-          pending_approval: pending_approval()
+          pending_approval: pending_approval(),
+          model_name: String.t(),
+          save_timer: reference() | nil
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -108,6 +112,24 @@ defmodule Minga.Agent.Session do
   @spec respond_to_approval(GenServer.server(), :approve | :reject | :approve_all) :: :ok
   def respond_to_approval(session, decision) when decision in [:approve, :reject, :approve_all] do
     GenServer.call(session, {:respond_to_approval, decision})
+  end
+
+  @doc "Returns the session ID."
+  @spec session_id(GenServer.server()) :: String.t()
+  def session_id(session) do
+    GenServer.call(session, :session_id)
+  end
+
+  @doc """
+  Loads a previously saved session, replacing the current conversation history.
+
+  The provider's conversation context is not synced; the loaded messages
+  are for display only until the user sends a new prompt, which re-establishes
+  the provider context.
+  """
+  @spec load_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def load_session(session, session_id) when is_binary(session_id) do
+    GenServer.call(session, {:load_session, session_id})
   end
 
   @doc "Subscribes the calling process to session events."
@@ -181,7 +203,11 @@ defmodule Minga.Agent.Session do
     initial_thinking_level = Keyword.get(opts, :thinking_level)
     timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
+    session_id = Keyword.get(opts, :session_id, generate_session_id())
+    model_name = Keyword.get(opts, :model_name, "unknown")
+
     state = %{
+      session_id: session_id,
       provider: nil,
       provider_module: provider_module,
       provider_opts: provider_opts,
@@ -191,7 +217,9 @@ defmodule Minga.Agent.Session do
       total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
-      pending_approval: nil
+      pending_approval: nil,
+      model_name: model_name,
+      save_timer: nil
     }
 
     # Start provider asynchronously so init doesn't block
@@ -208,6 +236,7 @@ defmodule Minga.Agent.Session do
   def handle_call({:send_prompt, text}, _from, state) do
     # Add user message to conversation
     state = %{state | messages: state.messages ++ [Message.user(text)]}
+    state = notify_messages_changed(state)
 
     case state.provider_module.send_prompt(state.provider, text) do
       :ok ->
@@ -238,7 +267,7 @@ defmodule Minga.Agent.Session do
     # Append "Aborted" system message, clear any pending approval
     state = %{state | messages: messages, pending_approval: nil}
     state = append_system_message(state, "Aborted", :info)
-    broadcast(state, :messages_changed)
+    state = notify_messages_changed(state)
     state = set_status(state, :idle)
     {:reply, :ok, state}
   end
@@ -250,9 +279,12 @@ defmodule Minga.Agent.Session do
 
     timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
+    state = cancel_save_timer(state)
+
     state = %{
       state
-      | messages: [Message.system("Session cleared · #{timestamp}")],
+      | session_id: generate_session_id(),
+        messages: [Message.system("Session cleared · #{timestamp}")],
         status: :idle,
         total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
         error_message: nil,
@@ -260,8 +292,37 @@ defmodule Minga.Agent.Session do
     }
 
     broadcast(state, {:status_changed, :idle})
-    broadcast(state, :messages_changed)
+    state = notify_messages_changed(state)
     {:reply, :ok, state}
+  end
+
+  def handle_call(:session_id, _from, state) do
+    {:reply, state.session_id, state}
+  end
+
+  def handle_call({:load_session, session_id}, _from, state) do
+    case SessionStore.load(session_id) do
+      {:ok, data} ->
+        state = cancel_save_timer(state)
+
+        state = %{
+          state
+          | session_id: data.id,
+            messages: data.messages,
+            total_usage: data.usage,
+            model_name: data.model_name,
+            status: :idle,
+            error_message: nil,
+            pending_approval: nil
+        }
+
+        broadcast(state, {:status_changed, :idle})
+        state = notify_messages_changed(state)
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:status, _from, state) do
@@ -348,7 +409,7 @@ defmodule Minga.Agent.Session do
       end)
 
     state = %{state | messages: messages}
-    broadcast(state, :messages_changed)
+    state = notify_messages_changed(state)
     {:reply, :ok, state}
   end
 
@@ -371,14 +432,14 @@ defmodule Minga.Agent.Session do
       end)
 
     state = %{state | messages: messages}
-    broadcast(state, :messages_changed)
+    state = notify_messages_changed(state)
     {:reply, :ok, state}
   end
 
   @impl GenServer
   def handle_cast({:add_system_message, text, level}, state) do
     state = append_system_message(state, text, level)
-    broadcast(state, :messages_changed)
+    state = notify_messages_changed(state)
     {:noreply, state}
   end
 
@@ -421,6 +482,12 @@ defmodule Minga.Agent.Session do
     {:noreply, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
   end
 
+  def handle_info(:save_session, state) do
+    state = %{state | save_timer: nil}
+    save_to_disk(state)
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -436,7 +503,7 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
     state =
       if usage do
-        %{
+        state = %{
           state
           | total_usage: %{
               input: state.total_usage.input + usage.input,
@@ -447,6 +514,8 @@ defmodule Minga.Agent.Session do
             },
             messages: state.messages ++ [Message.usage(usage)]
         }
+
+        notify_messages_changed(state)
       else
         state
       end
@@ -474,8 +543,7 @@ defmodule Minga.Agent.Session do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
     state = %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
     state = set_status(state, :tool_executing)
-    broadcast(state, :messages_changed)
-    state
+    notify_messages_changed(state)
   end
 
   defp handle_provider_event(%Event.ToolFileChanged{} = event, state) do
@@ -529,8 +597,7 @@ defmodule Minga.Agent.Session do
       end)
 
     state = %{state | messages: messages}
-    broadcast(state, :messages_changed)
-    state
+    notify_messages_changed(state)
   end
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
@@ -606,6 +673,13 @@ defmodule Minga.Agent.Session do
     end)
   end
 
+  @doc false
+  @spec notify_messages_changed(state()) :: state()
+  defp notify_messages_changed(state) do
+    broadcast(state, :messages_changed)
+    schedule_save(state)
+  end
+
   # ── Provider startup ────────────────────────────────────────────────────────
 
   @spec start_provider(state()) :: {:ok, pid()} | {:error, term()}
@@ -651,5 +725,46 @@ defmodule Minga.Agent.Session do
       {:ok, module} when is_atom(module) -> module
       _ -> ProviderResolver.resolve().module
     end
+  end
+
+  # ── Session persistence ─────────────────────────────────────────────────────
+
+  @save_debounce_ms 500
+
+  @spec schedule_save(state()) :: state()
+  defp schedule_save(state) do
+    state = cancel_save_timer(state)
+    ref = Process.send_after(self(), :save_session, @save_debounce_ms)
+    %{state | save_timer: ref}
+  end
+
+  @spec cancel_save_timer(state()) :: state()
+  defp cancel_save_timer(%{save_timer: nil} = state), do: state
+
+  defp cancel_save_timer(%{save_timer: ref} = state) do
+    Process.cancel_timer(ref)
+    %{state | save_timer: nil}
+  end
+
+  @spec save_to_disk(state()) :: :ok
+  defp save_to_disk(state) do
+    data = %{
+      id: state.session_id,
+      timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+      model_name: state.model_name,
+      messages: state.messages,
+      usage: state.total_usage
+    }
+
+    SessionStore.save(data)
+  end
+
+  @spec generate_session_id() :: String.t()
+  defp generate_session_id do
+    <<a::32, b::16, c::16, d::16, e::48>> = :crypto.strong_rand_bytes(16)
+
+    [a, b, c, d, e]
+    |> Enum.map_join("-", &Integer.to_string(&1, 16))
+    |> String.downcase()
   end
 end

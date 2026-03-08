@@ -71,6 +71,7 @@ defmodule Minga.Config.Options do
           | :agent_model
           | :agent_tool_approval
           | :agent_destructive_tools
+          | :agent_session_retention_days
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -116,7 +117,8 @@ defmodule Minga.Config.Options do
     {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
     {:agent_model, :string_or_nil, nil},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
-    {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]}
+    {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]},
+    {:agent_session_retention_days, :pos_integer, 30}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
