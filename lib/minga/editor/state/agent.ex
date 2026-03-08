@@ -160,6 +160,12 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.history_next(agent.panel)}
   end
 
+  @doc "Clears the chat display (visual reset, history preserved)."
+  @spec clear_display(t(), non_neg_integer()) :: t()
+  def clear_display(%__MODULE__{} = agent, message_count) do
+    %{agent | panel: PanelState.clear_display(agent.panel, message_count)}
+  end
+
   @doc "Clears the input and scrolls to the bottom."
   @spec clear_input_and_scroll(t()) :: t()
   def clear_input_and_scroll(%__MODULE__{} = agent) do

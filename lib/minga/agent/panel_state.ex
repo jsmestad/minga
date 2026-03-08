@@ -26,7 +26,8 @@ defmodule Minga.Agent.PanelState do
           model_name: String.t(),
           thinking_level: thinking_level(),
           input_focused: boolean(),
-          auto_scroll: boolean()
+          auto_scroll: boolean(),
+          display_start_index: non_neg_integer()
         }
 
   @enforce_keys []
@@ -41,7 +42,8 @@ defmodule Minga.Agent.PanelState do
             model_name: "claude-sonnet-4",
             thinking_level: "medium",
             input_focused: false,
-            auto_scroll: true
+            auto_scroll: true,
+            display_start_index: 0
 
   @doc "Creates a new panel state."
   @spec new() :: t()
@@ -254,4 +256,15 @@ defmodule Minga.Agent.PanelState do
   @doc "Returns the number of input lines."
   @spec input_line_count(t()) :: pos_integer()
   def input_line_count(%__MODULE__{input_lines: lines}), do: length(lines)
+
+  @doc """
+  Clears the chat display without affecting conversation history.
+
+  Sets `display_start_index` to the given message count so the renderer
+  skips all messages before this point. Scrolls to bottom.
+  """
+  @spec clear_display(t(), non_neg_integer()) :: t()
+  def clear_display(%__MODULE__{} = state, message_count) do
+    %{state | display_start_index: message_count, scroll_offset: 0, auto_scroll: true}
+  end
 end

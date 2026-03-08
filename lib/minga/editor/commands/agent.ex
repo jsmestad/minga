@@ -128,6 +128,29 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
+  @doc "Clears the chat display without affecting conversation history."
+  @spec clear_chat_display(state()) :: state()
+  def clear_chat_display(state) do
+    msg_count =
+      if state.agent.session do
+        try do
+          length(Session.messages(state.agent.session))
+        catch
+          :exit, _ -> 0
+        end
+      else
+        0
+      end
+
+    state = update_agent(state, &AgentState.clear_display(&1, msg_count))
+
+    if state.agent.session do
+      Session.add_system_message(state.agent.session, "Display cleared")
+    end
+
+    state
+  end
+
   @doc "Aborts the current agent operation."
   @spec abort_agent(state()) :: state()
   def abort_agent(%{agent: %{session: nil}} = state), do: state

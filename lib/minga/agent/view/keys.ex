@@ -120,6 +120,11 @@ defmodule Minga.Agent.View.Keys do
     scroll_chat_up_half(state)
   end
 
+  # Ctrl+L: clear chat display (visual reset)
+  defp handle_chat_input(state, ?l, mods) when band(mods, @ctrl) != 0 do
+    clear_chat_display(state)
+  end
+
   # Up arrow: move cursor up in multi-line input, or recall history if at top
   defp handle_chat_input(state, @arrow_up, _mods) do
     case AgentState.move_cursor_up(state.agent) do
@@ -222,6 +227,11 @@ defmodule Minga.Agent.View.Keys do
   # G: scroll to bottom
   defp handle_chat_nav(state, ?G, _mods) do
     update_agent(state, &AgentState.scroll_to_bottom/1)
+  end
+
+  # Ctrl-l: clear chat display (visual reset)
+  defp handle_chat_nav(state, ?l, mods) when band(mods, @ctrl) != 0 do
+    clear_chat_display(state)
   end
 
   # --- Repurposed editing keys ---
@@ -496,6 +506,28 @@ defmodule Minga.Agent.View.Keys do
   @spec viewer_half_page(EditorState.t()) :: pos_integer()
   defp viewer_half_page(state) do
     max(div(state.viewport.rows, 2), 1)
+  end
+
+  @spec clear_chat_display(EditorState.t()) :: EditorState.t()
+  defp clear_chat_display(state) do
+    msg_count =
+      if state.agent.session do
+        try do
+          length(Session.messages(state.agent.session))
+        catch
+          :exit, _ -> 0
+        end
+      else
+        0
+      end
+
+    state = update_agent(state, &AgentState.clear_display(&1, msg_count))
+
+    if state.agent.session do
+      Session.add_system_message(state.agent.session, "Display cleared")
+    end
+
+    state
   end
 
   @spec update_agent(EditorState.t(), (AgentState.t() -> AgentState.t())) :: EditorState.t()

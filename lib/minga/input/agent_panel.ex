@@ -97,6 +97,11 @@ defmodule Minga.Input.AgentPanel do
     AgentCommands.scroll_chat_up(state)
   end
 
+  # Ctrl+L: clear chat display
+  defp handle_input(state, ?l, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.clear_chat_display(state)
+  end
+
   # Escape: unfocus the input (back to navigation mode)
   defp handle_input(state, 27, _mods) do
     update_agent(state, &AgentState.focus_input(&1, false))

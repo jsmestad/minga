@@ -21,8 +21,35 @@ defmodule Minga.Agent.ChatRendererTest do
       model_name: "claude-sonnet-4",
       thinking_level: "medium",
       auto_scroll: Keyword.get(opts, :auto_scroll, true),
+      display_start_index: Keyword.get(opts, :display_start_index, 0),
       error_message: nil
     }
+  end
+
+  describe "display clear filtering" do
+    test "display_start_index hides earlier messages" do
+      messages = [
+        {:user, "First message"},
+        {:assistant, "First response"},
+        {:user, "Second message"},
+        {:assistant, "Second response"}
+      ]
+
+      rect = {0, 0, 60, 20}
+
+      # Without filtering, "First message" should appear
+      p_all = panel(messages: messages, display_start_index: 0)
+      draws_all = ChatRenderer.render_messages_only(rect, p_all, default_theme())
+      texts_all = Enum.map(draws_all, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts_all, &String.contains?(&1, "First message"))
+
+      # With filtering at index 2, "First message" should not appear
+      p_filtered = panel(messages: messages, display_start_index: 2)
+      draws_filtered = ChatRenderer.render_messages_only(rect, p_filtered, default_theme())
+      texts_filtered = Enum.map(draws_filtered, fn d -> elem(d, 2) end)
+      refute Enum.any?(texts_filtered, &String.contains?(&1, "First message"))
+      assert Enum.any?(texts_filtered, &String.contains?(&1, "Second message"))
+    end
   end
 
   describe "auto-scroll indicator" do

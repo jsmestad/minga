@@ -31,7 +31,8 @@ defmodule Minga.Agent.ChatRenderer do
           model_name: String.t(),
           thinking_level: String.t(),
           error_message: String.t() | nil,
-          auto_scroll: boolean()
+          auto_scroll: boolean(),
+          display_start_index: non_neg_integer()
         }
 
   @spinner_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -148,7 +149,9 @@ defmodule Minga.Agent.ChatRenderer do
           Theme.Agent.t()
         ) :: [DisplayList.draw()]
   defp render_content(cmds, row_start, col, width, content_height, panel, at) do
-    lines = messages_to_lines(panel.messages, panel.status, panel.spinner_frame, at, width)
+    display_start = Map.get(panel, :display_start_index, 0)
+    visible_messages = Enum.drop(panel.messages, display_start)
+    lines = messages_to_lines(visible_messages, panel.status, panel.spinner_frame, at, width)
 
     # Apply scroll offset
     total = length(lines)

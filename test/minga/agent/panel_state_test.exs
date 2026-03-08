@@ -351,6 +351,28 @@ defmodule Minga.Agent.PanelStateTest do
     end
   end
 
+  describe "display clear" do
+    test "clear_display sets display_start_index" do
+      panel = PanelState.new() |> PanelState.clear_display(5)
+      assert panel.display_start_index == 5
+    end
+
+    test "clear_display resets scroll and re-engages auto-scroll" do
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_down(50)
+        |> PanelState.clear_display(3)
+
+      assert panel.scroll_offset == 0
+      assert panel.auto_scroll
+    end
+
+    test "starts with display_start_index of 0" do
+      panel = PanelState.new()
+      assert panel.display_start_index == 0
+    end
+  end
+
   describe "spinner" do
     test "tick_spinner increments frame" do
       panel = PanelState.new() |> PanelState.tick_spinner() |> PanelState.tick_spinner()

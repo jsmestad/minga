@@ -98,7 +98,8 @@ defmodule Minga.Agent.View.Renderer do
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
             thinking_level: String.t(),
-            auto_scroll: boolean()
+            auto_scroll: boolean(),
+            display_start_index: non_neg_integer()
           }
 
     @typedoc "Agentic view fields needed for rendering."
@@ -249,7 +250,8 @@ defmodule Minga.Agent.View.Renderer do
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
         thinking_level: panel.thinking_level,
-        auto_scroll: panel.auto_scroll
+        auto_scroll: panel.auto_scroll,
+        display_start_index: panel.display_start_index
       },
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
@@ -337,6 +339,7 @@ defmodule Minga.Agent.View.Renderer do
       model_name: input.panel.model_name,
       thinking_level: input.panel.thinking_level,
       auto_scroll: input.panel.auto_scroll,
+      display_start_index: input.panel.display_start_index,
       error_message: nil
     }
 
