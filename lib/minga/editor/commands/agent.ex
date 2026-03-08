@@ -13,6 +13,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.Session
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Windows
@@ -364,6 +365,94 @@ defmodule Minga.Editor.Commands.Agent do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @doc """
+  Opens a code block from an agent chat message as a scratch buffer.
+
+  Creates a new buffer with the code block content, sets its filetype
+  based on the language tag, and displays it in the preview pane. The
+  buffer is named `*Agent: {language}*` and is not associated with a
+  file on disk.
+  """
+  @spec open_code_block(state(), String.t(), String.t()) :: state()
+  def open_code_block(state, language, content) do
+    name = buffer_name_for_language(language)
+    filetype = filetype_from_language(language)
+
+    {:ok, buf} =
+      BufferServer.start_link(
+        content: content,
+        buffer_name: name,
+        filetype: filetype
+      )
+
+    # Set as active buffer so it shows in the file viewer panel
+    state = put_in(state.buffers.active, buf)
+
+    # Show a system message about the opened block
+    if state.agent.session do
+      Session.add_system_message(
+        state.agent.session,
+        "Opened #{if(language == "", do: "text", else: language)} code block in buffer"
+      )
+    end
+
+    state
+  end
+
+  @spec buffer_name_for_language(String.t()) :: String.t()
+  defp buffer_name_for_language(""), do: "*Agent: text*"
+  defp buffer_name_for_language(lang), do: "*Agent: #{lang}*"
+
+  @spec filetype_from_language(String.t()) :: atom() | nil
+  defp filetype_from_language(""), do: nil
+
+  defp filetype_from_language(lang) do
+    # Map common language tags to Minga filetypes
+    mapping = %{
+      "elixir" => :elixir,
+      "ex" => :elixir,
+      "exs" => :elixir,
+      "javascript" => :javascript,
+      "js" => :javascript,
+      "typescript" => :typescript,
+      "ts" => :typescript,
+      "python" => :python,
+      "py" => :python,
+      "ruby" => :ruby,
+      "rb" => :ruby,
+      "rust" => :rust,
+      "rs" => :rust,
+      "go" => :go,
+      "golang" => :go,
+      "zig" => :zig,
+      "c" => :c,
+      "cpp" => :cpp,
+      "c++" => :cpp,
+      "java" => :java,
+      "json" => :json,
+      "yaml" => :yaml,
+      "yml" => :yaml,
+      "toml" => :toml,
+      "html" => :html,
+      "css" => :css,
+      "lua" => :lua,
+      "bash" => :bash,
+      "sh" => :bash,
+      "shell" => :bash,
+      "zsh" => :bash,
+      "sql" => :sql,
+      "markdown" => :markdown,
+      "md" => :markdown,
+      "xml" => :xml,
+      "dockerfile" => :dockerfile,
+      "docker" => :dockerfile,
+      "makefile" => :makefile,
+      "make" => :makefile
+    }
+
+    Map.get(mapping, String.downcase(lang))
   end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()

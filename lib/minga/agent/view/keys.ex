@@ -582,7 +582,9 @@ defmodule Minga.Agent.View.Keys do
   end
 
   # gf: open code block in editor buffer (stubbed until #189)
-  defp handle_prefix(state, :g, ?f, _mods, :chat), do: state
+  defp handle_prefix(state, :g, ?f, _mods, :chat) do
+    open_code_block_at_cursor(state)
+  end
 
   # g + unrecognized: cancel prefix and process the key normally
   defp handle_prefix(state, :g, cp, mods, :chat), do: handle_chat_nav(state, cp, mods)
@@ -750,6 +752,78 @@ defmodule Minga.Agent.View.Keys do
     end
   end
 
+  @spec open_code_block_at_cursor(EditorState.t()) :: EditorState.t()
+  defp open_code_block_at_cursor(state) do
+    case scroll_context(state) do
+      nil ->
+        state
+
+      {_idx, msg, line_type} ->
+        if line_type == :code do
+          text = Message.text(msg)
+          blocks = Markdown.extract_code_blocks(text)
+          block = code_block_at_scroll(state, blocks)
+          open_block_as_buffer(state, block)
+        else
+          state
+        end
+    end
+  end
+
+  @spec code_block_at_scroll(EditorState.t(), [Markdown.code_block()]) ::
+          Markdown.code_block() | nil
+  defp code_block_at_scroll(_state, []), do: nil
+
+  defp code_block_at_scroll(state, blocks) do
+    index = code_block_index_for_scroll(state, blocks)
+    Enum.at(blocks, index)
+  end
+
+  @spec code_block_index_for_scroll(EditorState.t(), [Markdown.code_block()]) ::
+          non_neg_integer()
+  defp code_block_index_for_scroll(state, blocks) do
+    session = state.agent.session
+    panel = state.agent.panel
+    messages = Session.messages(session)
+
+    line_map =
+      ChatRenderer.line_message_map(
+        messages,
+        state.viewport.cols,
+        state.theme,
+        panel.display_start_index
+      )
+
+    offset = panel.scroll_offset
+    total_lines = length(line_map)
+    target = max(total_lines - offset - 1, 0)
+
+    {msg_idx, _type} =
+      case Enum.at(line_map, target) do
+        nil -> {0, :text}
+        entry -> entry
+      end
+
+    msg_start =
+      Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) || 0
+
+    lines_for_msg =
+      line_map
+      |> Enum.drop(msg_start)
+      |> Enum.take_while(fn {idx, _} -> idx == msg_idx end)
+
+    relative = target - msg_start
+    idx = count_code_block_at(lines_for_msg, relative)
+    min(idx, length(blocks) - 1)
+  end
+
+  @spec open_block_as_buffer(EditorState.t(), Markdown.code_block() | nil) :: EditorState.t()
+  defp open_block_as_buffer(state, nil), do: state
+
+  defp open_block_as_buffer(state, block) do
+    AgentCommands.open_code_block(state, block.language, block.content)
+  end
+
   @spec copy_message_at_cursor(EditorState.t()) :: EditorState.t()
   defp copy_message_at_cursor(state) do
     case scroll_context(state) do
@@ -807,45 +881,8 @@ defmodule Minga.Agent.View.Keys do
   defp code_block_for_scroll(_state, []), do: ""
 
   defp code_block_for_scroll(state, blocks) do
-    # Count how many code lines precede the scroll position in this message
-    # to figure out which code block the cursor is in
-    session = state.agent.session
-    panel = state.agent.panel
-    messages = Session.messages(session)
-
-    line_map =
-      ChatRenderer.line_message_map(
-        messages,
-        state.viewport.cols,
-        state.theme,
-        panel.display_start_index
-      )
-
-    offset = panel.scroll_offset
-    total_lines = length(line_map)
-    target = max(total_lines - offset - 1, 0)
-
-    {msg_idx, _type} =
-      case Enum.at(line_map, target) do
-        nil -> {0, :text}
-        entry -> entry
-      end
-
-    # Find the first line of this message in the line_map
-    msg_start =
-      Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) || 0
-
-    # Count code lines from the message start to the target line,
-    # tracking code block boundaries (non-code lines separate blocks)
-    lines_for_msg =
-      line_map
-      |> Enum.drop(msg_start)
-      |> Enum.take_while(fn {idx, _} -> idx == msg_idx end)
-
-    relative = target - msg_start
-    code_block_index = count_code_block_at(lines_for_msg, relative)
-
-    Enum.at(blocks, code_block_index, hd(blocks)).content
+    idx = code_block_index_for_scroll(state, blocks)
+    Enum.at(blocks, idx, hd(blocks)).content
   end
 
   @spec count_code_block_at([{non_neg_integer(), ChatRenderer.line_type()}], non_neg_integer()) ::
