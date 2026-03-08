@@ -67,6 +67,10 @@ defmodule Minga.Agent.BufferSync do
     "> **Thinking**\n>\n> #{String.replace(text, "\n", "\n> ")}"
   end
 
+  defp message_to_markdown({:usage, %{input: i, output: o, cost: c}}) do
+    "*↑#{i} ↓#{o} $#{Float.round(c, 3)}*"
+  end
+
   defp message_to_markdown({:tool_call, tc}) do
     status =
       case tc.status do

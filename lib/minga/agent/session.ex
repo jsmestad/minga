@@ -387,7 +387,8 @@ defmodule Minga.Agent.Session do
               cache_read: state.total_usage.cache_read + usage.cache_read,
               cache_write: state.total_usage.cache_write + usage.cache_write,
               cost: state.total_usage.cost + usage.cost
-            }
+            },
+            messages: Enum.reverse([Message.usage(usage) | Enum.reverse(state.messages)])
         }
       else
         state

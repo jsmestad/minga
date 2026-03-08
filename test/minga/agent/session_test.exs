@@ -139,6 +139,23 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "per-turn usage" do
+    test "appends usage message after AgentEnd", %{session: session} do
+      :ok = Session.send_prompt(session, "Test")
+      Process.sleep(50)
+
+      messages = Session.messages(session)
+
+      usage_msg =
+        Enum.find(messages, fn
+          {:usage, _} -> true
+          _ -> false
+        end)
+
+      assert {:usage, %{input: 100, output: 50, cost: 0.01}} = usage_msg
+    end
+  end
+
   describe "new_session/1" do
     test "clears messages and resets status", %{session: session} do
       :ok = Session.send_prompt(session, "First")

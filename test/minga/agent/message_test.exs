@@ -91,6 +91,14 @@ defmodule Minga.Agent.MessageTest do
     end
   end
 
+  describe "usage/1" do
+    test "creates a usage message" do
+      data = %{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.01}
+      msg = Message.usage(data)
+      assert {:usage, ^data} = msg
+    end
+  end
+
   describe "system/2" do
     test "creates an info system message by default" do
       msg = Message.system("Session started")

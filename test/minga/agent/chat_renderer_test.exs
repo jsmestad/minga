@@ -26,6 +26,53 @@ defmodule Minga.Agent.ChatRendererTest do
     }
   end
 
+  describe "per-turn usage footer" do
+    test "renders usage after assistant message" do
+      usage = %{input: 12_345, output: 2100, cache_read: 8400, cache_write: 0, cost: 0.042}
+      messages = [{:assistant, "Hello"}, {:usage, usage}]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_cost = Enum.any?(texts, &String.contains?(&1, "$0.042"))
+      has_input = Enum.any?(texts, &String.contains?(&1, "↑12.3k"))
+      has_output = Enum.any?(texts, &String.contains?(&1, "↓2.1k"))
+      assert has_cost, "expected usage cost in render output"
+      assert has_input, "expected input tokens"
+      assert has_output, "expected output tokens"
+    end
+
+    test "renders cache info when present" do
+      usage = %{input: 100, output: 50, cache_read: 5000, cache_write: 1000, cost: 0.01}
+      messages = [{:usage, usage}]
+
+      rect = {0, 0, 80, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_cache = Enum.any?(texts, &String.contains?(&1, "cache:5.0k"))
+      has_write = Enum.any?(texts, &String.contains?(&1, "/1.0kw"))
+      assert has_cache, "expected cache read info"
+      assert has_write, "expected cache write info"
+    end
+
+    test "omits cache info when zero" do
+      usage = %{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.005}
+      messages = [{:usage, usage}]
+
+      rect = {0, 0, 80, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_cache = Enum.any?(texts, &String.contains?(&1, "cache"))
+      refute has_cache, "expected no cache info when zero"
+    end
+  end
+
   describe "display clear filtering" do
     test "display_start_index hides earlier messages" do
       messages = [

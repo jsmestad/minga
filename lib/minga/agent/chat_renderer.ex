@@ -443,6 +443,19 @@ defmodule Minga.Agent.ChatRenderer do
     [header | result_lines] ++ [footer, spacer]
   end
 
+  defp message_lines({:usage, usage}, at, width) do
+    text = format_turn_usage(usage)
+    padding = max(width - String.length(text) - 4, 0)
+
+    [
+      {[
+         {"  ", []},
+         {String.duplicate(" ", padding), []},
+         {text, [fg: at.usage_fg]}
+       ], :text, at.panel_bg}
+    ]
+  end
+
   defp message_lines({:system, text, level}, at, width) do
     fg =
       case level do
@@ -603,6 +616,23 @@ defmodule Minga.Agent.ChatRenderer do
   end
 
   defp format_usage(_), do: ""
+
+  @spec format_turn_usage(map()) :: String.t()
+  defp format_turn_usage(%{input: i, output: o, cache_read: cr, cache_write: cw, cost: c}) do
+    cache_part =
+      if cr > 0 or cw > 0 do
+        cache = "cache:#{format_tokens(cr)}"
+        if cw > 0, do: " " <> cache <> "/#{format_tokens(cw)}w", else: " " <> cache
+      else
+        ""
+      end
+
+    "↑#{format_tokens(i)} ↓#{format_tokens(o)}#{cache_part} $#{Float.round(c, 3)}"
+  end
+
+  defp format_turn_usage(%{input: i, output: o, cost: c}) do
+    "↑#{format_tokens(i)} ↓#{format_tokens(o)} $#{Float.round(c, 3)}"
+  end
 
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"

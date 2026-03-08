@@ -12,6 +12,15 @@ defmodule Minga.Agent.Message do
   @typedoc "System message severity level."
   @type system_level :: :info | :error
 
+  @typedoc "Per-turn token usage data."
+  @type turn_usage :: %{
+          input: non_neg_integer(),
+          output: non_neg_integer(),
+          cache_read: non_neg_integer(),
+          cache_write: non_neg_integer(),
+          cost: float()
+        }
+
   @typedoc "A single conversation message."
   @type t ::
           {:user, String.t()}
@@ -19,6 +28,7 @@ defmodule Minga.Agent.Message do
           | {:thinking, String.t(), boolean()}
           | {:tool_call, tool_call()}
           | {:system, String.t(), system_level()}
+          | {:usage, turn_usage()}
 
   @typedoc "Tool call details."
   @type tool_call :: %{
@@ -56,6 +66,11 @@ defmodule Minga.Agent.Message do
   def text({:thinking, t, _collapsed}), do: t
   def text({:tool_call, tc}), do: "#{tc.name}: #{tc.result}"
   def text({:system, t, _level}), do: t
+  def text({:usage, u}), do: "↑#{u.input} ↓#{u.output} $#{u.cost}"
+
+  @doc "Creates a per-turn usage message."
+  @spec usage(turn_usage()) :: t()
+  def usage(data) when is_map(data), do: {:usage, data}
 
   @doc "Creates a new tool call message."
   @spec tool_call(String.t(), String.t(), map()) :: t()
