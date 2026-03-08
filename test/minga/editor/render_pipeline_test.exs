@@ -466,5 +466,44 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert window.dirty_lines == %{}
       assert window.last_buf_version >= 0
     end
+
+    test "second render without edits reuses cached draws (clean lines)" do
+      # A 10-line buffer in a viewport that shows all lines
+      lines = Enum.map_join(1..10, "\n", &"line #{&1}")
+      state = base_state(content: lines, rows: 15, cols: 80)
+
+      # Frame 1: full render
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      [{win_id, window}] = Map.to_list(state.windows.map)
+      # Verify caches were populated
+      assert map_size(window.cached_content) > 0
+      assert map_size(window.cached_gutter) > 0
+
+      # Frame 2: no edits, no scroll, no cursor change
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      window2 = Map.get(state.windows.map, win_id)
+      # Caches should still be populated and window clean
+      assert map_size(window2.cached_content) > 0
+      assert window2.dirty_lines == %{}
+    end
+
+    test "window caches contain per-line gutter and content draws" do
+      state = base_state(content: "aaa\nbbb\nccc")
+
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      [{_win_id, window}] = Map.to_list(state.windows.map)
+
+      # Should have cache entries for lines 0, 1, 2
+      assert Map.has_key?(window.cached_content, 0)
+      assert Map.has_key?(window.cached_content, 1)
+      assert Map.has_key?(window.cached_content, 2)
+      assert Map.has_key?(window.cached_gutter, 0)
+    end
   end
 end

@@ -36,6 +36,17 @@ defmodule Minga.Editor.Window do
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
 
+  @typedoc """
+  Context fingerprint: a term derived from the render context that
+  captures all per-frame inputs affecting every visible line. When
+  the fingerprint changes between frames, all lines are re-rendered.
+
+  Built from: visual selection, search matches, highlight version,
+  diagnostic signs, git signs, viewport left scroll, active status,
+  and theme color structs.
+  """
+  @type context_fingerprint :: term()
+
   @type t :: %__MODULE__{
           id: id(),
           buffer: pid(),
@@ -48,7 +59,8 @@ defmodule Minga.Editor.Window do
           last_gutter_w: integer(),
           last_line_count: integer(),
           last_cursor_line: integer(),
-          last_buf_version: integer()
+          last_buf_version: integer(),
+          last_context_fingerprint: context_fingerprint()
         }
 
   @enforce_keys [:id, :buffer, :viewport]
@@ -64,7 +76,8 @@ defmodule Minga.Editor.Window do
     last_gutter_w: -1,
     last_line_count: -1,
     last_cursor_line: -1,
-    last_buf_version: -1
+    last_buf_version: -1,
+    last_context_fingerprint: nil
   ]
 
   @doc "Creates a new window with the given id, buffer, and viewport dimensions."
@@ -97,7 +110,9 @@ defmodule Minga.Editor.Window do
   @spec resize(t(), pos_integer(), pos_integer()) :: t()
   def resize(%__MODULE__{} = window, rows, cols)
       when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
-    %{window | viewport: Viewport.new(rows, cols), dirty_lines: :all}
+    window
+    |> invalidate()
+    |> Map.put(:viewport, Viewport.new(rows, cols))
   end
 
   # ── Dirty-line tracking ───────────────────────────────────────────────────
@@ -121,10 +136,28 @@ defmodule Minga.Editor.Window do
     %{window | dirty_lines: new_dirty}
   end
 
-  @doc "Marks all lines dirty (full redraw needed)."
+  @doc """
+  Marks all lines dirty (full redraw needed).
+
+  Clears all caches and resets tracking fields to sentinels so the next
+  render pass starts from scratch. Use this when the window's buffer
+  changes, on resize, or any other event that makes all cached draws
+  invalid.
+  """
   @spec invalidate(t()) :: t()
   def invalidate(%__MODULE__{} = window) do
-    %{window | dirty_lines: :all}
+    %{
+      window
+      | dirty_lines: :all,
+        cached_gutter: %{},
+        cached_content: %{},
+        last_viewport_top: -1,
+        last_gutter_w: -1,
+        last_line_count: -1,
+        last_cursor_line: -1,
+        last_buf_version: -1,
+        last_context_fingerprint: nil
+    }
   end
 
   @doc """
@@ -141,8 +174,12 @@ defmodule Minga.Editor.Window do
   and returns the window with `dirty_lines: :all` if anything that
   requires a full redraw has changed.
 
-  Checked triggers: viewport scroll position, gutter width, total line
-  count, and whether the cache is empty (first frame).
+  Structural triggers (checked here): viewport scroll, gutter width,
+  line count, buffer version, first frame (sentinel values).
+
+  Context triggers (checked separately via `detect_context_change/2`):
+  visual selection, search matches, syntax highlights, diagnostic signs,
+  git signs, viewport horizontal scroll, active status, theme colors.
   """
   @spec detect_invalidation(
           t(),
@@ -152,8 +189,6 @@ defmodule Minga.Editor.Window do
           non_neg_integer()
         ) :: t()
   def detect_invalidation(%__MODULE__{} = window, viewport_top, gutter_w, line_count, buf_version) do
-    # Sentinel value -1 means no prior render has completed. Force full
-    # redraw on the very first frame regardless of parameter values.
     first_frame = window.last_buf_version < 0
 
     needs_full =
@@ -164,14 +199,25 @@ defmodule Minga.Editor.Window do
 
     window = if needs_full, do: %{window | dirty_lines: :all}, else: window
 
-    # Buffer version change means content was edited. We don't know exactly
-    # which lines changed here (that info lives in EditDelta, which is
-    # consumed by HighlightSync). Conservative: mark all dirty when
-    # version changes, since the edit could be multi-line (paste, undo).
-    #
-    # Future optimization: add a non-destructive `peek_edits` API to
-    # BufferServer that returns delta line ranges without consuming them.
     if window.last_buf_version != buf_version and window.last_buf_version >= 0 do
+      %{window | dirty_lines: :all}
+    else
+      window
+    end
+  end
+
+  @doc """
+  Compares the current render context fingerprint against the last frame's.
+
+  If the fingerprint changed, marks all lines dirty. This catches changes
+  to visual selection, search matches, syntax highlights, diagnostic signs,
+  git signs, horizontal scroll, active/inactive status, and theme colors,
+  all of which affect every visible line's draw output.
+  """
+  @spec detect_context_change(t(), context_fingerprint()) :: t()
+  def detect_context_change(%__MODULE__{} = window, fingerprint) do
+    if window.last_context_fingerprint != nil and
+         window.last_context_fingerprint != fingerprint do
       %{window | dirty_lines: :all}
     else
       window
@@ -202,7 +248,9 @@ defmodule Minga.Editor.Window do
   Snapshots tracking fields after a successful render pass.
 
   Clears the dirty set and records the current frame's parameters so the
-  next frame can detect what changed.
+  next frame can detect what changed. The context fingerprint captures
+  all per-frame render context inputs (visual selection, search matches,
+  syntax highlights, signs, etc.) so context changes trigger full redraws.
   """
   @spec snapshot_after_render(
           t(),
@@ -210,7 +258,8 @@ defmodule Minga.Editor.Window do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          context_fingerprint()
         ) :: t()
   def snapshot_after_render(
         %__MODULE__{} = window,
@@ -218,7 +267,8 @@ defmodule Minga.Editor.Window do
         gutter_w,
         line_count,
         cursor_line,
-        buf_version
+        buf_version,
+        context_fingerprint
       ) do
     %{
       window
@@ -227,7 +277,8 @@ defmodule Minga.Editor.Window do
         last_gutter_w: gutter_w,
         last_line_count: line_count,
         last_cursor_line: cursor_line,
-        last_buf_version: buf_version
+        last_buf_version: buf_version,
+        last_context_fingerprint: context_fingerprint
     }
   end
 

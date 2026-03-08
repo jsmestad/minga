@@ -263,25 +263,22 @@ defmodule Minga.Editor.RenderPipeline do
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────
 
   @doc """
-  Determines what needs redrawing (Stage 1).
+  Invalidation stage (Stage 1). Currently a pass-through.
 
-  Checks for global invalidation triggers that affect all windows:
-  visual selection active, search mode active, or mode transitions that
-  change how content is highlighted. When a global trigger fires, all
-  windows are marked `:all` dirty.
+  All invalidation is handled by two mechanisms downstream:
 
-  Per-window invalidation (scroll, gutter width, buffer version) is
-  handled in the Scroll stage where the data is available.
+  * **Structural invalidation** in `scroll_windows/2`: viewport scroll,
+    gutter width, line count, buffer version changes detected via
+    `Window.detect_invalidation/5`.
+
+  * **Context invalidation** in `build_window_content/2`: visual
+    selection, search matches, syntax highlights, diagnostic/git signs,
+    horizontal scroll, active status, and theme colors detected via
+    `Window.detect_context_change/2` using a fingerprint of the
+    render context.
   """
   @spec invalidate(state()) :: state()
   def invalidate(state) do
-    # Global triggers that require full redraw of all windows:
-    # - Visual mode is active (selection highlighting affects all visible lines)
-    # - Search mode with active matches
-    # - These are checked here because they can't be detected per-window
-    #
-    # Note: most invalidation is per-window and handled in scroll_windows.
-    # This stage only catches cross-window global triggers.
     state
   end
 
@@ -438,8 +435,10 @@ defmodule Minga.Editor.RenderPipeline do
     else
       case line_number_style do
         style when style in [:relative, :hybrid] ->
-          # Every visible line number changes
-          Window.invalidate(window)
+          # Every visible line number changes. Use mark_dirty (not
+          # invalidate) because the content draws are still valid;
+          # only gutter numbers change.
+          Window.mark_dirty(window, :all)
 
         _ ->
           # Only the old and new cursor lines need gutter + cursor highlight update
@@ -511,7 +510,13 @@ defmodule Minga.Editor.RenderPipeline do
         is_active: is_active
       })
 
-    # Render lines
+    # Compute context fingerprint and check for context changes.
+    # If any context input (visual selection, search, highlights, signs,
+    # horizontal scroll, active status) changed, all lines are dirty.
+    ctx_fp = context_fingerprint(render_ctx, is_active)
+    window = Window.detect_context_change(window, ctx_fp)
+
+    # Render lines with dirty-aware loop
     line_opts = %{
       first_line: first_line,
       cursor_line: cursor_line,
@@ -520,12 +525,15 @@ defmodule Minga.Editor.RenderPipeline do
       gutter_w: gutter_w,
       first_byte_off: snapshot.first_line_byte_offset,
       row_off: row_off,
-      col_off: col_off
+      col_off: col_off,
+      window: window
     }
 
-    {gutter_draws, line_draws, rows_used} =
+    {gutter_draws, line_draws, rows_used, window} =
       if wrap_on do
-        render_lines_wrapped(lines, visible_rows, line_opts)
+        # Wrapped mode: always full render (wrap maps change unpredictably)
+        {g, l, r} = render_lines_wrapped(lines, visible_rows, line_opts)
+        {g, l, r, window}
       else
         render_lines_nowrap(lines, line_opts)
       end
@@ -542,16 +550,7 @@ defmodule Minga.Editor.RenderPipeline do
         []
       end
 
-    # Dim inactive window lines (Doom Emacs style)
-    # Modeline dimming is handled in Chrome stage
-    {gutter_draws, line_draws, tilde_draws} =
-      if is_active do
-        {gutter_draws, line_draws, tilde_draws}
-      else
-        {gutter_draws, line_draws, tilde_draws}
-      end
-
-    # Build WindowFrame (absolute coords, rect at {0,0} so to_commands doesn't double-offset)
+    # Build WindowFrame
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
       gutter: DisplayList.draws_to_layer(gutter_draws),
@@ -574,8 +573,7 @@ defmodule Minga.Editor.RenderPipeline do
         nil
       end
 
-    # Update the window's render cache and snapshot tracking fields.
-    # Per-line caching uses the indexed results from render_lines_nowrap_indexed.
+    # Snapshot tracking fields and prune cache to visible range
     last_visible = first_line + length(lines) - 1
 
     updated_window =
@@ -585,7 +583,8 @@ defmodule Minga.Editor.RenderPipeline do
         gutter_w,
         snapshot.line_count,
         cursor_line,
-        scroll.buf_version
+        scroll.buf_version,
+        ctx_fp
       )
       |> Window.prune_cache(first_line, last_visible)
 
@@ -593,6 +592,32 @@ defmodule Minga.Editor.RenderPipeline do
     state = %{state | windows: %{state.windows | map: new_map}}
 
     {win_frame, cursor_info, state}
+  end
+
+  # Builds a fingerprint from the render context that captures all inputs
+  # affecting every visible line. Used to detect context changes between
+  # frames (visual selection, search, highlights, signs, scroll, etc.).
+  @spec context_fingerprint(Context.t(), boolean()) :: Window.context_fingerprint()
+  defp context_fingerprint(%Context{} = ctx, is_active) do
+    # Highlight identity: use the version counter which increments each
+    # time tree-sitter sends new spans. Comparing the full spans tuple
+    # would be expensive; the version is a cheap proxy.
+    hl_id =
+      case ctx.highlight do
+        nil -> nil
+        hl -> hl.version
+      end
+
+    {
+      ctx.visual_selection,
+      ctx.search_matches,
+      hl_id,
+      ctx.diagnostic_signs,
+      ctx.git_signs,
+      ctx.viewport.left,
+      is_active,
+      ctx.confirm_match
+    }
   end
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
@@ -991,11 +1016,12 @@ defmodule Minga.Editor.RenderPipeline do
            gutter_w: non_neg_integer(),
            first_byte_off: non_neg_integer(),
            row_off: non_neg_integer(),
-           col_off: non_neg_integer()
+           col_off: non_neg_integer(),
+           window: Window.t()
          }
 
   @spec render_lines_nowrap([String.t()], line_render_opts()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer()}
+          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
   defp render_lines_nowrap(lines, opts) do
     %{
       first_line: first_line,
@@ -1005,40 +1031,53 @@ defmodule Minga.Editor.RenderPipeline do
       gutter_w: gutter_w,
       first_byte_off: first_byte_off,
       row_off: row_off,
-      col_off: col_off
+      col_off: col_off,
+      window: window
     } = opts
 
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+    max_rows = length(lines)
 
-    {gutters, contents_rev, _byte_off} =
+    {gutters, contents_rev, _byte_off, window} =
       lines
       |> Enum.with_index()
       |> Enum.reduce(
-        {[], [], first_byte_off},
-        fn {line_text, screen_row}, {g, c, byte_off} ->
-          {g_cmds, c_cmds, _rows} =
-            BufferLine.render(%{
-              line_text: line_text,
-              buf_line: first_line + screen_row,
-              cursor_line: cursor_line,
-              byte_offset: byte_off,
-              screen_row: screen_row,
-              ctx: ctx,
-              ln_style: ln_style,
-              gutter_w: gutter_w,
-              sign_w: sign_w,
-              wrap_entry: nil,
-              max_rows: length(lines),
-              row_offset: row_off,
-              col_offset: col_off
-            })
-
+        {[], [], first_byte_off, window},
+        fn {line_text, screen_row}, {g, c, byte_off, win} ->
+          buf_line = first_line + screen_row
           next_byte_off = byte_off + byte_size(line_text) + 1
-          {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off}
+
+          if Window.dirty?(win, buf_line) do
+            # Dirty line: render fresh, cache the result
+            {g_cmds, c_cmds, _rows} =
+              BufferLine.render(%{
+                line_text: line_text,
+                buf_line: buf_line,
+                cursor_line: cursor_line,
+                byte_offset: byte_off,
+                screen_row: screen_row,
+                ctx: ctx,
+                ln_style: ln_style,
+                gutter_w: gutter_w,
+                sign_w: sign_w,
+                wrap_entry: nil,
+                max_rows: max_rows,
+                row_offset: row_off,
+                col_offset: col_off
+              })
+
+            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
+            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
+          else
+            # Clean line: reuse cached draws, skip rendering
+            g_cmds = Map.get(win.cached_gutter, buf_line, [])
+            c_cmds = Map.get(win.cached_content, buf_line, [])
+            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
+          end
         end
       )
 
-    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines)}
+    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines), window}
   end
 
   @spec render_lines_wrapped([String.t()], pos_integer(), line_render_opts()) ::

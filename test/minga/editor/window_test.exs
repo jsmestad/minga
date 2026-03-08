@@ -52,12 +52,18 @@ defmodule Minga.Editor.WindowTest do
       assert resized.id == 1
     end
 
-    test "marks all lines dirty" do
+    test "marks all lines dirty and clears caches" do
       window = make_window()
-      # Simulate a previous render clearing the dirty set
-      window = %{window | dirty_lines: %{}}
+      # Simulate a previous render with populated caches
+      window = Window.cache_line(window, 0, [{0, 0, "1", []}], [{0, 4, "hi", []}])
+      window = %{window | dirty_lines: %{}, last_buf_version: 5, last_context_fingerprint: :fp}
       resized = Window.resize(window, 12, 40)
+
       assert resized.dirty_lines == :all
+      assert resized.cached_gutter == %{}
+      assert resized.cached_content == %{}
+      assert resized.last_buf_version == -1
+      assert resized.last_context_fingerprint == nil
     end
   end
 
@@ -96,10 +102,28 @@ defmodule Minga.Editor.WindowTest do
   end
 
   describe "invalidate/1" do
-    test "sets dirty_lines to :all" do
-      window = %{make_window() | dirty_lines: Map.new([1, 2], &{&1, true})}
+    test "sets dirty_lines to :all and clears all render state" do
+      window = make_window()
+      window = Window.cache_line(window, 0, [{0, 0, "1", []}], [{0, 4, "hi", []}])
+
+      window = %{
+        window
+        | dirty_lines: Map.new([1, 2], &{&1, true}),
+          last_buf_version: 5,
+          last_context_fingerprint: :fp
+      }
+
       window = Window.invalidate(window)
+
       assert window.dirty_lines == :all
+      assert window.cached_gutter == %{}
+      assert window.cached_content == %{}
+      assert window.last_viewport_top == -1
+      assert window.last_gutter_w == -1
+      assert window.last_line_count == -1
+      assert window.last_cursor_line == -1
+      assert window.last_buf_version == -1
+      assert window.last_context_fingerprint == nil
     end
   end
 
@@ -137,7 +161,8 @@ defmodule Minga.Editor.WindowTest do
           _gutter_w = 4,
           _line_count = 100,
           _cursor_line = 10,
-          _buf_version = 5
+          _buf_version = 5,
+          _fingerprint = :test_fp
         )
 
       %{window: window}
@@ -217,24 +242,62 @@ defmodule Minga.Editor.WindowTest do
     end
   end
 
-  describe "snapshot_after_render/6" do
+  describe "snapshot_after_render/7" do
     test "clears the dirty set" do
       window = Window.invalidate(make_window())
       assert window.dirty_lines == :all
 
-      window = Window.snapshot_after_render(window, 0, 4, 100, 10, 5)
+      window = Window.snapshot_after_render(window, 0, 4, 100, 10, 5, :test_fp)
       assert window.dirty_lines == %{}
     end
 
     test "updates all tracking fields" do
       window = make_window()
-      window = Window.snapshot_after_render(window, 10, 5, 200, 25, 42)
+      window = Window.snapshot_after_render(window, 10, 5, 200, 25, 42, :test_fp)
 
       assert window.last_viewport_top == 10
       assert window.last_gutter_w == 5
       assert window.last_line_count == 200
       assert window.last_cursor_line == 25
       assert window.last_buf_version == 42
+    end
+  end
+
+  describe "detect_context_change/2" do
+    test "marks all dirty when fingerprint changes" do
+      window = make_window()
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :fp_a)
+      assert window.dirty_lines == %{}
+
+      window = Window.detect_context_change(window, :fp_b)
+      assert window.dirty_lines == :all
+    end
+
+    test "no-op when fingerprint is the same" do
+      window = make_window()
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :fp_a)
+      assert window.dirty_lines == %{}
+
+      window = Window.detect_context_change(window, :fp_a)
+      assert window.dirty_lines == %{}
+    end
+
+    test "no-op when last fingerprint is nil (first frame)" do
+      window = make_window()
+      assert window.last_context_fingerprint == nil
+
+      window = Window.detect_context_change(window, :fp_a)
+      assert window.dirty_lines == %{}
+    end
+
+    test "detects changes in complex fingerprint tuples" do
+      fp1 = {:visual, {:char, {0, 0}, {5, 10}}, [], nil, %{}, %{}, 0, true}
+      fp2 = {:visual, nil, [], nil, %{}, %{}, 0, true}
+
+      window = make_window()
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, fp1)
+      window = Window.detect_context_change(window, fp2)
+      assert window.dirty_lines == :all
     end
   end
 
@@ -298,7 +361,7 @@ defmodule Minga.Editor.WindowTest do
         end)
 
       # Snapshot after render
-      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1)
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
       assert window.dirty_lines == %{}
 
       # Frame 2: nothing changed → nothing dirty
@@ -317,7 +380,7 @@ defmodule Minga.Editor.WindowTest do
           Window.cache_line(w, line, [{line, 0, "#{line}", []}], [{line, 4, "text", []}])
         end)
 
-      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1)
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
 
       # User types a character on line 5 → buffer version bumps to 2
       # The pipeline detects version change and marks :all dirty
@@ -326,13 +389,13 @@ defmodule Minga.Editor.WindowTest do
       assert window.dirty_lines == :all
 
       # After rendering, snapshot with new version
-      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 2)
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 2, :test_fp)
       assert window.dirty_lines == %{}
     end
 
     test "scroll cycle: viewport_top changes → full invalidation" do
       window = make_window()
-      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1)
+      window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
 
       # Scroll down
       window = Window.detect_invalidation(window, 10, 4, 100, 1)

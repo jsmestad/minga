@@ -207,7 +207,13 @@ defmodule Minga.Editor.State do
       ) do
     case Map.fetch(windows, id) do
       {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
-        %{state | windows: %{ws | map: Map.put(windows, id, %{window | buffer: buffers.active})}}
+        # Buffer changed: invalidate all caches. The new buffer has
+        # different content, and cached draws from the old buffer are
+        # completely wrong. Also reset tracking fields so
+        # detect_invalidation forces a full redraw on the next frame.
+        window = %{Window.invalidate(window) | buffer: buffers.active}
+
+        %{state | windows: %{ws | map: Map.put(windows, id, window)}}
 
       _ ->
         state
