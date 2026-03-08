@@ -6,6 +6,10 @@ defmodule Minga.Editor.Renderer do
   `RenderPipeline`, which decomposes rendering into seven named stages:
   Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit.
 
+  `render/1` returns the updated editor state with per-window render
+  caches populated. Callers must use the returned state so that
+  dirty-line tracking works across frames.
+
   Sub-modules handle focused rendering concerns:
 
   * `Renderer.Gutter`          — line number rendering
@@ -42,8 +46,17 @@ defmodule Minga.Editor.Renderer do
              {non_neg_integer(), non_neg_integer()}}
           | {:line, non_neg_integer(), non_neg_integer()}
 
-  @doc "Renders the no-buffer splash screen."
-  @spec render(state()) :: :ok
+  @doc """
+  Renders the current editor state and returns updated state.
+
+  The returned state contains per-window render caches that enable
+  dirty-line tracking on subsequent frames. Callers must use the
+  returned state for the optimization to work.
+
+  For the no-buffer splash screen, returns state unchanged (no windows
+  to cache).
+  """
+  @spec render(state()) :: state()
   def render(%{buffers: %{active: nil}} = state) do
     splash_draws = [
       DisplayList.draw(0, 0, "Minga v#{Minga.version()} — No file open"),
@@ -58,6 +71,7 @@ defmodule Minga.Editor.Renderer do
 
     commands = DisplayList.to_commands(frame)
     PortManager.send_commands(state.port_manager, commands)
+    state
   end
 
   def render(state) do

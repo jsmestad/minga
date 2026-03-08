@@ -339,6 +339,9 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec resize_windows_to_layout(state()) :: state()
   defp resize_windows_to_layout(state) do
+    # Force layout recompute: the window tree just changed (split/close)
+    # and any cached layout is stale.
+    state = Layout.put(state)
     layout = Layout.get(state)
 
     Enum.reduce(layout.window_layouts, state, fn {id, wl}, acc ->

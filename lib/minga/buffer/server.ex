@@ -277,18 +277,7 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:append, text})
   end
 
-  @typedoc "All data needed to render a single frame, fetched in one GenServer call."
-  @type render_snapshot :: %{
-          cursor: Document.position(),
-          line_count: pos_integer(),
-          lines: [String.t()],
-          file_path: String.t() | nil,
-          filetype: atom(),
-          buffer_type: BufState.buffer_type(),
-          dirty: boolean(),
-          name: String.t() | nil,
-          read_only: boolean()
-        }
+  alias Minga.Buffer.RenderSnapshot
 
   @doc """
   Returns all data needed to render a single frame in one GenServer call.
@@ -299,7 +288,7 @@ defmodule Minga.Buffer.Server do
   dirty?) with a single round-trip.
   """
   @spec render_snapshot(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
-          render_snapshot()
+          RenderSnapshot.t()
   def render_snapshot(server, first_line, count)
       when is_integer(first_line) and first_line >= 0 and is_integer(count) and count >= 0 do
     GenServer.call(server, {:render_snapshot, first_line, count})
@@ -858,7 +847,7 @@ defmodule Minga.Buffer.Server do
     # instead of iterating all lines before first_line.
     first_line_byte_offset = Document.position_to_offset(buf, {first_line, 0})
 
-    snapshot = %{
+    snapshot = %RenderSnapshot{
       cursor: Document.cursor(buf),
       line_count: Document.line_count(buf),
       lines: Document.lines(buf, first_line, count),
@@ -868,7 +857,8 @@ defmodule Minga.Buffer.Server do
       dirty: state.dirty,
       name: state.name,
       read_only: state.read_only,
-      first_line_byte_offset: first_line_byte_offset
+      first_line_byte_offset: first_line_byte_offset,
+      version: state.version
     }
 
     {:reply, snapshot, state}

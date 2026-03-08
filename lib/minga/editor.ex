@@ -217,7 +217,7 @@ defmodule Minga.Editor do
         new_state = lsp_buffer_opened(new_state, pid)
         new_state = git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
-        Renderer.render(new_state)
+        new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -253,13 +253,13 @@ defmodule Minga.Editor do
           state
       end
 
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:reply, result, new_state}
   end
 
   def handle_call({:api_execute_command, cmd}, _from, state) do
     new_state = dispatch_command(state, cmd)
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:reply, :ok, new_state}
   end
 
@@ -275,7 +275,7 @@ defmodule Minga.Editor do
   end
 
   def handle_cast(:render, state) do
-    Renderer.render(state)
+    state = Renderer.render(state)
     {:noreply, state}
   end
 
@@ -285,7 +285,7 @@ defmodule Minga.Editor do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = fetch_capabilities(state.port_manager)
     new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
     {:noreply, new_state}
@@ -309,7 +309,7 @@ defmodule Minga.Editor do
     # rectangles from the new viewport dimensions.
     new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
 
@@ -327,19 +327,19 @@ defmodule Minga.Editor do
   def handle_info({:file_changed_on_disk, path}, state) do
     new_state = handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:mouse_event, row, col, button, _mods, event_type}}, state) do
     new_state = Mouse.handle(state, row, col, button, event_type)
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
 
   def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
     new_state = put_in(state.whichkey.show, true)
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
 
@@ -401,7 +401,7 @@ defmodule Minga.Editor do
         new_state
       end
 
-    Renderer.render(new_state)
+    new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
 
@@ -434,13 +434,13 @@ defmodule Minga.Editor do
       {:definition, pending} ->
         new_state = put_in(state.lsp.pending, pending)
         new_state = LspActions.handle_definition_response(new_state, result)
-        Renderer.render(new_state)
+        new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
       {:hover, pending} ->
         new_state = put_in(state.lsp.pending, pending)
         new_state = LspActions.handle_hover_response(new_state, result)
-        Renderer.render(new_state)
+        new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
       {nil, _} ->
@@ -457,7 +457,7 @@ defmodule Minga.Editor do
 
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
-    Renderer.render(state)
+    state = Renderer.render(state)
     {:noreply, %{state | render_timer: nil}}
   end
 
@@ -484,7 +484,7 @@ defmodule Minga.Editor do
           update_agent(state, &AgentState.stop_spinner_timer/1)
       end
 
-    Renderer.render(state)
+    state = Renderer.render(state)
     {:noreply, state}
   end
 
@@ -510,7 +510,7 @@ defmodule Minga.Editor do
   def handle_info({:agent_event, {:error, message}}, state) do
     state = update_agent(state, &AgentState.set_error(&1, message))
     state = log_message(state, "Agent error: #{message}")
-    Renderer.render(state)
+    state = Renderer.render(state)
     {:noreply, state}
   end
 
@@ -591,7 +591,7 @@ defmodule Minga.Editor do
             %Completion{} -> %{new_state | completion: completion}
           end
 
-        Renderer.render(new_state)
+        new_state = Renderer.render(new_state)
         {:noreply, new_state}
     end
   end
@@ -1384,7 +1384,6 @@ defmodule Minga.Editor do
   @spec do_render(state()) :: state()
   def do_render(state) do
     Renderer.render(state)
-    state
   end
 
   @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()

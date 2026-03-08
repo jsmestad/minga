@@ -467,6 +467,24 @@ defmodule Minga.Buffer.ServerTest do
       assert snapshot.buffer_type == :nofile
     end
 
+    test "render_snapshot is a RenderSnapshot struct" do
+      {:ok, pid} = Server.start_link(content: "hello\nworld")
+      snapshot = Server.render_snapshot(pid, 0, 10)
+      assert %Minga.Buffer.RenderSnapshot{} = snapshot
+    end
+
+    test "render_snapshot includes version that increments on edit" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      snap1 = Server.render_snapshot(pid, 0, 10)
+      v1 = snap1.version
+
+      Server.insert_char(pid, "x")
+      snap2 = Server.render_snapshot(pid, 0, 10)
+      v2 = snap2.version
+
+      assert v2 > v1
+    end
+
     test "append bypasses read_only on nofile buffer" do
       {:ok, pid} = Server.start_link(buffer_type: :nofile, buffer_name: "*Test*", content: "")
       assert Server.read_only?(pid)

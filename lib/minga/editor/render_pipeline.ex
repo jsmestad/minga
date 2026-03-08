@@ -113,7 +113,8 @@ defmodule Minga.Editor.RenderPipeline do
       :has_sign_column,
       :preview_matches,
       :line_number_style,
-      :wrap_on
+      :wrap_on,
+      :buf_version
     ]
 
     defstruct [
@@ -133,7 +134,8 @@ defmodule Minga.Editor.RenderPipeline do
       :has_sign_column,
       :preview_matches,
       :line_number_style,
-      :wrap_on
+      :wrap_on,
+      :buf_version
     ]
 
     @type t :: %__MODULE__{
@@ -153,7 +155,8 @@ defmodule Minga.Editor.RenderPipeline do
             has_sign_column: boolean(),
             preview_matches: list(),
             line_number_style: atom(),
-            wrap_on: boolean()
+            wrap_on: boolean(),
+            buf_version: non_neg_integer()
           }
   end
 
@@ -195,16 +198,17 @@ defmodule Minga.Editor.RenderPipeline do
   @doc """
   Runs the full render pipeline for the current editor state.
 
-  Selects the window or agentic path based on `state.agentic.active`,
-  then executes all seven stages in order.
+  Returns updated state with per-window render caches populated.
+  The caller must use the returned state for dirty-line tracking
+  to work across frames.
   """
-  @spec run(state()) :: :ok
+  @spec run(state()) :: state()
   def run(state) do
     # Pre-pipeline: sync cursor
     state = EditorState.sync_active_window_cursor(state)
 
-    # Stage 1: Invalidation
-    inv = timed(:invalidation, fn -> invalidate(state) end)
+    # Stage 1: Invalidation (global triggers: visual selection, search, theme)
+    state = timed(:invalidation, fn -> invalidate(state) end)
 
     # Stage 2: Layout
     state = timed(:layout, fn -> compute_layout(state) end)
@@ -213,19 +217,19 @@ defmodule Minga.Editor.RenderPipeline do
     debug_layout(state, layout)
 
     if state.agentic.active do
-      run_agentic(state, layout, inv)
+      run_agentic(state, layout)
     else
-      run_windows(state, layout, inv)
+      run_windows(state, layout)
     end
   end
 
-  @spec run_windows(state(), Layout.t(), Invalidation.t()) :: :ok
-  defp run_windows(state, layout, _inv) do
-    # Stage 3: Scroll
-    scrolls = timed(:scroll, fn -> scroll_windows(state, layout) end)
+  @spec run_windows(state(), Layout.t()) :: state()
+  defp run_windows(state, layout) do
+    # Stage 3: Scroll (also runs per-window invalidation detection)
+    {scrolls, state} = timed(:scroll, fn -> scroll_windows(state, layout) end)
 
-    # Stage 4: Content
-    {window_frames, cursor_info} =
+    # Stage 4: Content (skips clean lines, updates window caches)
+    {window_frames, cursor_info, state} =
       timed(:content, fn -> build_content(state, scrolls) end)
 
     # Stage 5: Chrome
@@ -237,10 +241,12 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Stage 7: Emit
     timed(:emit, fn -> emit(frame, state) end)
+
+    state
   end
 
-  @spec run_agentic(state(), Layout.t(), Invalidation.t()) :: :ok
-  defp run_agentic(state, layout, _inv) do
+  @spec run_agentic(state(), Layout.t()) :: state()
+  defp run_agentic(state, layout) do
     # Agentic path: Content is the ViewRenderer, Chrome is minimal
     panel_draws = timed(:content, fn -> ViewRenderer.render(state) end)
 
@@ -250,19 +256,33 @@ defmodule Minga.Editor.RenderPipeline do
       timed(:compose, fn -> compose_agentic(panel_draws, chrome, state) end)
 
     timed(:emit, fn -> emit(frame, state) end)
+
+    state
   end
 
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────
 
   @doc """
-  Determines what needs redrawing.
+  Determines what needs redrawing (Stage 1).
 
-  Currently a stub that always requests a full redraw. Future work (#164)
-  will compute dirty windows and lines by comparing editor state deltas.
+  Checks for global invalidation triggers that affect all windows:
+  visual selection active, search mode active, or mode transitions that
+  change how content is highlighted. When a global trigger fires, all
+  windows are marked `:all` dirty.
+
+  Per-window invalidation (scroll, gutter width, buffer version) is
+  handled in the Scroll stage where the data is available.
   """
-  @spec invalidate(state(), Frame.t() | nil) :: Invalidation.t()
-  def invalidate(_state, _prev_frame \\ nil) do
-    %Invalidation{full_redraw: true}
+  @spec invalidate(state()) :: state()
+  def invalidate(state) do
+    # Global triggers that require full redraw of all windows:
+    # - Visual mode is active (selection highlighting affects all visible lines)
+    # - Search mode with active matches
+    # - These are checked here because they can't be detected per-window
+    #
+    # Note: most invalidation is per-window and handled in scroll_windows.
+    # This stage only catches cross-window global triggers.
+    state
   end
 
   # ── Stage 2: Layout ────────────────────────────────────────────────────────
@@ -285,20 +305,50 @@ defmodule Minga.Editor.RenderPipeline do
 
   For each window in the layout, reads the cursor position, computes
   the viewport scroll, fetches buffer lines, and determines gutter
-  dimensions. Returns a map from window ID to `WindowScroll` structs.
+  dimensions. Also runs per-window invalidation detection by comparing
+  current scroll position, gutter width, line count, and buffer version
+  against the window's tracking fields from the previous frame.
+
+  Returns `{scrolls, updated_state}` where `updated_state` has the
+  windows map updated with invalidation results.
   """
-  @spec scroll_windows(state(), Layout.t()) :: %{Window.id() => WindowScroll.t()}
+  @spec scroll_windows(state(), Layout.t()) :: {%{Window.id() => WindowScroll.t()}, state()}
   def scroll_windows(state, layout) do
     layout.window_layouts
-    |> Enum.reduce(%{}, fn {win_id, win_layout}, acc ->
-      window = Map.get(state.windows.map, win_id)
+    |> Enum.reduce({%{}, state}, fn {win_id, win_layout}, {acc, st} ->
+      window = Map.get(st.windows.map, win_id)
 
       if window == nil or window.buffer == nil do
-        acc
+        {acc, st}
       else
         is_active = win_id == state.windows.active
-        scroll = scroll_window(state, win_id, window, win_layout, is_active)
-        Map.put(acc, win_id, scroll)
+        scroll = scroll_window(st, win_id, window, win_layout, is_active)
+
+        # Detect per-window invalidation by comparing against last frame
+        updated_window =
+          Window.detect_invalidation(
+            window,
+            scroll.viewport.top,
+            scroll.gutter_w,
+            scroll.snapshot.line_count,
+            scroll.buf_version
+          )
+
+        # Also invalidate gutter when cursor line changed with relative numbering
+        updated_window =
+          detect_gutter_invalidation(
+            updated_window,
+            scroll.cursor_line,
+            scroll.line_number_style
+          )
+
+        # Store the invalidated window and update the scroll to reference it
+        scroll = %{scroll | window: updated_window}
+
+        new_map = Map.put(st.windows.map, win_id, updated_window)
+        st = %{st | windows: %{st.windows | map: new_map}}
+
+        {Map.put(acc, win_id, scroll), st}
       end
     end)
   end
@@ -369,8 +419,33 @@ defmodule Minga.Editor.RenderPipeline do
       has_sign_column: has_sign_column,
       preview_matches: preview_matches,
       line_number_style: line_number_style,
-      wrap_on: wrap_on
+      wrap_on: wrap_on,
+      buf_version: snapshot.version
     }
+  end
+
+  # When cursor line changes with relative or hybrid numbering, every
+  # gutter entry shows a different number. Mark all lines dirty for
+  # re-render. With absolute numbering, cursor movement doesn't affect
+  # gutter content so we only mark the old and new cursor lines.
+  @spec detect_gutter_invalidation(Window.t(), non_neg_integer(), atom()) :: Window.t()
+  defp detect_gutter_invalidation(window, cursor_line, line_number_style) do
+    old_cursor = window.last_cursor_line
+
+    if old_cursor == cursor_line or old_cursor < 0 do
+      # Cursor didn't move or first frame (already :all dirty)
+      window
+    else
+      case line_number_style do
+        style when style in [:relative, :hybrid] ->
+          # Every visible line number changes
+          Window.invalidate(window)
+
+        _ ->
+          # Only the old and new cursor lines need gutter + cursor highlight update
+          Window.mark_dirty(window, [old_cursor, cursor_line])
+      end
+    end
   end
 
   # ── Stage 4: Content ──────────────────────────────────────────────────────
@@ -383,18 +458,20 @@ defmodule Minga.Editor.RenderPipeline do
   cursor position for the active window.
   """
   @spec build_content(state(), %{Window.id() => WindowScroll.t()}) ::
-          {[WindowFrame.t()], {non_neg_integer(), non_neg_integer()} | nil}
+          {[WindowFrame.t()], {non_neg_integer(), non_neg_integer()} | nil, state()}
   def build_content(state, scrolls) do
-    Enum.reduce(scrolls, {[], nil}, fn {_win_id, scroll}, {frames, cursor_info} ->
-      {wf, ci} = build_window_content(state, scroll)
-      new_cursor = if scroll.is_active and ci != nil, do: ci, else: cursor_info
-      {[wf | frames], new_cursor}
-    end)
-    |> then(fn {frames, cursor} -> {Enum.reverse(frames), cursor} end)
+    {frames, cursor_info, state} =
+      Enum.reduce(scrolls, {[], nil, state}, fn {_win_id, scroll}, {frames, cursor_info, st} ->
+        {wf, ci, st} = build_window_content(st, scroll)
+        new_cursor = if scroll.is_active and ci != nil, do: ci, else: cursor_info
+        {[wf | frames], new_cursor, st}
+      end)
+
+    {Enum.reverse(frames), cursor_info, state}
   end
 
   @spec build_window_content(state(), WindowScroll.t()) ::
-          {WindowFrame.t(), {non_neg_integer(), non_neg_integer()} | nil}
+          {WindowFrame.t(), {non_neg_integer(), non_neg_integer()} | nil, state()}
   defp build_window_content(state, scroll) do
     %WindowScroll{
       win_layout: win_layout,
@@ -497,7 +574,25 @@ defmodule Minga.Editor.RenderPipeline do
         nil
       end
 
-    {win_frame, cursor_info}
+    # Update the window's render cache and snapshot tracking fields.
+    # Per-line caching uses the indexed results from render_lines_nowrap_indexed.
+    last_visible = first_line + length(lines) - 1
+
+    updated_window =
+      window
+      |> Window.snapshot_after_render(
+        viewport.top,
+        gutter_w,
+        snapshot.line_count,
+        cursor_line,
+        scroll.buf_version
+      )
+      |> Window.prune_cache(first_line, last_visible)
+
+    new_map = Map.put(state.windows.map, scroll.win_id, updated_window)
+    state = %{state | windows: %{state.windows | map: new_map}}
+
+    {win_frame, cursor_info, state}
   end
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
