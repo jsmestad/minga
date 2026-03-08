@@ -88,7 +88,7 @@ test/                         # Mirrors lib/ structure
 - **Always create a feature branch** before making changes. Use descriptive names: `feat/release-pipeline`, `fix/viewport-scroll`, `refactor/layout-compute`.
 - **Never switch branches if another agent session is active on a branch.** Multiple LLM agents may be working in this repo concurrently. If you see uncommitted changes or a branch that isn't yours, leave it alone. Create a new branch from `main` instead.
 - **Check your current branch** before starting work: `git branch --show-current`. If you're on `main`, create a branch. If you're on someone else's feature branch, switch to `main` and branch from there.
-- **Push your branch and open a PR** when the work is ready. CI must pass before merging.
+- **Push your branch and open a PR** when the work is ready. Always open the PR; don't just push and leave it. CI must pass before merging.
 
 ### Git Worktrees (trial)
 
