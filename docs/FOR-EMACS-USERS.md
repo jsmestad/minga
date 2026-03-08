@@ -21,6 +21,8 @@ The extensibility model you love transfers directly. Minga's runtime is the BEAM
 | `M-:` / `eval-expression` | `Code.eval_string` / eval prompt | ✅ |
 | `describe-function` / `describe-key` | `h/1`, `:sys.get_state`, runtime docs | ✅ |
 | `init.el` is real Elisp | `config.exs` is real Elixir | ✅ |
+| Major modes (filetype keymaps) | `SPC m` prefix scoped to filetype | Planned ([#215](https://github.com/jsmestad/minga/issues/215)) |
+| Minor modes (toggleable keymaps) | Keymap layers with activation predicates | Future ([#216](https://github.com/jsmestad/minga/issues/216)) |
 | MELPA packages | Hex packages + supervised extensions | Future |
 
 Every property that makes Emacs Emacs, Minga is building on the BEAM. The [Elixir as Elisp](EXTENSIBILITY.md) doc proves it point by point.
@@ -362,10 +364,37 @@ The single real trade-off: you reload a whole module, not a single function. In 
 | `dired` | File tree planned (#40) |
 | Decades of community wisdom | Brand new. You'd be early. |
 | Emacs Lisp (if you love Lisp) | Elixir. Optional LFE support planned (#3) for Lisp fans. |
+| Major modes (filetype keymaps) | Planned ([#215](https://github.com/jsmestad/minga/issues/215)). `SPC m` prefix scoped per filetype. |
+| Minor modes (toggleable keymaps) | Future ([#216](https://github.com/jsmestad/minga/issues/216)). See below for why this is less of a gap than it sounds. |
 
 Minga is not trying to replace Emacs today. `org-mode` alone is a reason to keep Emacs around.
 
 But for code editing, the thing you actually spend most of your time doing, Minga offers the same deep programmability with an architecture that eliminates the concurrency, isolation, and observability gaps you've been working around for years.
+
+---
+
+## "But what about minor modes?"
+
+If you're a Doom Emacs user, you rely on minor modes constantly. `lsp-mode` adds code action keybindings. `flycheck-mode` adds error navigation. `evil-surround` adds surround operators. Each minor mode contributes its own keybindings that activate when the mode is enabled and disappear when it's not. Minga doesn't have this yet. Here's why it's less of a gap than you'd expect.
+
+**Most of what minor modes do in Emacs, Minga handles differently.**
+
+In Emacs, minor modes exist because packages need a way to contribute keybindings without stomping on each other in a single global keymap. The minor mode system is the coordination mechanism. But Minga's architecture already solves the underlying problems:
+
+- **LSP keybindings** live under `SPC c` globally. They no-op gracefully if no language server is connected. No mode toggle needed; the command itself checks for an active server.
+- **Git keybindings** live under `SPC g` globally. Same pattern: the commands check for a git repo.
+- **Surround operations** are operators in operator-pending mode (`ds"`, `cs"'`, etc.), not a separate mode layer.
+- **Error navigation** (`]d`, `[d`) is always available. It just does nothing if there are no diagnostics.
+
+The Doom Emacs pattern of "always bind the key, let the command handle the empty case" works better in practice than toggling keybindings on and off. Users build muscle memory for `SPC c a` (code action) regardless of whether an LSP is active. The key always exists, the popup always shows it, and the command tells you if it can't do anything right now.
+
+**Where minor modes actually matter: extensions that ship keybindings.**
+
+The real gap shows up when third-party extensions want to contribute keybindings that should only exist while their feature is active. A debugger extension shouldn't pollute the global keymap with `SPC d` bindings when no debug session is running. An AI extension might want to add bindings only when an agent is active.
+
+This is a genuine need, but it's a future need. Minga's extension ecosystem is early. The keymap architecture (trie-based, centralized lookup, per-mode storage) is designed so that keymap layers can be added on top without restructuring anything. Mode handlers already go through `Keymap.Active` for all lookups; adding a layer stack is an internal change to that module, not a rewrite. See [#216](https://github.com/jsmestad/minga/issues/216) for the planned design.
+
+**The short version:** Minga doesn't need minor modes today because the use cases they solve in Emacs are handled by different patterns here (global bindings with graceful no-ops, filetype-scoped `SPC m` bindings, advice system). When extensions mature enough to need toggleable keymap layers, the architecture is ready for them.
 
 ---
 
