@@ -1,10 +1,12 @@
 defmodule Minga.Input.VimNavIntegrationTest do
   @moduledoc """
   Integration tests verifying full vim navigation works in non-file
-  buffers (file tree and agent panel) via the mode FSM delegation.
+  buffers (file tree and agent panel) via mode FSM delegation through
+  the keymap scope system.
 
-  Tests cover motions (j, k, gg, G), search, yank, and visual select
-  to confirm these buffers inherit the full vim vocabulary.
+  Tests cover motions (j, k, gg, G), count prefix, yank, insert mode
+  blocking, and tree-specific keys to confirm these buffers inherit the
+  full vim vocabulary while scope-specific bindings take priority.
   """
   use ExUnit.Case, async: true
 
@@ -13,10 +15,13 @@ defmodule Minga.Input.VimNavIntegrationTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.Viewport
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
-  alias Minga.Input.FileTree, as: FileTreeHandler
+  alias Minga.Input.Scoped
+  alias Minga.Mode
 
   defp make_tree_state(tmp_dir, file_count \\ 10) do
     if file_count > 0 do
@@ -31,22 +36,21 @@ defmodule Minga.Input.VimNavIntegrationTest do
     tree = FileTree.new(tmp_dir)
     buf = BufferSync.start_buffer(tree)
 
-    %{
+    %EditorState{
+      port_manager: self(),
+      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
       buffers: %{active: nil, list: [], recent: []},
       mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
+      mode_state: Mode.initial_state(),
       status_msg: nil,
-      key_buffer: [],
-      count: nil,
       marks: %{},
-      registers: %{},
       change_recorder: ChangeRecorder.new(),
       macro_recorder: MacroRecorder.new(),
-      agent: %{panel: %{visible: false}},
+      agent: %Minga.Editor.State.Agent{},
       completion: nil,
-      conflict: nil,
-      focus_stack: [FileTreeHandler, Minga.Input.ModeFSM],
+      keymap_scope: :file_tree,
+      focus_stack: [Scoped, Minga.Input.ModeFSM],
       reg: %Minga.Editor.State.Registers{}
     }
   end
@@ -57,7 +61,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
       entries = FileTree.visible_entries(state.file_tree.tree)
       max_idx = length(entries) - 1
 
-      {:handled, state} = FileTreeHandler.handle_key(state, ?G, 0)
+      {:handled, state} = Scoped.handle_key(state, ?G, 0)
       assert state.file_tree.tree.cursor == max_idx
     end
 
@@ -65,12 +69,12 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # First move to bottom
-      {:handled, state} = FileTreeHandler.handle_key(state, ?G, 0)
+      {:handled, state} = Scoped.handle_key(state, ?G, 0)
       assert state.file_tree.tree.cursor > 0
 
       # Then gg to top (g is pending_g, second g triggers)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
       assert state.file_tree.tree.cursor == 0
     end
   end
@@ -81,8 +85,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
       assert state.file_tree.tree.cursor == 0
 
       # Type 3j
-      {:handled, state} = FileTreeHandler.handle_key(state, ?3, 0)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
+      {:handled, state} = Scoped.handle_key(state, ?3, 0)
+      {:handled, state} = Scoped.handle_key(state, ?j, 0)
       assert state.file_tree.tree.cursor == 3
     end
   end
@@ -94,8 +98,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
       content_before = BufferServer.content(buf)
 
       # yy should yank without error
-      {:handled, state} = FileTreeHandler.handle_key(state, ?y, 0)
-      {:handled, _state} = FileTreeHandler.handle_key(state, ?y, 0)
+      {:handled, state} = Scoped.handle_key(state, ?y, 0)
+      {:handled, _state} = Scoped.handle_key(state, ?y, 0)
 
       assert BufferServer.content(buf) == content_before
     end
@@ -107,21 +111,21 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
       # i is not a tree-specific key, so it delegates to mode FSM
       # The mode FSM should block insert on read-only buffer
-      {:handled, state} = FileTreeHandler.handle_key(state, ?i, 0)
+      {:handled, state} = Scoped.handle_key(state, ?i, 0)
       assert state.mode == :normal
     end
 
     test "a does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = FileTreeHandler.handle_key(state, ?a, 0)
+      {:handled, state} = Scoped.handle_key(state, ?a, 0)
       assert state.mode == :normal
     end
 
     test "o does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = FileTreeHandler.handle_key(state, ?o, 0)
+      {:handled, state} = Scoped.handle_key(state, ?o, 0)
       assert state.mode == :normal
     end
   end
@@ -143,7 +147,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
         state =
           if dir_idx > 0 do
             Enum.reduce(1..dir_idx, state, fn _i, acc ->
-              {:handled, new_acc} = FileTreeHandler.handle_key(acc, ?j, 0)
+              {:handled, new_acc} = Scoped.handle_key(acc, ?j, 0)
               new_acc
             end)
           else
@@ -152,7 +156,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
         # Press Tab to expand
         entries_before = length(FileTree.visible_entries(state.file_tree.tree))
-        {:handled, state} = FileTreeHandler.handle_key(state, 9, 0)
+        {:handled, state} = Scoped.handle_key(state, 9, 0)
         entries_after = length(FileTree.visible_entries(state.file_tree.tree))
 
         # Should have more entries after expanding
@@ -167,7 +171,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir, 0)
       entries_default = FileTree.visible_entries(state.file_tree.tree)
 
-      {:handled, state} = FileTreeHandler.handle_key(state, ?H, 0)
+      {:handled, state} = Scoped.handle_key(state, ?H, 0)
       entries_with_hidden = FileTree.visible_entries(state.file_tree.tree)
 
       # Toggling hidden should change the entry count
@@ -177,7 +181,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
     test "q closes the file tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = FileTreeHandler.handle_key(state, ?q, 0)
+      {:handled, state} = Scoped.handle_key(state, ?q, 0)
       assert state.file_tree.tree == nil
       assert state.file_tree.focused == false
     end
@@ -188,16 +192,16 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # Move down first so we can verify gg works
-      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?j, 0)
+      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = Scoped.handle_key(state, ?j, 0)
       assert state.file_tree.tree.cursor == 2
 
       # g should delegate to mode FSM (pending_g)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
       assert state.mode_state.pending_g == true
 
       # second g should trigger gg (go to top)
-      {:handled, state} = FileTreeHandler.handle_key(state, ?g, 0)
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
       assert state.file_tree.tree.cursor == 0
     end
   end

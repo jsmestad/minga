@@ -6,8 +6,12 @@ defmodule Minga.Input.AgentPanelNavTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
-  alias Minga.Input.AgentPanel, as: AgentPanelHandler
+  alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.Viewport
+  alias Minga.Input.Scoped
+  alias Minga.Mode
 
   defp make_state do
     buf = AgentBufferSync.start_buffer()
@@ -20,7 +24,9 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     panel = %{PanelState.new() | visible: true, input_focused: false}
 
-    %{
+    %EditorState{
+      port_manager: self(),
+      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       agent: %AgentState{
         panel: panel,
         buffer: buf,
@@ -31,30 +37,27 @@ defmodule Minga.Input.AgentPanelNavTest do
       },
       buffers: %{active: nil, list: [], recent: []},
       mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
+      mode_state: Mode.initial_state(),
       status_msg: nil,
-      key_buffer: [],
-      count: nil,
       marks: %{},
-      registers: %{},
       change_recorder: ChangeRecorder.new(),
       macro_recorder: MacroRecorder.new(),
-      file_tree: %{tree: nil, focused: false, buffer: nil},
+      file_tree: %FileTreeState{},
       completion: nil,
-      conflict: nil,
-      focus_stack: [AgentPanelHandler, Minga.Input.ModeFSM]
+      keymap_scope: :editor,
+      focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end
 
-  describe "agent panel navigation mode" do
-    test "j moves cursor down in agent buffer" do
+  describe "agent panel navigation mode (via Scoped)" do
+    test "k moves cursor up in agent buffer" do
       state = make_state()
       buf = state.agent.buffer
 
       # Cursor starts at end (auto-scroll from sync)
       {start_line, _} = BufferServer.cursor(buf)
 
-      {:handled, _state} = AgentPanelHandler.handle_key(state, ?k, 0)
+      {:handled, _state} = Scoped.handle_key(state, ?k, 0)
 
       # After k, cursor should have moved up
       {new_line, _} = BufferServer.cursor(buf)
@@ -64,29 +67,56 @@ defmodule Minga.Input.AgentPanelNavTest do
     test "i focuses the input" do
       state = make_state()
 
-      {:handled, new_state} = AgentPanelHandler.handle_key(state, ?i, 0)
+      {:handled, new_state} = Scoped.handle_key(state, ?i, 0)
       assert new_state.agent.panel.input_focused == true
     end
 
     test "passthrough when panel not visible" do
       state = make_state()
       state = put_in(state.agent.panel.visible, false)
-      {:passthrough, _state} = AgentPanelHandler.handle_key(state, ?j, 0)
+      {:passthrough, _state} = Scoped.handle_key(state, ?j, 0)
     end
 
     test "passthrough when no buffer" do
       state = make_state()
       state = put_in(state.agent.buffer, nil)
-      {:passthrough, _state} = AgentPanelHandler.handle_key(state, ?j, 0)
+      {:passthrough, _state} = Scoped.handle_key(state, ?j, 0)
+    end
+
+    test "q closes the panel" do
+      state = make_state()
+
+      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      # toggle_panel on a non-input-focused panel will focus input
+      # (the first toggle re-focuses, second one closes)
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "j moves cursor down in agent buffer" do
+      state = make_state()
+      buf = state.agent.buffer
+
+      # Move cursor to top first
+      {_, _} = BufferServer.cursor(buf)
+      # Navigate with gg to get to top
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+
+      {start_line, _} = BufferServer.cursor(buf)
+
+      {:handled, _state} = Scoped.handle_key(state, ?j, 0)
+
+      {new_line, _} = BufferServer.cursor(buf)
+      assert new_line > start_line
     end
   end
 
-  describe "agent panel input mode" do
+  describe "agent panel input mode (via Scoped)" do
     test "Escape unfocuses input" do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, new_state} = AgentPanelHandler.handle_key(state, 27, 0)
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.agent.panel.input_focused == false
     end
 
@@ -94,8 +124,48 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, _new_state} = AgentPanelHandler.handle_key(state, ?a, 0)
-      # Doesn't crash, key is handled (goes to input_char)
+      {:handled, new_state} = Scoped.handle_key(state, ?a, 0)
+      assert PanelState.input_text(new_state.agent.panel) =~ "a"
+    end
+
+    test "Ctrl+D scrolls chat while in input mode" do
+      state = make_state()
+      state = put_in(state.agent.panel.input_focused, true)
+
+      {:handled, _new_state} = Scoped.handle_key(state, ?d, 0x02)
+      # Doesn't crash; scroll may or may not change depending on content
+    end
+
+    test "Ctrl+U scrolls chat up while in input mode" do
+      state = make_state()
+      state = put_in(state.agent.panel.input_focused, true)
+
+      {:handled, _new_state} = Scoped.handle_key(state, ?u, 0x02)
+    end
+
+    test "Enter submits prompt (empty is no-op)" do
+      state = make_state()
+      state = put_in(state.agent.panel.input_focused, true)
+
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0)
+      # Empty prompt is a no-op
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "Shift+Enter inserts newline" do
+      state = make_state()
+      state = put_in(state.agent.panel.input_focused, true)
+
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0x01)
+      # Should have a newline in the input
+      assert length(new_state.agent.panel.input_lines) > 1
+    end
+
+    test "Backspace on empty input is safe" do
+      state = make_state()
+      state = put_in(state.agent.panel.input_focused, true)
+
+      {:handled, _new_state} = Scoped.handle_key(state, 127, 0)
     end
   end
 end

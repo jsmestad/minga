@@ -362,6 +362,23 @@ User bindings override defaults. If you bind `SPC f f` to something else, it rep
 
 Invalid key sequences log a warning but don't crash the editor.
 
+### Keymap scopes
+
+Minga uses [keymap scopes](KEYMAP-SCOPES.md) to provide view-type-specific keybindings. Three scopes ship by default: `:editor` (normal editing), `:agent` (agentic view), and `:file_tree` (file tree panel). Leader key bindings (`SPC ...`) work identically in all scopes.
+
+Phase 2 ([#215](https://github.com/jsmestad/minga/issues/215)) will add per-scope and per-filetype customization:
+
+```elixir
+# Future API (not yet available):
+# bind :agent, :normal, "s", :agent_session_switcher, "Session switcher"
+# bind :file_tree, :normal, "d", :tree_delete, "Delete file"
+# for_filetype :elixir do
+#   bind :normal, "SPC m t", :mix_test, "Run tests"
+# end
+```
+
+For the full scope architecture and resolution order, see [Keymap Scopes](KEYMAP-SCOPES.md).
+
 For key parser internals, see [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html). For how the keymap trie works, see [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) and [`Minga.Keymap.Trie`](https://jsmestad.github.io/minga/Minga.Keymap.Trie.html).
 
 ## Custom commands
