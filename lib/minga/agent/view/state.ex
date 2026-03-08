@@ -18,6 +18,7 @@ defmodule Minga.Agent.View.State do
   """
 
   alias Minga.Agent.View.Preview
+  alias Minga.Config.Options
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
 
@@ -152,10 +153,12 @@ defmodule Minga.Agent.View.State do
     %{av | chat_width_pct: max(av.chat_width_pct - @resize_step, @min_chat_pct)}
   end
 
-  @doc "Resets the chat panel width to the default."
+  @doc "Resets the chat panel width to the configured default."
   @spec reset_split(t()) :: t()
   def reset_split(%__MODULE__{} = av) do
-    %{av | chat_width_pct: 65}
+    default = Options.get(:agent_panel_split)
+    pct = default |> max(@min_chat_pct) |> min(@max_chat_pct)
+    %{av | chat_width_pct: pct}
   end
 
   # ── Backward compatibility ──────────────────────────────────────────────────
