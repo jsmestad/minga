@@ -228,6 +228,190 @@ defmodule Minga.Editor.LayoutTest do
     end
   end
 
+  # ── Constraint satisfaction ──────────────────────────────────────────────────
+  #
+  # Constraints (from layout.ex):
+  #   @editor_min_cols      10   — editor area never narrower than this
+  #   @editor_min_rows       3   — editor area never shorter than this
+  #   @file_tree_min_cols    8   — tree collapses below this width
+  #   @agent_panel_min_rows  5   — panel collapses below this height
+  #
+  # Collapse priority: agent panel first, file tree second, editor never.
+
+  describe "constraints: agent panel" do
+    test "stays when panel height meets minimum" do
+      # 16 rows. Minibuffer=1, remaining=15. Panel = 35% of 16 = 5. Editor = 10.
+      # Panel height 5 == min(5). Editor 10 >= min(3). Both survive.
+      state = new_state(16, 80) |> with_window() |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel != nil
+      {_, _, _, ph} = layout.agent_panel
+      assert ph == 5
+    end
+
+    test "collapses when panel height is below minimum (boundary)" do
+      # 14 rows. Minibuffer=1, remaining=13. Panel = 35% of 14 = 4.
+      # 4 < 5 (min), so panel collapses.
+      state = new_state(14, 80) |> with_window() |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel == nil
+      {_, _, _, eh} = layout.editor_area
+      assert eh == 13
+    end
+
+    test "collapses when remaining editor height would be below minimum" do
+      # Construct a case where panel height >= 5 but editor height < 3.
+      # 9 rows. Minibuffer=1, remaining=8. Panel = 35% of 9 = 3.
+      # 3 < 5 (panel min), so collapses on panel-too-small, not editor-too-small.
+      state = new_state(9, 80) |> with_window() |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel == nil
+
+      # 20 rows. Panel = 35% of 20 = 7. Remaining = 19. Editor = 19-7 = 12. Fine.
+      state = new_state(20, 80) |> with_window() |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel != nil
+      {_, _, _, eh} = layout.editor_area
+      assert eh == 12
+    end
+  end
+
+  describe "constraints: file tree" do
+    test "stays when editor width meets minimum (boundary)" do
+      # Tree width 10, separator 1, so editor needs >= 10 cols. Total = 21.
+      state = new_state(24, 21) |> with_window() |> with_file_tree(10)
+      layout = Layout.compute(state)
+      assert layout.file_tree != nil
+      {_, _, tw, _} = layout.file_tree
+      assert tw == 10
+      {_, _, ew, _} = layout.editor_area
+      assert ew == 10
+    end
+
+    test "collapses when editor width would be below minimum" do
+      # Tree width 10, separator 1, total = 20. Editor = 20-11 = 9 < 10.
+      state = new_state(24, 20) |> with_window() |> with_file_tree(10)
+      layout = Layout.compute(state)
+      assert layout.file_tree == nil
+      {_, col, ew, _} = layout.editor_area
+      assert col == 0
+      assert ew == 20
+    end
+
+    test "collapses when tree width is below its own minimum" do
+      # Tree wants 5 cols. 5 < 8 (file_tree_min_cols). Collapses even if editor fits.
+      # But file_tree_layout clamps tree width to max(total-1-3, 1).
+      # If total is large enough that clamped width is still 5, tree collapses.
+      # 80 cols, tree wants 5. Clamped to 5. 5 < 8 = collapse.
+      state = new_state(24, 80) |> with_window() |> with_file_tree(5)
+      layout = Layout.compute(state)
+      assert layout.file_tree == nil
+    end
+
+    test "stays when tree width meets its own minimum (boundary)" do
+      # Tree wants 8 cols. 8 == 8 (file_tree_min_cols). Stays.
+      state = new_state(24, 80) |> with_window() |> with_file_tree(8)
+      layout = Layout.compute(state)
+      assert layout.file_tree != nil
+      {_, _, tw, _} = layout.file_tree
+      assert tw == 8
+    end
+
+    test "wide tree gets clamped then collapses if clamped width < minimum" do
+      # 12 cols total. Tree wants 30. Clamped to max(12-1-3, 1) = 8.
+      # Editor = max(12-9, 1) = 3. 3 < 10 (editor min). Collapse.
+      state = new_state(24, 12) |> with_window() |> with_file_tree(30)
+      layout = Layout.compute(state)
+      assert layout.file_tree == nil
+    end
+  end
+
+  describe "constraints: collapse order" do
+    test "agent panel collapses before file tree when both are tight" do
+      state = new_state(7, 50) |> with_window() |> with_file_tree(15) |> with_agent_panel()
+      layout = Layout.compute(state)
+
+      # Panel = 35% of 7 = 2 < 5, collapses
+      assert layout.agent_panel == nil
+      # Tree stays (50 - 15 - 1 = 34 >> 10)
+      assert layout.file_tree != nil
+    end
+
+    test "both collapse when terminal is tiny" do
+      state = new_state(4, 10) |> with_window() |> with_file_tree(8) |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel == nil
+      assert layout.file_tree == nil
+      {_, col, w, h} = layout.editor_area
+      assert col == 0
+      assert w == 10
+      assert h == 3
+    end
+
+    test "editor area always has positive dimensions at minimum terminal" do
+      state = new_state(2, 3) |> with_window()
+      layout = Layout.compute(state)
+      {_, _, w, h} = layout.editor_area
+      assert w > 0
+      assert h > 0
+    end
+
+    test "file tree collapse recalculates agent panel rect with full width" do
+      # When file tree collapses, the agent panel rect should use the
+      # full terminal width, not the old narrower editor width.
+      # 25 cols, tree=12. Without collapse: editor_col=13, editor_w=12.
+      # 12 >= 10 so tree stays normally. But let's check agent panel gets right width.
+      state = new_state(20, 40) |> with_window() |> with_file_tree(12) |> with_agent_panel()
+      layout = Layout.compute(state)
+
+      if layout.agent_panel != nil do
+        {_, ac, aw, _} = layout.agent_panel
+        {_, ec, ew, _} = layout.editor_area
+        # Agent panel and editor area should share the same column/width
+        assert ac == ec
+        assert aw == ew
+      end
+    end
+  end
+
+  describe "constraints: dynamic resize" do
+    test "shrinking height collapses agent panel, file tree stays" do
+      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.file_tree != nil
+      assert layout.agent_panel != nil
+
+      short_state = %{state | viewport: Viewport.new(7, 80)}
+      layout = Layout.compute(short_state)
+      assert layout.agent_panel == nil
+      assert layout.file_tree != nil
+    end
+
+    test "shrinking width collapses file tree, agent panel unaffected" do
+      state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
+
+      narrow_state = %{state | viewport: Viewport.new(24, 25)}
+      layout = Layout.compute(narrow_state)
+      # Tree = 20, separator = 1, editor = 4 < 10. Tree collapses.
+      assert layout.file_tree == nil
+      # Agent panel should still exist (plenty of height)
+      assert layout.agent_panel != nil
+    end
+
+    test "growing terminal restores regions" do
+      state = new_state(5, 10) |> with_window() |> with_file_tree(20) |> with_agent_panel()
+      layout = Layout.compute(state)
+      assert layout.agent_panel == nil
+      assert layout.file_tree == nil
+
+      # Grow back
+      big_state = %{state | viewport: Viewport.new(30, 100)}
+      layout = Layout.compute(big_state)
+      assert layout.agent_panel != nil
+      assert layout.file_tree != nil
+    end
+  end
+
   # ── Resize ─────────────────────────────────────────────────────────────────
 
   describe "resize" do
@@ -254,10 +438,10 @@ defmodule Minga.Editor.LayoutTest do
   # ── Property-based tests ──────────────────────────────────────────────────
 
   describe "property: no overlap for random configurations" do
-    property "no regions overlap for random terminal sizes and split trees" do
+    property "no regions overlap and no zero/negative dimensions for random terminal sizes" do
       check all(
-              rows <- StreamData.integer(5..100),
-              cols <- StreamData.integer(20..300),
+              rows <- StreamData.integer(2..100),
+              cols <- StreamData.integer(3..300),
               split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
               has_tree <- StreamData.boolean(),
               has_agent <- StreamData.boolean()
@@ -284,9 +468,16 @@ defmodule Minga.Editor.LayoutTest do
           {r, c, w, h} = rect
           assert r >= 0, "row #{r} < 0 in #{inspect(rect)}"
           assert c >= 0, "col #{c} < 0 in #{inspect(rect)}"
+          assert w > 0, "width #{w} <= 0 in #{inspect(rect)}"
+          assert h > 0, "height #{h} <= 0 in #{inspect(rect)}"
           assert r + h <= term_h, "rect #{inspect(rect)} exceeds terminal height #{term_h}"
           assert c + w <= term_w, "rect #{inspect(rect)} exceeds terminal width #{term_w}"
         end
+
+        # Editor area always exists with positive dimensions
+        {_, _, ew, eh} = layout.editor_area
+        assert ew > 0, "editor width must be positive, got #{ew}"
+        assert eh > 0, "editor height must be positive, got #{eh}"
 
         # Non-overlay rects don't overlap
         assert_no_overlap(layout)

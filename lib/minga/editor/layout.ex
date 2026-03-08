@@ -28,6 +28,15 @@ defmodule Minga.Editor.Layout do
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
 
+  # ── Constraints ────────────────────────────────────────────────────────────
+  # Minimum sizes and collapse priorities for each region.
+  # Lower priority number = collapses first when space is tight.
+
+  @editor_min_cols 10
+  @editor_min_rows 3
+  @file_tree_min_cols 8
+  @agent_panel_min_rows 5
+
   # ── Types ──────────────────────────────────────────────────────────────────
 
   @typedoc "A screen rectangle: {row, col, width, height}."
@@ -110,17 +119,31 @@ defmodule Minga.Editor.Layout do
     minibuffer = {vp.rows - 1, 0, vp.cols, 1}
     remaining_height = vp.rows - 1
 
-    # 2. File tree takes a left column if open.
+    # 2. File tree takes a left column if open (collapse if not enough space).
     {file_tree_rect, editor_col, editor_width} = file_tree_layout(state, vp.cols)
 
     # 3. Agent panel takes a percentage of remaining height if visible.
     {agent_rect, editor_height} =
       agent_panel_layout(state, remaining_height, editor_col, editor_width)
 
-    # 4. Editor area is what's left.
+    # 4. Constraint satisfaction: collapse regions that don't fit.
+    #    Priority order (collapse first → last): agent panel, file tree, editor (never).
+    {file_tree_rect, agent_rect, editor_col, editor_width, editor_height} =
+      apply_constraints(
+        state,
+        vp,
+        file_tree_rect,
+        agent_rect,
+        editor_col,
+        editor_width,
+        editor_height,
+        remaining_height
+      )
+
+    # 5. Editor area is what's left.
     editor_area = {0, editor_col, editor_width, editor_height}
 
-    # 5. Window layouts within the editor area.
+    # 6. Window layouts within the editor area.
     window_layouts =
       if EditorState.split?(state) do
         compute_window_layouts(state.windows.tree, editor_area)
@@ -137,6 +160,81 @@ defmodule Minga.Editor.Layout do
       agent_panel: agent_rect,
       minibuffer: minibuffer
     }
+  end
+
+  # ── Constraint satisfaction ─────────────────────────────────────────────────
+
+  # Collapses regions that violate minimum size constraints.
+  # Priority order: agent panel collapses first, file tree second, editor never.
+  @spec apply_constraints(
+          EditorState.t(),
+          Minga.Editor.Viewport.t(),
+          rect() | nil,
+          rect() | nil,
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {rect() | nil, rect() | nil, non_neg_integer(), pos_integer(), non_neg_integer()}
+  defp apply_constraints(
+         _state,
+         vp,
+         file_tree_rect,
+         agent_rect,
+         editor_col,
+         editor_width,
+         editor_height,
+         remaining_height
+       ) do
+    # Step 1: Collapse agent panel if editor height is too small
+    {agent_rect, editor_height} =
+      if agent_rect != nil and editor_height < @editor_min_rows do
+        {nil, remaining_height}
+      else
+        {agent_rect, editor_height}
+      end
+
+    # Also collapse agent panel if the panel itself is too short to be useful
+    {agent_rect, editor_height} =
+      if agent_rect != nil and elem(agent_rect, 3) < @agent_panel_min_rows do
+        {nil, remaining_height}
+      else
+        {agent_rect, editor_height}
+      end
+
+    # Step 2: Collapse file tree if editor width is too small
+    {file_tree_rect, editor_col, editor_width} =
+      if file_tree_rect != nil and editor_width < @editor_min_cols do
+        {nil, 0, vp.cols}
+      else
+        {file_tree_rect, editor_col, editor_width}
+      end
+
+    # Step 3: Collapse file tree if the tree itself is narrower than minimum
+    {file_tree_rect, editor_col, editor_width} =
+      if file_tree_rect != nil and elem(file_tree_rect, 2) < @file_tree_min_cols do
+        {nil, 0, vp.cols}
+      else
+        {file_tree_rect, editor_col, editor_width}
+      end
+
+    # Step 4: If we collapsed the file tree, recompute agent panel with full width
+    {agent_rect, editor_height} =
+      if agent_rect != nil do
+        {_ar, _ac, _aw, ah} = agent_rect
+        new_editor_height = remaining_height - ah
+        new_agent_rect = {new_editor_height, editor_col, editor_width, ah}
+
+        if new_editor_height < @editor_min_rows do
+          {nil, remaining_height}
+        else
+          {new_agent_rect, new_editor_height}
+        end
+      else
+        {agent_rect, editor_height}
+      end
+
+    {file_tree_rect, agent_rect, editor_col, editor_width, editor_height}
   end
 
   # ── File tree ──────────────────────────────────────────────────────────────
