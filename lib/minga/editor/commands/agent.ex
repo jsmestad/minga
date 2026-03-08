@@ -10,6 +10,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Agent.SlashCommand
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -97,12 +98,30 @@ defmodule Minga.Editor.Commands.Agent do
   def submit_prompt(state) do
     text = PanelState.input_text(state.agent.panel)
 
+    if SlashCommand.slash_command?(text) do
+      state = update_agent(state, &AgentState.clear_input_and_scroll/1)
+      execute_slash_command(state, text)
+    else
+      send_prompt_to_llm(state, text)
+    end
+  end
+
+  @spec execute_slash_command(state(), String.t()) :: state()
+  defp execute_slash_command(state, text) do
+    case SlashCommand.execute(state, text) do
+      {:ok, state} -> state
+      {:error, msg} -> %{state | status_msg: msg}
+    end
+  end
+
+  @spec send_prompt_to_llm(state(), String.t()) :: state()
+  defp send_prompt_to_llm(state, text) do
     case Session.send_prompt(state.agent.session, text) do
       :ok ->
         update_agent(state, &AgentState.clear_input_and_scroll/1)
 
       {:error, :provider_not_ready} ->
-        %{state | status_msg: "Agent provider still starting — try again in a moment"}
+        %{state | status_msg: "Agent provider still starting, try again in a moment"}
 
       {:error, reason} ->
         %{state | status_msg: "Agent error: #{inspect(reason)}"}
