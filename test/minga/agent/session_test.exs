@@ -82,8 +82,10 @@ defmodule Minga.Agent.SessionTest do
       assert Session.status(session) == :idle
     end
 
-    test "starts with empty messages", %{session: session} do
-      assert Session.messages(session) == []
+    test "starts with a session-started system message", %{session: session} do
+      messages = Session.messages(session)
+      assert [{:system, text, :info}] = messages
+      assert String.starts_with?(text, "Session started")
     end
 
     test "starts with zero usage", %{session: session} do
@@ -103,10 +105,11 @@ defmodule Minga.Agent.SessionTest do
 
       messages = Session.messages(session)
 
-      # Should have user message + assistant message
-      assert length(messages) >= 2
-      assert {:user, "Hello!"} = Enum.at(messages, 0)
-      assert {:assistant, "Hello world!"} = Enum.at(messages, 1)
+      # Should have system message + user message + assistant message
+      assert length(messages) >= 3
+      assert {:system, _, :info} = Enum.at(messages, 0)
+      assert {:user, "Hello!"} = Enum.at(messages, 1)
+      assert {:assistant, "Hello world!"} = Enum.at(messages, 2)
     end
 
     test "accumulates token usage", %{session: session} do
@@ -141,11 +144,14 @@ defmodule Minga.Agent.SessionTest do
       :ok = Session.send_prompt(session, "First")
       Process.sleep(50)
 
-      assert Session.messages(session) != []
+      assert length(Session.messages(session)) > 1
 
       :ok = Session.new_session(session)
 
-      assert Session.messages(session) == []
+      # After clearing, should have just the "Session cleared" system message
+      messages = Session.messages(session)
+      assert [{:system, text, :info}] = messages
+      assert String.starts_with?(text, "Session cleared")
       assert Session.status(session) == :idle
     end
 

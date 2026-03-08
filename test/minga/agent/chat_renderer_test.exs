@@ -89,6 +89,108 @@ defmodule Minga.Agent.ChatRendererTest do
     end
   end
 
+  describe "system message rendering" do
+    test "renders info system message with decorative rules" do
+      messages = [{:system, "Session started · 12:00:00 UTC", :info}]
+
+      rect = {0, 0, 60, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_session_text = Enum.any?(texts, &String.contains?(&1, "Session started"))
+      assert has_session_text, "expected system message text to appear"
+    end
+
+    test "renders error system message" do
+      messages = [{:system, "Error: connection timeout", :error}]
+
+      rect = {0, 0, 60, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_error_text = Enum.any?(texts, &String.contains?(&1, "Error: connection timeout"))
+      assert has_error_text
+    end
+
+    test "system message has decorative ── rules" do
+      messages = [{:system, "Model: claude-sonnet-4", :info}]
+
+      rect = {0, 0, 60, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_rules = Enum.any?(texts, &String.contains?(&1, "──"))
+      assert has_rules, "expected decorative rules around system message"
+    end
+
+    test "system messages take exactly 1 line in the message flow" do
+      # Put a system message between two user messages and check
+      # that it adds exactly 1 line vs. a version without it
+      messages_without = [
+        {:user, "Hello"},
+        {:user, "World"}
+      ]
+
+      messages_with = [
+        {:user, "Hello"},
+        {:system, "Test", :info},
+        {:user, "World"}
+      ]
+
+      rect = {0, 0, 60, 20}
+
+      draws_without =
+        ChatRenderer.render_messages_only(
+          rect,
+          panel(messages: messages_without),
+          default_theme()
+        )
+
+      draws_with =
+        ChatRenderer.render_messages_only(rect, panel(messages: messages_with), default_theme())
+
+      # Count non-background draws (text content) by looking for draws with actual text
+      content_rows_without =
+        draws_without
+        |> Enum.reject(fn d -> String.trim(elem(d, 2)) == "" end)
+        |> Enum.map(fn d -> elem(d, 0) end)
+        |> Enum.uniq()
+        |> length()
+
+      content_rows_with =
+        draws_with
+        |> Enum.reject(fn d -> String.trim(elem(d, 2)) == "" end)
+        |> Enum.map(fn d -> elem(d, 0) end)
+        |> Enum.uniq()
+        |> length()
+
+      # System message should add exactly 1 content row
+      assert content_rows_with - content_rows_without == 1
+    end
+
+    test "system messages render inline with other message types" do
+      messages = [
+        {:system, "Session started", :info},
+        {:user, "Hello"},
+        {:assistant, "Hi there"},
+        {:system, "Thinking: high", :info}
+      ]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_session = Enum.any?(texts, &String.contains?(&1, "Session started"))
+      has_thinking = Enum.any?(texts, &String.contains?(&1, "Thinking: high"))
+      assert has_session
+      assert has_thinking
+    end
+  end
+
   describe "word wrapping in messages" do
     test "long assistant messages produce more visual lines than source lines" do
       long_text = String.duplicate("word ", 30) |> String.trim()

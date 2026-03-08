@@ -176,6 +176,7 @@ defmodule Minga.Editor.Commands.Agent do
     case Session.cycle_thinking_level(state.agent.session) do
       {:ok, %{"level" => level}} when is_binary(level) ->
         state = update_agent(state, &AgentState.set_thinking_level(&1, level))
+        Session.add_system_message(state.agent.session, "Thinking: #{level}")
         %{state | status_msg: "Thinking: #{level}"}
 
       {:ok, nil} ->
@@ -190,14 +191,14 @@ defmodule Minga.Editor.Commands.Agent do
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do
     state = update_agent(state, &AgentState.set_provider_name(&1, provider))
-    restart_session(state, "Provider set to #{provider}")
+    restart_session(state, "Provider: #{provider}")
   end
 
   @doc "Sets the agent model and restarts the session."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
     state = update_agent(state, &AgentState.set_model_name(&1, model))
-    restart_session(state, "Model set to #{model}")
+    restart_session(state, "Model: #{model}")
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────────

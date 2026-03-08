@@ -53,4 +53,16 @@ defmodule Minga.Agent.MessageTest do
       assert tc.args == %{}
     end
   end
+
+  describe "system/2" do
+    test "creates an info system message by default" do
+      msg = Message.system("Session started")
+      assert {:system, "Session started", :info} = msg
+    end
+
+    test "creates an error system message" do
+      msg = Message.system("Connection failed", :error)
+      assert {:system, "Connection failed", :error} = msg
+    end
+  end
 end

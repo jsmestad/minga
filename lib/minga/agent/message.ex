@@ -9,12 +9,16 @@ defmodule Minga.Agent.Message do
   @typedoc "Tool call status."
   @type tool_status :: :running | :complete | :error
 
+  @typedoc "System message severity level."
+  @type system_level :: :info | :error
+
   @typedoc "A single conversation message."
   @type t ::
           {:user, String.t()}
           | {:assistant, String.t()}
           | {:thinking, String.t()}
           | {:tool_call, tool_call()}
+          | {:system, String.t(), system_level()}
 
   @typedoc "Tool call details."
   @type tool_call :: %{
@@ -38,6 +42,12 @@ defmodule Minga.Agent.Message do
   @doc "Creates a new thinking message (initially empty)."
   @spec thinking(String.t()) :: t()
   def thinking(text \\ ""), do: {:thinking, text}
+
+  @doc "Creates a system message (session events, status changes)."
+  @spec system(String.t(), system_level()) :: t()
+  def system(text, level \\ :info) when is_binary(text) and level in [:info, :error] do
+    {:system, text, level}
+  end
 
   @doc "Creates a new tool call message."
   @spec tool_call(String.t(), String.t(), map()) :: t()

@@ -385,6 +385,39 @@ defmodule Minga.Agent.ChatRenderer do
     [header | result_lines] ++ [footer, spacer]
   end
 
+  defp message_lines({:system, text, level}, at, width) do
+    fg =
+      case level do
+        :error -> at.status_error
+        :info -> at.panel_border
+      end
+
+    # Center the text with ── decorations on both sides
+    label = " #{text} "
+    label_len = String.length(label)
+    available = max(width - 2, 0)
+
+    {left_rule, right_rule} =
+      if label_len >= available do
+        {"", ""}
+      else
+        remaining = available - label_len
+        left = div(remaining, 2)
+        right = remaining - left
+        {String.duplicate("─", left), String.duplicate("─", right)}
+      end
+
+    line =
+      {[
+         {" ", []},
+         {left_rule, [fg: fg]},
+         {label, [fg: fg, italic: true]},
+         {right_rule, [fg: fg]}
+       ], :text, at.panel_bg}
+
+    [line]
+  end
+
   # ── Wrapping / truncation helpers ─────────────────────────────────────────────
 
   # Wraps prose lines or truncates code lines, returning render_line tuples.

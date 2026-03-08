@@ -135,6 +135,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :toggle_all_tool_collapses)
   end
 
+  @doc "Appends a system message to the conversation and notifies subscribers."
+  @spec add_system_message(GenServer.server(), String.t(), Message.system_level()) :: :ok
+  def add_system_message(session, text, level \\ :info) do
+    GenServer.cast(session, {:add_system_message, text, level})
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -150,13 +156,14 @@ defmodule Minga.Agent.Session do
       )
 
     initial_thinking_level = Keyword.get(opts, :thinking_level)
+    timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
 
     state = %{
       provider: nil,
       provider_module: provider_module,
       provider_opts: provider_opts,
       status: :idle,
-      messages: [],
+      messages: [Message.system("Session started · #{timestamp}")],
       subscribers: MapSet.new(),
       total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
       error_message: nil,
@@ -202,9 +209,11 @@ defmodule Minga.Agent.Session do
       state.provider_module.new_session(state.provider)
     end
 
+    timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
+
     state = %{
       state
-      | messages: [],
+      | messages: [Message.system("Session cleared · #{timestamp}")],
         status: :idle,
         total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
         error_message: nil
@@ -305,6 +314,13 @@ defmodule Minga.Agent.Session do
     state = %{state | messages: messages}
     broadcast(state, :messages_changed)
     {:reply, :ok, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:add_system_message, text, level}, state) do
+    state = append_system_message(state, text, level)
+    broadcast(state, :messages_changed)
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -429,11 +445,18 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.Error{message: message}, state) do
     state = set_status(state, :error)
     state = %{state | error_message: message}
+    state = append_system_message(state, "Error: #{message}", :error)
     broadcast(state, {:error, message})
     state
   end
 
   # ── Message list helpers ────────────────────────────────────────────────────
+
+  @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
+  defp append_system_message(state, text, level) do
+    msg = Message.system(text, level)
+    %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
+  end
 
   @spec append_to_last_assistant([Message.t()], String.t()) :: [Message.t()]
   defp append_to_last_assistant(messages, delta) do
