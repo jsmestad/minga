@@ -32,7 +32,8 @@ defmodule Minga.Agent.ChatRenderer do
           thinking_level: String.t(),
           error_message: String.t() | nil,
           auto_scroll: boolean(),
-          display_start_index: non_neg_integer()
+          display_start_index: non_neg_integer(),
+          pending_approval: map() | nil
         }
 
   @spinner_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -181,7 +182,16 @@ defmodule Minga.Agent.ChatRenderer do
   defp render_content(cmds, row_start, col, width, content_height, panel, at) do
     display_start = Map.get(panel, :display_start_index, 0)
     visible_messages = Enum.drop(panel.messages, display_start)
+    approval = Map.get(panel, :pending_approval)
     lines = messages_to_lines(visible_messages, panel.status, panel.spinner_frame, at, width)
+
+    # Append approval prompt if a tool is waiting for user confirmation
+    lines =
+      if approval do
+        Enum.reverse([approval_prompt(approval, at, width) | Enum.reverse(lines)])
+      else
+        lines
+      end
 
     # Apply scroll offset
     total = length(lines)
@@ -617,6 +627,28 @@ defmodule Minga.Agent.ChatRenderer do
   end
 
   defp format_usage(_), do: ""
+
+  # ── Approval prompt ──────────────────────────────────────────────────────────
+
+  @spec approval_prompt(map(), Theme.Agent.t(), pos_integer()) :: render_line()
+  defp approval_prompt(approval, at, width) do
+    name = approval.name
+    detail = approval_detail(approval)
+    text = "  ⚠ Execute #{name}#{detail}?  [y]es  [n]o  [a]ll "
+
+    {[{String.slice(text, 0, width), [fg: at.status_thinking, bold: true]}], :text, at.panel_bg}
+  end
+
+  @spec approval_detail(map()) :: String.t()
+  defp approval_detail(%{args: %{"command" => cmd}}) do
+    ": #{String.slice(cmd, 0, 40)}"
+  end
+
+  defp approval_detail(%{args: %{"path" => path}}) do
+    ": #{path}"
+  end
+
+  defp approval_detail(_), do: ""
 
   @spec format_turn_usage(map()) :: String.t()
   defp format_turn_usage(%{input: i, output: o, cache_read: cr, cache_write: cw, cost: c}) do

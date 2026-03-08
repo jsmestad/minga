@@ -22,7 +22,8 @@ defmodule Minga.Agent.ChatRendererTest do
       thinking_level: "medium",
       auto_scroll: Keyword.get(opts, :auto_scroll, true),
       display_start_index: Keyword.get(opts, :display_start_index, 0),
-      error_message: nil
+      error_message: nil,
+      pending_approval: Keyword.get(opts, :pending_approval, nil)
     }
   end
 
@@ -411,6 +412,52 @@ defmodule Minga.Agent.ChatRendererTest do
 
       assert is_list(draws)
       assert draws != []
+    end
+  end
+
+  describe "tool approval prompt" do
+    test "renders approval prompt when pending" do
+      approval = %{tool_call_id: "tc1", name: "shell", args: %{"command" => "rm -rf /"}}
+      messages = [{:user, "Do it"}]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages, pending_approval: approval)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_approval = Enum.any?(texts, &String.contains?(&1, "Execute shell"))
+      has_choices = Enum.any?(texts, &String.contains?(&1, "[y]es"))
+      assert has_approval, "expected approval prompt with tool name"
+      assert has_choices, "expected [y]es [n]o [a]ll choices"
+    end
+
+    test "shows command detail for shell tools" do
+      approval = %{tool_call_id: "tc1", name: "shell", args: %{"command" => "mix test"}}
+      rect = {0, 0, 60, 10}
+      p = panel(messages: [], pending_approval: approval)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "mix test"))
+    end
+
+    test "shows path detail for file tools" do
+      approval = %{tool_call_id: "tc1", name: "write_file", args: %{"path" => "lib/foo.ex"}}
+      rect = {0, 0, 60, 10}
+      p = panel(messages: [], pending_approval: approval)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "lib/foo.ex"))
+    end
+
+    test "no approval prompt when nil" do
+      rect = {0, 0, 60, 10}
+      p = panel(messages: [{:user, "hello"}], pending_approval: nil)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      refute Enum.any?(texts, &String.contains?(&1, "Execute"))
     end
   end
 

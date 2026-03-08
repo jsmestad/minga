@@ -323,6 +323,80 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "tool approval" do
+    test "ToolApproval event stores pending approval and broadcasts", %{session: session} do
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{"command" => "rm -rf /"},
+        reply_to: self()
+      }
+
+      send(session, {:agent_provider_event, approval})
+
+      # Broadcast should arrive
+      assert_receive {:agent_event, {:approval_pending, data}}, 200
+      assert data.name == "shell"
+      assert data.tool_call_id == "tc1"
+    end
+
+    test "respond_to_approval sends decision to reply_to pid", %{session: session} do
+      # Register ourselves as the reply_to (simulating the Task)
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "write_file",
+        args: %{"path" => "foo.ex"},
+        reply_to: self()
+      }
+
+      send(session, {:agent_provider_event, approval})
+      assert_receive {:agent_event, {:approval_pending, _}}, 200
+
+      :ok = Session.respond_to_approval(session, :approve)
+
+      # Should receive the response directly
+      assert_receive {:tool_approval_response, "tc1", :approve}
+      # And the resolution broadcast
+      assert_receive {:agent_event, {:approval_resolved, :approve}}, 200
+    end
+
+    test "respond_to_approval with :reject sends reject", %{session: session} do
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{},
+        reply_to: self()
+      }
+
+      send(session, {:agent_provider_event, approval})
+      assert_receive {:agent_event, {:approval_pending, _}}, 200
+
+      :ok = Session.respond_to_approval(session, :reject)
+      assert_receive {:tool_approval_response, "tc1", :reject}
+    end
+
+    test "respond_to_approval with no pending returns error", %{session: session} do
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+    end
+
+    test "abort clears pending approval", %{session: session} do
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{},
+        reply_to: self()
+      }
+
+      send(session, {:agent_provider_event, approval})
+      assert_receive {:agent_event, {:approval_pending, _}}, 200
+
+      :ok = Session.abort(session)
+
+      # Pending approval should be cleared
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
+    end
+  end
+
   describe "thinking block collapse" do
     test "thinking blocks auto-collapse when text delta arrives", %{session: session} do
       send(session, {:agent_provider_event, %Event.AgentStart{}})

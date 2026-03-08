@@ -71,7 +71,8 @@ defmodule Minga.Agent.View.Renderer do
       mode: :normal,
       mode_state: nil,
       buf_index: 1,
-      buf_count: 1
+      buf_count: 1,
+      pending_approval: nil
     ]
 
     @type t :: %__MODULE__{
@@ -87,7 +88,8 @@ defmodule Minga.Agent.View.Renderer do
             mode: atom(),
             mode_state: term(),
             buf_index: pos_integer(),
-            buf_count: pos_integer()
+            buf_count: pos_integer(),
+            pending_approval: map() | nil
           }
 
     @typedoc "Agent panel fields needed for rendering."
@@ -276,7 +278,8 @@ defmodule Minga.Agent.View.Renderer do
       mode: state.mode,
       mode_state: state.mode_state,
       buf_index: state.buffers.active_index + 1,
-      buf_count: length(state.buffers.list)
+      buf_count: length(state.buffers.list),
+      pending_approval: state.agent.pending_approval
     }
   end
 
@@ -352,7 +355,8 @@ defmodule Minga.Agent.View.Renderer do
       thinking_level: input.panel.thinking_level,
       auto_scroll: input.panel.auto_scroll,
       display_start_index: input.panel.display_start_index,
-      error_message: nil
+      error_message: nil,
+      pending_approval: input.pending_approval
     }
 
     ChatRenderer.render_messages_only(rect, panel_state, input.theme)

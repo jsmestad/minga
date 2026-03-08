@@ -1519,7 +1519,8 @@ defmodule Minga.Editor.RenderPipeline do
       thinking_level: agent.panel.thinking_level,
       auto_scroll: agent.panel.auto_scroll,
       display_start_index: agent.panel.display_start_index,
-      error_message: agent.error
+      error_message: agent.error,
+      pending_approval: agent.pending_approval
     }
 
     ChatRenderer.render(rect, panel_state, state.theme)

@@ -30,6 +30,16 @@ defmodule Minga.Agent.Session do
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
 
+  @typedoc "Pending tool approval data (nil when no approval is pending)."
+  @type pending_approval ::
+          %{
+            tool_call_id: String.t(),
+            name: String.t(),
+            args: map(),
+            reply_to: pid()
+          }
+          | nil
+
   @typedoc "Internal session state."
   @type state :: %{
           provider: pid() | nil,
@@ -40,7 +50,8 @@ defmodule Minga.Agent.Session do
           subscribers: MapSet.t(pid()),
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
-          pending_thinking_level: String.t() | nil
+          pending_thinking_level: String.t() | nil,
+          pending_approval: pending_approval()
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -85,6 +96,18 @@ defmodule Minga.Agent.Session do
   @spec usage(GenServer.server()) :: Event.token_usage()
   def usage(session) do
     GenServer.call(session, :usage)
+  end
+
+  @doc """
+  Responds to a pending tool approval.
+
+  Sends the decision directly to the Task process that is blocking
+  on `receive`, then clears the pending approval and broadcasts
+  the resolution to subscribers.
+  """
+  @spec respond_to_approval(GenServer.server(), :approve | :reject | :approve_all) :: :ok
+  def respond_to_approval(session, decision) when decision in [:approve, :reject, :approve_all] do
+    GenServer.call(session, {:respond_to_approval, decision})
   end
 
   @doc "Subscribes the calling process to session events."
@@ -167,7 +190,8 @@ defmodule Minga.Agent.Session do
       subscribers: MapSet.new(),
       total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
       error_message: nil,
-      pending_thinking_level: initial_thinking_level
+      pending_thinking_level: initial_thinking_level,
+      pending_approval: nil
     }
 
     # Start provider asynchronously so init doesn't block
@@ -211,8 +235,8 @@ defmodule Minga.Agent.Session do
           other
       end)
 
-    # Append "Aborted" system message
-    state = %{state | messages: messages}
+    # Append "Aborted" system message, clear any pending approval
+    state = %{state | messages: messages, pending_approval: nil}
     state = append_system_message(state, "Aborted", :info)
     broadcast(state, :messages_changed)
     state = set_status(state, :idle)
@@ -231,7 +255,8 @@ defmodule Minga.Agent.Session do
       | messages: [Message.system("Session cleared · #{timestamp}")],
         status: :idle,
         total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
-        error_message: nil
+        error_message: nil,
+        pending_approval: nil
     }
 
     broadcast(state, {:status_changed, :idle})
@@ -249,6 +274,22 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:usage, _from, state) do
     {:reply, state.total_usage, state}
+  end
+
+  def handle_call({:respond_to_approval, _decision}, _from, %{pending_approval: nil} = state) do
+    Logger.warning("[Session] respond_to_approval called with no pending approval")
+    {:reply, {:error, :no_pending_approval}, state}
+  end
+
+  def handle_call({:respond_to_approval, decision}, _from, state) do
+    %{tool_call_id: tool_call_id, reply_to: reply_to} = state.pending_approval
+
+    # Send the decision directly to the blocked Task process
+    send(reply_to, {:tool_approval_response, tool_call_id, decision})
+
+    state = %{state | pending_approval: nil}
+    broadcast(state, {:approval_resolved, decision})
+    {:reply, :ok, state}
   end
 
   def handle_call({:subscribe, pid}, _from, state) do
@@ -388,6 +429,7 @@ defmodule Minga.Agent.Session do
 
   @spec handle_provider_event(Event.t(), state()) :: state()
   defp handle_provider_event(%Event.AgentStart{}, state) do
+    state = %{state | pending_approval: nil}
     set_status(state, :thinking)
   end
 
@@ -430,9 +472,22 @@ defmodule Minga.Agent.Session do
 
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
-    state = %{state | messages: state.messages ++ [msg]}
+    state = %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
     state = set_status(state, :tool_executing)
     broadcast(state, :messages_changed)
+    state
+  end
+
+  defp handle_provider_event(%Event.ToolApproval{} = event, state) do
+    approval = %{
+      tool_call_id: event.tool_call_id,
+      name: event.name,
+      args: event.args,
+      reply_to: event.reply_to
+    }
+
+    state = %{state | pending_approval: approval}
+    broadcast(state, {:approval_pending, approval})
     state
   end
 

@@ -28,6 +28,13 @@ defmodule Minga.Agent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [project_root: String.t()]
 
+  @destructive_tools ~w(write_file edit_file shell)
+
+  @doc "Returns true if the named tool modifies the filesystem or runs commands."
+  @spec destructive?(String.t()) :: boolean()
+  def destructive?(name) when name in @destructive_tools, do: true
+  def destructive?(_name), do: false
+
   @doc """
   Returns all available tools scoped to the given project root.
 

@@ -55,4 +55,30 @@ defmodule Minga.Agent.ToolsTest do
       end
     end
   end
+
+  describe "destructive?/1" do
+    test "write_file is destructive" do
+      assert Tools.destructive?("write_file")
+    end
+
+    test "edit_file is destructive" do
+      assert Tools.destructive?("edit_file")
+    end
+
+    test "shell is destructive" do
+      assert Tools.destructive?("shell")
+    end
+
+    test "read_file is not destructive" do
+      refute Tools.destructive?("read_file")
+    end
+
+    test "list_directory is not destructive" do
+      refute Tools.destructive?("list_directory")
+    end
+
+    test "unknown tools are not destructive" do
+      refute Tools.destructive?("foobar")
+    end
+  end
 end

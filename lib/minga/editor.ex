@@ -516,6 +516,19 @@ defmodule Minga.Editor do
     {:noreply, schedule_render(state, 50)}
   end
 
+  def handle_info({:agent_event, {:approval_pending, approval}}, state) do
+    # Strip reply_to before caching (Editor doesn't need the Task pid)
+    cached = Map.take(approval, [:tool_call_id, :name, :args])
+    state = update_agent(state, &AgentState.set_pending_approval(&1, cached))
+    state = Renderer.render(state)
+    {:noreply, state}
+  end
+
+  def handle_info({:agent_event, {:approval_resolved, _decision}}, state) do
+    state = update_agent(state, &AgentState.clear_pending_approval/1)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   def handle_info({:agent_event, {:error, message}}, state) do
     state = update_agent(state, &AgentState.set_error(&1, message))
     state = log_message(state, "Agent error: #{message}")

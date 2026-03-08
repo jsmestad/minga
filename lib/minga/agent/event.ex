@@ -26,6 +26,7 @@ defmodule Minga.Agent.Event do
           | tool_start()
           | tool_update()
           | tool_end()
+          | tool_approval()
           | error()
 
   @typedoc "Agent has started processing a prompt."
@@ -60,6 +61,14 @@ defmodule Minga.Agent.Event do
           name: String.t(),
           result: String.t(),
           is_error: boolean()
+        }
+
+  @typedoc "A destructive tool call needs user approval before executing."
+  @type tool_approval :: %__MODULE__.ToolApproval{
+          tool_call_id: String.t(),
+          name: String.t(),
+          args: map(),
+          reply_to: pid()
         }
 
   @typedoc "An error occurred in the agent."
@@ -122,6 +131,19 @@ defmodule Minga.Agent.Event do
             name: String.t(),
             result: String.t(),
             is_error: boolean()
+          }
+  end
+
+  defmodule ToolApproval do
+    @moduledoc false
+    @enforce_keys [:tool_call_id, :name, :reply_to]
+    defstruct [:tool_call_id, :name, :reply_to, args: %{}]
+
+    @type t :: %__MODULE__{
+            tool_call_id: String.t(),
+            name: String.t(),
+            args: map(),
+            reply_to: pid()
           }
   end
 

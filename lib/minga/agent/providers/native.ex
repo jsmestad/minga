@@ -377,25 +377,78 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
   defp execute_tools(provider_pid, context, tool_calls, available_tools) do
-    Enum.reduce(tool_calls, context, fn tool_call, ctx ->
-      {result_text, is_error} = run_single_tool(tool_call, available_tools)
+    {final_ctx, _mode} =
+      Enum.reduce(tool_calls, {context, :ask}, fn tool_call, {ctx, approval_mode} ->
+        {result_text, is_error, new_mode} =
+          execute_with_approval(provider_pid, tool_call, available_tools, approval_mode)
 
-      # Emit tool end event
-      send(
-        provider_pid,
-        {:agent_event,
-         %Event.ToolEnd{
-           tool_call_id: tool_call.id,
-           name: tool_call.name,
-           result: result_text,
-           is_error: is_error
-         }}
-      )
+        send(
+          provider_pid,
+          {:agent_event,
+           %Event.ToolEnd{
+             tool_call_id: tool_call.id,
+             name: tool_call.name,
+             result: result_text,
+             is_error: is_error
+           }}
+        )
 
-      # Append tool result to context for the next LLM call
-      tool_result_msg = Context.tool_result_message(tool_call.name, tool_call.id, result_text)
-      Context.append(ctx, tool_result_msg)
-    end)
+        tool_result_msg = Context.tool_result_message(tool_call.name, tool_call.id, result_text)
+        {Context.append(ctx, tool_result_msg), new_mode}
+      end)
+
+    final_ctx
+  end
+
+  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], :ask | :approve_all) ::
+          {String.t(), boolean(), :ask | :approve_all}
+  defp execute_with_approval(_provider_pid, tool_call, available_tools, :approve_all) do
+    {result, is_error} = run_single_tool(tool_call, available_tools)
+    {result, is_error, :approve_all}
+  end
+
+  defp execute_with_approval(provider_pid, tool_call, available_tools, :ask) do
+    if Tools.destructive?(tool_call.name) do
+      request_approval(provider_pid, tool_call, available_tools)
+    else
+      {result, is_error} = run_single_tool(tool_call, available_tools)
+      {result, is_error, :ask}
+    end
+  end
+
+  @approval_timeout_ms 300_000
+
+  @spec request_approval(pid(), map(), [ReqLLM.Tool.t()]) ::
+          {String.t(), boolean(), :ask | :approve_all}
+  defp request_approval(provider_pid, tool_call, available_tools) do
+    # Send approval request through the event pipeline (Task → Provider → Session)
+    send(
+      provider_pid,
+      {:agent_event,
+       %Event.ToolApproval{
+         tool_call_id: tool_call.id,
+         name: tool_call.name,
+         args: tool_call.arguments,
+         reply_to: self()
+       }}
+    )
+
+    # Block until the user responds (or timeout after 5 minutes)
+    receive do
+      {:tool_approval_response, _tool_call_id, :approve} ->
+        {result, is_error} = run_single_tool(tool_call, available_tools)
+        {result, is_error, :ask}
+
+      {:tool_approval_response, _tool_call_id, :approve_all} ->
+        {result, is_error} = run_single_tool(tool_call, available_tools)
+        {result, is_error, :approve_all}
+
+      {:tool_approval_response, _tool_call_id, :reject} ->
+        {"Tool rejected by user", true, :ask}
+    after
+      @approval_timeout_ms ->
+        {"Tool approval timed out", true, :ask}
+    end
   end
 
   @spec run_single_tool(map(), [ReqLLM.Tool.t()]) :: {String.t(), boolean()}

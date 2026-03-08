@@ -11,6 +11,13 @@ defmodule Minga.Editor.State.Agent do
   @typedoc "Agent status."
   @type status :: :idle | :thinking | :tool_executing | :error | nil
 
+  @typedoc "Pending tool approval data."
+  @type approval :: %{
+          tool_call_id: String.t(),
+          name: String.t(),
+          args: map()
+        }
+
   @typedoc "Agent sub-state."
   @type t :: %__MODULE__{
           session: pid() | nil,
@@ -18,7 +25,8 @@ defmodule Minga.Editor.State.Agent do
           panel: PanelState.t(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
-          buffer: pid() | nil
+          buffer: pid() | nil,
+          pending_approval: approval() | nil
         }
 
   defstruct session: nil,
@@ -26,7 +34,8 @@ defmodule Minga.Editor.State.Agent do
             panel: PanelState.new(),
             error: nil,
             spinner_timer: nil,
-            buffer: nil
+            buffer: nil,
+            pending_approval: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +167,18 @@ defmodule Minga.Editor.State.Agent do
   @spec history_next(t()) :: t()
   def history_next(%__MODULE__{} = agent) do
     %{agent | panel: PanelState.history_next(agent.panel)}
+  end
+
+  @doc "Sets a pending tool approval."
+  @spec set_pending_approval(t(), approval()) :: t()
+  def set_pending_approval(%__MODULE__{} = agent, approval) when is_map(approval) do
+    %{agent | pending_approval: approval}
+  end
+
+  @doc "Clears the pending tool approval."
+  @spec clear_pending_approval(t()) :: t()
+  def clear_pending_approval(%__MODULE__{} = agent) do
+    %{agent | pending_approval: nil}
   end
 
   @doc "Clears the chat display (visual reset, history preserved)."
