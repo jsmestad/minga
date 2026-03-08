@@ -349,4 +349,69 @@ defmodule Minga.Agent.View.StateTest do
       assert av == ViewState.prev_search_match(av)
     end
   end
+
+  describe "toasts" do
+    test "starts with no toast" do
+      av = ViewState.new()
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "push_toast sets current toast when empty" do
+      av = ViewState.new() |> ViewState.push_toast("Hello", :info)
+      assert ViewState.toast_visible?(av)
+      assert av.toast.message == "Hello"
+      assert av.toast.icon == "✓"
+      assert av.toast.level == :info
+    end
+
+    test "push_toast queues when a toast is already showing" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("First", :info)
+        |> ViewState.push_toast("Second", :warning)
+
+      assert av.toast.message == "First"
+      assert :queue.len(av.toast_queue) == 1
+    end
+
+    test "dismiss_toast shows next from queue" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("First", :info)
+        |> ViewState.push_toast("Second", :warning)
+        |> ViewState.dismiss_toast()
+
+      assert av.toast.message == "Second"
+      assert av.toast.icon == "⚠"
+    end
+
+    test "dismiss_toast clears when queue is empty" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("Only", :info)
+        |> ViewState.dismiss_toast()
+
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "clear_toasts removes everything" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("A", :info)
+        |> ViewState.push_toast("B", :error)
+        |> ViewState.clear_toasts()
+
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "error toast has ✗ icon" do
+      av = ViewState.new() |> ViewState.push_toast("Fail", :error)
+      assert av.toast.icon == "✗"
+    end
+
+    test "warning toast has ⚠ icon" do
+      av = ViewState.new() |> ViewState.push_toast("Warn", :warning)
+      assert av.toast.icon == "⚠"
+    end
+  end
 end

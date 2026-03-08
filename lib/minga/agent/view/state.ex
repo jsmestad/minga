@@ -42,6 +42,9 @@ defmodule Minga.Agent.View.State do
           input_active: boolean()
         }
 
+  @typedoc "A notification toast."
+  @type toast :: %{message: String.t(), icon: String.t(), level: :info | :warning | :error}
+
   @typedoc "Agentic view sub-state."
   @type t :: %__MODULE__{
           active: boolean(),
@@ -52,7 +55,9 @@ defmodule Minga.Agent.View.State do
           chat_width_pct: non_neg_integer(),
           saved_file_tree: FileTreeState.t() | nil,
           help_visible: boolean(),
-          search: search_state() | nil
+          search: search_state() | nil,
+          toast: toast() | nil,
+          toast_queue: term()
         }
 
   @enforce_keys []
@@ -64,7 +69,9 @@ defmodule Minga.Agent.View.State do
             chat_width_pct: 65,
             saved_file_tree: nil,
             help_visible: false,
-            search: nil
+            search: nil,
+            toast: nil,
+            toast_queue: :queue.new()
 
   @min_chat_pct 30
   @max_chat_pct 80
@@ -285,4 +292,48 @@ defmodule Minga.Agent.View.State do
   @spec search_query(t()) :: String.t() | nil
   def search_query(%__MODULE__{search: nil}), do: nil
   def search_query(%__MODULE__{search: search}), do: search.query
+
+  # ── Toasts ──────────────────────────────────────────────────────────────────
+
+  @doc "Pushes a toast. If no toast is showing, it becomes the current toast."
+  @spec push_toast(t(), String.t(), :info | :warning | :error) :: t()
+  def push_toast(%__MODULE__{toast: nil} = av, message, level) do
+    toast = make_toast(message, level)
+    %{av | toast: toast}
+  end
+
+  def push_toast(%__MODULE__{} = av, message, level) do
+    toast = make_toast(message, level)
+    %{av | toast_queue: :queue.in(toast, av.toast_queue)}
+  end
+
+  @doc "Dismisses the current toast. Shows the next one in the queue if any."
+  @spec dismiss_toast(t()) :: t()
+  def dismiss_toast(%__MODULE__{toast: nil} = av), do: av
+
+  def dismiss_toast(%__MODULE__{} = av) do
+    case :queue.out(av.toast_queue) do
+      {{:value, next}, rest} ->
+        %{av | toast: next, toast_queue: rest}
+
+      {:empty, _} ->
+        %{av | toast: nil}
+    end
+  end
+
+  @doc "Returns true if a toast is currently visible."
+  @spec toast_visible?(t()) :: boolean()
+  def toast_visible?(%__MODULE__{toast: nil}), do: false
+  def toast_visible?(%__MODULE__{}), do: true
+
+  @doc "Clears all toasts."
+  @spec clear_toasts(t()) :: t()
+  def clear_toasts(%__MODULE__{} = av) do
+    %{av | toast: nil, toast_queue: :queue.new()}
+  end
+
+  @spec make_toast(String.t(), :info | :warning | :error) :: toast()
+  defp make_toast(message, :info), do: %{message: message, icon: "✓", level: :info}
+  defp make_toast(message, :warning), do: %{message: message, icon: "⚠", level: :warning}
+  defp make_toast(message, :error), do: %{message: message, icon: "✗", level: :error}
 end

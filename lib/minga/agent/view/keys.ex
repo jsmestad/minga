@@ -65,6 +65,12 @@ defmodule Minga.Agent.View.Keys do
     {:passthrough, state}
   end
 
+  # Dismiss any toast on keypress (before processing the key normally)
+  def handle_key(%{agentic: %{toast: %{}} = agentic} = state, cp, mods) do
+    state = %{state | agentic: ViewState.dismiss_toast(agentic)}
+    handle_key(state, cp, mods)
+  end
+
   # SPC prefix: delegate to mode FSM so leader/which-key work,
   # but NOT when the chat input is focused (space is a typeable character).
   def handle_key(
@@ -867,10 +873,14 @@ defmodule Minga.Agent.View.Keys do
           Session.add_system_message(state.agent.session, "Copied #{label} to clipboard")
         end
 
+        update_agentic(state, &ViewState.push_toast(&1, "Copied #{label}", :info))
+
       _error ->
         if state.agent.session do
           Session.add_system_message(state.agent.session, "Clipboard write failed", :error)
         end
+
+        update_agentic(state, &ViewState.push_toast(&1, "Clipboard write failed", :error))
     end
 
     state

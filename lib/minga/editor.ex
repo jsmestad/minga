@@ -470,10 +470,18 @@ defmodule Minga.Editor do
 
     state =
       case status do
-        :error -> log_message(state, "Agent: error")
-        :idle -> state
-        :thinking -> state
-        :tool_executing -> state
+        :error ->
+          state = log_message(state, "Agent: error")
+          push_toast(state, "Agent error", :error)
+
+        :idle ->
+          state
+
+        :thinking ->
+          state
+
+        :tool_executing ->
+          state
       end
 
     # Re-engage auto-scroll when a new agent turn starts (thinking)
@@ -632,6 +640,19 @@ defmodule Minga.Editor do
     end
   end
 
+  @toast_duration_ms 3_000
+
+  def handle_info(:dismiss_toast, state) do
+    state = %{state | agentic: ViewState.dismiss_toast(state.agentic)}
+
+    # If there's another toast in the queue, schedule its dismissal
+    if ViewState.toast_visible?(state.agentic) do
+      Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
+    end
+
+    {:noreply, schedule_render(state, 16)}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -666,6 +687,18 @@ defmodule Minga.Editor do
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+  end
+
+  @spec push_toast(state(), String.t(), :info | :warning | :error) :: state()
+  defp push_toast(state, message, level) do
+    was_empty = not ViewState.toast_visible?(state.agentic)
+    state = %{state | agentic: ViewState.push_toast(state.agentic, message, level)}
+
+    if was_empty do
+      Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
+    end
+
+    state
   end
 
   @spec sync_agent_buffer(state()) :: state()

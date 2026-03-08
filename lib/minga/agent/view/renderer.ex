@@ -118,7 +118,8 @@ defmodule Minga.Agent.View.Renderer do
             chat_width_pct: non_neg_integer(),
             help_visible: boolean(),
             focus: atom(),
-            search: Minga.Agent.View.State.search_state() | nil
+            search: Minga.Agent.View.State.search_state() | nil,
+            toast: Minga.Agent.View.State.toast() | nil
           }
   end
 
@@ -172,11 +173,16 @@ defmodule Minga.Agent.View.Renderer do
         input_commands ++
         modeline_commands
 
-    if input.agentic.help_visible do
-      base ++ render_help_overlay(input, cols, rows)
-    else
-      base
-    end
+    overlays =
+      if input.agentic.help_visible do
+        render_help_overlay(input, cols, rows)
+      else
+        []
+      end
+
+    toast_cmds = render_toast_overlay(input, cols)
+
+    base ++ overlays ++ toast_cmds
   end
 
   # Legacy wrapper: extracts a RenderInput from full EditorState.
@@ -278,7 +284,8 @@ defmodule Minga.Agent.View.Renderer do
         chat_width_pct: state.agentic.chat_width_pct,
         help_visible: state.agentic.help_visible,
         focus: state.agentic.focus,
-        search: state.agentic.search
+        search: state.agentic.search,
+        toast: state.agentic.toast
       },
       messages: messages,
       usage: usage,
@@ -853,6 +860,31 @@ defmodule Minga.Agent.View.Renderer do
     chars = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     Enum.at(chars, rem(frame, length(chars)))
   end
+
+  # ── Toast overlay ─────────────────────────────────────────────────────────
+
+  @spec render_toast_overlay(RenderInput.t(), pos_integer()) :: [DisplayList.draw()]
+  defp render_toast_overlay(%{agentic: %{toast: nil}}, _cols), do: []
+
+  defp render_toast_overlay(%{agentic: %{toast: toast}} = input, cols) do
+    at = Theme.agent_theme(input.theme)
+    text = " #{toast.icon} #{toast.message} "
+    text_len = String.length(text)
+    col = max(cols - text_len - 1, 0)
+
+    fg = toast_fg(toast.level, at)
+    bg = toast_bg(toast.level, at)
+
+    [DisplayList.draw(0, col, text, fg: fg, bg: bg)]
+  end
+
+  @spec toast_fg(atom(), Theme.Agent.t()) :: Theme.color()
+  defp toast_fg(:error, at), do: at.status_error
+  defp toast_fg(:warning, at), do: at.status_thinking
+  defp toast_fg(:info, at), do: at.status_idle
+
+  @spec toast_bg(atom(), Theme.Agent.t()) :: Theme.color()
+  defp toast_bg(_level, at), do: at.header_bg
 
   # ── Help overlay ──────────────────────────────────────────────────────────
 
