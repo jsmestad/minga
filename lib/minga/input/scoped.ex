@@ -7,31 +7,38 @@ defmodule Minga.Input.Scoped do
   keymap scope, handling scope-specific bindings, prefix sequences, and
   sub-state dispatch (search input, mention completion).
 
-  For the `:editor` scope, all keys pass through to the mode FSM (the scope
-  returns `:not_found` for every key).
+  For the `:editor` scope, keys pass through to the mode FSM unless the agent
+  side panel is visible, in which case panel-specific handling applies.
 
   For the `:agent` scope, keys are resolved against the agent scope trie.
   Context-dependent sub-states (search input, mention completion, tool
   approval, diff review) are handled before trie lookup. The leader key
   (SPC) always passes through to the mode FSM for which-key integration.
 
-  For the `:file_tree` scope, tree-specific keys are handled and unmatched
-  keys pass through to the mode FSM for vim navigation.
+  For the `:file_tree` scope, tree-specific keys are handled via scope
+  resolution and unmatched keys delegate to the mode FSM with the tree
+  buffer swapped in as the active buffer (providing full vim navigation).
   """
 
   @behaviour Minga.Input.Handler
 
   import Bitwise
 
+  alias Minga.Agent.PanelState
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.FileTree
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
 
   @ctrl Protocol.mod_ctrl()
+  @alt Protocol.mod_alt()
+  @shift Protocol.mod_shift()
   @space 32
 
   # ── Handler callback ───────────────────────────────────────────────────────
@@ -40,23 +47,60 @@ defmodule Minga.Input.Scoped do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
-  # Editor scope: always passthrough (let ModeFSM handle everything)
+  # ── Editor scope ─────────────────────────────────────────────────────────
+
+  # Editor scope with agent side panel visible + input focused:
+  # intercept all keys for the input field.
+  def handle_key(
+        %{
+          keymap_scope: :editor,
+          agent: %{panel: %{visible: true, input_focused: true}}
+        } = state,
+        cp,
+        mods
+      ) do
+    {:handled, handle_panel_input(state, cp, mods)}
+  end
+
+  # Editor scope with agent side panel visible + nav mode:
+  # handle panel-specific keys, delegate rest to mode FSM with agent buffer.
+  def handle_key(
+        %{
+          keymap_scope: :editor,
+          agent: %{panel: %{visible: true}, buffer: buf}
+        } = state,
+        cp,
+        mods
+      )
+      when is_pid(buf) do
+    handle_panel_nav(state, cp, mods)
+  end
+
+  # Editor scope (no panel): always passthrough to mode FSM
   def handle_key(%{keymap_scope: :editor} = state, _cp, _mods) do
     {:passthrough, state}
   end
+
+  # ── Agent scope ──────────────────────────────────────────────────────────
 
   # Agent scope: dispatch through scope resolution
   def handle_key(%{keymap_scope: :agent, agentic: %{active: true}} = state, cp, mods) do
     handle_agent_key(state, cp, mods)
   end
 
-  # Agent scope but not active (race condition guard): passthrough
+  # Agent scope but agentic view not active (race condition guard): passthrough
   def handle_key(%{keymap_scope: :agent} = state, _cp, _mods) do
     {:passthrough, state}
   end
 
-  # File tree scope: dispatch through scope resolution
-  def handle_key(%{keymap_scope: :file_tree, file_tree: %{focused: true}} = state, cp, mods) do
+  # ── File tree scope ──────────────────────────────────────────────────────
+
+  # File tree scope with tree focused: handle via scope + mode FSM delegation
+  def handle_key(
+        %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{}, focused: true}} = state,
+        cp,
+        mods
+      ) do
     handle_file_tree_key(state, cp, mods)
   end
 
@@ -68,7 +112,9 @@ defmodule Minga.Input.Scoped do
   # Unknown scope: passthrough
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
-  # ── Agent scope dispatch ───────────────────────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════════════
+  # Agent scope dispatch
+  # ══════════════════════════════════════════════════════════════════════════
 
   @spec handle_agent_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
@@ -213,10 +259,10 @@ defmodule Minga.Input.Scoped do
       :not_found ->
         # No scope binding. In insert mode, self-insert printable chars.
         if vim_state == :insert and cp >= 32 and band(mods, @ctrl) == 0 and
-             band(mods, 0x04) == 0 do
+             band(mods, @alt) == 0 do
           handle_agent_self_insert(state, cp, mods)
         else
-          # Not handled by scope, pass through to mode FSM / next handler
+          # Not handled by scope, swallow the key
           {:handled, state}
         end
     end
@@ -279,15 +325,231 @@ defmodule Minga.Input.Scoped do
     resolve_scope_key(state, :agent, :normal, {cp, 0}, cp, 0)
   end
 
-  # ── File tree scope dispatch ───────────────────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════════════
+  # Agent side panel (editor scope, panel visible)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # The agent side panel (SPC a a) lives in the editor scope. When visible,
+  # it has two modes:
+  #
+  # 1. Input focused: keys go to the chat input field. Same bindings as the
+  #    agentic view's insert mode.
+  # 2. Navigation: panel-specific keys (q/i/ESC) are handled directly.
+  #    Everything else delegates to the mode FSM with the agent buffer
+  #    swapped in as active, giving full vim navigation of chat content.
+
+  @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+
+  # ── Mention completion active ──────────────────────────────────────────
+
+  defp handle_panel_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         cp,
+         mods
+       ) do
+    AgentCommands.handle_mention_key(state, cp, mods)
+  end
+
+  # ── Regular input ──────────────────────────────────────────────────────
+
+  # Ctrl+Q: unfocus first, then forward the quit key
+  defp handle_panel_input(state, ?q, mods) when band(mods, @ctrl) != 0 do
+    send(self(), {:minga_input, {:key_press, ?q, mods}})
+    update_agent(state, &AgentState.focus_input(&1, false))
+  end
+
+  # Ctrl+S: save current buffer
+  defp handle_panel_input(state, ?s, mods) when band(mods, @ctrl) != 0 do
+    if state.buffers.active do
+      case BufferServer.save(state.buffers.active) do
+        :ok -> :ok
+        {:error, _reason} -> :ok
+      end
+    end
+
+    _ = mods
+    state
+  end
+
+  # Ctrl+C: submit prompt if input has text, abort if agent is active
+  defp handle_panel_input(state, ?c, mods) when band(mods, @ctrl) != 0 do
+    if PanelState.input_text(state.agent.panel) == "" do
+      if state.agent.status in [:thinking, :tool_executing] do
+        AgentCommands.abort_agent(state)
+      else
+        state
+      end
+    else
+      AgentCommands.submit_prompt(state)
+    end
+  end
+
+  # Ctrl+D: scroll chat down
+  defp handle_panel_input(state, ?d, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.scroll_chat_down(state)
+  end
+
+  # Ctrl+U: scroll chat up
+  defp handle_panel_input(state, ?u, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.scroll_chat_up(state)
+  end
+
+  # Ctrl+L: clear chat display
+  defp handle_panel_input(state, ?l, mods) when band(mods, @ctrl) != 0 do
+    AgentCommands.clear_chat_display(state)
+  end
+
+  # Escape: unfocus the input
+  defp handle_panel_input(state, 27, _mods) do
+    update_agent(state, &AgentState.focus_input(&1, false))
+  end
+
+  # Backspace
+  defp handle_panel_input(state, 127, _mods) do
+    AgentCommands.input_backspace(state)
+  end
+
+  # Shift+Enter or Alt+Enter: insert newline
+  defp handle_panel_input(state, 13, mods) when band(mods, @shift) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_panel_input(state, 13, mods) when band(mods, @alt) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  # Enter: submit prompt
+  defp handle_panel_input(state, 13, _mods) do
+    AgentCommands.submit_prompt(state)
+  end
+
+  # Up arrow: move cursor up or recall history
+  defp handle_panel_input(state, cp, _mods) when cp == 0xF700 do
+    case AgentState.move_cursor_up(state.agent) do
+      :at_top -> update_agent(state, &AgentState.history_prev/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  # Down arrow: move cursor down or forward history
+  defp handle_panel_input(state, cp, _mods) when cp == 0xF701 do
+    case AgentState.move_cursor_down(state.agent) do
+      :at_bottom -> update_agent(state, &AgentState.history_next/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  # Legacy arrow encodings (escape sequences from Zig TUI)
+  defp handle_panel_input(state, 0x415B1B, _mods) do
+    case AgentState.move_cursor_up(state.agent) do
+      :at_top -> update_agent(state, &AgentState.history_prev/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  defp handle_panel_input(state, 0x425B1B, _mods) do
+    case AgentState.move_cursor_down(state.agent) do
+      :at_bottom -> update_agent(state, &AgentState.history_next/1)
+      agent -> %{state | agent: agent}
+    end
+  end
+
+  # @ at start of line or after whitespace: trigger mention completion
+  defp handle_panel_input(state, ?@, mods)
+       when band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+    AgentCommands.scope_trigger_mention(state)
+  end
+
+  # Printable characters (no Ctrl/Alt)
+  defp handle_panel_input(state, cp, mods)
+       when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+    AgentCommands.input_char(state, <<cp::utf8>>)
+  end
+
+  # Everything else: silently swallow
+  defp handle_panel_input(state, _cp, _mods), do: state
+
+  # ── Panel navigation mode ─────────────────────────────────────────────────
+
+  @spec handle_panel_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+
+  # If a leader key sequence is in progress, pass through to mode FSM
+  defp handle_panel_nav(state, _cp, _mods) when is_map(state.mode_state.leader_node) do
+    {:handled, delegate_to_mode_fsm_with_agent_buffer(state, elem({0, 0}, 0), 0)}
+  end
+
+  # Override: when a leader sequence is pending, pass the actual key through
+  defp handle_panel_nav(state, cp, mods) do
+    if key_sequence_pending?(state) do
+      {:handled, delegate_to_mode_fsm_with_agent_buffer(state, cp, mods)}
+    else
+      case panel_nav_key(state, cp, mods) do
+        {:panel, new_state} -> {:handled, new_state}
+        :delegate -> {:handled, delegate_to_mode_fsm_with_agent_buffer(state, cp, mods)}
+      end
+    end
+  end
+
+  @spec panel_nav_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          {:panel, EditorState.t()} | :delegate
+
+  # q or Escape: close the panel
+  defp panel_nav_key(state, cp, _mods) when cp in [?q, 27] do
+    {:panel, AgentCommands.toggle_panel(state)}
+  end
+
+  # i: focus the input field
+  defp panel_nav_key(state, ?i, _mods) do
+    {:panel, update_agent(state, &AgentState.focus_input(&1, true))}
+  end
+
+  # Everything else: delegate to mode FSM for vim navigation
+  defp panel_nav_key(_state, _cp, _mods), do: :delegate
+
+  @spec delegate_to_mode_fsm_with_agent_buffer(
+          EditorState.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: EditorState.t()
+  defp delegate_to_mode_fsm_with_agent_buffer(
+         %{agent: %{buffer: buf}} = state,
+         cp,
+         mods
+       )
+       when is_pid(buf) do
+    # Swap active buffer to agent buffer
+    real_active = state.buffers.active
+    state = put_in(state.buffers.active, buf)
+
+    # Run through the mode FSM
+    state = Minga.Editor.do_handle_key(state, cp, mods)
+
+    # Block mode transitions (buffer is read-only, navigation only)
+    state =
+      if state.mode != :normal do
+        %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
+      else
+        state
+      end
+
+    # Restore the real active buffer
+    put_in(state.buffers.active, real_active)
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # File tree scope dispatch
+  # ══════════════════════════════════════════════════════════════════════════
 
   @spec handle_file_tree_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
-  # Leader sequence in progress: delegate to mode FSM
   defp handle_file_tree_key(state, cp, mods) do
     if key_sequence_pending?(state) do
-      {:passthrough, state}
+      # Leader sequence or pending g/operator: delegate to mode FSM with
+      # tree buffer so SPC w l, gg, etc. work.
+      {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
     else
       key = {cp, mods}
 
@@ -296,19 +558,78 @@ defmodule Minga.Input.Scoped do
           {:handled, Commands.execute(state, command)}
 
         {:prefix, _node} ->
-          # File tree has no prefix sequences currently
+          # File tree has no prefix sequences currently; swallow
           {:handled, state}
 
         :not_found ->
-          # Delegate to mode FSM for vim navigation (j/k/gg/G/etc.)
-          {:passthrough, state}
+          # Delegate to mode FSM for vim navigation (j/k/gg/G/Ctrl-d/etc.)
+          {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
       end
     end
   end
+
+  @spec delegate_to_mode_fsm_with_tree_buffer(
+          EditorState.t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: EditorState.t()
+  defp delegate_to_mode_fsm_with_tree_buffer(
+         %{file_tree: %{buffer: buf}} = state,
+         cp,
+         mods
+       )
+       when is_pid(buf) do
+    # Save the real active buffer, swap in the tree buffer
+    real_active = state.buffers.active
+    state = put_in(state.buffers.active, buf)
+
+    # Run through the mode FSM (j, k, gg, G, Ctrl-d, Ctrl-u, /, etc.)
+    state = Minga.Editor.do_handle_key(state, cp, mods)
+
+    # Block mode transitions: force back to normal if mode FSM tried
+    # to enter insert/visual/etc. (tree is read-only)
+    state =
+      if state.mode != :normal do
+        %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
+      else
+        state
+      end
+
+    # Restore the real active buffer
+    state = put_in(state.buffers.active, real_active)
+
+    # If the tree was closed by the command (e.g. SPC o p toggle), skip sync
+    if state.file_tree.tree == nil do
+      state
+    else
+      sync_tree_cursor_from_buffer(state, buf)
+    end
+  end
+
+  defp delegate_to_mode_fsm_with_tree_buffer(state, _cp, _mods), do: state
+
+  # Read the buffer cursor line and update the tree cursor to match
+  @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
+  defp sync_tree_cursor_from_buffer(%{file_tree: %{tree: tree}} = state, buf) do
+    {cursor_line, _col} = BufferServer.cursor(buf)
+    entries = FileTree.visible_entries(tree)
+    max_cursor = max(length(entries) - 1, 0)
+    clamped = min(cursor_line, max_cursor)
+    put_in(state.file_tree.tree, %{tree | cursor: clamped})
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Shared helpers
+  # ══════════════════════════════════════════════════════════════════════════
 
   @spec key_sequence_pending?(EditorState.t()) :: boolean()
   defp key_sequence_pending?(%{mode_state: %{leader_node: node}}) when node != nil, do: true
   defp key_sequence_pending?(%{mode_state: %{pending_g: true}}), do: true
   defp key_sequence_pending?(%{mode: mode}) when mode in [:operator_pending, :command], do: true
   defp key_sequence_pending?(_state), do: false
+
+  @spec update_agent(EditorState.t(), (AgentState.t() -> AgentState.t())) :: EditorState.t()
+  defp update_agent(state, fun) do
+    %{state | agent: fun.(state.agent)}
+  end
 end

@@ -190,7 +190,8 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       tree_buf = BufferSync.start_buffer(tree)
 
       :sys.replace_state(ctx.editor, fn s ->
-        put_in(s.file_tree, %{s.file_tree | tree: tree, focused: true, buffer: tree_buf})
+        s = put_in(s.file_tree, %{s.file_tree | tree: tree, focused: true, buffer: tree_buf})
+        %{s | keymap_scope: :file_tree}
       end)
 
       # Find other.ex in the tree entries and navigate to it

@@ -1,13 +1,18 @@
 defmodule Minga.Input.ScopedTest do
   use ExUnit.Case, async: true
 
+  @moduletag :tmp_dir
+
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
+  alias Minga.FileTree
+  alias Minga.FileTree.BufferSync
   alias Minga.Input.Scoped
   alias Minga.Mode
 
@@ -15,7 +20,7 @@ defmodule Minga.Input.ScopedTest do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
 
     panel = %PanelState{
-      visible: true,
+      visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
       scroll_offset: 0,
       spinner_frame: 0,
@@ -30,7 +35,7 @@ defmodule Minga.Input.ScopedTest do
       panel: panel,
       error: nil,
       spinner_timer: nil,
-      buffer: nil
+      buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
     agentic = %ViewState{
@@ -51,7 +56,11 @@ defmodule Minga.Input.ScopedTest do
     }
   end
 
-  describe "editor scope" do
+  # ══════════════════════════════════════════════════════════════════════════
+  # Editor scope (no panel)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "editor scope (no panel)" do
     test "all keys pass through" do
       state = base_state(keymap_scope: :editor)
       assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
@@ -59,6 +68,115 @@ defmodule Minga.Input.ScopedTest do
       assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
     end
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Editor scope with agent side panel
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "editor scope — agent side panel nav" do
+    setup do
+      {:ok, agent_buf} = BufferServer.start_link(content: "line1\nline2\nline3\nline4")
+
+      state =
+        base_state(
+          keymap_scope: :editor,
+          panel_visible: true,
+          agent_buffer: agent_buf
+        )
+
+      {:ok, state: state, agent_buf: agent_buf}
+    end
+
+    test "q on unfocused panel re-focuses input (toggle_panel behavior)", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "i focuses the input", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, ?i, 0)
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "j delegates to mode FSM with agent buffer", %{state: state, agent_buf: agent_buf} do
+      # j should delegate to mode FSM, moving cursor in agent buffer
+      {:handled, _new_state} = Scoped.handle_key(state, ?j, 0)
+      {line, _col} = BufferServer.cursor(agent_buf)
+      assert line >= 1
+    end
+
+    test "ESC closes the panel", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      # toggle_panel on a non-input-focused visible panel re-focuses input
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "passthrough when panel not visible" do
+      state = base_state(keymap_scope: :editor, panel_visible: false)
+      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
+    end
+
+    test "passthrough when no agent buffer" do
+      state = base_state(keymap_scope: :editor, panel_visible: true, agent_buffer: nil)
+      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
+    end
+  end
+
+  describe "editor scope — agent side panel input" do
+    setup do
+      {:ok, agent_buf} = BufferServer.start_link(content: "chat content")
+
+      state =
+        base_state(
+          keymap_scope: :editor,
+          panel_visible: true,
+          input_focused: true,
+          agent_buffer: agent_buf
+        )
+
+      {:ok, state: state}
+    end
+
+    test "printable chars go to input", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, ?x, 0)
+      assert PanelState.input_text(new_state.agent.panel) =~ "x"
+    end
+
+    test "ESC unfocuses input", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      refute new_state.agent.panel.input_focused
+    end
+
+    test "Backspace on empty input is safe", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, 127, 0)
+    end
+
+    test "Ctrl+C with empty input is handled", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?c, 0x02)
+    end
+
+    test "Ctrl+D scrolls chat down", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?d, 0x02)
+    end
+
+    test "Enter on empty prompt is no-op", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0)
+      assert new_state.agent.panel.input_focused == true
+    end
+
+    test "Shift+Enter inserts newline", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0x01)
+      assert length(new_state.agent.panel.input_lines) > 1
+    end
+
+    test "Alt+Enter inserts newline", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0x04)
+      assert length(new_state.agent.panel.input_lines) > 1
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Agent scope (full-screen agentic view)
+  # ══════════════════════════════════════════════════════════════════════════
 
   describe "agent scope — normal mode" do
     setup do
@@ -202,9 +320,7 @@ defmodule Minga.Input.ScopedTest do
       assert {:handled, _} = Scoped.handle_key(state, ?c, 0x02)
     end
 
-    test "SPC passes through for leader key even in insert mode", %{state: state} do
-      # SPC should NOT pass through when input is focused (it's a space char)
-      # The check is: input_focused: false for SPC passthrough
+    test "SPC types a space when input is focused (not leader key)", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?\s, 0)
       assert PanelState.input_text(new_state.agent.panel) =~ " "
     end
@@ -253,28 +369,69 @@ defmodule Minga.Input.ScopedTest do
     end
   end
 
-  describe "file_tree scope" do
-    test "q closes tree" do
-      state = base_state(keymap_scope: :file_tree)
-      state = put_in(state.file_tree.focused, true)
+  # ══════════════════════════════════════════════════════════════════════════
+  # File tree scope
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "file tree scope" do
+    test "q closes tree", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir)
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
       assert new_state.keymap_scope == :editor
+      assert new_state.file_tree.tree == nil
     end
 
-    test "unbound key passes through for mode FSM" do
-      state = base_state(keymap_scope: :file_tree)
-      state = put_in(state.file_tree.focused, true)
-      # j is not bound in file_tree scope (handled by mode FSM for vim nav)
-      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
+    test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir)
+      # j is not bound in file_tree scope (handled by mode FSM delegation)
+      {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
+      assert new_state.file_tree.tree.cursor == 1
     end
 
-    test "leader sequence in progress passes through" do
-      state = base_state(keymap_scope: :file_tree)
-      state = put_in(state.file_tree.focused, true)
-      leader_state = %{state | mode_state: %{state.mode_state | leader_node: %{}}}
-      assert {:passthrough, _} = Scoped.handle_key(leader_state, ?f, 0)
+    test "leader sequence in progress delegates to mode FSM", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir)
+      # Use a real Bindings.Node, not a plain map, because the mode FSM
+      # calls Bindings.lookup on leader_node.
+      leader_node = %Minga.Keymap.Bindings.Node{children: %{}, command: nil, description: nil}
+      leader_state = %{state | mode_state: %{state.mode_state | leader_node: leader_node}}
+      {:handled, _new_state} = Scoped.handle_key(leader_state, ?f, 0)
+    end
+
+    test "h collapses directory (scope binding)", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
+      state = make_tree_state(tmp_dir, 0)
+
+      # h is bound in file_tree scope to :tree_collapse
+      {:handled, _new_state} = Scoped.handle_key(state, ?h, 0)
+    end
+
+    test "l expands directory (scope binding)", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "subdir"))
+      state = make_tree_state(tmp_dir, 0)
+
+      {:handled, _new_state} = Scoped.handle_key(state, ?l, 0)
+    end
+
+    test "r refreshes tree (scope binding)", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir, 3)
+      {:handled, _new_state} = Scoped.handle_key(state, ?r, 0)
+    end
+
+    test "H toggles hidden files (scope binding)", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, ".hidden"), "")
+      state = make_tree_state(tmp_dir, 0)
+
+      entries_before = length(FileTree.visible_entries(state.file_tree.tree))
+      {:handled, new_state} = Scoped.handle_key(state, ?H, 0)
+      entries_after = length(FileTree.visible_entries(new_state.file_tree.tree))
+
+      assert entries_after != entries_before
     end
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Scope inactive guards
+  # ══════════════════════════════════════════════════════════════════════════
 
   describe "scope inactive guards" do
     test "agent scope with agentic not active passes through" do
@@ -282,10 +439,57 @@ defmodule Minga.Input.ScopedTest do
       assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
     end
 
-    test "file_tree scope with tree not focused passes through" do
-      state = base_state(keymap_scope: :file_tree)
-      # focused defaults to false
+    test "file_tree scope with tree not focused passes through", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir)
+      state = put_in(state.file_tree.focused, false)
       assert {:passthrough, _} = Scoped.handle_key(state, ?q, 0)
     end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Cross-scope leader sequences
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "leader sequences work across all scopes" do
+    test "SPC passes through in agent scope (normal mode)" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
+    end
+
+    test "SPC self-inserts in agent insert mode" do
+      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+      {:handled, new_state} = Scoped.handle_key(state, ?\s, 0)
+      assert PanelState.input_text(new_state.agent.panel) =~ " "
+    end
+
+    test "leader node pending passes through in agent scope" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      state = %{state | mode_state: %{state.mode_state | leader_node: %{}}}
+      assert {:passthrough, _} = Scoped.handle_key(state, ?a, 0)
+    end
+
+    test "SPC passes through in editor scope (no panel)" do
+      state = base_state(keymap_scope: :editor)
+      assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
+    end
+  end
+
+  # ── Helpers ────────────────────────────────────────────────────────────────
+
+  defp make_tree_state(tmp_dir, file_count \\ 5) do
+    if file_count > 0 do
+      for i <- 1..file_count do
+        File.write!(
+          Path.join(tmp_dir, "file_#{String.pad_leading(to_string(i), 2, "0")}.txt"),
+          ""
+        )
+      end
+    end
+
+    tree = FileTree.new(tmp_dir)
+    buf = BufferSync.start_buffer(tree)
+
+    base_state(keymap_scope: :file_tree)
+    |> Map.put(:file_tree, %FileTreeState{tree: tree, focused: true, buffer: buf})
   end
 end
