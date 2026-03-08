@@ -193,3 +193,196 @@ jobs:
           files: |
             release-binaries/minga_*
             release-binaries/SHA256SUMS.txt
+
+  # ── Update Homebrew tap with new version and hashes ────────────────────
+  update-homebrew:
+    name: Update Homebrew Tap
+    needs: [validate, release]
+    if: needs.validate.outputs.is_prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Compute SHA256 hashes
+        id: hashes
+        run: |
+          echo "macos_aarch64=$(sha256sum release-artifacts/minga_macos_aarch64/minga_macos_aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "macos_x86_64=$(sha256sum release-artifacts/minga_macos_x86_64/minga_macos_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_aarch64=$(sha256sum release-artifacts/minga_linux_aarch64/minga_linux_aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_x86_64=$(sha256sum release-artifacts/minga_linux_x86_64/minga_linux_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: jsmestad/homebrew-minga
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula and cask
+        env:
+          VERSION: ${{ github.ref_name }}
+          SHA_MACOS_AARCH64: ${{ steps.hashes.outputs.macos_aarch64 }}
+          SHA_MACOS_X86_64: ${{ steps.hashes.outputs.macos_x86_64 }}
+          SHA_LINUX_AARCH64: ${{ steps.hashes.outputs.linux_aarch64 }}
+          SHA_LINUX_X86_64: ${{ steps.hashes.outputs.linux_x86_64 }}
+        run: |
+          version="${VERSION#v}"
+
+          # Generate formula
+          python3 << 'PYEOF'
+          import os
+          v = os.environ["VERSION"].lstrip("v")
+          formula = f'''# typed: false
+          # frozen_string_literal: true
+
+          class Minga < Formula
+            desc "BEAM-powered modal text editor with Zig terminal renderer"
+            homepage "https://github.com/jsmestad/minga"
+            version "{v}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_macos_aarch64"
+                sha256 "{os.environ["SHA_MACOS_AARCH64"]}"
+              else
+                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_macos_x86_64"
+                sha256 "{os.environ["SHA_MACOS_X86_64"]}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_linux_aarch64"
+                sha256 "{os.environ["SHA_LINUX_AARCH64"]}"
+              else
+                url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/minga_linux_x86_64"
+                sha256 "{os.environ["SHA_LINUX_X86_64"]}"
+              end
+            end
+
+            def install
+              binary = Dir["minga_*"].first
+              bin.install binary => "minga"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{{bin}}/minga --version")
+            end
+          end
+          '''
+          import textwrap
+          with open("homebrew-tap/Formula/minga.rb", "w") as f:
+              f.write(textwrap.dedent(formula).lstrip())
+          PYEOF
+
+          # Download .dmg for cask hash (may not exist for TUI-only releases)
+          dmg_url="https://github.com/jsmestad/minga/releases/download/v${version}/Minga.dmg"
+          dmg_sha="PLACEHOLDER"
+          if curl -fSL -o Minga.dmg "$dmg_url" 2>/dev/null; then
+            dmg_sha=$(sha256sum Minga.dmg | cut -d' ' -f1)
+          fi
+          export DMG_SHA="$dmg_sha"
+
+          # Generate cask
+          python3 << 'PYEOF'
+          import os, textwrap
+          v = os.environ["VERSION"].lstrip("v")
+          dmg_sha = os.environ["DMG_SHA"]
+          cask = f'''cask "minga-mac" do
+            version "{v}"
+            sha256 "{dmg_sha}"
+
+            url "https://github.com/jsmestad/minga/releases/download/v#{{version}}/Minga.dmg"
+            name "Minga"
+            desc "BEAM-powered modal text editor with native macOS GUI"
+            homepage "https://github.com/jsmestad/minga"
+
+            app "Minga.app"
+
+            zap trash: [
+              "~/Library/Application Support/minga",
+              "~/Library/Preferences/com.minga.minga-mac.plist",
+              "~/Library/Caches/com.minga.minga-mac",
+            ]
+          end
+          '''
+          with open("homebrew-tap/Casks/minga-mac.rb", "w") as f:
+              f.write(textwrap.dedent(cask).lstrip())
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: update to ${{ github.ref_name }}"
+          git push
+
+  # ── Update CHANGELOG.md with release notes ─────────────────────────────
+  update-changelog:
+    name: Update Changelog
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepend release notes to CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          date=$(date -u +%Y-%m-%d)
+
+          # Fetch auto-generated release notes from the GitHub Release
+          release_body=$(gh release view "$TAG" --json body -q '.body' 2>/dev/null || echo "")
+          if [ -z "$release_body" ]; then
+            release_body="Release $TAG"
+          fi
+
+          export RELEASE_VERSION="$version"
+          export RELEASE_DATE="$date"
+          export RELEASE_BODY="$release_body"
+
+          python3 << 'PYEOF'
+          import os
+
+          version = os.environ["RELEASE_VERSION"]
+          date = os.environ["RELEASE_DATE"]
+          body = os.environ["RELEASE_BODY"]
+
+          entry = f"## [{version}] - {date}\n\n{body}\n\n"
+
+          with open("CHANGELOG.md", "r") as f:
+              content = f.read()
+
+          marker = "<!-- RELEASE_MARKER"
+          idx = content.find(marker)
+          if idx >= 0:
+              content = content[:idx] + entry + content[idx:]
+          else:
+              # No marker; insert after the first blank line
+              lines = content.split("\n", 3)
+              content = lines[0] + "\n\n" + entry + "\n".join(lines[1:])
+
+          with open("CHANGELOG.md", "w") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Commit changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "docs: update CHANGELOG.md for ${{ github.ref_name }} [skip ci]"
+          git push
