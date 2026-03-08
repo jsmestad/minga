@@ -127,7 +127,17 @@ defmodule Minga.Theme.DoomOne do
         status_tool: @cyan,
         status_error: @red,
         status_idle: @base5,
-        text_fg: @fg
+        text_fg: @fg,
+        context_low: @green,
+        context_mid: @yellow,
+        context_high: @red,
+        usage_fg: @grey,
+        toast_bg: 0x3F444A,
+        toast_fg: @fg,
+        toast_border: @base6,
+        system_fg: @base6,
+        search_match_bg: @yellow,
+        search_current_bg: @red
       }
     }
   end

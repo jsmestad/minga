@@ -177,6 +177,53 @@ defmodule Minga.ThemeTest do
         assert %Theme.Tree{} = theme.tree
       end
 
+      test "#{theme_name} has agent colors" do
+        theme = Theme.get!(unquote(theme_name))
+        assert %Theme.Agent{} = theme.agent
+        assert theme.agent != nil
+
+        agent_fields = [
+          :panel_bg,
+          :panel_border,
+          :header_fg,
+          :header_bg,
+          :user_border,
+          :user_label,
+          :assistant_border,
+          :assistant_label,
+          :tool_border,
+          :tool_header,
+          :code_bg,
+          :code_border,
+          :input_border,
+          :input_bg,
+          :input_placeholder,
+          :thinking_fg,
+          :status_thinking,
+          :status_tool,
+          :status_error,
+          :status_idle,
+          :text_fg,
+          :context_low,
+          :context_mid,
+          :context_high,
+          :usage_fg,
+          :toast_bg,
+          :toast_fg,
+          :toast_border,
+          :system_fg,
+          :search_match_bg,
+          :search_current_bg
+        ]
+
+        for field <- agent_fields do
+          value = Map.get(theme.agent, field)
+
+          assert is_integer(value) and value >= 0,
+                 "expected #{field} to be a non-negative integer in #{unquote(theme_name)}.agent, got: #{inspect(value)}"
+        end
+      end
+
       test "#{theme_name} all colors are non-negative integers" do
         theme = Theme.get!(unquote(theme_name))
 
@@ -189,6 +236,10 @@ defmodule Minga.ThemeTest do
         end
 
         for {_key, color} <- Map.from_struct(theme.tree) do
+          assert is_integer(color) and color >= 0
+        end
+
+        for {_key, color} <- Map.from_struct(theme.agent) do
           assert is_integer(color) and color >= 0
         end
       end
@@ -215,6 +266,53 @@ defmodule Minga.ThemeTest do
     test "catppuccin_mocha has a dark background" do
       theme = Theme.get!(:catppuccin_mocha)
       assert theme.editor.bg < 0x404040
+    end
+  end
+
+  describe "agent theme fallback" do
+    test "agent_theme/1 returns fallback when agent is nil" do
+      theme = %Theme{
+        name: :test,
+        syntax: %{},
+        editor: Theme.get!(:doom_one).editor,
+        gutter: Theme.get!(:doom_one).gutter,
+        git: Theme.get!(:doom_one).git,
+        modeline: Theme.get!(:doom_one).modeline,
+        picker: Theme.get!(:doom_one).picker,
+        minibuffer: Theme.get!(:doom_one).minibuffer,
+        search: Theme.get!(:doom_one).search,
+        popup: Theme.get!(:doom_one).popup,
+        tree: Theme.get!(:doom_one).tree,
+        agent: nil
+      }
+
+      agent = Theme.agent_theme(theme)
+      assert %Theme.Agent{} = agent
+      assert is_integer(agent.panel_bg)
+      assert is_integer(agent.context_low)
+      assert is_integer(agent.search_match_bg)
+    end
+
+    test "agent_theme/1 returns the theme's agent when present" do
+      theme = Theme.get!(:catppuccin_mocha)
+      agent = Theme.agent_theme(theme)
+      assert agent == theme.agent
+    end
+  end
+
+  describe "agent theme consistency" do
+    test "light themes have light agent panel backgrounds" do
+      for name <- [:catppuccin_latte, :one_light] do
+        theme = Theme.get!(name)
+        assert theme.agent.panel_bg > 0xC0C0C0, "#{name} agent.panel_bg should be light"
+      end
+    end
+
+    test "dark themes have dark agent panel backgrounds" do
+      for name <- [:doom_one, :catppuccin_mocha, :catppuccin_macchiato, :one_dark] do
+        theme = Theme.get!(name)
+        assert theme.agent.panel_bg < 0x404040, "#{name} agent.panel_bg should be dark"
+      end
     end
   end
 end

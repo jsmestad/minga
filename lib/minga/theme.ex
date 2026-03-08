@@ -238,7 +238,17 @@ defmodule Minga.Theme do
       :status_tool,
       :status_error,
       :status_idle,
-      :text_fg
+      :text_fg,
+      :context_low,
+      :context_mid,
+      :context_high,
+      :usage_fg,
+      :toast_bg,
+      :toast_fg,
+      :toast_border,
+      :system_fg,
+      :search_match_bg,
+      :search_current_bg
     ]
 
     defstruct [
@@ -262,7 +272,17 @@ defmodule Minga.Theme do
       :status_tool,
       :status_error,
       :status_idle,
-      :text_fg
+      :text_fg,
+      :context_low,
+      :context_mid,
+      :context_high,
+      :usage_fg,
+      :toast_bg,
+      :toast_fg,
+      :toast_border,
+      :system_fg,
+      :search_match_bg,
+      :search_current_bg
     ]
 
     @type t :: %__MODULE__{
@@ -286,7 +306,17 @@ defmodule Minga.Theme do
             status_tool: Minga.Theme.color(),
             status_error: Minga.Theme.color(),
             status_idle: Minga.Theme.color(),
-            text_fg: Minga.Theme.color()
+            text_fg: Minga.Theme.color(),
+            context_low: Minga.Theme.color(),
+            context_mid: Minga.Theme.color(),
+            context_high: Minga.Theme.color(),
+            usage_fg: Minga.Theme.color(),
+            toast_bg: Minga.Theme.color(),
+            toast_fg: Minga.Theme.color(),
+            toast_border: Minga.Theme.color(),
+            system_fg: Minga.Theme.color(),
+            search_match_bg: Minga.Theme.color(),
+            search_current_bg: Minga.Theme.color()
           }
   end
 
@@ -361,7 +391,8 @@ defmodule Minga.Theme do
   @doc "Returns the agent theme section, falling back to a basic default."
   @spec agent_theme(t()) :: Agent.t()
   def agent_theme(%__MODULE__{agent: nil}) do
-    # Fallback for themes that don't define agent colors
+    # Fallback for themes that don't define agent colors (safety net; all
+    # built-in themes now define agent colors so this should not be hit).
     %Agent{
       panel_bg: 0x23272E,
       panel_border: 0x5B6268,
@@ -383,7 +414,17 @@ defmodule Minga.Theme do
       status_tool: 0x46D9FF,
       status_error: 0xFF6C6B,
       status_idle: 0x5B6268,
-      text_fg: 0xBBC2CF
+      text_fg: 0xBBC2CF,
+      context_low: 0x98BE65,
+      context_mid: 0xECBE7B,
+      context_high: 0xFF6C6B,
+      usage_fg: 0x5B6268,
+      toast_bg: 0x3F444A,
+      toast_fg: 0xBBC2CF,
+      toast_border: 0x73797E,
+      system_fg: 0x73797E,
+      search_match_bg: 0xECBE7B,
+      search_current_bg: 0xFF6C6B
     }
   end
 
