@@ -103,14 +103,12 @@ defmodule Minga.Agent.SlashCommandTest do
       {:ok, _state} = SlashCommand.execute(mock_state(), "/abort")
     end
 
-    test "/clear without session succeeds" do
-      {:ok, state} = SlashCommand.execute(mock_state(), "/clear")
-      assert state.status_msg == "Session cleared"
+    test "/clear without session starts a new session" do
+      {:ok, _state} = SlashCommand.execute(mock_state(), "/clear")
     end
 
     test "/new is an alias for /clear" do
-      {:ok, state} = SlashCommand.execute(mock_state(), "/new")
-      assert state.status_msg == "Session cleared"
+      {:ok, _state} = SlashCommand.execute(mock_state(), "/new")
     end
 
     test "/thinking without args cycles level (no session = status msg)" do

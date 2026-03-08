@@ -36,6 +36,7 @@ defmodule Minga.Agent.View.Keys do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Clipboard
   alias Minga.Editor.Commands.Agent, as: AgentCommands
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Git.Diff
@@ -419,8 +420,10 @@ defmodule Minga.Agent.View.Keys do
     copy_message_at_cursor(state)
   end
 
-  # s: session switcher (magit precedent; stubbed until #175)
-  defp handle_chat_nav(state, ?s, _mods), do: state
+  # s: session switcher (magit precedent)
+  defp handle_chat_nav(state, ?s, _mods) do
+    PickerUI.open(state, Minga.Picker.AgentSessionSource)
+  end
 
   # --- Panel resize ---
 

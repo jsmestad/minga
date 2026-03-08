@@ -26,7 +26,8 @@ defmodule Minga.Editor.State.Agent do
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
-          pending_approval: approval() | nil
+          pending_approval: approval() | nil,
+          session_history: [pid()]
         }
 
   defstruct session: nil,
@@ -35,7 +36,8 @@ defmodule Minga.Editor.State.Agent do
             error: nil,
             spinner_timer: nil,
             buffer: nil,
-            pending_approval: nil
+            pending_approval: nil,
+            session_history: []
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -51,16 +53,47 @@ defmodule Minga.Editor.State.Agent do
 
   # ── Session lifecycle ───────────────────────────────────────────────────────
 
-  @doc "Stores the session pid and sets status to :idle."
+  @doc "Stores the session pid and sets status to :idle. Archives the previous session."
   @spec set_session(t(), pid()) :: t()
-  def set_session(%__MODULE__{} = agent, pid) when is_pid(pid) do
+  def set_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
     %{agent | session: pid, status: :idle}
+  end
+
+  def set_session(%__MODULE__{session: old_pid} = agent, pid)
+      when is_pid(pid) and is_pid(old_pid) do
+    history = [old_pid | agent.session_history] |> Enum.uniq()
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
   @doc "Sets the agent buffer pid."
   @spec set_buffer(t(), pid()) :: t()
   def set_buffer(%__MODULE__{} = agent, pid) when is_pid(pid) do
     %{agent | buffer: pid}
+  end
+
+  @doc "Returns all session pids (active + history), most recent first."
+  @spec all_sessions(t()) :: [pid()]
+  def all_sessions(%__MODULE__{session: nil} = agent), do: agent.session_history
+
+  def all_sessions(%__MODULE__{} = agent) do
+    [agent.session | agent.session_history]
+  end
+
+  @doc "Switches to a session from history, moving current to history."
+  @spec switch_session(t(), pid()) :: t()
+  def switch_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
+    history = List.delete(agent.session_history, pid)
+    %{agent | session: pid, status: :idle, session_history: history}
+  end
+
+  def switch_session(%__MODULE__{session: current} = agent, pid)
+      when is_pid(pid) and is_pid(current) do
+    history =
+      [current | agent.session_history]
+      |> List.delete(pid)
+      |> Enum.uniq()
+
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
   @doc "Clears the session and resets status to :idle."

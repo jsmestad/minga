@@ -81,6 +81,15 @@ zig/
 test/                         # Mirrors lib/ structure
 ```
 
+## Git Branching
+
+**`main` is protected.** All changes must go through feature branches and pull requests. Never commit directly to main.
+
+- **Always create a feature branch** before making changes. Use descriptive names: `feat/release-pipeline`, `fix/viewport-scroll`, `refactor/layout-compute`.
+- **Never switch branches if another agent session is active on a branch.** Multiple LLM agents may be working in this repo concurrently. If you see uncommitted changes or a branch that isn't yours, leave it alone. Create a new branch from `main` instead.
+- **Check your current branch** before starting work: `git branch --show-current`. If you're on `main`, create a branch. If you're on someone else's feature branch, switch to `main` and branch from there.
+- **Push your branch and open a PR** when the work is ready. CI must pass before merging.
+
 ## Iterative Fixes (especially TUI/rendering)
 
 When a fix improves visible behavior (user confirms it's better), **commit it and stop**. Do not immediately try to "refine" or "optimize" the fix in the same session. The TUI rendering pipeline has race conditions between the BEAM, the Zig Port, and the physical terminal that are impossible to fully reason about without seeing real output. What looks like an obvious improvement in theory (e.g., "skip the stale frame") can make things worse because your mental model of the frame ordering is wrong.

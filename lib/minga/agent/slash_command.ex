@@ -11,6 +11,7 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Editor.Commands.Agent, as: AgentCommands
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State.Agent, as: AgentState
 
   @typedoc "Editor state (same as EditorState.t())."
@@ -26,7 +27,8 @@ defmodule Minga.Agent.SlashCommand do
     %{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
     %{name: "thinking", description: "Set thinking level: /thinking [off|low|medium|high]"},
     %{name: "model", description: "Set the model: /model <name>"},
-    %{name: "help", description: "Show available slash commands"}
+    %{name: "help", description: "Show available slash commands"},
+    %{name: "sessions", description: "Browse and switch between sessions"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -72,17 +74,14 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "model", args), do: do_model(state, args)
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
+  defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
 
   @spec do_clear(state()) :: state()
   defp do_clear(state) do
-    if state.agent.session do
-      Session.new_session(state.agent.session)
-    end
-
-    %{state | status_msg: "Session cleared"}
+    AgentCommands.new_agent_session(state)
   end
 
   @spec do_stop(state()) :: state()
@@ -133,6 +132,11 @@ defmodule Minga.Agent.SlashCommand do
     end
 
     %{state | status_msg: "Commands listed in chat"}
+  end
+
+  @spec do_sessions(state()) :: state()
+  defp do_sessions(state) do
+    PickerUI.open(state, Minga.Picker.AgentSessionSource)
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

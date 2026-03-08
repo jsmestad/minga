@@ -132,6 +132,23 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, {:load_session, session_id})
   end
 
+  @typedoc "Lightweight session metadata for the session picker."
+  @type metadata :: %{
+          id: String.t(),
+          model_name: String.t(),
+          created_at: DateTime.t(),
+          message_count: non_neg_integer(),
+          first_prompt: String.t() | nil,
+          cost: float(),
+          status: status()
+        }
+
+  @doc "Returns lightweight metadata about this session (for the picker)."
+  @spec metadata(GenServer.server()) :: metadata()
+  def metadata(session) do
+    GenServer.call(session, :metadata)
+  end
+
   @doc "Subscribes the calling process to session events."
   @spec subscribe(GenServer.server()) :: :ok
   def subscribe(session) do
@@ -219,7 +236,8 @@ defmodule Minga.Agent.Session do
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
       model_name: model_name,
-      save_timer: nil
+      save_timer: nil,
+      created_at: DateTime.utc_now()
     }
 
     # Start provider asynchronously so init doesn't block
@@ -335,6 +353,20 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:usage, _from, state) do
     {:reply, state.total_usage, state}
+  end
+
+  def handle_call(:metadata, _from, state) do
+    meta = %{
+      id: state.session_id,
+      model_name: state.model_name,
+      created_at: state.created_at,
+      message_count: length(state.messages),
+      first_prompt: first_user_prompt(state.messages),
+      cost: state.total_usage[:cost] || 0.0,
+      status: state.status
+    }
+
+    {:reply, meta, state}
   end
 
   def handle_call({:respond_to_approval, _decision}, _from, %{pending_approval: nil} = state) do
@@ -763,6 +795,14 @@ defmodule Minga.Agent.Session do
   end
 
   @spec generate_session_id() :: String.t()
+  @spec first_user_prompt([Message.t()]) :: String.t() | nil
+  defp first_user_prompt(messages) do
+    Enum.find_value(messages, fn
+      {:user, text} when is_binary(text) -> text
+      _ -> nil
+    end)
+  end
+
   defp generate_session_id do
     <<a::32, b::16, c::16, d::16, e::48>> = :crypto.strong_rand_bytes(16)
 

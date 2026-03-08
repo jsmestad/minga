@@ -191,8 +191,38 @@ defmodule Minga.Editor.Commands.Agent do
   end
 
   def new_agent_session(state) do
-    Session.new_session(state.agent.session)
-    update_agent(state, &AgentState.set_status(&1, :idle))
+    # Unsubscribe from the old session (it stays alive in the DynamicSupervisor)
+    old_pid = state.agent.session
+    Session.unsubscribe(old_pid)
+
+    # Start a fresh session; set_session archives the old pid in session_history
+    start_agent_session(state)
+  end
+
+  @doc "Switches to an existing session by pid."
+  @spec switch_to_session(state(), pid()) :: state()
+  def switch_to_session(%{agent: %{session: current}} = state, pid)
+      when is_pid(pid) and pid == current do
+    state
+  end
+
+  def switch_to_session(state, pid) when is_pid(pid) do
+    # Unsubscribe from current session if one exists
+    if state.agent.session do
+      Session.unsubscribe(state.agent.session)
+    end
+
+    # Subscribe to the target session
+    Session.subscribe(pid)
+
+    # Switch in agent state (moves current to history, target to active)
+    state = update_agent(state, &AgentState.switch_session(&1, pid))
+
+    # Reset panel scroll and auto-scroll to reflect new session's content
+    update_agent(state, fn agent ->
+      panel = %{agent.panel | scroll_offset: 0, auto_scroll: true}
+      %{agent | panel: panel}
+    end)
   end
 
   @doc "Scrolls the chat panel up by half the panel height."

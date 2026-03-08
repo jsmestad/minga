@@ -518,4 +518,30 @@ defmodule Minga.Agent.SessionTest do
       assert Enum.any?(messages, &match?({:tool_call, %{collapsed: false}}, &1))
     end
   end
+
+  describe "metadata/1" do
+    test "returns session metadata with id, model, and created_at", %{session: session} do
+      meta = Session.metadata(session)
+
+      assert is_binary(meta.id)
+      assert %DateTime{} = meta.created_at
+      assert meta.message_count >= 1
+      assert meta.cost == 0.0
+      assert meta.status == :idle
+    end
+
+    test "first_prompt is nil when no user messages", %{session: session} do
+      meta = Session.metadata(session)
+      assert meta.first_prompt == nil
+    end
+
+    test "first_prompt returns first user message text", %{session: session} do
+      Session.send_prompt(session, "Hello there")
+      # Wait for prompt to be added to messages
+      assert_receive {:agent_event, :messages_changed}, 1000
+
+      meta = Session.metadata(session)
+      assert meta.first_prompt == "Hello there"
+    end
+  end
 end
