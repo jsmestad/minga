@@ -300,6 +300,7 @@ Current status and planned features. Updated as development progresses.
 | Tool approval flow | ✅ | Destructive tools (write_file, edit_file, shell) require user approval. Configurable via `agent_tool_approval` and `agent_destructive_tools` #178 |
 | Inline diff review | ✅ | File viewer shows unified diff after agent edits; y/x accept/reject hunks, ]c/[c navigate, Y/X bulk resolve #136 |
 | Session persistence | ✅ | Auto-save conversations to JSON, `SPC a h` picker to browse/resume, auto-prune after 30 days #139 |
+| Status animations | ✅ | Thinking dot progression, streaming cursor blink, tool braille spinner #187 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |
