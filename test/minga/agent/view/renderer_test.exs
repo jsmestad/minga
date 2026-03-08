@@ -220,6 +220,80 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
+  describe "render/1 with RenderInput (isolated, no GenServer)" do
+    test "renders with a focused RenderInput, no full EditorState needed" do
+      input = %Renderer.RenderInput{
+        viewport: Viewport.new(30, 100),
+        theme: Theme.get!(:doom_one),
+        agent_status: :idle,
+        panel: %{
+          input_focused: false,
+          input_text: "",
+          scroll_offset: 0,
+          spinner_frame: 0,
+          model_name: "claude-sonnet-4",
+          thinking_level: "medium"
+        },
+        agentic: %{
+          chat_width_pct: 65,
+          file_viewer_scroll: 0
+        },
+        messages: [],
+        usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+        buffer_snapshot: nil,
+        highlight: nil,
+        mode: :normal,
+        mode_state: nil,
+        buf_index: 1,
+        buf_count: 1
+      }
+
+      commands = Renderer.render(input)
+      assert [_ | _] = commands
+      assert Enum.all?(commands, &is_tuple/1)
+    end
+
+    test "renders with buffer snapshot data" do
+      input = %Renderer.RenderInput{
+        viewport: Viewport.new(30, 100),
+        theme: Theme.get!(:doom_one),
+        agent_status: :thinking,
+        panel: %{
+          input_focused: true,
+          input_text: "hello",
+          scroll_offset: 0,
+          spinner_frame: 3,
+          model_name: "claude-sonnet-4",
+          thinking_level: "medium"
+        },
+        agentic: %{
+          chat_width_pct: 65,
+          file_viewer_scroll: 0
+        },
+        messages: [],
+        usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
+        buffer_snapshot: %{
+          lines: ["line one", "line two"],
+          line_count: 2,
+          first_line_byte_offset: 0,
+          name: "test.ex"
+        },
+        highlight: nil,
+        mode: :normal,
+        mode_state: nil,
+        buf_index: 1,
+        buf_count: 2
+      }
+
+      commands = Renderer.render(input)
+      assert [_ | _] = commands
+
+      # Should have file viewer content
+      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "test.ex"))
+    end
+  end
+
   describe "resize re-layout" do
     test "different viewport sizes produce different chat widths" do
       state_80 = base_state(rows: 24, cols: 80)

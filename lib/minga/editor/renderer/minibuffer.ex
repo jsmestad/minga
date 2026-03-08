@@ -3,6 +3,10 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   Minibuffer (bottom status line) rendering: search prompt, command input,
   status messages, and the empty-state fallback.
 
+  Accepts a map with focused fields (mode, mode_state, theme, status_msg,
+  diagnostic_hint) instead of the full EditorState. The pipeline's Chrome
+  stage constructs this map.
+
   Returns `DisplayList.draw()` tuples.
   """
 
@@ -11,8 +15,21 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DocumentSync
 
+  @typedoc """
+  Focused input for minibuffer rendering.
+
+  The map should contain:
+  - `:mode` — current editor mode
+  - `:mode_state` — mode-specific state (search input, command input, etc.)
+  - `:theme` — theme struct with `.minibuffer` colors
+  - `:status_msg` — status message string or nil
+  - `:diagnostic_hint` — pre-fetched diagnostic string or nil
+  - `:buffers` — `%{active: pid | nil}` (only used for legacy path)
+  """
+  @type input :: map()
+
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
-  @spec render(map(), non_neg_integer(), pos_integer()) :: DisplayList.draw()
+  @spec render(input(), non_neg_integer(), pos_integer()) :: DisplayList.draw()
   def render(%{mode: :search, mode_state: ms, theme: theme}, row, cols) do
     prefix = if ms.direction == :forward, do: "/", else: "?"
     search_text = prefix <> ms.input
@@ -119,6 +136,21 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  # Pre-fetched diagnostic hint (preferred: no GenServer calls during render)
+  def render(%{diagnostic_hint: hint, theme: theme}, row, cols)
+      when is_binary(hint) do
+    mb = theme.minibuffer
+
+    DisplayList.draw(
+      row,
+      0,
+      String.pad_trailing(hint, cols),
+      fg: mb.dim_fg,
+      bg: mb.bg
+    )
+  end
+
+  # Legacy path: fetches diagnostic from buffer (for backward compatibility)
   def render(%{buffers: %{active: buf}, theme: theme} = state, row, cols)
       when is_pid(buf) and state.mode in [:normal, :insert, :replace] do
     mb = theme.minibuffer

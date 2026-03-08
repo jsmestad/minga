@@ -15,28 +15,67 @@ defmodule Minga.Editor.TreeRenderer do
 
   @indent_size 2
 
+  defmodule RenderInput do
+    @moduledoc """
+    Input struct for TreeRenderer.render/1.
+    Contains only the data needed to render the tree panel.
+    """
+    @enforce_keys [:tree, :rect, :focused, :theme, :active_path]
+    defstruct [:tree, :rect, :focused, :theme, :active_path]
+
+    @type t :: %__MODULE__{
+            tree: FileTree.t(),
+            rect: WindowTree.rect(),
+            focused: boolean(),
+            theme: Theme.t(),
+            active_path: String.t() | nil
+          }
+  end
+
   @doc """
   Renders the file tree panel.
+
+  Accepts either a `RenderInput` struct containing focused rendering data,
+  or an `EditorState` (which extracts the necessary data and delegates).
 
   Returns a list of `DisplayList.draw()` tuples for the tree content,
   separator, and header.
   """
+  @spec render(RenderInput.t()) :: [DisplayList.draw()]
+  def render(%RenderInput{} = input) do
+    do_render(input.tree, input.rect, input.focused, input.theme, input.active_path)
+  end
+
   @spec render(EditorState.t()) :: [DisplayList.draw()]
   def render(%EditorState{file_tree: %{tree: nil}}), do: []
 
   def render(%EditorState{file_tree: %{tree: tree, focused: focused}} = state) do
     case EditorState.tree_rect(state) do
-      nil -> []
-      rect -> do_render(tree, rect, focused, state)
+      nil ->
+        []
+
+      rect ->
+        input = %RenderInput{
+          tree: tree,
+          rect: rect,
+          focused: focused,
+          theme: state.theme,
+          active_path: active_buffer_path(state)
+        }
+
+        render(input)
     end
   end
 
-  @spec do_render(FileTree.t(), WindowTree.rect(), boolean(), EditorState.t()) ::
-          [DisplayList.draw()]
-  defp do_render(tree, {row_off, col_off, width, height}, focused, state) do
+  @spec do_render(
+          FileTree.t(),
+          WindowTree.rect(),
+          boolean(),
+          Theme.t(),
+          String.t() | nil
+        ) :: [DisplayList.draw()]
+  defp do_render(tree, {row_off, col_off, width, height}, focused, theme, active_path) do
     entries = FileTree.visible_entries(tree)
-    theme = state.theme
-    active_path = active_buffer_path(state)
 
     # Header row
     header_text = " File Tree" |> String.pad_trailing(width)

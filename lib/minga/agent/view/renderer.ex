@@ -16,7 +16,7 @@ defmodule Minga.Agent.View.Renderer do
   full width by this module. The file viewer has a header bar at the top
   of its rect showing the filename.
 
-  Called by `Minga.Editor.Renderer` when `state.agentic.active` is true.
+  Called by `Minga.Editor.RenderPipeline` when `state.agentic.active` is true.
   Returns `DisplayList.draw()` tuples.
   """
 
@@ -40,32 +40,89 @@ defmodule Minga.Agent.View.Renderer do
 
   @input_height 3
 
+  # ── Focused input type ─────────────────────────────────────────────────────
+
+  defmodule RenderInput do
+    @moduledoc """
+    Focused input for the agentic view renderer.
+
+    Contains exactly the data needed to render the full-screen agent view,
+    without requiring a full `EditorState`. This enables isolated testing
+    and makes the data dependency graph explicit.
+    """
+
+    alias Minga.Editor.Viewport
+    alias Minga.Highlight
+    alias Minga.Theme
+
+    @enforce_keys [:viewport, :theme, :agent_status, :panel, :agentic]
+    defstruct [
+      :viewport,
+      :theme,
+      :agent_status,
+      :panel,
+      :agentic,
+      messages: [],
+      usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+      buffer_snapshot: nil,
+      highlight: nil,
+      mode: :normal,
+      mode_state: nil,
+      buf_index: 1,
+      buf_count: 1
+    ]
+
+    @type t :: %__MODULE__{
+            viewport: Viewport.t(),
+            theme: Theme.t(),
+            agent_status: atom() | nil,
+            panel: panel_data(),
+            agentic: agentic_data(),
+            messages: list(),
+            usage: map(),
+            buffer_snapshot: map() | nil,
+            highlight: Highlight.t() | nil,
+            mode: atom(),
+            mode_state: term(),
+            buf_index: pos_integer(),
+            buf_count: pos_integer()
+          }
+
+    @typedoc "Agent panel fields needed for rendering."
+    @type panel_data :: %{
+            input_focused: boolean(),
+            input_text: String.t(),
+            scroll_offset: non_neg_integer(),
+            spinner_frame: non_neg_integer(),
+            model_name: String.t(),
+            thinking_level: String.t()
+          }
+
+    @typedoc "Agentic view fields needed for rendering."
+    @type agentic_data :: %{
+            chat_width_pct: non_neg_integer(),
+            file_viewer_scroll: non_neg_integer()
+          }
+  end
+
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
-  Renders the full-screen agentic view and returns a flat list of draw tuples.
+  Renders the full-screen agentic view from a focused `RenderInput`.
 
-  The caller (Renderer.render_agentic/1) assembles these into a frame
-  and converts to protocol commands.
+  Preferred entry point for the pipeline. No GenServer calls are made;
+  all data is pre-fetched in the input.
   """
-  @spec render(state()) :: [DisplayList.draw()]
-  def render(state) do
-    cols = state.viewport.cols
-    rows = state.viewport.rows
+  @spec render(RenderInput.t()) :: [DisplayList.draw()]
+  def render(%RenderInput{} = input) do
+    cols = input.viewport.cols
+    rows = input.viewport.rows
 
-    # Layout math:
-    #   Row 0         = title bar
-    #   Row 1..P-1    = panels (chat + viewer)
-    #   Row P..P+2    = input area (3 rows)
-    #   Row P+3       = modeline
-    #   Row P+4       = minibuffer (reserved; rows - 1)
-    #
-    # P = rows - 1 (minibuffer) - 1 (modeline) - @input_height
     panel_end = rows - 1 - 1 - @input_height
     panel_start = 1
     panel_height = max(panel_end - panel_start, 1)
 
-    chat_width_pct = state.agentic.chat_width_pct
+    chat_width_pct = input.agentic.chat_width_pct
     chat_width = max(div(cols * chat_width_pct, 100), 20)
     separator_col = chat_width
     viewer_col = chat_width + 1
@@ -74,15 +131,20 @@ defmodule Minga.Agent.View.Renderer do
     input_row = panel_end
     modeline_row = input_row + @input_height
 
-    title_commands = render_title_bar(state, 0, cols)
-    chat_commands = render_chat(state, {panel_start, 0, chat_width, panel_height})
-    separator_commands = render_separator(separator_col, panel_start, panel_height, state.theme)
+    title_commands = render_title_bar_from_input(input, 0, cols)
+    chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, panel_height})
+
+    separator_commands =
+      render_separator(separator_col, panel_start, panel_height, input.theme)
 
     viewer_commands =
-      render_file_viewer(state, {panel_start, viewer_col, viewer_width, panel_height})
+      render_file_viewer_from_input(
+        input,
+        {panel_start, viewer_col, viewer_width, panel_height}
+      )
 
-    input_commands = render_input(state, input_row, cols)
-    modeline_commands = render_modeline(state, modeline_row, cols)
+    input_commands = render_input_from_input(input, input_row, cols)
+    modeline_commands = render_modeline_from_input(input, modeline_row, cols)
 
     title_commands ++
       chat_commands ++
@@ -90,6 +152,13 @@ defmodule Minga.Agent.View.Renderer do
       viewer_commands ++
       input_commands ++
       modeline_commands
+  end
+
+  # Legacy wrapper: extracts a RenderInput from full EditorState.
+  @spec render(state()) :: [DisplayList.draw()]
+  def render(%EditorState{} = state) do
+    input = extract_input(state)
+    render(input)
   end
 
   @doc """
@@ -103,7 +172,6 @@ defmodule Minga.Agent.View.Renderer do
     rows = state.viewport.rows
 
     if state.agent.panel.input_focused do
-      # Input text row = panel_end + 1 (border is panel_end, text is +1)
       panel_end = rows - 1 - 1 - @input_height
       input_text_row = panel_end + 1
       input_col = 2 + String.length(state.agent.panel.input_text)
@@ -113,44 +181,101 @@ defmodule Minga.Agent.View.Renderer do
     end
   end
 
+  # ── Input extraction ────────────────────────────────────────────────────────
+
+  @spec extract_input(state()) :: RenderInput.t()
+  defp extract_input(state) do
+    agent = state.agent
+    panel = agent.panel
+
+    messages =
+      if agent.session do
+        try do
+          Session.messages(agent.session)
+        catch
+          :exit, _ -> []
+        end
+      else
+        []
+      end
+
+    usage =
+      if agent.session do
+        try do
+          Session.usage(agent.session)
+        catch
+          :exit, _ -> empty_usage()
+        end
+      else
+        empty_usage()
+      end
+
+    # Pre-fetch buffer snapshot for file viewer
+    scroll = state.agentic.file_viewer_scroll
+    rows = state.viewport.rows
+    content_rows = max(rows - 1 - 1 - @input_height - 1 - 1, 1)
+
+    buffer_snapshot =
+      case state.buffers.active do
+        nil ->
+          nil
+
+        buf ->
+          snapshot = BufferServer.render_snapshot(buf, scroll, content_rows)
+          %{snapshot | name: snapshot_display_name(snapshot)}
+      end
+
+    highlight =
+      if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
+
+    %RenderInput{
+      viewport: state.viewport,
+      theme: state.theme,
+      agent_status: agent.status,
+      panel: %{
+        input_focused: panel.input_focused,
+        input_text: panel.input_text,
+        scroll_offset: panel.scroll_offset,
+        spinner_frame: panel.spinner_frame,
+        model_name: panel.model_name,
+        thinking_level: panel.thinking_level
+      },
+      agentic: %{
+        chat_width_pct: state.agentic.chat_width_pct,
+        file_viewer_scroll: scroll
+      },
+      messages: messages,
+      usage: usage,
+      buffer_snapshot: buffer_snapshot,
+      highlight: highlight,
+      mode: state.mode,
+      mode_state: state.mode_state,
+      buf_index: state.buffers.active_index + 1,
+      buf_count: length(state.buffers.list)
+    }
+  end
+
   # ── Title bar ───────────────────────────────────────────────────────────────
 
-  @spec render_title_bar(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
-  defp render_title_bar(state, row, cols) do
-    at = Theme.agent_theme(state.theme)
-    panel = state.agent.panel
+  @spec render_title_bar_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
+          [DisplayList.draw()]
+  defp render_title_bar_from_input(input, row, cols) do
+    at = Theme.agent_theme(input.theme)
+    panel = input.panel
 
-    status_icon =
-      case state.agent.status do
-        :idle -> "◯"
-        :thinking -> spinner(panel.spinner_frame)
-        :tool_executing -> "⚡"
-        :error -> "✗"
-        _ -> "◯"
-      end
+    status_icon = status_icon(input.agent_status, panel.spinner_frame)
+    status_fg = status_fg(input.agent_status, at)
 
-    status_fg =
-      case state.agent.status do
-        :idle -> at.status_idle
-        :thinking -> at.status_thinking
-        :tool_executing -> at.status_tool
-        :error -> at.status_error
-        _ -> at.status_idle
-      end
-
-    usage = fetch_usage(state)
-    usage_text = format_usage(usage)
+    usage_text = format_usage(input.usage)
 
     left = " #{status_icon}  󰚩 #{panel.model_name}"
     center = "Minga Agent"
     right = if usage_text != "", do: "#{usage_text} ", else: ""
 
-    # Build the title bar with left/center/right alignment
     left_len = String.length(left)
     center_len = String.length(center)
     right_len = String.length(right)
 
-    # Center the title text
     center_start = max(div(cols - center_len, 2), left_len + 3)
     gap_left = center_start - left_len
     gap_right = max(cols - center_start - center_len - right_len, 0)
@@ -164,14 +289,11 @@ defmodule Minga.Agent.View.Renderer do
         String.duplicate("─", max(gap_right - 1, 1)) <>
         right
 
-    # Trim or pad to exact width
     bar_text = String.slice(bar_text, 0, cols) |> String.pad_trailing(cols)
 
     [
       DisplayList.draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
-      # Re-draw the status icon with its color
       DisplayList.draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
-      # Re-draw the center title with emphasis
       DisplayList.draw(row, center_start, center,
         fg: at.header_fg,
         bg: at.header_bg,
@@ -182,36 +304,21 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Chat panel (messages only) ──────────────────────────────────────────────
 
-  @spec render_chat(state(), rect()) :: [DisplayList.draw()]
-  defp render_chat(state, rect) do
-    agent = state.agent
-
-    messages =
-      if agent.session do
-        try do
-          Session.messages(agent.session)
-        catch
-          :exit, _ -> []
-        end
-      else
-        []
-      end
-
-    usage = fetch_usage(state)
-
+  @spec render_chat_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
+  defp render_chat_from_input(input, rect) do
     panel_state = %{
-      messages: messages,
-      status: agent.status || :idle,
-      input_text: agent.panel.input_text,
-      scroll_offset: agent.panel.scroll_offset,
-      spinner_frame: agent.panel.spinner_frame,
-      usage: usage,
-      model_name: agent.panel.model_name,
-      thinking_level: agent.panel.thinking_level,
-      error_message: agent.error
+      messages: input.messages,
+      status: input.agent_status || :idle,
+      input_text: input.panel.input_text,
+      scroll_offset: input.panel.scroll_offset,
+      spinner_frame: input.panel.spinner_frame,
+      usage: input.usage,
+      model_name: input.panel.model_name,
+      thinking_level: input.panel.thinking_level,
+      error_message: nil
     }
 
-    ChatRenderer.render_messages_only(rect, panel_state, state.theme)
+    ChatRenderer.render_messages_only(rect, panel_state, input.theme)
   end
 
   # ── Vertical separator ──────────────────────────────────────────────────────
@@ -228,8 +335,8 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── File viewer panel ───────────────────────────────────────────────────────
 
-  @spec render_file_viewer(state(), rect()) :: [DisplayList.draw()]
-  defp render_file_viewer(%{buffers: %{active: nil}}, {row_off, col_off, width, height}) do
+  @spec render_file_viewer_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
+  defp render_file_viewer_from_input(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
     blank = String.duplicate(" ", width)
 
     for row <- 0..(height - 1) do
@@ -237,15 +344,13 @@ defmodule Minga.Agent.View.Renderer do
     end
   end
 
-  defp render_file_viewer(state, {row_off, col_off, width, height}) do
-    buf = state.buffers.active
-    scroll = state.agentic.file_viewer_scroll
+  defp render_file_viewer_from_input(input, {row_off, col_off, width, height}) do
+    snapshot = input.buffer_snapshot
+    scroll = input.agentic.file_viewer_scroll
 
-    # First row = filename header, remaining rows = file content
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
 
-    snapshot = BufferServer.render_snapshot(buf, scroll, content_rows)
     lines = snapshot.lines
     line_count = snapshot.line_count
 
@@ -257,9 +362,6 @@ defmodule Minga.Agent.View.Renderer do
     viewer_vp = Viewport.new(content_rows, width)
     viewer_vp = %{viewer_vp | top: scroll}
 
-    highlight =
-      if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
-
     render_ctx = %Context{
       viewport: viewer_vp,
       visual_selection: nil,
@@ -267,13 +369,13 @@ defmodule Minga.Agent.View.Renderer do
       gutter_w: abs_content_col,
       content_w: content_w,
       confirm_match: nil,
-      highlight: highlight,
+      highlight: input.highlight,
       has_sign_column: false,
       diagnostic_signs: %{},
       git_signs: %{},
-      search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git
+      search_colors: input.theme.search,
+      gutter_colors: input.theme.gutter,
+      git_colors: input.theme.git
     }
 
     {gutter_cmds, line_cmds, _} =
@@ -310,15 +412,14 @@ defmodule Minga.Agent.View.Renderer do
         tilde_end = content_start + content_rows - 1
 
         for r <- tilde_start..tilde_end do
-          DisplayList.draw(r, abs_content_col, "~", fg: state.theme.editor.tilde_fg)
+          DisplayList.draw(r, abs_content_col, "~", fg: input.theme.editor.tilde_fg)
         end
       else
         []
       end
 
-    # File name header bar at the TOP of the viewer panel
-    at = Theme.agent_theme(state.theme)
-    file_name = snapshot_display_name(snapshot)
+    at = Theme.agent_theme(input.theme)
+    file_name = Map.get(snapshot, :name, "[No Name]")
     header_text = String.pad_trailing(" 📄 #{file_name}", width)
 
     header_cmd =
@@ -329,18 +430,17 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Full-width input area ───────────────────────────────────────────────────
 
-  @spec render_input(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
-  defp render_input(state, row, cols) do
-    at = Theme.agent_theme(state.theme)
-    panel = state.agent.panel
+  @spec render_input_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
+          [DisplayList.draw()]
+  defp render_input_from_input(input, row, cols) do
+    at = Theme.agent_theme(input.theme)
+    panel = input.panel
 
-    # Border line (full width)
     label = "─── Prompt "
     border_rest = String.duplicate("─", max(cols - String.length(label), 0))
     border = label <> border_rest
     border_cmd = DisplayList.draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
 
-    # Input text row (full width)
     input_row = row + 1
     blank = String.duplicate(" ", cols)
     blank_cmd = DisplayList.draw(input_row, 0, blank, bg: at.input_bg)
@@ -355,7 +455,6 @@ defmodule Minga.Agent.View.Renderer do
     text = String.slice(text, 0, cols)
     text_cmd = DisplayList.draw(input_row, 0, text, fg: fg, bg: at.input_bg)
 
-    # Bottom padding row
     pad_cmd = DisplayList.draw(row + 2, 0, blank, bg: at.input_bg)
 
     [border_cmd, blank_cmd, text_cmd, pad_cmd]
@@ -363,14 +462,15 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Modeline ────────────────────────────────────────────────────────────────
 
-  @spec render_modeline(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
-  defp render_modeline(state, row, cols) do
+  @spec render_modeline_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
+          [DisplayList.draw()]
+  defp render_modeline_from_input(input, row, cols) do
     Modeline.render(
       row,
       cols,
       %{
-        mode: state.mode,
-        mode_state: state.mode_state,
+        mode: input.mode,
+        mode_state: input.mode_state,
         mode_override: "AGENT",
         file_name: "AGENT",
         filetype: :text,
@@ -378,17 +478,30 @@ defmodule Minga.Agent.View.Renderer do
         cursor_line: 0,
         cursor_col: 0,
         line_count: 0,
-        buf_index: state.buffers.active_index + 1,
-        buf_count: length(state.buffers.list),
+        buf_index: input.buf_index,
+        buf_count: input.buf_count,
         macro_recording: false,
-        agent_status: state.agent.status,
-        agent_theme_colors: Theme.agent_theme(state.theme)
+        agent_status: input.agent_status,
+        agent_theme_colors: Theme.agent_theme(input.theme)
       },
-      state.theme
+      input.theme
     )
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec status_icon(atom() | nil, non_neg_integer()) :: String.t()
+  defp status_icon(:thinking, frame), do: spinner(frame)
+  defp status_icon(:tool_executing, _), do: "⚡"
+  defp status_icon(:error, _), do: "✗"
+  defp status_icon(_, _), do: "◯"
+
+  @spec status_fg(atom() | nil, map()) :: non_neg_integer()
+  defp status_fg(:idle, at), do: at.status_idle
+  defp status_fg(:thinking, at), do: at.status_thinking
+  defp status_fg(:tool_executing, at), do: at.status_tool
+  defp status_fg(:error, at), do: at.status_error
+  defp status_fg(_, at), do: at.status_idle
 
   @spec file_viewer_gutter_width(non_neg_integer()) :: non_neg_integer()
   defp file_viewer_gutter_width(line_count) do
@@ -399,19 +512,6 @@ defmodule Minga.Agent.View.Renderer do
   @spec snapshot_display_name(map()) :: String.t()
   defp snapshot_display_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp snapshot_display_name(_), do: "[No Name]"
-
-  @spec fetch_usage(state()) :: map()
-  defp fetch_usage(state) do
-    if state.agent.session do
-      try do
-        Session.usage(state.agent.session)
-      catch
-        :exit, _ -> empty_usage()
-      end
-    else
-      empty_usage()
-    end
-  end
 
   @spec empty_usage() :: map()
   defp empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}

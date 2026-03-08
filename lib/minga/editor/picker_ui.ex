@@ -38,6 +38,22 @@ defmodule Minga.Editor.PickerUI do
   @typedoc "Action the GenServer should dispatch after handle_key/3."
   @type action :: {:execute_command, term()}
 
+  defmodule RenderInput do
+    @moduledoc """
+    Focused input struct for picker rendering.
+    Contains only the data needed to render the picker overlay.
+    """
+
+    @enforce_keys [:picker_state, :theme_picker, :viewport]
+    defstruct [:picker_state, :theme_picker, :viewport]
+
+    @type t :: %__MODULE__{
+            picker_state: Minga.Editor.State.Picker.t(),
+            theme_picker: map(),
+            viewport: Minga.Editor.Viewport.t()
+          }
+  end
+
   @doc "Opens the picker for the given source module."
   @spec open(state(), module()) :: state()
   def open(state, source_module) do
@@ -248,12 +264,20 @@ defmodule Minga.Editor.PickerUI do
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
 
-  @doc "Renders the picker overlay. Returns `{draws, cursor_pos | nil}`."
-  @spec render(state(), term()) ::
-          {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
-  def render(%{picker_ui: %{picker: nil}}, _viewport), do: {[], nil}
+  @doc """
+  Renders the picker overlay. Returns `{draws, cursor_pos | nil}`.
 
-  def render(%{picker_ui: %{picker: picker}} = state, viewport) do
+  This is the focused version that takes a RenderInput struct.
+  """
+  @spec render(RenderInput.t()) ::
+          {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
+  def render(%RenderInput{picker_state: %{picker: nil}}), do: {[], nil}
+
+  def render(%RenderInput{
+        picker_state: %{picker: picker, action_menu: action_menu},
+        theme_picker: pc,
+        viewport: viewport
+      }) do
     {visible, selected_offset} = Picker.visible_items(picker)
     item_count = length(visible)
 
@@ -263,7 +287,6 @@ defmodule Minga.Editor.PickerUI do
     first_item_row = separator_row + 1
 
     # Theme colors
-    pc = state.theme.picker
     bg = pc.bg
     sel_bg = pc.sel_bg
     prompt_bg = pc.prompt_bg
@@ -348,9 +371,31 @@ defmodule Minga.Editor.PickerUI do
     all_cmds = separator_cmd ++ item_commands ++ [prompt_cmd]
 
     # Render action menu overlay if open
-    action_cmds = render_action_menu(state, viewport, first_item_row, selected_offset)
+    action_cmds =
+      render_action_menu(
+        %{picker_state: %{action_menu: action_menu}, theme_picker: pc, viewport: viewport},
+        first_item_row,
+        selected_offset
+      )
 
     {all_cmds ++ action_cmds, cursor_pos}
+  end
+
+  @doc """
+  Renders the picker overlay. Returns `{draws, cursor_pos | nil}`.
+
+  Legacy wrapper that extracts RenderInput from full editor state.
+  """
+  @spec render(state(), term()) ::
+          {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
+  def render(state, viewport) do
+    input = %RenderInput{
+      picker_state: state.picker_ui,
+      theme_picker: state.theme.picker,
+      viewport: viewport
+    }
+
+    render(input)
   end
 
   @doc "Closes the picker and resets picker-related state."
@@ -451,15 +496,21 @@ defmodule Minga.Editor.PickerUI do
   end
 
   # Renders the C-o action menu popup overlay.
-  @spec render_action_menu(state(), term(), non_neg_integer(), non_neg_integer()) ::
-          [DisplayList.draw()]
-  defp render_action_menu(%{picker_ui: %{action_menu: nil}}, _vp, _first_item_row, _sel_offset) do
+  @spec render_action_menu(map(), non_neg_integer(), non_neg_integer()) :: [DisplayList.draw()]
+  defp render_action_menu(
+         %{picker_state: %{action_menu: nil}},
+         _first_item_row,
+         _sel_offset
+       ) do
     []
   end
 
   defp render_action_menu(
-         %{picker_ui: %{action_menu: {actions, menu_sel}}, theme: theme},
-         viewport,
+         %{
+           picker_state: %{action_menu: {actions, menu_sel}},
+           theme_picker: pc,
+           viewport: viewport
+         },
          first_item_row,
          selected_offset
        ) do
@@ -467,8 +518,6 @@ defmodule Minga.Editor.PickerUI do
     menu_row_start = first_item_row + selected_offset
     menu_col = div(viewport.cols, 3)
     menu_width = min(30, viewport.cols - menu_col - 2)
-
-    pc = theme.picker
     border_fg = pc.border_fg
     menu_bg = pc.menu_bg
     menu_fg = pc.menu_fg
