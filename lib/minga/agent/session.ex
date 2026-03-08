@@ -200,6 +200,21 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:abort, _from, state) do
     state.provider_module.abort(state.provider)
+
+    # Mark any running tool calls as aborted
+    messages =
+      Enum.map(state.messages, fn
+        {:tool_call, %{status: :running} = tc} ->
+          {:tool_call, %{tc | status: :error, result: "aborted", is_error: true}}
+
+        other ->
+          other
+      end)
+
+    # Append "Aborted" system message
+    state = %{state | messages: messages}
+    state = append_system_message(state, "Aborted", :info)
+    broadcast(state, :messages_changed)
     state = set_status(state, :idle)
     {:reply, :ok, state}
   end

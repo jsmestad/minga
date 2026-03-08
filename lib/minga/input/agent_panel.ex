@@ -21,6 +21,7 @@ defmodule Minga.Input.AgentPanel do
 
   require Logger
 
+  alias Minga.Agent.PanelState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State.Agent, as: AgentState
@@ -82,9 +83,19 @@ defmodule Minga.Input.AgentPanel do
     state
   end
 
-  # Ctrl+C: submit prompt
+  # Ctrl+C: submit prompt if input has text, abort if agent is active
   defp handle_input(state, ?c, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.submit_prompt(state)
+    input = PanelState.input_text(state.agent.panel)
+
+    if input == "" do
+      if state.agent.status in [:thinking, :tool_executing] do
+        AgentCommands.abort_agent(state)
+      else
+        state
+      end
+    else
+      AgentCommands.submit_prompt(state)
+    end
   end
 
   # Ctrl+D: scroll chat down

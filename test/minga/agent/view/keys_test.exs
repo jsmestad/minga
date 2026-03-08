@@ -188,10 +188,10 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agentic.active == false
     end
 
-    test "Escape closes the agentic view" do
+    test "Escape in chat nav is a no-op" do
       state = base_state(focus: :chat)
       {:handled, new_state} = Keys.handle_key(state, 27, 0)
-      assert new_state.agentic.active == false
+      assert new_state.agentic.active == true
     end
 
     test "unrecognized keys are swallowed (handled) without state change" do
@@ -335,10 +335,11 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agentic.active == false
     end
 
-    test "Escape closes the agentic view" do
+    test "Escape switches focus to chat" do
       state = viewer_state()
       {:handled, new_state} = Keys.handle_key(state, 27, 0)
-      assert new_state.agentic.active == false
+      assert new_state.agentic.active == true
+      assert new_state.agentic.focus == :chat
     end
 
     test "z sets pending_prefix to :z" do
@@ -492,6 +493,78 @@ defmodule Minga.Agent.View.KeysTest do
       state = put_in(state.agent.panel.input_focused, true)
       {:handled, new_state} = Keys.handle_key(state, ?\s, 0)
       assert PanelState.input_text(new_state.agent.panel) == " "
+    end
+  end
+
+  # ── ESC behavior ──────────────────────────────────────────────────────────────
+
+  describe "ESC behavior" do
+    test "ESC in input mode unfocuses input" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      {:handled, new_state} = Keys.handle_key(state, 27, 0)
+      refute new_state.agent.panel.input_focused
+    end
+
+    test "ESC in chat nav is a no-op (does not exit view)" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, 27, 0)
+      assert new_state.agentic.active
+    end
+
+    test "ESC in file viewer switches focus to chat" do
+      state = base_state(focus: :file_viewer)
+      {:handled, new_state} = Keys.handle_key(state, 27, 0)
+      assert new_state.agentic.focus == :chat
+      assert new_state.agentic.active
+    end
+
+    test "q in chat nav exits the agentic view" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?q, 0)
+      refute new_state.agentic.active
+    end
+
+    test "q in file viewer exits the agentic view" do
+      state = base_state(focus: :file_viewer)
+      {:handled, new_state} = Keys.handle_key(state, ?q, 0)
+      refute new_state.agentic.active
+    end
+  end
+
+  # ── Ctrl+C abort ──────────────────────────────────────────────────────────────
+
+  describe "Ctrl+C abort" do
+    test "Ctrl+C with empty input and idle status is a no-op" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      {:handled, new_state} = Keys.handle_key(state, ?c, @ctrl)
+      # No crash, state unchanged (no session to abort)
+      assert new_state.agent.status == :idle
+    end
+
+    test "Ctrl+C with text in input does not abort (routes to submit)" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      state = put_in(state.agent.panel.input_lines, ["hello"])
+      state = put_in(state.agent.panel.input_cursor, {0, 5})
+      state = put_in(state.agent.status, :thinking)
+      {:handled, new_state} = Keys.handle_key(state, ?c, @ctrl)
+      # Status should still be :thinking (abort was not called, submit was attempted)
+      # Without a session, submit is a no-op but it should NOT have aborted
+      assert new_state.agent.status == :thinking
+    end
+
+    test "Ctrl+C in chat nav with idle status is a no-op" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?c, @ctrl)
+      assert new_state.agent.status == :idle
+    end
+
+    test "Ctrl+C in file viewer with idle status is a no-op" do
+      state = base_state(focus: :file_viewer)
+      {:handled, new_state} = Keys.handle_key(state, ?c, @ctrl)
+      assert new_state.agent.status == :idle
     end
   end
 end

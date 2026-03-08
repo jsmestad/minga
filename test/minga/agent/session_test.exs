@@ -156,6 +156,49 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "abort/1" do
+    test "preserves partial response and adds system message", %{session: session} do
+      :ok = Session.send_prompt(session, "Test")
+      Process.sleep(50)
+
+      # Verify we have an assistant message
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:assistant, _}, &1))
+
+      :ok = Session.abort(session)
+
+      messages = Session.messages(session)
+      # Partial assistant message is preserved
+      assert Enum.any?(messages, &match?({:assistant, _}, &1))
+      # "Aborted" system message is appended
+      assert Enum.any?(messages, &match?({:system, "Aborted", :info}, &1))
+      # Status returns to idle
+      assert Session.status(session) == :idle
+    end
+
+    test "marks running tool calls as aborted", %{session: session} do
+      # Inject a running tool call
+      tool_start = %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
+      send(session, {:agent_provider_event, tool_start})
+      Process.sleep(20)
+
+      :ok = Session.abort(session)
+
+      messages = Session.messages(session)
+
+      tool =
+        Enum.find(messages, fn
+          {:tool_call, _} -> true
+          _ -> false
+        end)
+
+      assert {:tool_call, tc} = tool
+      assert tc.status == :error
+      assert tc.result == "aborted"
+      assert tc.is_error
+    end
+  end
+
   describe "new_session/1" do
     test "clears messages and resets status", %{session: session} do
       :ok = Session.send_prompt(session, "First")

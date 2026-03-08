@@ -28,6 +28,7 @@ defmodule Minga.Agent.View.Keys do
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
+  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Clipboard
@@ -113,7 +114,11 @@ defmodule Minga.Agent.View.Keys do
   end
 
   defp handle_chat_input(state, ?c, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.submit_prompt(state)
+    if input_empty?(state) do
+      abort_if_active(state)
+    else
+      AgentCommands.submit_prompt(state)
+    end
   end
 
   defp handle_chat_input(state, ?d, mods) when band(mods, @ctrl) != 0 do
@@ -189,10 +194,18 @@ defmodule Minga.Agent.View.Keys do
 
   # --- View management ---
 
-  # q or Escape: close the agentic view
-  defp handle_chat_nav(state, cp, _mods) when cp in [?q, @escape] do
+  # q: close the agentic view (vim special buffer convention)
+  defp handle_chat_nav(state, ?q, _mods) do
     AgentCommands.toggle_agentic_view(state)
   end
+
+  # Ctrl+C in chat nav: abort agent if active
+  defp handle_chat_nav(state, ?c, mods) when band(mods, @ctrl) != 0 do
+    abort_if_active(state)
+  end
+
+  # ESC in chat nav: no-op (already in resting state)
+  defp handle_chat_nav(state, @escape, _mods), do: state
 
   # Tab: switch focus to the file viewer
   defp handle_chat_nav(state, @tab, _mods) do
@@ -322,9 +335,19 @@ defmodule Minga.Agent.View.Keys do
     update_agentic(state, &ViewState.set_focus(&1, :chat))
   end
 
-  # q or Escape: close the agentic view
-  defp handle_viewer_nav(state, cp, _mods) when cp in [?q, @escape] do
+  # q: close the agentic view
+  defp handle_viewer_nav(state, ?q, _mods) do
     AgentCommands.toggle_agentic_view(state)
+  end
+
+  # Ctrl+C in viewer: abort agent if active
+  defp handle_viewer_nav(state, ?c, mods) when band(mods, @ctrl) != 0 do
+    abort_if_active(state)
+  end
+
+  # ESC in viewer: switch focus to chat
+  defp handle_viewer_nav(state, @escape, _mods) do
+    update_agentic(state, &ViewState.set_focus(&1, :chat))
   end
 
   # --- Scrolling ---
@@ -512,6 +535,20 @@ defmodule Minga.Agent.View.Keys do
   @spec viewer_half_page(EditorState.t()) :: pos_integer()
   defp viewer_half_page(state) do
     max(div(state.viewport.rows, 2), 1)
+  end
+
+  @spec input_empty?(EditorState.t()) :: boolean()
+  defp input_empty?(state) do
+    PanelState.input_text(state.agent.panel) == ""
+  end
+
+  @spec abort_if_active(EditorState.t()) :: EditorState.t()
+  defp abort_if_active(state) do
+    if state.agent.status in [:thinking, :tool_executing] do
+      AgentCommands.abort_agent(state)
+    else
+      state
+    end
   end
 
   @spec copy_code_block_at_cursor(EditorState.t()) :: EditorState.t()
