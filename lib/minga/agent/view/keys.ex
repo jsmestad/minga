@@ -32,6 +32,7 @@ defmodule Minga.Agent.View.Keys do
   alias Minga.Agent.Message
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Clipboard
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -89,33 +90,25 @@ defmodule Minga.Agent.View.Keys do
   # ── Diff review keys ─────────────────────────────────────────────────────────
   # When a diff review is active, intercept y/x/Y/X for accept/reject.
 
-  def handle_key(%{agent: %{diff_review: %DiffReview{}}} = state, ?y, _mods) do
+  def handle_key(%{agentic: %{preview: %Preview{content: {:diff, _}}}} = state, ?y, _mods) do
     state =
-      update_agent(
-        state,
-        &AgentState.update_diff_review(&1, fn r -> DiffReview.accept_current(r) end)
-      )
+      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_current(r) end))
 
     {:handled, maybe_finish_review(state)}
   end
 
-  def handle_key(%{agent: %{diff_review: %DiffReview{} = review}} = state, ?x, _mods) do
-    # Reject current hunk: revert it on disk
+  def handle_key(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state, ?x, _mods) do
     apply_rejection(state, review)
   end
 
-  def handle_key(%{agent: %{diff_review: %DiffReview{}}} = state, ?Y, _mods) do
+  def handle_key(%{agentic: %{preview: %Preview{content: {:diff, _}}}} = state, ?Y, _mods) do
     state =
-      update_agent(
-        state,
-        &AgentState.update_diff_review(&1, fn r -> DiffReview.accept_all(r) end)
-      )
+      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
 
     {:handled, maybe_finish_review(state)}
   end
 
-  def handle_key(%{agent: %{diff_review: %DiffReview{} = review}} = state, ?X, _mods) do
-    # Reject all remaining hunks
+  def handle_key(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state, ?X, _mods) do
     apply_bulk_rejection(state, review)
   end
 
@@ -631,16 +624,13 @@ defmodule Minga.Agent.View.Keys do
 
   # ]c: next diff hunk (when diff review is active), else next code block
   defp handle_prefix(
-         %{agent: %{diff_review: %DiffReview{} = review}} = state,
+         %{agentic: %{preview: %Preview{content: {:diff, review}}}} = state,
          :bracket_next,
          ?c,
          _mods,
          _context
        ) do
-    update_agent(
-      state,
-      &AgentState.update_diff_review(&1, fn _ -> DiffReview.next_hunk(review) end)
-    )
+    update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
   end
 
   defp handle_prefix(state, :bracket_next, ?c, _mods, _context), do: state
@@ -661,16 +651,13 @@ defmodule Minga.Agent.View.Keys do
 
   # [c: prev diff hunk (when diff review is active), else prev code block
   defp handle_prefix(
-         %{agent: %{diff_review: %DiffReview{} = review}} = state,
+         %{agentic: %{preview: %Preview{content: {:diff, review}}}} = state,
          :bracket_prev,
          ?c,
          _mods,
          _context
        ) do
-    update_agent(
-      state,
-      &AgentState.update_diff_review(&1, fn _ -> DiffReview.prev_hunk(review) end)
-    )
+    update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
   end
 
   defp handle_prefix(state, :bracket_prev, ?c, _mods, _context), do: state
@@ -907,6 +894,11 @@ defmodule Minga.Agent.View.Keys do
     %{state | agentic: fun.(state.agentic)}
   end
 
+  @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
+  defp update_preview(state, fun) do
+    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+  end
+
   @spec update_panel(EditorState.t(), (PanelState.t() -> PanelState.t())) :: EditorState.t()
   defp update_panel(state, fun) do
     update_agent(state, fn agent -> %{agent | panel: fun.(agent.panel)} end)
@@ -1024,10 +1016,10 @@ defmodule Minga.Agent.View.Keys do
 
   @spec maybe_finish_review(EditorState.t()) :: EditorState.t()
   defp maybe_finish_review(state) do
-    case state.agent.diff_review do
+    case Preview.diff_review(state.agentic.preview) do
       %DiffReview{} = review ->
         if DiffReview.resolved?(review) do
-          update_agent(state, &AgentState.clear_diff_review/1)
+          update_preview(state, &Preview.clear/1)
         else
           state
         end
@@ -1055,10 +1047,7 @@ defmodule Minga.Agent.View.Keys do
     end
 
     state =
-      update_agent(
-        state,
-        &AgentState.update_diff_review(&1, fn r -> DiffReview.reject_current(r) end)
-      )
+      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_current(r) end))
 
     {:handled, maybe_finish_review(state)}
   end
@@ -1090,10 +1079,7 @@ defmodule Minga.Agent.View.Keys do
     end
 
     state =
-      update_agent(
-        state,
-        &AgentState.update_diff_review(&1, fn r -> DiffReview.reject_all(r) end)
-      )
+      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
 
     {:handled, maybe_finish_review(state)}
   end

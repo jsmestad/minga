@@ -15,6 +15,8 @@ defmodule Minga.Editor do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session, as: AgentSession
+  alias Minga.Agent.View.Preview
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -511,11 +513,59 @@ defmodule Minga.Editor do
     {:noreply, schedule_render(state, 16)}
   end
 
-  def handle_info({:agent_event, {:tool_update, _id}}, state) do
+  # Shell tool: stream output to preview pane
+  def handle_info({:agent_event, {:tool_started, "shell", args}}, state) do
+    command = Map.get(args, "command", "")
+    state = update_preview(state, &Preview.set_shell(&1, command))
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:agent_event, {:tool_update, _id, "shell", partial}}, state) do
+    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = update_preview(state, &Preview.update_shell_output(&1, partial))
+    {:noreply, schedule_render(state, 50)}
+  end
+
+  def handle_info({:agent_event, {:tool_update, _id, _name, _partial}}, state) do
     state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     {:noreply, schedule_render(state, 50)}
   end
 
+  def handle_info({:agent_event, {:tool_ended, "shell", result, status}}, state) do
+    shell_status = if status == :error, do: :error, else: :done
+    state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  # Read file tool: show file content in preview
+  def handle_info({:agent_event, {:tool_started, "read_file", args}}, state) do
+    path = Map.get(args, "path", "")
+    state = update_preview(state, &Preview.set_file(&1, path, ""))
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:agent_event, {:tool_ended, "read_file", result, _status}}, state) do
+    # Update the file content with the actual result
+    case state.agentic.preview.content do
+      {:file, path, _} ->
+        state = update_preview(state, &Preview.set_file(&1, path, result))
+        {:noreply, schedule_render(state, 16)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  # Other tool starts/ends: no preview change
+  def handle_info({:agent_event, {:tool_started, _name, _args}}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info({:agent_event, {:tool_ended, _name, _result, _status}}, state) do
+    {:noreply, state}
+  end
+
+  # File changed: show diff in preview pane
   def handle_info({:agent_event, {:file_changed, path, before_content, after_content}}, state) do
     alias Minga.Agent.DiffReview
 
@@ -524,9 +574,9 @@ defmodule Minga.Editor do
         {:noreply, state}
 
       review ->
-        state = update_agent(state, &AgentState.set_diff_review(&1, review))
-        # Switch focus to file viewer so the user sees the diff
-        state = %{state | agentic: Minga.Agent.View.State.set_focus(state.agentic, :file_viewer)}
+        state = update_preview(state, &Preview.set_diff(&1, review))
+        # Switch focus to preview so the user sees the diff
+        state = %{state | agentic: ViewState.set_focus(state.agentic, :file_viewer)}
         state = Renderer.render(state)
         {:noreply, state}
     end
@@ -591,6 +641,11 @@ defmodule Minga.Editor do
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do
     %{state | agent: fun.(state.agent)}
+  end
+
+  @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
+  defp update_preview(state, fun) do
+    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
   end
 
   @spec sync_agent_buffer(state()) :: state()

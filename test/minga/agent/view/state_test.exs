@@ -16,9 +16,9 @@ defmodule Minga.Agent.View.StateTest do
       assert av.focus == :chat
     end
 
-    test "starts with file_viewer_scroll at 0" do
+    test "starts with preview scroll at 0" do
       av = ViewState.new()
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "starts with no saved windows" do
@@ -201,7 +201,7 @@ defmodule Minga.Agent.View.StateTest do
   describe "file viewer scrolling" do
     test "scroll_viewer_down increases offset" do
       av = ViewState.new() |> ViewState.scroll_viewer_down(10)
-      assert av.file_viewer_scroll == 10
+      assert av.preview.scroll_offset == 10
     end
 
     test "scroll_viewer_up decreases offset" do
@@ -210,12 +210,12 @@ defmodule Minga.Agent.View.StateTest do
         |> ViewState.scroll_viewer_down(10)
         |> ViewState.scroll_viewer_up(3)
 
-      assert av.file_viewer_scroll == 7
+      assert av.preview.scroll_offset == 7
     end
 
     test "scroll_viewer_up clamps at 0" do
       av = ViewState.new() |> ViewState.scroll_viewer_up(10)
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "scroll_viewer_to_top resets to 0" do
@@ -224,12 +224,12 @@ defmodule Minga.Agent.View.StateTest do
         |> ViewState.scroll_viewer_down(50)
         |> ViewState.scroll_viewer_to_top()
 
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "scroll_viewer_to_bottom sets a large offset" do
       av = ViewState.new() |> ViewState.scroll_viewer_to_bottom()
-      assert av.file_viewer_scroll > 0
+      assert av.preview.scroll_offset > 0
     end
   end
 

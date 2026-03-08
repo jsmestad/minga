@@ -543,6 +543,7 @@ defmodule Minga.Agent.Session do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
     state = %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
     state = set_status(state, :tool_executing)
+    broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
   end
 
@@ -572,7 +573,7 @@ defmodule Minga.Agent.Session do
       end)
 
     state = %{state | messages: messages}
-    broadcast(state, {:tool_update, event.tool_call_id})
+    broadcast(state, {:tool_update, event.tool_call_id, event.name, event.partial_result})
     state
   end
 
@@ -597,6 +598,8 @@ defmodule Minga.Agent.Session do
       end)
 
     state = %{state | messages: messages}
+    status = if event.is_error, do: :error, else: :done
+    broadcast(state, {:tool_ended, event.name, event.result, status})
     notify_messages_changed(state)
   end
 

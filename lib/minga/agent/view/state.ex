@@ -17,6 +17,7 @@ defmodule Minga.Agent.View.State do
   stays within Credo's 31-field limit.
   """
 
+  alias Minga.Agent.View.Preview
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
 
@@ -30,7 +31,7 @@ defmodule Minga.Agent.View.State do
   @type t :: %__MODULE__{
           active: boolean(),
           focus: focus(),
-          file_viewer_scroll: non_neg_integer(),
+          preview: Preview.t(),
           saved_windows: Windows.t() | nil,
           pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
@@ -41,7 +42,7 @@ defmodule Minga.Agent.View.State do
   @enforce_keys []
   defstruct active: false,
             focus: :chat,
-            file_viewer_scroll: 0,
+            preview: Preview.new(),
             saved_windows: nil,
             pending_prefix: nil,
             chat_width_pct: 65,
@@ -88,28 +89,36 @@ defmodule Minga.Agent.View.State do
     %{av | focus: focus}
   end
 
-  @doc "Scrolls the file viewer down by the given number of lines."
+  @doc "Scrolls the preview pane down by the given number of lines."
   @spec scroll_viewer_down(t(), pos_integer()) :: t()
   def scroll_viewer_down(%__MODULE__{} = av, amount) do
-    %{av | file_viewer_scroll: av.file_viewer_scroll + amount}
+    %{av | preview: Preview.scroll_down(av.preview, amount)}
   end
 
-  @doc "Scrolls the file viewer up by the given number of lines, clamped at 0."
+  @doc "Scrolls the preview pane up by the given number of lines, clamped at 0."
   @spec scroll_viewer_up(t(), pos_integer()) :: t()
   def scroll_viewer_up(%__MODULE__{} = av, amount) do
-    %{av | file_viewer_scroll: max(av.file_viewer_scroll - amount, 0)}
+    %{av | preview: Preview.scroll_up(av.preview, amount)}
   end
 
-  @doc "Scrolls the file viewer to the top (offset 0)."
+  @doc "Scrolls the preview pane to the top (offset 0)."
   @spec scroll_viewer_to_top(t()) :: t()
   def scroll_viewer_to_top(%__MODULE__{} = av) do
-    %{av | file_viewer_scroll: 0}
+    %{av | preview: Preview.scroll_to_top(av.preview)}
   end
 
-  @doc "Scrolls the file viewer to a large offset (renderer clamps to actual content)."
+  @doc "Scrolls the preview pane to a large offset (renderer clamps to actual content)."
   @spec scroll_viewer_to_bottom(t()) :: t()
   def scroll_viewer_to_bottom(%__MODULE__{} = av) do
-    %{av | file_viewer_scroll: 999_999}
+    %{av | preview: Preview.scroll_to_bottom(av.preview)}
+  end
+
+  # ── Preview management ──────────────────────────────────────────────────────
+
+  @doc "Updates the preview state with the given function."
+  @spec update_preview(t(), (Preview.t() -> Preview.t())) :: t()
+  def update_preview(%__MODULE__{} = av, fun) when is_function(fun, 1) do
+    %{av | preview: fun.(av.preview)}
   end
 
   @doc "Sets the pending prefix for multi-key sequences."

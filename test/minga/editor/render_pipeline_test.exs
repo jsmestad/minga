@@ -8,6 +8,7 @@ defmodule Minga.Editor.RenderPipelineTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, WindowFrame}
@@ -66,7 +67,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       agentic: %Minga.Agent.View.State{
         active: false,
         focus: :chat,
-        file_viewer_scroll: 0,
+        preview: Preview.new(),
         saved_windows: nil,
         pending_prefix: nil,
         saved_file_tree: nil

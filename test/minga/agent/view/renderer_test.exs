@@ -2,6 +2,7 @@ defmodule Minga.Agent.View.RendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.Renderer
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
@@ -44,7 +45,7 @@ defmodule Minga.Agent.View.RendererTest do
     agentic = %ViewState{
       active: true,
       focus: Keyword.get(opts, :focus, :chat),
-      file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
+      preview: Preview.new(),
       saved_windows: nil,
       pending_prefix: nil,
       saved_file_tree: nil
@@ -242,7 +243,6 @@ defmodule Minga.Agent.View.RendererTest do
         },
         agentic: %{
           chat_width_pct: 65,
-          file_viewer_scroll: 0,
           help_visible: false,
           focus: :chat
         },
@@ -280,7 +280,6 @@ defmodule Minga.Agent.View.RendererTest do
         },
         agentic: %{
           chat_width_pct: 65,
-          file_viewer_scroll: 0,
           help_visible: false,
           focus: :chat
         },
@@ -330,7 +329,7 @@ defmodule Minga.Agent.View.RendererTest do
           display_start_index: 0,
           mention_completion: nil
         },
-        agentic: %{chat_width_pct: 65, file_viewer_scroll: 0, help_visible: false},
+        agentic: %{chat_width_pct: 65, help_visible: false, focus: :chat},
         messages: [],
         usage: %{input: 50_000, output: 50_000, cache_read: 0, cache_write: 0, cost: 0.05},
         buffer_snapshot: nil,
