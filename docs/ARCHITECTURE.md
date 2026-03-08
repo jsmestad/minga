@@ -156,6 +156,34 @@ The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and
 
 Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend.
 
+### Display List (Rendering IR)
+
+The BEAM side owns a **display list** of styled text runs that sits between editor state and protocol encoding. This intermediate representation is the single source of truth for "what's on screen" and is consumed by all frontends (TUI, future macOS GUI, future Linux GUI).
+
+The display list uses **styled text runs**, not a cell grid. A cell grid is terminal-shaped and would force GUI frontends to fake a terminal. Styled text runs stay line-and-column based (monospaced editing model) while being abstract enough for both TUI and GUI frontends:
+
+```elixir
+# A styled run: "draw this text in this style starting at this column"
+@type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: style()}
+
+# A line's visual content: a list of runs
+@type display_line :: [text_run()]
+
+# A window's frame: positioned rectangle with visible lines
+@type window_frame :: %{
+  rect: rect(),
+  lines: %{row :: non_neg_integer() => display_line()},
+  gutter: %{row :: non_neg_integer() => display_line()},
+  cursor: {row :: non_neg_integer(), col :: non_neg_integer()}
+}
+```
+
+Each frontend does the last-mile translation. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). A GUI frontend converts the same run into an attributed string draw at a pixel position derived from the monospaced font metrics. The IR doesn't change; only the frontend's interpretation does.
+
+This design also keeps the door open for variable-width font support in future GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
+
+See **[docs/RENDERING_GAPS.md](RENDERING_GAPS.md)** for the full rendering pipeline analysis and implementation plan.
+
 ---
 
 ## Life of a Keystroke

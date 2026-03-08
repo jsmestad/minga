@@ -194,14 +194,14 @@ The editors that feel "reliable and clean" all share one trait: they separate *d
 
 Ordered by dependency (each item enables the ones below it) and impact:
 
-| Priority | Gap | Effort | Why this order |
-|----------|-----|--------|----------------|
-| 1 | Unify render paths (Gap 2, partial) | Low | Eliminates duplication, makes everything else simpler |
-| 2 | Per-window render state (Gap 2, full) | Medium | Enables damage tracking and caching |
-| 3 | Dirty-line tracking (Gap 1) | Medium | Biggest per-frame performance win |
-| 4 | BEAM-side cell grid (Gap 4) | Medium | Biggest protocol bandwidth win |
-| 5 | Render pipeline stages (Gap 3) | Medium | Best for debuggability and maintainability |
-| 6 | Component model (Gap 6) | Medium | Best for testability and isolation |
-| 7 | Layout constraints (Gap 5) | Low | Best for edge-case robustness |
+| Priority | Gap | Effort | Ticket | Why this order |
+|----------|-----|--------|--------|----------------|
+| 1 | Unify render paths (Gap 2, partial) | Low | [#162](https://github.com/jsmestad/minga/issues/162) | Eliminates duplication, makes everything else simpler |
+| 2 | Per-window render state (Gap 2, full) | Medium | [#163](https://github.com/jsmestad/minga/issues/163) | Enables damage tracking and caching |
+| 3 | Dirty-line tracking (Gap 1) | Medium | [#164](https://github.com/jsmestad/minga/issues/164) | Biggest per-frame performance win |
+| 4 | BEAM-side display list (Gap 4) | Medium | [#165](https://github.com/jsmestad/minga/issues/165) | Multi-frontend foundation + protocol bandwidth win |
+| 5 | Render pipeline stages (Gap 3) | Medium | [#166](https://github.com/jsmestad/minga/issues/166) | Best for debuggability and maintainability |
+| 6 | Component model (Gap 6) | Medium | [#167](https://github.com/jsmestad/minga/issues/167) | Best for testability and isolation |
+| 7 | Layout constraints (Gap 5) | Low | [#168](https://github.com/jsmestad/minga/issues/168) | Best for edge-case robustness |
 
-Items 1 and 2 can be done together as a single refactor that sets the foundation for everything else.
+Items 1 and 7 have no dependencies and can start immediately. Items 2-3 are sequential. Item 4 can be worked in parallel with 2-3 after item 1 is done. Items 5-6 depend on the display list types from item 4.

@@ -190,6 +190,16 @@ BEAM ↔ Zig communication uses length-prefixed binary messages over stdin/stdou
 
 See `PLAN.md` § "Port Protocol" for the full message specification.
 
+## Rendering Architecture
+
+The rendering pipeline is being refactored to support multiple frontends (TUI, macOS GUI, Linux GUI). Read `docs/RENDERING_GAPS.md` for the full analysis and ticket links.
+
+Key design decisions:
+- **Display list IR:** The BEAM side owns a display list of styled text runs (not a cell grid) that sits between editor state and protocol encoding. All frontends consume this shared IR. See `docs/ARCHITECTURE.md` § "Display List (Rendering IR)" for the type definitions.
+- **Styled text runs over cell grids:** GUIs don't think in terminal cells. The IR uses `{col, text, style}` tuples organized by line within positioned rectangles. The TUI quantizes runs to cells; a GUI renders runs with its font engine.
+- **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
+- **Pipeline stages:** The renderer is being split into named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) for debuggability and per-stage caching.
+
 ## Keeping Documentation Updated
 
 When implementing features, completing planned work, or changing architecture:
