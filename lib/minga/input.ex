@@ -16,24 +16,27 @@ defmodule Minga.Input do
   alias Minga.Input.GlobalBindings
   alias Minga.Input.ModeFSM
   alias Minga.Input.Picker
+  alias Minga.Input.Scoped
 
   @doc """
   Returns the default focus stack.
 
   Priority order (first handler wins):
   1. ConflictPrompt — modal, swallows all keys when active
-  2. AgenticViewKeys — full-screen agentic view (when active, handles all non-SPC keys)
-  3. AgentPanel — agent chat input (temporary, until agent becomes a buffer)
-  4. FileTree — file tree navigation (temporary, until tree becomes a buffer)
-  5. Picker — modal overlay, blocks all input while active
-  6. Completion — insert-mode sub-dispatch for popup navigation
-  7. GlobalBindings — Ctrl+S save, Ctrl+Q quit (always active)
-  8. ModeFSM — the normal vim mode system (fallback)
+  2. Scoped — keymap scope resolution (agent, file_tree, editor pass-through)
+  3. AgenticViewKeys — LEGACY: full-screen agentic view (kept until scope migration complete)
+  4. AgentPanel — agent chat input (temporary, until agent becomes a buffer)
+  5. FileTree — file tree navigation (temporary, until tree becomes a buffer)
+  6. Picker — modal overlay, blocks all input while active
+  7. Completion — insert-mode sub-dispatch for popup navigation
+  8. GlobalBindings — Ctrl+S save, Ctrl+Q quit (always active)
+  9. ModeFSM — the normal vim mode system (fallback)
   """
   @spec default_stack() :: [module()]
   def default_stack do
     [
       ConflictPrompt,
+      Scoped,
       AgenticViewKeys,
       AgentPanel,
       FileTree,

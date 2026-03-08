@@ -87,6 +87,7 @@ defmodule Minga.Editor.State do
             injection_ranges: %{},
             agent: %AgentState{},
             focus_stack: [],
+            keymap_scope: :editor,
             agentic: %ViewState{},
             capabilities: %Capabilities{},
             layout: nil
@@ -127,6 +128,7 @@ defmodule Minga.Editor.State do
           },
           agent: AgentState.t(),
           focus_stack: [module()],
+          keymap_scope: Minga.Keymap.Scope.scope_name(),
           agentic: ViewState.t(),
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil

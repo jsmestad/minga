@@ -151,6 +151,76 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
 
+  # ── Agent scope commands (dispatched via keymap scope resolution) ──────────
+  def execute(state, :agent_scroll_down), do: AgentCommands.scope_scroll_down(state)
+  def execute(state, :agent_scroll_up), do: AgentCommands.scope_scroll_up(state)
+  def execute(state, :agent_scroll_half_down), do: AgentCommands.scope_scroll_half_down(state)
+  def execute(state, :agent_scroll_half_up), do: AgentCommands.scope_scroll_half_up(state)
+  def execute(state, :agent_scroll_bottom), do: AgentCommands.scope_scroll_bottom(state)
+  def execute(state, :agent_scroll_top), do: AgentCommands.scope_scroll_top(state)
+  def execute(state, :agent_toggle_collapse), do: AgentCommands.scope_toggle_collapse(state)
+
+  def execute(state, :agent_toggle_all_collapse),
+    do: AgentCommands.scope_toggle_all_collapse(state)
+
+  def execute(state, :agent_expand_at_cursor), do: AgentCommands.scope_expand_at_cursor(state)
+  def execute(state, :agent_collapse_at_cursor), do: AgentCommands.scope_collapse_at_cursor(state)
+  def execute(state, :agent_collapse_all), do: AgentCommands.scope_collapse_all(state)
+  def execute(state, :agent_expand_all), do: AgentCommands.scope_expand_all(state)
+  def execute(state, :agent_next_message), do: AgentCommands.scope_next_message(state)
+  def execute(state, :agent_next_code_block), do: AgentCommands.scope_next_code_block(state)
+  def execute(state, :agent_next_tool_call), do: AgentCommands.scope_next_tool_call(state)
+  def execute(state, :agent_prev_message), do: AgentCommands.scope_prev_message(state)
+  def execute(state, :agent_prev_code_block), do: AgentCommands.scope_prev_code_block(state)
+  def execute(state, :agent_prev_tool_call), do: AgentCommands.scope_prev_tool_call(state)
+  def execute(state, :agent_copy_code_block), do: AgentCommands.scope_copy_code_block(state)
+  def execute(state, :agent_copy_message), do: AgentCommands.scope_copy_message(state)
+  def execute(state, :agent_open_code_block), do: AgentCommands.scope_open_code_block(state)
+  def execute(state, :agent_focus_input), do: AgentCommands.scope_focus_input(state)
+  def execute(state, :agent_unfocus_input), do: AgentCommands.scope_unfocus_input(state)
+  def execute(state, :agent_unfocus_and_quit), do: AgentCommands.scope_unfocus_and_quit(state)
+  def execute(state, :agent_grow_panel), do: AgentCommands.scope_grow_panel(state)
+  def execute(state, :agent_shrink_panel), do: AgentCommands.scope_shrink_panel(state)
+  def execute(state, :agent_reset_panel), do: AgentCommands.scope_reset_panel(state)
+  def execute(state, :agent_switch_focus), do: AgentCommands.scope_switch_focus(state)
+  def execute(state, :agent_start_search), do: AgentCommands.scope_start_search(state)
+  def execute(state, :agent_next_search_match), do: AgentCommands.scope_next_search_match(state)
+  def execute(state, :agent_prev_search_match), do: AgentCommands.scope_prev_search_match(state)
+  def execute(state, :agent_session_switcher), do: AgentCommands.scope_session_switcher(state)
+  def execute(state, :agent_toggle_help), do: AgentCommands.scope_toggle_help(state)
+  def execute(state, :agent_close), do: AgentCommands.scope_close(state)
+  def execute(state, :agent_dismiss_or_noop), do: AgentCommands.scope_dismiss_or_noop(state)
+  def execute(state, :agent_clear_chat), do: AgentCommands.scope_clear_chat(state)
+  def execute(state, :agent_submit_or_newline), do: AgentCommands.scope_submit_or_newline(state)
+  def execute(state, :agent_insert_newline), do: AgentCommands.scope_insert_newline(state)
+  def execute(state, :agent_submit_or_abort), do: AgentCommands.scope_submit_or_abort(state)
+  def execute(state, :agent_input_backspace), do: AgentCommands.input_backspace(state)
+  def execute(state, :agent_input_up), do: AgentCommands.scope_input_up(state)
+  def execute(state, :agent_input_down), do: AgentCommands.scope_input_down(state)
+  def execute(state, :agent_save_buffer), do: AgentCommands.scope_save_buffer(state)
+
+  def execute(state, {:agent_self_insert, char}),
+    do: AgentCommands.scope_self_insert(state, char)
+
+  def execute(state, :agent_accept_hunk), do: AgentCommands.scope_accept_hunk(state)
+  def execute(state, :agent_reject_hunk), do: AgentCommands.scope_reject_hunk(state)
+  def execute(state, :agent_accept_all_hunks), do: AgentCommands.scope_accept_all_hunks(state)
+  def execute(state, :agent_reject_all_hunks), do: AgentCommands.scope_reject_all_hunks(state)
+  def execute(state, :agent_approve_tool), do: AgentCommands.scope_approve_tool(state)
+  def execute(state, :agent_deny_tool), do: AgentCommands.scope_deny_tool(state)
+
+  def execute(state, :agent_trigger_mention),
+    do: AgentCommands.scope_trigger_mention(state)
+
+  # ── File tree scope commands ──────────────────────────────────────────────
+  def execute(state, :tree_open_or_toggle), do: tree_open_or_toggle(state)
+  def execute(state, :tree_toggle_directory), do: tree_toggle_directory(state)
+  def execute(state, :tree_expand), do: tree_expand(state)
+  def execute(state, :tree_collapse), do: tree_collapse(state)
+  def execute(state, :tree_toggle_hidden), do: tree_toggle_hidden(state)
+  def execute(state, :tree_refresh), do: tree_refresh(state)
+  def execute(state, :tree_close), do: tree_close(state)
+
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
   def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
@@ -520,10 +590,11 @@ defmodule Minga.Editor.Commands do
 
   defp toggle_file_tree(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
-    %{state | file_tree: FileTreeState.close(state.file_tree)}
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
   end
 
-  defp toggle_file_tree(state), do: %{state | file_tree: FileTreeState.close(state.file_tree)}
+  defp toggle_file_tree(state),
+    do: %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
 
   @spec open_file_tree(state()) :: state()
   defp open_file_tree(state) do
@@ -531,7 +602,7 @@ defmodule Minga.Editor.Commands do
     tree = FileTree.new(root)
     tree = reveal_active_in_tree(tree, state.buffers.active)
     buf = BufferSync.start_buffer(tree)
-    %{state | file_tree: FileTreeState.open(state.file_tree, tree, buf)}
+    %{state | file_tree: FileTreeState.open(state.file_tree, tree, buf), keymap_scope: :file_tree}
   end
 
   @spec reveal_active_in_tree(FileTree.t(), pid() | nil) :: FileTree.t()
@@ -542,5 +613,80 @@ defmodule Minga.Editor.Commands do
       nil -> tree
       path -> FileTree.reveal(tree, path)
     end
+  end
+
+  # ── File tree scope commands ──────────────────────────────────────────────
+
+  @spec tree_open_or_toggle(state()) :: state()
+  defp tree_open_or_toggle(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_open_or_toggle(%{file_tree: %{tree: tree}} = state) do
+    case FileTree.selected_entry(tree) do
+      %{dir?: true} ->
+        new_tree = FileTree.toggle_expand(tree)
+        tree_sync_and_update(state, new_tree)
+
+      %{dir?: false, path: path} ->
+        state = put_in(state.file_tree.focused, false)
+        state = %{state | keymap_scope: :editor}
+
+        case start_buffer(path) do
+          {:ok, pid} -> Minga.Editor.do_file_tree_open(state, pid, path, tree)
+          {:error, _} -> state
+        end
+
+      nil ->
+        state
+    end
+  end
+
+  @spec tree_toggle_directory(state()) :: state()
+  defp tree_toggle_directory(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_toggle_directory(%{file_tree: %{tree: tree}} = state) do
+    tree_sync_and_update(state, FileTree.toggle_expand(tree))
+  end
+
+  @spec tree_expand(state()) :: state()
+  defp tree_expand(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_expand(%{file_tree: %{tree: tree}} = state),
+    do: tree_sync_and_update(state, FileTree.expand(tree))
+
+  @spec tree_collapse(state()) :: state()
+  defp tree_collapse(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_collapse(%{file_tree: %{tree: tree}} = state),
+    do: tree_sync_and_update(state, FileTree.collapse(tree))
+
+  @spec tree_toggle_hidden(state()) :: state()
+  defp tree_toggle_hidden(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_toggle_hidden(%{file_tree: %{tree: tree}} = state),
+    do: tree_sync_and_update(state, FileTree.toggle_hidden(tree))
+
+  @spec tree_refresh(state()) :: state()
+  defp tree_refresh(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp tree_refresh(%{file_tree: %{tree: tree}} = state),
+    do: tree_sync_and_update(state, FileTree.refresh(tree))
+
+  @spec tree_close(state()) :: state()
+  defp tree_close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
+    GenServer.stop(buf, :normal)
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+  end
+
+  defp tree_close(state),
+    do: %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+
+  @spec tree_sync_and_update(state(), FileTree.t()) :: state()
+  defp tree_sync_and_update(%{file_tree: %{buffer: buf}} = state, new_tree) when is_pid(buf) do
+    BufferSync.sync(buf, new_tree)
+    put_in(state.file_tree.tree, new_tree)
+  end
+
+  defp tree_sync_and_update(state, new_tree) do
+    put_in(state.file_tree.tree, new_tree)
   end
 end

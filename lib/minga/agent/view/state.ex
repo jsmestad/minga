@@ -26,7 +26,7 @@ defmodule Minga.Agent.View.State do
   @type focus :: :chat | :file_viewer
 
   @typedoc "Active prefix key awaiting a follow-up keystroke."
-  @type prefix :: nil | :g | :z | :bracket_next | :bracket_prev
+  @type prefix :: nil | :g | :z | :bracket_next | :bracket_prev | Minga.Keymap.Bindings.Node.t()
 
   @typedoc "A search match: message index, byte start, byte end."
   @type search_match ::
@@ -148,7 +148,7 @@ defmodule Minga.Agent.View.State do
   @doc "Sets the pending prefix for multi-key sequences."
   @spec set_prefix(t(), prefix()) :: t()
   def set_prefix(%__MODULE__{} = av, prefix)
-      when prefix in [nil, :g, :z, :bracket_next, :bracket_prev] do
+      when prefix in [nil, :g, :z, :bracket_next, :bracket_prev] or is_map(prefix) do
     %{av | pending_prefix: prefix}
   end
 
