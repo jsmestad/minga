@@ -187,7 +187,7 @@ final class MetalRenderer {
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
             }
 
-            // Cursor overlay.
+            // Cursor overlay. Shape varies by mode: block (normal), beam (insert), underline.
             if grid.cursorVisible {
                 let cursorIdx = Int(grid.cursorRow) * Int(grid.cols) + Int(grid.cursorCol)
                 if cursorIdx >= 0, cursorIdx < count {
@@ -196,9 +196,29 @@ final class MetalRenderer {
                     cursorCell.bgColor = SIMD3<Float>(0.8, 0.8, 0.8)
                     cursorCell.hasGlyph = 0.0
 
+                    var cursorUniforms = uniforms
+
+                    switch grid.cursorShape {
+                    case .beam:
+                        // Thin vertical bar at the left edge of the cell (2px at content scale).
+                        let beamWidth = 2.0 * contentScale
+                        cursorUniforms.cellSize.x = beamWidth
+                        cursorCell.gridPos.x = Float(grid.cursorCol) * cellW * contentScale / beamWidth
+
+                    case .underline:
+                        // Thin horizontal bar at the bottom of the cell (2px at content scale).
+                        let underlineHeight = 2.0 * contentScale
+                        cursorUniforms.cellSize.y = underlineHeight
+                        let cellBottom = Float(grid.cursorRow + 1) * cellH * contentScale
+                        cursorCell.gridPos.y = (cellBottom - underlineHeight) / underlineHeight
+
+                    case .block:
+                        break // Full cell, no adjustment needed.
+                    }
+
                     encoder.setRenderPipelineState(bgPipeline)
                     encoder.setVertexBytes(&cursorCell, length: MemoryLayout<CellGPU>.stride, index: 0)
-                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                    encoder.setVertexBytes(&cursorUniforms, length: MemoryLayout<Uniforms>.size, index: 1)
                     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
                 }
             }
