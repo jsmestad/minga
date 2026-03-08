@@ -6,7 +6,6 @@ defmodule Minga.Editor.State.Agent do
   reach into the nested struct directly.
   """
 
-  alias Minga.Agent.DiffReview
   alias Minga.Agent.PanelState
 
   @typedoc "Agent status."
@@ -28,7 +27,7 @@ defmodule Minga.Editor.State.Agent do
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
           pending_approval: approval() | nil,
-          diff_review: DiffReview.t() | nil
+          session_history: [pid()]
         }
 
   defstruct session: nil,
@@ -38,7 +37,7 @@ defmodule Minga.Editor.State.Agent do
             spinner_timer: nil,
             buffer: nil,
             pending_approval: nil,
-            diff_review: nil
+            session_history: []
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -54,16 +53,47 @@ defmodule Minga.Editor.State.Agent do
 
   # ── Session lifecycle ───────────────────────────────────────────────────────
 
-  @doc "Stores the session pid and sets status to :idle."
+  @doc "Stores the session pid and sets status to :idle. Archives the previous session."
   @spec set_session(t(), pid()) :: t()
-  def set_session(%__MODULE__{} = agent, pid) when is_pid(pid) do
+  def set_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
     %{agent | session: pid, status: :idle}
+  end
+
+  def set_session(%__MODULE__{session: old_pid} = agent, pid)
+      when is_pid(pid) and is_pid(old_pid) do
+    history = [old_pid | agent.session_history] |> Enum.uniq()
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
   @doc "Sets the agent buffer pid."
   @spec set_buffer(t(), pid()) :: t()
   def set_buffer(%__MODULE__{} = agent, pid) when is_pid(pid) do
     %{agent | buffer: pid}
+  end
+
+  @doc "Returns all session pids (active + history), most recent first."
+  @spec all_sessions(t()) :: [pid()]
+  def all_sessions(%__MODULE__{session: nil} = agent), do: agent.session_history
+
+  def all_sessions(%__MODULE__{} = agent) do
+    [agent.session | agent.session_history]
+  end
+
+  @doc "Switches to a session from history, moving current to history."
+  @spec switch_session(t(), pid()) :: t()
+  def switch_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
+    history = List.delete(agent.session_history, pid)
+    %{agent | session: pid, status: :idle, session_history: history}
+  end
+
+  def switch_session(%__MODULE__{session: current} = agent, pid)
+      when is_pid(pid) and is_pid(current) do
+    history =
+      [current | agent.session_history]
+      |> List.delete(pid)
+      |> Enum.uniq()
+
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
   @doc "Clears the session and resets status to :idle."
@@ -104,6 +134,12 @@ defmodule Minga.Editor.State.Agent do
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{} = agent, amount) do
     %{agent | panel: PanelState.scroll_down(agent.panel, amount)}
+  end
+
+  @doc "Sets the scroll offset to an absolute value."
+  @spec set_scroll(t(), non_neg_integer()) :: t()
+  def set_scroll(%__MODULE__{} = agent, offset) when is_integer(offset) and offset >= 0 do
+    %{agent | panel: %{agent.panel | scroll_offset: offset, auto_scroll: false}}
   end
 
   @doc "Scrolls to bottom only if auto-scroll is engaged."
@@ -170,29 +206,6 @@ defmodule Minga.Editor.State.Agent do
   @spec history_next(t()) :: t()
   def history_next(%__MODULE__{} = agent) do
     %{agent | panel: PanelState.history_next(agent.panel)}
-  end
-
-  # ── Diff review ──────────────────────────────────────────────────────────────
-
-  @doc "Sets the active diff review."
-  @spec set_diff_review(t(), DiffReview.t()) :: t()
-  def set_diff_review(%__MODULE__{} = agent, %DiffReview{} = review) do
-    %{agent | diff_review: review}
-  end
-
-  @doc "Clears the active diff review."
-  @spec clear_diff_review(t()) :: t()
-  def clear_diff_review(%__MODULE__{} = agent) do
-    %{agent | diff_review: nil}
-  end
-
-  @doc "Updates the diff review with the given function."
-  @spec update_diff_review(t(), (DiffReview.t() -> DiffReview.t())) :: t()
-  def update_diff_review(%__MODULE__{diff_review: nil} = agent, _fun), do: agent
-
-  def update_diff_review(%__MODULE__{diff_review: review} = agent, fun)
-      when is_function(fun, 1) do
-    %{agent | diff_review: fun.(review)}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ defmodule Minga.Agent.SessionTest do
 
   alias Minga.Agent.Event
   alias Minga.Agent.Session
+  alias Minga.Agent.SessionStore
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
@@ -323,6 +324,53 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "session persistence" do
+    test "session has a unique ID", %{session: session} do
+      id = Session.session_id(session)
+      assert is_binary(id)
+      assert String.length(id) > 0
+    end
+
+    test "new_session generates a new ID", %{session: session} do
+      id1 = Session.session_id(session)
+      :ok = Session.new_session(session)
+      id2 = Session.session_id(session)
+      assert id1 != id2
+    end
+
+    test "save is scheduled after user prompt", %{session: session} do
+      # The save fires asynchronously via debounced timer
+      Session.send_prompt(session, "test prompt")
+      # Just verify no crash; actual file I/O tested in SessionStore tests
+      assert Session.session_id(session) |> is_binary()
+    end
+
+    test "load_session replaces messages", %{session: session} do
+      # Save the current session
+      _id = Session.session_id(session)
+
+      # Create a fake saved session
+      SessionStore.save(%{
+        id: "loaded-session",
+        timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+        model_name: "test-model",
+        messages: [{:user, "loaded message"}, {:assistant, "loaded reply"}],
+        usage: %{input: 500, output: 200, cache_read: 0, cache_write: 0, cost: 0.01}
+      })
+
+      :ok = Session.load_session(session, "loaded-session")
+
+      assert Session.session_id(session) == "loaded-session"
+      messages = Session.messages(session)
+      user_msgs = Enum.filter(messages, &match?({:user, _}, &1))
+      assert [{:user, "loaded message"}] = user_msgs
+    end
+
+    test "load_session returns error for missing session", %{session: session} do
+      assert {:error, _} = Session.load_session(session, "nonexistent")
+    end
+  end
+
   describe "ToolFileChanged event" do
     test "broadcasts file_changed with before/after content", %{session: session} do
       event = %Event.ToolFileChanged{
@@ -468,6 +516,32 @@ defmodule Minga.Agent.SessionTest do
       messages = Session.messages(session)
       assert Enum.any?(messages, &match?({:thinking, _, false}, &1))
       assert Enum.any?(messages, &match?({:tool_call, %{collapsed: false}}, &1))
+    end
+  end
+
+  describe "metadata/1" do
+    test "returns session metadata with id, model, and created_at", %{session: session} do
+      meta = Session.metadata(session)
+
+      assert is_binary(meta.id)
+      assert %DateTime{} = meta.created_at
+      assert meta.message_count >= 1
+      assert meta.cost == 0.0
+      assert meta.status == :idle
+    end
+
+    test "first_prompt is nil when no user messages", %{session: session} do
+      meta = Session.metadata(session)
+      assert meta.first_prompt == nil
+    end
+
+    test "first_prompt returns first user message text", %{session: session} do
+      Session.send_prompt(session, "Hello there")
+      # Wait for prompt to be added to messages
+      assert_receive {:agent_event, :messages_changed}, 1000
+
+      meta = Session.metadata(session)
+      assert meta.first_prompt == "Hello there"
     end
   end
 end

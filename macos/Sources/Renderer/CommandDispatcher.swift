@@ -66,6 +66,10 @@ final class CommandDispatcher {
             onTitleChanged?(title)
 
         case .setWindowBg(let r, let g, let b):
+            // Store as the grid's default bg so the Metal renderer uses it
+            // for cells that don't specify an explicit background (bg=0).
+            let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            grid.defaultBg = rgb
             let color = NSColor(
                 red: CGFloat(r) / 255.0,
                 green: CGFloat(g) / 255.0,

@@ -48,7 +48,9 @@ defmodule Minga.Config.OptionsTest do
                agent_provider: :auto,
                agent_model: nil,
                agent_tool_approval: :destructive,
-               agent_destructive_tools: ["write_file", "edit_file", "shell"]
+               agent_destructive_tools: ["write_file", "edit_file", "shell"],
+               agent_session_retention_days: 30,
+               agent_panel_split: 65
              }
     end
   end

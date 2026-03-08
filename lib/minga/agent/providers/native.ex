@@ -35,6 +35,7 @@ defmodule Minga.Agent.Providers.Native do
 
   alias Minga.Agent.Event
   alias Minga.Agent.Tools
+  alias Minga.Config.Options
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse
   alias ReqLLM.ToolCall
@@ -435,7 +436,7 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec approval_mode_from_config() :: approval_mode()
   defp approval_mode_from_config do
-    case Minga.Config.Options.get(:agent_tool_approval) do
+    case Options.get(:agent_tool_approval) do
       :none -> :none
       :all -> :ask_all
       :destructive -> :ask

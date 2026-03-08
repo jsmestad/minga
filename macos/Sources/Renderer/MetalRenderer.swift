@@ -121,7 +121,11 @@ final class MetalRenderer {
 
             let isReverse = (cell.attrs & ATTR_REVERSE) != 0
             let defaultFg = SIMD3<Float>(1, 1, 1)
-            let defaultBg = SIMD3<Float>(0.12, 0.12, 0.14)
+            // Use the theme's default bg from the grid (set via set_window_bg).
+            // Falls back to a dark grey if no default has been set yet.
+            let defaultBg = grid.defaultBg != 0
+                ? colorFromU24(grid.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
+                : SIMD3<Float>(0.12, 0.12, 0.14)
             let fg = colorFromU24(cell.fg, default: defaultFg)
             let bg = colorFromU24(cell.bg, default: defaultBg)
             gpu.fgColor = isReverse ? bg : fg

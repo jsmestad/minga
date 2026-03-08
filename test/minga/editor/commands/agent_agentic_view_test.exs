@@ -2,6 +2,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -38,7 +39,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     agentic = %ViewState{
       active: Keyword.get(opts, :active, false),
       focus: :chat,
-      file_viewer_scroll: 0,
+      preview: Preview.new(),
       saved_windows: Keyword.get(opts, :saved_windows, nil),
       pending_prefix: nil,
       saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)

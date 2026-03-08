@@ -212,6 +212,8 @@ pub const RenderCommand = union(enum) {
     edit_buffer: EditBuffer,
     // Text measurement
     measure_text: MeasureText,
+    // Default background color for cells that don't specify one.
+    set_default_bg: u24,
     // No-op (command was decoded and skipped; GUI-only opcodes, etc.)
     noop: void,
     // Highlight commands
@@ -493,9 +495,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .{ .set_title = rest[2 .. 2 + title_len] };
         },
         OP_SET_WINDOW_BG => {
-            // r:1, g:1, b:1 = 3 bytes. GUI-only; TUI ignores.
+            // r:1, g:1, b:1 = 3 bytes. Sets the default bg for cells with bg=0.
             if (rest.len < 3) return error.Malformed;
-            return .noop;
+            const rgb: u24 = @as(u24, rest[0]) << 16 | @as(u24, rest[1]) << 8 | @as(u24, rest[2]);
+            return .{ .set_default_bg = rgb };
         },
         OP_SET_LANGUAGE => {
             // name_len:2, name
@@ -864,6 +867,19 @@ test "decode batch_end command" {
     const data = [_]u8{0x13};
     const cmd = try decodeCommand(&data);
     try std.testing.expect(cmd == .batch_end);
+}
+
+test "decode set_window_bg as set_default_bg" {
+    const data = [_]u8{ OP_SET_WINDOW_BG, 0x28, 0x2C, 0x34 };
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .set_default_bg);
+    try std.testing.expectEqual(@as(u24, 0x282C34), cmd.set_default_bg);
+}
+
+test "decode set_window_bg truncated returns malformed" {
+    const data = [_]u8{ OP_SET_WINDOW_BG, 0x28, 0x2C };
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
 }
 
 test "decode set_cursor_shape block" {

@@ -16,9 +16,9 @@ defmodule Minga.Agent.View.StateTest do
       assert av.focus == :chat
     end
 
-    test "starts with file_viewer_scroll at 0" do
+    test "starts with preview scroll at 0" do
       av = ViewState.new()
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "starts with no saved windows" do
@@ -201,7 +201,7 @@ defmodule Minga.Agent.View.StateTest do
   describe "file viewer scrolling" do
     test "scroll_viewer_down increases offset" do
       av = ViewState.new() |> ViewState.scroll_viewer_down(10)
-      assert av.file_viewer_scroll == 10
+      assert av.preview.scroll_offset == 10
     end
 
     test "scroll_viewer_up decreases offset" do
@@ -210,12 +210,12 @@ defmodule Minga.Agent.View.StateTest do
         |> ViewState.scroll_viewer_down(10)
         |> ViewState.scroll_viewer_up(3)
 
-      assert av.file_viewer_scroll == 7
+      assert av.preview.scroll_offset == 7
     end
 
     test "scroll_viewer_up clamps at 0" do
       av = ViewState.new() |> ViewState.scroll_viewer_up(10)
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "scroll_viewer_to_top resets to 0" do
@@ -224,12 +224,12 @@ defmodule Minga.Agent.View.StateTest do
         |> ViewState.scroll_viewer_down(50)
         |> ViewState.scroll_viewer_to_top()
 
-      assert av.file_viewer_scroll == 0
+      assert av.preview.scroll_offset == 0
     end
 
     test "scroll_viewer_to_bottom sets a large offset" do
       av = ViewState.new() |> ViewState.scroll_viewer_to_bottom()
-      assert av.file_viewer_scroll > 0
+      assert av.preview.scroll_offset > 0
     end
   end
 
@@ -258,6 +258,160 @@ defmodule Minga.Agent.View.StateTest do
     test "dismiss_help is a no-op when already hidden" do
       av = ViewState.new() |> ViewState.dismiss_help()
       refute av.help_visible
+    end
+  end
+
+  describe "search" do
+    test "starts with no search" do
+      av = ViewState.new()
+      refute ViewState.searching?(av)
+      refute ViewState.search_input_active?(av)
+    end
+
+    test "start_search activates search with saved scroll" do
+      av = ViewState.new() |> ViewState.start_search(42)
+      assert ViewState.searching?(av)
+      assert ViewState.search_input_active?(av)
+      assert ViewState.search_saved_scroll(av) == 42
+      assert ViewState.search_query(av) == ""
+    end
+
+    test "update_search_query modifies the query" do
+      av = ViewState.new() |> ViewState.start_search(0) |> ViewState.update_search_query("hello")
+      assert ViewState.search_query(av) == "hello"
+    end
+
+    test "set_search_matches stores matches and resets current" do
+      av = ViewState.new() |> ViewState.start_search(0)
+      matches = [{0, 5, 10}, {1, 0, 5}]
+      av = ViewState.set_search_matches(av, matches)
+      assert av.search.matches == matches
+      assert av.search.current == 0
+    end
+
+    test "next_search_match cycles forward" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}, {1, 0, 5}, {2, 0, 5}])
+
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 1
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 2
+      av = ViewState.next_search_match(av)
+      assert av.search.current == 0
+    end
+
+    test "prev_search_match cycles backward" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}, {1, 0, 5}, {2, 0, 5}])
+
+      av = ViewState.prev_search_match(av)
+      assert av.search.current == 2
+      av = ViewState.prev_search_match(av)
+      assert av.search.current == 1
+    end
+
+    test "cancel_search clears the search state" do
+      av = ViewState.new() |> ViewState.start_search(10) |> ViewState.cancel_search()
+      refute ViewState.searching?(av)
+      assert av.search == nil
+    end
+
+    test "confirm_search clears search when no matches" do
+      av = ViewState.new() |> ViewState.start_search(0) |> ViewState.confirm_search()
+      refute ViewState.searching?(av)
+    end
+
+    test "confirm_search keeps matches and disables input" do
+      av =
+        ViewState.new()
+        |> ViewState.start_search(0)
+        |> ViewState.set_search_matches([{0, 0, 5}])
+        |> ViewState.confirm_search()
+
+      assert ViewState.searching?(av)
+      refute ViewState.search_input_active?(av)
+    end
+
+    test "next/prev no-op when no search" do
+      av = ViewState.new()
+      assert av == ViewState.next_search_match(av)
+      assert av == ViewState.prev_search_match(av)
+    end
+
+    test "next/prev no-op when no matches" do
+      av = ViewState.new() |> ViewState.start_search(0)
+      assert av == ViewState.next_search_match(av)
+      assert av == ViewState.prev_search_match(av)
+    end
+  end
+
+  describe "toasts" do
+    test "starts with no toast" do
+      av = ViewState.new()
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "push_toast sets current toast when empty" do
+      av = ViewState.new() |> ViewState.push_toast("Hello", :info)
+      assert ViewState.toast_visible?(av)
+      assert av.toast.message == "Hello"
+      assert av.toast.icon == "✓"
+      assert av.toast.level == :info
+    end
+
+    test "push_toast queues when a toast is already showing" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("First", :info)
+        |> ViewState.push_toast("Second", :warning)
+
+      assert av.toast.message == "First"
+      assert :queue.len(av.toast_queue) == 1
+    end
+
+    test "dismiss_toast shows next from queue" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("First", :info)
+        |> ViewState.push_toast("Second", :warning)
+        |> ViewState.dismiss_toast()
+
+      assert av.toast.message == "Second"
+      assert av.toast.icon == "⚠"
+    end
+
+    test "dismiss_toast clears when queue is empty" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("Only", :info)
+        |> ViewState.dismiss_toast()
+
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "clear_toasts removes everything" do
+      av =
+        ViewState.new()
+        |> ViewState.push_toast("A", :info)
+        |> ViewState.push_toast("B", :error)
+        |> ViewState.clear_toasts()
+
+      refute ViewState.toast_visible?(av)
+    end
+
+    test "error toast has ✗ icon" do
+      av = ViewState.new() |> ViewState.push_toast("Fail", :error)
+      assert av.toast.icon == "✗"
+    end
+
+    test "warning toast has ⚠ icon" do
+      av = ViewState.new() |> ViewState.push_toast("Warn", :warning)
+      assert av.toast.icon == "⚠"
     end
   end
 end

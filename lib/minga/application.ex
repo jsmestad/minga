@@ -28,6 +28,9 @@ defmodule Minga.Application do
 
   use Application
 
+  alias Minga.Agent.SessionStore
+  alias Minga.Config.Options
+
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
@@ -69,11 +72,35 @@ defmodule Minga.Application do
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)
 
+    # Prune old agent sessions in the background
+    if match?({:ok, _}, result) do
+      Task.start(fn -> prune_old_sessions() end)
+    end
+
     # In Burrito standalone mode, kick off the CLI
     if Burrito.Util.running_standalone?() do
       Task.start(fn -> Minga.CLI.start_from_cli() end)
     end
 
     result
+  end
+
+  @spec prune_old_sessions() :: :ok
+  defp prune_old_sessions do
+    retention_days =
+      try do
+        Options.get(:agent_session_retention_days)
+      rescue
+        _ -> 30
+      end
+
+    pruned = SessionStore.prune(retention_days)
+
+    if pruned > 0 do
+      require Logger
+      Logger.info("[Agent] pruned #{pruned} sessions older than #{retention_days} days")
+    end
+
+    :ok
   end
 end

@@ -232,7 +232,14 @@ defmodule Minga.Port.Protocol do
     <<@op_set_title, byte_size(title)::16, title::binary>>
   end
 
-  @doc "Encodes a set_window_bg command to set the window chrome background color."
+  @doc """
+  Encodes a set_window_bg command to set the default background color.
+
+  The Zig renderer uses this as the fallback background for any cell
+  that doesn't specify an explicit `bg:` value. This prevents cells
+  from falling back to the terminal's default background, which may
+  not match the editor theme.
+  """
   @spec encode_set_window_bg(non_neg_integer()) :: binary()
   def encode_set_window_bg(rgb) when is_integer(rgb) do
     r = Bitwise.band(Bitwise.bsr(rgb, 16), 0xFF)

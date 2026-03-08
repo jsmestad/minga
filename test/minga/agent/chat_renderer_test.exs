@@ -23,8 +23,119 @@ defmodule Minga.Agent.ChatRendererTest do
       auto_scroll: Keyword.get(opts, :auto_scroll, true),
       display_start_index: Keyword.get(opts, :display_start_index, 0),
       error_message: nil,
-      pending_approval: Keyword.get(opts, :pending_approval, nil)
+      pending_approval: Keyword.get(opts, :pending_approval, nil),
+      mention_completion: Keyword.get(opts, :mention_completion, nil)
     }
+  end
+
+  # ── Status animations ────────────────────────────────────────────────────
+
+  describe "thinking dot progression" do
+    test "thinking indicator cycles dots with spinner_frame" do
+      messages = [{:assistant, "Hello"}]
+      rect = {0, 0, 60, 20}
+
+      # Frame 0: no dots
+      p0 = %{panel(messages: messages, status: :thinking) | spinner_frame: 0}
+      draws0 = ChatRenderer.render_messages_only(rect, p0, default_theme())
+      texts0 = Enum.map(draws0, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts0, &String.contains?(&1, "Thinking"))
+
+      # Frame 3: one dot
+      p1 = %{panel(messages: messages, status: :thinking) | spinner_frame: 3}
+      draws1 = ChatRenderer.render_messages_only(rect, p1, default_theme())
+      texts1 = Enum.map(draws1, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts1, &String.contains?(&1, "Thinking."))
+
+      # Frame 6: two dots
+      p2 = %{panel(messages: messages, status: :thinking) | spinner_frame: 6}
+      draws2 = ChatRenderer.render_messages_only(rect, p2, default_theme())
+      texts2 = Enum.map(draws2, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts2, &String.contains?(&1, "Thinking.."))
+    end
+  end
+
+  describe "streaming cursor" do
+    test "shows block cursor on even spinner frames during thinking" do
+      messages = [{:assistant, "Hello world"}]
+      rect = {0, 0, 60, 20}
+
+      p = %{panel(messages: messages, status: :thinking) | spinner_frame: 0}
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "▌"))
+    end
+
+    test "hides cursor on odd spinner frames (blink)" do
+      messages = [{:assistant, "Hello world"}]
+      rect = {0, 0, 60, 20}
+
+      p = %{panel(messages: messages, status: :thinking) | spinner_frame: 1}
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      refute Enum.any?(texts, &String.contains?(&1, "▌"))
+    end
+
+    test "no cursor when idle" do
+      messages = [{:assistant, "Hello world"}]
+      rect = {0, 0, 60, 20}
+
+      p = panel(messages: messages, status: :idle)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      refute Enum.any?(texts, &String.contains?(&1, "▌"))
+    end
+  end
+
+  describe "tool execution animation" do
+    test "running tool shows animated spinner instead of static icon" do
+      tc = %{
+        id: "tc1",
+        name: "shell",
+        args: %{"command" => "mix test"},
+        status: :running,
+        result: "",
+        is_error: false,
+        collapsed: true,
+        started_at: System.monotonic_time(:millisecond),
+        duration_ms: nil
+      }
+
+      messages = [{:tool_call, tc}]
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages, status: :tool_executing)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      # Should have a braille spinner char, not the old static ⟳
+      has_braille =
+        Enum.any?(texts, fn t ->
+          String.match?(t, ~r/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/)
+        end)
+
+      assert has_braille, "expected animated braille spinner for running tool"
+    end
+
+    test "completed tool shows checkmark" do
+      tc = %{
+        id: "tc1",
+        name: "shell",
+        args: %{},
+        status: :complete,
+        result: "ok",
+        is_error: false,
+        collapsed: true,
+        started_at: nil,
+        duration_ms: 100
+      }
+
+      messages = [{:tool_call, tc}]
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages, status: :idle)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "✓"))
+    end
   end
 
   describe "per-turn usage footer" do

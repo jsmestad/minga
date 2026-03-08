@@ -123,4 +123,67 @@ defmodule Minga.Editor.State.AgentTest do
       refute AgentState.busy?(new_agent())
     end
   end
+
+  describe "session history" do
+    test "set_session archives previous session in history" do
+      pid1 = spawn(fn -> :ok end)
+      pid2 = spawn(fn -> :ok end)
+
+      agent =
+        new_agent()
+        |> AgentState.set_session(pid1)
+        |> AgentState.set_session(pid2)
+
+      assert agent.session == pid2
+      assert pid1 in agent.session_history
+    end
+
+    test "set_session with nil current does not add nil to history" do
+      pid = spawn(fn -> :ok end)
+      agent = new_agent() |> AgentState.set_session(pid)
+      assert agent.session_history == []
+    end
+
+    test "all_sessions returns active + history" do
+      pid1 = spawn(fn -> :ok end)
+      pid2 = spawn(fn -> :ok end)
+
+      agent =
+        new_agent()
+        |> AgentState.set_session(pid1)
+        |> AgentState.set_session(pid2)
+
+      all = AgentState.all_sessions(agent)
+      assert pid2 in all
+      assert pid1 in all
+      assert hd(all) == pid2
+    end
+
+    test "all_sessions returns empty when no session" do
+      assert AgentState.all_sessions(new_agent()) == []
+    end
+
+    test "switch_session swaps active and moves old to history" do
+      pid1 = spawn(fn -> :ok end)
+      pid2 = spawn(fn -> :ok end)
+
+      agent =
+        new_agent()
+        |> AgentState.set_session(pid1)
+        |> AgentState.set_session(pid2)
+        |> AgentState.switch_session(pid1)
+
+      assert agent.session == pid1
+      assert pid2 in agent.session_history
+      refute pid1 in agent.session_history
+    end
+
+    test "switch_session with nil current just activates from history" do
+      pid = spawn(fn -> :ok end)
+      agent = %AgentState{session: nil, session_history: [pid]}
+      agent = AgentState.switch_session(agent, pid)
+      assert agent.session == pid
+      assert agent.session_history == []
+    end
+  end
 end

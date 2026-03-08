@@ -22,10 +22,12 @@ defmodule Minga.Agent.View.Renderer do
 
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffRenderer
-  alias Minga.Agent.DiffReview
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
+  alias Minga.Agent.View.DirectoryRenderer
   alias Minga.Agent.View.Help
+  alias Minga.Agent.View.Preview
+  alias Minga.Agent.View.ShellRenderer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Modeline
@@ -55,6 +57,7 @@ defmodule Minga.Agent.View.Renderer do
     and makes the data dependency graph explicit.
     """
 
+    alias Minga.Agent.View.Preview
     alias Minga.Editor.Viewport
     alias Minga.Highlight
     alias Minga.Theme
@@ -68,14 +71,14 @@ defmodule Minga.Agent.View.Renderer do
       :agentic,
       messages: [],
       usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+      preview: Preview.new(),
       buffer_snapshot: nil,
       highlight: nil,
       mode: :normal,
       mode_state: nil,
       buf_index: 1,
       buf_count: 1,
-      pending_approval: nil,
-      diff_review: nil
+      pending_approval: nil
     ]
 
     @type t :: %__MODULE__{
@@ -86,14 +89,14 @@ defmodule Minga.Agent.View.Renderer do
             agentic: agentic_data(),
             messages: list(),
             usage: map(),
+            preview: Preview.t(),
             buffer_snapshot: map() | nil,
             highlight: Highlight.t() | nil,
             mode: atom(),
             mode_state: term(),
             buf_index: pos_integer(),
             buf_count: pos_integer(),
-            pending_approval: map() | nil,
-            diff_review: DiffReview.t() | nil
+            pending_approval: map() | nil
           }
 
     @typedoc "Agent panel fields needed for rendering."
@@ -106,15 +109,17 @@ defmodule Minga.Agent.View.Renderer do
             model_name: String.t(),
             thinking_level: String.t(),
             auto_scroll: boolean(),
-            display_start_index: non_neg_integer()
+            display_start_index: non_neg_integer(),
+            mention_completion: Minga.Agent.FileMention.completion() | nil
           }
 
     @typedoc "Agentic view fields needed for rendering."
     @type agentic_data :: %{
             chat_width_pct: non_neg_integer(),
-            file_viewer_scroll: non_neg_integer(),
             help_visible: boolean(),
-            focus: atom()
+            focus: atom(),
+            search: Minga.Agent.View.State.search_state() | nil,
+            toast: Minga.Agent.View.State.toast() | nil
           }
   end
 
@@ -168,11 +173,16 @@ defmodule Minga.Agent.View.Renderer do
         input_commands ++
         modeline_commands
 
-    if input.agentic.help_visible do
-      base ++ render_help_overlay(input, cols, rows)
-    else
-      base
-    end
+    overlays =
+      if input.agentic.help_visible do
+        render_help_overlay(input, cols, rows)
+      else
+        []
+      end
+
+    toast_cmds = render_toast_overlay(input, cols)
+
+    base ++ overlays ++ toast_cmds
   end
 
   # Legacy wrapper: extracts a RenderInput from full EditorState.
@@ -236,7 +246,7 @@ defmodule Minga.Agent.View.Renderer do
       end
 
     # Pre-fetch buffer snapshot for file viewer
-    scroll = state.agentic.file_viewer_scroll
+    scroll = state.agentic.preview.scroll_offset
     rows = state.viewport.rows
     input_h = compute_input_height(state.agent.panel.input_lines)
     content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
@@ -267,24 +277,26 @@ defmodule Minga.Agent.View.Renderer do
         model_name: panel.model_name,
         thinking_level: panel.thinking_level,
         auto_scroll: panel.auto_scroll,
-        display_start_index: panel.display_start_index
+        display_start_index: panel.display_start_index,
+        mention_completion: panel.mention_completion
       },
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
-        file_viewer_scroll: scroll,
         help_visible: state.agentic.help_visible,
-        focus: state.agentic.focus
+        focus: state.agentic.focus,
+        search: state.agentic.search,
+        toast: state.agentic.toast
       },
       messages: messages,
       usage: usage,
+      preview: state.agentic.preview,
       buffer_snapshot: buffer_snapshot,
       highlight: highlight,
       mode: state.mode,
       mode_state: state.mode_state,
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
-      pending_approval: state.agent.pending_approval,
-      diff_review: state.agent.diff_review
+      pending_approval: state.agent.pending_approval
     }
   end
 
@@ -361,7 +373,8 @@ defmodule Minga.Agent.View.Renderer do
       auto_scroll: input.panel.auto_scroll,
       display_start_index: input.panel.display_start_index,
       error_message: nil,
-      pending_approval: input.pending_approval
+      pending_approval: input.pending_approval,
+      mention_completion: input.panel.mention_completion
     }
 
     ChatRenderer.render_messages_only(rect, panel_state, input.theme)
@@ -383,12 +396,54 @@ defmodule Minga.Agent.View.Renderer do
 
   @spec render_file_viewer_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
 
-  # Diff mode: when a DiffReview is active, render the diff instead of the buffer
-  defp render_file_viewer_from_input(%{diff_review: %DiffReview{} = review} = input, rect) do
+  defp render_file_viewer_from_input(input, rect) do
+    render_preview(input, rect)
+  end
+
+  # ── Preview content dispatch ────────────────────────────────────────────────
+
+  @spec render_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
+
+  defp render_preview(%{preview: %Preview{content: {:diff, review}}} = input, rect) do
     DiffRenderer.render(rect, review, input.theme)
   end
 
-  defp render_file_viewer_from_input(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
+  defp render_preview(
+         %{preview: %Preview{content: {:shell, cmd, output, status}, scroll_offset: scroll}} =
+           input,
+         rect
+       ) do
+    spinner = input.panel.spinner_frame
+    ShellRenderer.render(rect, cmd, output, status, scroll, spinner, input.theme)
+  end
+
+  defp render_preview(
+         %{preview: %Preview{content: {:file, path, content}, scroll_offset: scroll}} = input,
+         {row_off, col_off, width, height}
+       ) do
+    render_file_preview(input, path, content, scroll, {row_off, col_off, width, height})
+  end
+
+  defp render_preview(
+         %{preview: %Preview{content: {:directory, path, entries}, scroll_offset: scroll}} =
+           input,
+         rect
+       ) do
+    DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
+  end
+
+  defp render_preview(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
+    render_empty_preview({row_off, col_off, width, height})
+  end
+
+  defp render_preview(input, {row_off, col_off, width, height}) do
+    render_buffer_preview(input, {row_off, col_off, width, height})
+  end
+
+  # ── Empty preview ───────────────────────────────────────────────────────────
+
+  @spec render_empty_preview(rect()) :: [DisplayList.draw()]
+  defp render_empty_preview({row_off, col_off, width, height}) do
     blank = String.duplicate(" ", width)
 
     for row <- 0..(height - 1) do
@@ -396,9 +451,69 @@ defmodule Minga.Agent.View.Renderer do
     end
   end
 
-  defp render_file_viewer_from_input(input, {row_off, col_off, width, height}) do
+  # ── File content preview ────────────────────────────────────────────────────
+
+  @spec render_file_preview(RenderInput.t(), String.t(), String.t(), non_neg_integer(), rect()) ::
+          [DisplayList.draw()]
+  defp render_file_preview(input, path, content, scroll, {row_off, col_off, width, height}) do
+    at = Theme.agent_theme(input.theme)
+    lines = String.split(content, "\n")
+    total = length(lines)
+
+    content_start = row_off + 1
+    content_rows = max(height - 1, 1)
+    scroll_clamped = min(scroll, max(total - content_rows, 0))
+    visible = Enum.slice(lines, scroll_clamped, content_rows)
+
+    gutter_w = file_viewer_gutter_width(total)
+    content_w = max(width - gutter_w, 1)
+
+    # Header
+    display_name = Path.basename(path)
+    header_text = String.pad_trailing(" 📄 #{display_name} (read_file)", width)
+    header = DisplayList.draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
+
+    # Content lines
+    line_cmds =
+      visible
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {line, idx} ->
+        row = content_start + idx
+        line_num = scroll_clamped + idx + 1
+        gutter_text = String.pad_leading("#{line_num}", gutter_w - 1) <> " "
+        line_text = String.slice(line, 0, content_w)
+        blank = String.duplicate(" ", width)
+
+        [
+          DisplayList.draw(row, col_off, blank, bg: at.panel_bg),
+          DisplayList.draw(row, col_off, gutter_text, fg: at.tool_border, bg: at.panel_bg),
+          DisplayList.draw(row, col_off + gutter_w, line_text, fg: at.text_fg, bg: at.panel_bg)
+        ]
+      end)
+
+    # Fill remaining rows
+    rendered = length(visible)
+
+    tilde_cmds =
+      if rendered < content_rows do
+        blank = String.duplicate(" ", width)
+
+        for r <- (content_start + rendered)..(content_start + content_rows - 1) do
+          DisplayList.draw(r, col_off, blank, bg: at.panel_bg)
+        end
+      else
+        []
+      end
+
+    [header | line_cmds] ++ tilde_cmds
+  end
+
+  # ── Buffer snapshot preview (legacy fallback) ───────────────────────────────
+
+  @spec render_buffer_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
+  defp render_buffer_preview(input, {row_off, col_off, width, height}) do
     snapshot = input.buffer_snapshot
-    scroll = input.agentic.file_viewer_scroll
+    scroll = input.preview.scroll_offset
 
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
@@ -554,6 +669,23 @@ defmodule Minga.Agent.View.Renderer do
   @spec render_modeline_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
           [DisplayList.draw()]
   defp render_modeline_from_input(input, row, cols) do
+    case input.agentic.search do
+      %{input_active: true} = search ->
+        render_search_prompt(row, cols, search, input.theme)
+
+      %{input_active: false} = search ->
+        # Show match count in modeline when search is confirmed
+        render_search_modeline(row, cols, search, input)
+
+      nil ->
+        render_agent_modeline(row, cols, input)
+    end
+  end
+
+  @spec render_agent_modeline(non_neg_integer(), pos_integer(), RenderInput.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_agent_modeline(row, cols, input) do
     Modeline.render(
       row,
       cols,
@@ -575,6 +707,46 @@ defmodule Minga.Agent.View.Renderer do
       },
       input.theme
     )
+  end
+
+  @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_search_prompt(row, cols, search, theme) do
+    at = Theme.agent_theme(theme)
+    match_count = length(search.matches)
+    current = search.current + 1
+
+    suffix =
+      if match_count > 0 do
+        " (#{current}/#{match_count})"
+      else
+        ""
+      end
+
+    prompt = "/#{search.query}#{suffix}"
+    padded = String.pad_trailing(prompt, cols)
+    [DisplayList.draw(row, 0, padded, fg: at.text_fg, bg: at.input_bg)]
+  end
+
+  @spec render_search_modeline(non_neg_integer(), pos_integer(), map(), RenderInput.t()) :: [
+          DisplayList.draw()
+        ]
+  defp render_search_modeline(row, cols, search, input) do
+    modeline_cmds = render_agent_modeline(row, cols, input)
+    match_count = length(search.matches)
+    current = search.current + 1
+    indicator = " [#{current}/#{match_count} \"#{search.query}\"]"
+    at = Theme.agent_theme(input.theme)
+    indicator_col = max(cols - String.length(indicator), 0)
+
+    overlay =
+      DisplayList.draw(row, indicator_col, indicator,
+        fg: at.status_thinking,
+        bg: input.theme.modeline.normal_bg
+      )
+
+    modeline_cmds ++ [overlay]
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -688,6 +860,31 @@ defmodule Minga.Agent.View.Renderer do
     chars = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     Enum.at(chars, rem(frame, length(chars)))
   end
+
+  # ── Toast overlay ─────────────────────────────────────────────────────────
+
+  @spec render_toast_overlay(RenderInput.t(), pos_integer()) :: [DisplayList.draw()]
+  defp render_toast_overlay(%{agentic: %{toast: nil}}, _cols), do: []
+
+  defp render_toast_overlay(%{agentic: %{toast: toast}} = input, cols) do
+    at = Theme.agent_theme(input.theme)
+    text = " #{toast.icon} #{toast.message} "
+    text_len = String.length(text)
+    col = max(cols - text_len - 1, 0)
+
+    fg = toast_fg(toast.level, at)
+    bg = toast_bg(toast.level, at)
+
+    [DisplayList.draw(0, col, text, fg: fg, bg: bg)]
+  end
+
+  @spec toast_fg(atom(), Theme.Agent.t()) :: Theme.color()
+  defp toast_fg(:error, at), do: at.status_error
+  defp toast_fg(:warning, at), do: at.status_thinking
+  defp toast_fg(:info, at), do: at.status_idle
+
+  @spec toast_bg(atom(), Theme.Agent.t()) :: Theme.color()
+  defp toast_bg(_level, at), do: at.header_bg
 
   # ── Help overlay ──────────────────────────────────────────────────────────
 

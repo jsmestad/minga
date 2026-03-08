@@ -47,7 +47,7 @@ jobs:
       - run: mix credo --strict
 
   test:
-    name: Test
+    name: Test (Elixir)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +72,18 @@ jobs:
 
       - run: mix deps.get
       - run: mix test --warnings-as-errors
-      - name: Zig tests
+
+  test-zig:
+    name: Test (Zig)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Run Zig tests
         run: cd zig && zig build test
 
   swift:
@@ -81,18 +92,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache SPM
+      - name: Cache DerivedData
         uses: actions/cache@v4
         with:
-          path: macos/.build
-          key: spm-${{ runner.os }}-${{ hashFiles('macos/Package.swift', 'macos/Sources/**/*.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          path: macos/DerivedData
+          key: xcode-${{ runner.os }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Sources/**/*.metal', 'macos/project.yml') }}
+          restore-keys: xcode-${{ runner.os }}-
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: cd macos && xcodegen generate
 
       - name: Build
-        run: cd macos && swift build
+        run: |
+          cd macos
+          xcodebuild build \
+            -scheme minga-mac \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Test
-        run: cd macos && swift test
+        run: |
+          cd macos
+          xcodebuild test \
+            -scheme minga-mac \
+            -configuration Debug \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
 
   dialyzer:
     name: Dialyzer

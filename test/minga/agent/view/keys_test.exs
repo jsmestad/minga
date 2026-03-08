@@ -1,8 +1,10 @@
 defmodule Minga.Agent.View.KeysTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Keys
+  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
@@ -37,10 +39,15 @@ defmodule Minga.Agent.View.KeysTest do
       buffer: nil
     }
 
+    preview = %Preview{
+      Preview.new()
+      | scroll_offset: Keyword.get(opts, :viewer_scroll, 0)
+    }
+
     agentic = %ViewState{
       active: Keyword.get(opts, :active, true),
       focus: Keyword.get(opts, :focus, :chat),
-      file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
+      preview: preview,
       saved_windows: nil,
       pending_prefix: Keyword.get(opts, :pending_prefix, nil),
       saved_file_tree: nil
@@ -260,52 +267,52 @@ defmodule Minga.Agent.View.KeysTest do
     test "j increments the file viewer scroll by 1" do
       state = viewer_state(10)
       {:handled, new_state} = Keys.handle_key(state, ?j, 0)
-      assert new_state.agentic.file_viewer_scroll == 11
+      assert new_state.agentic.preview.scroll_offset == 11
     end
 
     test "k decrements the file viewer scroll by 1" do
       state = viewer_state(10)
       {:handled, new_state} = Keys.handle_key(state, ?k, 0)
-      assert new_state.agentic.file_viewer_scroll == 9
+      assert new_state.agentic.preview.scroll_offset == 9
     end
 
     test "k clamps at 0" do
       state = viewer_state(0)
       {:handled, new_state} = Keys.handle_key(state, ?k, 0)
-      assert new_state.agentic.file_viewer_scroll == 0
+      assert new_state.agentic.preview.scroll_offset == 0
     end
 
     test "Ctrl-d scrolls down by half page" do
       state = viewer_state(0)
       {:handled, new_state} = Keys.handle_key(state, ?d, @ctrl)
       # viewport is 24 rows, half page = 12
-      assert new_state.agentic.file_viewer_scroll == 12
+      assert new_state.agentic.preview.scroll_offset == 12
     end
 
     test "Ctrl-u scrolls up by half page" do
       state = viewer_state(20)
       {:handled, new_state} = Keys.handle_key(state, ?u, @ctrl)
-      assert new_state.agentic.file_viewer_scroll == 8
+      assert new_state.agentic.preview.scroll_offset == 8
     end
 
     test "Ctrl-u clamps at 0" do
       state = viewer_state(5)
       {:handled, new_state} = Keys.handle_key(state, ?u, @ctrl)
-      assert new_state.agentic.file_viewer_scroll == 0
+      assert new_state.agentic.preview.scroll_offset == 0
     end
 
     test "g sets pending_prefix to :g" do
       state = viewer_state(50)
       {:handled, new_state} = Keys.handle_key(state, ?g, 0)
       assert new_state.agentic.pending_prefix == :g
-      assert new_state.agentic.file_viewer_scroll == 50
+      assert new_state.agentic.preview.scroll_offset == 50
     end
 
     test "gg scrolls to top" do
       state = viewer_state(50)
       {:handled, with_g} = Keys.handle_key(state, ?g, 0)
       {:handled, at_top} = Keys.handle_key(with_g, ?g, 0)
-      assert at_top.agentic.file_viewer_scroll == 0
+      assert at_top.agentic.preview.scroll_offset == 0
       assert at_top.agentic.pending_prefix == nil
     end
 
@@ -314,13 +321,13 @@ defmodule Minga.Agent.View.KeysTest do
       {:handled, with_g} = Keys.handle_key(state, ?g, 0)
       {:handled, result} = Keys.handle_key(with_g, ?j, 0)
       assert result.agentic.pending_prefix == nil
-      assert result.agentic.file_viewer_scroll == 51
+      assert result.agentic.preview.scroll_offset == 51
     end
 
     test "G scrolls to a large offset (approximate bottom)" do
       state = viewer_state(0)
       {:handled, new_state} = Keys.handle_key(state, ?G, 0)
-      assert new_state.agentic.file_viewer_scroll > 0
+      assert new_state.agentic.preview.scroll_offset > 0
     end
 
     test "Tab switches focus back to chat" do
@@ -346,13 +353,13 @@ defmodule Minga.Agent.View.KeysTest do
       state = viewer_state(10)
       {:handled, new_state} = Keys.handle_key(state, ?z, 0)
       assert new_state.agentic.pending_prefix == :z
-      assert new_state.agentic.file_viewer_scroll == 10
+      assert new_state.agentic.preview.scroll_offset == 10
     end
 
     test "unrecognized keys are swallowed without changing scroll" do
       state = viewer_state(10)
       {:handled, new_state} = Keys.handle_key(state, ?x, 0)
-      assert new_state.agentic.file_viewer_scroll == 10
+      assert new_state.agentic.preview.scroll_offset == 10
     end
 
     test "} grows chat panel" do
@@ -544,66 +551,68 @@ defmodule Minga.Agent.View.KeysTest do
   describe "diff review keys" do
     defp diff_state(opts \\ []) do
       state = base_state(Keyword.merge([focus: :chat], opts))
-      review = Minga.Agent.DiffReview.new("test.ex", "line1\nold\nline3\n", "line1\nnew\nline3\n")
-      put_in(state.agent.diff_review, review)
+      review = DiffReview.new("test.ex", "line1\nold\nline3\n", "line1\nnew\nline3\n")
+      put_in(state.agentic.preview, Preview.set_diff(Preview.new(), review))
+    end
+
+    defp preview_diff_review(state) do
+      Preview.diff_review(state.agentic.preview)
     end
 
     test "y accepts current hunk when diff review is active" do
       state = diff_state()
       {:handled, new_state} = Keys.handle_key(state, ?y, 0)
-      # Single hunk, accepting it resolves the review
-      assert new_state.agent.diff_review == nil
+      # Single hunk, accepting it clears the preview
+      assert preview_diff_review(new_state) == nil
     end
 
     test "x rejects current hunk when diff review is active" do
       state = diff_state()
       {:handled, new_state} = Keys.handle_key(state, ?x, 0)
-      # Single hunk, rejecting it resolves the review
-      assert new_state.agent.diff_review == nil
+      assert preview_diff_review(new_state) == nil
     end
 
     test "Y accepts all hunks" do
       state = diff_state()
       {:handled, new_state} = Keys.handle_key(state, ?Y, 0)
-      assert new_state.agent.diff_review == nil
+      assert preview_diff_review(new_state) == nil
     end
 
     test "X rejects all hunks" do
       state = diff_state()
       {:handled, new_state} = Keys.handle_key(state, ?X, 0)
-      assert new_state.agent.diff_review == nil
+      assert preview_diff_review(new_state) == nil
     end
 
     test "y without diff review falls through to copy behavior" do
       state = base_state(focus: :chat)
-      # No diff_review (nil by default), should not crash
+      # No diff in preview (empty by default), should not crash
       {:handled, _new_state} = Keys.handle_key(state, ?y, 0)
     end
 
     test "]c navigates to next hunk in diff review" do
-      # Multi-hunk review
       before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
       after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
-      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+      review = DiffReview.new("test.ex", before, after_)
 
       state = base_state(focus: :chat, pending_prefix: :bracket_next)
-      state = put_in(state.agent.diff_review, review)
+      state = put_in(state.agentic.preview, Preview.set_diff(Preview.new(), review))
 
       {:handled, new_state} = Keys.handle_key(state, ?c, 0)
-      assert new_state.agent.diff_review.current_hunk_index == 1
+      assert preview_diff_review(new_state).current_hunk_index == 1
     end
 
     test "[c navigates to prev hunk in diff review" do
       before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
       after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
-      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+      review = DiffReview.new("test.ex", before, after_)
       review = %{review | current_hunk_index: 1}
 
       state = base_state(focus: :chat, pending_prefix: :bracket_prev)
-      state = put_in(state.agent.diff_review, review)
+      state = put_in(state.agentic.preview, Preview.set_diff(Preview.new(), review))
 
       {:handled, new_state} = Keys.handle_key(state, ?c, 0)
-      assert new_state.agent.diff_review.current_hunk_index == 0
+      assert preview_diff_review(new_state).current_hunk_index == 0
     end
   end
 
