@@ -1,0 +1,40 @@
+defmodule Minga.Agent.ContextBarTest do
+  use ExUnit.Case, async: true
+
+  alias Minga.Agent.View.Renderer
+
+  describe "context_fill_pct/2" do
+    test "returns nil for unknown models" do
+      usage = %{input: 1000, output: 500}
+      assert Renderer.context_fill_pct(usage, "unknown-model") == nil
+    end
+
+    test "returns 0% when no tokens used" do
+      usage = %{input: 0, output: 0}
+      assert Renderer.context_fill_pct(usage, "claude-sonnet-4") == 0
+    end
+
+    test "calculates correct percentage for known model" do
+      # claude-sonnet-4 has 200k limit
+      usage = %{input: 50_000, output: 50_000}
+      assert Renderer.context_fill_pct(usage, "claude-sonnet-4") == 50
+    end
+
+    test "caps at 100%" do
+      usage = %{input: 200_000, output: 100_000}
+      assert Renderer.context_fill_pct(usage, "claude-sonnet-4") == 100
+    end
+
+    test "small usage shows low percentage" do
+      usage = %{input: 100, output: 50}
+      pct = Renderer.context_fill_pct(usage, "claude-sonnet-4")
+      assert pct == 0
+    end
+
+    test "high usage shows high percentage" do
+      usage = %{input: 170_000, output: 10_000}
+      pct = Renderer.context_fill_pct(usage, "claude-sonnet-4")
+      assert pct == 90
+    end
+  end
+end

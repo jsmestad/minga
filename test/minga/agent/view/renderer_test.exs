@@ -300,6 +300,46 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
+  describe "context bar" do
+    test "context bar appears in title bar when usage exists" do
+      state = base_state()
+      # Simulate some token usage by directly setting the panel state
+      # The renderer reads usage from the session, but for isolated tests
+      # we check via RenderInput
+      input = %Renderer.RenderInput{
+        viewport: Viewport.new(30, 100),
+        theme: Theme.get!(:doom_one),
+        agent_status: :idle,
+        panel: %{
+          input_focused: false,
+          input_lines: [""],
+          input_cursor: {0, 0},
+          scroll_offset: 0,
+          spinner_frame: 0,
+          model_name: "claude-sonnet-4",
+          thinking_level: "medium",
+          auto_scroll: true
+        },
+        agentic: %{chat_width_pct: 65, file_viewer_scroll: 0},
+        messages: [],
+        usage: %{input: 50_000, output: 50_000, cache_read: 0, cache_write: 0, cost: 0.05},
+        buffer_snapshot: nil,
+        highlight: nil,
+        mode: :normal,
+        mode_state: nil,
+        buf_index: 1,
+        buf_count: 1
+      }
+
+      _ = state
+      commands = Renderer.render(input)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      has_bar = Enum.any?(texts, &String.contains?(&1, "█"))
+      assert has_bar, "expected context bar with filled blocks in title bar"
+    end
+  end
+
   describe "resize re-layout" do
     test "different viewport sizes produce different chat widths" do
       state_80 = base_state(rows: 24, cols: 80)

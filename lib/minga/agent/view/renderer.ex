@@ -21,6 +21,7 @@ defmodule Minga.Agent.View.Renderer do
   """
 
   alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
@@ -277,10 +278,13 @@ defmodule Minga.Agent.View.Renderer do
     status_fg = status_fg(input.agent_status, at)
 
     usage_text = format_usage(input.usage)
+    context_text = format_context_bar(input.usage, panel.model_name)
 
     left = " #{status_icon}  󰚩 #{panel.model_name}"
     center = "Minga Agent"
-    right = if usage_text != "", do: "#{usage_text} ", else: ""
+
+    right_parts = [context_text, usage_text] |> Enum.reject(&(&1 == "")) |> Enum.join("  ")
+    right = if right_parts != "", do: "#{right_parts} ", else: ""
 
     left_len = String.length(left)
     center_len = String.length(center)
@@ -301,7 +305,7 @@ defmodule Minga.Agent.View.Renderer do
 
     bar_text = String.slice(bar_text, 0, cols) |> String.pad_trailing(cols)
 
-    [
+    cmds = [
       DisplayList.draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
       DisplayList.draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
       DisplayList.draw(row, center_start, center,
@@ -310,6 +314,12 @@ defmodule Minga.Agent.View.Renderer do
         bold: true
       )
     ]
+
+    # Overlay the context bar with colored segments
+    context_bar_cmds =
+      render_context_bar_overlay(row, cols, right_len, input.usage, panel.model_name, at)
+
+    cmds ++ context_bar_cmds
   end
 
   # ── Chat panel (messages only) ──────────────────────────────────────────────
@@ -575,6 +585,73 @@ defmodule Minga.Agent.View.Renderer do
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
   defp format_tokens(n), do: "#{n}"
+
+  # ── Context bar ─────────────────────────────────────────────────────────────
+
+  @context_bar_width 10
+
+  @doc false
+  @spec context_fill_pct(map(), String.t()) :: non_neg_integer() | nil
+  def context_fill_pct(usage, model_name) do
+    limit = ModelLimits.context_limit(model_name)
+
+    case limit do
+      nil ->
+        nil
+
+      0 ->
+        nil
+
+      n ->
+        used = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
+        min(round(used / n * 100), 100)
+    end
+  end
+
+  # Formats the context bar as plain text for title bar layout measurement.
+  @spec format_context_bar(map(), String.t()) :: String.t()
+  defp format_context_bar(usage, model_name) do
+    case context_fill_pct(usage, model_name) do
+      nil -> ""
+      pct -> context_bar_text(pct)
+    end
+  end
+
+  @spec context_bar_text(non_neg_integer()) :: String.t()
+  defp context_bar_text(pct) do
+    filled = div(pct * @context_bar_width, 100)
+    empty = @context_bar_width - filled
+    "[#{String.duplicate("█", filled)}#{String.duplicate("░", empty)}] #{pct}%"
+  end
+
+  # Renders colored overlay draw commands for the context bar.
+  # The bar is already placed as plain text in the title bar string;
+  # we overlay it with the correct color based on fill percentage.
+  @spec render_context_bar_overlay(
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          map(),
+          String.t(),
+          Theme.Agent.t()
+        ) :: [DisplayList.draw()]
+  defp render_context_bar_overlay(row, cols, right_len, usage, model_name, at) do
+    case context_fill_pct(usage, model_name) do
+      nil ->
+        []
+
+      pct ->
+        bar = context_bar_text(pct)
+        bar_col = cols - right_len
+        color = context_color(pct, at)
+        [DisplayList.draw(row, bar_col, bar, fg: color, bg: at.header_bg)]
+    end
+  end
+
+  @spec context_color(non_neg_integer(), Theme.Agent.t()) :: Theme.color()
+  defp context_color(pct, at) when pct > 80, do: at.context_high
+  defp context_color(pct, at) when pct > 50, do: at.context_mid
+  defp context_color(_pct, at), do: at.context_low
 
   @spec spinner(non_neg_integer()) :: String.t()
   defp spinner(frame) do
