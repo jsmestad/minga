@@ -10,6 +10,7 @@ defmodule Minga.Agent.ChatRenderer do
   directly with draw primitives rather than going through a buffer.
   """
 
+  alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
   alias Minga.Agent.WordWrap
@@ -33,7 +34,8 @@ defmodule Minga.Agent.ChatRenderer do
           error_message: String.t() | nil,
           auto_scroll: boolean(),
           display_start_index: non_neg_integer(),
-          pending_approval: map() | nil
+          pending_approval: map() | nil,
+          mention_completion: FileMention.completion() | nil
         }
 
   @spinner_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -303,8 +305,56 @@ defmodule Minga.Agent.ChatRenderer do
       display = String.slice(first_line <> indicator, 0, width)
 
       cmds = [DisplayList.draw(input_row, col, display, fg: at.text_fg, bg: at.input_bg) | cmds]
-      [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+      cmds = [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+
+      # Render @-mention completion popup above the input if active
+      render_mention_popup(cmds, row, col, width, panel, at)
     end
+  end
+
+  # ── @-mention completion popup ───────────────────────────────────────────────
+
+  @spec render_mention_popup(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          panel_state(),
+          Theme.Agent.t()
+        ) :: [DisplayList.draw()]
+  defp render_mention_popup(cmds, _row, _col, _width, %{mention_completion: nil}, _at), do: cmds
+
+  defp render_mention_popup(
+         cmds,
+         _row,
+         _col,
+         _width,
+         %{mention_completion: %{candidates: []}},
+         _at
+       ),
+       do: cmds
+
+  defp render_mention_popup(cmds, input_row, col, width, %{mention_completion: comp}, at) do
+    candidates = comp.candidates
+    selected = comp.selected
+    total = length(candidates)
+
+    # Render above the input border, one row per candidate (bottom-up)
+    Enum.reduce(Enum.with_index(candidates), cmds, fn {path, idx}, acc ->
+      popup_row = input_row - total + idx
+      is_selected = idx == selected
+
+      # Truncate path to fit, with file icon
+      icon = if is_selected, do: " 󰈔 ", else: "   "
+      display = String.slice(icon <> path, 0, width)
+      padding = max(width - String.length(display), 0)
+      padded = display <> String.duplicate(" ", padding)
+
+      fg = if is_selected, do: at.panel_bg, else: at.text_fg
+      bg = if is_selected, do: at.assistant_label, else: at.header_bg
+
+      [DisplayList.draw(popup_row, col, padded, fg: fg, bg: bg) | acc]
+    end)
   end
 
   # ── Message → line conversion ───────────────────────────────────────────────

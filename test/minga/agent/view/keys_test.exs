@@ -1,6 +1,7 @@
 defmodule Minga.Agent.View.KeysTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Keys
   alias Minga.Agent.View.State, as: ViewState
@@ -544,7 +545,7 @@ defmodule Minga.Agent.View.KeysTest do
   describe "diff review keys" do
     defp diff_state(opts \\ []) do
       state = base_state(Keyword.merge([focus: :chat], opts))
-      review = Minga.Agent.DiffReview.new("test.ex", "line1\nold\nline3\n", "line1\nnew\nline3\n")
+      review = DiffReview.new("test.ex", "line1\nold\nline3\n", "line1\nnew\nline3\n")
       put_in(state.agent.diff_review, review)
     end
 
@@ -584,7 +585,7 @@ defmodule Minga.Agent.View.KeysTest do
       # Multi-hunk review
       before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
       after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
-      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+      review = DiffReview.new("test.ex", before, after_)
 
       state = base_state(focus: :chat, pending_prefix: :bracket_next)
       state = put_in(state.agent.diff_review, review)
@@ -596,7 +597,7 @@ defmodule Minga.Agent.View.KeysTest do
     test "[c navigates to prev hunk in diff review" do
       before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
       after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
-      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+      review = DiffReview.new("test.ex", before, after_)
       review = %{review | current_hunk_index: 1}
 
       state = base_state(focus: :chat, pending_prefix: :bracket_prev)

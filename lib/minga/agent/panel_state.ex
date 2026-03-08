@@ -27,7 +27,8 @@ defmodule Minga.Agent.PanelState do
           thinking_level: thinking_level(),
           input_focused: boolean(),
           auto_scroll: boolean(),
-          display_start_index: non_neg_integer()
+          display_start_index: non_neg_integer(),
+          mention_completion: Minga.Agent.FileMention.completion() | nil
         }
 
   @enforce_keys []
@@ -43,7 +44,8 @@ defmodule Minga.Agent.PanelState do
             thinking_level: "medium",
             input_focused: false,
             auto_scroll: true,
-            display_start_index: 0
+            display_start_index: 0,
+            mention_completion: nil
 
   @doc "Creates a new panel state."
   @spec new() :: t()

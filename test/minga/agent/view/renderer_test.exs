@@ -237,7 +237,8 @@ defmodule Minga.Agent.View.RendererTest do
           model_name: "claude-sonnet-4",
           thinking_level: "medium",
           auto_scroll: true,
-          display_start_index: 0
+          display_start_index: 0,
+          mention_completion: nil
         },
         agentic: %{
           chat_width_pct: 65,
@@ -274,7 +275,8 @@ defmodule Minga.Agent.View.RendererTest do
           model_name: "claude-sonnet-4",
           thinking_level: "medium",
           auto_scroll: true,
-          display_start_index: 0
+          display_start_index: 0,
+          mention_completion: nil
         },
         agentic: %{
           chat_width_pct: 65,
@@ -325,7 +327,8 @@ defmodule Minga.Agent.View.RendererTest do
           model_name: "claude-sonnet-4",
           thinking_level: "medium",
           auto_scroll: true,
-          display_start_index: 0
+          display_start_index: 0,
+          mention_completion: nil
         },
         agentic: %{chat_width_pct: 65, file_viewer_scroll: 0, help_visible: false},
         messages: [],

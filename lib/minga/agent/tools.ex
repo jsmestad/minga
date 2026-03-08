@@ -23,6 +23,7 @@ defmodule Minga.Agent.Tools do
   alias Minga.Agent.Tools.ReadFile
   alias Minga.Agent.Tools.Shell
   alias Minga.Agent.Tools.WriteFile
+  alias Minga.Config.Options
   alias ReqLLM.Tool
 
   @typedoc "Options passed to `all/1`."
@@ -47,7 +48,7 @@ defmodule Minga.Agent.Tools do
 
   @spec configured_destructive_tools() :: [String.t()]
   defp configured_destructive_tools do
-    Minga.Config.Options.get(:agent_destructive_tools)
+    Options.get(:agent_destructive_tools)
   rescue
     # Options agent not started (e.g., in tests that don't start the app)
     _ -> @default_destructive_tools

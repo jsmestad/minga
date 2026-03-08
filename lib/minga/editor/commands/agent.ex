@@ -8,6 +8,7 @@ defmodule Minga.Editor.Commands.Agent do
   """
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
+  alias Minga.Agent.FileMention
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SlashCommand
@@ -116,16 +117,39 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec send_prompt_to_llm(state(), String.t()) :: state()
   defp send_prompt_to_llm(state, text) do
-    case Session.send_prompt(state.agent.session, text) do
-      :ok ->
-        update_agent(state, &AgentState.clear_input_and_scroll/1)
+    # Resolve @file mentions before sending to the LLM
+    case resolve_mentions(text) do
+      {:ok, resolved_text} ->
+        case Session.send_prompt(state.agent.session, resolved_text) do
+          :ok ->
+            update_agent(state, &AgentState.clear_input_and_scroll/1)
 
-      {:error, :provider_not_ready} ->
-        %{state | status_msg: "Agent provider still starting, try again in a moment"}
+          {:error, :provider_not_ready} ->
+            %{state | status_msg: "Agent provider still starting, try again in a moment"}
 
-      {:error, reason} ->
-        %{state | status_msg: "Agent error: #{inspect(reason)}"}
+          {:error, reason} ->
+            %{state | status_msg: "Agent error: #{inspect(reason)}"}
+        end
+
+      {:error, msg} ->
+        %{state | status_msg: msg}
     end
+  end
+
+  @spec resolve_mentions(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  defp resolve_mentions(text) do
+    root = project_root()
+    FileMention.resolve_prompt(text, root)
+  end
+
+  @spec project_root() :: String.t()
+  defp project_root do
+    case Minga.Project.root() do
+      nil -> File.cwd!()
+      root -> root
+    end
+  catch
+    :exit, _ -> File.cwd!()
   end
 
   @doc "Clears the chat display without affecting conversation history."

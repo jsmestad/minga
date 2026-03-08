@@ -28,6 +28,9 @@ defmodule Minga.Application do
 
   use Application
 
+  alias Minga.Agent.SessionStore
+  alias Minga.Config.Options
+
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
@@ -86,12 +89,12 @@ defmodule Minga.Application do
   defp prune_old_sessions do
     retention_days =
       try do
-        Minga.Config.Options.get(:agent_session_retention_days)
+        Options.get(:agent_session_retention_days)
       rescue
         _ -> 30
       end
 
-    pruned = Minga.Agent.SessionStore.prune(retention_days)
+    pruned = SessionStore.prune(retention_days)
 
     if pruned > 0 do
       require Logger

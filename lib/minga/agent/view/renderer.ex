@@ -106,7 +106,8 @@ defmodule Minga.Agent.View.Renderer do
             model_name: String.t(),
             thinking_level: String.t(),
             auto_scroll: boolean(),
-            display_start_index: non_neg_integer()
+            display_start_index: non_neg_integer(),
+            mention_completion: Minga.Agent.FileMention.completion() | nil
           }
 
     @typedoc "Agentic view fields needed for rendering."
@@ -267,7 +268,8 @@ defmodule Minga.Agent.View.Renderer do
         model_name: panel.model_name,
         thinking_level: panel.thinking_level,
         auto_scroll: panel.auto_scroll,
-        display_start_index: panel.display_start_index
+        display_start_index: panel.display_start_index,
+        mention_completion: panel.mention_completion
       },
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
@@ -361,7 +363,8 @@ defmodule Minga.Agent.View.Renderer do
       auto_scroll: input.panel.auto_scroll,
       display_start_index: input.panel.display_start_index,
       error_message: nil,
-      pending_approval: input.pending_approval
+      pending_approval: input.pending_approval,
+      mention_completion: input.panel.mention_completion
     }
 
     ChatRenderer.render_messages_only(rect, panel_state, input.theme)

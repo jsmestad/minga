@@ -3,6 +3,7 @@ defmodule Minga.Agent.SessionTest do
 
   alias Minga.Agent.Event
   alias Minga.Agent.Session
+  alias Minga.Agent.SessionStore
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
@@ -349,7 +350,7 @@ defmodule Minga.Agent.SessionTest do
       _id = Session.session_id(session)
 
       # Create a fake saved session
-      Minga.Agent.SessionStore.save(%{
+      SessionStore.save(%{
         id: "loaded-session",
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
         model_name: "test-model",

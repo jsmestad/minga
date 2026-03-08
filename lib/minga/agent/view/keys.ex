@@ -27,6 +27,7 @@ defmodule Minga.Agent.View.Keys do
 
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffReview
+  alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
   alias Minga.Agent.PanelState
@@ -180,6 +181,64 @@ defmodule Minga.Agent.View.Keys do
   @spec handle_chat_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
 
+  # ── Mention completion mode ──────────────────────────────────────────────
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         @tab,
+         mods
+       )
+       when band(mods, @shift) != 0 do
+    update_panel(state, fn p ->
+      %{p | mention_completion: FileMention.select_prev(p.mention_completion)}
+    end)
+  end
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         @tab,
+         _mods
+       ) do
+    update_panel(state, fn p ->
+      %{p | mention_completion: FileMention.select_next(p.mention_completion)}
+    end)
+  end
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         @enter,
+         _mods
+       ) do
+    accept_mention_completion(state)
+  end
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         @escape,
+         _mods
+       ) do
+    cancel_mention_completion(state)
+  end
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         @backspace,
+         _mods
+       ) do
+    handle_mention_backspace(state)
+  end
+
+  defp handle_chat_input(
+         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
+         cp,
+         mods
+       )
+       when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+    handle_mention_char(state, <<cp::utf8>>)
+  end
+
+  # ── Regular input ────────────────────────────────────────────────────────
+
   defp handle_chat_input(state, @escape, _mods) do
     update_agent(state, &AgentState.focus_input(&1, false))
   end
@@ -235,6 +294,17 @@ defmodule Minga.Agent.View.Keys do
     case AgentState.move_cursor_down(state.agent) do
       :at_bottom -> update_agent(state, &AgentState.history_next/1)
       agent -> %{state | agent: agent}
+    end
+  end
+
+  # @ at start of line or after whitespace: trigger mention completion
+  defp handle_chat_input(state, ?@, mods)
+       when band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+    if should_trigger_mention?(state) do
+      state = AgentCommands.input_char(state, "@")
+      start_mention_completion(state)
+    else
+      AgentCommands.input_char(state, "@")
     end
   end
 
@@ -835,6 +905,119 @@ defmodule Minga.Agent.View.Keys do
           EditorState.t()
   defp update_agentic(state, fun) do
     %{state | agentic: fun.(state.agentic)}
+  end
+
+  @spec update_panel(EditorState.t(), (PanelState.t() -> PanelState.t())) :: EditorState.t()
+  defp update_panel(state, fun) do
+    update_agent(state, fn agent -> %{agent | panel: fun.(agent.panel)} end)
+  end
+
+  # ── Mention completion helpers ──────────────────────────────────────────
+
+  @spec should_trigger_mention?(EditorState.t()) :: boolean()
+  defp should_trigger_mention?(state) do
+    panel = state.agent.panel
+    {line, col} = panel.input_cursor
+    current_line = Enum.at(panel.input_lines, line, "")
+    col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
+  end
+
+  @spec start_mention_completion(EditorState.t()) :: EditorState.t()
+  defp start_mention_completion(state) do
+    files = list_project_files()
+    {line, col} = state.agent.panel.input_cursor
+    completion = FileMention.new_completion(files, line, col - 1)
+    update_panel(state, fn p -> %{p | mention_completion: completion} end)
+  end
+
+  @spec accept_mention_completion(EditorState.t()) :: EditorState.t()
+  defp accept_mention_completion(state) do
+    comp = state.agent.panel.mention_completion
+
+    case FileMention.selected_path(comp) do
+      nil ->
+        update_panel(state, fn p -> %{p | mention_completion: nil} end)
+
+      path ->
+        panel = state.agent.panel
+        {line, _col} = panel.input_cursor
+        current = Enum.at(panel.input_lines, line)
+        anchor_col = comp.anchor_col
+
+        before = String.slice(current, 0, anchor_col)
+
+        after_prefix =
+          String.slice(
+            current,
+            anchor_col + 1 + String.length(comp.prefix),
+            String.length(current)
+          )
+
+        new_line = before <> "@" <> path <> " " <> after_prefix
+        new_col = anchor_col + 1 + String.length(path) + 1
+
+        new_lines = List.replace_at(panel.input_lines, line, new_line)
+
+        update_panel(state, fn p ->
+          %{p | input_lines: new_lines, input_cursor: {line, new_col}, mention_completion: nil}
+        end)
+    end
+  end
+
+  @spec cancel_mention_completion(EditorState.t()) :: EditorState.t()
+  defp cancel_mention_completion(state) do
+    update_panel(state, fn p -> %{p | mention_completion: nil} end)
+  end
+
+  @spec handle_mention_char(EditorState.t(), String.t()) :: EditorState.t()
+  defp handle_mention_char(state, " ") do
+    state = update_panel(state, fn p -> %{p | mention_completion: nil} end)
+    AgentCommands.input_char(state, " ")
+  end
+
+  defp handle_mention_char(state, char) do
+    state = AgentCommands.input_char(state, char)
+    comp = state.agent.panel.mention_completion
+    new_prefix = comp.prefix <> char
+
+    update_panel(state, fn p ->
+      %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
+    end)
+  end
+
+  @spec handle_mention_backspace(EditorState.t()) :: EditorState.t()
+  defp handle_mention_backspace(state) do
+    comp = state.agent.panel.mention_completion
+
+    if comp.prefix == "" do
+      state = AgentCommands.input_backspace(state)
+      update_panel(state, fn p -> %{p | mention_completion: nil} end)
+    else
+      state = AgentCommands.input_backspace(state)
+      new_prefix = String.slice(comp.prefix, 0..-2//1)
+
+      update_panel(state, fn p ->
+        %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
+      end)
+    end
+  end
+
+  @spec list_project_files() :: [String.t()]
+  defp list_project_files do
+    root =
+      try do
+        case Minga.Project.root() do
+          nil -> File.cwd!()
+          r -> r
+        end
+      catch
+        :exit, _ -> File.cwd!()
+      end
+
+    case Minga.FileFind.list_files(root) do
+      {:ok, paths} -> paths
+      {:error, _} -> []
+    end
   end
 
   # ── Diff review helpers ─────────────────────────────────────────────────────

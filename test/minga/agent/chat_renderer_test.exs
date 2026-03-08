@@ -23,7 +23,8 @@ defmodule Minga.Agent.ChatRendererTest do
       auto_scroll: Keyword.get(opts, :auto_scroll, true),
       display_start_index: Keyword.get(opts, :display_start_index, 0),
       error_message: nil,
-      pending_approval: Keyword.get(opts, :pending_approval, nil)
+      pending_approval: Keyword.get(opts, :pending_approval, nil),
+      mention_completion: Keyword.get(opts, :mention_completion, nil)
     }
   end
 
