@@ -52,6 +52,42 @@ defmodule Minga.Agent.ChatRendererTest do
     end
   end
 
+  describe "line_message_map/4" do
+    test "maps lines to message indices" do
+      messages = [{:user, "Hello"}, {:assistant, "World"}]
+      line_map = ChatRenderer.line_message_map(messages, 60, default_theme())
+
+      # Each message produces at least a header + content + spacer
+      assert line_map != []
+
+      # First entries should point to message index 0
+      {first_idx, _type} = hd(line_map)
+      assert first_idx == 0
+
+      # Last entries should point to message index 1
+      {last_idx, _type} = List.last(line_map)
+      assert last_idx == 1
+    end
+
+    test "respects display_start_index" do
+      messages = [{:user, "First"}, {:assistant, "Second"}]
+
+      # Skip the first message
+      line_map = ChatRenderer.line_message_map(messages, 60, default_theme(), 1)
+
+      # All entries should point to message index 1
+      assert Enum.all?(line_map, fn {idx, _} -> idx == 1 end)
+    end
+
+    test "marks code block lines as :code type" do
+      messages = [{:assistant, "text\n```elixir\ncode here\n```\nmore text"}]
+      line_map = ChatRenderer.line_message_map(messages, 60, default_theme())
+
+      types = Enum.map(line_map, fn {_, type} -> type end)
+      assert :code in types
+    end
+  end
+
   describe "auto-scroll indicator" do
     test "shows ↓ new indicator when auto-scroll disengaged and streaming with content below" do
       # Generate enough content to overflow a small viewport

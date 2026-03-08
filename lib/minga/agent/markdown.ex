@@ -48,6 +48,50 @@ defmodule Minga.Agent.Markdown do
   @typedoc "A parsed line with its segments and type."
   @type parsed_line :: {[segment()], line_type()}
 
+  @typedoc "Extracted code block with language and content."
+  @type code_block :: %{language: String.t(), content: String.t()}
+
+  @doc """
+  Extracts fenced code blocks from markdown text.
+
+  Returns a list of `%{language: String.t(), content: String.t()}` maps,
+  one per fenced code block. The content excludes the fence markers.
+  """
+  @spec extract_code_blocks(String.t()) :: [code_block()]
+  def extract_code_blocks(text) when is_binary(text) do
+    text
+    |> String.split("\n")
+    |> extract_blocks([], nil, [])
+    |> Enum.reverse()
+  end
+
+  @spec extract_blocks([String.t()], [String.t()], String.t() | nil, [code_block()]) :: [
+          code_block()
+        ]
+  defp extract_blocks([], _current_lines, _lang, acc), do: acc
+
+  defp extract_blocks(["```" <> _ | rest], current_lines, lang, acc) when is_binary(lang) do
+    # Closing fence
+    content = current_lines |> Enum.reverse() |> Enum.join("\n")
+    block = %{language: lang, content: content}
+    extract_blocks(rest, [], nil, [block | acc])
+  end
+
+  defp extract_blocks(["```" <> lang | rest], _current_lines, nil, acc) do
+    # Opening fence
+    extract_blocks(rest, [], String.trim(lang), acc)
+  end
+
+  defp extract_blocks([line | rest], current_lines, lang, acc) when is_binary(lang) do
+    # Inside code block
+    extract_blocks(rest, [line | current_lines], lang, acc)
+  end
+
+  defp extract_blocks([_line | rest], current_lines, nil, acc) do
+    # Outside code block
+    extract_blocks(rest, current_lines, nil, acc)
+  end
+
   @doc """
   Parses markdown text into styled line segments.
 

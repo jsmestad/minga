@@ -166,4 +166,65 @@ defmodule Minga.Agent.MarkdownTest do
       assert [{"Hello 🌍 world", :plain}] = result
     end
   end
+
+  describe "extract_code_blocks/1" do
+    test "extracts a single code block" do
+      md = """
+      Some text before.
+
+      ```elixir
+      def hello, do: :world
+      ```
+
+      Some text after.
+      """
+
+      blocks = Markdown.extract_code_blocks(md)
+      assert [%{language: "elixir", content: "def hello, do: :world"}] = blocks
+    end
+
+    test "extracts multiple code blocks" do
+      md = """
+      First block:
+
+      ```python
+      print("hello")
+      ```
+
+      Second block:
+
+      ```bash
+      echo hi
+      ```
+      """
+
+      blocks = Markdown.extract_code_blocks(md)
+      assert length(blocks) == 2
+      assert Enum.at(blocks, 0).language == "python"
+      assert Enum.at(blocks, 0).content == "print(\"hello\")"
+      assert Enum.at(blocks, 1).language == "bash"
+      assert Enum.at(blocks, 1).content == "echo hi"
+    end
+
+    test "handles code block without language" do
+      md = "```\nsome code\n```"
+      blocks = Markdown.extract_code_blocks(md)
+      assert [%{language: "", content: "some code"}] = blocks
+    end
+
+    test "returns empty list when no code blocks" do
+      assert Markdown.extract_code_blocks("just text") == []
+    end
+
+    test "handles multi-line code blocks" do
+      md = "```ruby\nline1\nline2\nline3\n```"
+      blocks = Markdown.extract_code_blocks(md)
+      assert [%{content: "line1\nline2\nline3"}] = blocks
+    end
+
+    test "handles unclosed code block" do
+      md = "```\nunclosed content"
+      assert Markdown.extract_code_blocks(md) == []
+    end
+  end
 end

@@ -49,6 +49,14 @@ defmodule Minga.Agent.Message do
     {:system, text, level}
   end
 
+  @doc "Extracts the plain text content of a message for clipboard copy."
+  @spec text(t()) :: String.t()
+  def text({:user, t}), do: t
+  def text({:assistant, t}), do: t
+  def text({:thinking, t, _collapsed}), do: t
+  def text({:tool_call, tc}), do: "#{tc.name}: #{tc.result}"
+  def text({:system, t, _level}), do: t
+
   @doc "Creates a new tool call message."
   @spec tool_call(String.t(), String.t(), map()) :: t()
   def tool_call(id, name, args \\ %{}) do

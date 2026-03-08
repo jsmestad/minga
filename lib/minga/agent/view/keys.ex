@@ -25,8 +25,12 @@ defmodule Minga.Agent.View.Keys do
 
   import Bitwise
 
+  alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.Markdown
+  alias Minga.Agent.Message
   alias Minga.Agent.Session
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Clipboard
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -242,12 +246,14 @@ defmodule Minga.Agent.View.Keys do
   end
 
   # y: copy code block at cursor to clipboard (yank = copy semantic parallel)
-  # Stubbed until #177 provides line-to-message mapping
-  defp handle_chat_nav(state, ?y, _mods), do: state
+  defp handle_chat_nav(state, ?y, _mods) do
+    copy_code_block_at_cursor(state)
+  end
 
   # Y: copy full message at cursor to clipboard
-  # Stubbed until #177 provides line-to-message mapping
-  defp handle_chat_nav(state, ?Y, _mods), do: state
+  defp handle_chat_nav(state, ?Y, _mods) do
+    copy_message_at_cursor(state)
+  end
 
   # s: session switcher (magit precedent; stubbed until #175)
   defp handle_chat_nav(state, ?s, _mods), do: state
@@ -506,6 +512,141 @@ defmodule Minga.Agent.View.Keys do
   @spec viewer_half_page(EditorState.t()) :: pos_integer()
   defp viewer_half_page(state) do
     max(div(state.viewport.rows, 2), 1)
+  end
+
+  @spec copy_code_block_at_cursor(EditorState.t()) :: EditorState.t()
+  defp copy_code_block_at_cursor(state) do
+    case scroll_context(state) do
+      nil ->
+        state
+
+      {_idx, msg, line_type} ->
+        text = Message.text(msg)
+
+        if line_type == :code do
+          # On a code line: find which code block and copy it
+          blocks = Markdown.extract_code_blocks(text)
+          content = code_block_for_scroll(state, blocks)
+          copy_to_clipboard(state, content, "code block")
+        else
+          # Not on a code line: copy the full message
+          copy_to_clipboard(state, text, "message")
+        end
+    end
+  end
+
+  @spec copy_message_at_cursor(EditorState.t()) :: EditorState.t()
+  defp copy_message_at_cursor(state) do
+    case scroll_context(state) do
+      nil -> state
+      {_idx, msg, _type} -> copy_to_clipboard(state, Message.text(msg), "message")
+    end
+  end
+
+  @spec copy_to_clipboard(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp copy_to_clipboard(state, text, label) do
+    case Clipboard.write(text) do
+      :ok ->
+        if state.agent.session do
+          Session.add_system_message(state.agent.session, "Copied #{label} to clipboard")
+        end
+
+      _error ->
+        if state.agent.session do
+          Session.add_system_message(state.agent.session, "Clipboard write failed", :error)
+        end
+    end
+
+    state
+  end
+
+  @spec scroll_context(EditorState.t()) ::
+          {non_neg_integer(), Message.t(), ChatRenderer.line_type()} | nil
+  defp scroll_context(state) do
+    session = state.agent.session
+    panel = state.agent.panel
+
+    if session do
+      messages = Session.messages(session)
+      theme = state.theme
+      width = state.viewport.cols
+
+      line_map =
+        ChatRenderer.line_message_map(messages, width, theme, panel.display_start_index)
+
+      offset = panel.scroll_offset
+      total_lines = length(line_map)
+      # The scroll offset counts from the bottom, so the visible top line index is:
+      target = max(total_lines - offset - 1, 0)
+
+      case Enum.at(line_map, target) do
+        {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
+        nil -> nil
+      end
+    else
+      nil
+    end
+  end
+
+  @spec code_block_for_scroll(EditorState.t(), [Markdown.code_block()]) :: String.t()
+  defp code_block_for_scroll(_state, []), do: ""
+
+  defp code_block_for_scroll(state, blocks) do
+    # Count how many code lines precede the scroll position in this message
+    # to figure out which code block the cursor is in
+    session = state.agent.session
+    panel = state.agent.panel
+    messages = Session.messages(session)
+
+    line_map =
+      ChatRenderer.line_message_map(
+        messages,
+        state.viewport.cols,
+        state.theme,
+        panel.display_start_index
+      )
+
+    offset = panel.scroll_offset
+    total_lines = length(line_map)
+    target = max(total_lines - offset - 1, 0)
+
+    {msg_idx, _type} =
+      case Enum.at(line_map, target) do
+        nil -> {0, :text}
+        entry -> entry
+      end
+
+    # Find the first line of this message in the line_map
+    msg_start =
+      Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) || 0
+
+    # Count code lines from the message start to the target line,
+    # tracking code block boundaries (non-code lines separate blocks)
+    lines_for_msg =
+      line_map
+      |> Enum.drop(msg_start)
+      |> Enum.take_while(fn {idx, _} -> idx == msg_idx end)
+
+    relative = target - msg_start
+    code_block_index = count_code_block_at(lines_for_msg, relative)
+
+    Enum.at(blocks, code_block_index, hd(blocks)).content
+  end
+
+  @spec count_code_block_at([{non_neg_integer(), ChatRenderer.line_type()}], non_neg_integer()) ::
+          non_neg_integer()
+  defp count_code_block_at(lines, target_offset) do
+    lines
+    |> Enum.take(target_offset + 1)
+    |> Enum.reduce({0, false}, fn {_idx, type}, {block_count, in_code} ->
+      case {type, in_code} do
+        {:code, false} -> {block_count, true}
+        {:code, true} -> {block_count, true}
+        {_, true} -> {block_count + 1, false}
+        {_, false} -> {block_count, false}
+      end
+    end)
+    |> elem(0)
   end
 
   @spec clear_chat_display(EditorState.t()) :: EditorState.t()

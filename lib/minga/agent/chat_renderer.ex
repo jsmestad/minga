@@ -71,6 +71,36 @@ defmodule Minga.Agent.ChatRenderer do
     render_content([], row_off, col_off, width, height, panel, at)
   end
 
+  @typedoc "Line type for line-to-message mapping."
+  @type line_type :: :text | :code | :tool | :thinking | :system | :empty
+
+  @doc """
+  Builds a line-to-message index map for the visible messages.
+
+  Returns a list of `{message_index, line_type}` tuples, one per rendered
+  line. The `display_start_index` from the panel state is applied first,
+  so message indices are relative to the full (unfiltered) message list.
+  """
+  @spec line_message_map([Message.t()], pos_integer(), Theme.t(), non_neg_integer()) :: [
+          {non_neg_integer(), line_type()}
+        ]
+  def line_message_map(messages, width, theme, display_start_index \\ 0) do
+    at = Theme.agent_theme(theme)
+    visible = Enum.drop(messages, display_start_index)
+
+    visible
+    |> Enum.with_index(display_start_index)
+    |> Enum.flat_map(fn {msg, msg_idx} ->
+      lines = message_lines(msg, at, width)
+      Enum.map(lines, fn {_segments, type, _bg} -> {msg_idx, classify_line_type(type)} end)
+    end)
+  end
+
+  @spec classify_line_type(atom()) :: line_type()
+  defp classify_line_type(:code), do: :code
+  defp classify_line_type(:empty), do: :empty
+  defp classify_line_type(_), do: :text
+
   # ── Separator line ──────────────────────────────────────────────────────────
 
   @spec render_separator(

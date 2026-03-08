@@ -59,6 +59,38 @@ defmodule Minga.Agent.MessageTest do
     end
   end
 
+  describe "text/1" do
+    test "extracts text from user message" do
+      assert Message.text({:user, "hello"}) == "hello"
+    end
+
+    test "extracts text from assistant message" do
+      assert Message.text({:assistant, "response"}) == "response"
+    end
+
+    test "extracts text from thinking message" do
+      assert Message.text({:thinking, "reasoning", false}) == "reasoning"
+    end
+
+    test "extracts text from tool call" do
+      tc = %{
+        name: "bash",
+        result: "output",
+        id: "1",
+        args: %{},
+        status: :complete,
+        is_error: false,
+        collapsed: true
+      }
+
+      assert Message.text({:tool_call, tc}) == "bash: output"
+    end
+
+    test "extracts text from system message" do
+      assert Message.text({:system, "info", :info}) == "info"
+    end
+  end
+
   describe "system/2" do
     test "creates an info system message by default" do
       msg = Message.system("Session started")
