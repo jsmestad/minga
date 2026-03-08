@@ -31,6 +31,9 @@ pub fn Renderer(comptime SurfaceT: type) type {
         active_region: ?protocol.Region = null,
         /// All defined regions, keyed by region ID.
         regions: std.AutoHashMap(u16, protocol.Region),
+        /// Default background color for cells that don't specify one (bg=0).
+        /// Set via set_default_bg / set_window_bg. 0 = use terminal default.
+        default_bg: u24 = 0,
 
         /// Initialize a renderer bound to a surface.
         /// `alloc` backs the internal arena used for grapheme byte copies.
@@ -89,11 +92,16 @@ pub fn Renderer(comptime SurfaceT: type) type {
                         // Compute display width.
                         const w: u16 = vaxis.gwidth.gwidth(stable, .wcwidth);
 
+                        // Use the default bg when the command doesn't
+                        // specify one (bg=0), so the theme background
+                        // shows through instead of the terminal default.
+                        const effective_bg = if (dt.bg == 0) self.default_bg else dt.bg;
+
                         self.surface.writeCell(col, abs_row, .{
                             .grapheme = stable,
                             .width = @intCast(if (w == 0) 1 else w),
                             .fg = dt.fg,
-                            .bg = dt.bg,
+                            .bg = effective_bg,
                             .attrs = dt.attrs,
                         });
 
@@ -148,6 +156,10 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     } else {
                         self.active_region = self.regions.get(id);
                     }
+                },
+
+                .set_default_bg => |bg| {
+                    self.default_bg = bg;
                 },
 
                 // edit_buffer, measure_text and highlight commands are handled by the event loop, not the renderer.
@@ -339,6 +351,61 @@ test "handleCommand draw_text passes attrs through to cell" {
     } });
     const cell = mock.last_cell.?;
     try std.testing.expectEqual(attrs, cell.attrs);
+}
+
+test "set_default_bg stores default background" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try std.testing.expectEqual(@as(u24, 0), rend.default_bg);
+    try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
+    try std.testing.expectEqual(@as(u24, 0x282C34), rend.default_bg);
+}
+
+test "draw_text with bg=0 uses default_bg when set" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    // Set default bg to the theme color
+    try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
+
+    // Draw text without an explicit bg (bg=0)
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0xFFFFFF,
+        .bg = 0,
+        .attrs = 0,
+        .text = "A",
+    } });
+
+    const cell = mock.last_cell.?;
+    // Cell should use the default bg, not 0
+    try std.testing.expectEqual(@as(u24, 0x282C34), cell.bg);
+}
+
+test "draw_text with explicit bg ignores default_bg" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
+
+    // Draw text with an explicit bg
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0xFFFFFF,
+        .bg = 0x123456,
+        .attrs = 0,
+        .text = "B",
+    } });
+
+    const cell = mock.last_cell.?;
+    // Cell should use the explicit bg, not default
+    try std.testing.expectEqual(@as(u24, 0x123456), cell.bg);
 }
 
 test "clear then draw_text then batch_end full sequence" {

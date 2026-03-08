@@ -212,12 +212,7 @@ defmodule Minga.Agent.ChatRenderer do
 
         {seg_cmds_rev, _} =
           Enum.reduce(segments, {[], col}, fn {text, style_opts}, {seg_acc, c} ->
-            # Inject the line bg into each segment so text cells carry the
-            # correct background instead of falling back to the terminal default.
-            opts_with_bg =
-              if Keyword.has_key?(style_opts, :bg), do: style_opts, else: Keyword.put(style_opts, :bg, bg)
-
-            render_segment(seg_acc, row, c, text, opts_with_bg, right_edge)
+            render_segment(seg_acc, row, c, text, style_opts, right_edge)
           end)
 
         # Forward order: bg first, then segments
