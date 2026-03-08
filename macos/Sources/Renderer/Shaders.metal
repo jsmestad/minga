@@ -108,7 +108,9 @@ vertex VertexOut glyph_vertex(
     float2 pos = quadPositions[vertex_id];
 
     float2 cell_origin = cell.grid_pos * uniforms.cell_size;
-    float2 glyph_origin = cell_origin + cell.glyph_offset;
+    // Snap glyph origin to pixel boundaries to avoid sub-pixel blur
+    // from bilinear interpolation on fractional offsets.
+    float2 glyph_origin = round(cell_origin + cell.glyph_offset);
     float2 pixel_pos = glyph_origin + pos * cell.glyph_size;
 
     VertexOut out;

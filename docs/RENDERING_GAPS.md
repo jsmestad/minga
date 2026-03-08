@@ -97,7 +97,7 @@ Each stage has clear inputs, clear outputs, and can be cached or skipped indepen
 
 ## Gap 4: No Intermediate Representation (Display List)
 
-**Impact: Medium. Blocks damage tracking and BEAM-side diffing.**
+**Impact: High. Blocks damage tracking, BEAM-side diffing, and multi-frontend rendering.**
 
 The others all have an intermediate representation between "editor state" and "terminal bytes."
 
@@ -112,7 +112,48 @@ The others all have an intermediate representation between "editor state" and "t
 - You can't ask "what's at row 5, col 10?" without re-rendering.
 - You can't do partial updates because you don't know what the previous state was.
 
-**The fix:** A per-window cell grid on the BEAM side. Render into the grid, diff against the previous grid, emit only changed cells as `draw_text` commands. This is essentially what libvaxis does on the Zig side, but having it on the BEAM side too means far less data crosses the Port boundary.
+**The fix: A display list of styled text runs, not a cell grid.**
+
+A cell grid (row × col → character + style) is terminal-shaped. It works for a TUI, but Minga is planning macOS and Linux GUI frontends where rendering uses proportional font engines, subpixel positioning, and variable line heights. A cell grid forces GUI frontends to fake a terminal, which is the wrong abstraction.
+
+Instead, the BEAM-side IR should be **styled text runs organized by line, within positioned rectangular regions (windows)**. This is the same approach Neovim's UI protocol uses internally: its `grid_line` events send styled text chunks, not individual cells. The TUI frontend converts those runs into terminal cells. Remote GUIs (Neovide, etc.) convert the same runs into GPU draw calls. Same editing model, different output formats.
+
+The key insight: Minga is a monospaced editor. Even in a GUI, the editing area uses a monospaced font, so "column 5" always means a deterministic position. The IR stays line-and-column based. It just doesn't pre-split text into individual cells on the BEAM side.
+
+```elixir
+# A styled run of text: "draw these characters in this style"
+@type style :: %{fg: color(), bg: color(), bold: boolean(), italic: boolean(), ...}
+@type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: style()}
+
+# A line's visual content: a list of runs that together cover the line
+@type display_line :: [text_run()]
+
+# A window's frame: its rectangle + the visible lines
+@type window_frame :: %{
+  rect: rect(),
+  lines: %{row :: non_neg_integer() => display_line()},
+  cursor: {row :: non_neg_integer(), col :: non_neg_integer()},
+  gutter: %{row :: non_neg_integer() => display_line()}
+}
+
+# A full frame: all windows + chrome
+@type frame :: %{
+  windows: [window_frame()],
+  modelines: [window_frame()],
+  minibuffer: display_line(),
+  overlays: [overlay()]
+}
+```
+
+Each frontend then does the last-mile translation:
+
+- **Terminal (Zig/libvaxis):** Converts text runs into cell writes. `{5, "hello", green}` becomes five green cells at columns 5-9. libvaxis diffs against its internal cell grid and emits only changed terminal sequences. This is essentially what happens today, just with a cleaner input.
+- **macOS GUI:** Converts text runs into Core Text attributed string draws at pixel position `(col * cell_width, row * cell_height)`.
+- **Linux GUI:** Same idea with whatever rendering toolkit is chosen.
+
+Diffing happens at the display list level: compare frame N-1's `[text_run()]` for a given line against frame N's. If they match, skip that line entirely. If they differ, send the new runs. This gives the BEAM full knowledge of "what's on screen" without committing to a terminal-specific cell model.
+
+The `Port.Frontend` behaviour is the natural place for each backend to translate from this shared IR to its native primitives.
 
 ## Gap 5: Layout Has No Constraint System
 

@@ -195,73 +195,12 @@ final class FontFace {
         let w = Int(renderWidth)
         let h = Int(renderHeight)
 
-        // Rasterize into an RGBA bitmap context.
-        let rgbaStride = w * 4
-        var rgbaBuf = [UInt8](repeating: 0, count: rgbaStride * h)
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: &rgbaBuf,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: rgbaStride,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return GlyphInfo(atlasX: 0, atlasY: 0, width: 0, height: 0, offsetX: 0, offsetY: 0, isColor: false)
-        }
-
-        // Scale for Retina.
-        ctx.scaleBy(x: scale, y: scale)
-
-        // Font rendering settings (matching native macOS apps).
-        ctx.setAllowsFontSmoothing(true)
-        ctx.setShouldSmoothFonts(!isColor)
-        ctx.setAllowsAntialiasing(true)
-        ctx.setShouldAntialias(true)
-        ctx.setAllowsFontSubpixelPositioning(true)
-        ctx.setShouldSubpixelPositionFonts(true)
-        ctx.setAllowsFontSubpixelQuantization(false)
-        ctx.setShouldSubpixelQuantizeFonts(false)
-
-        if !isColor {
-            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        }
-
-        // Position the glyph.
-        let drawX = -boundingRect.origin.x
-        let drawY = -boundingRect.origin.y
-        var position = CGPoint(x: drawX, y: drawY)
-        var glyph = glyphId
-        CTFontDrawGlyphs(renderFont, &glyph, &position, 1, ctx)
-
-        // Convert RGBA to BGRA for the atlas.
-        var bgraBuf = [UInt8](repeating: 0, count: rgbaStride * h)
+        let bgraBuf: [UInt8]
 
         if isColor {
-            // Color emoji: RGBA → BGRA (premultiplied).
-            for row in 0..<h {
-                for col in 0..<w {
-                    let off = row * rgbaStride + col * 4
-                    bgraBuf[off + 0] = rgbaBuf[off + 2] // B
-                    bgraBuf[off + 1] = rgbaBuf[off + 1] // G
-                    bgraBuf[off + 2] = rgbaBuf[off + 0] // R
-                    bgraBuf[off + 3] = rgbaBuf[off + 3] // A
-                }
-            }
+            bgraBuf = rasterizeColorGlyph(w: w, h: h, renderFont: renderFont, glyphId: glyphId, boundingRect: boundingRect)
         } else {
-            // Text glyph: extract max(R,G,B) as alpha, store white + alpha.
-            for row in 0..<h {
-                for col in 0..<w {
-                    let off = row * rgbaStride + col * 4
-                    let alpha = max(rgbaBuf[off], max(rgbaBuf[off + 1], rgbaBuf[off + 2]))
-                    bgraBuf[off + 0] = 255 // B
-                    bgraBuf[off + 1] = 255 // G
-                    bgraBuf[off + 2] = 255 // R
-                    bgraBuf[off + 3] = alpha
-                }
-            }
+            bgraBuf = rasterizeTextGlyph(w: w, h: h, renderFont: renderFont, glyphId: glyphId, boundingRect: boundingRect)
         }
 
         // Write into the padded atlas region.
@@ -276,5 +215,111 @@ final class FontFace {
             offsetY: boundingRect.origin.y + boundingRect.height,
             isColor: isColor
         )
+    }
+
+    /// Rasterize a text glyph using a grayscale alpha-only context.
+    ///
+    /// Following Ghostty's approach: render into a single-channel context
+    /// (linearGray + alphaOnly) to get clean coverage values. Font smoothing
+    /// still works in this mode but produces grayscale coverage rather than
+    /// per-channel RGB differences. The result is stored as white + alpha
+    /// in the BGRA atlas.
+    private func rasterizeTextGlyph(w: Int, h: Int, renderFont: CTFont,
+                                     glyphId: CGGlyph, boundingRect: CGRect) -> [UInt8] {
+        // Single-channel grayscale context for coverage.
+        let grayStride = w
+        var grayBuf = [UInt8](repeating: 0, count: grayStride * h)
+
+        guard let graySpace = CGColorSpace(name: CGColorSpace.linearGray),
+              let ctx = CGContext(
+                  data: &grayBuf,
+                  width: w,
+                  height: h,
+                  bitsPerComponent: 8,
+                  bytesPerRow: grayStride,
+                  space: graySpace,
+                  bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+              ) else {
+            return [UInt8](repeating: 0, count: w * h * 4)
+        }
+
+        // Scale for Retina.
+        ctx.scaleBy(x: scale, y: scale)
+
+        // Font rendering settings.
+        ctx.setAllowsFontSmoothing(true)
+        ctx.setShouldSmoothFonts(true)
+        ctx.setAllowsFontSubpixelPositioning(true)
+        ctx.setShouldSubpixelPositionFonts(true)
+        ctx.setAllowsFontSubpixelQuantization(false)
+        ctx.setShouldSubpixelQuantizeFonts(false)
+        ctx.setAllowsAntialiasing(true)
+        ctx.setShouldAntialias(true)
+
+        // White fill for maximum coverage in the alpha channel.
+        ctx.setFillColor(gray: 1.0, alpha: 1.0)
+
+        // Draw the glyph.
+        var position = CGPoint(x: -boundingRect.origin.x, y: -boundingRect.origin.y)
+        var glyph = glyphId
+        CTFontDrawGlyphs(renderFont, &glyph, &position, 1, ctx)
+
+        // Convert single-channel coverage to BGRA (white + alpha).
+        let bgraStride = w * 4
+        var bgraBuf = [UInt8](repeating: 0, count: bgraStride * h)
+        for row in 0..<h {
+            for col in 0..<w {
+                let grayOff = row * grayStride + col
+                let bgraOff = row * bgraStride + col * 4
+                bgraBuf[bgraOff + 0] = 255           // B
+                bgraBuf[bgraOff + 1] = 255           // G
+                bgraBuf[bgraOff + 2] = 255           // R
+                bgraBuf[bgraOff + 3] = grayBuf[grayOff] // A = coverage
+            }
+        }
+
+        return bgraBuf
+    }
+
+    /// Rasterize a color emoji using an RGBA context in device RGB.
+    private func rasterizeColorGlyph(w: Int, h: Int, renderFont: CTFont,
+                                      glyphId: CGGlyph, boundingRect: CGRect) -> [UInt8] {
+        let rgbaStride = w * 4
+        var rgbaBuf = [UInt8](repeating: 0, count: rgbaStride * h)
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &rgbaBuf,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: rgbaStride,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return [UInt8](repeating: 0, count: w * h * 4)
+        }
+
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.setAllowsAntialiasing(true)
+        ctx.setShouldAntialias(true)
+
+        var position = CGPoint(x: -boundingRect.origin.x, y: -boundingRect.origin.y)
+        var glyph = glyphId
+        CTFontDrawGlyphs(renderFont, &glyph, &position, 1, ctx)
+
+        // Convert RGBA to BGRA (premultiplied).
+        var bgraBuf = [UInt8](repeating: 0, count: rgbaStride * h)
+        for row in 0..<h {
+            for col in 0..<w {
+                let off = row * rgbaStride + col * 4
+                bgraBuf[off + 0] = rgbaBuf[off + 2] // B
+                bgraBuf[off + 1] = rgbaBuf[off + 1] // G
+                bgraBuf[off + 2] = rgbaBuf[off + 0] // R
+                bgraBuf[off + 3] = rgbaBuf[off + 3] // A
+            }
+        }
+
+        return bgraBuf
     }
 }
