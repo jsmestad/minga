@@ -41,7 +41,7 @@ The default mode when the agentic view is open and the input is not focused.
 | Key | Action |
 |-----|--------|
 | `]m` / `[m` | Next / previous message |
-| `]c` / `[c` | Next / previous code block |
+| `]c` / `[c` | Next / previous diff hunk (when diff review is active) or code block |
 | `]t` / `[t` | Next / previous tool call |
 
 ### Go-to (g prefix)
@@ -51,12 +51,18 @@ The default mode when the agentic view is open and the input is not focused.
 | `gg` | Go to top (standard vim) |
 | `gf` | Open code block at cursor in editor buffer |
 
-### Copy
+### Copy / Diff Review
 
-| Key | Action |
-|-----|--------|
-| `y` | Copy code block at cursor to clipboard |
-| `Y` | Copy full message at cursor to clipboard |
+When a diff review is active (after the agent edits a file), these keys switch to diff review mode:
+
+| Key | Normal | Diff Review Active |
+|-----|--------|--------------------|
+| `y` | Copy code block at cursor | Accept current hunk |
+| `Y` | Copy full message at cursor | Accept all remaining hunks |
+| `x` | (unused) | Reject current hunk (reverts on disk) |
+| `X` | (unused) | Reject all remaining hunks |
+
+When all hunks are resolved (accepted or rejected), the viewer returns to normal file view.
 
 ### Input
 

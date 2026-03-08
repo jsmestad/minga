@@ -281,6 +281,7 @@ Current status and planned features. Updated as development progresses.
 | Ex commands | ✅ | `:agent-stop`, `:agent-new` |
 | Full-screen agentic view | ✅ | `SPC a t` two-panel layout: chat + file viewer, vim nav, `Minga.Agent.View.*` #133 |
 | Tool approval flow | ✅ | Destructive tools (write_file, edit_file, shell) require user approval. Configurable via `agent_tool_approval` and `agent_destructive_tools` #178 |
+| Inline diff review | ✅ | File viewer shows unified diff after agent edits; y/x accept/reject hunks, ]c/[c navigate, Y/X bulk resolve #136 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |
