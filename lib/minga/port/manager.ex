@@ -127,6 +127,15 @@ defmodule Minga.Port.Manager do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
+    # Debug: log all port data opcodes
+    opcode = if byte_size(data) > 0, do: :binary.at(data, 0), else: nil
+
+    File.write(
+      "/tmp/minga_port.log",
+      "opcode=0x#{if opcode, do: Integer.to_string(opcode, 16), else: "nil"} size=#{byte_size(data)}\n",
+      [:append]
+    )
+
     case Protocol.decode_event(data) do
       {:ok, {:ready, width, height, caps}} ->
         new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
@@ -144,6 +153,12 @@ defmodule Minga.Port.Manager do
         {:noreply, new_state}
 
       {:ok, {:resize, width, height}} ->
+        File.write(
+          "/tmp/minga_resize.log",
+          "RESIZE w=#{width} h=#{height} subs=#{length(state.subscribers)}\n",
+          [:append]
+        )
+
         new_state = %{state | terminal_size: {width, height}}
         broadcast(new_state.subscribers, {:minga_input, {:resize, width, height}})
         {:noreply, new_state}

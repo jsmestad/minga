@@ -44,7 +44,7 @@ defmodule Minga.Agent.View.RendererTest do
       focus: Keyword.get(opts, :focus, :chat),
       file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
       saved_windows: nil,
-      pending_g: false,
+      pending_prefix: nil,
       saved_file_tree: nil
     }
 

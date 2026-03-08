@@ -37,7 +37,6 @@ defmodule Minga.Agent.View.Renderer do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
-  @chat_width_pct 65
   @input_height 3
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -65,7 +64,8 @@ defmodule Minga.Agent.View.Renderer do
     panel_start = 1
     panel_height = max(panel_end - panel_start, 1)
 
-    chat_width = max(div(cols * @chat_width_pct, 100), 20)
+    chat_width_pct = state.agentic.chat_width_pct
+    chat_width = max(div(cols * chat_width_pct, 100), 20)
     separator_col = chat_width
     viewer_col = chat_width + 1
     viewer_width = max(cols - viewer_col, 10)

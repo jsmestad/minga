@@ -26,14 +26,19 @@ defmodule Minga.Agent.View.StateTest do
       assert av.saved_windows == nil
     end
 
-    test "starts with pending_g false" do
+    test "starts with no pending prefix" do
       av = ViewState.new()
-      refute av.pending_g
+      assert av.pending_prefix == nil
     end
 
     test "starts with no saved file tree" do
       av = ViewState.new()
       assert av.saved_file_tree == nil
+    end
+
+    test "starts with chat_width_pct at 65" do
+      av = ViewState.new()
+      assert av.chat_width_pct == 65
     end
   end
 
@@ -61,10 +66,10 @@ defmodule Minga.Agent.View.StateTest do
       assert av.focus == :chat
     end
 
-    test "resets pending_g to false" do
-      av = %{ViewState.new() | pending_g: true}
+    test "clears pending prefix" do
+      av = %{ViewState.new() | pending_prefix: :z}
       av = ViewState.activate(av, %Windows{}, %FileTreeState{})
-      refute av.pending_g
+      assert av.pending_prefix == nil
     end
   end
 
@@ -105,10 +110,10 @@ defmodule Minga.Agent.View.StateTest do
       assert new_av.focus == :chat
     end
 
-    test "resets pending_g to false" do
-      av = %{ViewState.new() | active: true, pending_g: true}
+    test "clears pending prefix" do
+      av = %{ViewState.new() | active: true, pending_prefix: :bracket_next}
       {new_av, _, _} = ViewState.deactivate(av)
-      refute new_av.pending_g
+      assert new_av.pending_prefix == nil
     end
   end
 
@@ -127,15 +132,69 @@ defmodule Minga.Agent.View.StateTest do
     end
   end
 
-  describe "set_pending_g/2" do
-    test "sets pending_g to true" do
-      av = ViewState.new() |> ViewState.set_pending_g(true)
-      assert av.pending_g
+  describe "prefix state machine" do
+    test "set_prefix/2 sets the pending prefix" do
+      av = ViewState.new() |> ViewState.set_prefix(:g)
+      assert av.pending_prefix == :g
     end
 
-    test "sets pending_g to false" do
-      av = %{ViewState.new() | pending_g: true} |> ViewState.set_pending_g(false)
-      refute av.pending_g
+    test "set_prefix/2 accepts all valid prefixes" do
+      for prefix <- [:g, :z, :bracket_next, :bracket_prev, nil] do
+        av = ViewState.new() |> ViewState.set_prefix(prefix)
+        assert av.pending_prefix == prefix
+      end
+    end
+
+    test "clear_prefix/1 resets to nil" do
+      av = %{ViewState.new() | pending_prefix: :z} |> ViewState.clear_prefix()
+      assert av.pending_prefix == nil
+    end
+
+    test "backward compat: set_pending_g(true) sets prefix to :g" do
+      av = ViewState.new() |> ViewState.set_pending_g(true)
+      assert av.pending_prefix == :g
+    end
+
+    test "backward compat: set_pending_g(false) clears prefix" do
+      av = %{ViewState.new() | pending_prefix: :g} |> ViewState.set_pending_g(false)
+      assert av.pending_prefix == nil
+    end
+
+    test "backward compat: pending_g/1 returns true when prefix is :g" do
+      av = ViewState.new() |> ViewState.set_prefix(:g)
+      assert ViewState.pending_g(av) == true
+    end
+
+    test "backward compat: pending_g/1 returns false for other prefixes" do
+      av = ViewState.new() |> ViewState.set_prefix(:z)
+      assert ViewState.pending_g(av) == false
+    end
+  end
+
+  describe "panel resize" do
+    test "grow_chat increases chat_width_pct by 5" do
+      av = ViewState.new() |> ViewState.grow_chat()
+      assert av.chat_width_pct == 70
+    end
+
+    test "grow_chat clamps at 80" do
+      av = %{ViewState.new() | chat_width_pct: 78} |> ViewState.grow_chat()
+      assert av.chat_width_pct == 80
+    end
+
+    test "shrink_chat decreases chat_width_pct by 5" do
+      av = ViewState.new() |> ViewState.shrink_chat()
+      assert av.chat_width_pct == 60
+    end
+
+    test "shrink_chat clamps at 30" do
+      av = %{ViewState.new() | chat_width_pct: 32} |> ViewState.shrink_chat()
+      assert av.chat_width_pct == 30
+    end
+
+    test "reset_split returns to 65" do
+      av = %{ViewState.new() | chat_width_pct: 45} |> ViewState.reset_split()
+      assert av.chat_width_pct == 65
     end
   end
 

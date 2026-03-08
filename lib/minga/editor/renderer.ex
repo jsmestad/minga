@@ -89,6 +89,10 @@ defmodule Minga.Editor.Renderer do
     # Compute layout once for the entire frame; downstream code reads state.layout.
     state = Layout.put(state)
 
+    # DEBUG: dump layout to file
+    layout = Layout.get(state)
+    debug_layout(state, layout)
+
     if state.agentic.active do
       render_agentic(state)
     else
@@ -97,6 +101,24 @@ defmodule Minga.Editor.Renderer do
 
     send_title(state)
     send_window_bg(state)
+  end
+
+  defp debug_layout(state, layout) do
+    vp = state.viewport
+    ts = DateTime.utc_now() |> DateTime.to_string()
+
+    lines = [
+      "[#{ts}] viewport: #{vp.rows}x#{vp.cols}",
+      "  editor_area: #{inspect(layout.editor_area)}",
+      "  file_tree: #{inspect(layout.file_tree)}",
+      "  minibuffer: #{inspect(layout.minibuffer)}",
+      "  modeline: #{inspect(layout.window_layouts |> Map.values() |> Enum.map(& &1.modeline))}",
+      ""
+    ]
+
+    File.write("/tmp/minga_layout_debug.log", Enum.join(lines, "\n"), [:append])
+  rescue
+    _ -> :ok
   end
 
   @spec send_title(state()) :: :ok

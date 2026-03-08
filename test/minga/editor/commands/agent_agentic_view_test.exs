@@ -41,7 +41,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       focus: :chat,
       file_viewer_scroll: 0,
       saved_windows: Keyword.get(opts, :saved_windows, nil),
-      pending_g: false,
+      pending_prefix: nil,
       saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
     }
 

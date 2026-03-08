@@ -6,6 +6,13 @@ defmodule Minga.Agent.View.State do
   focus, the file viewer scroll position, and the saved window layout to
   restore when the view is closed.
 
+  ## Prefix state machine
+
+  Multi-key sequences (gg, za, ]m, gf, etc.) use a generalized prefix
+  system. When a prefix key is pressed, `pending_prefix` is set and the
+  next keypress completes or cancels the sequence. This replaces the
+  old `pending_g: boolean()` flag.
+
   Stored as a single sub-struct in `EditorState` so the top-level struct
   stays within Credo's 31-field limit.
   """
@@ -16,13 +23,17 @@ defmodule Minga.Agent.View.State do
   @typedoc "Which panel has keyboard focus inside the agentic view."
   @type focus :: :chat | :file_viewer
 
+  @typedoc "Active prefix key awaiting a follow-up keystroke."
+  @type prefix :: nil | :g | :z | :bracket_next | :bracket_prev
+
   @typedoc "Agentic view sub-state."
   @type t :: %__MODULE__{
           active: boolean(),
           focus: focus(),
           file_viewer_scroll: non_neg_integer(),
           saved_windows: Windows.t() | nil,
-          pending_g: boolean(),
+          pending_prefix: prefix(),
+          chat_width_pct: non_neg_integer(),
           saved_file_tree: FileTreeState.t() | nil
         }
 
@@ -31,8 +42,13 @@ defmodule Minga.Agent.View.State do
             focus: :chat,
             file_viewer_scroll: 0,
             saved_windows: nil,
-            pending_g: false,
+            pending_prefix: nil,
+            chat_width_pct: 65,
             saved_file_tree: nil
+
+  @min_chat_pct 30
+  @max_chat_pct 80
+  @resize_step 5
 
   @doc "Returns a new agentic view state with all defaults."
   @spec new() :: t()
@@ -47,7 +63,7 @@ defmodule Minga.Agent.View.State do
         focus: :chat,
         saved_windows: windows,
         saved_file_tree: file_tree,
-        pending_g: false
+        pending_prefix: nil
     }
   end
 
@@ -60,7 +76,7 @@ defmodule Minga.Agent.View.State do
          focus: :chat,
          saved_windows: nil,
          saved_file_tree: nil,
-         pending_g: false
+         pending_prefix: nil
      }, saved_windows, saved_file_tree}
   end
 
@@ -94,9 +110,46 @@ defmodule Minga.Agent.View.State do
     %{av | file_viewer_scroll: 999_999}
   end
 
-  @doc "Sets the pending_g flag for tracking gg two-key sequences."
-  @spec set_pending_g(t(), boolean()) :: t()
-  def set_pending_g(%__MODULE__{} = av, pending) when is_boolean(pending) do
-    %{av | pending_g: pending}
+  @doc "Sets the pending prefix for multi-key sequences."
+  @spec set_prefix(t(), prefix()) :: t()
+  def set_prefix(%__MODULE__{} = av, prefix)
+      when prefix in [nil, :g, :z, :bracket_next, :bracket_prev] do
+    %{av | pending_prefix: prefix}
   end
+
+  @doc "Clears any pending prefix."
+  @spec clear_prefix(t()) :: t()
+  def clear_prefix(%__MODULE__{} = av), do: %{av | pending_prefix: nil}
+
+  @doc "Grows the chat panel width by one step (clamped at max)."
+  @spec grow_chat(t()) :: t()
+  def grow_chat(%__MODULE__{} = av) do
+    %{av | chat_width_pct: min(av.chat_width_pct + @resize_step, @max_chat_pct)}
+  end
+
+  @doc "Shrinks the chat panel width by one step (clamped at min)."
+  @spec shrink_chat(t()) :: t()
+  def shrink_chat(%__MODULE__{} = av) do
+    %{av | chat_width_pct: max(av.chat_width_pct - @resize_step, @min_chat_pct)}
+  end
+
+  @doc "Resets the chat panel width to the default."
+  @spec reset_split(t()) :: t()
+  def reset_split(%__MODULE__{} = av) do
+    %{av | chat_width_pct: 65}
+  end
+
+  # ── Backward compatibility ──────────────────────────────────────────────────
+
+  @doc false
+  @doc deprecated: "Use set_prefix/2 and clear_prefix/1 instead"
+  @spec set_pending_g(t(), boolean()) :: t()
+  def set_pending_g(%__MODULE__{} = av, true), do: set_prefix(av, :g)
+  def set_pending_g(%__MODULE__{} = av, false), do: clear_prefix(av)
+
+  @doc false
+  @doc deprecated: "Use pending_prefix == :g instead"
+  @spec pending_g(t()) :: boolean()
+  def pending_g(%__MODULE__{pending_prefix: :g}), do: true
+  def pending_g(%__MODULE__{}), do: false
 end

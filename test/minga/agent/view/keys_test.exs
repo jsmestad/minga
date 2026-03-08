@@ -43,7 +43,7 @@ defmodule Minga.Agent.View.KeysTest do
       focus: Keyword.get(opts, :focus, :chat),
       file_viewer_scroll: Keyword.get(opts, :viewer_scroll, 0),
       saved_windows: nil,
-      pending_g: Keyword.get(opts, :pending_g, false),
+      pending_prefix: Keyword.get(opts, :pending_prefix, nil),
       saved_file_tree: nil
     }
 
@@ -119,10 +119,10 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agent.panel.scroll_offset == 0
     end
 
-    test "g sets pending_g flag" do
+    test "g sets pending_prefix to :g" do
       state = base_state(focus: :chat)
       {:handled, new_state} = Keys.handle_key(state, ?g, 0)
-      assert new_state.agentic.pending_g == true
+      assert new_state.agentic.pending_prefix == :g
     end
 
     test "gg scrolls chat to top" do
@@ -135,15 +135,15 @@ defmodule Minga.Agent.View.KeysTest do
       {:handled, with_g} = Keys.handle_key(scrolled, ?g, 0)
       {:handled, at_top} = Keys.handle_key(with_g, ?g, 0)
       assert at_top.agent.panel.scroll_offset == 0
-      refute at_top.agentic.pending_g
+      assert at_top.agentic.pending_prefix == nil
     end
 
-    test "g then another key cancels pending_g and processes the key" do
+    test "g then another key cancels pending_prefix and processes the key" do
       state = base_state(focus: :chat)
       {:handled, with_g} = Keys.handle_key(state, ?g, 0)
-      assert with_g.agentic.pending_g
+      assert with_g.agentic.pending_prefix == :g
       {:handled, result} = Keys.handle_key(with_g, ?j, 0)
-      refute result.agentic.pending_g
+      assert result.agentic.pending_prefix == nil
       assert result.agent.panel.scroll_offset == 1
     end
 
@@ -197,7 +197,7 @@ defmodule Minga.Agent.View.KeysTest do
 
     test "unrecognized keys are swallowed (handled) without state change" do
       state = base_state(focus: :chat)
-      {:handled, new_state} = Keys.handle_key(state, ?z, 0)
+      {:handled, new_state} = Keys.handle_key(state, ?x, 0)
       assert new_state.agent.panel.scroll_offset == 0
       assert new_state.agentic.focus == :chat
     end
@@ -295,10 +295,10 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agentic.file_viewer_scroll == 0
     end
 
-    test "g sets pending_g flag" do
+    test "g sets pending_prefix to :g" do
       state = viewer_state(50)
       {:handled, new_state} = Keys.handle_key(state, ?g, 0)
-      assert new_state.agentic.pending_g == true
+      assert new_state.agentic.pending_prefix == :g
       assert new_state.agentic.file_viewer_scroll == 50
     end
 
@@ -307,14 +307,14 @@ defmodule Minga.Agent.View.KeysTest do
       {:handled, with_g} = Keys.handle_key(state, ?g, 0)
       {:handled, at_top} = Keys.handle_key(with_g, ?g, 0)
       assert at_top.agentic.file_viewer_scroll == 0
-      refute at_top.agentic.pending_g
+      assert at_top.agentic.pending_prefix == nil
     end
 
-    test "g then another key cancels pending_g and processes the key" do
+    test "g then another key cancels pending_prefix and processes the key" do
       state = viewer_state(50)
       {:handled, with_g} = Keys.handle_key(state, ?g, 0)
       {:handled, result} = Keys.handle_key(with_g, ?j, 0)
-      refute result.agentic.pending_g
+      assert result.agentic.pending_prefix == nil
       assert result.agentic.file_viewer_scroll == 51
     end
 
@@ -342,10 +342,157 @@ defmodule Minga.Agent.View.KeysTest do
       assert new_state.agentic.active == false
     end
 
-    test "unrecognized keys are swallowed without changing scroll" do
+    test "z sets pending_prefix to :z" do
       state = viewer_state(10)
       {:handled, new_state} = Keys.handle_key(state, ?z, 0)
+      assert new_state.agentic.pending_prefix == :z
       assert new_state.agentic.file_viewer_scroll == 10
+    end
+
+    test "unrecognized keys are swallowed without changing scroll" do
+      state = viewer_state(10)
+      {:handled, new_state} = Keys.handle_key(state, ?x, 0)
+      assert new_state.agentic.file_viewer_scroll == 10
+    end
+
+    test "} grows chat panel" do
+      state = viewer_state(10)
+      {:handled, new_state} = Keys.handle_key(state, ?}, 0)
+      assert new_state.agentic.chat_width_pct == 70
+    end
+
+    test "{ shrinks chat panel" do
+      state = viewer_state(10)
+      {:handled, new_state} = Keys.handle_key(state, ?{, 0)
+      assert new_state.agentic.chat_width_pct == 60
+    end
+  end
+
+  # ── Prefix state machine ────────────────────────────────────────────────────
+
+  describe "z prefix (folds/collapse)" do
+    test "z sets pending_prefix to :z in chat nav" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?z, 0)
+      assert new_state.agentic.pending_prefix == :z
+    end
+
+    test "za toggles collapse (clears prefix)" do
+      state = base_state(focus: :chat)
+      {:handled, with_z} = Keys.handle_key(state, ?z, 0)
+      {:handled, result} = Keys.handle_key(with_z, ?a, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+
+    test "zA toggles all collapses" do
+      state = base_state(focus: :chat)
+      {:handled, with_z} = Keys.handle_key(state, ?z, 0)
+      {:handled, result} = Keys.handle_key(with_z, ?A, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+
+    test "z then unrecognized key cancels prefix and processes key" do
+      state = base_state(focus: :chat)
+      {:handled, with_z} = Keys.handle_key(state, ?z, 0)
+      {:handled, result} = Keys.handle_key(with_z, ?j, 0)
+      assert result.agentic.pending_prefix == nil
+      assert result.agent.panel.scroll_offset == 1
+    end
+  end
+
+  describe "] prefix (next item)" do
+    test "] sets pending_prefix to :bracket_next" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?], 0)
+      assert new_state.agentic.pending_prefix == :bracket_next
+    end
+
+    test "]m is handled (stubbed, clears prefix)" do
+      state = base_state(focus: :chat)
+      {:handled, with_bracket} = Keys.handle_key(state, ?], 0)
+      {:handled, result} = Keys.handle_key(with_bracket, ?m, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+
+    test "]c is handled (stubbed)" do
+      state = base_state(focus: :chat)
+      {:handled, with_bracket} = Keys.handle_key(state, ?], 0)
+      {:handled, result} = Keys.handle_key(with_bracket, ?c, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+
+    test "]t is handled (stubbed)" do
+      state = base_state(focus: :chat)
+      {:handled, with_bracket} = Keys.handle_key(state, ?], 0)
+      {:handled, result} = Keys.handle_key(with_bracket, ?t, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+
+    test "] then unrecognized key cancels prefix and processes key" do
+      state = base_state(focus: :chat)
+      {:handled, with_bracket} = Keys.handle_key(state, ?], 0)
+      {:handled, result} = Keys.handle_key(with_bracket, ?j, 0)
+      assert result.agentic.pending_prefix == nil
+      assert result.agent.panel.scroll_offset == 1
+    end
+  end
+
+  describe "[ prefix (prev item)" do
+    test "[ sets pending_prefix to :bracket_prev" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?[, 0)
+      assert new_state.agentic.pending_prefix == :bracket_prev
+    end
+
+    test "[m is handled (stubbed)" do
+      state = base_state(focus: :chat)
+      {:handled, with_bracket} = Keys.handle_key(state, ?[, 0)
+      {:handled, result} = Keys.handle_key(with_bracket, ?m, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+  end
+
+  describe "g prefix extensions" do
+    test "gf is handled (stubbed, clears prefix)" do
+      state = base_state(focus: :chat)
+      {:handled, with_g} = Keys.handle_key(state, ?g, 0)
+      {:handled, result} = Keys.handle_key(with_g, ?f, 0)
+      assert result.agentic.pending_prefix == nil
+    end
+  end
+
+  describe "panel resize" do
+    test "} grows the chat panel" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?}, 0)
+      assert new_state.agentic.chat_width_pct == 70
+    end
+
+    test "{ shrinks the chat panel" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ?{, 0)
+      assert new_state.agentic.chat_width_pct == 60
+    end
+
+    test "= resets the panel split" do
+      state = base_state(focus: :chat)
+      {:handled, grown} = Keys.handle_key(state, ?}, 0)
+      {:handled, reset} = Keys.handle_key(grown, ?=, 0)
+      assert reset.agentic.chat_width_pct == 65
+    end
+  end
+
+  describe "sacred vim keys are not repurposed" do
+    test "SPC passes through in nav mode" do
+      state = base_state(focus: :chat)
+      assert {:passthrough, _} = Keys.handle_key(state, ?\s, 0)
+    end
+
+    test "SPC is handled (typed) when input is focused" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      {:handled, new_state} = Keys.handle_key(state, ?\s, 0)
+      assert new_state.agent.panel.input_text == " "
     end
   end
 end
