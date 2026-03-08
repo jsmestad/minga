@@ -206,7 +206,24 @@ Current status and planned features. Updated as development progresses.
 | Which-Key popup | ✅ | Shows available keys after `SPC` |
 | Picker with fuzzy matching | ✅ | Used for files, buffers, commands, search results |
 | Viewport scrolling | ✅ | Vertical and horizontal |
-| Mouse support | ✅ | Click to position cursor |
+| Mouse: click to position | ✅ | Left click moves cursor |
+| Mouse: drag to select | ✅ | Left drag enters Visual mode |
+| Mouse: scroll wheel (vertical) | ✅ | 3-line scroll per tick |
+| Mouse: window separator resize | ✅ | Drag split separators |
+| Mouse: double-click word select | 📋 | #217 |
+| Mouse: triple-click line select | 📋 | #217 |
+| Mouse: Shift+click extend selection | 📋 | #217 |
+| Mouse: Cmd/Ctrl+click go-to-definition | 📋 | #217 |
+| Mouse: middle-click paste | 📋 | #217 |
+| Mouse: right-click context menu | 📋 | #217 |
+| Mouse: horizontal scroll wheel | 📋 | #217 |
+| Mouse: file tree clicking | 📋 | #217 |
+| Mouse: picker candidate clicking | 📋 | #217 |
+| Mouse: completion menu clicking | 📋 | #217 |
+| Mouse: modeline segment clicking | 📋 | #217 |
+| Mouse: hover tooltips (GUI) | 📋 | #217 |
+| Mouse: smooth trackpad scrolling (GUI) | 📋 | #217 |
+| Mouse: cursor shape changes (GUI) | 📋 | #217 |
 | Split windows | ✅ | Vertical, horizontal, nested; `SPC w` navigation |
 | Floating windows | 📋 | Zig renderer supports panels |
 | Tab bar | 💭 | |

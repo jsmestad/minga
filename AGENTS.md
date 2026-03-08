@@ -204,6 +204,46 @@ Key design decisions:
 - **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
 - **Pipeline stages:** The renderer is being split into named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) for debuggability and per-stage caching.
 
+## Mouse Support (first-class citizen)
+
+Mouse support is not optional or secondary to keyboard input. Minga ships two frontends (TUI via Zig/libvaxis, macOS GUI via Swift/Metal), and both must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
+
+See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
+
+### Architecture
+
+Mouse events flow through the same protocol as keyboard events. Both frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them to `Minga.Editor.Mouse`.
+
+Key rules for mouse work:
+
+1. **Mouse events must flow through the Input.Router focus stack** (once #217 lands), not bypass it. The file tree, picker, completion menu, and agent panel all need to intercept clicks in their regions. Add `handle_mouse` callbacks to `Input.Handler` implementations when building mouse-interactive UI components.
+
+2. **Always pass modifiers through.** The `Editor.handle_info` clause for mouse events must pass modifiers to the mouse handler. Modifier+click combinations (Shift+click, Cmd+click, Ctrl+click) are meaningful interactions, not noise to discard.
+
+3. **Hit-test against `Layout.get(state)` rects.** Every UI region has a computed rect from `Minga.Editor.Layout`. Mouse handlers determine which region a click landed in by checking these rects. Never hardcode pixel/cell offsets.
+
+4. **GUI and TUI may diverge on capture, but the BEAM handler is shared.** The Swift GUI captures `NSEvent.clickCount` natively; the Zig TUI infers multi-click from timing. Both send the same protocol message. The BEAM handler doesn't care which frontend produced the event.
+
+5. **When adding new clickable UI elements** (panels, popups, modeline segments), always add mouse interaction alongside keyboard interaction. Don't ship a keyboard-only UI and plan to "add mouse later." Mouse is not a follow-up.
+
+### Reference: what Doom Emacs supports
+
+Use this as the minimum bar. If Doom does it, we should do it:
+
+- Left click to position cursor
+- Click + drag for visual selection
+- Double-click to select word
+- Triple-click to select line
+- Scroll wheel (vertical)
+- Middle-click paste
+- File tree clicking (treemacs)
+- Modeline segment clicking (doom-modeline)
+- Shift+click to extend selection
+- GUI: hover tooltips for diagnostics and LSP hover
+- GUI: Cmd+click go-to-definition
+- GUI: right-click context menu
+- GUI: smooth trackpad scrolling
+
 ## Keeping Documentation Updated
 
 When implementing features, completing planned work, or changing architecture:
