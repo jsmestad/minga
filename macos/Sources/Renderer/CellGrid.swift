@@ -33,6 +33,10 @@ final class CellGrid {
     var cursorShape: CursorShape = .block
     var cursorVisible: Bool = true
 
+    /// Default background color (24-bit RGB) for cells with bg=0.
+    /// Set by the set_window_bg protocol command. 0 = terminal default.
+    var defaultBg: UInt32 = 0
+
     /// Track whether the grid was modified since last render.
     var dirty: Bool = true
 
