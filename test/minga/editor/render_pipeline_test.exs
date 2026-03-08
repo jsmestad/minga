@@ -559,6 +559,8 @@ defmodule Minga.Editor.RenderPipelineTest do
     test "cursor-only movement with absolute numbering dirties only 2 lines" do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
+      # Use absolute numbering so only old+new cursor lines dirty
+      state = %{state | line_numbers: :absolute}
 
       # Frame 1: full render
       state = RenderPipeline.run(state)
@@ -568,10 +570,9 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert window.dirty_lines == %{}
 
       # Simulate cursor move from line 0 to line 3
-      # Update the window's cursor and the buffer's cursor
-      BufferServer.move_cursor(state.buffers.active, :down)
-      BufferServer.move_cursor(state.buffers.active, :down)
-      BufferServer.move_cursor(state.buffers.active, :down)
+      BufferServer.move(state.buffers.active, :down)
+      BufferServer.move(state.buffers.active, :down)
+      BufferServer.move(state.buffers.active, :down)
 
       # Run through scroll stage to detect gutter invalidation
       state = EditorState.sync_active_window_cursor(state)
@@ -580,11 +581,32 @@ defmodule Minga.Editor.RenderPipelineTest do
       {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
 
       window = Map.get(state.windows.map, win_id)
-      # With default (absolute) line numbers, only old and new cursor lines dirty
-      # Default ln_style is :absolute in the test state
+      # With absolute line numbers, only old and new cursor lines dirty
       assert window.dirty_lines != :all
       dirty_count = map_size(window.dirty_lines)
       assert dirty_count <= 2, "Expected at most 2 dirty lines, got #{dirty_count}"
+    end
+
+    test "cursor-only movement with hybrid numbering dirties all lines" do
+      lines = Enum.map_join(1..10, "\n", &"line #{&1}")
+      state = base_state(content: lines, rows: 15, cols: 80)
+      # Hybrid numbering: every visible line number changes on cursor move
+      state = %{state | line_numbers: :hybrid}
+
+      # Frame 1
+      state = RenderPipeline.run(state)
+      assert_receive {:"$gen_cast", {:send_commands, _}}
+
+      # Move cursor
+      BufferServer.move(state.buffers.active, :down)
+      state = EditorState.sync_active_window_cursor(state)
+      state = RenderPipeline.compute_layout(state)
+      layout = Layout.get(state)
+      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+
+      [{_win_id, window}] = Map.to_list(state.windows.map)
+      # Hybrid/relative: all lines dirty because every gutter number changes
+      assert window.dirty_lines == :all
     end
 
     test "context fingerprint change triggers full redraw" do
@@ -598,8 +620,10 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert window.dirty_lines == %{}
       assert window.last_context_fingerprint != nil
 
-      # Simulate entering visual mode (changes visual_selection in context)
-      state = %{state | mode: :visual, mode_state: %{state.mode_state | visual: %{type: :char, anchor: {0, 0}}}}
+      # Simulate entering visual mode (changes visual_selection in context).
+      # Visual mode uses VisualState as the mode_state, not a nested field.
+      visual_state = %Minga.Mode.VisualState{visual_type: :char, visual_anchor: {0, 0}}
+      state = %{state | mode: :visual, mode_state: visual_state}
 
       # Frame 2: context fingerprint will change due to visual selection
       state = RenderPipeline.run(state)

@@ -251,9 +251,16 @@ Current status and planned features. Updated as development progresses.
 | Incremental content sync | ✅ | edit_buffer opcode + edit delta tracking in Buffer.Server (#154) |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 2,556 Elixir tests | ✅ | Including 10 property-based tests |
+| 2,714 Elixir tests | ✅ | Including 10 property-based tests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
+| Unified render paths | ✅ | Single pipeline for all content types (#162) |
+| Display list IR | ✅ | BEAM-side `{row, col, text, style}` draw tuples, layer composition (#165) |
+| Explicit render pipeline | ✅ | 7 named stages: invalidation, layout, scroll, content, chrome, compose, emit (#166) |
+| Per-window render state | ✅ | Cached draws, dirty-line tracking, context fingerprinting (#163) |
+| Dirty-line rendering | ✅ | Skip unchanged lines, reuse cached draws, context-aware invalidation (#164) |
+| Component model | 📋 | Composable render components with lifecycle (#167) |
+| Layout constraints | 📋 | Constraint-based layout system (#168) |
 
 ---
 
