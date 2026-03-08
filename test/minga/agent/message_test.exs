@@ -25,12 +25,17 @@ defmodule Minga.Agent.MessageTest do
   describe "thinking/1" do
     test "creates a thinking message" do
       msg = Message.thinking("reasoning...")
-      assert {:thinking, "reasoning..."} = msg
+      assert {:thinking, "reasoning...", false} = msg
     end
 
     test "creates an empty thinking message by default" do
       msg = Message.thinking()
-      assert {:thinking, ""} = msg
+      assert {:thinking, "", false} = msg
+    end
+
+    test "creates a collapsed thinking message" do
+      msg = Message.thinking("done", true)
+      assert {:thinking, "done", true} = msg
     end
   end
 

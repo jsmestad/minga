@@ -266,9 +266,35 @@ defmodule Minga.Agent.ChatRendererTest do
       assert has_indicator, "expected code lines to be truncated with → indicator"
     end
 
+    test "collapsed thinking block renders as single line with preview" do
+      messages = [{:thinking, "Line one\nLine two\nLine three", true}]
+
+      rect = {0, 0, 60, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_summary = Enum.any?(texts, &String.contains?(&1, "3 lines"))
+      assert has_summary, "expected collapsed thinking to show line count"
+    end
+
+    test "expanded thinking block shows full content" do
+      messages = [{:thinking, "Line one\nLine two", false}]
+
+      rect = {0, 0, 60, 10}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_line_one = Enum.any?(texts, &String.contains?(&1, "Line one"))
+      has_line_two = Enum.any?(texts, &String.contains?(&1, "Line two"))
+      assert has_line_one
+      assert has_line_two
+    end
+
     test "thinking blocks wrap long lines" do
       long_thinking = String.duplicate("reasoning ", 20) |> String.trim()
-      messages = [{:thinking, long_thinking}]
+      messages = [{:thinking, long_thinking, false}]
 
       rect = {0, 0, 40, 20}
       p = panel(messages: messages)

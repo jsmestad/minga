@@ -63,7 +63,7 @@ defmodule Minga.Agent.BufferSync do
     "## Agent\n\n#{text}"
   end
 
-  defp message_to_markdown({:thinking, text}) do
+  defp message_to_markdown({:thinking, text, _collapsed}) do
     "> **Thinking**\n>\n> #{String.replace(text, "\n", "\n> ")}"
   end
 

@@ -209,4 +209,65 @@ defmodule Minga.Agent.SessionTest do
       assert tc.collapsed == false
     end
   end
+
+  describe "thinking block collapse" do
+    test "thinking blocks auto-collapse when text delta arrives", %{session: session} do
+      # Inject thinking delta directly via provider events
+      send(session, {:agent_provider_event, %Event.AgentStart{}})
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
+      Process.sleep(20)
+
+      # While thinking, the block should be expanded
+      messages = Session.messages(session)
+
+      thinking =
+        Enum.find(messages, fn
+          {:thinking, _, _} -> true
+          _ -> false
+        end)
+
+      assert {:thinking, _, false} = thinking
+
+      # Now send a text delta (thinking is done, response starting)
+      send(session, {:agent_provider_event, %Event.TextDelta{delta: "Here is my answer"}})
+      Process.sleep(20)
+
+      messages = Session.messages(session)
+
+      thinking =
+        Enum.find(messages, fn
+          {:thinking, _, _} -> true
+          _ -> false
+        end)
+
+      assert {:thinking, _, true} = thinking
+    end
+
+    test "toggle_all_tool_collapses also toggles thinking blocks", %{session: session} do
+      # Inject thinking and tool call
+      send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
+      send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
+
+      tool_start = %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
+      send(session, {:agent_provider_event, tool_start})
+
+      tool_end = %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
+      send(session, {:agent_provider_event, tool_end})
+
+      Process.sleep(20)
+
+      # Both should be collapsed
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:thinking, _, true}, &1))
+      assert Enum.any?(messages, &match?({:tool_call, %{collapsed: true}}, &1))
+
+      # Toggle all should expand both
+      :ok = Session.toggle_all_tool_collapses(session)
+      Process.sleep(20)
+
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:thinking, _, false}, &1))
+      assert Enum.any?(messages, &match?({:tool_call, %{collapsed: false}}, &1))
+    end
+  end
 end

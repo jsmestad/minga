@@ -325,8 +325,19 @@ defmodule Minga.Agent.ChatRenderer do
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:thinking, text}, at, width) do
+  defp message_lines({:thinking, text, true}, at, width) do
     lines = String.split(text, "\n")
+    line_count = length(lines)
+    preview = lines |> hd() |> String.slice(0, max(width - 30, 10))
+    summary = "  💭 Thinking (#{line_count} lines): #{preview}..."
+
+    [
+      {[{String.slice(summary, 0, width), [fg: at.thinking_fg, italic: true]}], :text,
+       at.panel_bg}
+    ]
+  end
+
+  defp message_lines({:thinking, text, false}, at, width) do
     prefix = [{"  │ ", [fg: at.thinking_fg, italic: true]}]
     content_width = max(width - 4, 4)
 
@@ -334,13 +345,16 @@ defmodule Minga.Agent.ChatRenderer do
       {[{"  💭 Thinking", [fg: at.thinking_fg, italic: true, bold: true]}], :text, at.panel_bg}
 
     content =
-      Enum.flat_map(lines, fn line ->
-        segments = [{line, [fg: at.thinking_fg, italic: true]}]
-        wrapped = WordWrap.wrap_segments(segments, content_width)
-
-        Enum.map(wrapped, fn line_segments ->
-          {prefix ++ line_segments, :text, at.panel_bg}
-        end)
+      text
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        wrap_or_truncate(
+          [{line, [fg: at.thinking_fg, italic: true]}],
+          :text,
+          prefix,
+          content_width,
+          at
+        )
       end)
 
     spacer = {[{"", []}], :empty, at.panel_bg}

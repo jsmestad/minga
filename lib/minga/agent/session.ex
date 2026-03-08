@@ -287,6 +287,7 @@ defmodule Minga.Agent.Session do
     messages =
       List.update_at(state.messages, index, fn
         {:tool_call, tc} -> {:tool_call, %{tc | collapsed: !tc.collapsed}}
+        {:thinking, text, collapsed} -> {:thinking, text, !collapsed}
         other -> other
       end)
 
@@ -300,6 +301,7 @@ defmodule Minga.Agent.Session do
     any_collapsed =
       Enum.any?(state.messages, fn
         {:tool_call, %{collapsed: true}} -> true
+        {:thinking, _, true} -> true
         _ -> false
       end)
 
@@ -308,6 +310,7 @@ defmodule Minga.Agent.Session do
     messages =
       Enum.map(state.messages, fn
         {:tool_call, tc} -> {:tool_call, %{tc | collapsed: target}}
+        {:thinking, text, _} -> {:thinking, text, target}
         other -> other
       end)
 
@@ -394,7 +397,9 @@ defmodule Minga.Agent.Session do
   end
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
-    messages = append_to_last_assistant(state.messages, delta)
+    # Auto-collapse any expanded thinking blocks (thinking is done)
+    messages = collapse_thinking_blocks(state.messages)
+    messages = append_to_last_assistant(messages, delta)
     state = %{state | messages: messages}
     broadcast(state, {:text_delta, delta})
     state
@@ -469,11 +474,19 @@ defmodule Minga.Agent.Session do
     end
   end
 
+  @spec collapse_thinking_blocks([Message.t()]) :: [Message.t()]
+  defp collapse_thinking_blocks(messages) do
+    Enum.map(messages, fn
+      {:thinking, text, false} -> {:thinking, text, true}
+      other -> other
+    end)
+  end
+
   @spec append_to_last_thinking([Message.t()], String.t()) :: [Message.t()]
   defp append_to_last_thinking(messages, delta) do
     case List.last(messages) do
-      {:thinking, text} ->
-        List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta})
+      {:thinking, text, _collapsed} ->
+        List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta, false})
 
       _ ->
         Enum.reverse([Message.thinking(delta) | Enum.reverse(messages)])

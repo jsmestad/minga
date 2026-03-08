@@ -16,7 +16,7 @@ defmodule Minga.Agent.Message do
   @type t ::
           {:user, String.t()}
           | {:assistant, String.t()}
-          | {:thinking, String.t()}
+          | {:thinking, String.t(), boolean()}
           | {:tool_call, tool_call()}
           | {:system, String.t(), system_level()}
 
@@ -39,9 +39,9 @@ defmodule Minga.Agent.Message do
   @spec assistant(String.t()) :: t()
   def assistant(text \\ ""), do: {:assistant, text}
 
-  @doc "Creates a new thinking message (initially empty)."
-  @spec thinking(String.t()) :: t()
-  def thinking(text \\ ""), do: {:thinking, text}
+  @doc "Creates a new thinking message (initially empty, expanded)."
+  @spec thinking(String.t(), boolean()) :: t()
+  def thinking(text \\ "", collapsed \\ false), do: {:thinking, text, collapsed}
 
   @doc "Creates a system message (session events, status changes)."
   @spec system(String.t(), system_level()) :: t()

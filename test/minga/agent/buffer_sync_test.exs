@@ -39,7 +39,7 @@ defmodule Minga.Agent.BufferSyncTest do
 
     test "writes thinking blocks as blockquotes" do
       pid = BufferSync.start_buffer()
-      BufferSync.sync(pid, [{:thinking, "Let me think about this"}])
+      BufferSync.sync(pid, [{:thinking, "Let me think about this", false}])
 
       content = BufferServer.content(pid)
       assert content =~ "> **Thinking**"
