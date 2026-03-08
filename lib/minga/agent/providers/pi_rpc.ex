@@ -79,12 +79,14 @@ defmodule Minga.Agent.Providers.PiRpc do
     GenServer.call(pid, :get_commands, 10_000)
   end
 
+  @impl Minga.Agent.Provider
   @doc "Sets the thinking level on the pi backend."
   @spec set_thinking_level(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def set_thinking_level(pid, level) when is_binary(level) do
     GenServer.call(pid, {:set_thinking_level, level})
   end
 
+  @impl Minga.Agent.Provider
   @doc "Cycles to the next thinking level on the pi backend."
   @spec cycle_thinking_level(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def cycle_thinking_level(pid) do

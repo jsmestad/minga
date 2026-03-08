@@ -25,7 +25,7 @@ defmodule Minga.Agent.Session do
 
   alias Minga.Agent.Event
   alias Minga.Agent.Message
-  alias Minga.Agent.Providers.PiRpc
+  alias Minga.Agent.ProviderResolver
 
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
@@ -141,7 +141,7 @@ defmodule Minga.Agent.Session do
   @dialyzer {:no_contracts, init: 1}
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    provider_module = Keyword.get(opts, :provider, Minga.Agent.Providers.PiRpc)
+    provider_module = resolve_provider_module(opts)
 
     provider_opts =
       Keyword.merge(
@@ -259,7 +259,9 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call({:set_thinking_level, level}, _from, state) do
-    result = PiRpc.set_thinking_level(state.provider, level)
+    result =
+      dispatch_optional(state.provider_module, :set_thinking_level, [state.provider, level])
+
     {:reply, result, state}
   end
 
@@ -268,7 +270,7 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call(:cycle_thinking_level, _from, state) do
-    result = PiRpc.cycle_thinking_level(state.provider)
+    result = dispatch_optional(state.provider_module, :cycle_thinking_level, [state.provider])
     {:reply, result, state}
   end
 
@@ -499,11 +501,33 @@ defmodule Minga.Agent.Session do
 
   defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do
     try do
-      PiRpc.set_thinking_level(state.provider, level)
+      dispatch_optional(state.provider_module, :set_thinking_level, [state.provider, level])
     catch
       :exit, _ -> :ok
     end
 
     %{state | pending_thinking_level: nil}
+  end
+
+  # Calls an optional callback on the provider module. Returns `{:error, :not_supported}`
+  # if the provider doesn't implement the callback.
+  @spec dispatch_optional(module(), atom(), [term()]) :: term()
+  defp dispatch_optional(module, function, args) do
+    if function_exported?(module, function, length(args)) do
+      apply(module, function, args)
+    else
+      {:error, :not_supported}
+    end
+  end
+
+  # Determines which provider module to use. If an explicit `:provider` option is
+  # passed (common in tests and from the existing code), use that. Otherwise, delegate
+  # to the ProviderResolver which checks config and pi availability.
+  @spec resolve_provider_module(keyword()) :: module()
+  defp resolve_provider_module(opts) do
+    case Keyword.fetch(opts, :provider) do
+      {:ok, module} when is_atom(module) -> module
+      _ -> ProviderResolver.resolve().module
+    end
   end
 end

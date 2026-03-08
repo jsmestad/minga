@@ -65,6 +65,8 @@ defmodule Minga.Config.Options do
           | :wrap
           | :linebreak
           | :breakindent
+          | :agent_provider
+          | :agent_model
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -105,7 +107,9 @@ defmodule Minga.Config.Options do
     {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus},
     {:wrap, :boolean, false},
     {:linebreak, :boolean, true},
-    {:breakindent, :boolean, true}
+    {:breakindent, :boolean, true},
+    {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
+    {:agent_model, :string_or_nil, nil}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

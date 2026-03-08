@@ -44,7 +44,9 @@ defmodule Minga.Config.OptionsTest do
                clipboard: :unnamedplus,
                wrap: false,
                linebreak: true,
-               breakindent: true
+               breakindent: true,
+               agent_provider: :auto,
+               agent_model: nil
              }
     end
   end

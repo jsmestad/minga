@@ -159,6 +159,7 @@ defmodule Minga.MixProject do
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
+      {:req_llm, "~> 1.6"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

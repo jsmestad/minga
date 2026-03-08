@@ -76,5 +76,16 @@ defmodule Minga.Agent.Provider do
   @doc "Returns available commands (extensions, skills, prompts) from the provider."
   @callback get_commands(provider()) :: {:ok, [map()]} | {:error, term()}
 
-  @optional_callbacks [get_available_models: 1, get_commands: 1]
+  @doc ~S'Sets the thinking level (e.g. "low", "medium", "high").'
+  @callback set_thinking_level(provider(), String.t()) :: :ok | {:error, term()}
+
+  @doc "Cycles to the next thinking level and returns the new level."
+  @callback cycle_thinking_level(provider()) :: {:ok, term()} | {:error, term()}
+
+  @optional_callbacks [
+    get_available_models: 1,
+    get_commands: 1,
+    set_thinking_level: 2,
+    cycle_thinking_level: 1
+  ]
 end
