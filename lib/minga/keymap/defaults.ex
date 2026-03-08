@@ -117,7 +117,8 @@ defmodule Minga.Keymap.Defaults do
     {[{?h, @none}], "+help"},
     {[{?o, @none}], "+open"},
     {[{?a, @none}], "+ai"},
-    {[{?t, @none}], "+toggle"}
+    {[{?t, @none}], "+toggle"},
+    {[{?m, @none}], "+filetype"}
   ]
 
   # ---------------------------------------------------------------------------

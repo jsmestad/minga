@@ -21,7 +21,7 @@ The extensibility model you love transfers directly. Minga's runtime is the BEAM
 | `M-:` / `eval-expression` | `Code.eval_string` / eval prompt | ✅ |
 | `describe-function` / `describe-key` | `h/1`, `:sys.get_state`, runtime docs | ✅ |
 | `init.el` is real Elisp | `config.exs` is real Elixir | ✅ |
-| Major modes (filetype keymaps) | [Keymap scopes](KEYMAP-SCOPES.md) + `SPC m` prefix scoped to filetype | Partial: scopes ✅ ([#223](https://github.com/jsmestad/minga/issues/223)), filetype bindings planned ([#215](https://github.com/jsmestad/minga/issues/215)) |
+| Major modes (filetype keymaps) | [Keymap scopes](KEYMAP-SCOPES.md) + `SPC m` prefix scoped to filetype | ✅ ([#223](https://github.com/jsmestad/minga/issues/223), [#215](https://github.com/jsmestad/minga/issues/215)) |
 | Minor modes (toggleable keymaps) | Keymap layers with activation predicates | Future ([#216](https://github.com/jsmestad/minga/issues/216)) |
 | MELPA packages | Hex packages + supervised extensions | Future |
 
@@ -364,7 +364,7 @@ The single real trade-off: you reload a whole module, not a single function. In 
 | `dired` | File tree planned (#40) |
 | Decades of community wisdom | Brand new. You'd be early. |
 | Emacs Lisp (if you love Lisp) | Elixir. Optional LFE support planned (#3) for Lisp fans. |
-| Major modes (filetype keymaps) | Planned ([#215](https://github.com/jsmestad/minga/issues/215)). `SPC m` prefix scoped per filetype. |
+| Major modes (filetype keymaps) | ✅ [Keymap scopes](KEYMAP-SCOPES.md) + `SPC m` filetype bindings. `keymap :elixir do ... end` in config. |
 | Minor modes (toggleable keymaps) | Future ([#216](https://github.com/jsmestad/minga/issues/216)). See below for why this is less of a gap than it sounds. |
 
 Minga is not trying to replace Emacs today. `org-mode` alone is a reason to keep Emacs around.

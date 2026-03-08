@@ -29,6 +29,7 @@ defmodule Minga.Keymap.Scope do
   ignore context.
   """
 
+  alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
 
   @typedoc "Extra context for scope keymap resolution (e.g., filetype)."
@@ -139,9 +140,10 @@ defmodule Minga.Keymap.Scope do
   Resolves a key through the scope's keybinding layers.
 
   Walks layers in priority order:
-  1. Vim-state-specific bindings for the active scope
-  2. Shared bindings for the active scope
-  3. Returns `:not_found` if no scope binding matches
+  1. User overrides for the scope + vim state (from `Keymap.Active`)
+  2. Vim-state-specific bindings for the active scope
+  3. Shared bindings for the active scope
+  4. Returns `:not_found` if no scope binding matches
 
   Global bindings (leader sequences, Ctrl+S) and Mode.process fallback are
   handled by the caller, not by this function.
@@ -149,23 +151,36 @@ defmodule Minga.Keymap.Scope do
   @spec resolve_key(scope_name(), vim_state(), Bindings.key(), context()) :: resolve_result()
   def resolve_key(scope_name, vim_state, key, context \\ []) do
     case module_for(scope_name) do
-      nil ->
-        :not_found
-
-      mod ->
-        # Layer 1: vim-state-specific bindings
-        state_trie = mod.keymap(vim_state, context)
-
-        case Bindings.lookup(state_trie, key) do
-          :not_found ->
-            # Layer 2: shared bindings (cross vim-state)
-            shared_trie = mod.shared_keymap()
-            Bindings.lookup(shared_trie, key)
-
-          result ->
-            result
-        end
+      nil -> :not_found
+      mod -> resolve_through_layers(mod, scope_name, vim_state, key, context)
     end
+  end
+
+  @spec resolve_through_layers(module(), scope_name(), vim_state(), Bindings.key(), context()) ::
+          resolve_result()
+  defp resolve_through_layers(mod, scope_name, vim_state, key, context) do
+    tries = [
+      # Layer 0: user overrides for this scope + vim state
+      user_scope_trie(scope_name, vim_state),
+      # Layer 1: vim-state-specific bindings from the scope module
+      mod.keymap(vim_state, context),
+      # Layer 2: shared bindings (cross vim-state)
+      mod.shared_keymap()
+    ]
+
+    Enum.find_value(tries, :not_found, fn trie ->
+      case Bindings.lookup(trie, key) do
+        :not_found -> nil
+        result -> result
+      end
+    end)
+  end
+
+  @spec user_scope_trie(scope_name(), vim_state()) :: Bindings.node_t()
+  defp user_scope_trie(scope_name, vim_state) do
+    KeymapActive.scope_trie(scope_name, vim_state)
+  catch
+    :exit, _ -> Bindings.new()
   end
 
   @doc """

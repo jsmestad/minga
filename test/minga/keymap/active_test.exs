@@ -16,6 +16,12 @@ defmodule Minga.Keymap.ActiveTest do
       {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
       assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
     end
+
+    test "has SPC m prefix for filetype bindings", %{store: s} do
+      trie = Active.leader_trie(s)
+      # SPC m should be a prefix node (registered by defaults)
+      assert {:prefix, _m_node} = Bindings.lookup(trie, {?m, 0})
+    end
   end
 
   describe "normal_bindings/1" do
@@ -68,13 +74,160 @@ defmodule Minga.Keymap.ActiveTest do
     end
   end
 
+  describe "bind/5 insert mode" do
+    test "adds an insert-mode binding", %{store: s} do
+      assert :ok = Active.bind(s, :insert, "C-j", :next_line, "Next line")
+
+      trie = Active.mode_trie(s, :insert)
+      assert {:command, :next_line} = Bindings.lookup(trie, {?j, 0x02})
+    end
+
+    test "multiple insert bindings coexist", %{store: s} do
+      Active.bind(s, :insert, "C-j", :next_line, "Next line")
+      Active.bind(s, :insert, "C-k", :prev_line, "Prev line")
+
+      trie = Active.mode_trie(s, :insert)
+      assert {:command, :next_line} = Bindings.lookup(trie, {?j, 0x02})
+      assert {:command, :prev_line} = Bindings.lookup(trie, {?k, 0x02})
+    end
+  end
+
+  describe "bind/5 visual mode" do
+    test "adds a visual-mode binding", %{store: s} do
+      assert :ok = Active.bind(s, :visual, "C-x", :custom_cut, "Custom cut")
+
+      trie = Active.mode_trie(s, :visual)
+      assert {:command, :custom_cut} = Bindings.lookup(trie, {?x, 0x02})
+    end
+  end
+
+  describe "bind/5 operator_pending mode" do
+    test "adds an operator-pending binding", %{store: s} do
+      assert :ok =
+               Active.bind(
+                 s,
+                 :operator_pending,
+                 "C-a",
+                 :select_all,
+                 "Select all"
+               )
+
+      trie = Active.mode_trie(s, :operator_pending)
+      assert {:command, :select_all} = Bindings.lookup(trie, {?a, 0x02})
+    end
+  end
+
+  describe "bind/5 command mode" do
+    test "adds a command-mode binding", %{store: s} do
+      assert :ok = Active.bind(s, :command, "C-p", :history_prev, "History prev")
+
+      trie = Active.mode_trie(s, :command)
+      assert {:command, :history_prev} = Bindings.lookup(trie, {?p, 0x02})
+    end
+  end
+
   describe "bind/5 error handling" do
     test "returns error for invalid key string", %{store: s} do
       assert {:error, _} = Active.bind(s, :normal, "", :noop, "noop")
     end
 
-    test "returns error for unsupported mode", %{store: s} do
-      assert {:error, _} = Active.bind(s, :visual, "SPC g s", :noop, "noop")
+    test "returns error for unsupported mode atom", %{store: s} do
+      assert {:error, _} = Active.bind(s, :bogus, "j", :noop, "noop")
+    end
+  end
+
+  describe "bind/6 with filetype option" do
+    test "stores filetype-scoped binding under SPC m", %{store: s} do
+      assert :ok =
+               Active.bind(
+                 s,
+                 :normal,
+                 "SPC m t",
+                 :mix_test,
+                 "Run tests",
+                 filetype: :elixir
+               )
+
+      trie = Active.filetype_trie(s, :elixir)
+      assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
+    end
+
+    test "strips SPC m prefix from stored key sequence", %{store: s} do
+      Active.bind(s, :normal, "SPC m f", :mix_format, "Format", filetype: :elixir)
+
+      trie = Active.filetype_trie(s, :elixir)
+      # Should be stored as just "f", not "SPC m f"
+      assert {:command, :mix_format} = Bindings.lookup(trie, {?f, 0})
+    end
+
+    test "different filetypes have independent tries", %{store: s} do
+      Active.bind(s, :normal, "SPC m t", :mix_test, "Test", filetype: :elixir)
+      Active.bind(s, :normal, "SPC m t", :go_test, "Test", filetype: :go)
+
+      elixir_trie = Active.filetype_trie(s, :elixir)
+      go_trie = Active.filetype_trie(s, :go)
+
+      assert {:command, :mix_test} = Bindings.lookup(elixir_trie, {?t, 0})
+      assert {:command, :go_test} = Bindings.lookup(go_trie, {?t, 0})
+    end
+
+    test "filetype trie is empty for unregistered filetypes", %{store: s} do
+      trie = Active.filetype_trie(s, :rust)
+      assert :not_found = Bindings.lookup(trie, {?t, 0})
+    end
+
+    test "multiple keys under same filetype", %{store: s} do
+      Active.bind(s, :normal, "SPC m t", :mix_test, "Test", filetype: :elixir)
+      Active.bind(s, :normal, "SPC m f", :mix_format, "Format", filetype: :elixir)
+      Active.bind(s, :normal, "SPC m r", :iex_run, "Run in IEx", filetype: :elixir)
+
+      trie = Active.filetype_trie(s, :elixir)
+      assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
+      assert {:command, :mix_format} = Bindings.lookup(trie, {?f, 0})
+      assert {:command, :iex_run} = Bindings.lookup(trie, {?r, 0})
+    end
+
+    test "filetype binding without SPC m prefix stores as-is", %{store: s} do
+      # If someone writes bind :normal, "t", :test, "Test", filetype: :elixir
+      # the key is stored as-is (no stripping needed)
+      Active.bind(s, :normal, "t", :test, "Test", filetype: :elixir)
+
+      trie = Active.filetype_trie(s, :elixir)
+      assert {:command, :test} = Bindings.lookup(trie, {?t, 0})
+    end
+  end
+
+  describe "bind/5 scope overrides" do
+    test "adds scope-specific binding", %{store: s} do
+      Active.bind(s, {:agent, :normal}, "y", :agent_copy, "Agent copy")
+
+      trie = Active.scope_trie(s, :agent, :normal)
+      assert {:command, :agent_copy} = Bindings.lookup(trie, {?y, 0})
+    end
+
+    test "different scopes have independent tries", %{store: s} do
+      Active.bind(s, {:agent, :normal}, "y", :agent_copy, "Agent copy")
+      Active.bind(s, {:file_tree, :normal}, "y", :tree_copy, "Tree copy")
+
+      agent_trie = Active.scope_trie(s, :agent, :normal)
+      tree_trie = Active.scope_trie(s, :file_tree, :normal)
+
+      assert {:command, :agent_copy} = Bindings.lookup(agent_trie, {?y, 0})
+      assert {:command, :tree_copy} = Bindings.lookup(tree_trie, {?y, 0})
+    end
+
+    test "scope_overrides returns all registered scopes", %{store: s} do
+      Active.bind(s, {:agent, :normal}, "y", :agent_copy, "Agent copy")
+
+      overrides = Active.scope_overrides(s)
+      assert Map.has_key?(overrides, :agent)
+    end
+  end
+
+  describe "mode_trie/2" do
+    test "returns empty trie for unregistered mode", %{store: s} do
+      trie = Active.mode_trie(s, :insert)
+      assert :not_found = Bindings.lookup(trie, {?j, 0x02})
     end
   end
 
@@ -82,10 +235,29 @@ defmodule Minga.Keymap.ActiveTest do
     test "removes all user overrides", %{store: s} do
       Active.bind(s, :normal, "SPC z z", :custom_cmd, "Custom command")
       Active.bind(s, :normal, "Q", :replay, "Replay")
+      Active.bind(s, :insert, "C-j", :next, "Next")
+      Active.bind(s, :normal, "SPC m t", :test, "Test", filetype: :elixir)
+      Active.bind(s, {:agent, :normal}, "y", :copy, "Copy")
+
       Active.reset(s)
 
+      # Normal overrides cleared
+      assert Active.normal_overrides(s) == %{}
+
+      # Mode tries cleared
+      trie = Active.mode_trie(s, :insert)
+      assert :not_found = Bindings.lookup(trie, {?j, 0x02})
+
+      # Filetype tries cleared
+      ft_trie = Active.filetype_trie(s, :elixir)
+      assert :not_found = Bindings.lookup(ft_trie, {?t, 0})
+
+      # Scope overrides cleared
+      assert Active.scope_overrides(s) == %{}
+
+      # Leader trie reset to defaults
       trie = Active.leader_trie(s)
-      # SPC z should not exist after reset (not in defaults)
+
       case Bindings.lookup(trie, {?z, 0}) do
         {:prefix, z_node} ->
           assert :not_found = Bindings.lookup(z_node, {?z, 0})
@@ -93,8 +265,6 @@ defmodule Minga.Keymap.ActiveTest do
         :not_found ->
           assert true
       end
-
-      assert Active.normal_overrides(s) == %{}
     end
   end
 end

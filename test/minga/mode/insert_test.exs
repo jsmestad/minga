@@ -92,3 +92,63 @@ defmodule Minga.Mode.InsertTest do
     end
   end
 end
+
+defmodule Minga.Mode.Insert.UserOverrideTest do
+  @moduledoc "Tests for user-defined insert mode bindings via Keymap.Active."
+  use ExUnit.Case, async: false
+
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Mode
+  alias Minga.Mode.Insert
+
+  defp fresh_state, do: Mode.initial_state()
+
+  setup do
+    case KeymapActive.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> KeymapActive.reset()
+    end
+
+    on_exit(fn ->
+      try do
+        KeymapActive.reset()
+      catch
+        :exit, _ -> :ok
+      end
+    end)
+
+    :ok
+  end
+
+  describe "user-defined insert-mode overrides" do
+    test "Ctrl+J bound to :next_line overrides default (continue)" do
+      KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
+
+      assert {:execute, :next_line, _} = Insert.handle_key({?j, 0x02}, fresh_state())
+    end
+
+    test "Ctrl+K bound to :prev_line overrides default (continue)" do
+      KeymapActive.bind(:insert, "C-k", :prev_line, "Prev line")
+
+      assert {:execute, :prev_line, _} = Insert.handle_key({?k, 0x02}, fresh_state())
+    end
+
+    test "unbound key falls through to default handling" do
+      # Ctrl+C is not bound, should be :continue
+      assert {:continue, _} = Insert.handle_key({?c, 0x02}, fresh_state())
+    end
+
+    test "built-in keys still work when user overrides exist" do
+      KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
+
+      # Escape should still transition to normal
+      assert {:transition, :normal, _} = Insert.handle_key({27, 0}, fresh_state())
+
+      # Backspace should still delete
+      assert {:execute, :delete_before, _} = Insert.handle_key({127, 0}, fresh_state())
+
+      # Printable chars should still insert
+      assert {:execute, {:insert_char, "a"}, _} = Insert.handle_key({?a, 0}, fresh_state())
+    end
+  end
+end

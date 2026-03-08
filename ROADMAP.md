@@ -163,7 +163,9 @@ Current status and planned features. Updated as development progresses.
 | Multiple buffers | ✅ | Open several files, switch between them |
 | Dirty buffer protection | ✅ | Warns before quitting with unsaved changes |
 | User config file (`config.exs`) | ✅ | `~/.config/minga/config.exs` with `use Minga.Config` DSL |
-| Custom keybindings in config | ✅ | `bind :normal, "SPC g s", :cmd, "desc"` |
+| Custom keybindings in config | ✅ | `bind :normal/:insert/:visual/:operator_pending/:command, "key", :cmd, "desc"` |
+| Per-filetype keybindings | ✅ | `keymap :elixir do bind :normal, "SPC m t", :cmd, "desc" end` (#215) |
+| Per-scope keybinding overrides | ✅ | `bind {:agent, :normal}, "y", :cmd, "desc"` (#215) |
 | Custom commands in config | ✅ | `command :name, "desc" do ... end`, crash-isolated |
 | Lifecycle hooks | ✅ | `on :after_save`, `:after_open`, `:on_mode_change` |
 | Command advice | ✅ | `advise :before, :save, fn state -> ... end` (before/after wrapping) |
