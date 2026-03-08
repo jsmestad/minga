@@ -70,6 +70,18 @@ defmodule Minga.Agent.View.Keys do
     {:passthrough, state}
   end
 
+  # When help overlay is visible, dismiss it. ? and ESC just dismiss;
+  # any other key dismisses and is then processed normally.
+  def handle_key(%{agentic: %{help_visible: true}} = state, cp, _mods)
+      when cp in [??, @escape] do
+    {:handled, update_agentic(state, &ViewState.dismiss_help/1)}
+  end
+
+  def handle_key(%{agentic: %{help_visible: true}} = state, cp, mods) do
+    state = update_agentic(state, &ViewState.dismiss_help/1)
+    handle_key(state, cp, mods)
+  end
+
   # Route based on focus.
   def handle_key(
         %{agentic: %{focus: :chat}, agent: %{panel: %{input_focused: true}}} = state,
@@ -291,7 +303,9 @@ defmodule Minga.Agent.View.Keys do
   # --- Help ---
 
   # ?: help overlay (stubbed until #173)
-  defp handle_chat_nav(state, ??, _mods), do: state
+  defp handle_chat_nav(state, ??, _mods) do
+    update_agentic(state, &ViewState.toggle_help/1)
+  end
 
   # --- Catch-all ---
 
@@ -395,7 +409,9 @@ defmodule Minga.Agent.View.Keys do
 
   # --- Help ---
 
-  defp handle_viewer_nav(state, ??, _mods), do: state
+  defp handle_viewer_nav(state, ??, _mods) do
+    update_agentic(state, &ViewState.toggle_help/1)
+  end
 
   # --- Catch-all ---
 

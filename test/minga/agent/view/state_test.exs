@@ -232,4 +232,32 @@ defmodule Minga.Agent.View.StateTest do
       assert av.file_viewer_scroll > 0
     end
   end
+
+  describe "help overlay" do
+    test "starts with help hidden" do
+      av = ViewState.new()
+      refute av.help_visible
+    end
+
+    test "toggle_help shows and hides" do
+      av = ViewState.new() |> ViewState.toggle_help()
+      assert av.help_visible
+
+      av = ViewState.toggle_help(av)
+      refute av.help_visible
+    end
+
+    test "dismiss_help always hides" do
+      av = ViewState.new() |> ViewState.toggle_help()
+      assert av.help_visible
+
+      av = ViewState.dismiss_help(av)
+      refute av.help_visible
+    end
+
+    test "dismiss_help is a no-op when already hidden" do
+      av = ViewState.new() |> ViewState.dismiss_help()
+      refute av.help_visible
+    end
+  end
 end

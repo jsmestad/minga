@@ -34,7 +34,8 @@ defmodule Minga.Agent.View.State do
           saved_windows: Windows.t() | nil,
           pending_prefix: prefix(),
           chat_width_pct: non_neg_integer(),
-          saved_file_tree: FileTreeState.t() | nil
+          saved_file_tree: FileTreeState.t() | nil,
+          help_visible: boolean()
         }
 
   @enforce_keys []
@@ -44,7 +45,8 @@ defmodule Minga.Agent.View.State do
             saved_windows: nil,
             pending_prefix: nil,
             chat_width_pct: 65,
-            saved_file_tree: nil
+            saved_file_tree: nil,
+            help_visible: false
 
   @min_chat_pct 30
   @max_chat_pct 80
@@ -120,6 +122,14 @@ defmodule Minga.Agent.View.State do
   @doc "Clears any pending prefix."
   @spec clear_prefix(t()) :: t()
   def clear_prefix(%__MODULE__{} = av), do: %{av | pending_prefix: nil}
+
+  @doc "Toggles the help overlay visibility."
+  @spec toggle_help(t()) :: t()
+  def toggle_help(%__MODULE__{} = av), do: %{av | help_visible: !av.help_visible}
+
+  @doc "Dismisses the help overlay."
+  @spec dismiss_help(t()) :: t()
+  def dismiss_help(%__MODULE__{} = av), do: %{av | help_visible: false}
 
   @doc "Grows the chat panel width by one step (clamped at max)."
   @spec grow_chat(t()) :: t()

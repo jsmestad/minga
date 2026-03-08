@@ -532,6 +532,53 @@ defmodule Minga.Agent.View.KeysTest do
     end
   end
 
+  # ── Help overlay ────────────────────────────────────────────────────────────
+
+  describe "help overlay" do
+    test "? in chat nav toggles help visible" do
+      state = base_state(focus: :chat)
+      {:handled, new_state} = Keys.handle_key(state, ??, 0)
+      assert new_state.agentic.help_visible
+    end
+
+    test "? in file viewer toggles help visible" do
+      state = base_state(focus: :file_viewer)
+      {:handled, new_state} = Keys.handle_key(state, ??, 0)
+      assert new_state.agentic.help_visible
+    end
+
+    test "? when help is visible dismisses it" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agentic.help_visible, true)
+      {:handled, new_state} = Keys.handle_key(state, ??, 0)
+      refute new_state.agentic.help_visible
+    end
+
+    test "ESC when help is visible dismisses it" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agentic.help_visible, true)
+      {:handled, new_state} = Keys.handle_key(state, 27, 0)
+      refute new_state.agentic.help_visible
+    end
+
+    test "other key when help is visible dismisses and processes" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agentic.help_visible, true)
+      {:handled, new_state} = Keys.handle_key(state, ?j, 0)
+      refute new_state.agentic.help_visible
+      # j should have scrolled (help dismissed then key processed)
+    end
+
+    test "? does not activate in input mode (typed as character)" do
+      state = base_state(focus: :chat)
+      state = put_in(state.agent.panel.input_focused, true)
+      {:handled, new_state} = Keys.handle_key(state, ??, 0)
+      refute new_state.agentic.help_visible
+      # Should have typed ? into input
+      assert PanelState.input_text(new_state.agent.panel) == "?"
+    end
+  end
+
   # ── Ctrl+C abort ──────────────────────────────────────────────────────────────
 
   describe "Ctrl+C abort" do

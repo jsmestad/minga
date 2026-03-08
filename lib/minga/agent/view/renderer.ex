@@ -23,6 +23,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
+  alias Minga.Agent.View.Help
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Modeline
@@ -105,7 +106,9 @@ defmodule Minga.Agent.View.Renderer do
     @typedoc "Agentic view fields needed for rendering."
     @type agentic_data :: %{
             chat_width_pct: non_neg_integer(),
-            file_viewer_scroll: non_neg_integer()
+            file_viewer_scroll: non_neg_integer(),
+            help_visible: boolean(),
+            focus: atom()
           }
   end
 
@@ -151,12 +154,19 @@ defmodule Minga.Agent.View.Renderer do
     input_commands = render_input_from_input(input, input_row, cols)
     modeline_commands = render_modeline_from_input(input, modeline_row, cols)
 
-    title_commands ++
-      chat_commands ++
-      separator_commands ++
-      viewer_commands ++
-      input_commands ++
-      modeline_commands
+    base =
+      title_commands ++
+        chat_commands ++
+        separator_commands ++
+        viewer_commands ++
+        input_commands ++
+        modeline_commands
+
+    if input.agentic.help_visible do
+      base ++ render_help_overlay(input, cols, rows)
+    else
+      base
+    end
   end
 
   # Legacy wrapper: extracts a RenderInput from full EditorState.
@@ -255,7 +265,9 @@ defmodule Minga.Agent.View.Renderer do
       },
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
-        file_viewer_scroll: scroll
+        file_viewer_scroll: scroll,
+        help_visible: state.agentic.help_visible,
+        focus: state.agentic.focus
       },
       messages: messages,
       usage: usage,
@@ -660,5 +672,128 @@ defmodule Minga.Agent.View.Renderer do
   defp spinner(frame) do
     chars = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     Enum.at(chars, rem(frame, length(chars)))
+  end
+
+  # ── Help overlay ──────────────────────────────────────────────────────────
+
+  @spec render_help_overlay(RenderInput.t(), pos_integer(), pos_integer()) :: [DisplayList.draw()]
+  defp render_help_overlay(input, cols, rows) do
+    at = Theme.agent_theme(input.theme)
+
+    groups =
+      case input.agentic.focus do
+        :file_viewer -> Help.viewer_bindings()
+        _ -> Help.chat_bindings()
+      end
+
+    context_label =
+      case input.agentic.focus do
+        :file_viewer -> "File Viewer"
+        _ -> "Chat"
+      end
+
+    content_lines = help_content_lines(groups)
+
+    box_width = min(max(div(cols * 60, 100), 40), cols - 4)
+    box_height = min(length(content_lines) + 4, rows - 4)
+    start_col = div(cols - box_width, 2)
+    start_row = div(rows - box_height, 2)
+    key_col_width = 20
+
+    border_top = "┌" <> String.duplicate("─", box_width - 2) <> "┐"
+    border_bottom = "└" <> String.duplicate("─", box_width - 2) <> "┘"
+    blank_line = "│" <> String.duplicate(" ", box_width - 2) <> "│"
+
+    # Top border
+    commands = [
+      DisplayList.draw(start_row, start_col, border_top, fg: at.panel_border, bg: at.panel_bg)
+    ]
+
+    # Title row
+    title = " Keybindings (#{context_label}) "
+    title_pad = String.duplicate(" ", max(box_width - 2 - String.length(title), 0))
+
+    commands = [
+      DisplayList.draw(start_row + 1, start_col, "│#{title}#{title_pad}│",
+        fg: at.assistant_label,
+        bg: at.panel_bg,
+        bold: true
+      )
+      | commands
+    ]
+
+    # Separator
+    sep = "├" <> String.duplicate("─", box_width - 2) <> "┤"
+
+    commands = [
+      DisplayList.draw(start_row + 2, start_col, sep, fg: at.panel_border, bg: at.panel_bg)
+      | commands
+    ]
+
+    # Content rows
+    visible_lines = Enum.take(content_lines, box_height - 4)
+
+    commands =
+      visible_lines
+      |> Enum.with_index(3)
+      |> Enum.reduce(commands, fn {{type, left, right}, row_offset}, acc ->
+        row = start_row + row_offset
+
+        {line, style} =
+          help_line_content(type, left, right, box_width, key_col_width, blank_line, at)
+
+        [DisplayList.draw(row, start_col, line, style) | acc]
+      end)
+
+    # Bottom border
+    bottom_row = start_row + length(visible_lines) + 3
+
+    [
+      DisplayList.draw(bottom_row, start_col, border_bottom, fg: at.panel_border, bg: at.panel_bg)
+      | commands
+    ]
+  end
+
+  @spec help_line_content(
+          atom(),
+          String.t(),
+          String.t(),
+          pos_integer(),
+          pos_integer(),
+          String.t(),
+          Theme.Agent.t()
+        ) ::
+          {String.t(), keyword()}
+  defp help_line_content(:header, left, _right, box_width, _key_w, _blank, at) do
+    text = " #{left} "
+    pad = String.duplicate(" ", max(box_width - 2 - String.length(text), 0))
+    {"│#{text}#{pad}│", [fg: at.assistant_label, bg: at.panel_bg, bold: true]}
+  end
+
+  defp help_line_content(:binding, left, right, box_width, key_w, _blank, at) do
+    key_text = String.pad_trailing(left, key_w)
+    desc_space = max(box_width - 2 - key_w - 2, 1)
+    desc_text = String.slice(right, 0, desc_space)
+    desc_pad = String.duplicate(" ", max(desc_space - String.length(desc_text), 0))
+    {"│ #{key_text}#{desc_text}#{desc_pad} │", [fg: at.text_fg, bg: at.panel_bg]}
+  end
+
+  defp help_line_content(:spacer, _left, _right, _box_width, _key_w, blank, at) do
+    {blank, [fg: at.panel_border, bg: at.panel_bg]}
+  end
+
+  @typedoc "Help content line type."
+  @type help_line ::
+          {:header, String.t(), String.t()}
+          | {:binding, String.t(), String.t()}
+          | {:spacer, String.t(), String.t()}
+
+  @spec help_content_lines([Help.group()]) :: [help_line()]
+  defp help_content_lines(groups) do
+    Enum.flat_map(groups, fn {category, bindings} ->
+      header = [{:header, category, ""}]
+      items = Enum.map(bindings, fn {key, desc} -> {:binding, key, desc} end)
+      header ++ items ++ [{:spacer, "", ""}]
+    end)
   end
 end
