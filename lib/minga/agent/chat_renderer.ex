@@ -406,7 +406,8 @@ defmodule Minga.Agent.ChatRenderer do
         :error -> at.status_error
       end
 
-    header_text = "  ┌─ #{status_icon} #{tc.name} "
+    timing = format_tool_timing(tc)
+    header_text = "  ┌─ #{status_icon} #{tc.name}#{timing} "
     args_text = format_tool_args(tc.args)
 
     header =
@@ -633,6 +634,32 @@ defmodule Minga.Agent.ChatRenderer do
   defp format_turn_usage(%{input: i, output: o, cost: c}) do
     "↑#{format_tokens(i)} ↓#{format_tokens(o)} $#{Float.round(c, 3)}"
   end
+
+  @spec format_tool_timing(map()) :: String.t()
+  defp format_tool_timing(%{status: :running, started_at: started_at})
+       when is_integer(started_at) do
+    elapsed = System.monotonic_time(:millisecond) - started_at
+    " (#{format_duration(elapsed)})"
+  end
+
+  defp format_tool_timing(%{duration_ms: ms}) when is_integer(ms) do
+    " (#{format_duration(ms)})"
+  end
+
+  defp format_tool_timing(_), do: ""
+
+  @spec format_duration(integer()) :: String.t()
+  defp format_duration(ms) when ms >= 60_000 do
+    minutes = div(ms, 60_000)
+    seconds = Float.round(rem(ms, 60_000) / 1000, 1)
+    "#{minutes}m#{seconds}s"
+  end
+
+  defp format_duration(ms) when ms >= 1000 do
+    "#{Float.round(ms / 1000, 1)}s"
+  end
+
+  defp format_duration(ms), do: "#{ms}ms"
 
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"

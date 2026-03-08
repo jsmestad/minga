@@ -50,6 +50,8 @@ defmodule Minga.Agent.MessageTest do
       assert tc.result == ""
       assert tc.is_error == false
       assert tc.collapsed == true
+      assert is_integer(tc.started_at)
+      assert tc.duration_ms == nil
     end
 
     test "defaults args to empty map" do

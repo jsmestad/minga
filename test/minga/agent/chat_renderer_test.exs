@@ -399,7 +399,9 @@ defmodule Minga.Agent.ChatRendererTest do
            status: :complete,
            result: long_result,
            is_error: false,
-           collapsed: false
+           collapsed: false,
+           started_at: nil,
+           duration_ms: nil
          }}
       ]
 
@@ -409,6 +411,85 @@ defmodule Minga.Agent.ChatRendererTest do
 
       assert is_list(draws)
       assert draws != []
+    end
+  end
+
+  describe "tool execution timing" do
+    test "completed tool card shows duration" do
+      messages = [
+        {:tool_call,
+         %{
+           id: "tc1",
+           name: "bash",
+           args: %{},
+           status: :complete,
+           result: "done",
+           is_error: false,
+           collapsed: false,
+           started_at: 1000,
+           duration_ms: 12_400
+         }}
+      ]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_timing = Enum.any?(texts, &String.contains?(&1, "12.4s"))
+      assert has_timing, "expected tool timing in output, got: #{inspect(texts)}"
+    end
+
+    test "tool card without timing shows no duration" do
+      messages = [
+        {:tool_call,
+         %{
+           id: "tc1",
+           name: "bash",
+           args: %{},
+           status: :complete,
+           result: "done",
+           is_error: false,
+           collapsed: false,
+           started_at: nil,
+           duration_ms: nil
+         }}
+      ]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_parens =
+        Enum.any?(texts, fn t -> String.contains?(t, "(") and String.contains?(t, "s)") end)
+
+      refute has_parens, "expected no timing when duration_ms is nil"
+    end
+
+    test "sub-second durations show milliseconds" do
+      messages = [
+        {:tool_call,
+         %{
+           id: "tc1",
+           name: "read_file",
+           args: %{},
+           status: :complete,
+           result: "content",
+           is_error: false,
+           collapsed: false,
+           started_at: 1000,
+           duration_ms: 42
+         }}
+      ]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      has_ms = Enum.any?(texts, &String.contains?(&1, "42ms"))
+      assert has_ms, "expected millisecond timing for fast tools"
     end
   end
 end

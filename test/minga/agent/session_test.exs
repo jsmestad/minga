@@ -63,6 +63,16 @@ defmodule Minga.Agent.SessionTest do
     def handle_cast(:new_session, state), do: {:noreply, state}
   end
 
+  # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  # Waits for all provider events to be processed by the session after
+  # send_prompt. The session broadcasts {:status_changed, :idle} as its
+  # final action when a turn completes, so receiving that event guarantees
+  # all handle_info callbacks have run.
+  defp await_turn_complete do
+    assert_receive {:agent_event, {:status_changed, :idle}}, 200
+  end
+
   # ── Tests ───────────────────────────────────────────────────────────────────
 
   setup do
@@ -99,13 +109,11 @@ defmodule Minga.Agent.SessionTest do
   describe "send_prompt/2" do
     test "adds user message and streams response", %{session: session} do
       :ok = Session.send_prompt(session, "Hello!")
-
-      # Allow events to process
-      Process.sleep(50)
+      await_turn_complete()
 
       messages = Session.messages(session)
 
-      # Should have system message + user message + assistant message
+      # Should have system message + user message + assistant message + usage
       assert length(messages) >= 3
       assert {:system, _, :info} = Enum.at(messages, 0)
       assert {:user, "Hello!"} = Enum.at(messages, 1)
@@ -114,8 +122,7 @@ defmodule Minga.Agent.SessionTest do
 
     test "accumulates token usage", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
-
-      Process.sleep(50)
+      await_turn_complete()
 
       usage = Session.usage(session)
       assert usage.input == 100
@@ -126,7 +133,6 @@ defmodule Minga.Agent.SessionTest do
     test "broadcasts status changes", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
 
-      # Should receive status_changed events
       assert_receive {:agent_event, {:status_changed, :thinking}}, 200
       assert_receive {:agent_event, {:status_changed, :idle}}, 200
     end
@@ -142,7 +148,7 @@ defmodule Minga.Agent.SessionTest do
   describe "per-turn usage" do
     test "appends usage message after AgentEnd", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
-      Process.sleep(50)
+      await_turn_complete()
 
       messages = Session.messages(session)
 
@@ -159,7 +165,7 @@ defmodule Minga.Agent.SessionTest do
   describe "abort/1" do
     test "preserves partial response and adds system message", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
-      Process.sleep(50)
+      await_turn_complete()
 
       # Verify we have an assistant message
       messages = Session.messages(session)
@@ -168,19 +174,20 @@ defmodule Minga.Agent.SessionTest do
       :ok = Session.abort(session)
 
       messages = Session.messages(session)
-      # Partial assistant message is preserved
       assert Enum.any?(messages, &match?({:assistant, _}, &1))
-      # "Aborted" system message is appended
       assert Enum.any?(messages, &match?({:system, "Aborted", :info}, &1))
-      # Status returns to idle
       assert Session.status(session) == :idle
     end
 
     test "marks running tool calls as aborted", %{session: session} do
-      # Inject a running tool call
-      tool_start = %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
-      send(session, {:agent_provider_event, tool_start})
-      Process.sleep(20)
+      # Direct event injection: send + call is sufficient for sync
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
+
+      # Session.messages is a call, so it's processed after the send above
+      _ = Session.messages(session)
 
       :ok = Session.abort(session)
 
@@ -202,13 +209,12 @@ defmodule Minga.Agent.SessionTest do
   describe "new_session/1" do
     test "clears messages and resets status", %{session: session} do
       :ok = Session.send_prompt(session, "First")
-      Process.sleep(50)
+      await_turn_complete()
 
       assert length(Session.messages(session)) > 1
 
       :ok = Session.new_session(session)
 
-      # After clearing, should have just the "Session cleared" system message
       messages = Session.messages(session)
       assert [{:system, text, :info}] = messages
       assert String.starts_with?(text, "Session cleared")
@@ -217,7 +223,7 @@ defmodule Minga.Agent.SessionTest do
 
     test "resets usage counters", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
-      Process.sleep(50)
+      await_turn_complete()
 
       :ok = Session.new_session(session)
 
@@ -232,7 +238,6 @@ defmodule Minga.Agent.SessionTest do
       :ok = Session.unsubscribe(session)
 
       :ok = Session.send_prompt(session, "Test")
-      Process.sleep(50)
 
       refute_receive {:agent_event, _}, 100
     end
@@ -240,15 +245,18 @@ defmodule Minga.Agent.SessionTest do
 
   describe "toggle_tool_collapse/2" do
     test "toggles collapsed state of tool call messages", %{session: session} do
-      # Manually inject a tool call via the provider event mechanism
-      tool_start = %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
-      send(session, {:agent_provider_event, tool_start})
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
 
-      tool_end = %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}
-      send(session, {:agent_provider_event, tool_end})
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "output"}}
+      )
 
-      Process.sleep(50)
-
+      # GenServer.call after send ensures all handle_info have run
       messages = Session.messages(session)
 
       tool_index =
@@ -270,12 +278,55 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "tool execution timing" do
+    test "tool auto-expands on first ToolUpdate", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
+
+      # Tool starts collapsed
+      messages = Session.messages(session)
+      {:tool_call, tc} = Enum.find(messages, &match?({:tool_call, _}, &1))
+      assert tc.collapsed == true
+
+      # ToolUpdate auto-expands
+      send(
+        session,
+        {:agent_provider_event,
+         %Event.ToolUpdate{tool_call_id: "tc1", name: "bash", partial_result: "line 1\n"}}
+      )
+
+      messages = Session.messages(session)
+      {:tool_call, tc} = Enum.find(messages, &match?({:tool_call, _}, &1))
+      assert tc.collapsed == false
+      assert tc.result == "line 1\n"
+    end
+
+    test "tool re-collapses on ToolEnd with duration", %{session: session} do
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "done"}}
+      )
+
+      messages = Session.messages(session)
+      {:tool_call, tc} = Enum.find(messages, &match?({:tool_call, _}, &1))
+      assert tc.collapsed == true
+      assert tc.status == :complete
+      assert is_integer(tc.duration_ms)
+      assert tc.duration_ms >= 0
+    end
+  end
+
   describe "thinking block collapse" do
     test "thinking blocks auto-collapse when text delta arrives", %{session: session} do
-      # Inject thinking delta directly via provider events
       send(session, {:agent_provider_event, %Event.AgentStart{}})
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "Let me think..."}})
-      Process.sleep(20)
 
       # While thinking, the block should be expanded
       messages = Session.messages(session)
@@ -288,9 +339,8 @@ defmodule Minga.Agent.SessionTest do
 
       assert {:thinking, _, false} = thinking
 
-      # Now send a text delta (thinking is done, response starting)
+      # TextDelta arrives (thinking is done, response starting) → auto-collapse
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "Here is my answer"}})
-      Process.sleep(20)
 
       messages = Session.messages(session)
 
@@ -304,17 +354,18 @@ defmodule Minga.Agent.SessionTest do
     end
 
     test "toggle_all_tool_collapses also toggles thinking blocks", %{session: session} do
-      # Inject thinking and tool call
       send(session, {:agent_provider_event, %Event.ThinkingDelta{delta: "hmm"}})
       send(session, {:agent_provider_event, %Event.TextDelta{delta: "answer"}})
 
-      tool_start = %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}
-      send(session, {:agent_provider_event, tool_start})
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc1", name: "bash", args: %{}}}
+      )
 
-      tool_end = %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}
-      send(session, {:agent_provider_event, tool_end})
-
-      Process.sleep(20)
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolEnd{tool_call_id: "tc1", name: "bash", result: "ok"}}
+      )
 
       # Both should be collapsed
       messages = Session.messages(session)
@@ -323,7 +374,6 @@ defmodule Minga.Agent.SessionTest do
 
       # Toggle all should expand both
       :ok = Session.toggle_all_tool_collapses(session)
-      Process.sleep(20)
 
       messages = Session.messages(session)
       assert Enum.any?(messages, &match?({:thinking, _, false}, &1))

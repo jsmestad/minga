@@ -439,7 +439,8 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.ToolUpdate{} = event, state) do
     messages =
       update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        %{tc | result: event.partial_result}
+        # Auto-expand on first update so the user sees live output
+        %{tc | result: event.partial_result, collapsed: false}
       end)
 
     state = %{state | messages: messages}
@@ -450,11 +451,20 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.ToolEnd{} = event, state) do
     messages =
       update_tool_call(state.messages, event.tool_call_id, fn tc ->
+        duration =
+          if tc.started_at do
+            System.monotonic_time(:millisecond) - tc.started_at
+          else
+            nil
+          end
+
         %{
           tc
           | status: if(event.is_error, do: :error, else: :complete),
             result: event.result,
-            is_error: event.is_error
+            is_error: event.is_error,
+            collapsed: true,
+            duration_ms: duration
         }
       end)
 

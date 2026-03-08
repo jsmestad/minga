@@ -38,7 +38,9 @@ defmodule Minga.Agent.Message do
           status: tool_status(),
           result: String.t(),
           is_error: boolean(),
-          collapsed: boolean()
+          collapsed: boolean(),
+          started_at: integer() | nil,
+          duration_ms: non_neg_integer() | nil
         }
 
   @doc "Creates a new user message."
@@ -83,7 +85,9 @@ defmodule Minga.Agent.Message do
        status: :running,
        result: "",
        is_error: false,
-       collapsed: true
+       collapsed: true,
+       started_at: System.monotonic_time(:millisecond),
+       duration_ms: nil
      }}
   end
 end
