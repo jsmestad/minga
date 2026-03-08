@@ -35,6 +35,8 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:title_format` | string | `"{filename} {dirty}({directory}) - Minga"` | Terminal window title format (see [Window Title](#window-title)) |
 | `:recent_files_limit` | positive integer | `200` | Max recent files tracked per project |
 | `:persist_recent_files` | boolean | `true` | Write recent file history to disk (see [Projects](PROJECTS.md)) |
+| `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
+| `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "shell"]` | Which tools are classified as destructive |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 
@@ -49,6 +51,55 @@ set :font_size, 14
 ```
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
+
+## Agent tool approval
+
+When the AI agent wants to run a destructive tool (writing a file, editing a file, or running a shell command), Minga pauses and shows a confirmation prompt:
+
+```
+⚠ Execute shell: mix test?  [y]es  [n]o  [a]ll
+```
+
+- **y** or **Enter** approves the tool and lets it run.
+- **n** rejects the tool. The agent gets "Tool rejected by user" as the result and continues its turn.
+- **a** approves this tool and all remaining tools in the current turn without further prompts.
+
+The approval mode resets at the start of each new agent turn.
+
+### Controlling when approval is required
+
+The `:agent_tool_approval` option controls the gate:
+
+```elixir
+# Default: prompt only for destructive tools
+set :agent_tool_approval, :destructive
+
+# Prompt for every tool call (read_file, list_directory, etc.)
+set :agent_tool_approval, :all
+
+# Auto-approve everything, never prompt
+set :agent_tool_approval, :none
+```
+
+### Customizing the destructive tools list
+
+The `:agent_destructive_tools` option controls which tools are classified as destructive. Only tools in this list trigger the approval prompt when `agent_tool_approval` is `:destructive`.
+
+```elixir
+# Default
+set :agent_destructive_tools, ["write_file", "edit_file", "shell"]
+
+# Trust file edits, only prompt for shell commands
+set :agent_destructive_tools, ["shell"]
+
+# Add a custom tool to the list
+set :agent_destructive_tools, ["write_file", "edit_file", "shell", "deploy"]
+
+# Empty list with :destructive mode = no prompts for built-in tools
+set :agent_destructive_tools, []
+```
+
+The two options are orthogonal. `:agent_tool_approval` controls *whether* to prompt. `:agent_destructive_tools` controls *which tools* count as destructive when the mode is `:destructive`.
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
 
@@ -658,6 +709,10 @@ set :theme, :catppuccin_mocha
 # Font (GUI backend only; no effect in TUI mode)
 set :font_family, "JetBrains Mono"
 set :font_size, 14
+
+# ── Agent ─────────────────────────────────────────────────────────────
+set :agent_tool_approval, :destructive
+set :agent_destructive_tools, ["write_file", "edit_file", "shell"]
 
 # ── Per-language ─────────────────────────────────────────────────────
 for_filetype :elixir, format_on_save: true, trim_trailing_whitespace: true, insert_final_newline: true

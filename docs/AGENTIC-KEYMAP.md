@@ -65,6 +65,18 @@ The default mode when the agentic view is open and the input is not focused.
 | `i` / `a` | Focus the input field |
 | `Enter` | Focus the input field |
 
+### Tool Approval
+
+When a destructive tool is pending approval, these keys are intercepted:
+
+| Key | Action |
+|-----|--------|
+| `y` / `Enter` | Approve the tool |
+| `n` | Reject the tool |
+| `a` | Approve this and all remaining tools in the turn |
+
+See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to configure which tools require approval.
+
 ### Session
 
 | Key | Action |
