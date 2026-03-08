@@ -323,6 +323,22 @@ defmodule Minga.Agent.SessionTest do
     end
   end
 
+  describe "ToolFileChanged event" do
+    test "broadcasts file_changed with before/after content", %{session: session} do
+      event = %Event.ToolFileChanged{
+        tool_call_id: "tc1",
+        path: "lib/foo.ex",
+        before_content: "old content",
+        after_content: "new content"
+      }
+
+      send(session, {:agent_provider_event, event})
+
+      assert_receive {:agent_event, {:file_changed, "lib/foo.ex", "old content", "new content"}},
+                     200
+    end
+  end
+
   describe "tool approval" do
     test "ToolApproval event stores pending approval and broadcasts", %{session: session} do
       approval = %Event.ToolApproval{

@@ -539,6 +539,74 @@ defmodule Minga.Agent.View.KeysTest do
     end
   end
 
+  # ── Diff review ──────────────────────────────────────────────────────────
+
+  describe "diff review keys" do
+    defp diff_state(opts \\ []) do
+      state = base_state(Keyword.merge([focus: :chat], opts))
+      review = Minga.Agent.DiffReview.new("test.ex", "line1\nold\nline3\n", "line1\nnew\nline3\n")
+      put_in(state.agent.diff_review, review)
+    end
+
+    test "y accepts current hunk when diff review is active" do
+      state = diff_state()
+      {:handled, new_state} = Keys.handle_key(state, ?y, 0)
+      # Single hunk, accepting it resolves the review
+      assert new_state.agent.diff_review == nil
+    end
+
+    test "x rejects current hunk when diff review is active" do
+      state = diff_state()
+      {:handled, new_state} = Keys.handle_key(state, ?x, 0)
+      # Single hunk, rejecting it resolves the review
+      assert new_state.agent.diff_review == nil
+    end
+
+    test "Y accepts all hunks" do
+      state = diff_state()
+      {:handled, new_state} = Keys.handle_key(state, ?Y, 0)
+      assert new_state.agent.diff_review == nil
+    end
+
+    test "X rejects all hunks" do
+      state = diff_state()
+      {:handled, new_state} = Keys.handle_key(state, ?X, 0)
+      assert new_state.agent.diff_review == nil
+    end
+
+    test "y without diff review falls through to copy behavior" do
+      state = base_state(focus: :chat)
+      # No diff_review (nil by default), should not crash
+      {:handled, _new_state} = Keys.handle_key(state, ?y, 0)
+    end
+
+    test "]c navigates to next hunk in diff review" do
+      # Multi-hunk review
+      before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
+      after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
+      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+
+      state = base_state(focus: :chat, pending_prefix: :bracket_next)
+      state = put_in(state.agent.diff_review, review)
+
+      {:handled, new_state} = Keys.handle_key(state, ?c, 0)
+      assert new_state.agent.diff_review.current_hunk_index == 1
+    end
+
+    test "[c navigates to prev hunk in diff review" do
+      before = "line1\nold1\nline3\nline4\nline5\nline6\nline7\nold2\nline9\n"
+      after_ = "line1\nnew1\nline3\nline4\nline5\nline6\nline7\nnew2\nline9\n"
+      review = Minga.Agent.DiffReview.new("test.ex", before, after_)
+      review = %{review | current_hunk_index: 1}
+
+      state = base_state(focus: :chat, pending_prefix: :bracket_prev)
+      state = put_in(state.agent.diff_review, review)
+
+      {:handled, new_state} = Keys.handle_key(state, ?c, 0)
+      assert new_state.agent.diff_review.current_hunk_index == 0
+    end
+  end
+
   # ── Tool approval ──────────────────────────────────────────────────────────
 
   describe "tool approval keys" do

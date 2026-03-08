@@ -381,6 +381,8 @@ defmodule Minga.Agent.Providers.Native do
 
     {final_ctx, _mode} =
       Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
+        before_content = capture_file_before(tool_call)
+
         {result_text, is_error, new_mode} =
           execute_with_approval(provider_pid, tool_call, available_tools, approval_mode)
 
@@ -394,6 +396,8 @@ defmodule Minga.Agent.Providers.Native do
              is_error: is_error
            }}
         )
+
+        maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
 
         tool_result_msg = Context.tool_result_message(tool_call.name, tool_call.id, result_text)
         {Context.append(ctx, tool_result_msg), new_mode}
@@ -477,6 +481,48 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   @spec run_single_tool(map(), [ReqLLM.Tool.t()]) :: {String.t(), boolean()}
+  @file_tools ~w(edit_file write_file)
+
+  @spec capture_file_before(map()) :: String.t() | nil
+  defp capture_file_before(%{name: name, arguments: %{"path" => path}})
+       when name in @file_tools do
+    case File.read(path) do
+      {:ok, content} -> content
+      {:error, _} -> nil
+    end
+  end
+
+  defp capture_file_before(_tool_call), do: nil
+
+  @spec maybe_emit_file_changed(pid(), map(), String.t() | nil, boolean()) :: :ok
+  defp maybe_emit_file_changed(provider_pid, tool_call, before_content, false = _is_error)
+       when is_binary(before_content) do
+    path = tool_call.arguments["path"]
+
+    after_content =
+      case File.read(path) do
+        {:ok, content} -> content
+        {:error, _} -> nil
+      end
+
+    if after_content && after_content != before_content do
+      send(
+        provider_pid,
+        {:agent_event,
+         %Event.ToolFileChanged{
+           tool_call_id: tool_call.id,
+           path: path,
+           before_content: before_content,
+           after_content: after_content
+         }}
+      )
+    end
+
+    :ok
+  end
+
+  defp maybe_emit_file_changed(_provider_pid, _tool_call, _before_content, _is_error), do: :ok
+
   defp run_single_tool(tool_call, available_tools) do
     case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
       nil ->

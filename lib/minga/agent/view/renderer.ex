@@ -21,6 +21,8 @@ defmodule Minga.Agent.View.Renderer do
   """
 
   alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.DiffRenderer
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
   alias Minga.Agent.View.Help
@@ -72,7 +74,8 @@ defmodule Minga.Agent.View.Renderer do
       mode_state: nil,
       buf_index: 1,
       buf_count: 1,
-      pending_approval: nil
+      pending_approval: nil,
+      diff_review: nil
     ]
 
     @type t :: %__MODULE__{
@@ -89,7 +92,8 @@ defmodule Minga.Agent.View.Renderer do
             mode_state: term(),
             buf_index: pos_integer(),
             buf_count: pos_integer(),
-            pending_approval: map() | nil
+            pending_approval: map() | nil,
+            diff_review: DiffReview.t() | nil
           }
 
     @typedoc "Agent panel fields needed for rendering."
@@ -279,7 +283,8 @@ defmodule Minga.Agent.View.Renderer do
       mode_state: state.mode_state,
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
-      pending_approval: state.agent.pending_approval
+      pending_approval: state.agent.pending_approval,
+      diff_review: state.agent.diff_review
     }
   end
 
@@ -377,6 +382,12 @@ defmodule Minga.Agent.View.Renderer do
   # ── File viewer panel ───────────────────────────────────────────────────────
 
   @spec render_file_viewer_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
+
+  # Diff mode: when a DiffReview is active, render the diff instead of the buffer
+  defp render_file_viewer_from_input(%{diff_review: %DiffReview{} = review} = input, rect) do
+    DiffRenderer.render(rect, review, input.theme)
+  end
+
   defp render_file_viewer_from_input(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
     blank = String.duplicate(" ", width)
 

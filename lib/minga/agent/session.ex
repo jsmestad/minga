@@ -478,6 +478,11 @@ defmodule Minga.Agent.Session do
     state
   end
 
+  defp handle_provider_event(%Event.ToolFileChanged{} = event, state) do
+    broadcast(state, {:file_changed, event.path, event.before_content, event.after_content})
+    state
+  end
+
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
     approval = %{
       tool_call_id: event.tool_call_id,

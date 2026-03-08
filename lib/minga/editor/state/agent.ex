@@ -6,6 +6,7 @@ defmodule Minga.Editor.State.Agent do
   reach into the nested struct directly.
   """
 
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.PanelState
 
   @typedoc "Agent status."
@@ -26,7 +27,8 @@ defmodule Minga.Editor.State.Agent do
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
-          pending_approval: approval() | nil
+          pending_approval: approval() | nil,
+          diff_review: DiffReview.t() | nil
         }
 
   defstruct session: nil,
@@ -35,7 +37,8 @@ defmodule Minga.Editor.State.Agent do
             error: nil,
             spinner_timer: nil,
             buffer: nil,
-            pending_approval: nil
+            pending_approval: nil,
+            diff_review: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -168,6 +171,31 @@ defmodule Minga.Editor.State.Agent do
   def history_next(%__MODULE__{} = agent) do
     %{agent | panel: PanelState.history_next(agent.panel)}
   end
+
+  # ── Diff review ──────────────────────────────────────────────────────────────
+
+  @doc "Sets the active diff review."
+  @spec set_diff_review(t(), DiffReview.t()) :: t()
+  def set_diff_review(%__MODULE__{} = agent, %DiffReview{} = review) do
+    %{agent | diff_review: review}
+  end
+
+  @doc "Clears the active diff review."
+  @spec clear_diff_review(t()) :: t()
+  def clear_diff_review(%__MODULE__{} = agent) do
+    %{agent | diff_review: nil}
+  end
+
+  @doc "Updates the diff review with the given function."
+  @spec update_diff_review(t(), (DiffReview.t() -> DiffReview.t())) :: t()
+  def update_diff_review(%__MODULE__{diff_review: nil} = agent, _fun), do: agent
+
+  def update_diff_review(%__MODULE__{diff_review: review} = agent, fun)
+      when is_function(fun, 1) do
+    %{agent | diff_review: fun.(review)}
+  end
+
+  # ── Tool approval ──────────────────────────────────────────────────────────
 
   @doc "Sets a pending tool approval."
   @spec set_pending_approval(t(), approval()) :: t()

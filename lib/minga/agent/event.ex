@@ -27,6 +27,7 @@ defmodule Minga.Agent.Event do
           | tool_update()
           | tool_end()
           | tool_approval()
+          | tool_file_changed()
           | error()
 
   @typedoc "Agent has started processing a prompt."
@@ -69,6 +70,14 @@ defmodule Minga.Agent.Event do
           name: String.t(),
           args: map(),
           reply_to: pid()
+        }
+
+  @typedoc "A file-modifying tool captured before/after content for diff review."
+  @type tool_file_changed :: %__MODULE__.ToolFileChanged{
+          tool_call_id: String.t(),
+          path: String.t(),
+          before_content: String.t(),
+          after_content: String.t()
         }
 
   @typedoc "An error occurred in the agent."
@@ -144,6 +153,19 @@ defmodule Minga.Agent.Event do
             name: String.t(),
             args: map(),
             reply_to: pid()
+          }
+  end
+
+  defmodule ToolFileChanged do
+    @moduledoc false
+    @enforce_keys [:tool_call_id, :path, :before_content, :after_content]
+    defstruct [:tool_call_id, :path, :before_content, :after_content]
+
+    @type t :: %__MODULE__{
+            tool_call_id: String.t(),
+            path: String.t(),
+            before_content: String.t(),
+            after_content: String.t()
           }
   end
 

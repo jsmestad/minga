@@ -26,6 +26,7 @@ defmodule Minga.Agent.View.Keys do
   import Bitwise
 
   alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
   alias Minga.Agent.PanelState
@@ -35,6 +36,7 @@ defmodule Minga.Agent.View.Keys do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Git.Diff
   alias Minga.Port.Protocol
 
   @ctrl Protocol.mod_ctrl()
@@ -81,6 +83,39 @@ defmodule Minga.Agent.View.Keys do
       )
       when is_map(node) do
     {:passthrough, state}
+  end
+
+  # ── Diff review keys ─────────────────────────────────────────────────────────
+  # When a diff review is active, intercept y/x/Y/X for accept/reject.
+
+  def handle_key(%{agent: %{diff_review: %DiffReview{}}} = state, ?y, _mods) do
+    state =
+      update_agent(
+        state,
+        &AgentState.update_diff_review(&1, fn r -> DiffReview.accept_current(r) end)
+      )
+
+    {:handled, maybe_finish_review(state)}
+  end
+
+  def handle_key(%{agent: %{diff_review: %DiffReview{} = review}} = state, ?x, _mods) do
+    # Reject current hunk: revert it on disk
+    apply_rejection(state, review)
+  end
+
+  def handle_key(%{agent: %{diff_review: %DiffReview{}}} = state, ?Y, _mods) do
+    state =
+      update_agent(
+        state,
+        &AgentState.update_diff_review(&1, fn r -> DiffReview.accept_all(r) end)
+      )
+
+    {:handled, maybe_finish_review(state)}
+  end
+
+  def handle_key(%{agent: %{diff_review: %DiffReview{} = review}} = state, ?X, _mods) do
+    # Reject all remaining hunks
+    apply_bulk_rejection(state, review)
   end
 
   # When a tool approval is pending, intercept y/n/a/Enter.
@@ -524,7 +559,20 @@ defmodule Minga.Agent.View.Keys do
   # ]m: next message (stubbed until #177 line-to-message mapping)
   defp handle_prefix(state, :bracket_next, ?m, _mods, _context), do: state
 
-  # ]c: next code block (stubbed until #177)
+  # ]c: next diff hunk (when diff review is active), else next code block
+  defp handle_prefix(
+         %{agent: %{diff_review: %DiffReview{} = review}} = state,
+         :bracket_next,
+         ?c,
+         _mods,
+         _context
+       ) do
+    update_agent(
+      state,
+      &AgentState.update_diff_review(&1, fn _ -> DiffReview.next_hunk(review) end)
+    )
+  end
+
   defp handle_prefix(state, :bracket_next, ?c, _mods, _context), do: state
 
   # ]t: next tool call (stubbed until #177)
@@ -541,7 +589,20 @@ defmodule Minga.Agent.View.Keys do
   # [m: prev message (stubbed until #177)
   defp handle_prefix(state, :bracket_prev, ?m, _mods, _context), do: state
 
-  # [c: prev code block (stubbed until #177)
+  # [c: prev diff hunk (when diff review is active), else prev code block
+  defp handle_prefix(
+         %{agent: %{diff_review: %DiffReview{} = review}} = state,
+         :bracket_prev,
+         ?c,
+         _mods,
+         _context
+       ) do
+    update_agent(
+      state,
+      &AgentState.update_diff_review(&1, fn _ -> DiffReview.prev_hunk(review) end)
+    )
+  end
+
   defp handle_prefix(state, :bracket_prev, ?c, _mods, _context), do: state
 
   # [t: prev tool call (stubbed until #177)
@@ -774,5 +835,83 @@ defmodule Minga.Agent.View.Keys do
           EditorState.t()
   defp update_agentic(state, fun) do
     %{state | agentic: fun.(state.agentic)}
+  end
+
+  # ── Diff review helpers ─────────────────────────────────────────────────────
+
+  @spec maybe_finish_review(EditorState.t()) :: EditorState.t()
+  defp maybe_finish_review(state) do
+    case state.agent.diff_review do
+      %DiffReview{} = review ->
+        if DiffReview.resolved?(review) do
+          update_agent(state, &AgentState.clear_diff_review/1)
+        else
+          state
+        end
+
+      nil ->
+        state
+    end
+  end
+
+  @spec apply_rejection(EditorState.t(), DiffReview.t()) :: {:handled, EditorState.t()}
+  defp apply_rejection(state, review) do
+    hunk = DiffReview.current_hunk(review)
+
+    if hunk do
+      # Read current file, revert this hunk, write back
+      case File.read(review.path) do
+        {:ok, content} ->
+          current_lines = String.split(content, "\n")
+          reverted = Diff.revert_hunk(current_lines, hunk)
+          File.write(review.path, Enum.join(reverted, "\n"))
+
+        {:error, _} ->
+          :ok
+      end
+    end
+
+    state =
+      update_agent(
+        state,
+        &AgentState.update_diff_review(&1, fn r -> DiffReview.reject_current(r) end)
+      )
+
+    {:handled, maybe_finish_review(state)}
+  end
+
+  @spec apply_bulk_rejection(EditorState.t(), DiffReview.t()) :: {:handled, EditorState.t()}
+  defp apply_bulk_rejection(state, review) do
+    # Reject all unresolved hunks: revert them in reverse order
+    # (reverse so line numbers stay valid as we modify the file)
+    unresolved_hunks =
+      review.hunks
+      |> Enum.with_index()
+      |> Enum.reject(fn {_hunk, idx} -> Map.has_key?(review.resolutions, idx) end)
+      |> Enum.map(fn {hunk, _idx} -> hunk end)
+      |> Enum.reverse()
+
+    case File.read(review.path) do
+      {:ok, content} ->
+        current_lines = String.split(content, "\n")
+
+        reverted =
+          Enum.reduce(unresolved_hunks, current_lines, fn hunk, lines ->
+            Diff.revert_hunk(lines, hunk)
+          end)
+
+        File.write(review.path, Enum.join(reverted, "\n"))
+
+      {:error, _} ->
+        :ok
+    end
+
+    state =
+      update_agent(
+        state,
+        &AgentState.update_diff_review(&1, fn r -> DiffReview.reject_all(r) end)
+      )
+
+    {:handled, maybe_finish_review(state)}
   end
 end

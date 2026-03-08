@@ -516,6 +516,22 @@ defmodule Minga.Editor do
     {:noreply, schedule_render(state, 50)}
   end
 
+  def handle_info({:agent_event, {:file_changed, path, before_content, after_content}}, state) do
+    alias Minga.Agent.DiffReview
+
+    case DiffReview.new(path, before_content, after_content) do
+      nil ->
+        {:noreply, state}
+
+      review ->
+        state = update_agent(state, &AgentState.set_diff_review(&1, review))
+        # Switch focus to file viewer so the user sees the diff
+        state = %{state | agentic: Minga.Agent.View.State.set_focus(state.agentic, :file_viewer)}
+        state = Renderer.render(state)
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:agent_event, {:approval_pending, approval}}, state) do
     # Strip reply_to before caching (Editor doesn't need the Task pid)
     cached = Map.take(approval, [:tool_call_id, :name, :args])
