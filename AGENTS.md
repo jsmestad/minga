@@ -90,6 +90,29 @@ test/                         # Mirrors lib/ structure
 - **Check your current branch** before starting work: `git branch --show-current`. If you're on `main`, create a branch. If you're on someone else's feature branch, switch to `main` and branch from there.
 - **Push your branch and open a PR** when the work is ready. CI must pass before merging.
 
+### Git Worktrees (trial)
+
+We're trying git worktrees so multiple agents can work on different features at the same time. **The user is new to worktrees, so walk them through every step.** Don't assume they know the commands.
+
+When starting a new feature, offer to use a worktree:
+
+> "Want me to set this up as a worktree so you can keep working on other things in the main checkout? I'll walk you through it."
+
+If they say yes:
+
+1. Create the worktree directory and branch:
+   ```bash
+   git worktree add ../minga-worktrees/<branch-name> -b <branch-name>
+   ```
+2. Tell the user to point the next agent session at `../minga-worktrees/<branch-name>` as its working directory.
+3. Remind them the first build will be slower (cold `_build` and `deps` cache).
+
+When a feature is done and the PR is merged:
+1. Clean up: `git worktree remove ../minga-worktrees/<branch-name>`
+2. Prune stale refs: `git worktree prune`
+
+**After the first worktree experience, ask the user:** "How did the worktree workflow feel? Worth keeping, or would you rather go back to one branch at a time?" Update this section based on their answer.
+
 ## Iterative Fixes (especially TUI/rendering)
 
 When a fix improves visible behavior (user confirms it's better), **commit it and stop**. Do not immediately try to "refine" or "optimize" the fix in the same session. The TUI rendering pipeline has race conditions between the BEAM, the Zig Port, and the physical terminal that are impossible to fully reason about without seeing real output. What looks like an obvious improvement in theory (e.g., "skip the stale frame") can make things worse because your mental model of the frame ordering is wrong.
