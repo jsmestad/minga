@@ -118,8 +118,14 @@ final class MetalRenderer {
 
             var gpu = CellGPU()
             gpu.gridPos = SIMD2<Float>(Float(col), Float(row))
-            gpu.bgColor = colorFromU24(cell.bg, default: SIMD3<Float>(0.12, 0.12, 0.14))
-            gpu.fgColor = colorFromU24(cell.fg, default: SIMD3<Float>(1, 1, 1))
+
+            let isReverse = (cell.attrs & ATTR_REVERSE) != 0
+            let defaultFg = SIMD3<Float>(1, 1, 1)
+            let defaultBg = SIMD3<Float>(0.12, 0.12, 0.14)
+            let fg = colorFromU24(cell.fg, default: defaultFg)
+            let bg = colorFromU24(cell.bg, default: defaultBg)
+            gpu.fgColor = isReverse ? bg : fg
+            gpu.bgColor = isReverse ? fg : bg
 
             // Look up glyph if cell has content.
             if !cell.grapheme.isEmpty, cell.grapheme != " " {
