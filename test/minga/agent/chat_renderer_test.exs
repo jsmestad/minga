@@ -19,8 +19,74 @@ defmodule Minga.Agent.ChatRendererTest do
       usage: %{input: 0, output: 0, cost: 0.0},
       model_name: "claude-sonnet-4",
       thinking_level: "medium",
+      auto_scroll: Keyword.get(opts, :auto_scroll, true),
       error_message: nil
     }
+  end
+
+  describe "auto-scroll indicator" do
+    test "shows ↓ new indicator when auto-scroll disengaged and streaming with content below" do
+      # Generate enough content to overflow a small viewport
+      long_text = Enum.map_join(1..20, "\n", fn i -> "Line #{i} of the response" end)
+      messages = [{:assistant, long_text}]
+
+      rect = {0, 0, 40, 10}
+
+      p =
+        panel(
+          messages: messages,
+          status: :thinking,
+          auto_scroll: false,
+          scroll_offset: 0
+        )
+
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
+
+      assert has_indicator,
+             "expected ↓ new indicator when auto-scroll disengaged during streaming"
+    end
+
+    test "does not show indicator when auto-scroll is engaged" do
+      long_text = Enum.map_join(1..20, "\n", fn i -> "Line #{i}" end)
+      messages = [{:assistant, long_text}]
+
+      rect = {0, 0, 40, 10}
+      p = panel(messages: messages, status: :thinking, auto_scroll: true, scroll_offset: 0)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
+      refute has_indicator, "should not show indicator when auto-scroll is engaged"
+    end
+
+    test "does not show indicator when status is idle" do
+      long_text = Enum.map_join(1..20, "\n", fn i -> "Line #{i}" end)
+      messages = [{:assistant, long_text}]
+
+      rect = {0, 0, 40, 10}
+      p = panel(messages: messages, status: :idle, auto_scroll: false, scroll_offset: 0)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
+      refute has_indicator, "should not show indicator when idle"
+    end
+
+    test "does not show indicator when at the bottom of content" do
+      # Short content that fits in viewport
+      messages = [{:assistant, "Short message"}]
+
+      rect = {0, 0, 40, 10}
+      p = panel(messages: messages, status: :thinking, auto_scroll: false, scroll_offset: 0)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
+      refute has_indicator, "should not show indicator when all content is visible"
+    end
   end
 
   describe "word wrapping in messages" do

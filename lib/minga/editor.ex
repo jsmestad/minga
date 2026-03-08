@@ -474,6 +474,13 @@ defmodule Minga.Editor do
         :tool_executing -> state
       end
 
+    # Re-engage auto-scroll when a new agent turn starts (thinking)
+    state =
+      case status do
+        :thinking -> update_agent(state, &AgentState.engage_auto_scroll/1)
+        _ -> state
+      end
+
     # Start/stop spinner timer based on status
     state =
       case status do
@@ -489,21 +496,23 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:agent_event, {:text_delta, _delta}}, state) do
-    state = update_agent(state, &AgentState.scroll_to_bottom/1)
+    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     {:noreply, schedule_render(state, 16)}
   end
 
   def handle_info({:agent_event, {:thinking_delta, _delta}}, state) do
+    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     {:noreply, schedule_render(state, 50)}
   end
 
   def handle_info({:agent_event, :messages_changed}, state) do
-    state = update_agent(state, &AgentState.scroll_to_bottom/1)
+    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     state = sync_agent_buffer(state)
     {:noreply, schedule_render(state, 16)}
   end
 
   def handle_info({:agent_event, {:tool_update, _id}}, state) do
+    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     {:noreply, schedule_render(state, 50)}
   end
 

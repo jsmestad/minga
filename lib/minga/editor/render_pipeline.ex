@@ -1514,6 +1514,7 @@ defmodule Minga.Editor.RenderPipeline do
       usage: usage,
       model_name: agent.panel.model_name,
       thinking_level: agent.panel.thinking_level,
+      auto_scroll: agent.panel.auto_scroll,
       error_message: agent.error
     }
 

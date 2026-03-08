@@ -232,7 +232,8 @@ defmodule Minga.Agent.View.RendererTest do
           scroll_offset: 0,
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
-          thinking_level: "medium"
+          thinking_level: "medium",
+          auto_scroll: true
         },
         agentic: %{
           chat_width_pct: 65,
@@ -264,7 +265,8 @@ defmodule Minga.Agent.View.RendererTest do
           scroll_offset: 0,
           spinner_frame: 3,
           model_name: "claude-sonnet-4",
-          thinking_level: "medium"
+          thinking_level: "medium",
+          auto_scroll: true
         },
         agentic: %{
           chat_width_pct: 65,

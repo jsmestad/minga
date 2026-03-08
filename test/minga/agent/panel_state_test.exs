@@ -81,6 +81,63 @@ defmodule Minga.Agent.PanelStateTest do
     end
   end
 
+  describe "auto-scroll" do
+    test "starts engaged" do
+      panel = PanelState.new()
+      assert panel.auto_scroll
+    end
+
+    test "scroll_up disengages auto-scroll" do
+      panel = PanelState.new() |> PanelState.scroll_up(5)
+      refute panel.auto_scroll
+    end
+
+    test "scroll_down disengages auto-scroll" do
+      panel = PanelState.new() |> PanelState.scroll_down(5)
+      refute panel.auto_scroll
+    end
+
+    test "scroll_to_top disengages auto-scroll" do
+      panel = PanelState.new() |> PanelState.scroll_to_top()
+      refute panel.auto_scroll
+    end
+
+    test "scroll_to_bottom re-engages auto-scroll" do
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_up(5)
+        |> PanelState.scroll_to_bottom()
+
+      assert panel.auto_scroll
+    end
+
+    test "maybe_auto_scroll scrolls to bottom when engaged" do
+      panel = PanelState.new() |> PanelState.maybe_auto_scroll()
+      assert panel.scroll_offset == 999_999
+      assert panel.auto_scroll
+    end
+
+    test "maybe_auto_scroll is a no-op when disengaged" do
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_down(50)
+        |> PanelState.maybe_auto_scroll()
+
+      assert panel.scroll_offset == 50
+      refute panel.auto_scroll
+    end
+
+    test "engage_auto_scroll re-engages and scrolls to bottom" do
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_up(5)
+        |> PanelState.engage_auto_scroll()
+
+      assert panel.auto_scroll
+      assert panel.scroll_offset == 999_999
+    end
+  end
+
   describe "spinner" do
     test "tick_spinner increments frame" do
       panel = PanelState.new() |> PanelState.tick_spinner() |> PanelState.tick_spinner()

@@ -70,28 +70,40 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.set_input_focused(agent.panel, focused)}
   end
 
-  @doc "Scrolls the chat to the bottom."
+  @doc "Scrolls the chat to the bottom and re-engages auto-scroll."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = agent) do
     %{agent | panel: PanelState.scroll_to_bottom(agent.panel)}
   end
 
-  @doc "Scrolls the chat to the top."
+  @doc "Scrolls the chat to the top. Disengages auto-scroll."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = agent) do
     %{agent | panel: PanelState.scroll_to_top(agent.panel)}
   end
 
-  @doc "Scrolls the chat up by `amount` lines."
+  @doc "Scrolls the chat up by `amount` lines. Disengages auto-scroll."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{} = agent, amount) do
     %{agent | panel: PanelState.scroll_up(agent.panel, amount)}
   end
 
-  @doc "Scrolls the chat down by `amount` lines."
+  @doc "Scrolls the chat down by `amount` lines. Disengages auto-scroll."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{} = agent, amount) do
     %{agent | panel: PanelState.scroll_down(agent.panel, amount)}
+  end
+
+  @doc "Scrolls to bottom only if auto-scroll is engaged."
+  @spec maybe_auto_scroll(t()) :: t()
+  def maybe_auto_scroll(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.maybe_auto_scroll(agent.panel)}
+  end
+
+  @doc "Re-engages auto-scroll and scrolls to bottom (e.g., new agent turn)."
+  @spec engage_auto_scroll(t()) :: t()
+  def engage_auto_scroll(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.engage_auto_scroll(agent.panel)}
   end
 
   @doc "Advances the spinner animation frame."

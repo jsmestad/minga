@@ -19,7 +19,8 @@ defmodule Minga.Agent.PanelState do
           provider_name: String.t(),
           model_name: String.t(),
           thinking_level: thinking_level(),
-          input_focused: boolean()
+          input_focused: boolean(),
+          auto_scroll: boolean()
         }
 
   @enforce_keys []
@@ -30,7 +31,8 @@ defmodule Minga.Agent.PanelState do
             provider_name: "anthropic",
             model_name: "claude-sonnet-4",
             thinking_level: "medium",
-            input_focused: false
+            input_focused: false,
+            auto_scroll: true
 
   @doc "Creates a new panel state."
   @spec new() :: t()
@@ -70,28 +72,44 @@ defmodule Minga.Agent.PanelState do
     %{state | input_text: ""}
   end
 
-  @doc "Scrolls the content up by the given number of lines."
+  @doc "Scrolls the content up by the given number of lines. Disengages auto-scroll."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{} = state, amount) do
-    %{state | scroll_offset: max(state.scroll_offset - amount, 0)}
+    %{state | scroll_offset: max(state.scroll_offset - amount, 0), auto_scroll: false}
   end
 
-  @doc "Scrolls the content down by the given number of lines."
+  @doc "Scrolls the content down by the given number of lines. Disengages auto-scroll."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{} = state, amount) do
-    %{state | scroll_offset: state.scroll_offset + amount}
+    %{state | scroll_offset: state.scroll_offset + amount, auto_scroll: false}
   end
 
-  @doc "Auto-scrolls to the bottom (sets offset to a large number; renderer clamps it)."
+  @doc "Scrolls to the bottom and re-engages auto-scroll."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = state) do
-    %{state | scroll_offset: 999_999}
+    %{state | scroll_offset: 999_999, auto_scroll: true}
   end
 
-  @doc "Scrolls to the top of the chat."
+  @doc "Scrolls to the top of the chat. Disengages auto-scroll."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = state) do
-    %{state | scroll_offset: 0}
+    %{state | scroll_offset: 0, auto_scroll: false}
+  end
+
+  @doc """
+  Scrolls to the bottom only if auto-scroll is engaged.
+
+  Called by event handlers when new streaming content arrives. No-ops if the
+  user has manually scrolled away from the bottom.
+  """
+  @spec maybe_auto_scroll(t()) :: t()
+  def maybe_auto_scroll(%__MODULE__{auto_scroll: true} = state), do: scroll_to_bottom(state)
+  def maybe_auto_scroll(%__MODULE__{} = state), do: state
+
+  @doc "Re-engages auto-scroll (e.g., on new agent turn start)."
+  @spec engage_auto_scroll(t()) :: t()
+  def engage_auto_scroll(%__MODULE__{} = state) do
+    scroll_to_bottom(%{state | auto_scroll: true})
   end
 
   @doc "Sets the input focus state."

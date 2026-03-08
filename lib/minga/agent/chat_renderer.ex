@@ -29,7 +29,8 @@ defmodule Minga.Agent.ChatRenderer do
           usage: map(),
           model_name: String.t(),
           thinking_level: String.t(),
-          error_message: String.t() | nil
+          error_message: String.t() | nil,
+          auto_scroll: boolean()
         }
 
   @spinner_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -190,7 +191,27 @@ defmodule Minga.Agent.ChatRenderer do
         cmds
       end
 
-    cmds
+    # "↓ new" indicator when auto-scroll is disengaged and content is below viewport
+    has_content_below = scroll + content_height < total
+    auto_scroll = Map.get(panel, :auto_scroll, true)
+    is_streaming = panel.status in [:thinking, :tool_executing]
+
+    if not auto_scroll and has_content_below and is_streaming do
+      indicator_row = row_start + content_height - 1
+      label = " ↓ new "
+      indicator_col = col + width - String.length(label)
+
+      [
+        DisplayList.draw(indicator_row, indicator_col, label,
+          fg: at.panel_bg,
+          bg: at.assistant_label,
+          bold: true
+        )
+        | cmds
+      ]
+    else
+      cmds
+    end
   end
 
   # ── Input area ──────────────────────────────────────────────────────────────
