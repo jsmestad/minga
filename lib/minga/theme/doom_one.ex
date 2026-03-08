@@ -107,7 +107,7 @@ defmodule Minga.Theme.DoomOne do
         separator_fg: @base5
       },
       agent: %Minga.Theme.Agent{
-        panel_bg: @base3,
+        panel_bg: @bg,
         panel_border: @base5,
         header_fg: @blue,
         header_bg: 0x1E2127,
