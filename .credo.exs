@@ -50,7 +50,7 @@
 
           # ── Refactor ───────────────────────────────────────────────────────
           {Credo.Check.Refactor.Apply, []},
-          {Credo.Check.Refactor.AppendSingleItem, []},
+          {Credo.Check.Refactor.AppendSingleItem, false},
           {Credo.Check.Refactor.CondStatements, []},
           {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 12]},
           {Credo.Check.Refactor.DoubleBooleanNegation, []},

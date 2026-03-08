@@ -322,7 +322,7 @@ defmodule Minga.Agent.ChatRenderer do
       indicator =
         {[{"  #{char} Thinking...", [fg: at.thinking_fg, italic: true]}], :text, at.panel_bg}
 
-      Enum.reverse([indicator | Enum.reverse(lines)])
+      lines ++ [indicator]
     else
       lines
     end
@@ -524,7 +524,7 @@ defmodule Minga.Agent.ChatRenderer do
       segments
     else
       indicator = {"→", [fg: at.panel_border, bg: at.code_bg]}
-      Enum.reverse([indicator | Enum.reverse(truncate_segments(segments, max_width - 1))])
+      truncate_segments(segments, max_width - 1) ++ [indicator]
     end
   end
 

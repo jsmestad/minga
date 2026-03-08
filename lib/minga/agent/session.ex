@@ -183,7 +183,7 @@ defmodule Minga.Agent.Session do
 
   def handle_call({:send_prompt, text}, _from, state) do
     # Add user message to conversation
-    state = %{state | messages: Enum.reverse([Message.user(text) | Enum.reverse(state.messages)])}
+    state = %{state | messages: state.messages ++ [Message.user(text)]}
 
     case state.provider_module.send_prompt(state.provider, text) do
       :ok ->
@@ -403,7 +403,7 @@ defmodule Minga.Agent.Session do
               cache_write: state.total_usage.cache_write + usage.cache_write,
               cost: state.total_usage.cost + usage.cost
             },
-            messages: Enum.reverse([Message.usage(usage) | Enum.reverse(state.messages)])
+            messages: state.messages ++ [Message.usage(usage)]
         }
       else
         state
@@ -430,7 +430,7 @@ defmodule Minga.Agent.Session do
 
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
-    state = %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
+    state = %{state | messages: state.messages ++ [msg]}
     state = set_status(state, :tool_executing)
     broadcast(state, :messages_changed)
     state
@@ -486,7 +486,7 @@ defmodule Minga.Agent.Session do
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
     msg = Message.system(text, level)
-    %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
+    %{state | messages: state.messages ++ [msg]}
   end
 
   @spec append_to_last_assistant([Message.t()], String.t()) :: [Message.t()]
@@ -496,7 +496,7 @@ defmodule Minga.Agent.Session do
         List.replace_at(messages, length(messages) - 1, {:assistant, text <> delta})
 
       _ ->
-        Enum.reverse([Message.assistant(delta) | Enum.reverse(messages)])
+        messages ++ [Message.assistant(delta)]
     end
   end
 
@@ -515,7 +515,7 @@ defmodule Minga.Agent.Session do
         List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta, false})
 
       _ ->
-        Enum.reverse([Message.thinking(delta) | Enum.reverse(messages)])
+        messages ++ [Message.thinking(delta)]
     end
   end
 
