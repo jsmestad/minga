@@ -30,6 +30,7 @@ defmodule Minga.Agent.View.Preview do
           | {:shell, command :: String.t(), output :: String.t(), shell_status()}
           | {:diff, DiffReview.t()}
           | {:file, path :: String.t(), content :: String.t()}
+          | {:directory, path :: String.t(), entries :: [String.t()]}
 
   @typedoc "Preview pane state."
   @type t :: %__MODULE__{
@@ -107,6 +108,12 @@ defmodule Minga.Agent.View.Preview do
     %{preview | content: {:file, path, content}, scroll_offset: 0, auto_follow: true}
   end
 
+  @doc "Sets the preview to show a directory listing."
+  @spec set_directory(t(), String.t(), [String.t()]) :: t()
+  def set_directory(%__MODULE__{} = preview, path, entries) when is_list(entries) do
+    %{preview | content: {:directory, path, entries}, scroll_offset: 0, auto_follow: true}
+  end
+
   @doc "Clears the preview to empty state."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = preview) do
@@ -155,6 +162,11 @@ defmodule Minga.Agent.View.Preview do
   @spec shell?(t()) :: boolean()
   def shell?(%__MODULE__{content: {:shell, _, _, _}}), do: true
   def shell?(%__MODULE__{}), do: false
+
+  @doc "Returns true if the preview is showing a directory listing."
+  @spec directory?(t()) :: boolean()
+  def directory?(%__MODULE__{content: {:directory, _, _}}), do: true
+  def directory?(%__MODULE__{}), do: false
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

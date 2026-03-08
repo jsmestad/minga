@@ -156,6 +156,22 @@ defmodule Minga.Agent.View.PreviewTest do
     end
   end
 
+  describe "directory content" do
+    test "set_directory transitions to directory state" do
+      p = Preview.new() |> Preview.set_directory("lib/", ["foo.ex", "bar/"])
+      assert {:directory, "lib/", ["foo.ex", "bar/"]} = p.content
+    end
+
+    test "directory? returns true for directory preview" do
+      p = Preview.new() |> Preview.set_directory(".", ["a.ex"])
+      assert Preview.directory?(p)
+    end
+
+    test "directory? returns false for other content" do
+      refute Preview.directory?(Preview.new())
+    end
+  end
+
   describe "transitions" do
     test "shell -> diff transition works" do
       p = Preview.new() |> Preview.set_shell("mix test")

@@ -556,6 +556,26 @@ defmodule Minga.Editor do
     end
   end
 
+  # List directory: show directory listing in preview pane
+  def handle_info({:agent_event, {:tool_started, "list_directory", args}}, state) do
+    path = Map.get(args, "path", ".")
+    state = update_preview(state, &Preview.set_directory(&1, path, []))
+    {:noreply, schedule_render(state, 16)}
+  end
+
+  def handle_info({:agent_event, {:tool_ended, "list_directory", result, _status}}, state) do
+    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+
+    case state.agentic.preview.content do
+      {:directory, path, _} ->
+        state = update_preview(state, &Preview.set_directory(&1, path, entries))
+        {:noreply, schedule_render(state, 16)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   # Other tool starts/ends: no preview change
   def handle_info({:agent_event, {:tool_started, _name, _args}}, state) do
     {:noreply, state}

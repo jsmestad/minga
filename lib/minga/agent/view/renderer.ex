@@ -24,6 +24,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Agent.DiffRenderer
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
+  alias Minga.Agent.View.DirectoryRenderer
   alias Minga.Agent.View.Help
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.ShellRenderer
@@ -414,6 +415,14 @@ defmodule Minga.Agent.View.Renderer do
          {row_off, col_off, width, height}
        ) do
     render_file_preview(input, path, content, scroll, {row_off, col_off, width, height})
+  end
+
+  defp render_preview(
+         %{preview: %Preview{content: {:directory, path, entries}, scroll_offset: scroll}} =
+           input,
+         rect
+       ) do
+    DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
   end
 
   defp render_preview(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
