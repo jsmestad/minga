@@ -7,10 +7,12 @@ defmodule Minga.Editor.Renderer.Gutter do
   2. **Line numbers** (variable width) — absolute, relative, or hybrid
 
   The sign column is always present when diagnostics exist for the buffer.
+
+  All render functions return `DisplayList.draw()` tuples (or `[]`).
   """
 
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.Port.Protocol
+  alias Minga.Editor.DisplayList
 
   @sign_col_width 2
 
@@ -42,7 +44,7 @@ defmodule Minga.Editor.Renderer.Gutter do
   Renders the sign column for a line.
 
   Diagnostics take priority over git signs. If no diagnostic exists for
-  the line, a git sign is shown instead. Returns a draw command or empty list.
+  the line, a git sign is shown instead. Returns a draw tuple or empty list.
   """
   @spec render_sign(
           non_neg_integer(),
@@ -52,7 +54,7 @@ defmodule Minga.Editor.Renderer.Gutter do
           %{non_neg_integer() => atom()},
           colors(),
           git_colors()
-        ) :: binary() | []
+        ) :: DisplayList.draw() | []
   def render_sign(screen_row, col_offset, buf_line, diag_signs, git_signs, colors, git_colors) do
     case Map.get(diag_signs, buf_line) do
       nil ->
@@ -60,7 +62,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
       severity ->
         {icon, fg} = sign_for_severity(severity, colors)
-        Protocol.encode_draw(screen_row, col_offset, icon, fg: fg)
+        DisplayList.draw(screen_row, col_offset, icon, fg: fg)
     end
   end
 
@@ -73,7 +75,7 @@ defmodule Minga.Editor.Renderer.Gutter do
           non_neg_integer(),
           line_number_style(),
           colors()
-        ) :: binary() | []
+        ) :: DisplayList.draw() | []
   def render_number(_screen_row, _col_offset, _buf_line, _cursor_line, 0, :none, _colors),
     do: []
 
@@ -82,7 +84,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
     num_str = Integer.to_string(number)
     padded = String.pad_leading(num_str, line_number_w - 1)
-    Protocol.encode_draw(screen_row, col_offset, padded, fg: fg)
+    DisplayList.draw(screen_row, col_offset, padded, fg: fg)
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -93,20 +95,20 @@ defmodule Minga.Editor.Renderer.Gutter do
           non_neg_integer(),
           %{non_neg_integer() => atom()},
           git_colors()
-        ) :: binary() | []
+        ) :: DisplayList.draw() | []
   defp render_git_sign(screen_row, col_offset, buf_line, git_signs, git_colors) do
     case Map.get(git_signs, buf_line) do
       nil ->
-        Protocol.encode_draw(screen_row, col_offset, "  ")
+        DisplayList.draw(screen_row, col_offset, "  ")
 
       :added ->
-        Protocol.encode_draw(screen_row, col_offset, "▎ ", fg: git_colors.added_fg)
+        DisplayList.draw(screen_row, col_offset, "▎ ", fg: git_colors.added_fg)
 
       :modified ->
-        Protocol.encode_draw(screen_row, col_offset, "▎ ", fg: git_colors.modified_fg)
+        DisplayList.draw(screen_row, col_offset, "▎ ", fg: git_colors.modified_fg)
 
       :deleted ->
-        Protocol.encode_draw(screen_row, col_offset, "▁ ", fg: git_colors.deleted_fg)
+        DisplayList.draw(screen_row, col_offset, "▁ ", fg: git_colors.deleted_fg)
     end
   end
 

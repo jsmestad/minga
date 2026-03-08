@@ -45,43 +45,43 @@ defmodule Minga.Editor.Renderer.GutterTest do
     test "renders error sign (diagnostic takes priority)" do
       diag_signs = %{5 => :error}
       result = Gutter.render_sign(0, 0, 5, diag_signs, %{}, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders warning sign" do
       diag_signs = %{3 => :warning}
       result = Gutter.render_sign(0, 0, 3, diag_signs, %{}, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders info sign" do
       diag_signs = %{1 => :info}
       result = Gutter.render_sign(0, 0, 1, diag_signs, %{}, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders hint sign" do
       diag_signs = %{0 => :hint}
       result = Gutter.render_sign(0, 0, 0, diag_signs, %{}, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders git added sign when no diagnostic" do
       git_signs = %{5 => :added}
       result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders git modified sign when no diagnostic" do
       git_signs = %{5 => :modified}
       result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders git deleted sign when no diagnostic" do
       git_signs = %{5 => :deleted}
       result = Gutter.render_sign(0, 0, 5, %{}, git_signs, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "diagnostic takes priority over git sign on same line" do
@@ -89,20 +89,20 @@ defmodule Minga.Editor.Renderer.GutterTest do
       git_signs = %{5 => :added}
       result = Gutter.render_sign(0, 0, 5, diag_signs, git_signs, @colors, @git_colors)
       # Should render the diagnostic sign, not the git sign
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "renders empty space when no diagnostic or git sign" do
       diag_signs = %{5 => :error}
       result = Gutter.render_sign(0, 0, 10, diag_signs, %{}, @colors, @git_colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
   end
 
   describe "render_number/7" do
     test "renders line number with col_offset" do
       result = Gutter.render_number(0, 2, 5, 5, 4, :hybrid, @colors)
-      assert is_binary(result)
+      assert is_tuple(result)
     end
 
     test "returns empty for :none style with zero width" do

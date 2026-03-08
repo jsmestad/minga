@@ -7,16 +7,21 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
 
   # ── Test helpers ──────────────────────────────────────────────────────────
 
-  # Decodes a draw command binary into a map for easy assertion.
-  defp decode_draw(
-         <<0x10, row::16, col::16, fg::24, bg::24, attrs::8, len::16, text::binary-size(len)>>
-       ) do
-    %{row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text}
+  # Converts a DisplayList draw tuple into a map for easy assertion.
+  defp decode_draw({row, col, text, style}) do
+    %{
+      row: row,
+      col: col,
+      text: text,
+      fg: Keyword.get(style, :fg, 0xFFFFFF),
+      bg: Keyword.get(style, :bg, 0x000000),
+      attrs: style
+    }
   end
 
   defp decode_draw(other), do: {:unknown, other}
 
-  # Decode all commands, filtering to draw commands only.
+  # Decode all draw tuples, filtering to maps only.
   defp decode_all(cmds) do
     cmds
     |> List.flatten()

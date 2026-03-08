@@ -17,18 +17,19 @@ defmodule Minga.Agent.View.Renderer do
   of its rect showing the filename.
 
   Called by `Minga.Editor.Renderer` when `state.agentic.active` is true.
+  Returns `DisplayList.draw()` tuples.
   """
 
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.Session
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.Modeline
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
-  alias Minga.Port.Protocol
   alias Minga.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
@@ -42,12 +43,12 @@ defmodule Minga.Agent.View.Renderer do
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
-  Renders the full-screen agentic view and returns a flat list of draw commands.
+  Renders the full-screen agentic view and returns a flat list of draw tuples.
 
-  The caller (Renderer.render_agentic/1) prepends a clear command and appends
-  the cursor, cursor-shape, and batch-end commands before sending.
+  The caller (Renderer.render_agentic/1) assembles these into a frame
+  and converts to protocol commands.
   """
-  @spec render(state()) :: [binary()]
+  @spec render(state()) :: [DisplayList.draw()]
   def render(state) do
     cols = state.viewport.cols
     rows = state.viewport.rows
@@ -114,7 +115,7 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Title bar ───────────────────────────────────────────────────────────────
 
-  @spec render_title_bar(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  @spec render_title_bar(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
   defp render_title_bar(state, row, cols) do
     at = Theme.agent_theme(state.theme)
     panel = state.agent.panel
@@ -167,11 +168,11 @@ defmodule Minga.Agent.View.Renderer do
     bar_text = String.slice(bar_text, 0, cols) |> String.pad_trailing(cols)
 
     [
-      Protocol.encode_draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
+      DisplayList.draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
       # Re-draw the status icon with its color
-      Protocol.encode_draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
+      DisplayList.draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
       # Re-draw the center title with emphasis
-      Protocol.encode_draw(row, center_start, center,
+      DisplayList.draw(row, center_start, center,
         fg: at.header_fg,
         bg: at.header_bg,
         bold: true
@@ -181,7 +182,7 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Chat panel (messages only) ──────────────────────────────────────────────
 
-  @spec render_chat(state(), rect()) :: [binary()]
+  @spec render_chat(state(), rect()) :: [DisplayList.draw()]
   defp render_chat(state, rect) do
     agent = state.agent
 
@@ -216,23 +217,23 @@ defmodule Minga.Agent.View.Renderer do
   # ── Vertical separator ──────────────────────────────────────────────────────
 
   @spec render_separator(non_neg_integer(), non_neg_integer(), pos_integer(), Theme.t()) ::
-          [binary()]
+          [DisplayList.draw()]
   defp render_separator(col, start_row, height, theme) do
     at = Theme.agent_theme(theme)
 
     for row <- start_row..(start_row + height - 1) do
-      Protocol.encode_draw(row, col, "│", fg: at.panel_border, bg: at.panel_bg)
+      DisplayList.draw(row, col, "│", fg: at.panel_border, bg: at.panel_bg)
     end
   end
 
   # ── File viewer panel ───────────────────────────────────────────────────────
 
-  @spec render_file_viewer(state(), rect()) :: [binary()]
+  @spec render_file_viewer(state(), rect()) :: [DisplayList.draw()]
   defp render_file_viewer(%{buffers: %{active: nil}}, {row_off, col_off, width, height}) do
     blank = String.duplicate(" ", width)
 
     for row <- 0..(height - 1) do
-      Protocol.encode_draw(row_off + row, col_off, blank)
+      DisplayList.draw(row_off + row, col_off, blank)
     end
   end
 
@@ -309,7 +310,7 @@ defmodule Minga.Agent.View.Renderer do
         tilde_end = content_start + content_rows - 1
 
         for r <- tilde_start..tilde_end do
-          Protocol.encode_draw(r, abs_content_col, "~", fg: state.theme.editor.tilde_fg)
+          DisplayList.draw(r, abs_content_col, "~", fg: state.theme.editor.tilde_fg)
         end
       else
         []
@@ -321,14 +322,14 @@ defmodule Minga.Agent.View.Renderer do
     header_text = String.pad_trailing(" 📄 #{file_name}", width)
 
     header_cmd =
-      Protocol.encode_draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
+      DisplayList.draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
 
     [header_cmd | gutter_cmds] ++ line_cmds ++ tilde_cmds
   end
 
   # ── Full-width input area ───────────────────────────────────────────────────
 
-  @spec render_input(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  @spec render_input(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
   defp render_input(state, row, cols) do
     at = Theme.agent_theme(state.theme)
     panel = state.agent.panel
@@ -337,12 +338,12 @@ defmodule Minga.Agent.View.Renderer do
     label = "─── Prompt "
     border_rest = String.duplicate("─", max(cols - String.length(label), 0))
     border = label <> border_rest
-    border_cmd = Protocol.encode_draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
+    border_cmd = DisplayList.draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
 
     # Input text row (full width)
     input_row = row + 1
     blank = String.duplicate(" ", cols)
-    blank_cmd = Protocol.encode_draw(input_row, 0, blank, bg: at.input_bg)
+    blank_cmd = DisplayList.draw(input_row, 0, blank, bg: at.input_bg)
 
     {text, fg} =
       if panel.input_text == "" do
@@ -352,17 +353,17 @@ defmodule Minga.Agent.View.Renderer do
       end
 
     text = String.slice(text, 0, cols)
-    text_cmd = Protocol.encode_draw(input_row, 0, text, fg: fg, bg: at.input_bg)
+    text_cmd = DisplayList.draw(input_row, 0, text, fg: fg, bg: at.input_bg)
 
     # Bottom padding row
-    pad_cmd = Protocol.encode_draw(row + 2, 0, blank, bg: at.input_bg)
+    pad_cmd = DisplayList.draw(row + 2, 0, blank, bg: at.input_bg)
 
     [border_cmd, blank_cmd, text_cmd, pad_cmd]
   end
 
   # ── Modeline ────────────────────────────────────────────────────────────────
 
-  @spec render_modeline(state(), non_neg_integer(), pos_integer()) :: [binary()]
+  @spec render_modeline(state(), non_neg_integer(), pos_integer()) :: [DisplayList.draw()]
   defp render_modeline(state, row, cols) do
     Modeline.render(
       row,

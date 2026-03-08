@@ -14,14 +14,16 @@ defmodule Minga.Editor.Renderer.BufferLine do
   visual row passes through `LineRenderer.render` with a per-row
   context where `viewport.left` is set to the visual row's display
   column offset, reusing the existing horizontal-scroll clipping.
+
+  All render functions return `DisplayList.draw()` tuples.
   """
 
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
-  alias Minga.Port.Protocol
 
   @typedoc """
   Per-line values that vary across lines in a render pass.
@@ -59,11 +61,13 @@ defmodule Minga.Editor.Renderer.BufferLine do
   @doc """
   Renders one logical buffer line to screen rows.
 
-  Returns `{gutter_commands, content_commands, rows_consumed}`.
+  Returns `{gutter_draws, content_draws, rows_consumed}`.
   For non-wrapped lines, `rows_consumed` is always 1. For wrapped
   lines, it equals the number of visual rows produced.
+
+  All draws are `DisplayList.draw()` tuples.
   """
-  @spec render(line_params()) :: {[binary()], [binary()], pos_integer()}
+  @spec render(line_params()) :: {[DisplayList.draw()], [DisplayList.draw()], pos_integer()}
   def render(%{wrap_entry: nil} = p) do
     {g_cmds, c_cmds} = render_single_row(p)
     {g_cmds, c_cmds, 1}
@@ -75,7 +79,8 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   # ── Single row (no wrap) ─────────────────────────────────────────────────
 
-  @spec render_single_row(line_params()) :: {[binary()], [binary()]}
+  @spec render_single_row(line_params()) ::
+          {[DisplayList.draw()], [DisplayList.draw()]}
   defp render_single_row(p) do
     sr = p.screen_row
 
@@ -93,7 +98,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   # ── Wrapped rows ─────────────────────────────────────────────────────────
 
   @spec render_wrapped_rows(line_params(), WrapMap.wrap_entry()) ::
-          {[binary()], [binary()], pos_integer()}
+          {[DisplayList.draw()], [DisplayList.draw()], pos_integer()}
   defp render_wrapped_rows(p, visual_rows) do
     {g_acc, c_acc, sr} =
       Enum.reduce_while(visual_rows, {[], [], p.screen_row}, fn vrow, {g, c, sr} ->
@@ -110,7 +115,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   end
 
   @spec render_visual_row(line_params(), WrapMap.visual_row(), non_neg_integer(), boolean()) ::
-          {[binary()], [binary()]}
+          {[DisplayList.draw()], [DisplayList.draw()]}
   defp render_visual_row(p, vrow, sr, is_first) do
     # Gutter: sign + number on first row; blank gutter on continuations.
     sign_cmd = if is_first, do: render_sign(p, sr), else: []
@@ -131,7 +136,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   # ── Gutter primitives ───────────────────────────────────────────────────
 
-  @spec render_sign(line_params(), non_neg_integer()) :: binary() | []
+  @spec render_sign(line_params(), non_neg_integer()) :: DisplayList.draw() | []
   defp render_sign(%{ctx: ctx, buf_line: buf_line}, sr) do
     if ctx.has_sign_column do
       Gutter.render_sign(
@@ -148,7 +153,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
     end
   end
 
-  @spec render_number(line_params(), non_neg_integer()) :: binary() | []
+  @spec render_number(line_params(), non_neg_integer()) :: DisplayList.draw() | []
   defp render_number(p, sr) do
     Gutter.render_number(
       sr,
@@ -161,17 +166,21 @@ defmodule Minga.Editor.Renderer.BufferLine do
     )
   end
 
-  @spec render_blank_gutter(line_params(), non_neg_integer()) :: binary()
+  @spec render_blank_gutter(line_params(), non_neg_integer()) :: DisplayList.draw()
   defp render_blank_gutter(p, sr) do
-    Protocol.encode_draw(sr, p.sign_w, String.duplicate(" ", max(p.gutter_w - p.sign_w, 0)),
+    DisplayList.draw(sr, p.sign_w, String.duplicate(" ", max(p.gutter_w - p.sign_w, 0)),
       fg: p.ctx.gutter_colors.fg
     )
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
-  @spec build_gutter_list(binary() | [], binary() | [], non_neg_integer(), non_neg_integer()) ::
-          [binary()]
+  @spec build_gutter_list(
+          DisplayList.draw() | [],
+          DisplayList.draw() | [],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
   defp build_gutter_list(sign_cmd, gutter_cmd, row_off, col_off) do
     cmds =
       []
@@ -181,24 +190,21 @@ defmodule Minga.Editor.Renderer.BufferLine do
     maybe_offset(cmds, row_off, col_off)
   end
 
-  @spec maybe_offset([binary()], non_neg_integer(), non_neg_integer()) :: [binary()]
+  @spec maybe_offset([DisplayList.draw()], non_neg_integer(), non_neg_integer()) ::
+          [DisplayList.draw()]
   defp maybe_offset(cmds, 0, 0), do: cmds
 
   defp maybe_offset(cmds, row_off, col_off) do
-    Enum.map(cmds, fn
-      <<0x10, row::16, col::16, rest::binary>> ->
-        <<0x10, row + row_off::16, col + col_off::16, rest::binary>>
-
-      other ->
-        other
+    Enum.map(cmds, fn {row, col, text, style} ->
+      {row + row_off, col + col_off, text, style}
     end)
   end
 
-  @spec prepend_if([binary()], binary() | []) :: [binary()]
+  @spec prepend_if([DisplayList.draw()], DisplayList.draw() | []) :: [DisplayList.draw()]
   defp prepend_if(list, []), do: list
-  defp prepend_if(list, cmd) when is_binary(cmd), do: [cmd | list]
+  defp prepend_if(list, cmd) when is_tuple(cmd), do: [cmd | list]
 
-  @spec prepend_all([binary()], [binary()]) :: [binary()]
+  @spec prepend_all([DisplayList.draw()], [DisplayList.draw()]) :: [DisplayList.draw()]
   defp prepend_all(acc, []), do: acc
   defp prepend_all(acc, items), do: Enum.reduce(items, acc, fn item, a -> [item | a] end)
 end

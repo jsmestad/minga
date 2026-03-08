@@ -2,13 +2,13 @@ defmodule Minga.Editor.CompletionUI do
   @moduledoc """
   Renders the LSP completion popup as an overlay near the cursor.
 
-  Produces a list of draw commands for the completion menu. The popup
-  is positioned below the cursor if there's room, above if not.
+  Produces a list of `DisplayList.draw()` tuples for the completion menu.
+  The popup is positioned below the cursor if there's room, above if not.
   Sized to fit the visible items up to a maximum of 10 rows and 50 columns.
   """
 
   alias Minga.Completion
-  alias Minga.Port.Protocol
+  alias Minga.Editor.DisplayList
 
   @max_rows 10
   @max_width 50
@@ -23,11 +23,11 @@ defmodule Minga.Editor.CompletionUI do
         }
 
   @doc """
-  Renders the completion popup. Returns a list of draw commands.
+  Renders the completion popup. Returns a list of draw tuples.
 
   Returns an empty list if completion is nil or has no visible items.
   """
-  @spec render(Completion.t() | nil, render_opts(), map()) :: [binary()]
+  @spec render(Completion.t() | nil, render_opts(), map()) :: [DisplayList.draw()]
   def render(nil, _opts, _theme), do: []
 
   def render(%Completion{} = completion, opts, theme) do
@@ -42,7 +42,8 @@ defmodule Minga.Editor.CompletionUI do
     end
   end
 
-  @spec do_render([Completion.item()], non_neg_integer(), render_opts(), map()) :: [binary()]
+  @spec do_render([Completion.item()], non_neg_integer(), render_opts(), map()) ::
+          [DisplayList.draw()]
   defp do_render(items, selected_offset, opts, theme) do
     item_count = min(length(items), @max_rows)
     visible_items = Enum.take(items, item_count)
@@ -65,7 +66,7 @@ defmodule Minga.Editor.CompletionUI do
 
     start_col = min(opts.cursor_col, max(0, opts.viewport_cols - popup_width))
 
-    # Theme colors — reuse picker colors
+    # Theme colors (reuse picker colors)
     pc = theme.picker
     bg = pc.bg
     sel_bg = pc.sel_bg
@@ -101,7 +102,7 @@ defmodule Minga.Editor.CompletionUI do
           Completion.item(),
           boolean(),
           map()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_completion_item(row, col, width, item, is_selected, colors) do
     fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
     bg = if is_selected, do: colors.sel_bg, else: colors.bg
@@ -128,7 +129,7 @@ defmodule Minga.Editor.CompletionUI do
     full_text = String.slice(full_text, 0, width)
 
     cmds = [
-      Protocol.encode_draw(row, col, String.pad_trailing(full_text, width),
+      DisplayList.draw(row, col, String.pad_trailing(full_text, width),
         fg: fg,
         bg: bg,
         bold: is_selected
@@ -137,7 +138,7 @@ defmodule Minga.Editor.CompletionUI do
 
     # Render kind character with dim color
     kind_cmd =
-      Protocol.encode_draw(row, col + 1, kind_char,
+      DisplayList.draw(row, col + 1, kind_char,
         fg: colors.dim_fg,
         bg: bg
       )
@@ -146,7 +147,7 @@ defmodule Minga.Editor.CompletionUI do
     detail_cmds =
       if detail_part != "" do
         detail_col = col + String.length(label_part) + padding
-        [Protocol.encode_draw(row, detail_col, detail_part, fg: colors.dim_fg, bg: bg)]
+        [DisplayList.draw(row, detail_col, detail_part, fg: colors.dim_fg, bg: bg)]
       else
         []
       end

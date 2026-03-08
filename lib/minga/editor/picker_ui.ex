@@ -15,6 +15,7 @@ defmodule Minga.Editor.PickerUI do
   """
 
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
@@ -247,9 +248,9 @@ defmodule Minga.Editor.PickerUI do
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
 
-  @doc "Renders the picker overlay. Returns `{commands, cursor_pos | nil}`."
+  @doc "Renders the picker overlay. Returns `{draws, cursor_pos | nil}`."
   @spec render(state(), term()) ::
-          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
+          {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
   def render(%{picker_ui: %{picker: nil}}, _viewport), do: {[], nil}
 
   def render(%{picker_ui: %{picker: picker}} = state, viewport) do
@@ -287,7 +288,7 @@ defmodule Minga.Editor.PickerUI do
     separator_cmd =
       if separator_row >= 0 do
         [
-          Protocol.encode_draw(separator_row, 0, String.pad_trailing(sep_text, viewport.cols),
+          DisplayList.draw(separator_row, 0, String.pad_trailing(sep_text, viewport.cols),
             fg: dim_fg,
             bg: bg
           )
@@ -332,7 +333,7 @@ defmodule Minga.Editor.PickerUI do
     prompt_text = "> " <> picker.query
 
     prompt_cmd =
-      Protocol.encode_draw(
+      DisplayList.draw(
         prompt_row,
         0,
         String.pad_trailing(prompt_text, viewport.cols),
@@ -382,7 +383,7 @@ defmodule Minga.Editor.PickerUI do
           String.t(),
           pos_integer(),
           map()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_item(row, label, desc, is_selected, query, cols, colors) do
     fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
     row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
@@ -408,7 +409,7 @@ defmodule Minga.Editor.PickerUI do
     row_text = String.slice(row_text, 0, cols)
 
     bg_cmd =
-      Protocol.encode_draw(row, 0, String.pad_trailing(row_text, cols),
+      DisplayList.draw(row, 0, String.pad_trailing(row_text, cols),
         fg: fg,
         bg: row_bg,
         bold: is_selected
@@ -419,7 +420,7 @@ defmodule Minga.Editor.PickerUI do
     desc_cmds =
       if desc_display != "" do
         desc_start = cols - Unicode.display_width(desc_display) - 1
-        [Protocol.encode_draw(row, desc_start, desc_display, fg: colors.dim_fg, bg: row_bg)]
+        [DisplayList.draw(row, desc_start, desc_display, fg: colors.dim_fg, bg: row_bg)]
       else
         []
       end
@@ -434,7 +435,7 @@ defmodule Minga.Editor.PickerUI do
           String.t(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_match_highlights(row, label, query, match_fg, row_bg) do
     match_positions = Picker.match_positions(label, query)
 
@@ -445,12 +446,13 @@ defmodule Minga.Editor.PickerUI do
     |> Enum.filter(&(&1 < label_len))
     |> Enum.map(fn pos ->
       char = Enum.at(label_graphemes, pos)
-      Protocol.encode_draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)
+      DisplayList.draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)
     end)
   end
 
   # Renders the C-o action menu popup overlay.
-  @spec render_action_menu(state(), term(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  @spec render_action_menu(state(), term(), non_neg_integer(), non_neg_integer()) ::
+          [DisplayList.draw()]
   defp render_action_menu(%{picker_ui: %{action_menu: nil}}, _vp, _first_item_row, _sel_offset) do
     []
   end
@@ -480,7 +482,7 @@ defmodule Minga.Editor.PickerUI do
     header_cmd =
       if header_row >= 0 and header_row < viewport.rows do
         [
-          Protocol.encode_draw(header_row, menu_col, header_text,
+          DisplayList.draw(header_row, menu_col, header_text,
             fg: border_fg,
             bg: menu_bg,
             bold: true
@@ -519,7 +521,7 @@ defmodule Minga.Editor.PickerUI do
           boolean(),
           non_neg_integer(),
           map()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_action_item(row, _col, _width, _name, _is_sel, max_rows, _colors)
        when row < 0 or row >= max_rows do
     []
@@ -530,6 +532,6 @@ defmodule Minga.Editor.PickerUI do
     bg = if is_sel, do: colors.sel_bg, else: colors.bg
     text = String.pad_trailing(" #{name}", width)
 
-    [Protocol.encode_draw(row, col, text, fg: fg, bg: bg, bold: is_sel)]
+    [DisplayList.draw(row, col, text, fg: fg, bg: bg, bold: is_sel)]
   end
 end

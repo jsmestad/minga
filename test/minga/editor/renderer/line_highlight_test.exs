@@ -12,7 +12,6 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.Viewport
   alias Minga.Highlight
-  alias Minga.Port.Protocol
 
   @keyword_color 0xFF0000
   @string_color 0x00FF00
@@ -39,9 +38,24 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     }
   end
 
-  defp decode_draw(cmd) do
-    {:ok, {:draw_text, data}} = Protocol.decode_command(cmd)
-    data
+  defp decode_draw({row, col, text, style}) do
+    %{
+      row: row,
+      col: col,
+      text: text,
+      fg: Keyword.get(style, :fg, 0xFFFFFF),
+      bg: Keyword.get(style, :bg, 0x000000),
+      attrs: decode_attrs(style)
+    }
+  end
+
+  defp decode_attrs(style) do
+    []
+    |> then(fn a -> if Keyword.get(style, :bold, false), do: [:bold | a], else: a end)
+    |> then(fn a -> if Keyword.get(style, :italic, false), do: [:italic | a], else: a end)
+    |> then(fn a -> if Keyword.get(style, :underline, false), do: [:underline | a], else: a end)
+    |> then(fn a -> if Keyword.get(style, :reverse, false), do: [:reverse | a], else: a end)
+    |> Enum.reverse()
   end
 
   describe "rendering with syntax highlighting" do

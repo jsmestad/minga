@@ -99,22 +99,24 @@ defmodule Minga.Agent.View.RendererTest do
   end
 
   describe "render/1" do
-    test "returns a non-empty list of binary commands" do
+    test "returns a non-empty list of draw tuples" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
       assert [_ | _] = commands
-      assert Enum.all?(commands, &is_binary/1)
+      assert Enum.all?(commands, &is_tuple/1)
     end
 
-    test "all draw commands have valid binary structure" do
+    test "all draw tuples have valid 4-element structure" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
 
-      draw_commands = Enum.filter(commands, &(binary_part(&1, 0, 1) == <<0x10>>))
-      assert draw_commands != []
-
-      Enum.each(draw_commands, fn cmd ->
-        assert byte_size(cmd) >= 5, "draw command too short: #{inspect(cmd)}"
+      Enum.each(commands, fn cmd ->
+        assert tuple_size(cmd) == 4, "draw tuple should have 4 elements: #{inspect(cmd)}"
+        {row, col, text, style} = cmd
+        assert is_integer(row)
+        assert is_integer(col)
+        assert is_binary(text)
+        assert is_list(style)
       end)
     end
 
@@ -155,16 +157,15 @@ defmodule Minga.Agent.View.RendererTest do
       expected_chat_width = div(cols * 65, 100)
 
       commands = Renderer.render(state)
-      draw_cmds = Enum.filter(commands, &(binary_part(&1, 0, 1) == <<0x10>>))
 
       chat_cols =
-        draw_cmds
-        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        commands
+        |> Enum.map(fn {_row, col, _text, _style} -> col end)
         |> Enum.filter(&(&1 < expected_chat_width))
 
       viewer_cols =
-        draw_cmds
-        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        commands
+        |> Enum.map(fn {_row, col, _text, _style} -> col end)
         |> Enum.filter(&(&1 > expected_chat_width))
 
       assert chat_cols != [], "expected draw commands in chat panel columns"
@@ -177,11 +178,7 @@ defmodule Minga.Agent.View.RendererTest do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
 
-      row_0_cmds =
-        Enum.filter(commands, fn
-          <<0x10, row::16, _col::16, _rest::binary>> -> row == 0
-          _ -> false
-        end)
+      row_0_cmds = Enum.filter(commands, fn {row, _col, _text, _style} -> row == 0 end)
 
       assert row_0_cmds != [], "expected draw commands at row 0 (title bar)"
     end
@@ -197,12 +194,8 @@ defmodule Minga.Agent.View.RendererTest do
       input_border_row = rows - 1 - 1 - 3
 
       input_cmds =
-        Enum.filter(commands, fn
-          <<0x10, row::16, col::16, _rest::binary>> ->
-            row == input_border_row and col == 0
-
-          _ ->
-            false
+        Enum.filter(commands, fn {row, col, _text, _style} ->
+          row == input_border_row and col == 0
         end)
 
       assert input_cmds != [], "expected input border at col 0"
@@ -219,12 +212,8 @@ defmodule Minga.Agent.View.RendererTest do
 
       # Header should be at row 1 (panel_start), at viewer_col
       header_cmds =
-        Enum.filter(commands, fn
-          <<0x10, row::16, col::16, _rest::binary>> ->
-            row == 1 and col == viewer_col
-
-          _ ->
-            false
+        Enum.filter(commands, fn {row, col, _text, _style} ->
+          row == 1 and col == viewer_col
         end)
 
       assert header_cmds != [], "expected file viewer header at row 1"
@@ -241,14 +230,12 @@ defmodule Minga.Agent.View.RendererTest do
 
       cols_80 =
         cmds_80
-        |> Enum.filter(&(binary_part(&1, 0, 1) == <<0x10>>))
-        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        |> Enum.map(fn {_row, col, _text, _style} -> col end)
         |> Enum.max(fn -> 0 end)
 
       cols_120 =
         cmds_120
-        |> Enum.filter(&(binary_part(&1, 0, 1) == <<0x10>>))
-        |> Enum.map(fn <<0x10, _row::16, col::16, _rest::binary>> -> col end)
+        |> Enum.map(fn {_row, col, _text, _style} -> col end)
         |> Enum.max(fn -> 0 end)
 
       assert cols_120 > cols_80, "wider viewport should use more columns"

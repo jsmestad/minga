@@ -1,16 +1,16 @@
 defmodule Minga.Editor.TreeRenderer do
   @moduledoc """
-  Renders the file tree panel into draw commands for the left side of the screen.
+  Renders the file tree panel into draw tuples for the left side of the screen.
 
-  Produces a list of Protocol draw_text commands for the tree entries,
+  Produces a list of `DisplayList.draw()` tuples for the tree entries,
   the separator column, and the header line.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
-  alias Minga.Port.Protocol
   alias Minga.Theme
 
   @indent_size 2
@@ -18,10 +18,10 @@ defmodule Minga.Editor.TreeRenderer do
   @doc """
   Renders the file tree panel.
 
-  Returns a list of binary render commands (draw_text) for the tree content,
+  Returns a list of `DisplayList.draw()` tuples for the tree content,
   separator, and header.
   """
-  @spec render(EditorState.t()) :: [binary()]
+  @spec render(EditorState.t()) :: [DisplayList.draw()]
   def render(%EditorState{file_tree: %{tree: nil}}), do: []
 
   def render(%EditorState{file_tree: %{tree: tree, focused: focused}} = state) do
@@ -31,7 +31,8 @@ defmodule Minga.Editor.TreeRenderer do
     end
   end
 
-  @spec do_render(FileTree.t(), WindowTree.rect(), boolean(), EditorState.t()) :: [binary()]
+  @spec do_render(FileTree.t(), WindowTree.rect(), boolean(), EditorState.t()) ::
+          [DisplayList.draw()]
   defp do_render(tree, {row_off, col_off, width, height}, focused, state) do
     entries = FileTree.visible_entries(tree)
     theme = state.theme
@@ -41,7 +42,7 @@ defmodule Minga.Editor.TreeRenderer do
     header_text = " File Tree" |> String.pad_trailing(width)
 
     header = [
-      Protocol.encode_draw(row_off, col_off, header_text,
+      DisplayList.draw(row_off, col_off, header_text,
         fg: theme.tree.header_fg,
         bg: theme.tree.header_bg,
         bold: true
@@ -85,7 +86,8 @@ defmodule Minga.Editor.TreeRenderer do
     header ++ entry_commands ++ blank_commands ++ sep_commands
   end
 
-  @spec render_entry(FileTree.entry(), non_neg_integer(), non_neg_integer(), map()) :: binary()
+  @spec render_entry(FileTree.entry(), non_neg_integer(), non_neg_integer(), map()) ::
+          DisplayList.draw()
   defp render_entry(entry, idx, row, opts) do
     %{
       cursor: cursor,
@@ -115,7 +117,7 @@ defmodule Minga.Editor.TreeRenderer do
 
     style = entry_style(entry, is_cursor, is_active, focused, theme)
 
-    Protocol.encode_draw(row, col, display, style)
+    DisplayList.draw(row, col, display, style)
   end
 
   @spec entry_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: keyword()
@@ -148,7 +150,7 @@ defmodule Minga.Editor.TreeRenderer do
           non_neg_integer(),
           pos_integer(),
           Theme.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_blanks(rendered, total, _row_start, _col, _width, _theme)
        when rendered >= total do
     []
@@ -159,7 +161,7 @@ defmodule Minga.Editor.TreeRenderer do
     style = [fg: theme.tree.fg, bg: theme.tree.bg]
 
     for i <- rendered..(total - 1) do
-      Protocol.encode_draw(row_start + i, col, blank, style)
+      DisplayList.draw(row_start + i, col, blank, style)
     end
   end
 
@@ -168,12 +170,12 @@ defmodule Minga.Editor.TreeRenderer do
           non_neg_integer(),
           pos_integer(),
           Theme.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_separator(col, row_start, height, theme) do
     style = [fg: theme.tree.separator_fg, bg: theme.tree.bg]
 
     for row <- row_start..(row_start + height - 1) do
-      Protocol.encode_draw(row, col, "│", style)
+      DisplayList.draw(row, col, "│", style)
     end
   end
 

@@ -2,11 +2,13 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   @moduledoc """
   Search match highlighting, substitute preview, and pattern extraction for
   the renderer.
+
+  All render functions return `DisplayList.draw()` tuples.
   """
 
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
-  alias Minga.Port.Protocol
 
   @typedoc "Search color set from the active theme."
   @type search_colors :: Minga.Theme.Search.t()
@@ -59,7 +61,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           search_match() | nil,
           search_colors()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   def render_line_with_search(
         visible_graphemes,
         screen_row,
@@ -78,7 +80,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
 
     case spans do
       [] ->
-        [Protocol.encode_draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
+        [DisplayList.draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
 
       _ ->
         render_highlighted_spans(
@@ -332,7 +334,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           non_neg_integer(),
           search_colors()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_highlighted_spans(visible_graphemes, vis_start, spans, screen_row, gutter_w, colors) do
     visible_graphemes
     |> Enum.with_index(vis_start)
@@ -352,12 +354,12 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           non_neg_integer(),
           non_neg_integer(),
           search_colors()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp encode_span(chars, abs_start_col, vis_start, :confirm, screen_row, gutter_w, colors) do
     screen_col = gutter_w + (abs_start_col - vis_start)
 
     [
-      Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
+      DisplayList.draw(screen_row, screen_col, Enum.join(chars),
         fg: colors.highlight_fg,
         bg: colors.current_bg
       )
@@ -368,7 +370,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     screen_col = gutter_w + (abs_start_col - vis_start)
 
     [
-      Protocol.encode_draw(screen_row, screen_col, Enum.join(chars),
+      DisplayList.draw(screen_row, screen_col, Enum.join(chars),
         fg: colors.highlight_fg,
         bg: colors.highlight_bg
       )
@@ -377,7 +379,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
 
   defp encode_span(chars, abs_start_col, vis_start, :none, screen_row, gutter_w, _colors) do
     screen_col = gutter_w + (abs_start_col - vis_start)
-    [Protocol.encode_draw(screen_row, screen_col, Enum.join(chars))]
+    [DisplayList.draw(screen_row, screen_col, Enum.join(chars))]
   end
 
   @spec chunk_by_highlight_type(

@@ -3,13 +3,13 @@ defmodule Minga.Editor.Modeline do
   Doom Emacs-style modeline rendering.
 
   Renders the colored status line at row N-2. Takes a data map and viewport
-  width; returns a list of draw commands. Has no dependency on the GenServer
-  or any mutable state — pure `data → commands` transformation.
+  width; returns a list of draw tuples. Has no dependency on the GenServer
+  or any mutable state, just a pure `data → draws` transformation.
   """
 
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayList
   alias Minga.Mode
-  alias Minga.Port.Protocol
 
   alias Minga.Theme
 
@@ -36,7 +36,7 @@ defmodule Minga.Editor.Modeline do
 
   @doc "Renders the modeline at the given row using the provided data."
   @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
-          [binary()]
+          [DisplayList.draw()]
   def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one), col_off \\ 0) do
     ml = theme.modeline
 
@@ -135,7 +135,7 @@ defmodule Minga.Editor.Modeline do
 
     {commands, _} =
       Enum.reduce(all_segments, {[], col_off}, fn {text, fg, bg, opts}, {cmds, col} ->
-        cmd = Protocol.encode_draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
+        cmd = DisplayList.draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
         {[cmd | cmds], col + Unicode.display_width(text)}
       end)
 
@@ -143,7 +143,7 @@ defmodule Minga.Editor.Modeline do
   end
 
   @doc "Returns the cursor shape atom for the given mode."
-  @spec cursor_shape(Mode.mode()) :: Protocol.cursor_shape()
+  @spec cursor_shape(Mode.mode()) :: Minga.Port.Protocol.cursor_shape()
   def cursor_shape(:insert), do: :beam
   def cursor_shape(:search), do: :beam
   def cursor_shape(:replace), do: :underline

@@ -18,11 +18,11 @@ defmodule Minga.Editor.ModelineTest do
   }
 
   describe "render/3" do
-    test "returns a list of binary draw commands" do
+    test "returns a list of draw tuples" do
       commands = Modeline.render(0, 80, @base_data)
       assert is_list(commands)
       assert commands != []
-      assert Enum.all?(commands, &is_binary/1)
+      assert Enum.all?(commands, &is_tuple/1)
     end
 
     test "renders for all modes without crashing" do

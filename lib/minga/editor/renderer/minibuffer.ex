@@ -2,21 +2,23 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   @moduledoc """
   Minibuffer (bottom status line) rendering: search prompt, command input,
   status messages, and the empty-state fallback.
+
+  Returns `DisplayList.draw()` tuples.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.DocumentSync
-  alias Minga.Port.Protocol
 
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
-  @spec render(map(), non_neg_integer(), pos_integer()) :: binary()
+  @spec render(map(), non_neg_integer(), pos_integer()) :: DisplayList.draw()
   def render(%{mode: :search, mode_state: ms, theme: theme}, row, cols) do
     prefix = if ms.direction == :forward, do: "/", else: "?"
     search_text = prefix <> ms.input
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(search_text, cols),
@@ -29,7 +31,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     prompt_text = "Search: " <> ms.input
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(prompt_text, cols),
@@ -44,7 +46,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     prompt = "replace with #{ms.replacement}? [y/n/a/q] (#{current} of #{total})"
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(prompt, cols),
@@ -57,7 +59,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     cmd_text = ":" <> ms.input
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(cmd_text, cols),
@@ -70,7 +72,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     eval_text = "Eval: " <> ms.input
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(eval_text, cols),
@@ -96,7 +98,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(prompt, cols),
@@ -108,7 +110,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   def render(%{status_msg: msg, theme: theme}, row, cols) when is_binary(msg) do
     mb = theme.minibuffer
 
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.pad_trailing(msg, cols),
@@ -126,7 +128,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
         render_blank(row, cols, mb)
 
       msg ->
-        Protocol.encode_draw(
+        DisplayList.draw(
           row,
           0,
           String.pad_trailing(msg, cols),
@@ -139,9 +141,9 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   def render(%{theme: theme}, row, cols), do: render_blank(row, cols, theme.minibuffer)
   def render(_state, row, cols), do: render_blank_default(row, cols)
 
-  @spec render_blank(non_neg_integer(), pos_integer(), map()) :: binary()
+  @spec render_blank(non_neg_integer(), pos_integer(), map()) :: DisplayList.draw()
   defp render_blank(row, cols, mb) do
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.duplicate(" ", cols),
@@ -150,9 +152,9 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  @spec render_blank_default(non_neg_integer(), pos_integer()) :: binary()
+  @spec render_blank_default(non_neg_integer(), pos_integer()) :: DisplayList.draw()
   defp render_blank_default(row, cols) do
-    Protocol.encode_draw(
+    DisplayList.draw(
       row,
       0,
       String.duplicate(" ", cols),

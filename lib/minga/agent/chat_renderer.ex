@@ -1,8 +1,8 @@
 defmodule Minga.Agent.ChatRenderer do
   @moduledoc """
-  Renders the AI agent chat panel into draw commands.
+  Renders the AI agent chat panel into draw tuples.
 
-  Produces a list of `Protocol.encode_draw` commands for a given screen
+  Produces a list of `DisplayList.draw()` tuples for a given screen
   region, displaying the conversation with styled message blocks, markdown
   formatting, tool call cards, thinking indicators, and the input area.
 
@@ -12,7 +12,7 @@ defmodule Minga.Agent.ChatRenderer do
 
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
-  alias Minga.Port.Protocol
+  alias Minga.Editor.DisplayList
   alias Minga.Theme
 
   @typedoc "Screen rectangle: {row_offset, col_offset, width, height}."
@@ -35,9 +35,9 @@ defmodule Minga.Agent.ChatRenderer do
   @input_height 3
 
   @doc """
-  Renders the chat panel into draw commands for the given screen rect.
+  Renders the chat panel into draw tuples for the given screen rect.
   """
-  @spec render(rect(), panel_state(), Theme.t()) :: [binary()]
+  @spec render(rect(), panel_state(), Theme.t()) :: [DisplayList.draw()]
   def render({row_off, col_off, width, height}, panel, theme) do
     at = Theme.agent_theme(theme)
 
@@ -61,7 +61,7 @@ defmodule Minga.Agent.ChatRenderer do
   Used by the agentic view renderer, which handles the title bar and input
   area separately at full screen width.
   """
-  @spec render_messages_only(rect(), panel_state(), Theme.t()) :: [binary()]
+  @spec render_messages_only(rect(), panel_state(), Theme.t()) :: [DisplayList.draw()]
   def render_messages_only({row_off, col_off, width, height}, panel, theme) do
     at = Theme.agent_theme(theme)
     render_content([], row_off, col_off, width, height, panel, at)
@@ -70,27 +70,27 @@ defmodule Minga.Agent.ChatRenderer do
   # ── Separator line ──────────────────────────────────────────────────────────
 
   @spec render_separator(
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
           Theme.Agent.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_separator(cmds, row, col, width, at) do
     line = String.duplicate("─", width)
-    [Protocol.encode_draw(row, col, line, fg: at.panel_border, bg: at.panel_bg) | cmds]
+    [DisplayList.draw(row, col, line, fg: at.panel_border, bg: at.panel_bg) | cmds]
   end
 
   # ── Header ──────────────────────────────────────────────────────────────────
 
   @spec render_header(
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
           panel_state(),
           Theme.Agent.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_header(cmds, row, col, width, panel, at) do
     model = " 󰚩 #{panel.model_name} "
     usage_text = format_usage(panel.usage)
@@ -117,13 +117,13 @@ defmodule Minga.Agent.ChatRenderer do
     padded_left = left <> String.duplicate(" ", padding)
 
     cmds = [
-      Protocol.encode_draw(row, col, padded_left, fg: at.header_fg, bg: at.header_bg),
-      Protocol.encode_draw(row, col, " #{status_icon} ",
+      DisplayList.draw(row, col, padded_left, fg: at.header_fg, bg: at.header_bg),
+      DisplayList.draw(row, col, " #{status_icon} ",
         fg: status_fg,
         bg: at.header_bg,
         bold: true
       ),
-      Protocol.encode_draw(row, col + String.length(padded_left), right,
+      DisplayList.draw(row, col + String.length(padded_left), right,
         fg: at.header_fg,
         bg: at.header_bg
       )
@@ -136,14 +136,14 @@ defmodule Minga.Agent.ChatRenderer do
   # ── Content area ────────────────────────────────────────────────────────────
 
   @spec render_content(
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
           pos_integer(),
           panel_state(),
           Theme.Agent.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_content(cmds, row_start, col, width, content_height, panel, at) do
     lines = messages_to_lines(panel.messages, panel.status, panel.spinner_frame, at, width)
 
@@ -153,14 +153,12 @@ defmodule Minga.Agent.ChatRenderer do
     visible = lines |> Enum.drop(scroll) |> Enum.take(content_height)
 
     # Render visible lines.
-    # The Zig renderer processes commands head-to-tail, so the background
-    # fill must appear BEFORE its row's segments in the final list
-    # (background painted first, text drawn on top). We accumulate each
-    # row's commands in forward order and append to the list.
+    # Background fill must appear BEFORE its row's segments in the final list
+    # (background painted first, text drawn on top).
     {row_cmds_acc, _row} =
       Enum.reduce(visible, {[], row_start}, fn {segments, _type, bg}, {acc, row} ->
         blank = String.duplicate(" ", width)
-        bg_cmd = Protocol.encode_draw(row, col, blank, bg: bg)
+        bg_cmd = DisplayList.draw(row, col, blank, bg: bg)
 
         right_edge = col + width
 
@@ -185,7 +183,7 @@ defmodule Minga.Agent.ChatRenderer do
         start_row = row_start + length(visible)
 
         Enum.reduce(0..(remaining - 1), cmds, fn i, acc ->
-          [Protocol.encode_draw(start_row + i, col, blank, bg: at.panel_bg) | acc]
+          [DisplayList.draw(start_row + i, col, blank, bg: at.panel_bg) | acc]
         end)
       else
         cmds
@@ -197,25 +195,25 @@ defmodule Minga.Agent.ChatRenderer do
   # ── Input area ──────────────────────────────────────────────────────────────
 
   @spec render_input(
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
           panel_state(),
           Theme.Agent.t()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_input(cmds, row, col, width, panel, at) do
     # Border line
     label = "─── Prompt "
     border_rest = String.duplicate("─", max(width - String.length(label), 0))
     border = label <> border_rest
 
-    cmds = [Protocol.encode_draw(row, col, border, fg: at.input_border, bg: at.panel_bg) | cmds]
+    cmds = [DisplayList.draw(row, col, border, fg: at.input_border, bg: at.panel_bg) | cmds]
 
     # Input text or placeholder
     input_row = row + 1
     blank = String.duplicate(" ", width)
-    cmds = [Protocol.encode_draw(input_row, col, blank, bg: at.input_bg) | cmds]
+    cmds = [DisplayList.draw(input_row, col, blank, bg: at.input_bg) | cmds]
 
     {text, fg} =
       if panel.input_text == "" do
@@ -225,10 +223,10 @@ defmodule Minga.Agent.ChatRenderer do
       end
 
     text = String.slice(text, 0, width)
-    cmds = [Protocol.encode_draw(input_row, col, text, fg: fg, bg: at.input_bg) | cmds]
+    cmds = [DisplayList.draw(input_row, col, text, fg: fg, bg: at.input_bg) | cmds]
 
     # Bottom padding
-    cmds = [Protocol.encode_draw(row + 2, col, blank, bg: at.input_bg) | cmds]
+    cmds = [DisplayList.draw(row + 2, col, blank, bg: at.input_bg) | cmds]
 
     cmds
   end
@@ -380,13 +378,13 @@ defmodule Minga.Agent.ChatRenderer do
 
   # Renders a single text segment, truncating at the panel's right edge.
   @spec render_segment(
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
           keyword(),
           non_neg_integer()
-        ) :: {[binary()], non_neg_integer()}
+        ) :: {[DisplayList.draw()], non_neg_integer()}
   defp render_segment(acc, _row, col, _text, _style_opts, right_edge) when col >= right_edge do
     {acc, col}
   end
@@ -394,8 +392,8 @@ defmodule Minga.Agent.ChatRenderer do
   defp render_segment(acc, row, col, text, style_opts, right_edge) do
     remaining = right_edge - col
     truncated = String.slice(text, 0, remaining)
-    draw = Protocol.encode_draw(row, col, truncated, style_opts)
-    {[draw | acc], col + String.length(truncated)}
+    d = DisplayList.draw(row, col, truncated, style_opts)
+    {[d | acc], col + String.length(truncated)}
   end
 
   # ── Text helpers ────────────────────────────────────────────────────────────

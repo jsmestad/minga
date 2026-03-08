@@ -2,9 +2,10 @@ defmodule Minga.Editor.Renderer do
   @moduledoc """
   Buffer and UI rendering for the editor.
 
-  Converts editor state into a list of terminal draw commands sent to the Zig
-  port. Pure `state → :ok` — side-effects are limited to the `PortManager`
-  call at the end.
+  Converts editor state into a `DisplayList.Frame`, then converts the frame
+  to protocol command binaries and sends them to the Zig port. The display
+  list intermediate representation enables BEAM-side frame diffing, multi-
+  frontend rendering, and introspection.
 
   This module orchestrates focused sub-modules:
 
@@ -12,6 +13,7 @@ defmodule Minga.Editor.Renderer do
   * `Renderer.Line`            — line content and selection rendering
   * `Renderer.SearchHighlight` — search/substitute highlight overlays
   * `Renderer.Minibuffer`      — command/search/status line
+  * `DisplayList`              — frame assembly and protocol conversion
   """
 
   alias Minga.Agent.View.Renderer, as: ViewRenderer
@@ -21,6 +23,8 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
+  alias Minga.Editor.DisplayList
+  alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
@@ -72,14 +76,18 @@ defmodule Minga.Editor.Renderer do
   @doc "Renders the no-buffer splash screen."
   @spec render(state()) :: :ok
   def render(%{buffers: %{active: nil}} = state) do
-    commands = [
-      Protocol.encode_clear(),
-      Protocol.encode_draw(0, 0, "Minga v#{Minga.version()} — No file open"),
-      Protocol.encode_draw(1, 0, "Use: mix minga <filename>"),
-      Protocol.encode_cursor(0, 0),
-      Protocol.encode_batch_end()
+    splash_draws = [
+      DisplayList.draw(0, 0, "Minga v#{Minga.version()} — No file open"),
+      DisplayList.draw(1, 0, "Use: mix minga <filename>")
     ]
 
+    frame = %Frame{
+      cursor: {0, 0},
+      cursor_shape: :block,
+      splash: splash_draws
+    }
+
+    commands = DisplayList.to_commands(frame)
     PortManager.send_commands(state.port_manager, commands)
   end
 
@@ -155,52 +163,55 @@ defmodule Minga.Editor.Renderer do
     layout = Layout.get(state)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
 
-    # Build panel draw commands.
-    panel_commands = ViewRenderer.render(state)
+    # Build panel draw tuples
+    panel_draws = ViewRenderer.render(state)
 
-    # Minibuffer (always last row).
-    minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+    # Minibuffer (always last row)
+    minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     # Overlay popups: skip when frontend has native float support.
     render_overlays = Caps.render_overlays?(state.capabilities)
-    whichkey_commands = if render_overlays, do: render_whichkey(state, full_viewport), else: []
+    whichkey_draws = if render_overlays, do: render_whichkey(state, full_viewport), else: []
 
     # Picker overlay (e.g. SPC a m model picker).
-    {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
+    {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
 
     # Cursor placement: agentic renderer knows where the input cursor goes.
     {cursor_row, cursor_col} = ViewRenderer.cursor_position(state)
 
-    cursor_shape_command =
+    cursor_shape =
       if state.picker_ui.picker do
-        Protocol.encode_cursor_shape(:beam)
+        :beam
       else
-        if state.agent.panel.input_focused do
-          Protocol.encode_cursor_shape(:beam)
-        else
-          Protocol.encode_cursor_shape(:block)
-        end
+        if state.agent.panel.input_focused, do: :beam, else: :block
       end
 
-    cursor_command =
+    cursor =
       case picker_cursor do
-        {pr, pc} -> Protocol.encode_cursor(pr, pc)
-        nil -> Protocol.encode_cursor(cursor_row, cursor_col)
+        {pr, pc} -> {pr, pc}
+        nil -> {cursor_row, cursor_col}
       end
 
-    layout = Layout.get(state)
     region_commands = Regions.define_regions(layout)
 
-    all_commands =
-      [Protocol.encode_clear()] ++
-        region_commands ++
-        panel_commands ++
-        [minibuffer_command] ++
-        whichkey_commands ++
-        picker_commands ++
-        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
+    overlays =
+      [
+        %Overlay{draws: whichkey_draws},
+        %Overlay{draws: picker_draws, cursor: picker_cursor}
+      ]
+      |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
-    PortManager.send_commands(state.port_manager, all_commands)
+    frame = %Frame{
+      cursor: cursor,
+      cursor_shape: cursor_shape,
+      agentic_view: panel_draws,
+      minibuffer: [minibuffer_draw],
+      overlays: overlays,
+      regions: region_commands
+    }
+
+    commands = DisplayList.to_commands(frame)
+    PortManager.send_commands(state.port_manager, commands)
     :ok
   end
 
@@ -211,17 +222,16 @@ defmodule Minga.Editor.Renderer do
     layout = Layout.get(state)
     full_viewport = state.viewport
 
-    clear = [Protocol.encode_clear()]
     region_commands = Regions.define_regions(layout)
 
     # Render each window through the same path (single window = one-element map)
-    {window_commands, active_cursor_info} =
+    {window_frames, active_cursor_info} =
       Enum.reduce(layout.window_layouts, {[], nil}, fn {win_id, win_layout}, acc ->
         render_window_entry(state, win_id, win_layout, acc)
       end)
 
     # Separators between split panes (no-op for single window)
-    separator_commands =
+    separator_draws =
       if EditorState.split?(state) do
         render_separators(
           state.windows.tree,
@@ -234,21 +244,21 @@ defmodule Minga.Editor.Renderer do
       end
 
     # File tree
-    tree_commands = TreeRenderer.render(state)
+    tree_draws = TreeRenderer.render(state)
 
     # Agent panel (sidebar mode, not full-screen agentic view)
-    agent_commands = render_agent_panel_from_layout(state, layout)
+    agent_draws = render_agent_panel_from_layout(state, layout)
 
     # Minibuffer (always last row)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
-    minibuffer_command = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+    minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     # Overlays (positioned relative to full terminal)
-    render_overlays = Caps.render_overlays?(state.capabilities)
-    {picker_commands, picker_cursor} = PickerUI.render(state, full_viewport)
-    whichkey_commands = if render_overlays, do: render_whichkey(state, full_viewport), else: []
+    render_overlays_flag = Caps.render_overlays?(state.capabilities)
+    {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
+    whichkey_draws = if render_overlays_flag, do: render_whichkey(state, full_viewport), else: []
 
-    completion_commands =
+    completion_draws =
       case active_cursor_info do
         {cur_row, cur_col} ->
           CompletionUI.render(
@@ -267,41 +277,49 @@ defmodule Minga.Editor.Renderer do
       end
 
     # Cursor shape
-    cursor_shape_command =
+    cursor_shape =
       if state.picker_ui.picker do
-        Protocol.encode_cursor_shape(:beam)
+        :beam
       else
-        Protocol.encode_cursor_shape(Modeline.cursor_shape(state.mode))
+        Modeline.cursor_shape(state.mode)
       end
 
     # Cursor position (picker overrides mode overrides buffer position)
-    cursor_command =
+    cursor =
       case picker_cursor do
         {row, col} ->
-          Protocol.encode_cursor(row, col)
+          {row, col}
 
         nil ->
-          resolve_cursor_from_info(state, active_cursor_info, minibuffer_row)
+          resolve_cursor(state, active_cursor_info, minibuffer_row)
       end
 
     # Agent panel input can steal the cursor
-    {cursor_command, cursor_shape_command} =
-      agent_cursor_override_from_layout(state, cursor_command, cursor_shape_command, layout)
+    {cursor, cursor_shape} =
+      agent_cursor_override_from_layout(state, cursor, cursor_shape, layout)
 
-    all_commands =
-      clear ++
-        region_commands ++
-        tree_commands ++
-        window_commands ++
-        separator_commands ++
-        agent_commands ++
-        [minibuffer_command] ++
-        whichkey_commands ++
-        completion_commands ++
-        picker_commands ++
-        [cursor_shape_command, cursor_command, Protocol.encode_batch_end()]
+    overlays =
+      [
+        %Overlay{draws: whichkey_draws},
+        %Overlay{draws: completion_draws},
+        %Overlay{draws: picker_draws, cursor: picker_cursor}
+      ]
+      |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
-    PortManager.send_commands(state.port_manager, all_commands)
+    frame = %Frame{
+      cursor: cursor,
+      cursor_shape: cursor_shape,
+      windows: Enum.reverse(window_frames),
+      file_tree: tree_draws,
+      separators: separator_draws,
+      agent_panel: agent_draws,
+      minibuffer: [minibuffer_draw],
+      overlays: overlays,
+      regions: region_commands
+    }
+
+    commands = DisplayList.to_commands(frame)
+    PortManager.send_commands(state.port_manager, commands)
     :ok
   end
 
@@ -310,26 +328,26 @@ defmodule Minga.Editor.Renderer do
           state(),
           Window.id(),
           Layout.window_layout(),
-          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
+          {[WindowFrame.t()], {non_neg_integer(), non_neg_integer()} | nil}
         ) ::
-          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
-  defp render_window_entry(state, win_id, win_layout, {cmds, cursor}) do
+          {[WindowFrame.t()], {non_neg_integer(), non_neg_integer()} | nil}
+  defp render_window_entry(state, win_id, win_layout, {wfs, cursor}) do
     window = Map.get(state.windows.map, win_id)
 
     if window == nil or window.buffer == nil do
-      {cmds, cursor}
+      {wfs, cursor}
     else
       is_active = win_id == state.windows.active
-      {win_cmds, win_cursor} = render_window(state, window, win_layout, is_active)
+      {win_frame, win_cursor} = render_window(state, window, win_layout, is_active)
       new_cursor = if is_active and win_cursor != nil, do: win_cursor, else: cursor
-      {cmds ++ win_cmds, new_cursor}
+      {[win_frame | wfs], new_cursor}
     end
   end
 
   # Renders a single window's buffer content + modeline within its layout rect.
-  # Used for both single-window and split-window cases.
+  # Returns a WindowFrame struct and the absolute cursor position for the active window.
   @spec render_window(state(), Window.t(), Layout.window_layout(), boolean()) ::
-          {[binary()], {non_neg_integer(), non_neg_integer()} | nil}
+          {WindowFrame.t(), {non_neg_integer(), non_neg_integer()} | nil}
   defp render_window(state, window, win_layout, is_active) do
     {row_off, col_off, content_width, content_height} = win_layout.content
 
@@ -400,7 +418,7 @@ defmodule Minga.Editor.Renderer do
       col_off: col_off
     }
 
-    {gutter_commands, line_commands, rows_used} =
+    {gutter_draws, line_draws, rows_used} =
       if wrap_on do
         render_lines_wrapped(lines, visible_rows, line_opts)
       else
@@ -408,10 +426,10 @@ defmodule Minga.Editor.Renderer do
       end
 
     # Tilde lines for empty space below content
-    tilde_commands =
+    tilde_draws =
       if rows_used < visible_rows do
         for row <- rows_used..(visible_rows - 1) do
-          Protocol.encode_draw(row + row_off, col_off + gutter_w, "~",
+          DisplayList.draw(row + row_off, col_off + gutter_w, "~",
             fg: state.theme.editor.tilde_fg
           )
         end
@@ -420,7 +438,7 @@ defmodule Minga.Editor.Renderer do
       end
 
     # Per-window modeline (skip if layout gave it zero height)
-    modeline_commands =
+    modeline_draws =
       render_window_modeline(
         state,
         win_layout,
@@ -433,14 +451,26 @@ defmodule Minga.Editor.Renderer do
       )
 
     # Dim inactive windows (Doom Emacs style)
-    commands =
-      apply_inactive_dimming(
-        is_active,
-        gutter_commands,
-        line_commands,
-        tilde_commands,
-        modeline_commands
-      )
+    {gutter_draws, line_draws, tilde_draws, modeline_draws} =
+      apply_inactive_dimming(is_active, gutter_draws, line_draws, tilde_draws, modeline_draws)
+
+    # Build WindowFrame with absolute coordinates (not window-relative)
+    # The draws already include row_off/col_off from BufferLine.maybe_offset.
+    # We set rect origin to {0, 0} so to_commands doesn't double-offset.
+    win_frame = %WindowFrame{
+      rect: {0, 0, content_width, content_height},
+      gutter: DisplayList.draws_to_layer(gutter_draws),
+      lines: DisplayList.draws_to_layer(line_draws),
+      tilde_lines: DisplayList.draws_to_layer(tilde_draws),
+      modeline: DisplayList.draws_to_layer(modeline_draws),
+      cursor:
+        if(is_active,
+          do:
+            {cursor_line - viewport.top + row_off,
+             gutter_w + cursor_col - viewport.left + col_off},
+          else: nil
+        )
+    }
 
     # Return absolute cursor position for the active window
     cursor_info =
@@ -450,18 +480,18 @@ defmodule Minga.Editor.Renderer do
         nil
       end
 
-    {commands, cursor_info}
+    {win_frame, cursor_info}
   end
 
   # Renders vertical separator lines for vertical splits, scoped to each
   # split's row range (not the full screen height).
   @spec render_separators(WindowTree.t(), WindowTree.rect(), pos_integer(), Minga.Theme.t()) ::
-          [binary()]
+          [DisplayList.draw()]
   defp render_separators(tree, screen_rect, _total_rows, theme) do
     separators = collect_separators(tree, screen_rect)
 
     for {col, start_row, end_row} <- separators, row <- start_row..end_row do
-      Protocol.encode_draw(row, col, "│", fg: theme.editor.split_border_fg)
+      DisplayList.draw(row, col, "│", fg: theme.editor.split_border_fg)
     end
   end
 
@@ -509,7 +539,7 @@ defmodule Minga.Editor.Renderer do
          }
 
   @spec render_lines_nowrap([String.t()], line_render_opts()) ::
-          {[binary()], [binary()], non_neg_integer()}
+          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer()}
   defp render_lines_nowrap(lines, opts) do
     %{
       first_line: first_line,
@@ -560,7 +590,7 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.WrapMap
 
   @spec render_lines_wrapped([String.t()], pos_integer(), line_render_opts()) ::
-          {[binary()], [binary()], non_neg_integer()}
+          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer()}
   defp render_lines_wrapped(lines, max_rows, opts) do
     %{
       first_line: first_line,
@@ -646,7 +676,7 @@ defmodule Minga.Editor.Renderer do
 
   # Prepend all items from `new_items` onto `acc` (reverse order).
   # Used instead of `acc ++ new_items` to avoid O(n²) list appending.
-  @spec prepend_all([binary()], [binary()]) :: [binary()]
+  @spec prepend_all([DisplayList.draw()], [DisplayList.draw()]) :: [DisplayList.draw()]
   defp prepend_all(acc, []), do: acc
   defp prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
 
@@ -705,7 +735,7 @@ defmodule Minga.Editor.Renderer do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_window_modeline(
          _state,
          %{modeline: {_, _, _, 0}},
@@ -810,42 +840,23 @@ defmodule Minga.Editor.Renderer do
   defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
-  # (scroll_to_cursor_modeline_only and visible_range_modeline_only removed;
-  # unified render path uses Viewport.new(height, width, 0) with reserved: 0
-  # since Layout's content rect already excludes the modeline row.)
-
   # ── Dimming (inactive window — Doom Emacs style) ────────────────────────────
 
-  # Active window: assemble commands unchanged.
-  # Inactive window: dim gutter/tilde, grayscale modeline.
-  # Line content dimming is handled in the LineRenderer via ctx.dim.
-  @spec apply_inactive_dimming(boolean(), [binary()], [binary()], [binary()], [binary()]) ::
-          [binary()]
+  @spec apply_inactive_dimming(
+          boolean(),
+          [DisplayList.draw()],
+          [DisplayList.draw()],
+          [DisplayList.draw()],
+          [DisplayList.draw()]
+        ) ::
+          {[DisplayList.draw()], [DisplayList.draw()], [DisplayList.draw()], [DisplayList.draw()]}
   defp apply_inactive_dimming(true, gutter, lines, tildes, modeline) do
-    gutter ++ lines ++ tildes ++ modeline
+    {gutter, lines, tildes, modeline}
   end
 
   defp apply_inactive_dimming(false, gutter, lines, tildes, modeline) do
-    gutter ++ lines ++ tildes ++ Enum.map(modeline, &grayscale_draw_command/1)
+    {gutter, lines, tildes, DisplayList.grayscale_draws(modeline)}
   end
-
-  # ── Dimming helpers ────────────────────────────────────────────────────────
-
-  # Converts a draw command to grayscale (for inactive modelines).
-  @spec grayscale_draw_command(binary()) :: binary()
-  defp grayscale_draw_command(
-         <<0x10, row::16, col::16, fg_r::8, fg_g::8, fg_b::8, bg_r::8, bg_g::8, bg_b::8, attrs::8,
-           rest::binary>>
-       ) do
-    # Luminance-weighted grayscale
-    fg_gray = round(fg_r * 0.299 + fg_g * 0.587 + fg_b * 0.114)
-    bg_gray = round(bg_r * 0.299 + bg_g * 0.587 + bg_b * 0.114)
-
-    <<0x10, row::16, col::16, fg_gray::8, fg_gray::8, fg_gray::8, bg_gray::8, bg_gray::8,
-      bg_gray::8, attrs::8, rest::binary>>
-  end
-
-  defp grayscale_draw_command(other), do: other
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
@@ -942,49 +953,49 @@ defmodule Minga.Editor.Renderer do
 
   # Resolves the cursor position from the active window's cursor info,
   # with mode-specific overrides for search/command/eval (cursor in minibuffer).
-  @spec resolve_cursor_from_info(
+  @spec resolve_cursor(
           state(),
           {non_neg_integer(), non_neg_integer()} | nil,
           non_neg_integer()
         ) ::
-          binary()
-  defp resolve_cursor_from_info(
+          {non_neg_integer(), non_neg_integer()}
+  defp resolve_cursor(
          %{mode: :search, mode_state: mode_state},
          _cursor_info,
          minibuffer_row
        ) do
     search_col = Unicode.display_width(mode_state.input) + 1
-    Protocol.encode_cursor(minibuffer_row, search_col)
+    {minibuffer_row, search_col}
   end
 
-  defp resolve_cursor_from_info(
+  defp resolve_cursor(
          %{mode: :command, mode_state: mode_state},
          _cursor_info,
          minibuffer_row
        ) do
     cmd_col = Unicode.display_width(mode_state.input) + 1
-    Protocol.encode_cursor(minibuffer_row, cmd_col)
+    {minibuffer_row, cmd_col}
   end
 
-  defp resolve_cursor_from_info(
+  defp resolve_cursor(
          %{mode: :eval, mode_state: mode_state},
          _cursor_info,
          minibuffer_row
        ) do
     # "Eval: " prefix is 6 display columns
     eval_col = Unicode.display_width(mode_state.input) + 6
-    Protocol.encode_cursor(minibuffer_row, eval_col)
+    {minibuffer_row, eval_col}
   end
 
-  defp resolve_cursor_from_info(_state, {row, col}, _minibuffer_row) do
-    Protocol.encode_cursor(row, col)
+  defp resolve_cursor(_state, {row, col}, _minibuffer_row) do
+    {row, col}
   end
 
-  defp resolve_cursor_from_info(_state, nil, _minibuffer_row) do
-    Protocol.encode_cursor(0, 0)
+  defp resolve_cursor(_state, nil, _minibuffer_row) do
+    {0, 0}
   end
 
-  @spec render_whichkey(state(), Viewport.t()) :: [binary()]
+  @spec render_whichkey(state(), Viewport.t()) :: [DisplayList.draw()]
   defp render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport)
        when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
@@ -993,7 +1004,7 @@ defmodule Minga.Editor.Renderer do
     popup_row = max(0, viewport.rows - 3 - length(lines))
 
     ([
-       Protocol.encode_draw(popup_row, 0, String.duplicate("─", viewport.cols),
+       DisplayList.draw(popup_row, 0, String.duplicate("─", viewport.cols),
          fg: theme.popup.border_fg
        )
      ] ++
@@ -1001,7 +1012,7 @@ defmodule Minga.Editor.Renderer do
     |> Enum.with_index(popup_row + 1)
     |> Enum.map(fn {line_text, row} ->
       padded = String.pad_trailing(line_text, viewport.cols)
-      Protocol.encode_draw(row, 0, padded, fg: theme.popup.fg, bg: theme.popup.bg)
+      DisplayList.draw(row, 0, padded, fg: theme.popup.fg, bg: theme.popup.bg)
     end)
   end
 
@@ -1031,26 +1042,31 @@ defmodule Minga.Editor.Renderer do
 
   # Overrides cursor position when the agent panel input is focused.
   # Uses Layout's pre-computed agent_panel rect.
-  @spec agent_cursor_override_from_layout(state(), binary(), binary(), Layout.t()) ::
-          {binary(), binary()}
+  @spec agent_cursor_override_from_layout(
+          state(),
+          {non_neg_integer(), non_neg_integer()},
+          atom(),
+          Layout.t()
+        ) ::
+          {{non_neg_integer(), non_neg_integer()}, atom()}
   defp agent_cursor_override_from_layout(
          %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
-         _cursor_cmd,
-         _shape_cmd,
+         _cursor,
+         _shape,
          %{agent_panel: {row, col, _w, h}} = _layout
        )
        when h > 0 do
     input_row = row + h - @agent_input_height + 1
     input_col = col + 2 + String.length(state.agent.panel.input_text)
-    {Protocol.encode_cursor(input_row, input_col), Protocol.encode_cursor_shape(:beam)}
+    {{input_row, input_col}, :beam}
   end
 
-  defp agent_cursor_override_from_layout(_state, cursor_cmd, shape_cmd, _layout) do
-    {cursor_cmd, shape_cmd}
+  defp agent_cursor_override_from_layout(_state, cursor, shape, _layout) do
+    {cursor, shape}
   end
 
   # Renders the agent panel sidebar using Layout's pre-computed rect.
-  @spec render_agent_panel_from_layout(state(), Layout.t()) :: [binary()]
+  @spec render_agent_panel_from_layout(state(), Layout.t()) :: [DisplayList.draw()]
   defp render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []
 
   defp render_agent_panel_from_layout(state, %{agent_panel: rect}) do

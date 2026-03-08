@@ -64,4 +64,22 @@ defmodule Minga.Port.Frontend do
   capabilities if the frontend has not reported any.
   """
   @callback capabilities(server :: GenServer.server()) :: Minga.Port.Capabilities.t()
+
+  @doc """
+  Receives a display list frame for rendering.
+
+  This callback lets each frontend decide how to encode or render the
+  frame. The TUI frontend converts it to protocol command binaries via
+  `DisplayList.to_commands/1`. A GUI frontend could convert it to
+  native drawing calls instead.
+
+  Optional callback: frontends that only support pre-encoded commands
+  (via `send_commands/2`) do not need to implement this.
+  """
+  @callback render_frame(
+              server :: GenServer.server(),
+              frame :: Minga.Editor.DisplayList.Frame.t()
+            ) :: :ok
+
+  @optional_callbacks [render_frame: 2]
 end

@@ -10,13 +10,15 @@ defmodule Minga.Editor.Renderer.Line do
   Visual selection bounds use an **exclusive** end column convention:
   `sel_end` is the first display column *after* the last selected grapheme,
   so `selection_width = sel_end - sel_start` works correctly for wide chars.
+
+  All render functions return `DisplayList.draw()` tuples.
   """
 
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Highlight
-  alias Minga.Port.Protocol
 
   @typedoc "Column range of a selection on a single line (display columns, end exclusive)."
   @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}
@@ -24,9 +26,9 @@ defmodule Minga.Editor.Renderer.Line do
   @typedoc "A grapheme paired with its display width."
   @type grapheme_pair :: {String.t(), non_neg_integer()}
 
-  @doc "Renders a single buffer line into draw commands."
+  @doc "Renders a single buffer line into draw tuples."
   @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t(), non_neg_integer()) ::
-          [binary()]
+          [DisplayList.draw()]
   def render(line_text, screen_row, buf_line, %Context{} = ctx, line_byte_offset \\ 0) do
     pairs = grapheme_pairs(line_text)
     line_display_len = display_width_of_pairs(pairs)
@@ -36,41 +38,38 @@ defmodule Minga.Editor.Renderer.Line do
       |> display_drop(ctx.viewport.left)
       |> display_take(ctx.content_w)
 
-    commands =
-      case selection_cols_for_line(buf_line, line_display_len, ctx.visual_selection) do
-        nil when ctx.highlight != nil ->
-          render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
+    case selection_cols_for_line(buf_line, line_display_len, ctx.visual_selection) do
+      nil when ctx.highlight != nil ->
+        render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
 
-        nil ->
-          visible_graphemes = Enum.map(visible_pairs, fn {g, _} -> g end)
+      nil ->
+        visible_graphemes = Enum.map(visible_pairs, fn {g, _} -> g end)
 
-          SearchHighlight.render_line_with_search(
-            visible_graphemes,
-            screen_row,
-            buf_line,
-            ctx.viewport,
-            ctx.search_matches,
-            ctx.gutter_w,
-            ctx.confirm_match,
-            ctx.search_colors
-          )
+        SearchHighlight.render_line_with_search(
+          visible_graphemes,
+          screen_row,
+          buf_line,
+          ctx.viewport,
+          ctx.search_matches,
+          ctx.gutter_w,
+          ctx.confirm_match,
+          ctx.search_colors
+        )
 
-        :full ->
-          visible_text = join_pairs(visible_pairs)
-          [Protocol.encode_draw(screen_row, ctx.gutter_w, visible_text, reverse: true)]
+      :full ->
+        visible_text = join_pairs(visible_pairs)
+        [DisplayList.draw(screen_row, ctx.gutter_w, visible_text, reverse: true)]
 
-        {sel_start, sel_end} ->
-          render_partial_selection(
-            visible_pairs,
-            screen_row,
-            ctx.gutter_w,
-            ctx.viewport.left,
-            sel_start,
-            sel_end
-          )
-      end
-
-    commands
+      {sel_start, sel_end} ->
+        render_partial_selection(
+          visible_pairs,
+          screen_row,
+          ctx.gutter_w,
+          ctx.viewport.left,
+          sel_start,
+          sel_end
+        )
+    end
   end
 
   # ── Display-width helpers ─────────────────────────────────────────────────
@@ -140,7 +139,7 @@ defmodule Minga.Editor.Renderer.Line do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: [binary()]
+        ) :: [DisplayList.draw()]
   defp render_partial_selection(visible_pairs, screen_row, gutter_w, left, sel_start, sel_end) do
     # sel_start is inclusive, sel_end is exclusive — both in display columns.
     # selection width = sel_end - max(sel_start, left), no +1 needed.
@@ -159,14 +158,14 @@ defmodule Minga.Editor.Renderer.Line do
     after_text = join_pairs(after_pairs)
 
     [
-      Protocol.encode_draw(screen_row, gutter_w, before_text),
-      Protocol.encode_draw(
+      DisplayList.draw(screen_row, gutter_w, before_text),
+      DisplayList.draw(
         screen_row,
         gutter_w + before_width,
         sel_text,
         reverse: true
       ),
-      Protocol.encode_draw(
+      DisplayList.draw(
         screen_row,
         gutter_w + before_width + sel_width,
         after_text
@@ -221,7 +220,7 @@ defmodule Minga.Editor.Renderer.Line do
   # ── Syntax highlighting ──────────────────────────────────────────────────────
 
   @spec render_highlighted_line(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) ::
-          [binary()]
+          [DisplayList.draw()]
   defp render_highlighted_line(line_text, screen_row, ctx, line_byte_offset) do
     segments = Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
 
@@ -246,14 +245,14 @@ defmodule Minga.Editor.Renderer.Line do
 
   @spec clip_and_draw(
           String.t(),
-          Protocol.style(),
+          keyword(),
           non_neg_integer(),
           Context.t(),
-          [binary()],
+          [DisplayList.draw()],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: {[binary()], non_neg_integer(), non_neg_integer()}
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
   defp clip_and_draw(text, style, screen_row, ctx, cmds, screen_col, buf_col, seg_end) do
     drop_cols = max(0, ctx.viewport.left - buf_col)
     remaining_budget = ctx.content_w - screen_col
@@ -268,7 +267,7 @@ defmodule Minga.Editor.Renderer.Line do
     visible_width = display_width_of_pairs(pairs)
 
     if visible_width > 0 do
-      cmd = Protocol.encode_draw(screen_row, ctx.gutter_w + screen_col, visible_text, style)
+      cmd = DisplayList.draw(screen_row, ctx.gutter_w + screen_col, visible_text, style)
       {[cmd | cmds], screen_col + visible_width, seg_end}
     else
       {cmds, screen_col, seg_end}
