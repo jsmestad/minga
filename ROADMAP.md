@@ -302,7 +302,13 @@ Current status and planned features. Updated as development progresses.
 | Session persistence | ✅ | Auto-save conversations to JSON, `SPC a h` picker to browse/resume, auto-prune after 30 days #139 |
 | Status animations | ✅ | Thinking dot progression, streaming cursor blink, tool braille spinner #187 |
 | @-mentions | ✅ | Type @path to attach file context; tab-completion popup with fuzzy filtering #190 |
-| Tool-reactive preview pane | ✅ | Right pane reacts to tool events; shell output streams in real time; Preview state machine with :empty/:shell/:diff/:file variants #218 |
+| Tool-reactive preview pane | ✅ | Right pane reacts to tool events; shell output streams in real time; Preview state machine with :empty/:shell/:diff/:file/:directory variants #218 #220 |
+| Session switcher | ✅ | Browse/switch sessions with s key or /sessions; multi-session management #175 |
+| Open code block | ✅ | gf opens code blocks as editor buffers with filetype detection #189 |
+| Message search | ✅ | Incremental search with /, n/N navigation, case-insensitive by default #188 |
+| Configurable panel split | ✅ | agent_panel_split config option; {/} resize; = reset #183 |
+| Notification toasts | ✅ | Top-right toasts for actions; auto-dismiss 3s; FIFO queue #179 |
+| Directory listing preview | ✅ | list_directory tool output shown with file/folder icons #220 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |
