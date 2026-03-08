@@ -40,6 +40,12 @@ defmodule Minga.Keymap.Scope do
   @typedoc "Vim state relevant to scope resolution."
   @type vim_state :: :normal | :insert
 
+  @typedoc "A single help binding: `{key_string, description}`."
+  @type help_binding :: {String.t(), String.t()}
+
+  @typedoc "A group of help bindings with a category label."
+  @type help_group :: {String.t(), [help_binding()]}
+
   @typedoc """
   Result of resolving a key through the scope system.
 
@@ -77,6 +83,18 @@ defmodule Minga.Keymap.Scope do
   """
   @callback shared_keymap() :: Bindings.node_t()
 
+  @doc """
+  Returns categorized help groups for the `?` help overlay.
+
+  Each group is a `{category_label, [{key_string, description}]}` tuple.
+  The `focus` parameter lets scopes return different help content depending
+  on the current UI context (e.g., `:chat` vs `:file_viewer` in the agent
+  scope).
+
+  Return `[]` to indicate no help overlay is available for this scope.
+  """
+  @callback help_groups(focus :: atom()) :: [help_group()]
+
   @doc "Called when this scope becomes active. Initialize scope-specific state."
   @callback on_enter(state :: term()) :: term()
 
@@ -98,6 +116,22 @@ defmodule Minga.Keymap.Scope do
   @doc "Returns all registered scope names."
   @spec all_scopes() :: [scope_name()]
   def all_scopes, do: Map.keys(@scope_modules)
+
+  # ── Help ────────────────────────────────────────────────────────────────────
+
+  @doc """
+  Returns help groups for the given scope and focus context.
+
+  Delegates to the scope module's `help_groups/1` callback.
+  Returns `[]` if the scope is not found.
+  """
+  @spec help_groups(scope_name(), atom()) :: [help_group()]
+  def help_groups(scope_name, focus \\ :default) do
+    case module_for(scope_name) do
+      nil -> []
+      mod -> mod.help_groups(focus)
+    end
+  end
 
   # ── Resolution ─────────────────────────────────────────────────────────────
 

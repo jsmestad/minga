@@ -19,10 +19,22 @@ defmodule Minga.Keymap.Active do
 
   require Logger
 
-  @typedoc "Store state: leader trie + normal binding overrides."
+  alias Minga.Keymap.Scope
+
+  @typedoc """
+  Per-scope, per-vim-state binding overrides from user config.
+
+  Outer key is the scope name, inner key is the vim state.
+  Phase 1 leaves this empty. Phase 2 (#215) populates it from the
+  `keymap` config block so users can customize scope-specific bindings.
+  """
+  @type scope_overrides :: %{Scope.scope_name() => %{Scope.vim_state() => Bindings.node_t()}}
+
+  @typedoc "Store state: leader trie + normal binding overrides + scope overrides."
   @type state :: %{
           leader_trie: Bindings.node_t(),
-          normal_overrides: %{Bindings.key() => {atom(), String.t()}}
+          normal_overrides: %{Bindings.key() => {atom(), String.t()}},
+          scope_overrides: scope_overrides()
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -36,7 +48,8 @@ defmodule Minga.Keymap.Active do
       fn ->
         %{
           leader_trie: Defaults.leader_trie(),
-          normal_overrides: %{}
+          normal_overrides: %{},
+          scope_overrides: %{}
         }
       end,
       name: name
@@ -116,10 +129,22 @@ defmodule Minga.Keymap.Active do
     Agent.update(server, fn _ ->
       %{
         leader_trie: Defaults.leader_trie(),
-        normal_overrides: %{}
+        normal_overrides: %{},
+        scope_overrides: %{}
       }
     end)
   end
+
+  @doc """
+  Returns scope-specific binding overrides from user config.
+
+  Phase 1: always returns `%{}`. Phase 2 (#215) will populate this from
+  the `keymap` config block.
+  """
+  @spec scope_overrides() :: scope_overrides()
+  @spec scope_overrides(GenServer.server()) :: scope_overrides()
+  def scope_overrides, do: scope_overrides(__MODULE__)
+  def scope_overrides(server), do: Agent.get(server, & &1.scope_overrides)
 
   # ── Private ─────────────────────────────────────────────────────────────────
 

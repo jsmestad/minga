@@ -2,6 +2,14 @@
 
 The agentic view (`SPC a t`) is a full-screen OpenCode-style interface for interacting with AI agents. It follows Doom Emacs conventions for read-only special buffers: vim navigation motions are preserved, editing keys are repurposed for contextual actions, and multi-key sequences use standard vim prefixes.
 
+## Architecture
+
+All agentic view keybindings are declared as trie data in `Minga.Keymap.Scope.Agent` and resolved through the keymap scope system (`Minga.Keymap.Scope`). The scope module defines separate tries for normal mode (navigation) and insert mode (input focused), plus shared bindings that apply in both.
+
+When the agentic view is active, the `Input.Scoped` handler routes keys through the agent scope. Sub-states (search input, tool approval, diff review, @-mentions) are handled before trie lookup. The `?` help overlay content comes from `Scope.Agent.help_groups/1`.
+
+See `Minga.Keymap.Scope` for the behaviour contract and `Minga.Input.Scoped` for the dispatch logic.
+
 ## Design Principles
 
 1. **Sacred vim motions stay.** j/k, gg/G, Ctrl-d/u, /, n/N work exactly as a vim user expects.

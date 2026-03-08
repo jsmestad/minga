@@ -33,6 +33,10 @@ defmodule Minga.Keymap.Scope.Editor do
   def shared_keymap, do: Bindings.new()
 
   @impl true
+  @spec help_groups(atom()) :: [Minga.Keymap.Scope.help_group()]
+  def help_groups(_focus), do: []
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 

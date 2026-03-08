@@ -198,4 +198,52 @@ defmodule Minga.Keymap.ScopeTest do
       end
     end
   end
+
+  describe "help_groups/2" do
+    test "agent scope returns chat help by default" do
+      groups = Scope.help_groups(:agent, :chat)
+      assert [_ | _] = groups
+      assert {"Navigation", bindings} = List.first(groups)
+      assert is_list(bindings)
+      assert Enum.any?(bindings, fn {key, _desc} -> String.contains?(key, "j") end)
+    end
+
+    test "agent scope returns viewer help for :file_viewer" do
+      viewer_groups = Scope.help_groups(:agent, :file_viewer)
+      assert [_ | _] = viewer_groups
+      # Viewer help has fewer groups than chat help
+      chat_groups = Scope.help_groups(:agent, :chat)
+      assert Enum.count(viewer_groups) < Enum.count(chat_groups)
+    end
+
+    test "editor scope returns empty help" do
+      assert [] = Scope.help_groups(:editor, :default)
+    end
+
+    test "file_tree scope returns help with tree bindings" do
+      groups = Scope.help_groups(:file_tree, :default)
+      assert [_ | _] = groups
+      all_bindings = Enum.flat_map(groups, fn {_cat, bindings} -> bindings end)
+      assert Enum.any?(all_bindings, fn {key, _desc} -> key == "Enter" end)
+    end
+
+    test "unknown scope returns empty help" do
+      assert [] = Scope.help_groups(:nonexistent, :default)
+    end
+
+    test "all help groups have {string, string} binding entries" do
+      for scope <- Scope.all_scopes() do
+        groups = Scope.help_groups(scope, :default)
+
+        for {category, bindings} <- groups do
+          assert is_binary(category), "category should be string in #{scope}"
+
+          for {key, desc} <- bindings do
+            assert is_binary(key), "key should be string in #{scope}/#{category}"
+            assert is_binary(desc), "desc should be string in #{scope}/#{category}"
+          end
+        end
+      end
+    end
+  end
 end
