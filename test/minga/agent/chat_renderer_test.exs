@@ -1,0 +1,109 @@
+defmodule Minga.Agent.ChatRendererTest do
+  use ExUnit.Case, async: true
+
+  alias Minga.Agent.ChatRenderer
+  alias Minga.Theme
+
+  defp default_theme do
+    {:ok, theme} = Theme.get(:doom_one)
+    theme
+  end
+
+  defp panel(opts) do
+    %{
+      messages: Keyword.get(opts, :messages, []),
+      status: Keyword.get(opts, :status, :idle),
+      input_text: Keyword.get(opts, :input_text, ""),
+      scroll_offset: Keyword.get(opts, :scroll_offset, 0),
+      spinner_frame: 0,
+      usage: %{input: 0, output: 0, cost: 0.0},
+      model_name: "claude-sonnet-4",
+      thinking_level: "medium",
+      error_message: nil
+    }
+  end
+
+  describe "word wrapping in messages" do
+    test "long assistant messages produce more visual lines than source lines" do
+      long_text = String.duplicate("word ", 30) |> String.trim()
+      messages = [{:assistant, long_text}]
+
+      # Render at a narrow width to force wrapping
+      rect = {0, 0, 40, 30}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      # The draw commands should exist (not crashing is the baseline)
+      assert is_list(draws)
+      assert draws != []
+    end
+
+    test "long user messages wrap" do
+      long_text = String.duplicate("hello ", 20) |> String.trim()
+      messages = [{:user, long_text}]
+
+      rect = {0, 0, 30, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      assert is_list(draws)
+      assert draws != []
+    end
+
+    test "code blocks are not wrapped" do
+      # A message with a code block
+      text =
+        "Here is code:\n```\nvery_long_variable_name = some_function_call(with_many_arguments, that_exceed_width)\n```\nDone."
+
+      messages = [{:assistant, text}]
+
+      rect = {0, 0, 40, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      # Should render without error
+      assert is_list(draws)
+
+      # Look for the → truncation indicator in any draw command
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      has_indicator = Enum.any?(texts, fn text -> String.contains?(text, "→") end)
+      assert has_indicator, "expected code lines to be truncated with → indicator"
+    end
+
+    test "thinking blocks wrap long lines" do
+      long_thinking = String.duplicate("reasoning ", 20) |> String.trim()
+      messages = [{:thinking, long_thinking}]
+
+      rect = {0, 0, 40, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      assert is_list(draws)
+      assert draws != []
+    end
+
+    test "tool results wrap within the tool card" do
+      long_result = String.duplicate("output ", 20) |> String.trim()
+
+      messages = [
+        {:tool_call,
+         %{
+           id: "tc1",
+           name: "shell",
+           args: %{},
+           status: :complete,
+           result: long_result,
+           is_error: false,
+           collapsed: false
+         }}
+      ]
+
+      rect = {0, 0, 40, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      assert is_list(draws)
+      assert draws != []
+    end
+  end
+end

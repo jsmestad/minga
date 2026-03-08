@@ -12,6 +12,7 @@ defmodule Minga.Agent.ChatRenderer do
 
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
+  alias Minga.Agent.WordWrap
   alias Minga.Editor.DisplayList
   alias Minga.Theme
 
@@ -271,44 +272,47 @@ defmodule Minga.Agent.ChatRenderer do
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:assistant, text}, at, _width) do
+  defp message_lines({:assistant, text}, at, width) do
     header = {[{"▎ Agent", [fg: at.assistant_label, bold: true]}], :text, at.panel_bg}
 
     parsed = Markdown.parse(text)
+    border_prefix = [{"▎ ", [fg: at.assistant_border]}]
+    # Available width after the border prefix
+    content_width = max(width - 2, 4)
 
     content =
-      Enum.map(parsed, fn {segments, line_type} ->
+      Enum.flat_map(parsed, fn {segments, line_type} ->
         styled = Enum.map(segments, fn {t, style} -> {t, style_to_opts(style, at)} end)
-
-        bg =
-          case line_type do
-            :code -> at.code_bg
-            _ -> at.panel_bg
-          end
-
-        {[{"▎ ", [fg: at.assistant_border]} | styled], line_type, bg}
+        wrap_or_truncate(styled, line_type, border_prefix, content_width, at)
       end)
 
     spacer = {[{"", []}], :empty, at.panel_bg}
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:thinking, text}, at, _width) do
+  defp message_lines({:thinking, text}, at, width) do
     lines = String.split(text, "\n")
+    prefix = [{"  │ ", [fg: at.thinking_fg, italic: true]}]
+    content_width = max(width - 4, 4)
 
     header =
       {[{"  💭 Thinking", [fg: at.thinking_fg, italic: true, bold: true]}], :text, at.panel_bg}
 
     content =
-      Enum.map(lines, fn line ->
-        {[{"  │ " <> line, [fg: at.thinking_fg, italic: true]}], :text, at.panel_bg}
+      Enum.flat_map(lines, fn line ->
+        segments = [{line, [fg: at.thinking_fg, italic: true]}]
+        wrapped = WordWrap.wrap_segments(segments, content_width)
+
+        Enum.map(wrapped, fn line_segments ->
+          {prefix ++ line_segments, :text, at.panel_bg}
+        end)
       end)
 
     spacer = {[{"", []}], :empty, at.panel_bg}
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:tool_call, tc}, at, _width) do
+  defp message_lines({:tool_call, tc}, at, width) do
     status_icon =
       case tc.status do
         :running -> "⟳"
@@ -334,12 +338,14 @@ defmodule Minga.Agent.ChatRenderer do
       if tc.collapsed or tc.result == "" do
         []
       else
+        tool_prefix = [{"  │ ", [fg: at.tool_border]}]
+        tool_content_width = max(width - 4, 4)
+
         tc.result
         |> String.split("\n")
         |> Enum.take(5)
-        |> Enum.map(fn line ->
-          truncated = String.slice(line, 0, 80)
-          {[{"  │ " <> truncated, [fg: at.text_fg]}], :text, at.panel_bg}
+        |> Enum.flat_map(fn line ->
+          wrap_or_truncate([{line, [fg: at.text_fg]}], :text, tool_prefix, tool_content_width, at)
         end)
       end
 
@@ -356,6 +362,68 @@ defmodule Minga.Agent.ChatRenderer do
 
     spacer = {[{"", []}], :empty, at.panel_bg}
     [header | result_lines] ++ [footer, spacer]
+  end
+
+  # ── Wrapping / truncation helpers ─────────────────────────────────────────────
+
+  # Wraps prose lines or truncates code lines, returning render_line tuples.
+  @spec wrap_or_truncate(
+          [{String.t(), keyword()}],
+          Markdown.line_type(),
+          [{String.t(), keyword()}],
+          pos_integer(),
+          Theme.Agent.t()
+        ) :: [render_line()]
+  defp wrap_or_truncate(styled, :code, prefix, width, at) do
+    [{prefix ++ truncate_code(styled, width, at), :code, at.code_bg}]
+  end
+
+  defp wrap_or_truncate(styled, line_type, prefix, width, at) do
+    styled
+    |> WordWrap.wrap_segments(width)
+    |> Enum.map(fn line_segments -> {prefix ++ line_segments, line_type, at.panel_bg} end)
+  end
+
+  # ── Code truncation ──────────────────────────────────────────────────────────
+
+  # Truncates a code line's segments to fit within width, appending a → indicator if truncated.
+  @spec truncate_code([{String.t(), keyword()}], pos_integer(), Theme.Agent.t()) :: [
+          {String.t(), keyword()}
+        ]
+  defp truncate_code(segments, max_width, at) do
+    total =
+      Enum.reduce(segments, 0, fn {text, _}, acc -> acc + String.length(text) end)
+
+    if total <= max_width do
+      segments
+    else
+      indicator = {"→", [fg: at.panel_border, bg: at.code_bg]}
+      Enum.reverse([indicator | Enum.reverse(truncate_segments(segments, max_width - 1))])
+    end
+  end
+
+  @spec truncate_segments([{String.t(), keyword()}], non_neg_integer()) :: [
+          {String.t(), keyword()}
+        ]
+  defp truncate_segments(segments, max_width) do
+    {result, _remaining} =
+      Enum.reduce_while(segments, {[], max_width}, fn {text, style}, {acc, remaining} ->
+        len = String.length(text)
+
+        cond do
+          remaining <= 0 ->
+            {:halt, {acc, 0}}
+
+          len <= remaining ->
+            {:cont, {[{text, style} | acc], remaining - len}}
+
+          true ->
+            truncated = String.slice(text, 0, remaining)
+            {:halt, {[{truncated, style} | acc], 0}}
+        end
+      end)
+
+    Enum.reverse(result)
   end
 
   # ── Style conversion ────────────────────────────────────────────────────────
@@ -401,11 +469,19 @@ defmodule Minga.Agent.ChatRenderer do
   @spec text_to_lines(String.t(), Theme.Agent.t(), pos_integer(), Theme.color()) :: [
           render_line()
         ]
-  defp text_to_lines(text, at, _width, border_color) do
+  defp text_to_lines(text, at, width, border_color) do
+    border_prefix = [{"▎ ", [fg: border_color]}]
+    content_width = max(width - 2, 4)
+
     text
     |> String.split("\n")
-    |> Enum.map(fn line ->
-      {[{"▎ ", [fg: border_color]}, {line, [fg: at.text_fg]}], :text, at.panel_bg}
+    |> Enum.flat_map(fn line ->
+      segments = [{line, [fg: at.text_fg]}]
+      wrapped = WordWrap.wrap_segments(segments, content_width)
+
+      Enum.map(wrapped, fn line_segments ->
+        {border_prefix ++ line_segments, :text, at.panel_bg}
+      end)
     end)
   end
 
