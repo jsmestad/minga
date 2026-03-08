@@ -46,7 +46,9 @@ defmodule Minga.Config.OptionsTest do
                linebreak: true,
                breakindent: true,
                agent_provider: :auto,
-               agent_model: nil
+               agent_model: nil,
+               agent_tool_approval: :destructive,
+               agent_destructive_tools: ["write_file", "edit_file", "shell"]
              }
     end
   end
@@ -180,6 +182,51 @@ defmodule Minga.Config.OptionsTest do
       Options.set_for_filetype(s, :go, :tab_width, 8)
       Options.reset(s)
       assert Options.get_for_filetype(s, :tab_width, :go) == 2
+    end
+  end
+
+  describe "agent_tool_approval" do
+    test "defaults to :destructive", %{server: s} do
+      assert Options.get(s, :agent_tool_approval) == :destructive
+    end
+
+    test "accepts :all", %{server: s} do
+      assert {:ok, :all} = Options.set(s, :agent_tool_approval, :all)
+      assert Options.get(s, :agent_tool_approval) == :all
+    end
+
+    test "accepts :none", %{server: s} do
+      assert {:ok, :none} = Options.set(s, :agent_tool_approval, :none)
+      assert Options.get(s, :agent_tool_approval) == :none
+    end
+
+    test "rejects invalid values", %{server: s} do
+      assert {:error, _} = Options.set(s, :agent_tool_approval, :always)
+    end
+  end
+
+  describe "agent_destructive_tools" do
+    test "defaults to write_file, edit_file, shell", %{server: s} do
+      assert Options.get(s, :agent_destructive_tools) == ["write_file", "edit_file", "shell"]
+    end
+
+    test "accepts a custom list of strings", %{server: s} do
+      custom = ["shell", "write_file"]
+      assert {:ok, ^custom} = Options.set(s, :agent_destructive_tools, custom)
+      assert Options.get(s, :agent_destructive_tools) == custom
+    end
+
+    test "accepts an empty list", %{server: s} do
+      assert {:ok, []} = Options.set(s, :agent_destructive_tools, [])
+      assert Options.get(s, :agent_destructive_tools) == []
+    end
+
+    test "rejects non-list values", %{server: s} do
+      assert {:error, _} = Options.set(s, :agent_destructive_tools, "shell")
+    end
+
+    test "rejects lists with non-string elements", %{server: s} do
+      assert {:error, _} = Options.set(s, :agent_destructive_tools, [:shell, :write_file])
     end
   end
 end

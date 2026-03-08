@@ -28,12 +28,30 @@ defmodule Minga.Agent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [project_root: String.t()]
 
-  @destructive_tools ~w(write_file edit_file shell)
+  @default_destructive_tools ~w(write_file edit_file shell)
 
-  @doc "Returns true if the named tool modifies the filesystem or runs commands."
+  @doc """
+  Returns true if the named tool is classified as destructive.
+
+  Reads the configured list from `:agent_destructive_tools` (defaults to
+  `["write_file", "edit_file", "shell"]`). Accepts an optional list override
+  for testing without starting the Options agent.
+  """
   @spec destructive?(String.t()) :: boolean()
-  def destructive?(name) when name in @destructive_tools, do: true
-  def destructive?(_name), do: false
+  def destructive?(name), do: destructive?(name, configured_destructive_tools())
+
+  @spec destructive?(String.t(), [String.t()]) :: boolean()
+  def destructive?(name, destructive_list) when is_list(destructive_list) do
+    name in destructive_list
+  end
+
+  @spec configured_destructive_tools() :: [String.t()]
+  defp configured_destructive_tools do
+    Minga.Config.Options.get(:agent_destructive_tools)
+  rescue
+    # Options agent not started (e.g., in tests that don't start the app)
+    _ -> @default_destructive_tools
+  end
 
   @doc """
   Returns all available tools scoped to the given project root.

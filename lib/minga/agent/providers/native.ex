@@ -377,8 +377,10 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
   defp execute_tools(provider_pid, context, tool_calls, available_tools) do
+    initial_mode = approval_mode_from_config()
+
     {final_ctx, _mode} =
-      Enum.reduce(tool_calls, {context, :ask}, fn tool_call, {ctx, approval_mode} ->
+      Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
         {result_text, is_error, new_mode} =
           execute_with_approval(provider_pid, tool_call, available_tools, approval_mode)
 
@@ -400,11 +402,22 @@ defmodule Minga.Agent.Providers.Native do
     final_ctx
   end
 
-  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], :ask | :approve_all) ::
-          {String.t(), boolean(), :ask | :approve_all}
+  @typep approval_mode :: :none | :ask | :ask_all | :approve_all
+
+  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
+          {String.t(), boolean(), approval_mode()}
+  defp execute_with_approval(_provider_pid, tool_call, available_tools, :none) do
+    {result, is_error} = run_single_tool(tool_call, available_tools)
+    {result, is_error, :none}
+  end
+
   defp execute_with_approval(_provider_pid, tool_call, available_tools, :approve_all) do
     {result, is_error} = run_single_tool(tool_call, available_tools)
     {result, is_error, :approve_all}
+  end
+
+  defp execute_with_approval(provider_pid, tool_call, available_tools, :ask_all) do
+    request_approval(provider_pid, tool_call, available_tools)
   end
 
   defp execute_with_approval(provider_pid, tool_call, available_tools, :ask) do
@@ -414,6 +427,18 @@ defmodule Minga.Agent.Providers.Native do
       {result, is_error} = run_single_tool(tool_call, available_tools)
       {result, is_error, :ask}
     end
+  end
+
+  @spec approval_mode_from_config() :: approval_mode()
+  defp approval_mode_from_config do
+    case Minga.Config.Options.get(:agent_tool_approval) do
+      :none -> :none
+      :all -> :ask_all
+      :destructive -> :ask
+    end
+  rescue
+    # Options agent not started (tests, standalone usage)
+    _ -> :ask
   end
 
   @approval_timeout_ms 300_000

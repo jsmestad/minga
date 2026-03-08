@@ -57,28 +57,38 @@ defmodule Minga.Agent.ToolsTest do
   end
 
   describe "destructive?/1" do
-    test "write_file is destructive" do
+    test "write_file is destructive by default" do
       assert Tools.destructive?("write_file")
     end
 
-    test "edit_file is destructive" do
+    test "edit_file is destructive by default" do
       assert Tools.destructive?("edit_file")
     end
 
-    test "shell is destructive" do
+    test "shell is destructive by default" do
       assert Tools.destructive?("shell")
     end
 
-    test "read_file is not destructive" do
+    test "read_file is not destructive by default" do
       refute Tools.destructive?("read_file")
     end
 
-    test "list_directory is not destructive" do
+    test "list_directory is not destructive by default" do
       refute Tools.destructive?("list_directory")
     end
 
     test "unknown tools are not destructive" do
       refute Tools.destructive?("foobar")
+    end
+
+    test "accepts a custom destructive list" do
+      assert Tools.destructive?("read_file", ["read_file", "shell"])
+      refute Tools.destructive?("write_file", ["read_file", "shell"])
+    end
+
+    test "empty list makes nothing destructive" do
+      refute Tools.destructive?("write_file", [])
+      refute Tools.destructive?("shell", [])
     end
   end
 end

@@ -27,6 +27,8 @@ defmodule Minga.Config.Options do
   | `:wrap`                 | boolean                                    | `false`    |
   | `:linebreak`            | boolean                                    | `true`     |
   | `:breakindent`          | boolean                                    | `true`     |
+  | `:agent_tool_approval`  | `:destructive`, `:all`, or `:none`          | `:destructive` |
+  | `:agent_destructive_tools` | list of tool name strings                | `["write_file", "edit_file", "shell"]` |
 
   ## Per-filetype overrides
 
@@ -67,6 +69,8 @@ defmodule Minga.Config.Options do
           | :breakindent
           | :agent_provider
           | :agent_model
+          | :agent_tool_approval
+          | :agent_destructive_tools
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -82,6 +86,7 @@ defmodule Minga.Config.Options do
            | {:enum, [atom()]}
            | :theme_atom
            | :string_or_nil
+           | :string_list
 
   @typedoc "Internal state: global options + per-filetype overrides."
   @type state :: %{
@@ -109,7 +114,9 @@ defmodule Minga.Config.Options do
     {:linebreak, :boolean, true},
     {:breakindent, :boolean, true},
     {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
-    {:agent_model, :string_or_nil, nil}
+    {:agent_model, :string_or_nil, nil},
+    {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
+    {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
@@ -303,6 +310,18 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:string_or_nil, name, value) do
     {:error, "#{name} must be a string or nil, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:string_list, _name, value) when is_list(value) do
+    if Enum.all?(value, &is_binary/1) do
+      :ok
+    else
+      {:error, "expected a list of strings, got non-string elements"}
+    end
+  end
+
+  defp validate_type(:string_list, name, value) do
+    {:error, "#{name} must be a list of strings, got: #{inspect(value)}"}
   end
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do
