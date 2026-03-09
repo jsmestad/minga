@@ -150,6 +150,9 @@ defmodule Minga.Editor do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
+    {keymap_scope, agentic_state, effective_tree} =
+      startup_view_state(port_manager, initial_window_id)
+
     state = %EditorState{
       buffers: %Buffers{
         active: active_buf,
@@ -163,11 +166,13 @@ defmodule Minga.Editor do
       mode: :normal,
       mode_state: Mode.initial_state(),
       windows: %Windows{
-        tree: WindowTree.new(initial_window_id),
+        tree: effective_tree,
         map: windows,
         active: initial_window_id,
         next_id: initial_window_id + 1
       },
+      keymap_scope: keymap_scope,
+      agentic: agentic_state,
       focus_stack: Minga.Input.default_stack()
     }
 
@@ -220,6 +225,7 @@ defmodule Minga.Editor do
         new_state = lsp_buffer_opened(new_state, pid)
         new_state = git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
+        new_state = maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -292,6 +298,9 @@ defmodule Minga.Editor do
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
+    # If the agentic view was activated at init, start the session now
+    # that the port is connected and the viewport is known.
+    new_state = maybe_start_agent_session(new_state)
     {:noreply, new_state}
   end
 
@@ -689,6 +698,41 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  # Determines the initial keymap scope, agentic view state, and window
+  # tree based on config and CLI flags. In headless test mode (port_manager
+  # is a pid, not the PortManager atom), always uses editor mode.
+  @spec startup_view_state(GenServer.server(), pos_integer()) ::
+          {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
+  defp startup_view_state(port_manager, window_id) do
+    tui_mode? = port_manager == PortManager
+    cli_flags = Minga.CLI.startup_flags()
+
+    want_agent? =
+      tui_mode? and
+        not cli_flags.force_editor and
+        safe_get_option(:startup_view, :agent) == :agent
+
+    if want_agent? do
+      # Agentic view: set state immediately, hide window tree so the
+      # agent panel takes the full screen. The agent session starts
+      # later when :ready arrives and the port is connected.
+      av = %ViewState{ViewState.new() | active: true, focus: :chat}
+      {:agent, av, nil}
+    else
+      {:editor, ViewState.new(), WindowTree.new(window_id)}
+    end
+  end
+
+  # Reads a config option, returning the fallback if the Options Agent
+  # isn't running (e.g., during headless tests that don't start the full
+  # supervision tree).
+  @spec safe_get_option(ConfigOptions.option_name(), term()) :: term()
+  defp safe_get_option(name, fallback) do
+    ConfigOptions.get(name)
+  rescue
+    _ -> fallback
+  end
+
   @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
   defp fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
 
@@ -719,6 +763,69 @@ defmodule Minga.Editor do
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+  end
+
+  # If the agentic view was activated during init, start the agent session
+  # now that the port is ready. Also loads auto-context if configured.
+  @spec maybe_start_agent_session(state()) :: state()
+  defp maybe_start_agent_session(%{agentic: %{active: true}, agent: %{session: nil}} = state) do
+    state = Commands.Agent.ensure_agent_session(state)
+    cli_flags = Minga.CLI.startup_flags()
+    maybe_load_auto_context(state, cli_flags)
+  rescue
+    e ->
+      Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
+      state
+  end
+
+  defp maybe_start_agent_session(state), do: state
+
+  # Loads the active buffer's file into the agentic preview pane when
+  # agent_auto_context is enabled and a file buffer is open. Called once
+  # during startup after the agentic view activates.
+  @spec maybe_load_auto_context(state(), Minga.CLI.flags()) :: state()
+  defp maybe_load_auto_context(state, %{no_context: true}), do: state
+
+  defp maybe_load_auto_context(state, _flags) do
+    auto_context = ConfigOptions.get(:agent_auto_context)
+    active_buf = state.buffers.active
+
+    if auto_context and active_buf do
+      load_buffer_as_preview(state, active_buf)
+    else
+      state
+    end
+  end
+
+  # Sets a file's content as the agentic preview pane if the view is active
+  # and the preview is still empty. Used both at startup (via
+  # maybe_load_auto_context) and when a file is opened while the agentic
+  # view is already active (via maybe_set_auto_context).
+  @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
+  defp maybe_set_auto_context(state, file_path, buffer_pid) do
+    cli_flags = Minga.CLI.startup_flags()
+    auto_context = ConfigOptions.get(:agent_auto_context)
+    agentic_active = state.agentic.active
+    preview_empty = state.agentic.preview.content == :empty
+
+    if agentic_active and preview_empty and auto_context and not cli_flags.no_context do
+      content = BufferServer.content(buffer_pid)
+      update_preview(state, &Preview.set_file(&1, file_path, content))
+    else
+      state
+    end
+  end
+
+  @spec load_buffer_as_preview(state(), pid()) :: state()
+  defp load_buffer_as_preview(state, buffer_pid) do
+    case BufferServer.file_path(buffer_pid) do
+      nil ->
+        state
+
+      path ->
+        content = BufferServer.content(buffer_pid)
+        update_preview(state, &Preview.set_file(&1, path, content))
+    end
   end
 
   @spec existing_diff_for_path(state(), String.t()) :: DiffReview.t() | nil

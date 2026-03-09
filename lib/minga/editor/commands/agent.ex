@@ -214,6 +214,14 @@ defmodule Minga.Editor.Commands.Agent do
     state
   end
 
+  @doc "Starts an agent session if one isn't already running. No-op otherwise."
+  @spec ensure_agent_session(state()) :: state()
+  def ensure_agent_session(%{agent: %{session: nil}} = state) do
+    start_agent_session(state)
+  end
+
+  def ensure_agent_session(state), do: state
+
   @doc "Starts a fresh agent session."
   @spec new_agent_session(state()) :: state()
   def new_agent_session(%{agent: %{session: nil}} = state) do

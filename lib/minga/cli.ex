@@ -7,23 +7,48 @@ defmodule Minga.CLI do
 
   In Burrito mode, arguments are fetched via `Burrito.Util.Args.argv/0`
   which works whether running standalone or under Mix.
+
+  ## Startup view
+
+  By default, Minga boots into the agentic view (controlled by the
+  `:startup_view` config option). CLI flags can override the config:
+
+  - `--editor` forces the traditional file editing view
+  - `--no-context` opens the agentic view but skips loading the CLI
+    file argument as preview context
   """
 
   alias Burrito.Util.Args
 
   require Logger
 
+  @typedoc "Parsed CLI result."
+  @type parsed ::
+          {:open, file :: String.t() | nil, flags()}
+          | {:error, String.t()}
+
+  @typedoc "CLI flags that override config options."
+  @type flags :: %{
+          force_editor: boolean(),
+          no_context: boolean()
+        }
+
+  @default_flags %{force_editor: false, no_context: false}
+
   @doc "Main entry point for the CLI."
   @spec main([String.t()]) :: :ok
   def main(args) do
     case parse_args(args) do
-      {:file, path} ->
-        Minga.Log.debug(:editor, "Opening file: #{path}")
-        open_editor(path)
+      {:open, file, flags} ->
+        store_startup_flags(flags)
 
-      :no_file ->
-        Minga.Log.debug(:editor, "Starting with empty buffer")
-        open_editor(nil)
+        if file do
+          Minga.Log.debug(:editor, "Opening file: #{file}")
+        else
+          Minga.Log.debug(:editor, "Starting with empty buffer")
+        end
+
+        open_editor(file)
 
       {:error, message} ->
         IO.puts(:stderr, message)
@@ -47,30 +72,76 @@ defmodule Minga.CLI do
   @doc """
   Parses CLI arguments into an action.
 
-  Returns `{:file, path}`, `:no_file`, or `{:error, message}`.
+  Returns `{:open, file_or_nil, flags}` or `{:error, message}`.
+  Flags carry CLI overrides for startup behavior.
   """
-  @spec parse_args([String.t()]) :: {:file, String.t()} | :no_file | {:error, String.t()}
-  def parse_args([]), do: :no_file
-  def parse_args(["--help" | _]), do: {:error, usage()}
-  def parse_args(["-h" | _]), do: {:error, usage()}
-  def parse_args(["--version" | _]), do: {:error, "minga #{Minga.version()}"}
-  def parse_args(["-v" | _]), do: {:error, "minga #{Minga.version()}"}
-  def parse_args([file_path | _]), do: {:file, file_path}
+  @spec parse_args([String.t()]) :: parsed()
+  def parse_args(args) do
+    parse_args(args, nil, @default_flags)
+  end
+
+  @doc """
+  Returns the startup flags stored by the CLI, or defaults if none were set.
+
+  The editor reads these once during initialization to decide whether to
+  activate the agentic view and whether to auto-load file context.
+  """
+  @spec startup_flags() :: flags()
+  def startup_flags do
+    Application.get_env(:minga, :cli_startup_flags, @default_flags)
+  end
+
+  # ── Argument parsing ────────────────────────────────────────────────────────
+
+  @spec parse_args([String.t()], String.t() | nil, flags()) :: parsed()
+  defp parse_args([], file, flags), do: {:open, file, flags}
+
+  defp parse_args(["--help" | _], _file, _flags), do: {:error, usage()}
+  defp parse_args(["-h" | _], _file, _flags), do: {:error, usage()}
+  defp parse_args(["--version" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
+  defp parse_args(["-v" | _], _file, _flags), do: {:error, "minga #{Minga.version()}"}
+
+  defp parse_args(["--editor" | rest], file, flags) do
+    parse_args(rest, file, %{flags | force_editor: true})
+  end
+
+  defp parse_args(["--no-context" | rest], file, flags) do
+    parse_args(rest, file, %{flags | no_context: true})
+  end
+
+  defp parse_args([<<"--", _::binary>> = flag | _], _file, _flags) do
+    {:error, "unknown flag: #{flag}\n\n#{usage()}"}
+  end
+
+  defp parse_args([file_path | rest], _file, flags) do
+    parse_args(rest, file_path, flags)
+  end
+
+  # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  @spec store_startup_flags(flags()) :: :ok
+  defp store_startup_flags(flags) do
+    Application.put_env(:minga, :cli_startup_flags, flags)
+  end
 
   @spec usage() :: String.t()
   defp usage do
     """
-    minga #{Minga.version()} — BEAM-powered modal text editor
+    minga #{Minga.version()} -- BEAM-powered modal text editor
 
-    Usage: minga [filename]
+    Usage: minga [options] [filename]
 
     Options:
-      -h, --help       Show this help message
-      -v, --version    Show version
+      -h, --help         Show this help message
+      -v, --version      Show version
+      --editor           Start in file editing mode (skip agentic view)
+      --no-context       Don't load the file as agent context
 
     Examples:
-      minga README.md    Open a file
-      minga              Start with empty buffer
+      minga                    Start agentic view
+      minga README.md          Start agentic view with file as context
+      minga --editor README.md Open file in traditional editor
+      minga --no-context foo.ex  Agentic view, file open but not as context
     """
   end
 

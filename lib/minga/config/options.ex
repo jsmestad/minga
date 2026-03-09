@@ -30,6 +30,8 @@ defmodule Minga.Config.Options do
   | `:agent_tool_approval`  | `:destructive`, `:all`, or `:none`          | `:destructive` |
   | `:agent_destructive_tools` | list of tool name strings                | `["write_file", "edit_file", "shell"]` |
   | `:agent_panel_split`      | positive integer (30-80)                   | `65`       |
+  | `:startup_view`           | `:agent` or `:editor`                       | `:agent`   |
+  | `:agent_auto_context`     | boolean                                     | `true`     |
   | `:font_family`            | string (font name)                          | `"Menlo"`   |
   | `:font_size`              | positive integer (point size)               | `13`        |
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
@@ -87,6 +89,8 @@ defmodule Minga.Config.Options do
           | :agent_destructive_tools
           | :agent_session_retention_days
           | :agent_panel_split
+          | :startup_view
+          | :agent_auto_context
           | :font_family
           | :font_size
           | :font_weight
@@ -144,6 +148,8 @@ defmodule Minga.Config.Options do
     {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]},
     {:agent_session_retention_days, :pos_integer, 30},
     {:agent_panel_split, :pos_integer, 65},
+    {:startup_view, {:enum, [:agent, :editor]}, :agent},
+    {:agent_auto_context, :boolean, true},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},
