@@ -169,6 +169,7 @@ Current status and planned features. Updated as development progresses.
 | Custom commands in config | ✅ | `command :name, "desc" do ... end`, crash-isolated |
 | Lifecycle hooks | ✅ | `on :after_save`, `:after_open`, `:on_mode_change` |
 | Command advice | ✅ | `advise :before, :save, fn state -> ... end` (before/after wrapping) |
+| Font configuration | ✅ | `set :font_family, "JetBrains Mono"`, `set :font_size, 14`, `set :font_ligatures, true` (#104) |
 | Per-filetype options | ✅ | `for_filetype :go, tab_width: 8` |
 | User modules | ✅ | `.ex` files in `~/.config/minga/modules/` compiled at startup |
 | Project-local config | ✅ | `.minga.exs` in project root overrides global settings |

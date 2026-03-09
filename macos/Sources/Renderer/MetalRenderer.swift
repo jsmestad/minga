@@ -139,8 +139,30 @@ final class MetalRenderer {
             gpu.fgColor = isReverse ? bg : fg
             gpu.bgColor = isReverse ? fg : bg
 
-            // Look up glyph if cell has content.
-            if !cell.grapheme.isEmpty, cell.grapheme != " " {
+            // Skip glyph drawing for ligature continuation cells (bg still draws).
+            if cell.isContinuation {
+                gpuCells[i] = gpu
+                continue
+            }
+
+            // Ligature head cell: use the shaped ligature glyph.
+            if cell.ligatureCellCount > 1, !cell.ligatureText.isEmpty,
+               let lig = face.shapeLigature(cell.ligatureText) {
+                gpu.hasGlyph = 1.0
+                gpu.isColor = 0.0
+                gpu.uvOrigin = SIMD2<Float>(Float(lig.glyph.atlasX) / atlasSize,
+                                            Float(lig.glyph.atlasY) / atlasSize)
+                gpu.uvSize = SIMD2<Float>(Float(lig.glyph.width) / atlasSize,
+                                          Float(lig.glyph.height) / atlasSize)
+                gpu.glyphSize = SIMD2<Float>(Float(lig.glyph.width), Float(lig.glyph.height))
+                let baseline = Float(face.ascent)
+                gpu.glyphOffset = SIMD2<Float>(
+                    Float(lig.glyph.offsetX) * contentScale,
+                    (baseline - Float(lig.glyph.offsetY)) * contentScale
+                )
+            }
+            // Normal single-cell glyph.
+            else if !cell.grapheme.isEmpty, cell.grapheme != " " {
                 if let scalar = cell.grapheme.unicodeScalars.first,
                    let glyph = face.getGlyph(scalar.value) {
                     gpu.hasGlyph = 1.0

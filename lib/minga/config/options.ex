@@ -30,6 +30,10 @@ defmodule Minga.Config.Options do
   | `:agent_tool_approval`  | `:destructive`, `:all`, or `:none`          | `:destructive` |
   | `:agent_destructive_tools` | list of tool name strings                | `["write_file", "edit_file", "shell"]` |
   | `:agent_panel_split`      | positive integer (30-80)                   | `65`       |
+  | `:font_family`            | string (font name)                          | `"Menlo"`   |
+  | `:font_size`              | positive integer (point size)               | `13`        |
+  | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
+  | `:font_ligatures`         | boolean                                     | `true`      |
 
   ## Per-filetype overrides
 
@@ -74,6 +78,10 @@ defmodule Minga.Config.Options do
           | :agent_destructive_tools
           | :agent_session_retention_days
           | :agent_panel_split
+          | :font_family
+          | :font_size
+          | :font_weight
+          | :font_ligatures
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -121,7 +129,12 @@ defmodule Minga.Config.Options do
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
     {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]},
     {:agent_session_retention_days, :pos_integer, 30},
-    {:agent_panel_split, :pos_integer, 65}
+    {:agent_panel_split, :pos_integer, 65},
+    {:font_family, :string, "Menlo"},
+    {:font_size, :pos_integer, 13},
+    {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},
+     :regular},
+    {:font_ligatures, :boolean, true}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

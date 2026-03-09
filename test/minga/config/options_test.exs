@@ -50,7 +50,11 @@ defmodule Minga.Config.OptionsTest do
                agent_tool_approval: :destructive,
                agent_destructive_tools: ["write_file", "edit_file", "shell"],
                agent_session_retention_days: 30,
-               agent_panel_split: 65
+               agent_panel_split: 65,
+               font_family: "Menlo",
+               font_size: 13,
+               font_weight: :regular,
+               font_ligatures: true
              }
     end
   end
@@ -117,6 +121,53 @@ defmodule Minga.Config.OptionsTest do
     test "unknown option returns error", %{server: s} do
       assert {:error, msg} = Options.set(s, :nonexistent, 42)
       assert msg =~ "unknown option"
+    end
+
+    test "font_family accepts any string", %{server: s} do
+      assert {:ok, "Fira Code"} = Options.set(s, :font_family, "Fira Code")
+      assert Options.get(s, :font_family) == "Fira Code"
+    end
+
+    test "font_family rejects non-string", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_family, :menlo)
+    end
+
+    test "font_size accepts positive integer", %{server: s} do
+      assert {:ok, 16} = Options.set(s, :font_size, 16)
+      assert Options.get(s, :font_size) == 16
+    end
+
+    test "font_size rejects zero", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_size, 0)
+    end
+
+    test "font_size rejects non-integer", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_size, 13.5)
+    end
+
+    test "font_weight accepts valid weight atoms", %{server: s} do
+      for weight <- [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black] do
+        assert {:ok, ^weight} = Options.set(s, :font_weight, weight)
+        assert Options.get(s, :font_weight) == weight
+      end
+    end
+
+    test "font_weight rejects invalid atom", %{server: s} do
+      assert {:error, msg} = Options.set(s, :font_weight, :extra_bold)
+      assert msg =~ "must be one of"
+    end
+
+    test "font_weight rejects non-atom", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_weight, 5)
+    end
+
+    test "font_ligatures accepts boolean", %{server: s} do
+      assert {:ok, false} = Options.set(s, :font_ligatures, false)
+      assert Options.get(s, :font_ligatures) == false
+    end
+
+    test "font_ligatures rejects non-boolean", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_ligatures, "yes")
     end
   end
 

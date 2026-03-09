@@ -43,6 +43,7 @@ defmodule Minga.Editor do
   alias Minga.Mode.CommandState
   alias Minga.Mode.EvalState
   alias Minga.Port.Manager, as: PortManager
+  alias Minga.Port.Protocol
 
   alias Minga.Project
 
@@ -286,6 +287,7 @@ defmodule Minga.Editor do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = fetch_capabilities(state.port_manager)
     new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
+    send_font_config(new_state)
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
@@ -1510,6 +1512,24 @@ defmodule Minga.Editor do
     catch
       :exit, _ -> state
     end
+  end
+
+  # Sends font configuration to the frontend via the port protocol.
+  # Called on ready and after config reload. The TUI ignores this command.
+  @spec send_font_config(state()) :: :ok
+  defp send_font_config(%{port_manager: nil}), do: :ok
+
+  defp send_font_config(%{port_manager: port}) do
+    family = ConfigOptions.get(:font_family)
+    size = ConfigOptions.get(:font_size)
+    ligatures = ConfigOptions.get(:font_ligatures)
+    weight = ConfigOptions.get(:font_weight)
+    cmd = Protocol.encode_set_font(family, size, ligatures, weight)
+    Minga.Port.Manager.send_commands(port, [cmd])
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
