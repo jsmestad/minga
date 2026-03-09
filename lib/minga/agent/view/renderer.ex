@@ -78,7 +78,8 @@ defmodule Minga.Agent.View.Renderer do
       mode_state: nil,
       buf_index: 1,
       buf_count: 1,
-      pending_approval: nil
+      pending_approval: nil,
+      session_title: "Minga Agent"
     ]
 
     @type t :: %__MODULE__{
@@ -96,7 +97,8 @@ defmodule Minga.Agent.View.Renderer do
             mode_state: term(),
             buf_index: pos_integer(),
             buf_count: pos_integer(),
-            pending_approval: map() | nil
+            pending_approval: map() | nil,
+            session_title: String.t()
           }
 
     @typedoc "Agent panel fields needed for rendering."
@@ -296,8 +298,24 @@ defmodule Minga.Agent.View.Renderer do
       mode_state: state.mode_state,
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
-      pending_approval: state.agent.pending_approval
+      pending_approval: state.agent.pending_approval,
+      session_title: session_title(messages)
     }
+  end
+
+  @spec session_title([term()]) :: String.t()
+  defp session_title(messages) do
+    case Enum.find(messages, fn msg -> match?({:user, _}, msg) end) do
+      {:user, text} ->
+        text
+        |> String.split("\n")
+        |> hd()
+        |> String.slice(0, 50)
+        |> then(fn t -> if String.length(t) == 50, do: t <> "...", else: t end)
+
+      nil ->
+        "Minga Agent"
+    end
   end
 
   # ── Title bar ───────────────────────────────────────────────────────────────
@@ -315,7 +333,7 @@ defmodule Minga.Agent.View.Renderer do
     context_text = format_context_bar(input.usage, panel.model_name)
 
     left = " #{status_icon}  󰚩 #{panel.model_name}"
-    center = "Minga Agent"
+    center = input.session_title
 
     right_parts = [context_text, usage_text] |> Enum.reject(&(&1 == "")) |> Enum.join("  ")
     right = if right_parts != "", do: "#{right_parts} ", else: ""
@@ -432,6 +450,10 @@ defmodule Minga.Agent.View.Renderer do
     DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
   end
 
+  defp render_preview(%{preview: %Preview{content: :empty}, buffer_snapshot: nil} = input, rect) do
+    render_dashboard(input, rect)
+  end
+
   defp render_preview(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
     render_empty_preview({row_off, col_off, width, height})
   end
@@ -448,6 +470,169 @@ defmodule Minga.Agent.View.Renderer do
 
     for row <- 0..(height - 1) do
       DisplayList.draw(row_off + row, col_off, blank)
+    end
+  end
+
+  # ── Dashboard panel (session info) ──────────────────────────────────────────
+
+  @spec render_dashboard(RenderInput.t(), rect()) :: [DisplayList.draw()]
+  defp render_dashboard(input, {row_off, col_off, width, height}) do
+    at = Theme.agent_theme(input.theme)
+    blank = String.duplicate(" ", width)
+
+    # Background fill
+    bg_cmds =
+      for row <- 0..(height - 1) do
+        DisplayList.draw(row_off + row, col_off, blank, bg: at.panel_bg)
+      end
+
+    sections = dashboard_sections(input, width, at)
+
+    # Render sections line by line
+    {section_cmds, _} =
+      Enum.reduce(sections, {[], row_off}, fn line, {acc, row} ->
+        if row >= row_off + height do
+          {acc, row}
+        else
+          {[line.(row, col_off) | acc], row + 1}
+        end
+      end)
+
+    bg_cmds ++ Enum.reverse(section_cmds)
+  end
+
+  @spec dashboard_sections(RenderInput.t(), pos_integer(), Theme.Agent.t()) :: [
+          (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
+        ]
+  defp dashboard_sections(input, width, at) do
+    panel = input.panel
+    usage = input.usage
+
+    # ── Session title section ──
+    title_lines = [
+      dashboard_text(" #{input.session_title}", width,
+        fg: at.header_fg,
+        bg: at.panel_bg,
+        bold: true
+      ),
+      dashboard_blank(width, at)
+    ]
+
+    # ── Context section ──
+    total_tokens = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
+    limit = ModelLimits.context_limit(panel.model_name)
+
+    context_lines = [
+      dashboard_text(" Context", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+    ]
+
+    context_lines =
+      if total_tokens > 0 do
+        pct_text =
+          if limit, do: " (#{context_fill_pct(usage, panel.model_name) || 0}% used)", else: ""
+
+        cost_text = if usage.cost > 0, do: "$#{Float.round(usage.cost, 4)}", else: "$0.00"
+        cache_read = Map.get(usage, :cache_read, 0)
+
+        context_lines ++
+          [
+            dashboard_text("  #{format_tokens(total_tokens)} tokens#{pct_text}", width,
+              fg: at.text_fg,
+              bg: at.panel_bg
+            ),
+            dashboard_text(
+              "  ↑ #{format_tokens(Map.get(usage, :input, 0))} in  ↓ #{format_tokens(Map.get(usage, :output, 0))} out",
+              width,
+              fg: at.hint_fg,
+              bg: at.panel_bg
+            )
+          ] ++
+          if cache_read > 0 do
+            [
+              dashboard_text("  cache: #{format_tokens(cache_read)} read", width,
+                fg: at.hint_fg,
+                bg: at.panel_bg
+              )
+            ]
+          else
+            []
+          end ++
+          [
+            dashboard_text("  #{cost_text} spent", width, fg: at.text_fg, bg: at.panel_bg),
+            dashboard_blank(width, at)
+          ]
+      else
+        context_lines ++
+          [
+            dashboard_text("  No usage yet", width, fg: at.hint_fg, bg: at.panel_bg),
+            dashboard_blank(width, at)
+          ]
+      end
+
+    # ── Model section ──
+    thinking = if panel.thinking_level != "", do: " (#{panel.thinking_level})", else: ""
+
+    model_lines = [
+      dashboard_text(" Model", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
+      dashboard_text("  #{panel.model_name}#{thinking}", width,
+        fg: at.text_fg,
+        bg: at.panel_bg
+      ),
+      dashboard_blank(width, at)
+    ]
+
+    # ── Working directory section ──
+    cwd = File.cwd!() |> shorten_path()
+
+    cwd_lines = [
+      dashboard_text(" Directory", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
+      dashboard_text("  #{cwd}", width, fg: at.text_fg, bg: at.panel_bg),
+      dashboard_blank(width, at)
+    ]
+
+    # ── Status section ──
+    status_text =
+      case input.agent_status do
+        :idle -> "Idle"
+        :thinking -> "Thinking..."
+        :tool_executing -> "Executing tool..."
+        :error -> "Error"
+        nil -> "Ready"
+      end
+
+    status_lines = [
+      dashboard_text(" Status", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
+      dashboard_text("  #{status_text}", width,
+        fg: status_fg(input.agent_status, at),
+        bg: at.panel_bg
+      )
+    ]
+
+    title_lines ++ context_lines ++ model_lines ++ cwd_lines ++ status_lines
+  end
+
+  @spec dashboard_text(String.t(), pos_integer(), keyword()) ::
+          (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
+  defp dashboard_text(text, width, opts) do
+    padded = String.slice(text, 0, width) |> String.pad_trailing(width)
+    fn row, col -> DisplayList.draw(row, col, padded, opts) end
+  end
+
+  @spec dashboard_blank(pos_integer(), Theme.Agent.t()) ::
+          (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
+  defp dashboard_blank(width, at) do
+    blank = String.duplicate(" ", width)
+    fn row, col -> DisplayList.draw(row, col, blank, bg: at.panel_bg) end
+  end
+
+  @spec shorten_path(String.t()) :: String.t()
+  defp shorten_path(path) do
+    home = System.user_home() || ""
+
+    if String.starts_with?(path, home) do
+      "~" <> String.trim_leading(path, home)
+    else
+      path
     end
   end
 
@@ -641,11 +826,21 @@ defmodule Minga.Agent.View.Renderer do
         end)
       end
 
-    # Bottom padding
+    # Model info line (replaces bottom padding)
     pad_row = row + 1 + visible_lines
-    pad_cmd = DisplayList.draw(pad_row, 0, blank, bg: at.input_bg)
+    model_label = model_info_text(input)
+    model_pad = String.pad_trailing(model_label, cols)
+
+    pad_cmd = DisplayList.draw(pad_row, 0, model_pad, fg: at.hint_fg, bg: at.input_bg)
 
     [border_cmd | line_cmds] ++ [pad_cmd]
+  end
+
+  @spec model_info_text(RenderInput.t()) :: String.t()
+  defp model_info_text(input) do
+    panel = input.panel
+    thinking = if panel.thinking_level != "", do: " · #{panel.thinking_level}", else: ""
+    "  󰚩 #{panel.model_name}#{thinking}"
   end
 
   # Computes the dynamic input area height: border(1) + visible lines + padding(1).
@@ -709,7 +904,31 @@ defmodule Minga.Agent.View.Renderer do
         input.theme
       )
 
-    draws
+    at = Theme.agent_theme(input.theme)
+
+    hints =
+      case input.agentic.focus do
+        :chat ->
+          if input.panel.input_focused do
+            "C-c C-c send  Esc cancel  C-c abort"
+          else
+            "i input  ? help  / search  q quit"
+          end
+
+        :file_viewer ->
+          "Tab focus  j/k scroll  ? help  q quit"
+      end
+
+    hint_text = " #{hints} "
+    hint_col = max(cols - String.length(hint_text), 0)
+
+    hint_cmd =
+      DisplayList.draw(row, hint_col, hint_text,
+        fg: at.hint_fg,
+        bg: input.theme.modeline.bar_bg
+      )
+
+    draws ++ [hint_cmd]
   end
 
   @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [

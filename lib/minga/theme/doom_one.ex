@@ -137,7 +137,9 @@ defmodule Minga.Theme.DoomOne do
         toast_border: @base6,
         system_fg: @base6,
         search_match_bg: @yellow,
-        search_current_bg: @red
+        search_current_bg: @red,
+        hint_fg: 0x5C6370,
+        dashboard_label: 0x61AFEF
       }
     }
   end

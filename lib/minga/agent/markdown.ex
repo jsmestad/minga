@@ -32,6 +32,7 @@ defmodule Minga.Agent.Markdown do
           | :bold_italic
           | :code
           | :code_block
+          | {:code_content, String.t()}
           | :header1
           | :header2
           | :header3
@@ -43,7 +44,15 @@ defmodule Minga.Agent.Markdown do
   @type segment :: {String.t(), style()}
 
   @typedoc "Line type indicating block context."
-  @type line_type :: :text | :code | :header | :blockquote | :list_item | :rule | :empty
+  @type line_type ::
+          :text
+          | :code
+          | {:code_header, String.t()}
+          | :header
+          | :blockquote
+          | :list_item
+          | :rule
+          | :empty
 
   @typedoc "A parsed line with its segments and type."
   @type parsed_line :: {[segment()], line_type()}
@@ -119,7 +128,7 @@ defmodule Minga.Agent.Markdown do
   defp parse_lines(["```" <> lang | rest], acc, nil) do
     lang = String.trim(lang)
     label = if lang == "", do: "code", else: lang
-    header = {[{"┌─ #{label} ", :code_block}, {"─", :code_block}], :code}
+    header = {[{"┌─ #{label} ", :code_block}, {"─", :code_block}], {:code_header, lang}}
     parse_lines(rest, [header | acc], lang)
   end
 
@@ -131,7 +140,7 @@ defmodule Minga.Agent.Markdown do
 
   # Inside a code block
   defp parse_lines([line | rest], acc, lang) when is_binary(lang) do
-    parsed = {[{"│ " <> line, :code_block}], :code}
+    parsed = {[{line, {:code_content, lang}}], :code}
     parse_lines(rest, [parsed | acc], lang)
   end
 
@@ -170,12 +179,16 @@ defmodule Minga.Agent.Markdown do
 
       match?("- " <> _, trimmed) or match?("* " <> _, trimmed) ->
         text = String.slice(trimmed, 2..-1//1)
-        segments = parse_inline("  • " <> text)
+        indent_level = div(indent_width(line), 2)
+        prefix = String.duplicate("  ", indent_level + 1)
+        segments = parse_inline(prefix <> "• " <> text)
         parse_lines(rest, [{segments, :list_item} | acc], nil)
 
       Regex.match?(~r/^\d+\.\s/, trimmed) ->
         # Numbered list: keep the number prefix, parse inline for the rest
-        segments = parse_inline("  " <> trimmed)
+        indent_level = div(indent_width(line), 2)
+        prefix = String.duplicate("  ", indent_level + 1)
+        segments = parse_inline(prefix <> trimmed)
         parse_lines(rest, [{segments, :list_item} | acc], nil)
 
       String.match?(trimmed, ~r/^[-*_]{3,}$/) ->
@@ -285,5 +298,13 @@ defmodule Minga.Agent.Markdown do
 
   defp merge_adjacent([seg | rest]) do
     [seg | merge_adjacent(rest)]
+  end
+
+  @spec indent_width(String.t()) :: non_neg_integer()
+  defp indent_width(line) do
+    line
+    |> String.graphemes()
+    |> Enum.take_while(&(&1 == " "))
+    |> length()
   end
 end

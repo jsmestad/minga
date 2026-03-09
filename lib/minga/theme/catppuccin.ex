@@ -119,7 +119,9 @@ defmodule Minga.Theme.Catppuccin do
         toast_border: p.overlay1,
         system_fg: p.overlay1,
         search_match_bg: p.yellow,
-        search_current_bg: p.red
+        search_current_bg: p.red,
+        hint_fg: p.overlay0,
+        dashboard_label: p.blue
       }
     }
   end

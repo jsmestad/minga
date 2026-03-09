@@ -134,7 +134,9 @@ defmodule Minga.Theme.OneDark do
         toast_border: @mono_2,
         system_fg: @mono_2,
         search_match_bg: @hue_6_2,
-        search_current_bg: @hue_5
+        search_current_bg: @hue_5,
+        hint_fg: 0x5C6370,
+        dashboard_label: 0x61AFEF
       }
     }
   end

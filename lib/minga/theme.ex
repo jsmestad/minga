@@ -248,7 +248,9 @@ defmodule Minga.Theme do
       :toast_border,
       :system_fg,
       :search_match_bg,
-      :search_current_bg
+      :search_current_bg,
+      :hint_fg,
+      :dashboard_label
     ]
 
     defstruct [
@@ -282,7 +284,9 @@ defmodule Minga.Theme do
       :toast_border,
       :system_fg,
       :search_match_bg,
-      :search_current_bg
+      :search_current_bg,
+      :hint_fg,
+      :dashboard_label
     ]
 
     @type t :: %__MODULE__{
@@ -316,7 +320,9 @@ defmodule Minga.Theme do
             toast_border: Minga.Theme.color(),
             system_fg: Minga.Theme.color(),
             search_match_bg: Minga.Theme.color(),
-            search_current_bg: Minga.Theme.color()
+            search_current_bg: Minga.Theme.color(),
+            hint_fg: Minga.Theme.color(),
+            dashboard_label: Minga.Theme.color()
           }
   end
 
@@ -424,7 +430,9 @@ defmodule Minga.Theme do
       toast_border: 0x73797E,
       system_fg: 0x73797E,
       search_match_bg: 0xECBE7B,
-      search_current_bg: 0xFF6C6B
+      search_current_bg: 0xFF6C6B,
+      hint_fg: 0x5C6370,
+      dashboard_label: 0x61AFEF
     }
   end
 

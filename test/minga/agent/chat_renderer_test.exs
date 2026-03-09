@@ -650,4 +650,49 @@ defmodule Minga.Agent.ChatRendererTest do
       assert has_ms, "expected millisecond timing for fast tools"
     end
   end
+
+  describe "syntax highlighting in code blocks" do
+    test "code blocks with known language get syntax-colored segments" do
+      text = "Here is code:\n```elixir\ndef hello, do: :world\n```"
+      messages = [{:assistant, text}]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      # Should render without error and have draw commands
+      assert is_list(draws)
+      assert draws != []
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      # The code should contain the keyword "def" somewhere
+      assert Enum.any?(texts, &String.contains?(&1, "def"))
+    end
+
+    test "code blocks with unknown language render as plain text" do
+      text = "```brainfuck\n++++++++\n```"
+      messages = [{:assistant, text}]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      assert is_list(draws)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "++++++++"))
+    end
+
+    test "code blocks without language tag render as plain text" do
+      text = "```\nplain code\n```"
+      messages = [{:assistant, text}]
+
+      rect = {0, 0, 60, 20}
+      p = panel(messages: messages)
+      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+
+      assert is_list(draws)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "plain code"))
+    end
+  end
 end
