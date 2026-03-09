@@ -56,6 +56,12 @@ pub fn Renderer(comptime SurfaceT: type) type {
             switch (cmd) {
                 .clear => {
                     self.surface.clear();
+                    // Fill the entire screen with the theme background so empty
+                    // cells (right of text, below content) match the editor
+                    // theme instead of showing the terminal's default bg.
+                    if (self.default_bg != 0) {
+                        self.surface.fillBg(self.default_bg);
+                    }
                     // Safe to discard pending grapheme copies when the screen is cleared.
                     _ = self.arena.reset(.retain_capacity);
                 },
@@ -160,6 +166,11 @@ pub fn Renderer(comptime SurfaceT: type) type {
 
                 .set_default_bg => |bg| {
                     self.default_bg = bg;
+                    // Fill immediately so the theme background takes effect
+                    // even if no clear command follows in this batch.
+                    if (bg != 0) {
+                        self.surface.fillBg(bg);
+                    }
                 },
 
                 // edit_buffer, measure_text and highlight commands are handled by the event loop, not the renderer.
@@ -193,6 +204,8 @@ pub fn Renderer(comptime SurfaceT: type) type {
 /// A mock Surface that records calls for test verification.
 const MockSurface = struct {
     clear_count: usize = 0,
+    fill_bg_count: usize = 0,
+    last_fill_bg: u24 = 0,
     render_count: usize = 0,
     last_cursor_col: u16 = 0,
     last_cursor_row: u16 = 0,
@@ -214,6 +227,11 @@ const MockSurface = struct {
 
     pub fn clear(self: *MockSurface) void {
         self.clear_count += 1;
+    }
+
+    pub fn fillBg(self: *MockSurface, bg: u24) void {
+        self.last_fill_bg = bg;
+        self.fill_bg_count += 1;
     }
 
     pub fn writeCell(self: *MockSurface, _: u16, _: u16, cell: Cell) void {
@@ -361,6 +379,42 @@ test "set_default_bg stores default background" {
     try std.testing.expectEqual(@as(u24, 0), rend.default_bg);
     try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
     try std.testing.expectEqual(@as(u24, 0x282C34), rend.default_bg);
+}
+
+test "set_default_bg fills surface with theme background" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
+    try std.testing.expectEqual(@as(usize, 1), mock.fill_bg_count);
+    try std.testing.expectEqual(@as(u24, 0x282C34), mock.last_fill_bg);
+}
+
+test "clear with default_bg fills surface with theme background" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    // Set theme bg first
+    try rend.handleCommand(.{ .set_default_bg = 0x282C34 });
+    mock.fill_bg_count = 0; // reset counter from set_default_bg
+
+    // Clear should fill with theme bg
+    try rend.handleCommand(.clear);
+    try std.testing.expectEqual(@as(usize, 1), mock.clear_count);
+    try std.testing.expectEqual(@as(usize, 1), mock.fill_bg_count);
+    try std.testing.expectEqual(@as(u24, 0x282C34), mock.last_fill_bg);
+}
+
+test "clear without default_bg does not fill" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.clear);
+    try std.testing.expectEqual(@as(usize, 1), mock.clear_count);
+    try std.testing.expectEqual(@as(usize, 0), mock.fill_bg_count);
 }
 
 test "draw_text with bg=0 uses default_bg when set" {

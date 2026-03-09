@@ -31,6 +31,22 @@ pub const VaxisSurface = struct {
         win.clear();
     }
 
+    /// Fills every cell in the window with a background color.
+    /// Used after clear() to replace the terminal's default background
+    /// with the editor theme's background, so empty cells match.
+    pub fn fillBg(self: *VaxisSurface, bg: u24) void {
+        const win = self.vx.window();
+        win.fill(.{
+            .style = .{
+                .bg = .{ .rgb = .{
+                    @as(u8, @intCast((bg >> 16) & 0xFF)),
+                    @as(u8, @intCast((bg >> 8) & 0xFF)),
+                    @as(u8, @intCast(bg & 0xFF)),
+                } },
+            },
+        });
+    }
+
     pub fn writeCell(self: *VaxisSurface, col: u16, row: u16, cell: Cell) void {
         const win = self.vx.window();
         const style = cellToStyle(cell);

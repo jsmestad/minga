@@ -47,6 +47,7 @@ pub const Cell = struct {
 /// Call as: `comptime { surface.assertSurface(@TypeOf(my_surface)); }`
 pub fn assertSurface(comptime T: type) void {
     if (!@hasDecl(T, "clear")) @compileError("Surface missing method: clear");
+    if (!@hasDecl(T, "fillBg")) @compileError("Surface missing method: fillBg");
     if (!@hasDecl(T, "writeCell")) @compileError("Surface missing method: writeCell");
     if (!@hasDecl(T, "showCursor")) @compileError("Surface missing method: showCursor");
     if (!@hasDecl(T, "setCursorShape")) @compileError("Surface missing method: setCursorShape");
