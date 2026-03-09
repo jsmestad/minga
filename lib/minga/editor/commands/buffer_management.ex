@@ -324,6 +324,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
       # set :autopair, true
       # set :scroll_margin, 5
 
+      # Font (GUI backend only; no effect in TUI mode)
+      # set :font_family, "JetBrains Mono"
+      # set :font_size, 14
+      # set :font_ligatures, true
+
       # Per-filetype overrides
       # for_filetype :go, tab_width: 8
       # for_filetype :python, tab_width: 4
