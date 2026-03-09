@@ -238,6 +238,40 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 ---
 
+### Mouse Event Routing
+
+Mouse events flow through the same focus stack as keyboard input. Both the Zig TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/8`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
+
+```
+Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + click_count)
+    │
+    ▼
+Editor.handle_info decodes via Port.Protocol
+    │
+    ▼
+Input.Router.dispatch_mouse walks focus stack
+    │
+    ├─ Input.Scoped (agentic view active?)
+    │     ├─ Yes → Agent.View.Mouse handles scroll, click-to-focus, separator drag
+    │     └─ No  → :passthrough
+    │
+    └─ Input.ModeFSM (fallback)
+          └─ Editor.Mouse.handle/8
+                ├─ click_count=1 → position cursor, start drag
+                ├─ click_count=2 → select word (visual char), word-snapped drag
+                ├─ click_count=3 → select line (visual line), line-snapped drag
+                ├─ Shift+click  → extend visual selection
+                ├─ Cmd/Ctrl+click → :goto_definition
+                ├─ Middle click → paste register at position
+                └─ Wheel left/right → horizontal viewport scroll
+```
+
+Multi-click detection works differently per frontend. The GUI sends `NSEvent.clickCount` directly in the protocol, so the BEAM trusts the native OS timing. The TUI sends `click_count=1` and the BEAM's `State.Mouse.record_press/4` detects multi-clicks using a timing window and position threshold, cycling 1 → 2 → 3 → 1.
+
+The `handle_mouse/7` callback is optional on `Input.Handler`. Handlers that don't implement it are skipped during the focus stack walk. This keeps keyboard-only handlers (like `Completion` or `Picker`) simple until they need mouse support.
+
+---
+
 ## Syntax Highlighting Pipeline
 
 Tree-sitter parsing runs in the Zig process to avoid sending parse trees across the protocol boundary. The BEAM controls *what* to parse and *how* to color it; Zig does the actual parsing.

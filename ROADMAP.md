@@ -213,13 +213,16 @@ Current status and planned features. Updated as development progresses.
 | Mouse: drag to select | ✅ | Left drag enters Visual mode |
 | Mouse: scroll wheel (vertical) | ✅ | 3-line scroll per tick |
 | Mouse: window separator resize | ✅ | Drag split separators |
-| Mouse: double-click word select | 📋 | #217 |
-| Mouse: triple-click line select | 📋 | #217 |
-| Mouse: Shift+click extend selection | 📋 | #217 |
-| Mouse: Cmd/Ctrl+click go-to-definition | 📋 | #217 |
-| Mouse: middle-click paste | 📋 | #217 |
+| Mouse: double-click word select | ✅ | #217 — visual char mode, word-snapped drag |
+| Mouse: triple-click line select | ✅ | #217 — visual line mode, line-snapped drag |
+| Mouse: Shift+click extend selection | ✅ | #217 — extends from cursor to click |
+| Mouse: Cmd/Ctrl+click go-to-definition | ✅ | #217 — dispatches :goto_definition |
+| Mouse: middle-click paste | ✅ | #217 — pastes register at click position |
+| Mouse: horizontal scroll wheel | ✅ | #217 — wheel_left/right shift viewport |
+| Mouse: agentic view mouse | ✅ | #196 — scroll, click-to-focus, separator drag |
+| Mouse: input infrastructure | ✅ | #217 — handle_mouse on Input.Handler, Router.dispatch_mouse, focus stack walk |
+| Mouse: protocol click_count | ✅ | #217 — 9-byte mouse event, GUI native clickCount, TUI timing detection |
 | Mouse: right-click context menu | 📋 | #217 |
-| Mouse: horizontal scroll wheel | 📋 | #217 |
 | Mouse: file tree clicking | 📋 | #217 |
 | Mouse: picker candidate clicking | 📋 | #217 |
 | Mouse: completion menu clicking | 📋 | #217 |

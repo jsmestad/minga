@@ -60,7 +60,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x01` | key_press | 6 | A key was pressed |
 | `0x02` | resize | 5 | Terminal/window was resized |
 | `0x03` | ready | 5 or 13 | Frontend is initialized and ready |
-| `0x04` | mouse_event | 8 | Mouse button, wheel, or motion |
+| `0x04` | mouse_event | 9 | Mouse button, wheel, or motion (8-byte legacy also accepted) |
 | `0x05` | capabilities_updated | 9 | Updated capabilities after async detection |
 
 ### Frontend → BEAM (Highlight Responses)
@@ -278,15 +278,18 @@ Frontends should use the extended format when possible. The BEAM detects which f
 A mouse button, wheel, or motion event.
 
 ```
-opcode:     u8  = 0x04
-row:        i16           screen row (signed; -1 = outside window)
-col:        i16           screen column (signed; -1 = outside window)
-button:     u8            button identifier
-modifiers:  u8            modifier flags (same as key_press)
-event_type: u8            type of mouse event
+opcode:      u8  = 0x04
+row:         i16           screen row (signed; -1 = outside window)
+col:         i16           screen column (signed; -1 = outside window)
+button:      u8            button identifier
+modifiers:   u8            modifier flags (same as key_press)
+event_type:  u8            type of mouse event
+click_count: u8            1 = single, 2 = double, 3 = triple (clamped)
 ```
 
-Total size: 8 bytes.
+Total size: 9 bytes.
+
+**Backward compatibility:** The BEAM decoder accepts 8-byte messages (legacy format without `click_count`) and defaults `click_count` to 1. GUI frontends should always send the 9-byte format with the native click count from the OS. TUI frontends send `click_count=1` and let the BEAM detect multi-clicks via timing.
 
 **Button values:**
 
