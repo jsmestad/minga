@@ -168,6 +168,21 @@ defmodule Minga.Editor.State do
     %{state | windows: Windows.update(ws, id, fun)}
   end
 
+  @doc """
+  Invalidates render caches for all windows.
+
+  Call when the screen layout changes (file tree toggle, agent panel toggle)
+  because cached draws contain baked-in absolute coordinates that become
+  wrong when column offsets shift.
+  """
+  @spec invalidate_all_windows(t()) :: t()
+  def invalidate_all_windows(%__MODULE__{windows: ws} = state) do
+    new_map =
+      Map.new(ws.map, fn {id, window} -> {id, Window.invalidate(window)} end)
+
+    %{state | windows: %{ws | map: new_map}}
+  end
+
   # ── Other accessors ───────────────────────────────────────────────────────
 
   @doc """
