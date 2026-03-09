@@ -1,207 +1,147 @@
-# Rendering Architecture Gaps
+# Rendering Architecture: Current State
 
-What established editors (Emacs, Neovim, Helix, Zed) have as architectural primitives that Minga is missing, and how to close the gaps. This is the reference document for the rendering refactor work.
+How Minga's rendering pipeline compares to established editors (Emacs, Neovim, Helix, Zed), and what was done to close the gaps.
 
-## Context
+This document was originally written to identify missing architectural primitives. All six gaps have been addressed. The sections below describe what was built, with references to the implementing code.
 
-Minga's two-process architecture (BEAM for logic, Zig for terminal output) is sound. The BEAM side's concurrency model, process isolation, and supervision are genuine advantages. The gap isn't in the macro architecture; it's in the rendering pipeline within the BEAM process. Specifically, Minga lacks the intermediate abstractions that make rendering composable, incremental, and debuggable.
+## Architecture Overview
 
-## Gap 1: No Damage Tracking
+Minga's two-process architecture (BEAM for logic, Zig for terminal output) remains the foundation. The BEAM side owns all rendering decisions: layout, content composition, dirty tracking, caching. The Zig side is a thin terminal adapter that receives draw commands and puts cells on screen via libvaxis.
 
-**Impact: High. This is the single biggest gap.**
+The rendering pipeline lives in `Minga.Editor.RenderPipeline` and runs seven named stages per frame:
 
-Every mature editor tracks *what changed*, not *what to draw*. Minga redraws everything, every frame.
+1. **Invalidation** — detects what changed since the last frame
+2. **Layout** — computes screen rectangles via `Layout.put/1`
+3. **Scroll** — per-window viewport adjustment + buffer data fetch
+4. **Content** — builds display list draws for dirty lines only
+5. **Chrome** — modeline, minibuffer, overlays, separators, file tree, agent panel
+6. **Compose** — merges content + chrome into a `Frame` struct
+7. **Emit** — converts frame to protocol commands and sends to the Zig port
 
-**What the others do:**
-- **Emacs** marks individual lines and windows as "dirty." Its `redisplay` engine walks the window tree and only touches invalidated regions.
-- **Neovim** uses a per-window grid model. Buffer edits produce line-level deltas (`nvim_buf_lines_event`). The UI layer only updates affected grid rows.
-- **Helix** maintains a virtual terminal buffer and diffs frame N against frame N-1.
-- **Zed** has a GPU scene graph; only dirty subtrees trigger re-rendering.
+Each stage is a public function with typed inputs/outputs and per-stage timing via `Logger.debug`.
 
-**What Minga does:** `Renderer.render/1` starts with `Protocol.encode_clear()`, fetches all visible lines, rebuilds every gutter entry, every modeline, every line of content, and sends all of it to Zig. The Zig side (libvaxis) does cell-level diffing before writing to the terminal, which saves at the output layer. But the BEAM side still does O(visible_lines) work and serializes it across the Port boundary on every keystroke.
+## Gap 1: Damage Tracking ✅
 
-**The fix:** A dirty-line set per window. When a buffer edit happens, mark affected lines dirty. When rendering, only rebuild draw commands for dirty lines. Keep the previous frame's command list and splice in replacements. This alone would cut per-frame work by 90%+ for single-character edits.
+**Ticket:** [#164](https://github.com/jsmestad/minga/issues/164) (closed)
 
-## Gap 2: Window Is Not a Self-Contained Render Unit
+**Implementation:** `Minga.Editor.Window` carries a `dirty_lines` field with two representations:
+- `:all` for full redraw (scroll, resize, theme change, highlight update)
+- A map of specific buffer line numbers for targeted invalidation (single edits)
 
-**Impact: High. This causes code duplication and makes windows fragile.**
+Two detection mechanisms run automatically each frame:
+- **Structural invalidation** (`Window.detect_invalidation/5`): compares viewport scroll position, gutter width, line count, and buffer version against last-frame tracking fields.
+- **Context invalidation** (`Window.detect_context_change/2`): compares a fingerprint of render context (visual selection, search matches, highlight version, diagnostic signs, git signs, horizontal scroll, active status) against the previous frame.
 
-In Emacs, Neovim, and Helix, a window is the fundamental unit of rendering. Each window owns its own viewport, display state, and rendering lifecycle. You can render one window without touching any other.
+Clean lines reuse cached draws. Dirty lines re-render and update the cache. For a single-character edit, only one line is re-rendered instead of every visible line.
 
-**What Minga does:** There are two completely separate render paths: `render_single/1` (~200 lines) and `render_split/1` (different code path). The single-window path does inline viewport math, fetches data, builds highlights, and emits commands all in one function. The split path calls `render_window_content/5` per window, which is a partial duplicate with slightly different viewport logic (`scroll_to_cursor_modeline_only` vs the normal version).
+**Code:** `lib/minga/editor/window.ex` (dirty tracking, cache management), `lib/minga/editor/render_pipeline.ex` (dirty-aware content loop in `render_lines_nowrap/2`)
 
-This duplication is the symptom. The disease is that a `Window` struct is just `{id, buffer, viewport, cursor}`. It doesn't carry its own render state.
+## Gap 2: Window as Self-Contained Render Unit ✅
 
-**What a Window should own:**
+**Tickets:** [#162](https://github.com/jsmestad/minga/issues/162), [#163](https://github.com/jsmestad/minga/issues/163) (both closed)
+
+**Implementation:** The `Window` struct now carries its own render state:
+
 ```elixir
 %Window{
-  id: pos_integer(),
+  id: id(),
   buffer: pid(),
   viewport: Viewport.t(),
-  cursor: position(),
-  # These are currently recomputed from scratch every frame:
-  gutter_width: non_neg_integer(),
-  wrap_map: WrapMap.t() | nil,
-  dirty_lines: MapSet.t(),       # which lines need redraw
-  cached_commands: [binary()],   # previous frame's draw commands
-  highlight_snapshot: map(),     # cached highlight data for this window
+  cursor: Document.position(),
+  dirty_lines: :all | %{line => true},
+  cached_gutter: %{line => [draw()]},
+  cached_content: %{line => [draw()]},
+  last_viewport_top: integer(),
+  last_gutter_w: integer(),
+  last_line_count: integer(),
+  last_cursor_line: integer(),
+  last_buf_version: integer(),
+  last_context_fingerprint: term()
 }
 ```
 
-With this, `render/1` becomes one path that iterates over all windows (including the single-window case) and calls the same render function on each.
+There is one render path that iterates over all windows (single or split) and calls the same `build_window_content/2` function on each. The old `render_single/1` vs `render_split/1` duplication is gone.
 
-## Gap 3: No Render Pipeline Stages
+Cache pruning (`Window.prune_cache/3`) keeps cached draws bounded to the visible line range, preventing memory growth as the user scrolls.
 
-**Impact: Medium. Hurts debuggability and makes optimization hard to target.**
+**Code:** `lib/minga/editor/window.ex`, `lib/minga/editor/render_pipeline.ex` (unified `build_content/2`)
 
-Mature editors have explicit, named stages in their render pipeline. Minga's is a monolithic function.
+## Gap 3: Named Pipeline Stages ✅
 
-**How the others structure it:**
-- **Emacs:** Buffer content → Glyph matrix → Terminal update
-- **Neovim:** State change → Grid update → TUI diff → Terminal write
-- **Helix:** Document change → View update → Virtual terminal → Flush
-- **Zed:** Layout tree → Scene graph → GPU batch → Present
+**Ticket:** [#166](https://github.com/jsmestad/minga/issues/166) (closed)
 
-**Minga's current pipeline (all in `Renderer.render/1`):**
-1. Fetch data from buffer GenServer
-2. Compute layout
-3. Compute viewport scroll
-4. Compute gutter dimensions
-5. Compute visual selection bounds
-6. Compute search highlights
-7. Build gutter commands
-8. Build line commands
-9. Build modeline commands
-10. Build minibuffer commands
-11. Build overlay commands (whichkey, completion, picker)
-12. Build tree commands
-13. Build agent panel commands
-14. Resolve cursor position
-15. Concatenate all commands
-16. Send to Port
+**Implementation:** `Minga.Editor.RenderPipeline` decomposes rendering into seven stages (listed above). Each stage is a public function with a typed spec. The `timed/2` wrapper logs elapsed microseconds per stage at debug level.
 
-That's ~15 responsibilities in one pass. When something goes wrong visually, you can't easily isolate which stage produced the bad output.
+Stage result types are defined as module structs: `Invalidation`, `WindowScroll`, `Chrome`. The `Frame` and `WindowFrame` structs live in `Minga.Editor.DisplayList`.
 
-**What a pipeline should look like:**
-```
-1. Invalidation  — mark dirty windows/lines from the event
-2. Layout        — recompute rects only if layout-affecting state changed (already cached)
-3. Scroll        — adjust viewport per dirty window
-4. Content       — rebuild draw commands only for dirty lines per window
-5. Chrome        — modeline, minibuffer, overlays (only if their inputs changed)
-6. Compose       — merge window commands + chrome into final command list
-7. Emit          — send to Port
-```
+**Code:** `lib/minga/editor/render_pipeline.ex`
 
-Each stage has clear inputs, clear outputs, and can be cached or skipped independently.
+## Gap 4: Display List IR ✅
 
-## Gap 4: No Intermediate Representation (Display List)
+**Ticket:** [#165](https://github.com/jsmestad/minga/issues/165) (closed)
 
-**Impact: High. Blocks damage tracking, BEAM-side diffing, and multi-frontend rendering.**
+**Implementation:** `Minga.Editor.DisplayList` defines a styled text run IR between editor state and protocol encoding:
 
-The others all have an intermediate representation between "editor state" and "terminal bytes."
+- `draw()` — `{row, col, text, style}` tuples produced by all renderer modules
+- `text_run()` — column + text + style (no row)
+- `display_line()` — list of text runs for one screen row
+- `render_layer()` — rows mapped to display lines
+- `WindowFrame` — per-window display data (gutter, lines, tildes, modeline, cursor)
+- `Frame` — complete frame (windows + chrome + overlays + regions + cursor)
 
-- **Emacs** has the *glyph matrix*: a 2D grid of styled characters per window.
-- **Neovim** has *screen grids*: per-window cell arrays that the TUI layer diffs.
-- **Helix** uses `tui::buffer::Buffer`, a virtual terminal you write into and then diff.
-- **Zed** has a scene graph of render primitives.
+`DisplayList.to_commands/1` converts a `Frame` to protocol command binaries for the TUI. Other frontends (GUI, headless) can consume the `Frame` directly without going through the binary protocol.
 
-**Minga skips this layer entirely.** The renderer produces binary protocol commands (`draw_text` opcodes) directly from editor state. There's no in-memory representation of "what's currently on screen from the BEAM's perspective." This means:
+**Code:** `lib/minga/editor/display_list.ex`
 
-- You can't diff frame N-1 against frame N on the BEAM side.
-- You can't ask "what's at row 5, col 10?" without re-rendering.
-- You can't do partial updates because you don't know what the previous state was.
+## Gap 5: Layout Constraints ✅
 
-**The fix: A display list of styled text runs, not a cell grid.**
+**Ticket:** [#168](https://github.com/jsmestad/minga/issues/168) (closed)
 
-A cell grid (row × col → character + style) is terminal-shaped. It works for a TUI, but Minga is planning macOS and Linux GUI frontends where rendering uses proportional font engines, subpixel positioning, and variable line heights. A cell grid forces GUI frontends to fake a terminal, which is the wrong abstraction.
+**Implementation:** `Minga.Editor.Layout` computes all rectangles from a single `Layout.put/1` call. The layout is the single source of truth for all screen positions. Mouse hit-testing, rendering, and region definitions all reference `Layout.get(state)` rects.
 
-Instead, the BEAM-side IR should be **styled text runs organized by line, within positioned rectangular regions (windows)**. This is the same approach Neovim's UI protocol uses internally: its `grid_line` events send styled text chunks, not individual cells. The TUI frontend converts those runs into terminal cells. Remote GUIs (Neovide, etc.) convert the same runs into GPU draw calls. Same editing model, different output formats.
+**Code:** `lib/minga/editor/layout.ex`
 
-The key insight: Minga is a monospaced editor. Even in a GUI, the editing area uses a monospaced font, so "column 5" always means a deterministic position. The IR stays line-and-column based. It just doesn't pre-split text into individual cells on the BEAM side.
+## Gap 6: Component Model ✅
 
-```elixir
-# A styled run of text: "draw these characters in this style"
-@type style :: %{fg: color(), bg: color(), bold: boolean(), italic: boolean(), ...}
-@type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: style()}
+**Ticket:** [#167](https://github.com/jsmestad/minga/issues/167) (closed)
 
-# A line's visual content: a list of runs that together cover the line
-@type display_line :: [text_run()]
+**Implementation:** UI elements are separate renderer modules that receive only the data they need:
 
-# A window's frame: its rectangle + the visible lines
-@type window_frame :: %{
-  rect: rect(),
-  lines: %{row :: non_neg_integer() => display_line()},
-  cursor: {row :: non_neg_integer(), col :: non_neg_integer()},
-  gutter: %{row :: non_neg_integer() => display_line()}
-}
+- `Renderer.BufferLine` — per-line content rendering
+- `Renderer.Gutter` — line numbers and sign column
+- `Renderer.Minibuffer` — command/search input
+- `Renderer.SearchHighlight` — search match highlighting
+- `Renderer.Regions` — region definitions from layout
+- `Editor.Modeline` — mode, file, cursor info
+- `Editor.TreeRenderer` — file tree sidebar
+- `Editor.PickerUI` — fuzzy finder overlay
+- `Editor.CompletionUI` — completion menu
+- `Agent.ChatRenderer` — agent panel sidebar
+- `Agent.View.Renderer` — full-screen agent view
 
-# A full frame: all windows + chrome
-@type frame :: %{
-  windows: [window_frame()],
-  modelines: [window_frame()],
-  minibuffer: display_line(),
-  overlays: [overlay()]
-}
-```
+Each module produces `[DisplayList.draw()]` lists. The pipeline's Chrome stage collects them; the Compose stage merges them into the final `Frame`.
 
-Each frontend then does the last-mile translation:
+**Code:** `lib/minga/editor/renderer/` (BufferLine, Gutter, Minibuffer, SearchHighlight, Regions, Caps, Context)
 
-- **Terminal (Zig/libvaxis):** Converts text runs into cell writes. `{5, "hello", green}` becomes five green cells at columns 5-9. libvaxis diffs against its internal cell grid and emits only changed terminal sequences. This is essentially what happens today, just with a cleaner input.
-- **macOS GUI:** Converts text runs into Core Text attributed string draws at pixel position `(col * cell_width, row * cell_height)`.
-- **Linux GUI:** Same idea with whatever rendering toolkit is chosen.
+## Performance Characteristics
 
-Diffing happens at the display list level: compare frame N-1's `[text_run()]` for a given line against frame N's. If they match, skip that line entirely. If they differ, send the new runs. This gives the BEAM full knowledge of "what's on screen" without committing to a terminal-specific cell model.
+With all gaps closed, the rendering pipeline has these properties:
 
-The `Port.Frontend` behaviour is the natural place for each backend to translate from this shared IR to its native primitives.
+- **Single-character edits** re-render one line (the dirty line), not every visible line. Cached draws for clean lines are reused.
+- **Cursor movement** with absolute line numbering dirties only the old and new cursor lines (2 lines). With relative numbering, all gutter entries are dirty but content draws are reused.
+- **Scroll** triggers a full redraw (`:all` dirty) because every visible line changes. libvaxis handles cell-level diffing on the Zig side.
+- **Context changes** (entering/leaving visual mode, search highlight updates, new syntax highlights) trigger full redraws via the context fingerprint mechanism.
+- **Per-stage timing** is available at debug log level for profiling.
 
-## Gap 5: Layout Has No Constraint System
+## Relationship to the Zig Renderer
 
-**Impact: Low now, Medium later as UI complexity grows.**
+The Zig side (`zig/src/renderer.zig`) is intentionally thin: ~430 lines that translate protocol commands into libvaxis cell writes. It handles:
 
-Minga's `Layout.compute/1` is a waterfall: minibuffer takes 1 row, file tree takes its width, agent panel takes 35% of height, windows get the rest.
+- `draw_text` — grapheme iteration, display width calculation, cell writes with region clipping
+- `set_cursor` / `set_cursor_shape` — cursor positioning
+- `define_region` / `set_active_region` / `clear_region` — region management
+- `batch_end` — triggers libvaxis frame diff and terminal flush
 
-**What the others have:**
-- **Emacs**: `window-min-height`, `window-min-width`, `fit-window-to-buffer`, window configuration save/restore
-- **Neovim**: `winwidth`, `winheight`, `winminwidth`, `winminheight`, `winfixwidth`, `winfixheight`, `equalalways`
-- **Zed**: A full flexbox-like layout engine (GPUI)
-- **Helix**: Fixed layout but with proportional splits that handle edge cases
+libvaxis provides cell-level diffing (only changed cells are written to the terminal), grapheme cluster handling, and terminal capability detection. The BEAM side's dirty-line tracking reduces how much data crosses the Port boundary; libvaxis's cell diffing reduces how much data hits the terminal. Both layers contribute to rendering efficiency.
 
-**What Minga is missing:** Min/max constraints on any region. What happens when the terminal is 10 columns wide and the file tree wants 30? The `max()` calls in `file_tree_layout` handle the crash case, but they don't produce a *good* layout. There's no "this element has priority, that one shrinks first" system.
-
-## Gap 6: Coupling Between Editor State and Render Decisions
-
-**Impact: Medium. Makes the renderer hard to test and reason about.**
-
-The renderer reads deeply into `EditorState` to make decisions: `state.mode`, `state.mode_state`, `state.highlight`, `state.completion`, `state.agent`, `state.picker_ui`, etc. This coupling means every render touches the full state struct, making it hard to know what actually affects the visual output.
-
-**What the others do:**
-- **Neovim** has a clean UI protocol. The core produces structured events (`grid_line`, `grid_cursor_goto`, `msg_show`). The UI consumer only sees these events.
-- **Helix** uses a `Compositor` with a stack of `Component` trait objects. Each component renders independently given a limited context.
-- **Zed** uses GPUI elements that receive only their relevant props.
-
-Minga's renderer takes the entire EditorState. Each UI element (gutter, content area, modeline, minibuffer, agent panel, picker, whichkey) should be a component that receives only the data it needs and produces draw commands independently.
-
-## The Root Issue
-
-All six gaps point to the same underlying problem: **Minga treats rendering as a side effect of state, not as a composable system with its own lifecycle.**
-
-The render function is called imperatively (`Renderer.render(state)`) at the end of every event handler. It produces draw commands directly from the full editor state. There's no intermediate step where you describe what the screen *should* look like and then let a reconciliation system figure out the minimal changes.
-
-The editors that feel "reliable and clean" all share one trait: they separate *describing the UI* from *updating the terminal*. Emacs builds glyph matrices. Neovim sends UI events. Helix writes to a virtual buffer. Zed builds a scene graph. The rendering system then owns the "how do we get from here to there" problem.
-
-## Recommended Priority Order
-
-Ordered by dependency (each item enables the ones below it) and impact:
-
-| Priority | Gap | Effort | Ticket | Why this order |
-|----------|-----|--------|--------|----------------|
-| 1 | Unify render paths (Gap 2, partial) | Low | [#162](https://github.com/jsmestad/minga/issues/162) | Eliminates duplication, makes everything else simpler |
-| 2 | Per-window render state (Gap 2, full) | Medium | [#163](https://github.com/jsmestad/minga/issues/163) | Enables damage tracking and caching |
-| 3 | Dirty-line tracking (Gap 1) | Medium | [#164](https://github.com/jsmestad/minga/issues/164) | Biggest per-frame performance win |
-| 4 | BEAM-side display list (Gap 4) | Medium | [#165](https://github.com/jsmestad/minga/issues/165) | Multi-frontend foundation + protocol bandwidth win |
-| 5 | Render pipeline stages (Gap 3) | Medium | [#166](https://github.com/jsmestad/minga/issues/166) | Best for debuggability and maintainability |
-| 6 | Component model (Gap 6) | Medium | [#167](https://github.com/jsmestad/minga/issues/167) | Best for testability and isolation |
-| 7 | Layout constraints (Gap 5) | Low | [#168](https://github.com/jsmestad/minga/issues/168) | Best for edge-case robustness |
-
-Items 1 and 7 have no dependencies and can start immediately. Items 2-3 are sequential. Item 4 can be worked in parallel with 2-3 after item 1 is done. Items 5-6 depend on the display list types from item 4.
+The `Surface` interface (`zig/src/surface.zig`) abstracts the terminal backend, enabling future backends (e.g., a Metal-based GUI surface) to implement the same 7-method interface without changing the renderer or protocol.
