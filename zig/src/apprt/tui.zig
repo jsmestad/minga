@@ -512,8 +512,9 @@ fn handleTtyEvent(vx: *vaxis.Vaxis, event: vaxis.Event, stdout: *std.Io.Writer) 
                 .drag => protocol.MOUSE_DRAG,
             };
 
-            var mbuf: [8]u8 = undefined;
-            const mlen = try protocol.encodeMouseEvent(&mbuf, mouse.row, mouse.col, button, mods, event_type);
+            var mbuf: [9]u8 = undefined;
+            // TUI always sends click_count=1; the BEAM does multi-click detection
+            const mlen = try protocol.encodeMouseEvent(&mbuf, mouse.row, mouse.col, button, mods, event_type, 1);
             try protocol.writeMessage(stdout, mbuf[0..mlen]);
             try stdout.flush();
         },

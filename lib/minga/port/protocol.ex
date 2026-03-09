@@ -136,7 +136,7 @@ defmodule Minga.Port.Protocol do
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t()}
           | {:capabilities_updated, Capabilities.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
-             mouse_event_type()}
+             mouse_event_type(), click_count :: pos_integer()}
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
           | {:highlight_names, [String.t()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
@@ -424,12 +424,23 @@ defmodule Minga.Port.Protocol do
     {:ok, {:capabilities_updated, caps}}
   end
 
+  # 9-byte mouse event with click_count (new protocol)
+  def decode_event(
+        <<@op_mouse_event, row::16-signed, col::16-signed, button::8, mods::8, event_type::8,
+          click_count::8>>
+      ) do
+    {:ok,
+     {:mouse_event, row, col, decode_mouse_button(button), mods,
+      decode_mouse_event_type(event_type), click_count}}
+  end
+
+  # 8-byte mouse event without click_count (backward compat with old frontends)
   def decode_event(
         <<@op_mouse_event, row::16-signed, col::16-signed, button::8, mods::8, event_type::8>>
       ) do
     {:ok,
      {:mouse_event, row, col, decode_mouse_button(button), mods,
-      decode_mouse_event_type(event_type)}}
+      decode_mouse_event_type(event_type), 1}}
   end
 
   def decode_event(<<@op_highlight_spans, version::32, count::32, rest::binary>>) do

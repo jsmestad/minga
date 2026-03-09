@@ -41,4 +41,25 @@ defmodule Minga.Input.Handler do
               codepoint :: non_neg_integer(),
               modifiers :: non_neg_integer()
             ) :: result()
+
+  @doc """
+  Processes a mouse event.
+
+  Returns `{:handled, state}` if this handler consumed the mouse event,
+  or `{:passthrough, state}` to forward it to the next handler.
+
+  The default implementation passes through all mouse events. Override
+  this callback to intercept mouse events for your UI region.
+  """
+  @callback handle_mouse(
+              EditorState.t(),
+              row :: integer(),
+              col :: integer(),
+              button :: atom(),
+              modifiers :: non_neg_integer(),
+              event_type :: atom(),
+              click_count :: pos_integer()
+            ) :: result()
+
+  @optional_callbacks [handle_mouse: 7]
 end

@@ -25,6 +25,7 @@ defmodule Minga.Input.Scoped do
   import Bitwise
 
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.Mouse, as: AgentViewMouse
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
@@ -631,5 +632,32 @@ defmodule Minga.Input.Scoped do
   @spec update_agent(EditorState.t(), (AgentState.t() -> AgentState.t())) :: EditorState.t()
   defp update_agent(state, fun) do
     %{state | agent: fun.(state.agent)}
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Mouse handling
+  # ══════════════════════════════════════════════════════════════════════════
+
+  @impl true
+  @spec handle_mouse(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+
+  # Agentic view active: route mouse events to the agentic view handler
+  def handle_mouse(%{agentic: %{active: true}} = state, row, col, button, mods, event_type, cc) do
+    new_state = AgentViewMouse.handle(state, row, col, button, mods, event_type, cc)
+
+    {:handled, new_state}
+  end
+
+  # All other scopes: pass through to the next handler
+  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
+    {:passthrough, state}
   end
 end
