@@ -316,6 +316,7 @@ Current status and planned features. Updated as development progresses.
 | Configurable panel split | ✅ | agent_panel_split config option; {/} resize; = reset #183 |
 | Notification toasts | ✅ | Top-right toasts for actions; auto-dismiss 3s; FIFO queue #179 |
 | Directory listing preview | ✅ | list_directory tool output shown with file/folder icons #220 |
+| Agent-first startup | ✅ | Boot into agentic view by default; configurable via `startup_view` and `agent_auto_context` #242 |
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76 |
 | Edit boundaries | 📋 | #78 |

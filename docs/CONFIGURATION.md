@@ -38,6 +38,8 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_tool_approval` | `:destructive`, `:all`, `:none` | `:destructive` | When to prompt before executing agent tools |
 | `:agent_destructive_tools` | list of strings | `["write_file", "edit_file", "shell"]` | Which tools are classified as destructive |
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
+| `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
+| `:agent_auto_context` | boolean | `true` | Load CLI file as agent preview context on startup |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
@@ -112,6 +114,61 @@ set :agent_destructive_tools, []
 The two options are orthogonal. `:agent_tool_approval` controls *whether* to prompt. `:agent_destructive_tools` controls *which tools* count as destructive when the mode is `:destructive`.
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
+
+## Startup view
+
+Minga boots into the full-screen agentic view by default. The chat panel is visible, the input is focused, and an agent session starts automatically. You're ready to talk to the agent the moment Minga opens.
+
+If you pass a file on the command line (`minga foo.ex`), the file opens in the preview pane so the agent has context about what you're working on.
+
+### Switching to editor-first startup
+
+If you prefer the traditional file editing experience on startup, set `:startup_view` to `:editor`:
+
+```elixir
+set :startup_view, :editor
+```
+
+This restores the pre-1.0 behavior: Minga opens with a file buffer (or scratch buffer) and the agentic view is a toggle away via `SPC a t`.
+
+### Controlling auto-context
+
+When the agentic view is the startup view and you open a file from the CLI, the file's content is loaded into the preview pane by default. This makes the interaction feel like "I'm chatting about this file" rather than "I opened a file and there's a chat panel."
+
+To disable this and start with a blank agentic view even when a file is provided:
+
+```elixir
+set :agent_auto_context, false
+```
+
+The file is still opened in a buffer (accessible via `SPC b b`), it just isn't surfaced in the preview pane automatically.
+
+### CLI flag overrides
+
+CLI flags override config options for a single invocation:
+
+```bash
+# Force editor mode regardless of config
+minga --editor foo.ex
+
+# Agentic view but don't load the file as context
+minga --no-context foo.ex
+
+# Editor mode with no file (scratch buffer)
+minga --editor
+```
+
+### Summary of combinations
+
+| Config | CLI | Result |
+|--------|-----|--------|
+| `startup_view: :agent` (default) | `minga` | Agentic view, empty |
+| `startup_view: :agent` (default) | `minga foo.ex` | Agentic view, file in preview |
+| `startup_view: :agent`, `agent_auto_context: false` | `minga foo.ex` | Agentic view, preview empty, file in buffer list |
+| `startup_view: :agent` | `minga --no-context foo.ex` | Same as above |
+| `startup_view: :agent` | `minga --editor foo.ex` | Editor view, file open |
+| `startup_view: :editor` | `minga foo.ex` | Editor view, file open |
+| `startup_view: :editor` | `minga` | Editor view, scratch buffer |
 
 ## Themes
 
@@ -843,6 +900,8 @@ set :font_weight, :regular
 set :font_ligatures, true
 
 # ── Agent ─────────────────────────────────────────────────────────────
+set :startup_view, :agent           # boot into agentic view (default)
+set :agent_auto_context, true       # load CLI file as preview context (default)
 set :agent_tool_approval, :destructive
 set :agent_destructive_tools, ["write_file", "edit_file", "shell"]
 

@@ -51,6 +51,8 @@ defmodule Minga.Config.OptionsTest do
                agent_destructive_tools: ["write_file", "edit_file", "shell"],
                agent_session_retention_days: 30,
                agent_panel_split: 65,
+               startup_view: :agent,
+               agent_auto_context: true,
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,
@@ -88,6 +90,18 @@ defmodule Minga.Config.OptionsTest do
     test "scroll_margin accepts zero", %{server: s} do
       assert {:ok, 0} = Options.set(s, :scroll_margin, 0)
       assert Options.get(s, :scroll_margin) == 0
+    end
+
+    test "set and get startup_view", %{server: s} do
+      assert Options.get(s, :startup_view) == :agent
+      assert {:ok, :editor} = Options.set(s, :startup_view, :editor)
+      assert Options.get(s, :startup_view) == :editor
+    end
+
+    test "set and get agent_auto_context", %{server: s} do
+      assert Options.get(s, :agent_auto_context) == true
+      assert {:ok, false} = Options.set(s, :agent_auto_context, false)
+      assert Options.get(s, :agent_auto_context) == false
     end
   end
 
@@ -173,6 +187,29 @@ defmodule Minga.Config.OptionsTest do
 
     test "font_ligatures rejects non-boolean", %{server: s} do
       assert {:error, _} = Options.set(s, :font_ligatures, "yes")
+    end
+
+    test "startup_view accepts :agent and :editor", %{server: s} do
+      assert {:ok, :editor} = Options.set(s, :startup_view, :editor)
+      assert {:ok, :agent} = Options.set(s, :startup_view, :agent)
+    end
+
+    test "startup_view rejects invalid atom", %{server: s} do
+      assert {:error, msg} = Options.set(s, :startup_view, :hybrid)
+      assert msg =~ "must be one of"
+    end
+
+    test "startup_view rejects non-atom", %{server: s} do
+      assert {:error, _} = Options.set(s, :startup_view, "agent")
+    end
+
+    test "agent_auto_context accepts boolean", %{server: s} do
+      assert {:ok, false} = Options.set(s, :agent_auto_context, false)
+      assert {:ok, true} = Options.set(s, :agent_auto_context, true)
+    end
+
+    test "agent_auto_context rejects non-boolean", %{server: s} do
+      assert {:error, _} = Options.set(s, :agent_auto_context, :yes)
     end
   end
 
