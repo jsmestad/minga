@@ -37,6 +37,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Project
   alias Minga.Editor.Commands.Search
   alias Minga.Editor.Commands.Visual
+  alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -602,11 +603,17 @@ defmodule Minga.Editor.Commands do
 
   defp toggle_file_tree(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
+
     %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
-  defp toggle_file_tree(state),
-    do: %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+  defp toggle_file_tree(state) do
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
 
   @spec open_file_tree(state()) :: state()
   defp open_file_tree(state) do
@@ -614,7 +621,10 @@ defmodule Minga.Editor.Commands do
     tree = FileTree.new(root)
     tree = reveal_active_in_tree(tree, state.buffers.active)
     buf = BufferSync.start_buffer(tree)
+
     %{state | file_tree: FileTreeState.open(state.file_tree, tree, buf), keymap_scope: :file_tree}
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
   @spec reveal_active_in_tree(FileTree.t(), pid() | nil) :: FileTree.t()

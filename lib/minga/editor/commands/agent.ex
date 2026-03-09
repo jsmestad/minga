@@ -22,6 +22,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
+  alias Minga.Editor.Layout
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -49,11 +50,16 @@ defmodule Minga.Editor.Commands.Agent do
         state
       end
 
-    if state.agent.panel.visible do
-      update_agent(state, &AgentState.focus_input(&1, true))
-    else
-      update_agent(state, &AgentState.focus_input(&1, false))
-    end
+    state =
+      if state.agent.panel.visible do
+        update_agent(state, &AgentState.focus_input(&1, true))
+      else
+        update_agent(state, &AgentState.focus_input(&1, false))
+      end
+
+    state
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
   @doc """
@@ -82,6 +88,8 @@ defmodule Minga.Editor.Commands.Agent do
       end
 
     %{state | agentic: new_av, keymap_scope: :editor}
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
   def toggle_agentic_view(%{agentic: %{active: false}} = state) do
@@ -97,11 +105,16 @@ defmodule Minga.Editor.Commands.Agent do
     state = %{state | keymap_scope: :agent}
 
     # Ensure a session is running; start one if not.
-    if state.agent.session == nil do
-      start_agent_session(state)
-    else
-      state
-    end
+    state =
+      if state.agent.session == nil do
+        start_agent_session(state)
+      else
+        state
+      end
+
+    state
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
   end
 
   @doc "Submits the current input text as a prompt."
