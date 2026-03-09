@@ -16,6 +16,8 @@ defmodule Minga.Mode.Insert do
 
   @behaviour Minga.Mode
 
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
 
   # Special codepoints
@@ -32,11 +34,15 @@ defmodule Minga.Mode.Insert do
   @doc """
   Handles a key event in Insert mode.
 
+  User-defined insert-mode bindings (via `Keymap.Active.mode_trie(:insert)`)
+  are checked first. If a match is found, the bound command is executed.
+  Otherwise, the default insert-mode handling applies.
+
   Returns a `t:Minga.Mode.result/0` indicating what the editor should do.
   """
   @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
 
-  # Escape → back to Normal
+  # Escape → back to Normal (always, even if user has an override)
   def handle_key({@escape, _mods}, state) do
     {:transition, :normal, state}
   end
@@ -68,9 +74,24 @@ defmodule Minga.Mode.Insert do
     {:execute, :move_right, state}
   end
 
+  # ── User-defined insert-mode overrides ──────────────────────────────────
+  # Check user-defined insert-mode bindings before self-inserting printable
+  # chars. This lets users bind Ctrl+key and other sequences in insert mode.
+  def handle_key(key, state) do
+    case check_user_override(:insert, key) do
+      {:command, command} ->
+        {:execute, command, state}
+
+      :not_found ->
+        handle_default(key, state)
+    end
+  end
+
+  @spec handle_default(Mode.key(), Mode.state()) :: Mode.result()
+
   # Printable Unicode characters (codepoints 32..0x10FFFF, no modifiers)
-  def handle_key({codepoint, 0}, state)
-      when codepoint >= 32 and codepoint <= 0x10FFFF do
+  defp handle_default({codepoint, 0}, state)
+       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char = <<codepoint::utf8>>
     {:execute, {:insert_char, char}, state}
   rescue
@@ -78,7 +99,15 @@ defmodule Minga.Mode.Insert do
   end
 
   # Ignore all other keys (control sequences, unknown modifiers, etc.)
-  def handle_key(_key, state) do
+  defp handle_default(_key, state) do
     {:continue, state}
+  end
+
+  @spec check_user_override(atom(), Mode.key()) :: {:command, atom()} | :not_found
+  defp check_user_override(mode, key) do
+    trie = KeymapActive.mode_trie(mode)
+    Bindings.lookup(trie, key)
+  catch
+    :exit, _ -> :not_found
   end
 end

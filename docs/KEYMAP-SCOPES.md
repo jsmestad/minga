@@ -19,10 +19,11 @@ Minga ships three scopes:
 When you press a key, Minga resolves it through layers in priority order:
 
 1. **Modal overlays** (picker, completion, conflict prompt) intercept all keys when active. These are truly modal and sit above the scope system.
-2. **Scope-specific bindings** for the active scope and vim state. For example, in the agent scope's normal mode, `j` is bound to `:agent_scroll_down`.
-3. **Shared scope bindings** that apply regardless of vim state within the scope (e.g., a key that works the same in both normal and insert mode).
-4. **Global bindings** (leader sequences via SPC, Ctrl+S, Ctrl+Q). These work in every scope.
-5. **Mode FSM fallback** for the `:editor` scope. The existing vim mode system (motions, operators, text objects) handles everything the scope doesn't claim.
+2. **User scope overrides** for the active scope and vim state. These are bindings you define in `config.exs` targeting a specific scope.
+3. **Scope-specific bindings** from the scope module for the active vim state.
+4. **Shared scope bindings** that apply regardless of vim state within the scope (e.g., a key that works the same in both normal and insert mode).
+5. **Global bindings** (leader sequences via SPC, Ctrl+S, Ctrl+Q). These work in every scope.
+6. **Mode FSM fallback** for the `:editor` scope. The existing vim mode system (motions, operators, text objects) handles everything the scope doesn't claim.
 
 For the `:file_tree` scope, keys that don't match any scope binding also fall through to the mode FSM with the tree buffer swapped in as the active buffer. This gives you full vim navigation (j/k, gg/G, Ctrl-d/u, etc.) in the file tree for free.
 
@@ -45,25 +46,89 @@ Leader sequences pass through to the mode FSM regardless of which scope is activ
 
 The only exception: when the agent input field is focused (insert mode), SPC types a space character. Press ESC first to return to normal mode, then use SPC for leader keys.
 
-## Scope lifecycle
+## Filetype-scoped bindings (SPC m)
 
-Each scope module can define `on_enter/1` and `on_exit/1` callbacks for setup and teardown when the scope becomes active or deactivates. Currently these are identity functions (no-ops), but they're available for future use.
+The `SPC m` prefix is reserved for filetype-specific leader bindings. When you press `SPC m`, the which-key popup shows bindings specific to the current buffer's filetype.
 
-## Customizing bindings
-
-You can override or extend scope-specific bindings in your `config.exs` using the standard `bind` function. Phase 1 supports global and leader key overrides. Phase 2 ([#215](https://github.com/jsmestad/minga/issues/215)) will add per-scope, per-vim-state, and per-filetype customization.
+Define filetype bindings in your `config.exs`:
 
 ```elixir
 use Minga.Config
 
-# Global leader key bindings (work in all scopes)
-bind :normal, "SPC g s", :git_status, "Git status"
-bind :normal, "SPC g b", :git_blame, "Git blame"
+# Option 1: keymap block (recommended for multiple bindings)
+keymap :elixir do
+  bind :normal, "SPC m t", :mix_test, "Run tests"
+  bind :normal, "SPC m f", :mix_format, "Format with mix"
+  bind :normal, "SPC m r", :iex_run, "Run in IEx"
+end
 
-# Phase 2 will add:
-# bind :agent, :normal, "s", :agent_session_switcher, "Session switcher"
-# bind :file_tree, :normal, "d", :tree_delete, "Delete file"
+keymap :markdown do
+  bind :normal, "SPC m p", :markdown_preview, "Preview"
+end
+
+# Option 2: explicit filetype option (one-off bindings)
+bind :normal, "SPC m t", :go_test, "Run go test", filetype: :go
 ```
+
+Different filetypes can use the same sub-key. `SPC m t` runs `mix test` in an Elixir buffer but `go test` in a Go buffer.
+
+## Customizing bindings
+
+### Per-mode bindings
+
+You can bind keys in any vim mode, not just normal:
+
+```elixir
+use Minga.Config
+
+# Normal mode (leader and single-key)
+bind :normal, "SPC g s", :git_status, "Git status"
+bind :normal, "Q", :replay_last_macro, "Replay last macro"
+
+# Insert mode
+bind :insert, "C-j", :next_line, "Next line"
+bind :insert, "C-k", :prev_line, "Previous line"
+
+# Visual mode
+bind :visual, "C-x", :custom_cut, "Custom cut"
+
+# Operator-pending mode
+bind :operator_pending, "C-a", :select_all, "Select all"
+
+# Command mode
+bind :command, "C-p", :history_prev, "Previous history entry"
+```
+
+### Per-scope bindings
+
+Override or extend scope-specific bindings:
+
+```elixir
+use Minga.Config
+
+# Override agent scope keys
+bind {:agent, :normal}, "y", :my_custom_yank, "Custom yank"
+bind {:agent, :normal}, "~", :toggle_debug, "Toggle debug"
+
+# Override file tree scope keys
+bind {:file_tree, :normal}, "d", :tree_delete, "Delete file"
+```
+
+### Resolution order
+
+When resolving a key, Minga checks these sources in order:
+
+1. **User filetype** bindings (for `SPC m` prefix)
+2. **User scope overrides** (for scope-specific keys)
+3. **User per-mode overrides** (for mode-specific keys)
+4. **Built-in scope defaults**
+5. **Built-in mode defaults**
+
+The first match wins. This means your config always takes priority over built-in defaults.
+
+## Scope lifecycle
+
+Each scope module can define `on_enter/1` and `on_exit/1` callbacks for setup and teardown when the scope becomes active or deactivates. Currently these are identity functions (no-ops), but they're available for future use.
 
 ## Architecture
 
@@ -79,9 +144,9 @@ Each scope is a module implementing the `Minga.Keymap.Scope` behaviour:
 @callback on_exit(state) :: state
 ```
 
-Bindings are declared as trie data (using `Minga.Keymap.Bindings`) and resolved through `Minga.Keymap.Scope.resolve_key/4`. The `context` parameter in `keymap/2` is a keyword list that phase 1 passes as `[]`. Phase 2 will pass `[filetype: :elixir]` so the editor scope can return filetype-specific bindings.
+Bindings are declared as trie data (using `Minga.Keymap.Bindings`) and resolved through `Minga.Keymap.Scope.resolve_key/4`. The `context` parameter in `keymap/2` is reserved for future filetype parameterization of scope bindings.
 
-The `Input.Scoped` handler sits in the focus stack and routes keys through the appropriate scope based on `state.keymap_scope`. It also handles sub-states within a scope (search input, mention completion, tool approval, diff review) before trie lookup. The focus stack is now:
+The `Input.Scoped` handler sits in the focus stack and routes keys through the appropriate scope based on `state.keymap_scope`. It also handles sub-states within a scope (search input, mention completion, tool approval, diff review) before trie lookup. The focus stack is:
 
 ```
 ConflictPrompt → Scoped → Picker → Completion → GlobalBindings → ModeFSM
@@ -91,7 +156,6 @@ Only truly modal overlays remain as separate handlers. All view-type-specific ke
 
 ## Relationship to future work
 
-- **Phase 2** ([#215](https://github.com/jsmestad/minga/issues/215)): Adds filetype-scoped `SPC m` bindings and per-vim-state user customization. The `Keymap.Active` store already has a `scope_overrides` map ready for this.
 - **Minor modes** ([#216](https://github.com/jsmestad/minga/issues/216)): Toggleable keymap layers (like Emacs minor modes) can be added on top of scopes without restructuring anything. The resolution order will gain a new layer between user overrides and scope bindings.
 
 ## Key files
@@ -103,4 +167,4 @@ Only truly modal overlays remain as separate handlers. All view-type-specific ke
 | `lib/minga/keymap/scope/agent.ex` | Agent scope (trie-based bindings) |
 | `lib/minga/keymap/scope/file_tree.ex` | File tree scope (trie-based bindings) |
 | `lib/minga/input/scoped.ex` | Focus stack handler that routes through scopes |
-| `lib/minga/keymap/active.ex` | Runtime keymap store (includes scope_overrides) |
+| `lib/minga/keymap/active.ex` | Runtime keymap store (overrides, filetype, scope) |

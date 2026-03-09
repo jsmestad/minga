@@ -81,9 +81,77 @@ defmodule Minga.ConfigTest do
       assert {:command, :git_status} = Bindings.lookup(g_node, {?s, 0})
     end
 
+    test "binds insert-mode key" do
+      Minga.Config.bind(:insert, "C-j", :next_line, "Next line")
+
+      trie = KeymapActive.mode_trie(:insert)
+      assert {:command, :next_line} = Bindings.lookup(trie, {?j, 0x02})
+    end
+
+    test "binds visual-mode key" do
+      Minga.Config.bind(:visual, "C-x", :custom_cut, "Custom cut")
+
+      trie = KeymapActive.mode_trie(:visual)
+      assert {:command, :custom_cut} = Bindings.lookup(trie, {?x, 0x02})
+    end
+
+    test "binds scope-specific key" do
+      Minga.Config.bind({:agent, :normal}, "y", :agent_copy, "Agent copy")
+
+      trie = KeymapActive.scope_trie(:agent, :normal)
+      assert {:command, :agent_copy} = Bindings.lookup(trie, {?y, 0})
+    end
+
     test "invalid key sequence logs warning but does not crash" do
       # Should not raise
       Minga.Config.bind(:normal, "", :noop, "noop")
+    end
+  end
+
+  describe "bind/5 with filetype option" do
+    test "registers filetype-scoped binding" do
+      Minga.Config.bind(:normal, "SPC m t", :mix_test, "Run tests", filetype: :elixir)
+
+      trie = KeymapActive.filetype_trie(:elixir)
+      assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
+    end
+  end
+
+  describe "keymap/2 macro" do
+    test "scopes bindings to filetype" do
+      Code.eval_string("""
+      use Minga.Config
+
+      keymap :elixir do
+        bind :normal, "SPC m t", :mix_test, "Run tests"
+        bind :normal, "SPC m f", :mix_format, "Format"
+      end
+      """)
+
+      trie = KeymapActive.filetype_trie(:elixir)
+      assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
+      assert {:command, :mix_format} = Bindings.lookup(trie, {?f, 0})
+    end
+
+    test "filetype scope does not leak outside keymap block" do
+      Code.eval_string("""
+      use Minga.Config
+
+      keymap :go do
+        bind :normal, "SPC m t", :go_test, "Go test"
+      end
+
+      bind :normal, "SPC z z", :global_cmd, "Global command"
+      """)
+
+      # The "SPC z z" binding should be global (in leader trie), not scoped to :go
+      trie = KeymapActive.leader_trie()
+      {:prefix, z_node} = Bindings.lookup(trie, {?z, 0})
+      assert {:command, :global_cmd} = Bindings.lookup(z_node, {?z, 0})
+
+      # And not in the go filetype trie
+      go_trie = KeymapActive.filetype_trie(:go)
+      assert :not_found = Bindings.lookup(go_trie, {?z, 0})
     end
   end
 

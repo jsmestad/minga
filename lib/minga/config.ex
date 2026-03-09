@@ -77,6 +77,10 @@ defmodule Minga.Config do
   @doc """
   Binds a key sequence to a command in the given mode.
 
+  Supports all vim modes: `:normal`, `:insert`, `:visual`,
+  `:operator_pending`, `:command`. For scope-specific bindings, pass a
+  `{scope, vim_state}` tuple (e.g., `{:agent, :normal}`).
+
   For normal mode, leader sequences (starting with `SPC`) are added to
   the leader trie. Single-key bindings override defaults.
 
@@ -85,13 +89,48 @@ defmodule Minga.Config do
   ## Examples
 
       bind :normal, "SPC g s", :git_status, "Git status"
-      bind :normal, "SPC t t", :toggle_tree, "Toggle file tree"
+      bind :insert, "C-j", :next_line, "Next line"
+      bind :visual, "SPC x", :custom_delete, "Custom delete"
+      bind {:agent, :normal}, "y", :my_agent_copy, "Custom copy"
   """
-  @spec bind(atom(), String.t(), atom(), String.t()) :: :ok
+  @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t()) :: :ok
   def bind(mode, key_str, command_name, description)
+      when is_binary(key_str) and is_atom(command_name) and is_binary(description) do
+    # If we're inside a `keymap :filetype do ... end` block, automatically
+    # scope the binding to that filetype.
+    filetype = Process.get(:minga_config_filetype)
+
+    result =
+      if filetype do
+        KeymapActive.bind(mode, key_str, command_name, description, filetype: filetype)
+      else
+        KeymapActive.bind(mode, key_str, command_name, description)
+      end
+
+    case result do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("bind failed: #{reason}")
+    end
+
+    :ok
+  end
+
+  @doc """
+  Binds a key sequence to a command with options.
+
+  Supports the `filetype:` option for filetype-scoped bindings under
+  the `SPC m` leader prefix.
+
+  ## Examples
+
+      bind :normal, "SPC m t", :mix_test, "Run tests", filetype: :elixir
+      bind :normal, "SPC m p", :markdown_preview, "Preview", filetype: :markdown
+  """
+  @spec bind(atom(), String.t(), atom(), String.t(), keyword()) :: :ok
+  def bind(mode, key_str, command_name, description, opts)
       when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
-             is_binary(description) do
-    case KeymapActive.bind(mode, key_str, command_name, description) do
+             is_binary(description) and is_list(opts) do
+    case KeymapActive.bind(mode, key_str, command_name, description, opts) do
       :ok -> :ok
       {:error, reason} -> Logger.warning("bind failed: #{reason}")
     end
@@ -243,6 +282,52 @@ defmodule Minga.Config do
       case Options.set_for_filetype(filetype, name, value) do
         {:ok, _} -> :ok
         {:error, msg} -> raise ArgumentError, "for_filetype #{filetype}: #{msg}"
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  Declares filetype-scoped keybindings.
+
+  Bindings declared inside the block are scoped to the given filetype
+  and appear under the `SPC m` leader prefix. This is the primary way
+  to define language-specific key bindings.
+
+  ## Examples
+
+      keymap :elixir do
+        bind :normal, "SPC m t", :mix_test, "Run tests"
+        bind :normal, "SPC m f", :mix_format, "Format with mix"
+      end
+
+      keymap :markdown do
+        bind :normal, "SPC m p", :markdown_preview, "Preview"
+      end
+  """
+  defmacro keymap(filetype, do: block) do
+    quote do
+      Minga.Config.__keymap_scope__(unquote(filetype), fn ->
+        unquote(block)
+      end)
+    end
+  end
+
+  @doc false
+  @spec __keymap_scope__(atom(), (-> term())) :: :ok
+  def __keymap_scope__(filetype, fun) when is_atom(filetype) and is_function(fun, 0) do
+    # Store the filetype in process dictionary so bind/5 can pick it up
+    previous = Process.get(:minga_config_filetype)
+    Process.put(:minga_config_filetype, filetype)
+
+    try do
+      fun.()
+    after
+      if previous do
+        Process.put(:minga_config_filetype, previous)
+      else
+        Process.delete(:minga_config_filetype)
       end
     end
 

@@ -44,6 +44,8 @@ defmodule Minga.Editor.Commands do
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Formatter
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.WhichKey
 
@@ -110,7 +112,17 @@ defmodule Minga.Editor.Commands do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    whichkey = %Minga.Editor.State.WhichKey{node: node, timer: timer, show: state.whichkey.show}
+    # When the leader walk reaches SPC m, substitute the filetype-specific
+    # trie based on the active buffer's filetype. This makes SPC m t resolve
+    # to the correct command for the current filetype.
+    {effective_node, state} = maybe_substitute_filetype_trie(state, node)
+
+    whichkey = %Minga.Editor.State.WhichKey{
+      node: effective_node,
+      timer: timer,
+      show: state.whichkey.show
+    }
+
     {state, {:whichkey_update, whichkey}}
   end
 
@@ -688,5 +700,49 @@ defmodule Minga.Editor.Commands do
 
   defp tree_sync_and_update(state, new_tree) do
     put_in(state.file_tree.tree, new_tree)
+  end
+
+  # ── Filetype trie substitution ────────────────────────────────────────────
+
+  # When the leader sequence reaches SPC m, swap the which-key node with the
+  # filetype-specific trie so the next key resolves filetype-scoped bindings.
+  # Also updates mode_state.leader_node so the mode FSM uses the same trie.
+  @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
+          {Bindings.node_t(), EditorState.t()}
+  defp maybe_substitute_filetype_trie(state, node) do
+    # Check if we just arrived at SPC m (leader_keys is ["m", "SPC"])
+    case state.mode_state do
+      %{leader_keys: ["m", "SPC"]} ->
+        filetype = current_filetype(state)
+        ft_trie = filetype_trie_for(filetype)
+
+        if ft_trie.children == %{} do
+          # No filetype bindings registered; use the default (empty) m node
+          {node, state}
+        else
+          # Substitute with the filetype trie and update mode_state
+          state = put_in(state.mode_state.leader_node, ft_trie)
+          {ft_trie, state}
+        end
+
+      _ ->
+        {node, state}
+    end
+  end
+
+  @spec current_filetype(EditorState.t()) :: atom()
+  defp current_filetype(%{buffers: %{active: nil}}), do: :text
+
+  defp current_filetype(%{buffers: %{active: buf}}) do
+    BufferServer.filetype(buf)
+  catch
+    :exit, _ -> :text
+  end
+
+  @spec filetype_trie_for(atom()) :: Bindings.node_t()
+  defp filetype_trie_for(filetype) do
+    KeymapActive.filetype_trie(filetype)
+  catch
+    :exit, _ -> Bindings.new()
   end
 end

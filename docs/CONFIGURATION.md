@@ -339,15 +339,23 @@ If you add a grammar for a popular language, consider opening a PR so everyone g
 
 ## Keybindings
 
-`bind/4` adds or overrides leader-key bindings:
+`bind/4` adds or overrides keybindings in any vim mode:
 
 ```elixir
+# Normal mode: leader sequences and single-key overrides
 bind :normal, "SPC g s", :git_status, "Git status"
 bind :normal, "SPC g b", :git_blame, "Git blame"
-bind :normal, "SPC t t", :toggle_tree, "Toggle file tree"
+bind :normal, "Q", :replay_last_macro, "Replay last macro"
+
+# Insert mode
+bind :insert, "C-j", :next_line, "Next line"
+bind :insert, "C-k", :prev_line, "Previous line"
+
+# Visual mode
+bind :visual, "C-x", :custom_cut, "Custom cut"
 ```
 
-The first argument is the mode (currently `:normal` is supported). The second is a space-separated key sequence string. Special keys:
+The first argument is the mode: `:normal`, `:insert`, `:visual`, `:operator_pending`, or `:command`. The second is a space-separated key sequence string. Special keys:
 
 | Token | Key |
 |-------|-----|
@@ -362,20 +370,47 @@ User bindings override defaults. If you bind `SPC f f` to something else, it rep
 
 Invalid key sequences log a warning but don't crash the editor.
 
+### Filetype-scoped bindings (SPC m)
+
+`SPC m` is reserved for filetype-specific leader bindings. Use the `keymap` block to define them:
+
+```elixir
+keymap :elixir do
+  bind :normal, "SPC m t", :mix_test, "Run tests"
+  bind :normal, "SPC m f", :mix_format, "Format with mix"
+  bind :normal, "SPC m r", :iex_run, "Run in IEx"
+end
+
+keymap :go do
+  bind :normal, "SPC m t", :go_test, "Go test"
+  bind :normal, "SPC m b", :go_build, "Go build"
+end
+```
+
+You can also use the explicit `filetype:` option for one-off bindings:
+
+```elixir
+bind :normal, "SPC m p", :markdown_preview, "Preview", filetype: :markdown
+```
+
+Different filetypes can use the same sub-key. `SPC m t` runs `mix test` in an Elixir buffer but `go test` in a Go buffer. The which-key popup shows only the bindings for the current buffer's filetype.
+
+### Scope-specific bindings
+
+Override or extend bindings for specific [keymap scopes](KEYMAP-SCOPES.md) using a `{scope, vim_state}` tuple:
+
+```elixir
+# Override agent scope keys
+bind {:agent, :normal}, "y", :my_custom_yank, "Custom yank"
+bind {:agent, :normal}, "~", :toggle_debug, "Toggle debug"
+
+# Override file tree scope keys
+bind {:file_tree, :normal}, "d", :tree_delete, "Delete file"
+```
+
 ### Keymap scopes
 
 Minga uses [keymap scopes](KEYMAP-SCOPES.md) to provide view-type-specific keybindings. Three scopes ship by default: `:editor` (normal editing), `:agent` (agentic view), and `:file_tree` (file tree panel). Leader key bindings (`SPC ...`) work identically in all scopes.
-
-Phase 2 ([#215](https://github.com/jsmestad/minga/issues/215)) will add per-scope and per-filetype customization:
-
-```elixir
-# Future API (not yet available):
-# bind :agent, :normal, "s", :agent_session_switcher, "Session switcher"
-# bind :file_tree, :normal, "d", :tree_delete, "Delete file"
-# for_filetype :elixir do
-#   bind :normal, "SPC m t", :mix_test, "Run tests"
-# end
-```
 
 For the full scope architecture and resolution order, see [Keymap Scopes](KEYMAP-SCOPES.md).
 

@@ -52,6 +52,8 @@ defmodule Minga.Mode.Visual do
 
   import Bitwise
 
+  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Mode.VisualState
 
@@ -274,9 +276,23 @@ defmodule Minga.Mode.Visual do
     {:transition, :normal, state}
   end
 
-  # ── Unknown keys: no-op ──────────────────────────────────────────────────────
+  # ── User-defined visual-mode overrides ──────────────────────────────────
+  # Before giving up, check user-defined visual-mode bindings.
+  def handle_key(key, state) do
+    case check_user_override(:visual, key) do
+      {:command, command} ->
+        {:execute, command, state}
 
-  def handle_key(_key, state) do
-    {:continue, state}
+      :not_found ->
+        {:continue, state}
+    end
+  end
+
+  @spec check_user_override(atom(), Mode.key()) :: {:command, atom()} | :not_found
+  defp check_user_override(mode, key) do
+    trie = KeymapActive.mode_trie(mode)
+    Bindings.lookup(trie, key)
+  catch
+    :exit, _ -> :not_found
   end
 end
