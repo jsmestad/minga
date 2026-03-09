@@ -30,6 +30,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.Layout
+  alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Mouse, as: MouseState
@@ -625,8 +626,20 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(state, total_lines) do
-    if state.line_numbers == :none, do: 0, else: Viewport.gutter_width(total_lines)
+  defp gutter_width(%{buffers: %{active: buf}} = state, total_lines) do
+    number_w =
+      if state.line_numbers == :none, do: 0, else: Viewport.gutter_width(total_lines)
+
+    # Sign column is shown when the buffer has a file path or a git buffer
+    # registered. This must match render_pipeline.ex's gutter_dimensions/4.
+    has_sign_column =
+      buf != nil and
+        (Map.has_key?(state.git_buffers, buf) or BufferServer.file_path(buf) != nil)
+
+    sign_w =
+      if has_sign_column, do: Gutter.sign_column_width(), else: 0
+
+    number_w + sign_w
   end
 
   # ── Screen-to-buffer coordinate translation ────────────────────────────────
@@ -643,63 +656,73 @@ defmodule Minga.Editor.Mouse do
 
   # Like mouse_to_buffer_pos but only returns the line (for triple-click).
   @spec mouse_to_buffer_line(state(), non_neg_integer()) :: non_neg_integer() | nil
-  defp mouse_to_buffer_line(%{buffers: %{active: buf}, viewport: vp} = _state, row) do
-    total_lines = BufferServer.line_count(buf)
-    visible_rows = Viewport.content_rows(vp)
-    target_line = row + vp.top
+  defp mouse_to_buffer_line(%{buffers: %{active: buf}} = state, row) do
+    layout = Layout.get(state)
 
-    if row >= visible_rows or target_line >= total_lines do
-      nil
-    else
-      target_line
+    case Layout.active_window_layout(layout, state) do
+      %{content: {win_row, _win_col, content_w, win_h}} ->
+        total_lines = BufferServer.line_count(buf)
+        {cursor_line, _} = BufferServer.cursor(buf)
+        scroll_top = render_scroll_top(win_h, content_w, cursor_line)
+        local_row = row - win_row
+        target_line = local_row + scroll_top
+
+        if local_row < 0 or local_row >= win_h or target_line >= total_lines do
+          nil
+        else
+          target_line
+        end
+
+      nil ->
+        nil
     end
   end
 
   @spec mouse_to_buffer_pos_single(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos_single(%{buffers: %{active: buf}, viewport: vp} = state, row, col) do
-    total_lines = BufferServer.line_count(buf)
-    gutter_w = gutter_width(state, total_lines)
-    visible_rows = Viewport.content_rows(vp)
-    target_line = row + vp.top
-    target_col = max(col - gutter_w, 0) + vp.left
+  defp mouse_to_buffer_pos_single(%{buffers: %{active: buf}} = state, row, col) do
+    layout = Layout.get(state)
 
-    resolve_buffer_pos(buf, row, visible_rows, target_line, target_col, total_lines)
+    case Layout.active_window_layout(layout, state) do
+      %{content: {win_row, win_col, content_w, win_h}} ->
+        total_lines = BufferServer.line_count(buf)
+        gutter_w = gutter_width(state, total_lines)
+        {cursor_line, _} = BufferServer.cursor(buf)
+        scroll_top = render_scroll_top(win_h, content_w, cursor_line)
+        local_row = row - win_row
+        local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
+        target_line = local_row + scroll_top
+
+        resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
+
+      nil ->
+        nil
+    end
   end
 
   @spec mouse_to_buffer_pos_split(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp mouse_to_buffer_pos_split(state, row, col) do
-    screen = Layout.get(state).editor_area
+    layout = Layout.get(state)
 
-    case WindowTree.window_at(state.windows.tree, screen, row, col) do
-      {:ok, id, {win_row, win_col, _win_w, win_h}} ->
+    case WindowTree.window_at(state.windows.tree, layout.editor_area, row, col) do
+      {:ok, id, {win_row, win_col, _win_w, _win_h}} ->
         window = Map.fetch!(state.windows.map, id)
+        win_layout = Map.fetch!(layout.window_layouts, id)
+        {_cr, _cc, content_w, content_h} = win_layout.content
         buf = window.buffer
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
+        {cursor_line, _} = window.cursor
+        scroll_top = render_scroll_top(content_h, content_w, cursor_line)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0)
-        visible_rows = max(win_h - 1, 1)
-        {cursor_line, _} = window.cursor
-        scroll_top = split_scroll_top(win_h, cursor_line)
         target_line = local_row + scroll_top
 
-        resolve_buffer_pos(buf, local_row, visible_rows, target_line, local_col, total_lines)
+        resolve_buffer_pos(buf, local_row, content_h, target_line, local_col, total_lines)
 
       :error ->
         nil
-    end
-  end
-
-  @spec split_scroll_top(pos_integer(), non_neg_integer()) :: non_neg_integer()
-  defp split_scroll_top(win_height, cursor_line) do
-    visible_rows = max(win_height - 1, 1)
-
-    if cursor_line >= visible_rows do
-      cursor_line - visible_rows + 1
-    else
-      0
     end
   end
 
@@ -714,6 +737,26 @@ defmodule Minga.Editor.Mouse do
   defp resolve_buffer_pos(buf, _row, _visible, target_line, target_col, _total) do
     {target_line, clamp_col_to_line(buf, target_line, target_col)}
   end
+
+  # Computes the scroll top the same way the render pipeline does:
+  # create a fresh viewport sized to the window content rect, then scroll
+  # to keep the cursor visible. This is the single source of truth for
+  # which buffer line maps to screen row 0. We must replicate it here
+  # because state.viewport.top is the *terminal* viewport (stale for
+  # per-window scroll), not the per-frame viewport used for rendering.
+  @spec render_scroll_top(pos_integer(), pos_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp render_scroll_top(content_height, content_width, cursor_line) do
+    vp = Viewport.new(content_height, content_width, 0)
+    vp = Viewport.scroll_to_cursor(vp, {cursor_line, 0})
+    vp.top
+  end
+
+  # Computes horizontal scroll offset the same way the render pipeline
+  # does. For now this just reads state.viewport.left since horizontal
+  # scroll is updated by the scroll wheel handler directly on state.
+  @spec scroll_left(state(), pid()) :: non_neg_integer()
+  defp scroll_left(%{viewport: vp}, _buf), do: vp.left
 
   # ── Viewport helpers ───────────────────────────────────────────────────────
 
