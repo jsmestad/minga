@@ -38,6 +38,7 @@
 		AA11223344556677AABB0001 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0010 /* ScrollAccumulator.swift */; };
 		AA11223344556677AABB0002 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0010 /* ScrollAccumulator.swift */; };
 		AA11223344556677AABB0003 /* ScrollAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */; };
+		BB22334455667788CCDD0002 /* FontTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB22334455667788CCDD0001 /* FontTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +61,7 @@
 		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
 		AA11223344556677AABB0010 /* ScrollAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulator.swift; sourceTree = "<group>"; };
 		AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulatorTests.swift; sourceTree = "<group>"; };
+		BB22334455667788CCDD0001 /* FontTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -148,6 +150,7 @@
 			children = (
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */,
+				BB22334455667788CCDD0001 /* FontTests.swift */,
 			);
 			path = MingaTests;
 			sourceTree = "<group>";
@@ -285,6 +288,7 @@
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
 				AA11223344556677AABB0003 /* ScrollAccumulatorTests.swift in Sources */,
 				AA11223344556677AABB0002 /* ScrollAccumulator.swift in Sources */,
+				BB22334455667788CCDD0002 /* FontTests.swift in Sources */,
 				614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

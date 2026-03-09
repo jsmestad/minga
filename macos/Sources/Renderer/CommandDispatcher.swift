@@ -24,6 +24,10 @@ final class CommandDispatcher {
     private var regions: [UInt16: Region] = [:]
     private var activeRegion: Region?
 
+    /// The current font face for ligature shaping. Set by the AppDelegate
+    /// on init and updated when a set_font command arrives.
+    var fontFace: FontFace?
+
     /// Called after each `batch_end` command. The MetalRenderer hooks into
     /// this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
@@ -33,6 +37,10 @@ final class CommandDispatcher {
 
     /// Called when the BEAM sends a window background color (RGB).
     var onWindowBgChanged: ((NSColor) -> Void)?
+
+    /// Called when the BEAM sends a font configuration change.
+    /// Parameters: family, size, ligatures, weight byte.
+    var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
 
     init(grid: CellGrid) {
         self.grid = grid
@@ -103,10 +111,49 @@ final class CommandDispatcher {
             } else {
                 activeRegion = regions[id]
             }
+
+        case .setFont(let family, let size, let ligatures, let weight):
+            onFontChanged?(family, size, ligatures, weight)
         }
     }
 
     // MARK: - Private
+
+    // MARK: - Ligature lookup table (static, allocated once)
+
+    /// Characters that can start a ligature sequence. Used to skip the
+    /// ligature scan entirely for the vast majority of characters.
+    private static let ligatureStarters: Set<Character> = {
+        var s = Set<Character>()
+        for (_, byFirst) in ligatureSequencesByLength {
+            for (_, seqs) in byFirst {
+                for str in seqs {
+                    s.insert(str.first!)
+                }
+            }
+        }
+        return s
+    }()
+
+    /// Ligature sequences grouped by length (longest first for greedy match),
+    /// then by first character for O(1) lookup.
+    /// Structure: [(length, [firstChar: [fullSequence]])]
+    private static let ligatureSequencesByLength: [(Int, [Character: [String]])] = {
+        let all = [
+            "www", "<=>", "==>", "-->", "<--", "<->", "===", "!==",
+            "=>", "->", "<-", "!=", "<=", ">=", "::", "&&", "||",
+            "++", "--", ">>", "<<", "..", "|>", "<|", "//", "/*",
+            "*/", "~/", "~>", "<~"
+        ]
+        var byLen: [Int: [Character: [String]]] = [:]
+        for seq in all {
+            let len = seq.count
+            let first = seq.first!
+            byLen[len, default: [:]][first, default: []].append(seq)
+        }
+        // Sort longest first for greedy matching.
+        return byLen.sorted { $0.key > $1.key }.map { ($0.key, $0.value) }
+    }()
 
     private func drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String) {
         var absRow = row
@@ -116,30 +163,84 @@ final class CommandDispatcher {
         if let region = activeRegion {
             absRow &+= region.row
             absCol &+= region.col
-            // Clip to region bounds.
             if absRow >= region.row &+ region.height { return }
             maxCol = min(grid.cols, region.col &+ region.width)
         }
 
+        // Fast path: no ligature shaping needed. Iterate characters directly
+        // without converting to Array or scanning for sequences.
+        let ligaturesActive = fontFace?.ligaturesEnabled ?? false
+        guard ligaturesActive else {
+            var currentCol = absCol
+            for char in text {
+                guard currentCol < maxCol else { break }
+                let grapheme = String(char)
+                let w = graphemeWidth(grapheme)
+                grid.writeCell(col: currentCol, row: absRow, cell: Cell(
+                    grapheme: grapheme, width: UInt8(w),
+                    fg: fg, bg: bg, attrs: attrs
+                ))
+                currentCol &+= UInt16(w)
+            }
+            return
+        }
+
+        // Slow path: ligature shaping enabled. Need indexed access for
+        // lookahead, so convert to Array once.
+        let face = fontFace!
+        let chars = Array(text)
+        var i = 0
         var currentCol = absCol
 
-        // Iterate grapheme clusters (Swift's Character type is a grapheme cluster).
-        for char in text {
+        while i < chars.count {
             guard currentCol < maxCol else { break }
 
-            let grapheme = String(char)
-            // Simple width heuristic: CJK and emoji are 2 cells wide.
-            let w = graphemeWidth(grapheme)
+            var ligatureFound = false
+            let ch = chars[i]
 
-            grid.writeCell(col: currentCol, row: absRow, cell: Cell(
-                grapheme: grapheme,
-                width: UInt8(w),
-                fg: fg,
-                bg: bg,
-                attrs: attrs
-            ))
+            // Only attempt ligature scan if this character can start one.
+            if Self.ligatureStarters.contains(ch) {
+                for (seqLen, byFirst) in Self.ligatureSequencesByLength {
+                    guard i + seqLen <= chars.count else { continue }
+                    guard let candidates = byFirst[ch] else { continue }
+                    guard currentCol &+ UInt16(seqLen) <= maxCol else { continue }
 
-            currentCol &+= UInt16(w)
+                    let candidate = String(chars[i..<(i + seqLen)])
+                    guard candidates.contains(candidate) else { continue }
+
+                    if let lig = face.shapeLigature(candidate) {
+                        grid.writeCell(col: currentCol, row: absRow, cell: Cell(
+                            grapheme: candidate, width: UInt8(lig.cellCount),
+                            fg: fg, bg: bg, attrs: attrs,
+                            ligatureText: candidate,
+                            ligatureCellCount: UInt8(lig.cellCount),
+                            isContinuation: false
+                        ))
+                        for offset in 1..<UInt16(lig.cellCount) {
+                            grid.writeCell(col: currentCol &+ offset, row: absRow, cell: Cell(
+                                grapheme: "", width: 1,
+                                fg: fg, bg: bg, attrs: attrs,
+                                isContinuation: true
+                            ))
+                        }
+                        currentCol &+= UInt16(lig.cellCount)
+                        i += seqLen
+                        ligatureFound = true
+                        break
+                    }
+                }
+            }
+
+            if !ligatureFound {
+                let grapheme = String(ch)
+                let w = graphemeWidth(grapheme)
+                grid.writeCell(col: currentCol, row: absRow, cell: Cell(
+                    grapheme: grapheme, width: UInt8(w),
+                    fg: fg, bg: bg, attrs: attrs
+                ))
+                currentCol &+= UInt16(w)
+                i += 1
+            }
         }
     }
 

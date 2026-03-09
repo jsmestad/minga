@@ -15,7 +15,7 @@ import MetalKit
 final class EditorNSView: MTKView {
     let encoder: InputEncoder
     let metalRenderer: MetalRenderer
-    let fontFace: FontFace
+    private(set) var fontFace: FontFace
     let cellGrid: CellGrid
 
     private var trackingArea: NSTrackingArea?
@@ -81,6 +81,31 @@ final class EditorNSView: MTKView {
         metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
                              viewportSize: drawableSize, contentScale: scale)
         cellGrid.dirty = false
+    }
+
+    // MARK: - Font update
+
+    /// Called when the BEAM sends a set_font command. Replaces the font face,
+    /// resizes the grid to match new cell dimensions, and sends a resize event
+    /// to the BEAM so it re-renders with the new grid size.
+    func updateFont(_ newFace: FontFace) {
+        self.fontFace = newFace
+
+        // Recompute grid dimensions with the new cell size.
+        let newCellW = CGFloat(newFace.cellWidth)
+        let newCellH = CGFloat(newFace.cellHeight)
+        guard newCellW > 0, newCellH > 0 else { return }
+
+        let newCols = UInt16(max(frame.width / newCellW, 1))
+        let newRows = UInt16(max(frame.height / newCellH, 1))
+
+        if newCols != cellGrid.cols || newRows != cellGrid.rows {
+            cellGrid.resize(newCols: newCols, newRows: newRows)
+            encoder.sendResize(cols: newCols, rows: newRows)
+        }
+
+        // Force a full re-render.
+        renderFrame()
     }
 
     // MARK: - Window lifecycle

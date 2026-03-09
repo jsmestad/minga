@@ -8,6 +8,7 @@
 import CoreText
 import CoreGraphics
 import Foundation
+import AppKit
 
 /// Information about a rasterized glyph for atlas storage and positioning.
 struct GlyphInfo {
@@ -51,20 +52,48 @@ final class FontFace {
     let atlas: GlyphAtlas
     private var cache: [UInt32: Glyph] = [:]
 
-    /// Load a font by name at the given point size.
-    /// Falls back to the system monospace font if the named font isn't found.
-    /// `scale` is the backing scale factor (2.0 for Retina).
-    init(name: String, size: CGFloat, scale: CGFloat) {
-        let font: CTFont
-        if let named = CTFontCreateWithName(name as CFString, size, nil) as CTFont? {
-            font = named
-        } else {
-            // Fallback: system monospace (UserFixedPitch).
-            font = CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)!
-        }
+    /// Whether programming ligatures are enabled. When true, multi-character
+    /// sequences like `->`, `!=`, `=>` are shaped via CoreText and rendered
+    /// as a single wide glyph spanning multiple cells.
+    let ligaturesEnabled: Bool
 
+    /// Cache of shaped ligature glyphs keyed by the input string.
+    /// A nil value means "no ligature for this sequence."
+    private var ligatureCache: [String: LigatureResult?] = [:]
+
+    /// Protocol weight byte → NSFontManager weight (0-15 scale).
+    /// NSFontManager uses: 2=ultralight, 3=thin, 4=light, 5=regular,
+    /// 6=medium, 7=semibold, 8=bold, 9=heavy, 10+=black.
+    static let weightMap: [UInt8: Int] = [
+        0: 3,   // thin
+        1: 4,   // light
+        2: 5,   // regular
+        3: 6,   // medium
+        4: 7,   // semibold
+        5: 8,   // bold
+        6: 9,   // heavy
+        7: 10   // black
+    ]
+
+    /// The NSFontManager weight used to resolve this font.
+    let fontWeight: Int
+
+    /// Load a font by name at the given point size.
+    ///
+    /// Font name resolution uses NSFontManager so both display names
+    /// ("JetBrains Mono") and PostScript names ("JetBrainsMonoNF-Regular")
+    /// work. Falls back to the system monospace font if not found.
+    ///
+    /// `scale` is the backing scale factor (2.0 for Retina).
+    /// `ligatures` enables programming ligature shaping via CoreText.
+    /// `weight` is the protocol weight byte (0-7), mapped to NSFontManager's scale.
+    init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
+        let nsFontWeight = FontFace.weightMap[weight] ?? 5
+        self.fontWeight = nsFontWeight
+        let font = FontFace.resolveFont(name: name, size: size, weight: nsFontWeight)
         self.ctFont = font
         self.scale = scale
+        self.ligaturesEnabled = ligatures
 
         let asc = CTFontGetAscent(font)
         let desc = CTFontGetDescent(font)
@@ -78,6 +107,37 @@ final class FontFace {
         self.cellHeight = Int(ceil(asc + desc + lead))
 
         self.atlas = GlyphAtlas(initialSize: 512)
+    }
+
+    /// Resolve a font name to a CTFont, trying multiple strategies:
+    /// 1. PostScript name via CTFontCreateWithName
+    /// 2. Display name via NSFontManager (with weight)
+    /// 3. Fallback to system monospace
+    private static func resolveFont(name: String, size: CGFloat, weight: Int = 5) -> CTFont {
+        // Try PostScript name first (e.g., "JetBrainsMonoNF-Regular").
+        // PostScript names encode weight in the name itself, so skip weight
+        // matching here.
+        let directFont = CTFontCreateWithName(name as CFString, size, nil)
+        let directName = CTFontCopyPostScriptName(directFont) as String
+        // CTFontCreateWithName always returns a font; check if it matched.
+        if directName.lowercased().contains(name.lowercased().replacingOccurrences(of: " ", with: "").prefix(8).lowercased()) {
+            return directFont
+        }
+
+        // Try NSFontManager with display name and requested weight.
+        let fm = NSFontManager.shared
+        if let nsFont = fm.font(withFamily: name, traits: NSFontTraitMask.fixedPitchFontMask, weight: weight, size: size) {
+            return nsFont as CTFont
+        }
+
+        // Try without fixed-pitch trait (some fonts don't report it).
+        if let nsFont = fm.font(withFamily: name, traits: [], weight: weight, size: size) {
+            return nsFont as CTFont
+        }
+
+        // Fallback: system monospace.
+        PortLogger.warn("Font '\(name)' weight \(weight) not found, falling back to system monospace")
+        return CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)!
     }
 
     /// Look up a glyph by codepoint, rasterizing on first access.
@@ -103,6 +163,147 @@ final class FontFace {
         for cp: UInt32 in 0x20...0x7E {
             _ = getGlyph(cp)
         }
+    }
+
+    // MARK: - Ligature shaping
+
+    /// Result of shaping a multi-character sequence into a ligature glyph.
+    struct LigatureResult {
+        /// The rasterized glyph covering the full ligature width.
+        let glyph: Glyph
+        /// Number of cells this ligature spans.
+        let cellCount: Int
+    }
+
+    /// Attempt to shape a string into a ligature glyph.
+    ///
+    /// Returns a `LigatureResult` if the font produces fewer glyphs than
+    /// input characters (indicating a ligature substitution happened).
+    /// Returns nil if no ligature was produced or ligatures are disabled.
+    ///
+    /// The result is cached, so repeated calls with the same string are cheap.
+    func shapeLigature(_ text: String) -> LigatureResult? {
+        guard ligaturesEnabled, text.count >= 2 else { return nil }
+
+        // Check cache first.
+        if let cached = ligatureCache[text] {
+            return cached
+        }
+
+        let result = detectAndRasterizeLigature(text)
+        ligatureCache[text] = result
+        return result
+    }
+
+    /// Core ligature detection using CTLine shaping.
+    ///
+    /// Creates an attributed string with the font, asks CoreText to shape it,
+    /// then inspects the glyph runs. If the number of glyphs is less than
+    /// the number of characters, a ligature substitution occurred.
+    private func detectAndRasterizeLigature(_ text: String) -> LigatureResult? {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: ctFont as Any,
+            // Enable all ligatures (1 = standard, 2 = all including rare ones).
+            .ligature: 2
+        ]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let line = CTLineCreateWithAttributedString(attrStr)
+
+        // Count total glyphs produced.
+        let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+        var totalGlyphs = 0
+        for run in runs {
+            totalGlyphs += CTRunGetGlyphCount(run)
+        }
+
+        let charCount = text.count
+
+        // If CoreText produced the same number of glyphs as characters,
+        // no ligature happened. (Or the font doesn't have one.)
+        guard totalGlyphs < charCount else { return nil }
+
+        // Rasterize the entire shaped line as a single wide glyph.
+        let cellCount = charCount
+        let pixelWidth = UInt32(ceil(CGFloat(cellWidth * cellCount) * scale))
+        let pixelHeight = UInt32(ceil(CGFloat(cellHeight) * scale))
+
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+
+        // Reserve atlas space.
+        let pad: UInt32 = 1
+        let paddedW = pixelWidth + pad * 2
+        let paddedH = pixelHeight + pad * 2
+
+        guard let region = atlas.reserve(width: paddedW, height: paddedH) ?? {
+            atlas.grow(newSize: atlas.size * 2)
+            return atlas.reserve(width: paddedW, height: paddedH)
+        }() else { return nil }
+
+        // Rasterize the shaped line into a bitmap.
+        let bgraBuf = rasterizeLine(line, width: Int(pixelWidth), height: Int(pixelHeight))
+
+        let glyphX = region.x + pad
+        let glyphY = region.y + pad
+        atlas.set(x: glyphX, y: glyphY, width: pixelWidth, height: pixelHeight, data: bgraBuf)
+
+        let glyph = Glyph(
+            atlasX: glyphX, atlasY: glyphY,
+            width: pixelWidth, height: pixelHeight,
+            offsetX: 0,
+            offsetY: ascent,
+            isColor: false
+        )
+
+        return LigatureResult(glyph: glyph, cellCount: cellCount)
+    }
+
+    /// Rasterize a CTLine into a BGRA bitmap (white + alpha coverage).
+    private func rasterizeLine(_ line: CTLine, width w: Int, height h: Int) -> [UInt8] {
+        let grayStride = w
+        var grayBuf = [UInt8](repeating: 0, count: grayStride * h)
+
+        guard let graySpace = CGColorSpace(name: CGColorSpace.linearGray),
+              let ctx = CGContext(
+                  data: &grayBuf,
+                  width: w,
+                  height: h,
+                  bitsPerComponent: 8,
+                  bytesPerRow: grayStride,
+                  space: graySpace,
+                  bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+              ) else {
+            return [UInt8](repeating: 0, count: w * h * 4)
+        }
+
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.setAllowsFontSmoothing(true)
+        ctx.setShouldSmoothFonts(true)
+        ctx.setAllowsFontSubpixelPositioning(true)
+        ctx.setShouldSubpixelPositionFonts(true)
+        ctx.setAllowsAntialiasing(true)
+        ctx.setShouldAntialias(true)
+        ctx.setFillColor(gray: 1.0, alpha: 1.0)
+
+        // Draw at baseline. CoreText uses a bottom-up coordinate system.
+        let textPos = CGPoint(x: 0, y: descent)
+        ctx.textPosition = textPos
+        CTLineDraw(line, ctx)
+
+        // Convert coverage to BGRA.
+        let bgraStride = w * 4
+        var bgraBuf = [UInt8](repeating: 0, count: bgraStride * h)
+        for row in 0..<h {
+            for col in 0..<w {
+                let grayOff = row * grayStride + col
+                let bgraOff = row * bgraStride + col * 4
+                bgraBuf[bgraOff + 0] = 255
+                bgraBuf[bgraOff + 1] = 255
+                bgraBuf[bgraOff + 2] = 255
+                bgraBuf[bgraOff + 3] = grayBuf[grayOff]
+            }
+        }
+
+        return bgraBuf
     }
 
     // MARK: - Private

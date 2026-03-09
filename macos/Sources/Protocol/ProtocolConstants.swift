@@ -24,6 +24,10 @@ let OP_CLEAR_REGION: UInt8 = 0x18
 let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 
+// MARK: - Config opcodes (BEAM → frontend)
+
+let OP_SET_FONT: UInt8 = 0x50
+
 // MARK: - Highlight opcodes (ignored by GUI, handled by minga-parser)
 
 let OP_SET_LANGUAGE: UInt8 = 0x20

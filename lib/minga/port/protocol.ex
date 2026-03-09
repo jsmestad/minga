@@ -75,6 +75,9 @@ defmodule Minga.Port.Protocol do
   @op_injection_ranges 0x34
   @op_text_width 0x35
 
+  # Config commands (BEAM → frontend)
+  @op_set_font 0x50
+
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
 
@@ -246,6 +249,43 @@ defmodule Minga.Port.Protocol do
     g = Bitwise.band(Bitwise.bsr(rgb, 8), 0xFF)
     b = Bitwise.band(rgb, 0xFF)
     <<@op_set_window_bg, r::8, g::8, b::8>>
+  end
+
+  @doc """
+  Encodes a set_font command to configure the GUI frontend's font.
+
+  The font family is resolved by the frontend using NSFontManager (macOS)
+  so both display names ("JetBrains Mono") and PostScript names
+  ("JetBrainsMonoNF-Regular") work. The TUI ignores this command.
+
+  Format: `opcode:8, size:16, weight:8, ligatures:8, name_len:16, name:bytes`
+
+  Fields are ordered by category: font identity (size, weight, name) then
+  rendering features (ligatures). The variable-length name stays at the end.
+  """
+  @font_weight_map %{
+    thin: 0,
+    light: 1,
+    regular: 2,
+    medium: 3,
+    semibold: 4,
+    bold: 5,
+    heavy: 6,
+    black: 7
+  }
+
+  @font_weight_reverse Map.new(@font_weight_map, fn {k, v} -> {v, k} end)
+
+  @spec encode_set_font(String.t(), pos_integer(), boolean(), atom()) :: binary()
+  def encode_set_font(family, size, ligatures, weight \\ :regular)
+
+  def encode_set_font(family, size, ligatures, weight)
+      when is_binary(family) and is_integer(size) and size > 0 and is_boolean(ligatures) and
+             is_atom(weight) do
+    lig_byte = if ligatures, do: 1, else: 0
+    weight_byte = Map.get(@font_weight_map, weight, 2)
+
+    <<@op_set_font, size::16, weight_byte::8, lig_byte::8, byte_size(family)::16, family::binary>>
   end
 
   # ── Encoding: region commands (BEAM → Zig) ──
@@ -544,6 +584,14 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(<<@op_set_title, len::16, title::binary-size(len)>>) do
     {:ok, {:set_title, title}}
+  end
+
+  def decode_command(
+        <<@op_set_font, size::16, weight_byte::8, lig::8, name_len::16,
+          name::binary-size(name_len)>>
+      ) do
+    weight = Map.get(@font_weight_reverse, weight_byte, :regular)
+    {:ok, {:set_font, name, size, weight, lig == 1}}
   end
 
   def decode_command(<<_opcode::8, _rest::binary>>) do
