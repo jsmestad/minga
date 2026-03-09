@@ -28,6 +28,8 @@ struct CellGPU {
 struct Uniforms {
     var cellSize: SIMD2<Float>
     var viewportSize: SIMD2<Float>
+    /// Pixel offset for smooth scrolling (x: horizontal, y: vertical).
+    var scrollOffset: SIMD2<Float>
 }
 
 /// Background clear color (dark gray matching the default bg).
@@ -93,7 +95,8 @@ final class MetalRenderer {
     }
 
     /// Render the cell grid to the given Metal layer.
-    func render(grid: CellGrid, face: FontFace, layer: CAMetalLayer) {
+    /// `scrollOffset` is the sub-cell-height pixel offset for smooth scrolling.
+    func render(grid: CellGrid, face: FontFace, layer: CAMetalLayer, scrollOffset: SIMD2<Float> = .zero) {
         guard let drawable = layer.nextDrawable() else { return }
 
         let cellW = Float(face.cellWidth)
@@ -178,7 +181,8 @@ final class MetalRenderer {
         let drawableSize = layer.drawableSize
         var uniforms = Uniforms(
             cellSize: SIMD2<Float>(cellW * contentScale, cellH * contentScale),
-            viewportSize: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+            viewportSize: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height)),
+            scrollOffset: SIMD2<Float>(scrollOffset.x * contentScale, scrollOffset.y * contentScale)
         )
 
         if count > 0 {

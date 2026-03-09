@@ -39,8 +39,13 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.WindowTree
   alias Minga.Mode
   alias Minga.Mode.VisualState
+  alias Minga.Port.Capabilities
 
-  @scroll_lines 3
+  # TUI scrolls 3 lines per wheel tick (standard terminal behavior).
+  # GUI scrolls 1 line per event because the frontend accumulates pixel
+  # deltas and emits one event per cellHeight crossed.
+  @tui_scroll_lines 3
+  @gui_scroll_lines 1
   @scroll_cols 6
 
   # Modifier flags
@@ -82,13 +87,15 @@ defmodule Minga.Editor.Mouse do
         _cc
       ) do
     total_lines = BufferServer.line_count(buf)
-    new_vp = scroll_viewport(vp, @scroll_lines, total_lines)
+    lines = scroll_lines(state)
+    new_vp = scroll_viewport(vp, lines, total_lines)
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
   def handle(%{buffers: %{active: buf}, viewport: vp} = state, _r, _c, :wheel_up, _m, :press, _cc) do
     total_lines = BufferServer.line_count(buf)
-    new_vp = scroll_viewport(vp, -@scroll_lines, total_lines)
+    lines = scroll_lines(state)
+    new_vp = scroll_viewport(vp, -lines, total_lines)
     %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
   end
 
@@ -838,6 +845,15 @@ defmodule Minga.Editor.Mouse do
       :not_modeline
     end
   end
+
+  # GUI frontends accumulate pixel deltas and emit one scroll event per
+  # line height crossed, so each event = 1 line. TUI frontends send one
+  # event per wheel tick, so each event = 3 lines for usable speed.
+  @spec scroll_lines(state()) :: pos_integer()
+  defp scroll_lines(%{capabilities: %Capabilities{frontend_type: :native_gui}}),
+    do: @gui_scroll_lines
+
+  defp scroll_lines(_state), do: @tui_scroll_lines
 
   @spec find_click_region([Minga.Editor.Modeline.click_region()], non_neg_integer()) ::
           {:command, atom()} | :not_modeline

@@ -42,6 +42,9 @@ struct CellData {
 struct Uniforms {
     float2 cell_size;
     float2 viewport_size;
+    /// Pixel offset for smooth scrolling. Shifts all content vertically
+    /// (positive = content scrolled up, negative = scrolled down).
+    float2 scroll_offset;
 };
 
 /// Vertex shader output / fragment shader input.
@@ -79,7 +82,7 @@ vertex VertexOut bg_vertex(
 ) {
     constant CellData& cell = cells[instance_id];
     float2 pos = quadPositions[vertex_id];
-    float2 pixel_pos = (cell.grid_pos + pos) * uniforms.cell_size;
+    float2 pixel_pos = (cell.grid_pos + pos) * uniforms.cell_size - uniforms.scroll_offset;
 
     VertexOut out;
     out.position = float4(pixelToNDC(pixel_pos, uniforms.viewport_size), 0.0, 1.0);
@@ -107,7 +110,7 @@ vertex VertexOut glyph_vertex(
     constant CellData& cell = cells[instance_id];
     float2 pos = quadPositions[vertex_id];
 
-    float2 cell_origin = cell.grid_pos * uniforms.cell_size;
+    float2 cell_origin = cell.grid_pos * uniforms.cell_size - uniforms.scroll_offset;
     // Snap glyph origin to pixel boundaries to avoid sub-pixel blur
     // from bilinear interpolation on fractional offsets.
     float2 glyph_origin = round(cell_origin + cell.glyph_offset);

@@ -117,10 +117,15 @@ final class EditorNSView: NSView {
         }
     }
 
+    /// Sub-cell-height vertical pixel offset for smooth trackpad scrolling.
+    /// Positive = content shifted up (scrolled down). Always in range [0, cellHeight).
+    private var scrollPixelOffset: CGFloat = 0
+
     /// Render the current cell grid state to the Metal layer.
     func renderFrame() {
         guard let layer = metalLayer else { return }
-        metalRenderer.render(grid: cellGrid, face: fontFace, layer: layer)
+        let offset = SIMD2<Float>(0, Float(scrollPixelOffset))
+        metalRenderer.render(grid: cellGrid, face: fontFace, layer: layer, scrollOffset: offset)
         cellGrid.dirty = false
     }
 
@@ -246,11 +251,59 @@ final class EditorNSView: NSView {
                                eventType: MOUSE_MOTION)
     }
 
+    /// Scroll accumulator for smooth trackpad scrolling. Extracted into a
+    /// pure struct so the accumulation math is unit-testable.
+    private var scrollAccumulator = ScrollAccumulator()
+
     override func scrollWheel(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         let mods = modifierBits(from: event.modifierFlags)
 
-        // Vertical scroll
+        if event.hasPreciseScrollingDeltas {
+            handleTrackpadScroll(event: event, row: row, col: col, mods: mods)
+        } else {
+            handleDiscreteScroll(event: event, row: row, col: col, mods: mods)
+        }
+    }
+
+    /// Smooth trackpad scrolling: accumulate pixel deltas, emit discrete
+    /// events at cell boundaries, and render the fractional offset via Metal.
+    private func handleTrackpadScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
+        if event.phase == .began {
+            scrollAccumulator.reset()
+        }
+
+        // Vertical: smooth sub-line pixel offset
+        let vEvents = scrollAccumulator.accumulateVertical(
+            deltaY: event.scrollingDeltaY, cellHeight: cellHeight)
+        for e in vEvents {
+            sendScrollEvent(e, row: row, col: col, mods: mods)
+        }
+        scrollPixelOffset = scrollAccumulator.pixelOffsetY
+
+        // Horizontal: discrete column events
+        let hEvents = scrollAccumulator.accumulateHorizontal(
+            deltaX: event.scrollingDeltaX, cellWidth: cellWidth)
+        for e in hEvents {
+            sendScrollEvent(e, row: row, col: col, mods: mods)
+        }
+
+        // Snap to zero when gesture/momentum ends
+        if (event.phase == .ended || event.phase == .cancelled) && event.momentumPhase == [] {
+            scrollAccumulator.snapVertical()
+            scrollPixelOffset = 0
+        }
+        if event.momentumPhase == .ended {
+            scrollAccumulator.snapVertical()
+            scrollPixelOffset = 0
+        }
+
+        // Re-render immediately with the new fractional offset
+        renderFrame()
+    }
+
+    /// Discrete mouse wheel: one event per click, no accumulation.
+    private func handleDiscreteScroll(event: NSEvent, row: Int16, col: Int16, mods: UInt8) {
         if event.scrollingDeltaY > 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_UP,
                                    modifiers: mods, eventType: MOUSE_PRESS)
@@ -258,8 +311,6 @@ final class EditorNSView: NSView {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_DOWN,
                                    modifiers: mods, eventType: MOUSE_PRESS)
         }
-
-        // Horizontal scroll
         if event.scrollingDeltaX > 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_LEFT,
                                    modifiers: mods, eventType: MOUSE_PRESS)
@@ -267,6 +318,19 @@ final class EditorNSView: NSView {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_RIGHT,
                                    modifiers: mods, eventType: MOUSE_PRESS)
         }
+    }
+
+    /// Maps a ScrollAccumulator.Event to a protocol mouse event.
+    private func sendScrollEvent(_ event: ScrollAccumulator.Event, row: Int16, col: Int16, mods: UInt8) {
+        let button: UInt8
+        switch event {
+        case .scrollDown:  button = MOUSE_SCROLL_DOWN
+        case .scrollUp:    button = MOUSE_SCROLL_UP
+        case .scrollLeft:  button = MOUSE_SCROLL_LEFT
+        case .scrollRight: button = MOUSE_SCROLL_RIGHT
+        }
+        encoder.sendMouseEvent(row: row, col: col, button: button,
+                               modifiers: mods, eventType: MOUSE_PRESS)
     }
 
     // MARK: - Helpers

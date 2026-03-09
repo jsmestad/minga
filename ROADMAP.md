@@ -228,7 +228,7 @@ Current status and planned features. Updated as development progresses.
 | Mouse: modeline segment clicking | ✅ | #217 — file name opens buffer list, render-time click regions |
 | Mouse: right-click context menu | 📋 | #217 |
 | Mouse: hover tooltips (GUI) | 📋 | #217 |
-| Mouse: smooth trackpad scrolling (GUI) | 📋 | #217 |
+| Mouse: smooth trackpad scrolling (GUI) | ✅ | #217 — sub-pixel Metal offset, ScrollAccumulator, 1-line BEAM events |
 | Mouse: cursor shape changes (GUI) | 📋 | #217 |
 | Split windows | ✅ | Vertical, horizontal, nested; `SPC w` navigation |
 | Floating windows | 📋 | Zig renderer supports panels |
