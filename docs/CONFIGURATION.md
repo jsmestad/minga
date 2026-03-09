@@ -42,6 +42,11 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
 | `:font_ligatures` | boolean | `true` | Enable programming ligatures (see [Fonts](#fonts) below) |
+| `:log_level` | `:debug`, `:info`, `:warning`, `:error`, `:none` | `:info` | Global minimum log level (see [Logging](#logging) below) |
+| `:log_level_render` | log level or `:default` | `:default` | Log level for the render pipeline |
+| `:log_level_lsp` | log level or `:default` | `:default` | Log level for LSP client communication |
+| `:log_level_agent` | log level or `:default` | `:default` | Log level for AI agent providers |
+| `:log_level_editor` | log level or `:default` | `:default` | Log level for general editor operations |
 
 ```elixir
 set :tab_width, 2
@@ -174,6 +179,45 @@ Ligatures only work when two conditions are met:
 2. The font has ligature tables (Fira Code, JetBrains Mono, Cascadia Code, etc.)
 
 Fonts without ligature tables (like Menlo or SF Mono) are unaffected by this setting. Setting `:font_ligatures` to `false` is useful if you're using a ligature font but prefer to see individual characters.
+
+## Logging
+
+Minga logs to `*Messages*` (viewable with `SPC b m`) and to `~/.local/share/minga/minga.log`. By default, the log level is `:info`, which suppresses noisy debug output like render pipeline timing.
+
+```elixir
+# Set the global floor (suppresses :debug by default)
+set :log_level, :info
+```
+
+Each subsystem has its own log level override. Set a subsystem to `:debug` to see its detailed output without turning on debug logs everywhere:
+
+```elixir
+# Debug just the render pipeline
+set :log_level_render, :debug
+
+# Debug LSP communication
+set :log_level_lsp, :debug
+```
+
+The subsystem options default to `:default`, which means "inherit from `:log_level`." You can also set a subsystem to `:none` to silence it completely, even for warnings and errors.
+
+### Subsystems
+
+| Subsystem | Option | What it covers |
+|-----------|--------|----------------|
+| render | `:log_level_render` | Render pipeline stage timing and frame composition |
+| lsp | `:log_level_lsp` | LSP server communication, requests, and errors |
+| agent | `:log_level_agent` | AI agent providers, sessions, and tool execution |
+| editor | `:log_level_editor` | General editor operations, commands, and file I/O |
+
+### Example: debugging a rendering issue
+
+```elixir
+set :log_level, :warning         # quiet everything else
+set :log_level_render, :debug    # but show render pipeline details
+```
+
+Open `*Messages*` with `SPC b m` to see the per-stage timing output in real time.
 
 ## Window title
 

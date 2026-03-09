@@ -12,8 +12,6 @@ defmodule Minga.Editor.Commands.Help do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
-  require Logger
-
   @type state :: EditorState.t()
 
   @spec execute(state(), Mode.command()) :: state()

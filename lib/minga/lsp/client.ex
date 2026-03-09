@@ -483,7 +483,7 @@ defmodule Minga.LSP.Client do
   end
 
   defp handle_server_request(method, id, _params, state) do
-    Logger.debug("Unhandled server request: #{method} (id=#{id})")
+    Minga.Log.debug(:lsp, "Unhandled server request: #{method} (id=#{id})")
     send_response(state, id, %{})
     state
   end

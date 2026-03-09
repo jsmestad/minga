@@ -25,8 +25,6 @@ defmodule Minga.Editor.CompletionTrigger do
   alias Minga.Editor.DocumentSync
   alias Minga.LSP.Client
 
-  require Logger
-
   @debounce_ms 100
 
   @typedoc "Completion bridge state tracked in the Editor."
@@ -119,7 +117,7 @@ defmodule Minga.Editor.CompletionTrigger do
   end
 
   def handle_response(bridge, _ref, {:error, error}, _buffer_pid) do
-    Logger.debug("Completion request failed: #{inspect(error)}")
+    Minga.Log.debug(:lsp, "Completion request failed: #{inspect(error)}")
     {%{bridge | pending_ref: nil}, nil}
   end
 

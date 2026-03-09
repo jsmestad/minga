@@ -28,8 +28,6 @@ defmodule Minga.Editor.DocumentSync do
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
 
-  require Logger
-
   @debounce_ms 150
 
   @typedoc "LSP bridge state tracked in the Editor."

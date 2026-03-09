@@ -34,6 +34,15 @@ defmodule Minga.Config.Options do
   | `:font_size`              | positive integer (point size)               | `13`        |
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
   | `:font_ligatures`         | boolean                                     | `true`      |
+  | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
+  | `:log_level_render`       | log level or `:default`                     | `:default`  |
+  | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
+  | `:log_level_agent`        | log level or `:default`                     | `:default`  |
+  | `:log_level_editor`       | log level or `:default`                     | `:default`  |
+
+  Log level options control per-subsystem verbosity. Subsystem options
+  default to `:default` (inherit from `:log_level`). See `Minga.Log`
+  for the filtering API.
 
   ## Per-filetype overrides
 
@@ -82,6 +91,11 @@ defmodule Minga.Config.Options do
           | :font_size
           | :font_weight
           | :font_ligatures
+          | :log_level
+          | :log_level_render
+          | :log_level_lsp
+          | :log_level_agent
+          | :log_level_editor
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -134,7 +148,12 @@ defmodule Minga.Config.Options do
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},
      :regular},
-    {:font_ligatures, :boolean, true}
+    {:font_ligatures, :boolean, true},
+    {:log_level, {:enum, [:debug, :info, :warning, :error, :none]}, :info},
+    {:log_level_render, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
+    {:log_level_lsp, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
+    {:log_level_agent, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
+    {:log_level_editor, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

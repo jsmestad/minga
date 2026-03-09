@@ -12,8 +12,6 @@ defmodule Minga.Editor.Commands.Eval do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
-  require Logger
-
   @type state :: EditorState.t()
 
   @eval_timeout 5_000

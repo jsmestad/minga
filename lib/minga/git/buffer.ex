@@ -16,8 +16,6 @@ defmodule Minga.Git.Buffer do
   alias Minga.Git
   alias Minga.Git.Diff
 
-  require Logger
-
   @typedoc "Internal state."
   @type state :: %{
           git_root: String.t(),

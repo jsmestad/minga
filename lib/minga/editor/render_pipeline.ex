@@ -23,12 +23,10 @@ defmodule Minga.Editor.RenderPipeline do
 
   ## Observability
 
-  Each stage logs its name and elapsed time via `Logger.debug`. Set log
-  level to `:debug` to see per-stage timing. In production (`:info` or
-  higher), these calls are no-ops.
+  Each stage logs its name and elapsed time via `Minga.Log.debug(:render, ...)`.
+  Set `:log_level_render` to `:debug` to see per-stage timing. At the
+  default level (`:info`), these calls are suppressed.
   """
-
-  require Logger
 
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.Session
@@ -862,7 +860,7 @@ defmodule Minga.Editor.RenderPipeline do
     start = System.monotonic_time(:microsecond)
     result = fun.()
     elapsed = System.monotonic_time(:microsecond) - start
-    Logger.debug("[render:#{stage}] #{elapsed}µs")
+    Minga.Log.debug(:render, "[render:#{stage}] #{elapsed}µs")
     result
   end
 

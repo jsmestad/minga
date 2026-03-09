@@ -312,7 +312,11 @@ defmodule Minga.Agent.Providers.PiRpc do
         handle_event(event, state)
 
       {:error, _} ->
-        Logger.debug("[Agent.PiRpc] ignoring non-JSON line: #{String.slice(full_line, 0, 100)}")
+        Minga.Log.debug(
+          :agent,
+          "[Agent.PiRpc] ignoring non-JSON line: #{String.slice(full_line, 0, 100)}"
+        )
+
         {:noreply, state}
     end
   end
@@ -460,7 +464,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   defp handle_event(%{"type" => type}, state) do
-    Logger.debug("[Agent.PiRpc] unhandled event type: #{type}")
+    Minga.Log.debug(:agent, "[Agent.PiRpc] unhandled event type: #{type}")
     {:noreply, state}
   end
 
