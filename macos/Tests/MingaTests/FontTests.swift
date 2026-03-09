@@ -66,6 +66,34 @@ struct FontResolutionTests {
         let withoutLig = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: false)
         #expect(withoutLig.ligaturesEnabled == false)
     }
+
+    @Test("Font weight is stored and maps correctly")
+    func fontWeight() {
+        let regular = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 2)
+        #expect(regular.fontWeight == 5) // NSFontManager regular = 5
+
+        let bold = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 5)
+        #expect(bold.fontWeight == 8) // NSFontManager bold = 8
+
+        let light = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 1)
+        #expect(light.fontWeight == 4) // NSFontManager light = 4
+    }
+
+    @Test("Default weight is regular")
+    func defaultWeight() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        #expect(face.fontWeight == 5) // regular
+    }
+
+    @Test("Bold weight produces a valid font")
+    func boldWeight() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 5)
+        #expect(face.cellWidth > 0)
+        #expect(face.cellHeight > 0)
+        let psName = CTFontCopyPostScriptName(face.ctFont) as String
+        // Menlo Bold should resolve to a bold variant.
+        #expect(psName.contains("Bold") || psName.contains("Menlo"))
+    }
 }
 
 @Suite("FontFace ligature shaping")

@@ -39,7 +39,8 @@ final class CommandDispatcher {
     var onWindowBgChanged: ((NSColor) -> Void)?
 
     /// Called when the BEAM sends a font configuration change.
-    var onFontChanged: ((String, UInt16, Bool) -> Void)?
+    /// Parameters: family, size, ligatures, weight byte.
+    var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
 
     init(grid: CellGrid) {
         self.grid = grid
@@ -111,8 +112,8 @@ final class CommandDispatcher {
                 activeRegion = regions[id]
             }
 
-        case .setFont(let family, let size, let ligatures):
-            onFontChanged?(family, size, ligatures)
+        case .setFont(let family, let size, let ligatures, let weight):
+            onFontChanged?(family, size, ligatures, weight)
         }
     }
 

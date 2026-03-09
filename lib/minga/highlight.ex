@@ -231,7 +231,7 @@ defmodule Minga.Highlight do
     line_len = byte_size(line_text)
 
     if pos < line_len do
-      segment = binary_part(line_text, pos, line_len - pos)
+      segment = safe_binary_slice(line_text, pos, line_len - pos)
       Enum.reverse([{segment, []} | acc])
     else
       Enum.reverse(acc)
@@ -255,7 +255,7 @@ defmodule Minga.Highlight do
       # Gap before this span
       acc =
         if effective_start > pos do
-          gap = binary_part(line_text, pos, effective_start - pos)
+          gap = safe_binary_slice(line_text, pos, effective_start - pos)
           [{gap, []} | acc]
         else
           acc
@@ -267,7 +267,7 @@ defmodule Minga.Highlight do
 
       acc =
         if seg_len > 0 do
-          segment = binary_part(line_text, effective_start, seg_len)
+          segment = safe_binary_slice(line_text, effective_start, seg_len)
           [{segment, style} | acc]
         else
           acc
@@ -282,6 +282,34 @@ defmodule Minga.Highlight do
     case Enum.at(hl.capture_names, capture_id) do
       nil -> []
       name -> Theme.style_for_capture(hl.theme, name)
+    end
+  end
+
+  # Safely extract a substring using byte offsets. When highlight spans are
+  # stale (buffer edited since last highlight), byte offsets can land
+  # mid-codepoint, producing invalid UTF-8. This snaps offsets to the nearest
+  # valid character boundary to avoid downstream crashes in display_width.
+  @spec safe_binary_slice(binary(), non_neg_integer(), non_neg_integer()) :: binary()
+  defp safe_binary_slice(text, start, len) when start >= 0 and len >= 0 do
+    text_len = byte_size(text)
+    clamped_start = min(start, text_len)
+    clamped_len = min(len, text_len - clamped_start)
+
+    result = binary_part(text, clamped_start, clamped_len)
+
+    if String.valid?(result) do
+      result
+    else
+      # Byte offsets are misaligned with character boundaries. Fall back to
+      # the full remaining text from `start` so we don't lose content.
+      remaining = binary_part(text, clamped_start, text_len - clamped_start)
+
+      if String.valid?(remaining) do
+        remaining
+      else
+        # Extremely stale spans. Return empty to skip rather than crash.
+        ""
+      end
     end
   end
 end

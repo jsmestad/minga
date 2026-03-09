@@ -357,7 +357,7 @@ defmodule Minga.Test.HeadlessPort do
 
         %{state | waiters: [], frame_count: state.frame_count + 1}
 
-      {:ok, {:set_font, _family, _size, _ligatures}} ->
+      {:ok, {:set_font, _family, _size, _weight, _ligatures}} ->
         # Font config is GUI-only; headless port ignores it.
         state
 

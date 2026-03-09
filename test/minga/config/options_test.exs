@@ -53,6 +53,7 @@ defmodule Minga.Config.OptionsTest do
                agent_panel_split: 65,
                font_family: "Menlo",
                font_size: 13,
+               font_weight: :regular,
                font_ligatures: true
              }
     end
@@ -142,6 +143,22 @@ defmodule Minga.Config.OptionsTest do
 
     test "font_size rejects non-integer", %{server: s} do
       assert {:error, _} = Options.set(s, :font_size, 13.5)
+    end
+
+    test "font_weight accepts valid weight atoms", %{server: s} do
+      for weight <- [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black] do
+        assert {:ok, ^weight} = Options.set(s, :font_weight, weight)
+        assert Options.get(s, :font_weight) == weight
+      end
+    end
+
+    test "font_weight rejects invalid atom", %{server: s} do
+      assert {:error, msg} = Options.set(s, :font_weight, :extra_bold)
+      assert msg =~ "must be one of"
+    end
+
+    test "font_weight rejects non-atom", %{server: s} do
+      assert {:error, _} = Options.set(s, :font_weight, 5)
     end
 
     test "font_ligatures accepts boolean", %{server: s} do

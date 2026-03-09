@@ -20,7 +20,7 @@ enum RenderCommand: Sendable {
     case clearRegion(id: UInt16)
     case destroyRegion(id: UInt16)
     case setActiveRegion(id: UInt16)
-    case setFont(family: String, size: UInt16, ligatures: Bool)
+    case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
 }
 
 /// Cursor shape matching the protocol constants.
@@ -135,15 +135,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
     // Config commands.
     case OP_SET_FONT:
-        // size:2, ligatures:1, name_len:2 = 5 bytes after opcode
-        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        // size:2, weight:1, ligatures:1, name_len:2 = 6 bytes after opcode
+        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
         let fontSize = readU16(data, rest)
-        let ligatures = data[rest + 2] != 0
-        let nameLen = Int(readU16(data, rest + 3))
-        guard data.count >= rest + 5 + nameLen else { throw ProtocolDecodeError.malformed }
-        let nameData = data[(rest + 5)..<(rest + 5 + nameLen)]
+        let weight = data[rest + 2]
+        let ligatures = data[rest + 3] != 0
+        let nameLen = Int(readU16(data, rest + 4))
+        guard data.count >= rest + 6 + nameLen else { throw ProtocolDecodeError.malformed }
+        let nameData = data[(rest + 6)..<(rest + 6 + nameLen)]
         let family = String(data: nameData, encoding: .utf8) ?? "Menlo"
-        return (.setFont(family: family, size: fontSize, ligatures: ligatures), 1 + 5 + nameLen)
+        return (.setFont(family: family, size: fontSize, ligatures: ligatures, weight: weight), 1 + 6 + nameLen)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:

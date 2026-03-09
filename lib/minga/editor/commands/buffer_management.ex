@@ -327,6 +327,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
       # Font (GUI backend only; no effect in TUI mode)
       # set :font_family, "JetBrains Mono"
       # set :font_size, 14
+      # set :font_weight, :regular
       # set :font_ligatures, true
 
       # Per-filetype overrides

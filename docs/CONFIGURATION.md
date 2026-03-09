@@ -40,6 +40,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
+| `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
 | `:font_ligatures` | boolean | `true` | Enable programming ligatures (see [Fonts](#fonts) below) |
 
 ```elixir
@@ -50,6 +51,7 @@ set :scroll_margin, 5
 set :theme, :catppuccin_mocha
 set :font_family, "JetBrains Mono"
 set :font_size, 14
+set :font_weight, :regular
 set :font_ligatures, true
 ```
 
@@ -135,8 +137,21 @@ Font settings only apply to the GUI backend. **In TUI mode (the default), your t
 ```elixir
 set :font_family, "JetBrains Mono"
 set :font_size, 14
+set :font_weight, :light
 set :font_ligatures, true
 ```
+
+### Font weight
+
+Available weights: `:thin`, `:light`, `:regular`, `:medium`, `:semibold`, `:bold`, `:heavy`, `:black`. The default is `:regular`.
+
+```elixir
+set :font_weight, :light    # thinner strokes, popular for high-DPI
+set :font_weight, :regular  # default
+set :font_weight, :medium   # slightly heavier than regular
+```
+
+Not every font ships every weight. If the requested weight isn't available, macOS picks the closest match. Bold text from syntax highlighting still resolves to the font's bold variant regardless of this setting.
 
 You can use any of these name formats:
 
@@ -780,6 +795,7 @@ set :theme, :catppuccin_mocha
 # Font (GUI backend only; no effect in TUI mode)
 set :font_family, "JetBrains Mono"
 set :font_size, 14
+set :font_weight, :regular
 set :font_ligatures, true
 
 # ── Agent ─────────────────────────────────────────────────────────────

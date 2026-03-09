@@ -61,6 +61,23 @@ final class FontFace {
     /// A nil value means "no ligature for this sequence."
     private var ligatureCache: [String: LigatureResult?] = [:]
 
+    /// Protocol weight byte → NSFontManager weight (0-15 scale).
+    /// NSFontManager uses: 2=ultralight, 3=thin, 4=light, 5=regular,
+    /// 6=medium, 7=semibold, 8=bold, 9=heavy, 10+=black.
+    static let weightMap: [UInt8: Int] = [
+        0: 3,   // thin
+        1: 4,   // light
+        2: 5,   // regular
+        3: 6,   // medium
+        4: 7,   // semibold
+        5: 8,   // bold
+        6: 9,   // heavy
+        7: 10   // black
+    ]
+
+    /// The NSFontManager weight used to resolve this font.
+    let fontWeight: Int
+
     /// Load a font by name at the given point size.
     ///
     /// Font name resolution uses NSFontManager so both display names
@@ -69,8 +86,11 @@ final class FontFace {
     ///
     /// `scale` is the backing scale factor (2.0 for Retina).
     /// `ligatures` enables programming ligature shaping via CoreText.
-    init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true) {
-        let font = FontFace.resolveFont(name: name, size: size)
+    /// `weight` is the protocol weight byte (0-7), mapped to NSFontManager's scale.
+    init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
+        let nsFontWeight = FontFace.weightMap[weight] ?? 5
+        self.fontWeight = nsFontWeight
+        let font = FontFace.resolveFont(name: name, size: size, weight: nsFontWeight)
         self.ctFont = font
         self.scale = scale
         self.ligaturesEnabled = ligatures
@@ -91,10 +111,12 @@ final class FontFace {
 
     /// Resolve a font name to a CTFont, trying multiple strategies:
     /// 1. PostScript name via CTFontCreateWithName
-    /// 2. Display name via NSFontManager
+    /// 2. Display name via NSFontManager (with weight)
     /// 3. Fallback to system monospace
-    private static func resolveFont(name: String, size: CGFloat) -> CTFont {
+    private static func resolveFont(name: String, size: CGFloat, weight: Int = 5) -> CTFont {
         // Try PostScript name first (e.g., "JetBrainsMonoNF-Regular").
+        // PostScript names encode weight in the name itself, so skip weight
+        // matching here.
         let directFont = CTFontCreateWithName(name as CFString, size, nil)
         let directName = CTFontCopyPostScriptName(directFont) as String
         // CTFontCreateWithName always returns a font; check if it matched.
@@ -102,19 +124,19 @@ final class FontFace {
             return directFont
         }
 
-        // Try NSFontManager with display name (e.g., "JetBrains Mono").
+        // Try NSFontManager with display name and requested weight.
         let fm = NSFontManager.shared
-        if let nsFont = fm.font(withFamily: name, traits: NSFontTraitMask.fixedPitchFontMask, weight: 5, size: size) {
+        if let nsFont = fm.font(withFamily: name, traits: NSFontTraitMask.fixedPitchFontMask, weight: weight, size: size) {
             return nsFont as CTFont
         }
 
         // Try without fixed-pitch trait (some fonts don't report it).
-        if let nsFont = fm.font(withFamily: name, traits: [], weight: 5, size: size) {
+        if let nsFont = fm.font(withFamily: name, traits: [], weight: weight, size: size) {
             return nsFont as CTFont
         }
 
         // Fallback: system monospace.
-        PortLogger.warn("Font '\(name)' not found, falling back to system monospace")
+        PortLogger.warn("Font '\(name)' weight \(weight) not found, falling back to system monospace")
         return CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)!
     }
 

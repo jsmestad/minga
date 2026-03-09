@@ -1523,7 +1523,8 @@ defmodule Minga.Editor do
     family = ConfigOptions.get(:font_family)
     size = ConfigOptions.get(:font_size)
     ligatures = ConfigOptions.get(:font_ligatures)
-    cmd = Protocol.encode_set_font(family, size, ligatures)
+    weight = ConfigOptions.get(:font_weight)
+    cmd = Protocol.encode_set_font(family, size, ligatures, weight)
     Minga.Port.Manager.send_commands(port, [cmd])
   rescue
     _ -> :ok

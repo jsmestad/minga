@@ -370,29 +370,55 @@ defmodule Minga.Port.ProtocolTest do
   end
 
   describe "set_font protocol" do
-    test "encode/decode round-trip with ligatures enabled" do
+    test "encode/decode round-trip with ligatures enabled, default weight" do
       encoded = Protocol.encode_set_font("JetBrains Mono", 14, true)
-      assert {:ok, {:set_font, "JetBrains Mono", 14, true}} = Protocol.decode_command(encoded)
+
+      assert {:ok, {:set_font, "JetBrains Mono", 14, :regular, true}} =
+               Protocol.decode_command(encoded)
     end
 
     test "encode/decode round-trip with ligatures disabled" do
       encoded = Protocol.encode_set_font("Menlo", 13, false)
-      assert {:ok, {:set_font, "Menlo", 13, false}} = Protocol.decode_command(encoded)
+      assert {:ok, {:set_font, "Menlo", 13, :regular, false}} = Protocol.decode_command(encoded)
     end
 
     test "encode/decode with unicode font name" do
       encoded = Protocol.encode_set_font("Iosevka Термин", 12, true)
-      assert {:ok, {:set_font, "Iosevka Термин", 12, true}} = Protocol.decode_command(encoded)
+
+      assert {:ok, {:set_font, "Iosevka Термин", 12, :regular, true}} =
+               Protocol.decode_command(encoded)
     end
 
-    test "binary format: opcode 0x50, size:16, lig:8, name_len:16, name" do
+    test "encode/decode with explicit weight" do
+      encoded = Protocol.encode_set_font("JetBrains Mono", 14, true, :light)
+
+      assert {:ok, {:set_font, "JetBrains Mono", 14, :light, true}} =
+               Protocol.decode_command(encoded)
+    end
+
+    test "encode/decode all weight values" do
+      weights = [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]
+
+      for weight <- weights do
+        encoded = Protocol.encode_set_font("Test", 13, true, weight)
+        assert {:ok, {:set_font, "Test", 13, ^weight, true}} = Protocol.decode_command(encoded)
+      end
+    end
+
+    test "binary format: opcode 0x50, size:16, weight:8, lig:8, name_len:16, name" do
       encoded = Protocol.encode_set_font("Fira Code", 16, true)
-      assert <<0x50, 16::16, 1::8, 9::16, "Fira Code">> = encoded
+      # weight defaults to :regular = 2
+      assert <<0x50, 16::16, 2::8, 1::8, 9::16, "Fira Code">> = encoded
     end
 
     test "binary format: ligatures false encodes as 0" do
       encoded = Protocol.encode_set_font("Menlo", 13, false)
-      assert <<0x50, 13::16, 0::8, 5::16, "Menlo">> = encoded
+      assert <<0x50, 13::16, 2::8, 0::8, 5::16, "Menlo">> = encoded
+    end
+
+    test "binary format: bold weight encodes as 5" do
+      encoded = Protocol.encode_set_font("Menlo", 13, true, :bold)
+      assert <<0x50, 13::16, 5::8, 1::8, _rest::binary>> = encoded
     end
   end
 

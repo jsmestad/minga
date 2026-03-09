@@ -469,6 +469,12 @@ defmodule Minga.Buffer.Unicode do
 
       <<cp::utf8, _rest::binary>> ->
         codepoint_width(cp)
+
+      # Partial or invalid UTF-8 byte sequence (e.g. <<226>> from a truncated
+      # multi-byte character). Treat each raw byte as 1 column wide so the
+      # renderer doesn't crash.
+      _invalid ->
+        byte_size(grapheme)
     end
   end
 

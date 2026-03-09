@@ -610,10 +610,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .{ .set_active_region = std.mem.readInt(u16, rest[0..2], .big) };
         },
         OP_SET_FONT => {
-            // size:2, ligatures:1, name_len:2 = 5 bytes minimum after opcode
-            if (rest.len < 5) return error.Malformed;
-            const name_len = std.mem.readInt(u16, rest[3..5], .big);
-            if (rest.len < 5 + name_len) return error.Malformed;
+            // size:2, weight:1, ligatures:1, name_len:2 = 6 bytes after opcode
+            if (rest.len < 6) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[4..6], .big);
+            if (rest.len < 6 + name_len) return error.Malformed;
             // TUI ignores font config; just return a no-op clear.
             return .clear;
         },
@@ -699,10 +699,10 @@ pub fn commandSize(payload: []const u8) usize {
         OP_DESTROY_REGION => 3, // opcode(1) + id(2)
         OP_SET_ACTIVE_REGION => 3, // opcode(1) + id(2)
         OP_SET_FONT => blk: {
-            // opcode(1) + size(2) + ligatures(1) + name_len(2) + name
-            if (payload.len < 6) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[4..6], .big);
-            break :blk 6 + name_len;
+            // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
+            if (payload.len < 7) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[5..7], .big);
+            break :blk 7 + name_len;
         },
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,

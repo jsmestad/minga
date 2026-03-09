@@ -154,8 +154,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         disp.fontFace = face
-        disp.onFontChanged = { [weak self] family, size, ligatures in
-            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures)
+        disp.onFontChanged = { [weak self] family, size, ligatures, weight in
+            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
         self.dispatcher = disp
 
@@ -191,11 +191,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Font change
 
-    private func handleFontChange(family: String, size: CGFloat, ligatures: Bool) {
+    private func handleFontChange(family: String, size: CGFloat, ligatures: Bool, weight: UInt8) {
         guard let nsView = editorNSView, let dispatcher else { return }
 
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
-        let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures)
+        let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures, weight: weight)
         newFace.preloadAscii()
 
         let fontName = CTFontCopyPostScriptName(newFace.ctFont) as String

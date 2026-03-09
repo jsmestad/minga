@@ -45,7 +45,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 | Opcode | Name | Size | Description |
 |--------|------|------|-------------|
-| `0x50` | set_font | 6 + name_len | Set font family, size, and ligatures |
+| `0x50` | set_font | 7 + name_len | Set font family, size, weight, and ligatures |
 
 ### BEAM → Frontend (Highlight Commands)
 
@@ -327,17 +327,31 @@ Config commands push editor configuration to the frontend. The TUI silently igno
 
 ### `0x50` set_font
 
-Set the font family, size, and ligature preference. Sent once on ready and again when the user changes font config at runtime.
+Set the font family, size, weight, and ligature preference. Sent once on ready and again when the user changes font config at runtime.
 
 ```
 opcode:    u8  = 0x50
 size:      u16           font size in points
+weight:    u8            font weight (see table below)
 ligatures: u8            1 = enable programming ligatures, 0 = disable
 name_len:  u16           byte length of the font family name
 name:      [name_len]u8  UTF-8 encoded font family name
 ```
 
-Total size: 6 + name_len bytes.
+Total size: 7 + name_len bytes.
+
+**Weight values:**
+
+| Value | Weight |
+|-------|--------|
+| 0 | thin |
+| 1 | light |
+| 2 | regular (default) |
+| 3 | medium |
+| 4 | semibold |
+| 5 | bold |
+| 6 | heavy |
+| 7 | black |
 
 **Font name resolution (macOS GUI):** The name is a user-friendly display name like "JetBrains Mono" or "Fira Code". The frontend resolves it to an installed font using NSFontManager. PostScript names ("JetBrainsMonoNF-Regular") also work. If the font isn't found, the frontend falls back to the system monospace font and logs a warning.
 
