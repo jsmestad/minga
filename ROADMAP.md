@@ -222,11 +222,11 @@ Current status and planned features. Updated as development progresses.
 | Mouse: agentic view mouse | ✅ | #196 — scroll, click-to-focus, separator drag |
 | Mouse: input infrastructure | ✅ | #217 — handle_mouse on Input.Handler, Router.dispatch_mouse, focus stack walk |
 | Mouse: protocol click_count | ✅ | #217 — 9-byte mouse event, GUI native clickCount, TUI timing detection |
+| Mouse: file tree clicking | ✅ | #217 — click file opens, click dir toggles, scroll wheel |
+| Mouse: picker candidate clicking | ✅ | #217 — click to select+confirm, scroll wheel |
+| Mouse: completion menu clicking | ✅ | #217 — click to accept, scroll wheel, outside click dismisses |
+| Mouse: modeline segment clicking | ✅ | #217 — file name opens buffer list, render-time click regions |
 | Mouse: right-click context menu | 📋 | #217 |
-| Mouse: file tree clicking | 📋 | #217 |
-| Mouse: picker candidate clicking | 📋 | #217 |
-| Mouse: completion menu clicking | 📋 | #217 |
-| Mouse: modeline segment clicking | 📋 | #217 |
 | Mouse: hover tooltips (GUI) | 📋 | #217 |
 | Mouse: smooth trackpad scrolling (GUI) | 📋 | #217 |
 | Mouse: cursor shape changes (GUI) | 📋 | #217 |
