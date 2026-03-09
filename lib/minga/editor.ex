@@ -14,6 +14,7 @@ defmodule Minga.Editor do
   use GenServer
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
@@ -611,15 +612,30 @@ defmodule Minga.Editor do
 
   # File changed: show diff in preview pane
   def handle_info({:agent_event, {:file_changed, path, before_content, after_content}}, state) do
-    alias Minga.Agent.DiffReview
+    # Record the baseline on first edit to this path in the current turn.
+    # Subsequent edits reuse the original baseline for cumulative diffs.
+    state = %{state | agentic: ViewState.record_baseline(state.agentic, path, before_content)}
+    baseline = ViewState.get_baseline(state.agentic, path)
 
-    case DiffReview.new(path, before_content, after_content) do
+    # If a diff review for this same path already exists, update it
+    # to preserve any hunk resolutions the user has made.
+    existing_review = existing_diff_for_path(state, path)
+
+    review =
+      case existing_review do
+        nil ->
+          DiffReview.new(path, baseline, after_content)
+
+        existing ->
+          DiffReview.update_after(existing, after_content)
+      end
+
+    case review do
       nil ->
         {:noreply, state}
 
-      review ->
+      _ ->
         state = update_preview(state, &Preview.set_diff(&1, review))
-        # Switch focus to preview so the user sees the diff
         state = %{state | agentic: ViewState.set_focus(state.agentic, :file_viewer)}
         state = Renderer.render(state)
         {:noreply, state}
@@ -703,6 +719,14 @@ defmodule Minga.Editor do
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+  end
+
+  @spec existing_diff_for_path(state(), String.t()) :: DiffReview.t() | nil
+  defp existing_diff_for_path(state, path) do
+    case Preview.diff_review(state.agentic.preview) do
+      %DiffReview{path: ^path} = review -> review
+      _ -> nil
+    end
   end
 
   @spec push_toast(state(), String.t(), :info | :warning | :error) :: state()

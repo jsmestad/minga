@@ -168,7 +168,10 @@ defmodule Minga.Config.Loader do
     after_path = Path.join(config_dir, "after.exs")
     after_error = eval_if_exists(after_path)
 
-    # 5. Start declared extensions (if the supervisor is running)
+    # 5. Apply log level from config
+    apply_log_level()
+
+    # 6. Start declared extensions (if the supervisor is running)
     if Process.whereis(Minga.Extension.Supervisor) do
       ExtSupervisor.start_all()
     end
@@ -182,6 +185,16 @@ defmodule Minga.Config.Loader do
       project_config_error: project_config_error,
       after_error: after_error
     }
+  end
+
+  @spec apply_log_level() :: :ok
+  defp apply_log_level do
+    level = Options.get(:log_level)
+    Logger.configure(level: level)
+    :ok
+  rescue
+    # Options agent may not be running yet (e.g., during tests)
+    _ -> :ok
   end
 
   @spec compile_user_modules(String.t()) :: {[module()], [String.t()]}

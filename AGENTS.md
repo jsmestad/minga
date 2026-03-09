@@ -192,17 +192,35 @@ Minga has a `*Messages*` buffer (viewable via `SPC b m`) that acts as the editor
 - Diagnostic context: which LSP server was chosen for a buffer, why a filetype was detected a certain way, what config file was loaded.
 - Performance-relevant events during development: parse times, highlight setup duration, port restart recovery.
 
-**How to log:**
-- Inside the Editor GenServer, call `log_message(state, "your message")`. This appends a timestamped line to the `*Messages*` buffer.
-- Outside the Editor (other processes, extensions, commands), call `Minga.Editor.log_to_messages("your message")`. This sends an async cast to avoid deadlocks.
-- For structured logging that also writes to the log file (`~/.local/share/minga/minga.log`), use `Logger.info/warning/error` as normal. The custom `Minga.LoggerHandler` routes Logger output to both the log file and `*Messages*`.
+**How to log (Elixir side):**
+
+**Always use `Minga.Log` instead of calling `Logger` directly.** `Minga.Log` routes through per-subsystem log levels so users can turn debug output on/off per subsystem without drowning in noise from everywhere else. Direct `Logger.debug/info/warning/error` calls bypass this filtering and should not be used in application code.
+
+```elixir
+# Good: subsystem-aware, respects per-subsystem log level config
+Minga.Log.debug(:render, "[render:content] 24µs")
+Minga.Log.warning(:lsp, "LSP server crashed: #{inspect(reason)}")
+
+# Bad: bypasses subsystem filtering, don't do this
+Logger.debug("[render:content] 24µs")
+```
+
+Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`. If your code doesn't fit any of these, add a new subsystem:
+
+1. Add `:log_level_<name>` to the `option_name` type union in `Minga.Config.Options`
+2. Add a `{:log_level_<name>, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default}` entry to `@option_specs`
+3. Add the subsystem atom to the `@subsystem_options` map in `Minga.Log`
+4. Add the subsystem to the `@type subsystem` union in `Minga.Log`
+5. Document the new subsystem in `docs/CONFIGURATION.md` under the Logging section
+
+For direct writes to `*Messages*` without Logger (e.g., inside the Editor GenServer), call `log_message(state, "your message")`. Outside the Editor, call `Minga.Editor.log_to_messages("your message")` (async cast to avoid deadlocks).
 
 **Zig side:** Use `std.log` for debug output. The Port.Manager captures log messages from the Zig process's stderr and forwards them to `*Messages*` prefixed with `[ZIG/{level}]`.
 
 **Guidelines:**
 - Keep messages concise and actionable. `"LSP: elixir-ls connected (pid 42031)"` is better than `"The language server process has successfully been started."`
 - Include relevant context (file paths, server names, error reasons) so the user doesn't have to guess.
-- Don't log per-keystroke or per-frame events to `*Messages*`. Those belong in the log file only (via `Logger.debug`).
+- Don't log per-keystroke or per-frame events to `*Messages*`. Those belong in the log file only (via `Minga.Log.debug`).
 - When in doubt, log it. A message the user never reads costs nothing. A missing message when debugging costs time.
 
 ### Commit Messages

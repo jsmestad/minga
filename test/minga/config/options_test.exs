@@ -54,7 +54,12 @@ defmodule Minga.Config.OptionsTest do
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,
-               font_ligatures: true
+               font_ligatures: true,
+               log_level: :info,
+               log_level_render: :default,
+               log_level_lsp: :default,
+               log_level_agent: :default,
+               log_level_editor: :default
              }
     end
   end

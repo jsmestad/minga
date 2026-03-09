@@ -13,8 +13,6 @@ defmodule Minga.Editor.LspActions do
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
 
-  require Logger
-
   @type state :: EditorState.t()
 
   # ── Request senders ────────────────────────────────────────────────────────
@@ -61,7 +59,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_definition_response(state, {:error, error}) do
-    Logger.debug("Definition request failed: #{inspect(error)}")
+    Minga.Log.debug(:lsp, "Definition request failed: #{inspect(error)}")
     %{state | status_msg: "Definition request failed"}
   end
 
@@ -90,7 +88,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_hover_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_hover_response(state, {:error, error}) do
-    Logger.debug("Hover request failed: #{inspect(error)}")
+    Minga.Log.debug(:lsp, "Hover request failed: #{inspect(error)}")
     %{state | status_msg: "Hover request failed"}
   end
 

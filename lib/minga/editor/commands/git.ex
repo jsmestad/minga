@@ -9,8 +9,6 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Diff
 
-  require Logger
-
   @type state :: EditorState.t()
 
   @spec execute(state(), atom()) :: state()

@@ -10,8 +10,6 @@ defmodule Minga.Picker.ProjectSource do
 
   alias Minga.Project
 
-  require Logger
-
   @impl true
   @spec title() :: String.t()
   def title, do: "Switch project"

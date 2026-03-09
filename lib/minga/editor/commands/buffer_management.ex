@@ -187,14 +187,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:force_quit, []}}) do
-    Logger.debug("Force quitting editor")
+    Minga.Log.debug(:editor, "Force quitting editor")
     System.stop(0)
     state
   end
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
     state_after_save = execute(state, :save)
-    Logger.debug("Quitting editor after save")
+    Minga.Log.debug(:editor, "Quitting editor after save")
     System.stop(0)
     state_after_save
   end
@@ -295,7 +295,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
-    Logger.debug("Unknown ex command: #{raw}")
+    Minga.Log.debug(:editor, "Unknown ex command: #{raw}")
     state
   end
 

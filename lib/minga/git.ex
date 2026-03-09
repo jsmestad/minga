@@ -7,8 +7,6 @@ defmodule Minga.Git do
   so the process spawn overhead is acceptable.
   """
 
-  require Logger
-
   @cmd_timeout 5_000
 
   @doc """

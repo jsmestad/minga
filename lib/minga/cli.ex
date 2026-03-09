@@ -18,11 +18,11 @@ defmodule Minga.CLI do
   def main(args) do
     case parse_args(args) do
       {:file, path} ->
-        Logger.debug("Opening file: #{path}")
+        Minga.Log.debug(:editor, "Opening file: #{path}")
         open_editor(path)
 
       :no_file ->
-        Logger.debug("Starting with empty buffer")
+        Minga.Log.debug(:editor, "Starting with empty buffer")
         open_editor(nil)
 
       {:error, message} ->

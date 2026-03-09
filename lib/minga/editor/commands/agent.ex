@@ -151,7 +151,8 @@ defmodule Minga.Editor.Commands.Agent do
       {:ok, resolved_text} ->
         case Session.send_prompt(state.agent.session, resolved_text) do
           :ok ->
-            update_agent(state, &AgentState.clear_input_and_scroll/1)
+            state = update_agent(state, &AgentState.clear_input_and_scroll/1)
+            %{state | agentic: ViewState.clear_baselines(state.agentic)}
 
           {:error, :provider_not_ready} ->
             %{state | status_msg: "Agent provider still starting, try again in a moment"}

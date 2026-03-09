@@ -26,8 +26,6 @@ defmodule Minga.Formatter do
 
   alias Minga.Config.Options
 
-  require Logger
-
   @typedoc "A shell command string, optionally containing `{file}`."
   @type formatter_spec :: String.t()
 

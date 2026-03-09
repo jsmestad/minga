@@ -50,8 +50,6 @@ defmodule Minga.Editor.Commands do
   alias Minga.Mode
   alias Minga.WhichKey
 
-  require Logger
-
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
