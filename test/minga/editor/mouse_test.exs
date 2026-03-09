@@ -146,11 +146,18 @@ defmodule Minga.Editor.MouseTest do
           height: 10
         )
 
+      # 4 wheel_down events at 3 lines each = 12 lines scrolled.
+      # clamp_cursor_to_viewport moves cursor to line 12.
+      # Render pipeline computes scroll_top via scroll_to_cursor:
+      #   content_height = 8 (10 rows - 1 minibuffer - 1 modeline)
+      #   effective_margin = min(5, (8-1)/2) = 3
+      #   cursor_line 12 >= 0 + 8 - 3 → top = 12 - 8 + 1 + 3 = 8
+      # So screen row 0 = line 8, row 2 = line 10.
       for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, 2, 0, :left, :press)
       send_mouse(editor, 2, 0, :left, :release)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 14
+      assert line == 10
     end
 
     test "left click on modeline row is ignored" do
