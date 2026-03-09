@@ -35,3 +35,4 @@ Thumbs.db
 .env.local
 PLAN.md
 PLAN.md
+.build/

@@ -188,32 +188,52 @@ final class EditorNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
+        let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_PRESS, clickCount: cc)
     }
 
     override func mouseUp(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_RELEASE)
     }
 
     override func rightMouseDown(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_PRESS)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_PRESS)
     }
 
     override func rightMouseUp(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_RIGHT,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_RELEASE)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_RELEASE)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        let (row, col) = cellPosition(from: event)
+        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_PRESS)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        let (row, col) = cellPosition(from: event)
+        encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_MIDDLE,
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_RELEASE)
     }
 
     override func mouseDragged(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_DRAG)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_DRAG)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -222,17 +242,29 @@ final class EditorNSView: NSView {
         lastMoveRow = row
         lastMoveCol = col
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_NONE,
-                               modifiers: modifierBits(from: event.modifierFlags), eventType: MOUSE_MOTION)
+                               modifiers: modifierBits(from: event.modifierFlags),
+                               eventType: MOUSE_MOTION)
     }
 
     override func scrollWheel(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         let mods = modifierBits(from: event.modifierFlags)
+
+        // Vertical scroll
         if event.scrollingDeltaY > 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_UP,
                                    modifiers: mods, eventType: MOUSE_PRESS)
         } else if event.scrollingDeltaY < 0 {
             encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_DOWN,
+                                   modifiers: mods, eventType: MOUSE_PRESS)
+        }
+
+        // Horizontal scroll
+        if event.scrollingDeltaX > 0 {
+            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_LEFT,
+                                   modifiers: mods, eventType: MOUSE_PRESS)
+        } else if event.scrollingDeltaX < 0 {
+            encoder.sendMouseEvent(row: row, col: col, button: MOUSE_SCROLL_RIGHT,
                                    modifiers: mods, eventType: MOUSE_PRESS)
         }
     }

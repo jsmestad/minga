@@ -69,6 +69,8 @@ let MOUSE_BUTTON_RIGHT: UInt8 = 0x02
 let MOUSE_BUTTON_NONE: UInt8 = 0x03
 let MOUSE_SCROLL_UP: UInt8 = 0x40
 let MOUSE_SCROLL_DOWN: UInt8 = 0x41
+let MOUSE_SCROLL_RIGHT: UInt8 = 0x42
+let MOUSE_SCROLL_LEFT: UInt8 = 0x43
 
 // MARK: - Log message opcode (frontend → BEAM)
 
