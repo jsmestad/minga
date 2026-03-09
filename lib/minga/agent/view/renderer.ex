@@ -306,16 +306,16 @@ defmodule Minga.Agent.View.Renderer do
   @spec session_title([term()]) :: String.t()
   defp session_title(messages) do
     case Enum.find(messages, fn msg -> match?({:user, _}, msg) end) do
-      {:user, text} ->
-        text
-        |> String.split("\n")
-        |> hd()
-        |> String.slice(0, 50)
-        |> then(fn t -> if String.length(t) == 50, do: t <> "...", else: t end)
-
-      nil ->
-        "Minga Agent"
+      {:user, text} -> truncate_title(text)
+      nil -> "Minga Agent"
     end
+  end
+
+  @spec truncate_title(String.t()) :: String.t()
+  defp truncate_title(text) do
+    first_line = text |> String.split("\n") |> hd()
+    truncated = String.slice(first_line, 0, 50)
+    if String.length(truncated) == 50, do: truncated <> "...", else: truncated
   end
 
   # ── Title bar ───────────────────────────────────────────────────────────────

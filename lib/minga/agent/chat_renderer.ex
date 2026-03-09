@@ -421,35 +421,7 @@ defmodule Minga.Agent.ChatRenderer do
 
     content =
       Enum.flat_map(parsed, fn {segments, line_type} ->
-        case line_type do
-          {:code_header, _lang} ->
-            styled =
-              Enum.map(segments, fn {t, _style} -> {t, [fg: at.code_border, bg: at.code_bg]} end)
-
-            [{border_prefix ++ styled, :code, at.code_bg}]
-
-          :code ->
-            case segments do
-              [{raw_line, {:code_content, lang}}] ->
-                highlighted = highlight_code_line(raw_line, lang, at, theme)
-                code_prefix = border_prefix ++ [{"│ ", [fg: at.code_border, bg: at.code_bg]}]
-                truncated = truncate_code(highlighted, max(content_width - 2, 1), at)
-                [{code_prefix ++ truncated, :code, at.code_bg}]
-
-              _ ->
-                # Code block footer or fallback
-                styled =
-                  Enum.map(segments, fn {t, _style} ->
-                    {t, [fg: at.code_border, bg: at.code_bg]}
-                  end)
-
-                [{border_prefix ++ styled, :code, at.code_bg}]
-            end
-
-          _ ->
-            styled = Enum.map(segments, fn {t, style} -> {t, style_to_opts(style, at)} end)
-            wrap_or_truncate(styled, line_type, border_prefix, content_width, at)
-        end
+        render_assistant_line(segments, line_type, border_prefix, content_width, at, theme)
       end)
 
     spacer = {[{"", []}], :empty, at.panel_bg}
@@ -595,6 +567,62 @@ defmodule Minga.Agent.ChatRenderer do
     [line]
   end
 
+  # ── Assistant line rendering (extracted for credo nesting) ───────────────────
+
+  @spec render_assistant_line(
+          [Markdown.segment()],
+          Markdown.line_type(),
+          [{String.t(), keyword()}],
+          pos_integer(),
+          Theme.Agent.t(),
+          Theme.t()
+        ) :: [render_line()]
+  defp render_assistant_line(
+         segments,
+         {:code_header, _lang},
+         border_prefix,
+         _content_width,
+         at,
+         _theme
+       ) do
+    styled = Enum.map(segments, fn {t, _style} -> {t, [fg: at.code_border, bg: at.code_bg]} end)
+    [{border_prefix ++ styled, :code, at.code_bg}]
+  end
+
+  defp render_assistant_line(segments, :code, border_prefix, content_width, at, theme) do
+    render_assistant_code_line(segments, border_prefix, content_width, at, theme)
+  end
+
+  defp render_assistant_line(segments, line_type, border_prefix, content_width, at, _theme) do
+    styled = Enum.map(segments, fn {t, style} -> {t, style_to_opts(style, at)} end)
+    wrap_or_truncate(styled, line_type, border_prefix, content_width, at)
+  end
+
+  @spec render_assistant_code_line(
+          [Markdown.segment()],
+          [{String.t(), keyword()}],
+          pos_integer(),
+          Theme.Agent.t(),
+          Theme.t()
+        ) :: [render_line()]
+  defp render_assistant_code_line(
+         [{raw_line, {:code_content, lang}}],
+         border_prefix,
+         content_width,
+         at,
+         theme
+       ) do
+    highlighted = highlight_code_line(raw_line, lang, at, theme)
+    code_prefix = border_prefix ++ [{"│ ", [fg: at.code_border, bg: at.code_bg]}]
+    truncated = truncate_code(highlighted, max(content_width - 2, 1), at)
+    [{code_prefix ++ truncated, :code, at.code_bg}]
+  end
+
+  defp render_assistant_code_line(segments, border_prefix, _content_width, at, _theme) do
+    styled = Enum.map(segments, fn {t, _style} -> {t, [fg: at.code_border, bg: at.code_bg]} end)
+    [{border_prefix ++ styled, :code, at.code_bg}]
+  end
+
   # ── Wrapping / truncation helpers ─────────────────────────────────────────────
 
   # Wraps prose lines or truncates code lines, returning render_line tuples.
@@ -665,36 +693,33 @@ defmodule Minga.Agent.ChatRenderer do
   defp highlight_code_line(line, lang, at, theme) do
     if lang != "" and CodeHighlight.supported?(lang) do
       CodeHighlight.highlight_line(line, lang)
-      |> Enum.map(fn {text, capture} ->
-        if capture == "" do
-          {text, [fg: at.text_fg, bg: at.code_bg]}
-        else
-          style = Theme.style_for_capture(theme, capture)
-
-          case style do
-            [] ->
-              {text, [fg: at.text_fg, bg: at.code_bg]}
-
-            kw ->
-              # Merge syntax colors with code block background
-              fg = Keyword.get(kw, :fg, at.text_fg)
-              opts = [fg: fg, bg: at.code_bg]
-
-              opts =
-                if Keyword.get(kw, :bold, false), do: Keyword.put(opts, :bold, true), else: opts
-
-              opts =
-                if Keyword.get(kw, :italic, false),
-                  do: Keyword.put(opts, :italic, true),
-                  else: opts
-
-              {text, opts}
-          end
-        end
-      end)
+      |> Enum.map(fn {text, capture} -> apply_capture_style(text, capture, at, theme) end)
     else
       [{line, [fg: at.text_fg, bg: at.code_bg]}]
     end
+  end
+
+  @spec apply_capture_style(String.t(), String.t(), Theme.Agent.t(), Theme.t()) ::
+          {String.t(), keyword()}
+  defp apply_capture_style(text, "", at, _theme), do: {text, [fg: at.text_fg, bg: at.code_bg]}
+
+  defp apply_capture_style(text, capture, at, theme) do
+    case Theme.style_for_capture(theme, capture) do
+      [] ->
+        {text, [fg: at.text_fg, bg: at.code_bg]}
+
+      kw ->
+        opts = merge_syntax_with_code_bg(kw, at)
+        {text, opts}
+    end
+  end
+
+  @spec merge_syntax_with_code_bg(keyword(), Theme.Agent.t()) :: keyword()
+  defp merge_syntax_with_code_bg(kw, at) do
+    fg = Keyword.get(kw, :fg, at.text_fg)
+    opts = [fg: fg, bg: at.code_bg]
+    opts = if Keyword.get(kw, :bold, false), do: Keyword.put(opts, :bold, true), else: opts
+    if Keyword.get(kw, :italic, false), do: Keyword.put(opts, :italic, true), else: opts
   end
 
   # ── Style conversion ────────────────────────────────────────────────────────
