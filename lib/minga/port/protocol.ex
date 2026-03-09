@@ -75,6 +75,9 @@ defmodule Minga.Port.Protocol do
   @op_injection_ranges 0x34
   @op_text_width 0x35
 
+  # Config commands (BEAM → frontend)
+  @op_set_font 0x50
+
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
 
@@ -246,6 +249,22 @@ defmodule Minga.Port.Protocol do
     g = Bitwise.band(Bitwise.bsr(rgb, 8), 0xFF)
     b = Bitwise.band(rgb, 0xFF)
     <<@op_set_window_bg, r::8, g::8, b::8>>
+  end
+
+  @doc """
+  Encodes a set_font command to configure the GUI frontend's font.
+
+  The font family is resolved by the frontend using NSFontManager (macOS)
+  so both display names ("JetBrains Mono") and PostScript names
+  ("JetBrainsMonoNF-Regular") work. The TUI ignores this command.
+
+  Format: `opcode:8, size:16, ligatures:8, name_len:16, name:bytes`
+  """
+  @spec encode_set_font(String.t(), pos_integer(), boolean()) :: binary()
+  def encode_set_font(family, size, ligatures)
+      when is_binary(family) and is_integer(size) and size > 0 and is_boolean(ligatures) do
+    lig_byte = if ligatures, do: 1, else: 0
+    <<@op_set_font, size::16, lig_byte::8, byte_size(family)::16, family::binary>>
   end
 
   # ── Encoding: region commands (BEAM → Zig) ──
@@ -544,6 +563,12 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(<<@op_set_title, len::16, title::binary-size(len)>>) do
     {:ok, {:set_title, title}}
+  end
+
+  def decode_command(
+        <<@op_set_font, size::16, lig::8, name_len::16, name::binary-size(name_len)>>
+      ) do
+    {:ok, {:set_font, name, size, lig == 1}}
   end
 
   def decode_command(<<_opcode::8, _rest::binary>>) do

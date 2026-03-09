@@ -37,6 +37,9 @@ pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 
+// Config commands (BEAM → frontend, TUI ignores)
+pub const OP_SET_FONT: u8 = 0x50;
+
 // Incremental content sync (BEAM → Zig)
 pub const OP_EDIT_BUFFER: u8 = 0x26;
 
@@ -606,6 +609,14 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 2) return error.Malformed;
             return .{ .set_active_region = std.mem.readInt(u16, rest[0..2], .big) };
         },
+        OP_SET_FONT => {
+            // size:2, ligatures:1, name_len:2 = 5 bytes minimum after opcode
+            if (rest.len < 5) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[3..5], .big);
+            if (rest.len < 5 + name_len) return error.Malformed;
+            // TUI ignores font config; just return a no-op clear.
+            return .clear;
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -687,6 +698,12 @@ pub fn commandSize(payload: []const u8) usize {
         OP_CLEAR_REGION => 3, // opcode(1) + id(2)
         OP_DESTROY_REGION => 3, // opcode(1) + id(2)
         OP_SET_ACTIVE_REGION => 3, // opcode(1) + id(2)
+        OP_SET_FONT => blk: {
+            // opcode(1) + size(2) + ligatures(1) + name_len(2) + name
+            if (payload.len < 6) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[4..6], .big);
+            break :blk 6 + name_len;
+        },
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };

@@ -41,6 +41,12 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x1A` | set_active_region | 3 | Route draw commands to a region |
 | `0x27` | measure_text | 7 + text_len | Request display width of text |
 
+### BEAM → Frontend (Config Commands)
+
+| Opcode | Name | Size | Description |
+|--------|------|------|-------------|
+| `0x50` | set_font | 6 + name_len | Set font family, size, and ligatures |
+
 ### BEAM → Frontend (Highlight Commands)
 
 | Opcode | Name | Size | Description |
@@ -312,6 +318,32 @@ Total size: 9 bytes.
 | `0x01` | Release |
 | `0x02` | Motion (no button held) |
 | `0x03` | Drag (button held during motion) |
+
+---
+
+## Config Commands (BEAM → Frontend)
+
+Config commands push editor configuration to the frontend. The TUI silently ignores these (terminal fonts are set by the terminal emulator, not the editor). The macOS GUI applies them immediately.
+
+### `0x50` set_font
+
+Set the font family, size, and ligature preference. Sent once on ready and again when the user changes font config at runtime.
+
+```
+opcode:    u8  = 0x50
+size:      u16           font size in points
+ligatures: u8            1 = enable programming ligatures, 0 = disable
+name_len:  u16           byte length of the font family name
+name:      [name_len]u8  UTF-8 encoded font family name
+```
+
+Total size: 6 + name_len bytes.
+
+**Font name resolution (macOS GUI):** The name is a user-friendly display name like "JetBrains Mono" or "Fira Code". The frontend resolves it to an installed font using NSFontManager. PostScript names ("JetBrainsMonoNF-Regular") also work. If the font isn't found, the frontend falls back to the system monospace font and logs a warning.
+
+**Ligature behavior:** When ligatures are enabled and the font supports programming ligatures, the frontend shapes multi-character sequences (like `->`, `!=`, `=>`) using CoreText and renders them as single wide glyphs spanning the appropriate number of cells. When disabled, each character renders individually regardless of font support. Fonts without ligature tables (e.g., Menlo) are unaffected by this flag.
+
+**Grid resize:** Changing the font size changes the cell dimensions, which changes how many cells fit in the window. The frontend sends a `0x02 resize` event back to the BEAM with the new grid dimensions after applying a font change.
 
 ---
 

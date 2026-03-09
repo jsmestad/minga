@@ -19,6 +19,14 @@ struct Cell {
     var bg: UInt32 = 0
     /// Text attributes bitmask (bold, italic, underline, reverse).
     var attrs: UInt8 = 0
+    /// For ligature head cells: the full source text that was shaped (e.g., "->").
+    /// Empty for non-ligature cells.
+    var ligatureText: String = ""
+    /// Number of cells this ligature spans (1 = no ligature, >1 = head of ligature).
+    var ligatureCellCount: UInt8 = 1
+    /// True if this cell is a continuation of a ligature started in an earlier column.
+    /// The renderer skips glyph drawing for continuation cells.
+    var isContinuation: Bool = false
 }
 
 /// The cell grid with cursor state. Not thread-safe; all access should

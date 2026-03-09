@@ -136,6 +136,47 @@ struct ProtocolDecoderTests {
         #expect(b == 0x34)
     }
 
+    @Test("Decode set_font command with ligatures enabled")
+    func decodeSetFont() throws {
+        var data = Data()
+        data.append(OP_SET_FONT)
+        data.append(contentsOf: [0x00, 0x0E]) // size=14
+        data.append(0x01) // ligatures=true
+        let name = "JetBrains Mono"
+        data.append(contentsOf: [UInt8(name.utf8.count >> 8), UInt8(name.utf8.count & 0xFF)]) // name_len
+        data.append(contentsOf: name.utf8)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 1 + 5 + name.utf8.count)
+        guard case .setFont(let family, let fontSize, let ligatures) = cmd else {
+            Issue.record("Expected .setFont, got \(String(describing: cmd))")
+            return
+        }
+        #expect(family == "JetBrains Mono")
+        #expect(fontSize == 14)
+        #expect(ligatures == true)
+    }
+
+    @Test("Decode set_font command with ligatures disabled")
+    func decodeSetFontNoLigatures() throws {
+        var data = Data()
+        data.append(OP_SET_FONT)
+        data.append(contentsOf: [0x00, 0x0D]) // size=13
+        data.append(0x00) // ligatures=false
+        let name = "Menlo"
+        data.append(contentsOf: [0x00, UInt8(name.utf8.count)])
+        data.append(contentsOf: name.utf8)
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .setFont(let family, let fontSize, let ligatures) = cmd else {
+            Issue.record("Expected .setFont, got \(String(describing: cmd))")
+            return
+        }
+        #expect(family == "Menlo")
+        #expect(fontSize == 13)
+        #expect(ligatures == false)
+    }
+
     @Test("Skip highlight opcodes without error")
     func skipHighlightOpcodes() throws {
         // set_language with name "elixir"

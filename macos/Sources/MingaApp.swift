@@ -153,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        disp.fontFace = face
+        disp.onFontChanged = { [weak self] family, size, ligatures in
+            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures)
+        }
         self.dispatcher = disp
 
         // The ready event is deferred: EditorNSView.setFrameSize sends it
@@ -183,6 +187,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         protocolReader?.stop()
+    }
+
+    // MARK: - Font change
+
+    private func handleFontChange(family: String, size: CGFloat, ligatures: Bool) {
+        guard let nsView = editorNSView, let dispatcher else { return }
+
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures)
+        newFace.preloadAscii()
+
+        let fontName = CTFontCopyPostScriptName(newFace.ctFont) as String
+        PortLogger.info("Font changed: \(fontName) \(Int(size))pt, ligatures: \(ligatures), cell: \(newFace.cellWidth)x\(newFace.cellHeight)")
+
+        self.fontFace = newFace
+        dispatcher.fontFace = newFace
+        nsView.updateFont(newFace)
     }
 
     // MARK: - Protocol handling
