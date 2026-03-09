@@ -94,15 +94,20 @@ final class MetalRenderer {
         }
     }
 
-    /// Render the cell grid to the given Metal layer.
+    /// Render the cell grid using the given drawable.
+    ///
+    /// Render the cell grid using the given drawable.
+    ///
+    /// The caller (MTKView.draw) provides the already-acquired drawable
+    /// and viewport size (in backing pixels). This avoids the blocking
+    /// `layer.nextDrawable()` call that caused scroll lag.
+    ///
     /// `scrollOffset` is the sub-cell-height pixel offset for smooth scrolling.
-    func render(grid: CellGrid, face: FontFace, layer: CAMetalLayer, scrollOffset: SIMD2<Float> = .zero) {
-        guard let drawable = layer.nextDrawable() else { return }
-
+    func render(grid: CellGrid, face: FontFace, drawable: CAMetalDrawable,
+                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
         let cellW = Float(face.cellWidth)
         let cellH = Float(face.cellHeight)
         let atlasSize = Float(face.atlas.size)
-        let contentScale = Float(layer.contentsScale)
 
         // Re-upload atlas if it changed.
         if face.atlas.modified != atlasVersion {
@@ -178,10 +183,9 @@ final class MetalRenderer {
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
 
-        let drawableSize = layer.drawableSize
         var uniforms = Uniforms(
             cellSize: SIMD2<Float>(cellW * contentScale, cellH * contentScale),
-            viewportSize: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height)),
+            viewportSize: SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height)),
             scrollOffset: SIMD2<Float>(scrollOffset.x * contentScale, scrollOffset.y * contentScale)
         )
 

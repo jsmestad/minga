@@ -1,16 +1,18 @@
-/// NSView subclass that handles Metal rendering and keyboard/mouse input.
+/// MTKView subclass that handles Metal rendering and keyboard/mouse input.
 ///
-/// This is the core editor surface: a CAMetalLayer-backed view that receives
-/// raw key events and translates them to protocol encoder calls. Wrapped by
-/// EditorView (NSViewRepresentable) for use in SwiftUI.
+/// This is the core editor surface. It receives raw key events and translates
+/// them to protocol encoder calls. Rendering is event-driven: BEAM frame
+/// updates and scroll events call `setNeedsDisplay(_:)`, and MTKView's
+/// built-in display link coalesces them into one GPU frame per vsync.
+///
+/// Wrapped by EditorView (NSViewRepresentable) for use in SwiftUI.
 
 import AppKit
-import Metal
-import QuartzCore
+import MetalKit
 
-/// The main editor view. Owns the Metal layer, receives all input events,
-/// and triggers rendering when the CommandDispatcher signals a frame is ready.
-final class EditorNSView: NSView {
+/// The main editor view. Uses MTKView's built-in display link for
+/// vsync-driven rendering with automatic frame coalescing.
+final class EditorNSView: MTKView {
     let encoder: InputEncoder
     let metalRenderer: MetalRenderer
     let fontFace: FontFace
@@ -36,34 +38,54 @@ final class EditorNSView: NSView {
         self.metalRenderer = metalRenderer
         self.fontFace = fontFace
         self.cellGrid = cellGrid
-        super.init(frame: .zero)
-        wantsLayer = true
+        super.init(frame: .zero, device: metalRenderer.device)
+
+        // Event-driven rendering: MTKView only calls draw() when we set
+        // needsDisplay = true. No continuous 60fps loop burning GPU cycles.
+        isPaused = true
+        enableSetNeedsDisplay = true
+
+        // Standard Metal layer config.
+        colorPixelFormat = .bgra8Unorm
+        layer?.isOpaque = true
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("Not implemented") }
+    required init(coder: NSCoder) { fatalError("Not implemented") }
 
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
-    override var wantsUpdateLayer: Bool { true }
 
-    override func makeBackingLayer() -> CALayer {
-        let layer = CAMetalLayer()
-        layer.device = metalRenderer.device
-        layer.pixelFormat = .bgra8Unorm
-        layer.contentsScale = window?.backingScaleFactor ?? 2.0
-        layer.framebufferOnly = true
-        return layer
+    // MARK: - Rendering
+
+    /// Sub-cell-height vertical pixel offset for smooth trackpad scrolling.
+    /// Positive = content shifted up (scrolled down). Always in [0, cellHeight).
+    private var scrollPixelOffset: CGFloat = 0
+
+    /// Schedule a render on the next vsync. Multiple calls between vsyncs
+    /// are coalesced by MTKView into a single draw() call.
+    func renderFrame() {
+        needsDisplay = true
     }
 
-    override func updateLayer() {
-        // Rendering is triggered by CommandDispatcher.onFrameReady, not updateLayer.
+    /// Called by MTKView's display link at vsync when needsDisplay is true.
+    override func draw(_ dirtyRect: NSRect) {
+        guard let drawable = currentDrawable else { return }
+        let scale = Float(window?.backingScaleFactor ?? 2.0)
+        let offset = SIMD2<Float>(0, Float(scrollPixelOffset))
+        metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
+                             viewportSize: drawableSize, contentScale: scale,
+                             scrollOffset: offset)
+        cellGrid.dirty = false
     }
+
+    // MARK: - Window lifecycle
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let window = window {
-            metalLayer?.contentsScale = window.backingScaleFactor
+            // Match the Metal layer's scale to the window's backing scale.
+            (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
 
             // Observe window becoming key to reclaim first responder.
             // SwiftUI can reassign it during layout passes.
@@ -96,7 +118,6 @@ final class EditorNSView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        metalLayer?.drawableSize = convertToBacking(bounds.size)
 
         guard newSize.width > 0, newSize.height > 0 else { return }
 
@@ -115,22 +136,6 @@ final class EditorNSView: NSView {
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }
-    }
-
-    /// Sub-cell-height vertical pixel offset for smooth trackpad scrolling.
-    /// Positive = content shifted up (scrolled down). Always in range [0, cellHeight).
-    private var scrollPixelOffset: CGFloat = 0
-
-    /// Render the current cell grid state to the Metal layer.
-    func renderFrame() {
-        guard let layer = metalLayer else { return }
-        let offset = SIMD2<Float>(0, Float(scrollPixelOffset))
-        metalRenderer.render(grid: cellGrid, face: fontFace, layer: layer, scrollOffset: offset)
-        cellGrid.dirty = false
-    }
-
-    var metalLayer: CAMetalLayer? {
-        layer as? CAMetalLayer
     }
 
     // MARK: - Tracking area
@@ -298,8 +303,9 @@ final class EditorNSView: NSView {
             scrollPixelOffset = 0
         }
 
-        // Re-render immediately with the new fractional offset
-        renderFrame()
+        // Tell MTKView we need a frame. The display link coalesces
+        // multiple scroll events between vsyncs into one draw() call.
+        needsDisplay = true
     }
 
     /// Discrete mouse wheel: one event per click, no accumulation.
