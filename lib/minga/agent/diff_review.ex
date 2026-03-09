@@ -61,6 +61,30 @@ defmodule Minga.Agent.DiffReview do
     end
   end
 
+  @doc """
+  Updates the diff review with new after-content while preserving
+  resolutions for hunks that have not changed.
+
+  Used for accumulated diffs: when the agent edits the same file again,
+  the baseline stays the same but the after-content changes. Hunks are
+  re-computed and resolutions from the previous review are carried forward
+  for hunks that still match.
+  """
+  @spec update_after(t(), String.t()) :: t() | nil
+  def update_after(
+        %__MODULE__{path: path, before_lines: before_lines} = review,
+        new_after_content
+      )
+      when is_binary(new_after_content) do
+    new_after_lines = String.split(new_after_content, "\n")
+    new_hunks = Diff.diff_lines(before_lines, new_after_lines)
+
+    case new_hunks do
+      [] -> nil
+      _ -> build_updated_review(review, path, before_lines, new_after_lines, new_hunks)
+    end
+  end
+
   @doc "Moves to the next unresolved hunk. Wraps around to the first."
   @spec next_hunk(t()) :: t()
   def next_hunk(%__MODULE__{hunks: hunks, current_hunk_index: idx} = review) do
@@ -202,6 +226,76 @@ defmodule Minga.Agent.DiffReview do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec build_updated_review(
+          t(),
+          String.t(),
+          [String.t()],
+          [String.t()],
+          [Diff.hunk()]
+        ) :: t()
+  defp build_updated_review(review, path, before_lines, new_after_lines, new_hunks) do
+    old_hunk_sigs = hunk_signatures(review.hunks)
+    new_hunk_sigs = hunk_signatures(new_hunks)
+
+    new_resolutions =
+      preserve_matching_resolutions(old_hunk_sigs, new_hunk_sigs, review.resolutions)
+
+    max_idx = max(length(new_hunks) - 1, 0)
+    clamped_idx = min(review.current_hunk_index, max_idx)
+
+    %__MODULE__{
+      path: path,
+      before_lines: before_lines,
+      after_lines: new_after_lines,
+      hunks: new_hunks,
+      current_hunk_index: clamped_idx,
+      resolutions: new_resolutions
+    }
+  end
+
+  @spec preserve_matching_resolutions(
+          [{atom(), non_neg_integer(), non_neg_integer(), [String.t()]}],
+          [{atom(), non_neg_integer(), non_neg_integer(), [String.t()]}],
+          %{non_neg_integer() => resolution()}
+        ) :: %{non_neg_integer() => resolution()}
+  defp preserve_matching_resolutions(old_sigs, new_sigs, old_resolutions) do
+    new_sigs
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {sig, new_idx}, acc ->
+      case find_resolved_match(old_sigs, sig, old_resolutions) do
+        nil -> acc
+        resolution -> Map.put(acc, new_idx, resolution)
+      end
+    end)
+  end
+
+  # A hunk signature captures the essential content for matching across re-diffs.
+  # Two hunks are "the same" if they have the same type, same old lines, and
+  # appear at the same position in the after-content.
+  @spec hunk_signatures([Diff.hunk()]) :: [
+          {atom(), non_neg_integer(), non_neg_integer(), [String.t()]}
+        ]
+  defp hunk_signatures(hunks) do
+    Enum.map(hunks, fn hunk ->
+      {hunk.type, hunk.start_line, hunk.old_start, hunk.old_lines}
+    end)
+  end
+
+  @spec find_resolved_match(
+          [{atom(), non_neg_integer(), non_neg_integer(), [String.t()]}],
+          {atom(), non_neg_integer(), non_neg_integer(), [String.t()]},
+          %{non_neg_integer() => resolution()}
+        ) :: resolution() | nil
+  defp find_resolved_match(old_sigs, target_sig, resolutions) do
+    old_sigs
+    |> Enum.with_index()
+    |> Enum.find(fn {sig, _idx} -> sig == target_sig end)
+    |> case do
+      {_, old_idx} -> Map.get(resolutions, old_idx)
+      nil -> nil
+    end
+  end
 
   @spec put_resolution(t(), non_neg_integer(), resolution()) :: t()
   defp put_resolution(%__MODULE__{resolutions: resolutions} = review, index, status) do

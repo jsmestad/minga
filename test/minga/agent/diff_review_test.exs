@@ -256,6 +256,111 @@ defmodule Minga.Agent.DiffReviewTest do
     end
   end
 
+  # ── update_after/2 ──────────────────────────────────────────────────────────
+
+  describe "update_after/2" do
+    test "returns updated review with new after-content" do
+      before = "line1\nline2\nline3"
+      after_v1 = "line1\nmodified\nline3"
+      review = DiffReview.new("test.ex", before, after_v1)
+
+      after_v2 = "line1\nmodified\nline3\nnew_line"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert updated.path == "test.ex"
+      assert updated.before_lines == String.split(before, "\n")
+      assert updated.after_lines == String.split(after_v2, "\n")
+    end
+
+    test "returns nil when after-content matches before-content" do
+      before = "line1\nline2\nline3"
+      after_v1 = "line1\nmodified\nline3"
+      review = DiffReview.new("test.ex", before, after_v1)
+
+      # Revert to original
+      result = DiffReview.update_after(review, before)
+      assert result == nil
+    end
+
+    test "preserves resolutions for unchanged hunks" do
+      before = "aaa\nbbb\nccc\n\n\nddd\neee\nfff"
+      after_v1 = "aaa\nBBB\nccc\n\n\nddd\neee\nfff"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      # Accept the first hunk
+      review = DiffReview.accept_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+
+      # Second edit: add a new line at the end (original hunk unchanged)
+      after_v2 = "aaa\nBBB\nccc\n\n\nddd\neee\nfff\nnew_line"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      # The original hunk's resolution should be preserved
+      # (It's the same modification: bbb -> BBB at the same position)
+      assert DiffReview.resolution_at(updated, 0) == :accepted
+    end
+
+    test "drops resolutions for hunks that changed" do
+      before = "aaa\nbbb\nccc"
+      after_v1 = "aaa\nBBB\nccc"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      # Accept the hunk
+      review = DiffReview.accept_current(review)
+      assert DiffReview.resolution_at(review, 0) == :accepted
+
+      # Second edit: completely change the after-content so the hunk signature won't match.
+      # The baseline stays "aaa\nbbb\nccc" but the after changes to modify a different line.
+      after_v2 = "aaa\nbbb\nYYY"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      # The hunk signature changed (different line changed), so resolution should be dropped
+      assert DiffReview.resolution_at(updated, 0) == nil
+    end
+
+    test "clamps current_hunk_index to new hunk count" do
+      before = "aaa\nbbb\nccc\nddd\neee"
+      after_v1 = "aaa\nBBB\nccc\nDDD\neee"
+      review = DiffReview.new("test.ex", before, after_v1)
+      assert review != nil
+
+      # Navigate to the last hunk
+      review = DiffReview.next_hunk(review)
+
+      # Second edit removes one of the changes
+      after_v2 = "aaa\nBBB\nccc\nddd\neee"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      assert updated.current_hunk_index <= length(updated.hunks) - 1
+    end
+
+    test "cumulative diff shows all changes from baseline" do
+      # Simulate: original file, then two sequential edits
+      original = "line1\nline2\nline3\nline4\nline5"
+
+      # First edit: modify line 2
+      after_v1 = "line1\nmodified2\nline3\nline4\nline5"
+      review = DiffReview.new("test.ex", original, after_v1)
+      assert review != nil
+
+      # Second edit: also modify line 4
+      after_v2 = "line1\nmodified2\nline3\nmodified4\nline5"
+      updated = DiffReview.update_after(review, after_v2)
+
+      assert updated != nil
+      # Should have hunks covering BOTH modifications (line 2 AND line 4)
+      {added, removed} = DiffReview.summary(updated)
+      assert added >= 2
+      assert removed >= 2
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   # A review with exactly one hunk

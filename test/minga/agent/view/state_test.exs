@@ -414,4 +414,39 @@ defmodule Minga.Agent.View.StateTest do
       assert av.toast.icon == "⚠"
     end
   end
+
+  describe "diff baselines" do
+    test "record_baseline stores content on first call" do
+      av = ViewState.new()
+      av = ViewState.record_baseline(av, "lib/foo.ex", "original content")
+      assert ViewState.get_baseline(av, "lib/foo.ex") == "original content"
+    end
+
+    test "record_baseline is a no-op on subsequent calls for same path" do
+      av = ViewState.new()
+      av = ViewState.record_baseline(av, "lib/foo.ex", "original")
+      av = ViewState.record_baseline(av, "lib/foo.ex", "modified")
+      assert ViewState.get_baseline(av, "lib/foo.ex") == "original"
+    end
+
+    test "record_baseline tracks multiple paths independently" do
+      av = ViewState.new()
+      av = ViewState.record_baseline(av, "lib/a.ex", "content_a")
+      av = ViewState.record_baseline(av, "lib/b.ex", "content_b")
+      assert ViewState.get_baseline(av, "lib/a.ex") == "content_a"
+      assert ViewState.get_baseline(av, "lib/b.ex") == "content_b"
+    end
+
+    test "clear_baselines removes all baselines" do
+      av = ViewState.new()
+      av = ViewState.record_baseline(av, "lib/foo.ex", "content")
+      av = ViewState.clear_baselines(av)
+      assert ViewState.get_baseline(av, "lib/foo.ex") == nil
+    end
+
+    test "get_baseline returns nil for unknown path" do
+      av = ViewState.new()
+      assert ViewState.get_baseline(av, "lib/unknown.ex") == nil
+    end
+  end
 end

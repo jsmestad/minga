@@ -57,7 +57,8 @@ defmodule Minga.Agent.View.State do
           help_visible: boolean(),
           search: search_state() | nil,
           toast: toast() | nil,
-          toast_queue: term()
+          toast_queue: term(),
+          diff_baselines: %{String.t() => String.t()}
         }
 
   @enforce_keys []
@@ -71,7 +72,8 @@ defmodule Minga.Agent.View.State do
             help_visible: false,
             search: nil,
             toast: nil,
-            toast_queue: :queue.new()
+            toast_queue: :queue.new(),
+            diff_baselines: %{}
 
   @min_chat_pct 30
   @max_chat_pct 80
@@ -336,4 +338,29 @@ defmodule Minga.Agent.View.State do
   defp make_toast(message, :info), do: %{message: message, icon: "✓", level: :info}
   defp make_toast(message, :warning), do: %{message: message, icon: "⚠", level: :warning}
   defp make_toast(message, :error), do: %{message: message, icon: "✗", level: :error}
+
+  # ── Diff baselines ──────────────────────────────────────────────────────────
+
+  @doc "Records the baseline content for a file path (first edit only)."
+  @spec record_baseline(t(), String.t(), String.t()) :: t()
+  def record_baseline(%__MODULE__{diff_baselines: baselines} = av, path, content)
+      when is_binary(path) and is_binary(content) do
+    if Map.has_key?(baselines, path) do
+      av
+    else
+      %{av | diff_baselines: Map.put(baselines, path, content)}
+    end
+  end
+
+  @doc "Returns the baseline content for a path, or nil if none recorded."
+  @spec get_baseline(t(), String.t()) :: String.t() | nil
+  def get_baseline(%__MODULE__{diff_baselines: baselines}, path) when is_binary(path) do
+    Map.get(baselines, path)
+  end
+
+  @doc "Clears all diff baselines (called at the start of a new turn)."
+  @spec clear_baselines(t()) :: t()
+  def clear_baselines(%__MODULE__{} = av) do
+    %{av | diff_baselines: %{}}
+  end
 end
