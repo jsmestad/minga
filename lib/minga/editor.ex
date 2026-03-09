@@ -31,7 +31,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.MacroRecorder
-  alias Minga.Editor.Mouse
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -333,8 +332,23 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:minga_input, {:mouse_event, row, col, button, _mods, event_type}}, state) do
-    new_state = Mouse.handle(state, row, col, button, event_type)
+  def handle_info(
+        {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
+        state
+      ) do
+    new_state =
+      Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, click_count)
+
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  # Backward compat: 6-element mouse_event (no click_count)
+  def handle_info(
+        {:minga_input, {:mouse_event, row, col, button, mods, event_type}},
+        state
+      ) do
+    new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end

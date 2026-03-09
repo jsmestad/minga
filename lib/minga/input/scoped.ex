@@ -25,11 +25,13 @@ defmodule Minga.Input.Scoped do
   import Bitwise
 
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.Mouse, as: AgentViewMouse
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
+  alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.FileTree
@@ -632,4 +634,128 @@ defmodule Minga.Input.Scoped do
   defp update_agent(state, fun) do
     %{state | agent: fun.(state.agent)}
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Mouse handling
+  # ══════════════════════════════════════════════════════════════════════════
+
+  @impl true
+  @spec handle_mouse(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+
+  # Agentic view active: route mouse events to the agentic view handler
+  def handle_mouse(%{agentic: %{active: true}} = state, row, col, button, mods, event_type, cc) do
+    new_state = AgentViewMouse.handle(state, row, col, button, mods, event_type, cc)
+
+    {:handled, new_state}
+  end
+
+  # File tree: left click opens file/toggles dir, scroll wheel scrolls tree
+  def handle_mouse(
+        %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{} = tree}} = state,
+        row,
+        col,
+        button,
+        _mods,
+        :press,
+        click_count
+      ) do
+    layout = Layout.get(state)
+
+    case layout.file_tree do
+      nil ->
+        {:passthrough, state}
+
+      {ft_row, ft_col, ft_width, ft_height} ->
+        if row >= ft_row and row < ft_row + ft_height and col >= ft_col and
+             col < ft_col + ft_width do
+          {:handled,
+           handle_file_tree_click(state, tree, row, ft_row, ft_height, button, click_count)}
+        else
+          {:passthrough, state}
+        end
+    end
+  end
+
+  # All other scopes: pass through to the next handler
+  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
+    {:passthrough, state}
+  end
+
+  # ── File tree mouse helpers ──────────────────────────────────────────────
+
+  @spec handle_file_tree_click(
+          EditorState.t(),
+          FileTree.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          atom(),
+          pos_integer()
+        ) :: EditorState.t()
+  defp handle_file_tree_click(state, tree, _row, _ft_row, _ft_height, button, _click_count)
+       when button in [:wheel_up, :wheel_down] do
+    # Scroll the tree cursor up/down by 3 entries
+    delta = if button == :wheel_down, do: 3, else: -3
+    entries = FileTree.visible_entries(tree)
+    max_idx = max(length(entries) - 1, 0)
+    new_cursor = (tree.cursor + delta) |> max(0) |> min(max_idx)
+    new_tree = %{tree | cursor: new_cursor}
+
+    put_in(state.file_tree.tree, new_tree)
+  end
+
+  defp handle_file_tree_click(state, tree, row, ft_row, ft_height, :left, click_count) do
+    # Row 0 of the tree rect is the header. Entries start at row 1.
+    content_rows = ft_height - 1
+    screen_row = row - ft_row - 1
+
+    if screen_row < 0 do
+      state
+    else
+      # Compute scroll offset (same logic as TreeRenderer)
+      scroll_offset = tree_scroll_offset(tree.cursor, content_rows)
+      entry_idx = scroll_offset + screen_row
+      entries = FileTree.visible_entries(tree)
+
+      case Enum.at(entries, entry_idx) do
+        nil ->
+          state
+
+        entry ->
+          # Move tree cursor to clicked entry
+          new_tree = %{tree | cursor: entry_idx}
+          state = put_in(state.file_tree.tree, new_tree)
+
+          # Single click: select. Double click (or single click on file): open
+          handle_tree_entry_click(state, entry, click_count)
+      end
+    end
+  end
+
+  defp handle_file_tree_click(state, _tree, _row, _ft_row, _ft_height, _button, _cc), do: state
+
+  @spec handle_tree_entry_click(EditorState.t(), FileTree.entry(), pos_integer()) ::
+          EditorState.t()
+  defp handle_tree_entry_click(state, %{dir?: true}, _click_count) do
+    # Click on directory: toggle expand/collapse
+    Commands.execute(state, :tree_toggle_directory)
+  end
+
+  defp handle_tree_entry_click(state, %{dir?: false}, _click_count) do
+    # Click on file: open it (same as pressing Enter)
+    Commands.execute(state, :tree_open_or_toggle)
+  end
+
+  @spec tree_scroll_offset(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp tree_scroll_offset(cursor, visible_rows) when visible_rows <= 0, do: cursor
+  defp tree_scroll_offset(cursor, visible_rows) when cursor < visible_rows, do: 0
+  defp tree_scroll_offset(cursor, visible_rows), do: cursor - visible_rows + 1
 end

@@ -197,7 +197,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendResize(cols: UInt16, rows: UInt16) {
         state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }
     }
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {}
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {}
     func sendLog(level: UInt8, message: String) {
         state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
     }

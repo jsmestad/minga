@@ -3,8 +3,15 @@ defmodule Minga.Editor.Modeline do
   Doom Emacs-style modeline rendering.
 
   Renders the colored status line at row N-2. Takes a data map and viewport
-  width; returns a list of draw tuples. Has no dependency on the GenServer
-  or any mutable state, just a pure `data → draws` transformation.
+  width; returns a list of draw tuples and a list of clickable regions. Has
+  no dependency on the GenServer or any mutable state, just a pure
+  `data → {draws, click_regions}` transformation.
+
+  Click regions are `{col_start, col_end, command}` tuples attached to
+  segments at render time, matching how Doom Emacs embeds `local-map` text
+  properties and Neovim embeds `%@ClickHandler@` markers. The mouse handler
+  looks up the command for a clicked column without reverse-engineering the
+  layout.
   """
 
   alias Minga.Buffer.Unicode
@@ -12,6 +19,10 @@ defmodule Minga.Editor.Modeline do
   alias Minga.Mode
 
   alias Minga.Theme
+
+  @typedoc "A clickable region: column range mapping to a command."
+  @type click_region ::
+          {col_start :: non_neg_integer(), col_end :: non_neg_integer(), command :: atom()}
 
   # Powerline separator characters
   @separator ""
@@ -34,9 +45,14 @@ defmodule Minga.Editor.Modeline do
           optional(:mode_override) => String.t() | nil
         }
 
-  @doc "Renders the modeline at the given row using the provided data."
+  @doc """
+  Renders the modeline at the given row using the provided data.
+
+  Returns `{draw_commands, click_regions}` where click_regions is a list of
+  `{col_start, col_end, command_atom}` tuples for mouse hit-testing.
+  """
   @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
-          [DisplayList.draw()]
+          {[DisplayList.draw()], [click_region()]}
   def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one), col_off \\ 0) do
     ml = theme.modeline
 
@@ -75,54 +91,33 @@ defmodule Minga.Editor.Modeline do
     filetype_fg = ml.filetype_fg
     filetype_bg = bar_bg
 
-    # Agent status indicator (only shown when an agent session is active)
-    agent_status = Map.get(data, :agent_status)
-    agent_theme_colors = Map.get(data, :agent_theme_colors)
+    agent_segments = build_agent_segments(data, bar_bg)
 
-    agent_segments =
-      case {agent_status, agent_theme_colors} do
-        {nil, _} ->
-          []
-
-        {:idle, colors} ->
-          [{" ◯ ", colors.status_idle, bar_bg, []}]
-
-        {:thinking, colors} ->
-          [{" ⟳ ", colors.status_thinking, bar_bg, bold: true}]
-
-        {:tool_executing, colors} ->
-          [{" ⚡ ", colors.status_tool, bar_bg, bold: true}]
-
-        {:error, colors} ->
-          [{" ✗ ", colors.status_error, bar_bg, bold: true}]
-
-        _ ->
-          []
-      end
-
+    # Segments are {text, fg, bg, opts, click_target}
+    # click_target is an atom command or nil for non-clickable segments
     left_segments =
       [
-        {mode_segment, mode_fg, mode_bg, bold: true},
-        {@separator, mode_bg, info_bg, []},
-        {file_segment, info_fg, info_bg, []},
-        {@separator, info_bg, bar_bg, []}
-      ] ++ agent_segments
+        {mode_segment, mode_fg, mode_bg, [bold: true], nil},
+        {@separator, mode_bg, info_bg, [], nil},
+        {file_segment, info_fg, info_bg, [], :buffer_list},
+        {@separator, info_bg, bar_bg, [], nil}
+      ] ++ Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
 
     right_segments = [
-      {filetype_segment, filetype_fg, filetype_bg, []},
-      {@separator, info_bg, bar_bg, []},
-      {pos_segment, info_fg, info_bg, []},
-      {@separator, mode_bg, info_bg, []},
-      {pct_segment, mode_fg, mode_bg, bold: true}
+      {filetype_segment, filetype_fg, filetype_bg, [], nil},
+      {@separator, info_bg, bar_bg, [], nil},
+      {pos_segment, info_fg, info_bg, [], nil},
+      {@separator, mode_bg, info_bg, [], nil},
+      {pct_segment, mode_fg, mode_bg, [bold: true], nil}
     ]
 
     left_width =
-      Enum.reduce(left_segments, 0, fn {text, _, _, _}, acc ->
+      Enum.reduce(left_segments, 0, fn {text, _, _, _, _}, acc ->
         acc + Unicode.display_width(text)
       end)
 
     right_width =
-      Enum.reduce(right_segments, 0, fn {text, _, _, _}, acc ->
+      Enum.reduce(right_segments, 0, fn {text, _, _, _, _}, acc ->
         acc + Unicode.display_width(text)
       end)
 
@@ -130,16 +125,26 @@ defmodule Minga.Editor.Modeline do
 
     all_segments =
       left_segments ++
-        [{String.duplicate(" ", fill_width), bar_fg, bar_bg, []}] ++
+        [{String.duplicate(" ", fill_width), bar_fg, bar_bg, [], nil}] ++
         right_segments
 
-    {commands, _} =
-      Enum.reduce(all_segments, {[], col_off}, fn {text, fg, bg, opts}, {cmds, col} ->
+    {commands, click_regions, _} =
+      Enum.reduce(all_segments, {[], [], col_off}, fn {text, fg, bg, opts, target},
+                                                      {cmds, regions, col} ->
         cmd = DisplayList.draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
-        {[cmd | cmds], col + Unicode.display_width(text)}
+        width = Unicode.display_width(text)
+        next_col = col + width
+
+        new_regions =
+          case target do
+            nil -> regions
+            command -> [{col, next_col, command} | regions]
+          end
+
+        {[cmd | cmds], new_regions, next_col}
       end)
 
-    Enum.reverse(commands)
+    {Enum.reverse(commands), Enum.reverse(click_regions)}
   end
 
   @doc "Returns the cursor shape atom for the given mode."
@@ -148,6 +153,22 @@ defmodule Minga.Editor.Modeline do
   def cursor_shape(:search), do: :beam
   def cursor_shape(:replace), do: :underline
   def cursor_shape(_mode), do: :block
+
+  @spec build_agent_segments(modeline_data(), non_neg_integer()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword()}]
+  defp build_agent_segments(data, bar_bg) do
+    status = Map.get(data, :agent_status)
+    colors = Map.get(data, :agent_theme_colors)
+
+    case {status, colors} do
+      {nil, _} -> []
+      {:idle, c} -> [{" ◯ ", c.status_idle, bar_bg, []}]
+      {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, bold: true}]
+      {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, bold: true}]
+      {:error, c} -> [{" ✗ ", c.status_error, bar_bg, bold: true}]
+      _ -> []
+    end
+  end
 
   @spec mode_badge(Mode.mode(), Mode.state()) :: String.t()
   defp mode_badge(:visual, %Minga.Mode.VisualState{visual_type: :line}), do: "V-LINE"

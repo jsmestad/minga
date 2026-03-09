@@ -35,6 +35,9 @@
 		F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
 		F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
 		FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
+		AA11223344556677AABB0001 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0010 /* ScrollAccumulator.swift */; };
+		AA11223344556677AABB0002 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0010 /* ScrollAccumulator.swift */; };
+		AA11223344556677AABB0003 /* ScrollAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +58,8 @@
 		C441427A427E23B912F70092 /* ProtocolConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolConstants.swift; sourceTree = "<group>"; };
 		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
+		AA11223344556677AABB0010 /* ScrollAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulator.swift; sourceTree = "<group>"; };
+		AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulatorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -91,6 +96,7 @@
 			children = (
 				83165B89231936674C54B513 /* EditorNSView.swift */,
 				0C26E064D810299C0302F439 /* EditorView.swift */,
+				AA11223344556677AABB0010 /* ScrollAccumulator.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -141,6 +147,7 @@
 			isa = PBXGroup;
 			children = (
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
+				AA11223344556677AABB0011 /* ScrollAccumulatorTests.swift */,
 			);
 			path = MingaTests;
 			sourceTree = "<group>";
@@ -255,6 +262,7 @@
 				0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */,
 				C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */,
 				F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */,
+				AA11223344556677AABB0001 /* ScrollAccumulator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -275,6 +283,8 @@
 				7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */,
 				FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */,
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
+				AA11223344556677AABB0003 /* ScrollAccumulatorTests.swift in Sources */,
+				AA11223344556677AABB0002 /* ScrollAccumulator.swift in Sources */,
 				614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

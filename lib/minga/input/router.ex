@@ -67,6 +67,54 @@ defmodule Minga.Input.Router do
     |> Editor.do_render()
   end
 
+  @doc """
+  Dispatches a mouse event through the focus stack.
+
+  Walks the focus stack calling `handle_mouse/7` on each handler that
+  implements it. The first handler that returns `{:handled, state}` stops
+  the walk. Handlers that don't implement `handle_mouse/7` are skipped.
+
+  Returns the final state after dispatch.
+  """
+  @spec dispatch_mouse(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: EditorState.t()
+  def dispatch_mouse(state, row, col, button, mods, event_type, click_count) do
+    Enum.reduce_while(state.focus_stack, state, fn handler, acc ->
+      try_mouse_handler(handler, acc, row, col, button, mods, event_type, click_count)
+    end)
+  end
+
+  @spec try_mouse_handler(
+          module(),
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) ::
+          {:halt, EditorState.t()} | {:cont, EditorState.t()}
+  defp try_mouse_handler(handler, state, row, col, button, mods, event_type, click_count) do
+    Code.ensure_loaded(handler)
+
+    if function_exported?(handler, :handle_mouse, 7) do
+      case handler.handle_mouse(state, row, col, button, mods, event_type, click_count) do
+        {:handled, new_state} -> {:halt, new_state}
+        {:passthrough, new_state} -> {:cont, new_state}
+      end
+    else
+      {:cont, state}
+    end
+  end
+
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
   defp buffer_version(%{buffers: %{active: nil}}), do: 0
 

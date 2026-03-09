@@ -37,8 +37,8 @@ defmodule Minga.Editor.MouseTest do
     _ = :sys.get_state(editor)
   end
 
-  defp send_mouse(editor, row, col, button, event_type, mods \\ 0) do
-    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type}})
+  defp send_mouse(editor, row, col, button, event_type, mods \\ 0, click_count \\ 1) do
+    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
     _ = :sys.get_state(editor)
   end
 

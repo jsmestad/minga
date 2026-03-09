@@ -28,6 +28,8 @@ struct CellGPU {
 struct Uniforms {
     var cellSize: SIMD2<Float>
     var viewportSize: SIMD2<Float>
+    /// Pixel offset for smooth scrolling (x: horizontal, y: vertical).
+    var scrollOffset: SIMD2<Float>
 }
 
 /// Background clear color (dark gray matching the default bg).
@@ -92,14 +94,20 @@ final class MetalRenderer {
         }
     }
 
-    /// Render the cell grid to the given Metal layer.
-    func render(grid: CellGrid, face: FontFace, layer: CAMetalLayer) {
-        guard let drawable = layer.nextDrawable() else { return }
-
+    /// Render the cell grid using the given drawable.
+    ///
+    /// Render the cell grid using the given drawable.
+    ///
+    /// The caller (MTKView.draw) provides the already-acquired drawable
+    /// and viewport size (in backing pixels). This avoids the blocking
+    /// `layer.nextDrawable()` call that caused scroll lag.
+    ///
+    /// `scrollOffset` is the sub-cell-height pixel offset for smooth scrolling.
+    func render(grid: CellGrid, face: FontFace, drawable: CAMetalDrawable,
+                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
         let cellW = Float(face.cellWidth)
         let cellH = Float(face.cellHeight)
         let atlasSize = Float(face.atlas.size)
-        let contentScale = Float(layer.contentsScale)
 
         // Re-upload atlas if it changed.
         if face.atlas.modified != atlasVersion {
@@ -175,10 +183,10 @@ final class MetalRenderer {
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
 
-        let drawableSize = layer.drawableSize
         var uniforms = Uniforms(
             cellSize: SIMD2<Float>(cellW * contentScale, cellH * contentScale),
-            viewportSize: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+            viewportSize: SIMD2<Float>(Float(viewportSize.width), Float(viewportSize.height)),
+            scrollOffset: SIMD2<Float>(scrollOffset.x * contentScale, scrollOffset.y * contentScale)
         )
 
         if count > 0 {

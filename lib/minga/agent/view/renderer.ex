@@ -686,27 +686,30 @@ defmodule Minga.Agent.View.Renderer do
           DisplayList.draw()
         ]
   defp render_agent_modeline(row, cols, input) do
-    Modeline.render(
-      row,
-      cols,
-      %{
-        mode: input.mode,
-        mode_state: input.mode_state,
-        mode_override: "AGENT",
-        file_name: "AGENT",
-        filetype: :text,
-        dirty_marker: "",
-        cursor_line: 0,
-        cursor_col: 0,
-        line_count: 0,
-        buf_index: input.buf_index,
-        buf_count: input.buf_count,
-        macro_recording: false,
-        agent_status: input.agent_status,
-        agent_theme_colors: Theme.agent_theme(input.theme)
-      },
-      input.theme
-    )
+    {draws, _click_regions} =
+      Modeline.render(
+        row,
+        cols,
+        %{
+          mode: input.mode,
+          mode_state: input.mode_state,
+          mode_override: "AGENT",
+          file_name: "AGENT",
+          filetype: :text,
+          dirty_marker: "",
+          cursor_line: 0,
+          cursor_col: 0,
+          line_count: 0,
+          buf_index: input.buf_index,
+          buf_count: input.buf_count,
+          macro_recording: false,
+          agent_status: input.agent_status,
+          agent_theme_colors: Theme.agent_theme(input.theme)
+        },
+        input.theme
+      )
+
+    draws
   end
 
   @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [

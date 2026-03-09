@@ -12,8 +12,15 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendReady(cols: UInt16, rows: UInt16)
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
     func sendResize(cols: UInt16, rows: UInt16)
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8)
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendLog(level: UInt8, message: String)
+}
+
+extension InputEncoder {
+    /// Convenience: send a mouse event with click count defaulting to 1.
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
+        sendMouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: 1)
+    }
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
@@ -56,15 +63,18 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a mouse event.
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8) {
-        var buf = Data(count: 8)
+    /// Send a mouse event with click count.
+    /// GUI frontends send the native `NSEvent.clickCount`; the BEAM uses it
+    /// directly for double/triple-click detection (no timing needed).
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8) {
+        var buf = Data(count: 9)
         buf[0] = OP_MOUSE_EVENT
         writeI16(&buf, 1, row)
         writeI16(&buf, 3, col)
         buf[5] = button
         buf[6] = modifiers
         buf[7] = eventType
+        buf[8] = clickCount
         writeFrame(buf)
     }
 
