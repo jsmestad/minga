@@ -72,10 +72,14 @@ final class EditorNSView: MTKView {
     override func draw(_ dirtyRect: NSRect) {
         guard let drawable = currentDrawable else { return }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
-        let offset = SIMD2<Float>(0, Float(scrollPixelOffset))
+        // Sub-pixel offset is disabled for now. The scroll_offset uniform
+        // shifts ALL cells (including modeline and chrome), which makes
+        // the whole window wobble. Proper fix requires per-region scroll
+        // offsets in the shader so only the editor viewport shifts.
+        // The MTKView coalescing + 1-line-per-event accumulation already
+        // gives smooth scrolling without the fractional offset.
         metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
-                             viewportSize: drawableSize, contentScale: scale,
-                             scrollOffset: offset)
+                             viewportSize: drawableSize, contentScale: scale)
         cellGrid.dirty = false
     }
 
