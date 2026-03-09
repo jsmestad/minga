@@ -90,7 +90,8 @@ defmodule Minga.Editor.State do
             keymap_scope: :editor,
             agentic: %ViewState{},
             capabilities: %Capabilities{},
-            layout: nil
+            layout: nil,
+            modeline_click_regions: []
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -131,7 +132,8 @@ defmodule Minga.Editor.State do
           keymap_scope: Minga.Keymap.Scope.scope_name(),
           agentic: ViewState.t(),
           capabilities: Capabilities.t(),
-          layout: Minga.Editor.Layout.t() | nil
+          layout: Minga.Editor.Layout.t() | nil,
+          modeline_click_regions: [Minga.Editor.Modeline.click_region()]
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

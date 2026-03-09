@@ -172,6 +172,7 @@ defmodule Minga.Editor.RenderPipeline do
     alias Minga.Editor.DisplayList.Overlay
 
     defstruct modeline_draws: %{},
+              modeline_click_regions: [],
               minibuffer: [],
               separators: [],
               file_tree: [],
@@ -181,6 +182,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     @type t :: %__MODULE__{
             modeline_draws: %{non_neg_integer() => [DisplayList.draw()]},
+            modeline_click_regions: [Minga.Editor.Modeline.click_region()],
             minibuffer: [DisplayList.draw()],
             separators: [DisplayList.draw()],
             file_tree: [DisplayList.draw()],
@@ -234,6 +236,9 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Stage 5: Chrome
     chrome = timed(:chrome, fn -> build_chrome(state, layout, scrolls, cursor_info) end)
+
+    # Cache modeline click regions on state for mouse hit-testing
+    state = %{state | modeline_click_regions: chrome.modeline_click_regions}
 
     # Stage 6: Compose
     frame =
@@ -636,10 +641,10 @@ defmodule Minga.Editor.RenderPipeline do
     full_viewport = state.viewport
 
     # Modeline per window
-    modeline_draws =
-      Map.new(scrolls, fn {win_id, scroll} ->
-        draws = render_window_modeline(state, scroll)
-        {win_id, draws}
+    {modeline_draws, modeline_click_regions} =
+      Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
+        {draws, regions} = render_window_modeline(state, scroll)
+        {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
       end)
 
     # Separators (vertical split borders)
@@ -701,6 +706,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     %Chrome{
       modeline_draws: modeline_draws,
+      modeline_click_regions: modeline_click_regions,
       minibuffer: [minibuffer_draw],
       separators: separator_draws,
       file_tree: tree_draws,
@@ -1260,10 +1266,11 @@ defmodule Minga.Editor.RenderPipeline do
 
   # ── Private helpers: chrome ────────────────────────────────────────────────
 
-  @spec render_window_modeline(state(), WindowScroll.t()) :: [DisplayList.draw()]
+  @spec render_window_modeline(state(), WindowScroll.t()) ::
+          {[DisplayList.draw()], [Minga.Editor.Modeline.click_region()]}
   defp render_window_modeline(state, %WindowScroll{win_layout: %{modeline: {_, _, _, 0}}}) do
     _ = state
-    []
+    {[], []}
   end
 
   defp render_window_modeline(state, scroll) do

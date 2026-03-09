@@ -66,11 +66,6 @@ defmodule Minga.Editor.Mouse do
   def handle(%{buffers: %{active: nil}} = state, _row, _col, _button, _mods, _type, _cc),
     do: state
 
-  # Ignore mouse events when picker is open.
-  def handle(%{picker_ui: %{picker: picker}} = state, _r, _c, _b, _m, _t, _cc)
-      when is_struct(picker, Minga.Picker),
-      do: state
-
   # Ignore negative coordinates.
   def handle(state, row, _col, _button, _mods, _type, _cc) when row < 0, do: state
   def handle(state, _row, col, _button, _mods, _type, _cc) when col < 0, do: state
@@ -583,23 +578,30 @@ defmodule Minga.Editor.Mouse do
 
   @spec handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp handle_content_click(state, row, col) do
-    state = maybe_focus_window_at(state, row, col)
+    # Check modeline click first
+    case modeline_click(state, row, col) do
+      {:command, cmd} ->
+        Minga.Editor.dispatch_command(state, cmd)
 
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
+      :not_modeline ->
+        state = maybe_focus_window_at(state, row, col)
 
-      {target_line, target_col} ->
-        BufferServer.move_to(state.buffers.active, {target_line, target_col})
+        case mouse_to_buffer_pos(state, row, col) do
+          nil ->
+            state
 
-        state = cancel_mode_for_mouse(state)
+          {target_line, target_col} ->
+            BufferServer.move_to(state.buffers.active, {target_line, target_col})
 
-        %{
-          state
-          | mode: :normal,
-            mode_state: Mode.initial_state(),
-            mouse: MouseState.start_drag(state.mouse, {target_line, target_col})
-        }
+            state = cancel_mode_for_mouse(state)
+
+            %{
+              state
+              | mode: :normal,
+                mode_state: Mode.initial_state(),
+                mouse: MouseState.start_drag(state.mouse, {target_line, target_col})
+            }
+        end
     end
   end
 
@@ -811,5 +813,40 @@ defmodule Minga.Editor.Mouse do
       end
 
     BufferServer.move_to(buf, {target_line, target_col})
+  end
+
+  # ── Modeline segment click detection ─────────────────────────────────────
+
+  # Click regions are attached to modeline segments at render time (like
+  # Doom Emacs local-map text properties). The mouse handler just does a
+  # range lookup against the cached regions.
+  @spec modeline_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:command, atom()} | :not_modeline
+  defp modeline_click(state, row, col) do
+    layout = Layout.get(state)
+
+    # Check if the click row is a modeline row in any window
+    is_modeline =
+      Enum.any?(layout.window_layouts, fn {_id, wl} ->
+        {ml_row, ml_col, ml_width, ml_height} = wl.modeline
+        ml_height > 0 and row == ml_row and col >= ml_col and col < ml_col + ml_width
+      end)
+
+    if is_modeline do
+      find_click_region(state.modeline_click_regions, col)
+    else
+      :not_modeline
+    end
+  end
+
+  @spec find_click_region([Minga.Editor.Modeline.click_region()], non_neg_integer()) ::
+          {:command, atom()} | :not_modeline
+  defp find_click_region(regions, col) do
+    case Enum.find(regions, fn {col_start, col_end, _cmd} ->
+           col >= col_start and col < col_end
+         end) do
+      {_start, _end, command} -> {:command, command}
+      nil -> :not_modeline
+    end
   end
 end
