@@ -10,6 +10,7 @@ defmodule Minga.Agent.ChatRenderer do
   directly with draw primitives rather than going through a buffer.
   """
 
+  alias Minga.Agent.CodeHighlight
   alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
@@ -56,7 +57,7 @@ defmodule Minga.Agent.ChatRenderer do
       []
       |> render_separator(row_off, col_off, width, at)
       |> render_header(row_off + 1, col_off, width, panel, at)
-      |> render_content(row_off + 2, col_off, width, content_height, panel, at)
+      |> render_content(row_off + 2, col_off, width, content_height, panel, at, theme)
       |> render_input(input_row, col_off, width, panel, at)
 
     commands
@@ -71,7 +72,7 @@ defmodule Minga.Agent.ChatRenderer do
   @spec render_messages_only(rect(), panel_state(), Theme.t()) :: [DisplayList.draw()]
   def render_messages_only({row_off, col_off, width, height}, panel, theme) do
     at = Theme.agent_theme(theme)
-    render_content([], row_off, col_off, width, height, panel, at)
+    render_content([], row_off, col_off, width, height, panel, at, theme)
   end
 
   @typedoc "Line type for line-to-message mapping."
@@ -94,13 +95,14 @@ defmodule Minga.Agent.ChatRenderer do
     visible
     |> Enum.with_index(display_start_index)
     |> Enum.flat_map(fn {msg, msg_idx} ->
-      lines = message_lines(msg, at, width)
+      lines = message_lines(msg, at, width, theme)
       Enum.map(lines, fn {_segments, type, _bg} -> {msg_idx, classify_line_type(type)} end)
     end)
   end
 
   @spec classify_line_type(atom()) :: line_type()
   defp classify_line_type(:code), do: :code
+  defp classify_line_type({:code_header, _}), do: :code
   defp classify_line_type(:empty), do: :empty
   defp classify_line_type(_), do: :text
 
@@ -179,13 +181,16 @@ defmodule Minga.Agent.ChatRenderer do
           pos_integer(),
           pos_integer(),
           panel_state(),
-          Theme.Agent.t()
+          Theme.Agent.t(),
+          Theme.t()
         ) :: [DisplayList.draw()]
-  defp render_content(cmds, row_start, col, width, content_height, panel, at) do
+  defp render_content(cmds, row_start, col, width, content_height, panel, at, theme) do
     display_start = Map.get(panel, :display_start_index, 0)
     visible_messages = Enum.drop(panel.messages, display_start)
     approval = Map.get(panel, :pending_approval)
-    lines = messages_to_lines(visible_messages, panel.status, panel.spinner_frame, at, width)
+
+    lines =
+      messages_to_lines(visible_messages, panel.status, panel.spinner_frame, at, width, theme)
 
     # Append approval prompt if a tool is waiting for user confirmation
     lines =
@@ -367,12 +372,13 @@ defmodule Minga.Agent.ChatRenderer do
           atom(),
           non_neg_integer(),
           Theme.Agent.t(),
-          pos_integer()
+          pos_integer(),
+          Theme.t()
         ) :: [render_line()]
-  defp messages_to_lines(messages, status, spinner_frame, at, width) do
+  defp messages_to_lines(messages, status, spinner_frame, at, width, theme) do
     lines =
       Enum.flat_map(messages, fn msg ->
-        message_lines(msg, at, width)
+        message_lines(msg, at, width, theme)
       end)
 
     # Add thinking indicator or streaming cursor
@@ -397,34 +403,32 @@ defmodule Minga.Agent.ChatRenderer do
     end
   end
 
-  @spec message_lines(Message.t(), Theme.Agent.t(), pos_integer()) :: [render_line()]
+  @spec message_lines(Message.t(), Theme.Agent.t(), pos_integer(), Theme.t()) :: [render_line()]
 
-  defp message_lines({:user, text}, at, width) do
+  defp message_lines({:user, text}, at, width, _theme) do
     header = {[{"▎ You", [fg: at.user_label, bold: true]}], :text, at.panel_bg}
     content = text_to_lines(text, at, width, at.user_border)
     spacer = {[{"", []}], :empty, at.panel_bg}
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:assistant, text}, at, width) do
+  defp message_lines({:assistant, text}, at, width, theme) do
     header = {[{"▎ Agent", [fg: at.assistant_label, bold: true]}], :text, at.panel_bg}
 
     parsed = Markdown.parse(text)
     border_prefix = [{"▎ ", [fg: at.assistant_border]}]
-    # Available width after the border prefix
     content_width = max(width - 2, 4)
 
     content =
       Enum.flat_map(parsed, fn {segments, line_type} ->
-        styled = Enum.map(segments, fn {t, style} -> {t, style_to_opts(style, at)} end)
-        wrap_or_truncate(styled, line_type, border_prefix, content_width, at)
+        render_assistant_line(segments, line_type, border_prefix, content_width, at, theme)
       end)
 
     spacer = {[{"", []}], :empty, at.panel_bg}
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:thinking, text, true}, at, width) do
+  defp message_lines({:thinking, text, true}, at, width, _theme) do
     lines = String.split(text, "\n")
     line_count = length(lines)
     preview = lines |> hd() |> String.slice(0, max(width - 30, 10))
@@ -436,7 +440,7 @@ defmodule Minga.Agent.ChatRenderer do
     ]
   end
 
-  defp message_lines({:thinking, text, false}, at, width) do
+  defp message_lines({:thinking, text, false}, at, width, _theme) do
     prefix = [{"  │ ", [fg: at.thinking_fg, italic: true]}]
     content_width = max(width - 4, 4)
 
@@ -460,7 +464,7 @@ defmodule Minga.Agent.ChatRenderer do
     [header | content] ++ [spacer]
   end
 
-  defp message_lines({:tool_call, tc}, at, width) do
+  defp message_lines({:tool_call, tc}, at, width, _theme) do
     # For running tools, use the spinner_frame from the tool's started_at
     # to create a per-tool animation offset
     tool_frame = tool_animation_frame(tc)
@@ -517,7 +521,7 @@ defmodule Minga.Agent.ChatRenderer do
     [header | result_lines] ++ [footer, spacer]
   end
 
-  defp message_lines({:usage, usage}, at, width) do
+  defp message_lines({:usage, usage}, at, width, _theme) do
     text = format_turn_usage(usage)
     padding = max(width - String.length(text) - 4, 0)
 
@@ -530,7 +534,7 @@ defmodule Minga.Agent.ChatRenderer do
     ]
   end
 
-  defp message_lines({:system, text, level}, at, width) do
+  defp message_lines({:system, text, level}, at, width, _theme) do
     fg =
       case level do
         :error -> at.status_error
@@ -561,6 +565,62 @@ defmodule Minga.Agent.ChatRenderer do
        ], :text, at.panel_bg}
 
     [line]
+  end
+
+  # ── Assistant line rendering (extracted for credo nesting) ───────────────────
+
+  @spec render_assistant_line(
+          [Markdown.segment()],
+          Markdown.line_type(),
+          [{String.t(), keyword()}],
+          pos_integer(),
+          Theme.Agent.t(),
+          Theme.t()
+        ) :: [render_line()]
+  defp render_assistant_line(
+         segments,
+         {:code_header, _lang},
+         border_prefix,
+         _content_width,
+         at,
+         _theme
+       ) do
+    styled = Enum.map(segments, fn {t, _style} -> {t, [fg: at.code_border, bg: at.code_bg]} end)
+    [{border_prefix ++ styled, :code, at.code_bg}]
+  end
+
+  defp render_assistant_line(segments, :code, border_prefix, content_width, at, theme) do
+    render_assistant_code_line(segments, border_prefix, content_width, at, theme)
+  end
+
+  defp render_assistant_line(segments, line_type, border_prefix, content_width, at, _theme) do
+    styled = Enum.map(segments, fn {t, style} -> {t, style_to_opts(style, at)} end)
+    wrap_or_truncate(styled, line_type, border_prefix, content_width, at)
+  end
+
+  @spec render_assistant_code_line(
+          [Markdown.segment()],
+          [{String.t(), keyword()}],
+          pos_integer(),
+          Theme.Agent.t(),
+          Theme.t()
+        ) :: [render_line()]
+  defp render_assistant_code_line(
+         [{raw_line, {:code_content, lang}}],
+         border_prefix,
+         content_width,
+         at,
+         theme
+       ) do
+    highlighted = highlight_code_line(raw_line, lang, at, theme)
+    code_prefix = border_prefix ++ [{"│ ", [fg: at.code_border, bg: at.code_bg]}]
+    truncated = truncate_code(highlighted, max(content_width - 2, 1), at)
+    [{code_prefix ++ truncated, :code, at.code_bg}]
+  end
+
+  defp render_assistant_code_line(segments, border_prefix, _content_width, at, _theme) do
+    styled = Enum.map(segments, fn {t, _style} -> {t, [fg: at.code_border, bg: at.code_bg]} end)
+    [{border_prefix ++ styled, :code, at.code_bg}]
   end
 
   # ── Wrapping / truncation helpers ─────────────────────────────────────────────
@@ -625,6 +685,43 @@ defmodule Minga.Agent.ChatRenderer do
     Enum.reverse(result)
   end
 
+  # ── Code syntax highlighting ────────────────────────────────────────────────
+
+  @spec highlight_code_line(String.t(), String.t(), Theme.Agent.t(), Theme.t()) :: [
+          {String.t(), keyword()}
+        ]
+  defp highlight_code_line(line, lang, at, theme) do
+    if lang != "" and CodeHighlight.supported?(lang) do
+      CodeHighlight.highlight_line(line, lang)
+      |> Enum.map(fn {text, capture} -> apply_capture_style(text, capture, at, theme) end)
+    else
+      [{line, [fg: at.text_fg, bg: at.code_bg]}]
+    end
+  end
+
+  @spec apply_capture_style(String.t(), String.t(), Theme.Agent.t(), Theme.t()) ::
+          {String.t(), keyword()}
+  defp apply_capture_style(text, "", at, _theme), do: {text, [fg: at.text_fg, bg: at.code_bg]}
+
+  defp apply_capture_style(text, capture, at, theme) do
+    case Theme.style_for_capture(theme, capture) do
+      [] ->
+        {text, [fg: at.text_fg, bg: at.code_bg]}
+
+      kw ->
+        opts = merge_syntax_with_code_bg(kw, at)
+        {text, opts}
+    end
+  end
+
+  @spec merge_syntax_with_code_bg(keyword(), Theme.Agent.t()) :: keyword()
+  defp merge_syntax_with_code_bg(kw, at) do
+    fg = Keyword.get(kw, :fg, at.text_fg)
+    opts = [fg: fg, bg: at.code_bg]
+    opts = if Keyword.get(kw, :bold, false), do: Keyword.put(opts, :bold, true), else: opts
+    if Keyword.get(kw, :italic, false), do: Keyword.put(opts, :italic, true), else: opts
+  end
+
   # ── Style conversion ────────────────────────────────────────────────────────
 
   @spec style_to_opts(Markdown.style(), Theme.Agent.t()) :: keyword()
@@ -634,6 +731,7 @@ defmodule Minga.Agent.ChatRenderer do
   defp style_to_opts(:bold_italic, at), do: [fg: at.text_fg, bold: true, italic: true]
   defp style_to_opts(:code, at), do: [fg: at.text_fg, bg: at.code_bg]
   defp style_to_opts(:code_block, at), do: [fg: at.text_fg, bg: at.code_bg]
+  defp style_to_opts({:code_content, _lang}, at), do: [fg: at.text_fg, bg: at.code_bg]
   defp style_to_opts(:header1, at), do: [fg: at.assistant_label, bold: true]
   defp style_to_opts(:header2, at), do: [fg: at.assistant_label, bold: true]
   defp style_to_opts(:header3, at), do: [fg: at.assistant_label]

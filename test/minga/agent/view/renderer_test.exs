@@ -4,6 +4,7 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.Renderer
+  alias Minga.Agent.View.Renderer.RenderInput
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
@@ -14,6 +15,43 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Theme
+
+  defp default_theme do
+    Theme.get!(:doom_one)
+  end
+
+  defp default_input(overrides \\ %{}) do
+    theme = default_theme()
+
+    base = %RenderInput{
+      viewport: Viewport.new(24, 80),
+      theme: theme,
+      agent_status: :idle,
+      panel: %{
+        input_focused: false,
+        input_lines: [""],
+        input_cursor: {0, 0},
+        scroll_offset: 0,
+        spinner_frame: 0,
+        model_name: "claude-sonnet-4",
+        thinking_level: "medium",
+        auto_scroll: true,
+        display_start_index: 0,
+        mention_completion: nil
+      },
+      agentic: %{
+        chat_width_pct: 65,
+        help_visible: false,
+        focus: :chat,
+        search: nil,
+        toast: nil
+      },
+      messages: [],
+      session_title: "Minga Agent"
+    }
+
+    Map.merge(base, overrides)
+  end
 
   defp base_state(opts \\ []) do
     rows = Keyword.get(opts, :rows, 40)
@@ -372,6 +410,128 @@ defmodule Minga.Agent.View.RendererTest do
         |> Enum.max(fn -> 0 end)
 
       assert cols_120 > cols_80, "wider viewport should use more columns"
+    end
+  end
+
+  describe "session title" do
+    test "title bar shows Minga Agent when no messages" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "Minga Agent"))
+    end
+
+    test "title bar shows first user prompt when available" do
+      input =
+        default_input(%{
+          messages: [{:user, "Explain the BEAM"}, {:assistant, "The BEAM is..."}],
+          session_title: "Explain the BEAM"
+        })
+
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "Explain the BEAM"))
+    end
+  end
+
+  describe "keyboard hints" do
+    test "modeline includes keyboard hints for chat focus" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "? help"))
+    end
+
+    test "modeline shows input hints when input is focused" do
+      input =
+        default_input(%{
+          panel: %{
+            input_focused: true,
+            input_lines: [""],
+            input_cursor: {0, 0},
+            scroll_offset: 0,
+            spinner_frame: 0,
+            model_name: "claude-sonnet-4",
+            thinking_level: "medium",
+            auto_scroll: true,
+            display_start_index: 0,
+            mention_completion: nil
+          }
+        })
+
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "send"))
+    end
+  end
+
+  describe "model info" do
+    test "model name appears near input area" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
+    end
+
+    test "thinking level appears when set" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "medium"))
+    end
+  end
+
+  describe "dashboard panel" do
+    test "shows session info when preview is empty" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      # Dashboard should show Context section
+      assert Enum.any?(texts, &String.contains?(&1, "Context"))
+      # Dashboard should show Model section
+      assert Enum.any?(texts, &String.contains?(&1, "Model"))
+      # Dashboard should show the model name
+      assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
+      # Dashboard should show Status section
+      assert Enum.any?(texts, &String.contains?(&1, "Status"))
+    end
+
+    test "shows token usage when available" do
+      input =
+        default_input(%{
+          usage: %{input: 15_000, output: 2000, cache_read: 8000, cache_write: 0, cost: 0.042}
+        })
+
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "17.0k tokens"))
+      assert Enum.any?(texts, &String.contains?(&1, "$0.042"))
+    end
+
+    test "shows working directory" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "Directory"))
+    end
+
+    test "not shown when preview has file content" do
+      preview =
+        Preview.set_file(
+          Preview.new(),
+          "/tmp/test.txt",
+          "hello world"
+        )
+
+      input = default_input(%{preview: preview})
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      # File preview should be showing
+      assert Enum.any?(texts, &String.contains?(&1, "test.txt"))
     end
   end
 end

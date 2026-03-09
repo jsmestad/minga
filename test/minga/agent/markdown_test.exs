@@ -87,8 +87,8 @@ defmodule Minga.Agent.MarkdownTest do
       result = Markdown.parse(text)
 
       assert [
-               {[{"┌─ elixir ", :code_block}, {"─", :code_block}], :code},
-               {[{"│ def hello, do: :world", :code_block}], :code},
+               {[{"┌─ elixir ", :code_block}, {"─", :code_block}], {:code_header, "elixir"}},
+               {[{"def hello, do: :world", {:code_content, "elixir"}}], :code},
                {[{"└", :code_block}, {"─", :code_block}], :code}
              ] = result
     end
@@ -103,8 +103,8 @@ defmodule Minga.Agent.MarkdownTest do
       result = Markdown.parse(text)
 
       assert [
-               {[{"┌─ code ", :code_block}, {"─", :code_block}], :code},
-               {[{"│ some code", :code_block}], :code},
+               {[{"┌─ code ", :code_block}, {"─", :code_block}], {:code_header, ""}},
+               {[{"some code", {:code_content, ""}}], :code},
                {[{"└", :code_block}, {"─", :code_block}], :code}
              ] = result
     end
@@ -148,6 +148,40 @@ defmodule Minga.Agent.MarkdownTest do
       assert [{segments, :text}] = result
       # Should not crash; the plain regex consumes the whole string
       assert [{"Hello `world", :plain}] = segments
+    end
+
+    test "parses nested unordered list items with increasing indentation" do
+      text = "- Top\n  - Middle\n    - Deep"
+      result = Markdown.parse(text)
+
+      assert [
+               {[{"  • Top", :plain}], :list_item},
+               {[{"    • Middle", :plain}], :list_item},
+               {[{"      • Deep", :plain}], :list_item}
+             ] = result
+    end
+
+    test "preserves inline formatting in nested list items" do
+      text = "  - Item with **bold** text"
+      result = Markdown.parse(text)
+      assert [{segments, :list_item}] = result
+      assert [{"    • Item with ", :plain}, {"bold", :bold}, {" text", :plain}] = segments
+    end
+
+    test "nested numbered list items get indentation" do
+      text = "1. First\n  2. Second"
+      result = Markdown.parse(text)
+
+      assert [
+               {[{"  1. First", :plain}], :list_item},
+               {[{"    2. Second", :plain}], :list_item}
+             ] = result
+    end
+
+    test "deeply nested list items (4+ levels)" do
+      text = "      - Very deep item"
+      result = Markdown.parse(text)
+      assert [{[{"        • Very deep item", :plain}], :list_item}] = result
     end
   end
 

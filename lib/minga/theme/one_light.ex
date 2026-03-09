@@ -134,7 +134,9 @@ defmodule Minga.Theme.OneLight do
         toast_border: @mono_3,
         system_fg: @mono_2,
         search_match_bg: @hue_6,
-        search_current_bg: @hue_5
+        search_current_bg: @hue_5,
+        hint_fg: 0xA0A1A7,
+        dashboard_label: 0x4078F2
       }
     }
   end
