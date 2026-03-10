@@ -4,17 +4,20 @@ defmodule Minga.Agent.View.Renderer do
 
   Layout from top to bottom:
 
-      Row 0          Title bar (status, model, session info, token usage)
-      Row 1..H-6     Chat messages (left ~65%) │ File viewer (right ~35%)
-      Row H-5        Input border ─── Prompt ─── (full width)
-      Row H-4        Input text (full width)
-      Row H-3        Input padding (full width)
+      Row 0          Tab bar (rendered by TabBarRenderer)
+      Row 1          Title bar (status, model, session info, token usage)
+      Row 2..H-2     Left column: Chat + Input │ Right column: Preview/Dashboard
+        Left:          Chat messages (rows 2..H-2-input_h)
+                       Input border + text + model info (bottom of left col)
+        Right:         Preview or dashboard (full column height)
+        Separator:     Vertical │ (full column height)
       Row H-2        Modeline (full width)
       Row H-1        Minibuffer (reserved by editor)
 
-  The chat panel has no internal header or input; those are rendered at
-  full width by this module. The file viewer has a header bar at the top
-  of its rect showing the filename.
+  The two-column split extends the full height between title bar and
+  modeline. The input area renders within the left column only, not at
+  full width. The right panel (preview/dashboard) extends alongside the
+  input area. This matches the OpenCode reference layout.
 
   Called by `Minga.Editor.RenderPipeline` when `state.agentic.active` is true.
   Returns `DisplayList.draw()` tuples.
@@ -139,10 +142,18 @@ defmodule Minga.Agent.View.Renderer do
     rows = input.viewport.rows
 
     input_height = compute_input_height(input.panel.input_lines)
-    panel_end = rows - 1 - 1 - input_height
-    # Tab bar occupies row 0, title bar at row 1, content starts at row 2
+
+    # Tab bar at row 0, title bar at row 1, content starts at row 2.
+    # Modeline at rows-2, minibuffer at rows-1.
     panel_start = 2
-    panel_height = max(panel_end - panel_start, 1)
+    modeline_row = rows - 1 - 1
+
+    # The two-column split extends from panel_start to just above the modeline.
+    panel_height = max(modeline_row - panel_start, 1)
+
+    # Left column is split: chat on top, input at bottom.
+    chat_height = max(panel_height - input_height, 1)
+    input_row = panel_start + chat_height
 
     chat_width_pct = input.agentic.chat_width_pct
     chat_width = max(div(cols * chat_width_pct, 100), 20)
@@ -150,12 +161,12 @@ defmodule Minga.Agent.View.Renderer do
     viewer_col = chat_width + 1
     viewer_width = max(cols - viewer_col, 10)
 
-    input_row = panel_end
-    modeline_row = input_row + input_height
-
     title_commands = render_title_bar_from_input(input, 1, cols)
-    chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, panel_height})
 
+    # Left column: chat messages fill the top portion.
+    chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, chat_height})
+
+    # Separator and right column span the FULL panel height (alongside input).
     separator_commands =
       render_separator(separator_col, panel_start, panel_height, input.theme)
 
@@ -165,7 +176,8 @@ defmodule Minga.Agent.View.Renderer do
         {panel_start, viewer_col, viewer_width, panel_height}
       )
 
-    input_commands = render_input_from_input(input, input_row, cols)
+    # Input area renders within the left column only.
+    input_commands = render_input_from_input(input, input_row, chat_width)
     modeline_commands = render_modeline_from_input(input, modeline_row, cols)
 
     base =
@@ -781,11 +793,12 @@ defmodule Minga.Agent.View.Renderer do
     [header_cmd | gutter_cmds] ++ line_cmds ++ tilde_cmds
   end
 
-  # ── Full-width input area ───────────────────────────────────────────────────
+  # ── Input area (left column) ──────────────────────────────────────────────
 
   @spec render_input_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
           [DisplayList.draw()]
-  defp render_input_from_input(input, row, cols) do
+  defp render_input_from_input(input, row, width) do
+    cols = width
     at = Theme.agent_theme(input.theme)
     panel = input.panel
 
