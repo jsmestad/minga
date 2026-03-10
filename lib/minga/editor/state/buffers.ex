@@ -42,4 +42,13 @@ defmodule Minga.Editor.State.Buffers do
   end
 
   def switch_to(%__MODULE__{} = bs, _idx), do: bs
+
+  @doc "Switches to the buffer with the given pid, if it exists in the list."
+  @spec switch_to_pid(t(), pid()) :: t()
+  def switch_to_pid(%__MODULE__{list: buffers} = bs, pid) do
+    case Enum.find_index(buffers, &(&1 == pid)) do
+      nil -> bs
+      idx -> %{bs | active_index: idx, active: pid}
+    end
+  end
 end
