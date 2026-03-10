@@ -455,14 +455,15 @@ defmodule Minga.Editor.State do
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
     Log.debug(:editor, fn ->
-      current_tab = TabBar.active(tb)
-      target_tab = TabBar.get(tb, target_id)
-      from = if current_tab, do: "#{current_tab.kind}:#{current_tab.label}", else: "nil"
-      to = if target_tab, do: "#{target_tab.kind}:#{target_tab.label}", else: "nil"
-      ctx_keys = if target_tab, do: Map.keys(target_tab.context) |> inspect(), else: "[]"
-      "[tab] switch_tab #{current_id}(#{from}) -> #{target_id}(#{to}) ctx=#{ctx_keys}"
+      from = format_tab_ref(TabBar.active(tb))
+      to = format_tab_ref(TabBar.get(tb, target_id))
+      "[tab] switch_tab #{current_id}(#{from}) -> #{target_id}(#{to})"
     end)
   end
+
+  @spec format_tab_ref(Tab.t() | nil) :: String.t()
+  defp format_tab_ref(%{kind: kind, label: label}), do: "#{kind}:#{label}"
+  defp format_tab_ref(nil), do: "nil"
 
   @spec log_switch_tab_result(t()) :: :ok
   defp log_switch_tab_result(state) do

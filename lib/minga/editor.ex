@@ -888,30 +888,40 @@ defmodule Minga.Editor do
          %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
        )
        when is_pid(session) do
-    active_tab = TabBar.active(tb)
-
-    if active_tab && active_tab.kind == :agent && default_agent_label?(active_tab.label) do
-      messages =
-        try do
-          AgentSession.messages(session)
-        catch
-          :exit, _ -> []
+    case TabBar.active(tb) do
+      %{kind: :agent, label: label} when is_binary(label) ->
+        if default_agent_label?(label) do
+          update_agent_tab_from_session(state, tb, active_id, session)
+        else
+          state
         end
 
-      case first_user_message(messages) do
-        nil ->
-          state
-
-        text ->
-          label = truncate_label(text, 30)
-          %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
-      end
-    else
-      state
+      _other ->
+        state
     end
   end
 
   defp maybe_update_agent_tab_label(state), do: state
+
+  @spec update_agent_tab_from_session(EditorState.t(), TabBar.t(), Tab.id(), pid()) ::
+          EditorState.t()
+  defp update_agent_tab_from_session(state, tb, active_id, session) do
+    messages =
+      try do
+        AgentSession.messages(session)
+      catch
+        :exit, _ -> []
+      end
+
+    case first_user_message(messages) do
+      nil ->
+        state
+
+      text ->
+        label = truncate_label(text, 30)
+        %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
+    end
+  end
 
   @spec default_agent_label?(String.t()) :: boolean()
   defp default_agent_label?("New Agent"), do: true
