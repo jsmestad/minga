@@ -24,7 +24,7 @@ defmodule Minga.Input.ScopedTest do
     panel = %PanelState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
-      scroll_offset: 0,
+      scroll: Minga.Scroll.new(),
       spinner_frame: 0,
       provider_name: "anthropic",
       model_name: "claude-sonnet-4",
@@ -197,7 +197,7 @@ defmodule Minga.Input.ScopedTest do
     test "j scrolls down", %{state: state} do
       assert {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
 
-      assert new_state.agent.panel.scroll_offset != state.agent.panel.scroll_offset or
+      assert new_state.agent.panel.scroll.offset != state.agent.panel.scroll.offset or
                new_state == state
     end
 

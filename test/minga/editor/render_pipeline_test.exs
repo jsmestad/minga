@@ -54,7 +54,7 @@ defmodule Minga.Editor.RenderPipelineTest do
         panel: %Minga.Agent.PanelState{
           visible: false,
           input_focused: false,
-          scroll_offset: 0,
+          scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           provider_name: "anthropic",
           model_name: "claude-sonnet-4",

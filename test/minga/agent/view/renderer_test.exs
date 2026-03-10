@@ -31,12 +31,11 @@ defmodule Minga.Agent.View.RendererTest do
         input_focused: false,
         input_lines: [""],
         input_cursor: {0, 0},
-        scroll_offset: 0,
+        scroll: Minga.Scroll.new(),
         spinner_frame: 0,
         model_name: "claude-sonnet-4",
         provider_name: "anthropic",
         thinking_level: "medium",
-        auto_scroll: true,
         display_start_index: 0,
         mention_completion: nil,
         pasted_blocks: []
@@ -66,7 +65,7 @@ defmodule Minga.Agent.View.RendererTest do
       input_lines: Keyword.get(opts, :input_lines, [Keyword.get(opts, :input_text, "")]),
       input_cursor:
         Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))}),
-      scroll_offset: 0,
+      scroll: Minga.Scroll.new(),
       spinner_frame: 0,
       provider_name: "anthropic",
       model_name: "claude-sonnet-4",
@@ -144,14 +143,14 @@ defmodule Minga.Agent.View.RendererTest do
   describe "render/1" do
     test "returns a non-empty list of draw tuples" do
       state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
       assert [_ | _] = commands
       assert Enum.all?(commands, &is_tuple/1)
     end
 
     test "all draw tuples have valid 4-element structure" do
       state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       Enum.each(commands, fn cmd ->
         assert tuple_size(cmd) == 4, "draw tuple should have 4 elements: #{inspect(cmd)}"
@@ -167,8 +166,8 @@ defmodule Minga.Agent.View.RendererTest do
       state_small = base_state(rows: 20, cols: 80)
       state_large = base_state(rows: 40, cols: 80)
 
-      cmds_small = Renderer.render(state_small)
-      cmds_large = Renderer.render(state_large)
+      {cmds_small, _metrics} = Renderer.render(state_small)
+      {cmds_large, _metrics} = Renderer.render(state_large)
 
       assert length(cmds_large) > length(cmds_small)
     end
@@ -176,7 +175,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "does not crash when active buffer is nil" do
       state = base_state()
       state = put_in(state.buffers.active, nil)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
       assert is_list(commands)
     end
 
@@ -184,8 +183,8 @@ defmodule Minga.Agent.View.RendererTest do
       state_top = base_state(viewer_scroll: 0)
       state_scrolled = base_state(viewer_scroll: 2)
 
-      cmds_top = Renderer.render(state_top)
-      cmds_scrolled = Renderer.render(state_scrolled)
+      {cmds_top, _metrics} = Renderer.render(state_top)
+      {cmds_scrolled, _metrics} = Renderer.render(state_scrolled)
 
       assert is_list(cmds_top)
       assert is_list(cmds_scrolled)
@@ -199,7 +198,7 @@ defmodule Minga.Agent.View.RendererTest do
 
       expected_chat_width = div(cols * 65, 100)
 
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       chat_cols =
         commands
@@ -219,7 +218,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "title bar" do
     test "renders draw commands at row 1 (title bar below tab bar)" do
       state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       row_1_cmds = Enum.filter(commands, fn {row, _col, _text, _style} -> row == 1 end)
 
@@ -230,7 +229,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "input area inside left column" do
     test "input border renders at col 0 within the left panel" do
       state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       # With the new layout: modeline at row 28, input_height = 3,
       # input starts at row 28 - 3 = 25
@@ -247,7 +246,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "input box width is constrained to left column (chat_width)" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       chat_width = div(cols * 65, 100)
 
@@ -267,7 +266,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "right panel extends alongside the input area" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       chat_width = div(cols * 65, 100)
       viewer_col = chat_width + 1
@@ -286,7 +285,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "separator extends the full panel height including alongside input" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       chat_width = div(cols * 65, 100)
       sep_col = chat_width
@@ -311,7 +310,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "file viewer header" do
     test "file viewer header is at the top of the viewer panel (row 2)" do
       state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render(state)
+      {commands, _metrics} = Renderer.render(state)
 
       chat_width = div(100 * 65, 100)
       viewer_col = chat_width + 1
@@ -336,12 +335,11 @@ defmodule Minga.Agent.View.RendererTest do
           input_focused: false,
           input_lines: [""],
           input_cursor: {0, 0},
-          scroll_offset: 0,
+          scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
           provider_name: "anthropic",
           thinking_level: "medium",
-          auto_scroll: true,
           display_start_index: 0,
           mention_completion: nil,
           pasted_blocks: []
@@ -363,7 +361,7 @@ defmodule Minga.Agent.View.RendererTest do
         buf_count: 1
       }
 
-      commands = Renderer.render(input)
+      {commands, _metrics} = Renderer.render(input)
       assert [_ | _] = commands
       assert Enum.all?(commands, &is_tuple/1)
     end
@@ -377,12 +375,11 @@ defmodule Minga.Agent.View.RendererTest do
           input_focused: true,
           input_lines: ["hello"],
           input_cursor: {0, 5},
-          scroll_offset: 0,
+          scroll: Minga.Scroll.new(),
           spinner_frame: 3,
           model_name: "claude-sonnet-4",
           provider_name: "anthropic",
           thinking_level: "medium",
-          auto_scroll: true,
           display_start_index: 0,
           mention_completion: nil,
           pasted_blocks: []
@@ -396,7 +393,10 @@ defmodule Minga.Agent.View.RendererTest do
         },
         messages: [],
         # Set preview to a file so the buffer preview renders (not dashboard)
-        preview: %Preview{content: {:file, "test.ex", "line one\nline two"}, scroll_offset: 0},
+        preview: %Preview{
+          content: {:file, "test.ex", "line one\nline two"},
+          scroll: Minga.Scroll.new()
+        },
         usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
         buffer_snapshot: nil,
         highlight: nil,
@@ -406,7 +406,7 @@ defmodule Minga.Agent.View.RendererTest do
         buf_count: 2
       }
 
-      commands = Renderer.render(input)
+      {commands, _metrics} = Renderer.render(input)
       assert [_ | _] = commands
 
       # Should have file viewer content
@@ -429,12 +429,11 @@ defmodule Minga.Agent.View.RendererTest do
           input_focused: false,
           input_lines: [""],
           input_cursor: {0, 0},
-          scroll_offset: 0,
+          scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
           provider_name: "anthropic",
           thinking_level: "medium",
-          auto_scroll: true,
           display_start_index: 0,
           mention_completion: nil,
           pasted_blocks: []
@@ -451,7 +450,7 @@ defmodule Minga.Agent.View.RendererTest do
       }
 
       _ = state
-      commands = Renderer.render(input)
+      {commands, _metrics} = Renderer.render(input)
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       has_bar = Enum.any?(texts, &String.contains?(&1, "█"))
@@ -464,8 +463,8 @@ defmodule Minga.Agent.View.RendererTest do
       state_80 = base_state(rows: 24, cols: 80)
       state_120 = base_state(rows: 24, cols: 120)
 
-      cmds_80 = Renderer.render(state_80)
-      cmds_120 = Renderer.render(state_120)
+      {cmds_80, _metrics} = Renderer.render(state_80)
+      {cmds_120, _metrics} = Renderer.render(state_120)
 
       cols_80 =
         cmds_80
@@ -484,7 +483,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "session title" do
     test "title bar shows Minga Agent when no messages" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Minga Agent"))
     end
@@ -496,7 +495,7 @@ defmodule Minga.Agent.View.RendererTest do
           session_title: "Explain the BEAM"
         })
 
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Explain the BEAM"))
     end
@@ -505,7 +504,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "keyboard hints" do
     test "modeline includes keyboard hints for chat focus" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "? help"))
     end
@@ -517,19 +516,18 @@ defmodule Minga.Agent.View.RendererTest do
             input_focused: true,
             input_lines: [""],
             input_cursor: {0, 0},
-            scroll_offset: 0,
+            scroll: Minga.Scroll.new(),
             spinner_frame: 0,
             model_name: "claude-sonnet-4",
             provider_name: "anthropic",
             thinking_level: "medium",
-            auto_scroll: true,
             display_start_index: 0,
             mention_completion: nil,
             pasted_blocks: []
           }
         })
 
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "send"))
     end
@@ -538,21 +536,21 @@ defmodule Minga.Agent.View.RendererTest do
   describe "model info" do
     test "model name appears near input area" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
     end
 
     test "thinking level appears when set" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "medium"))
     end
 
     test "provider name appears in model info line (titleized)" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Anthropic"))
     end
@@ -561,7 +559,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "input box border" do
     test "input area has rounded box border with Prompt label" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt")),
@@ -576,7 +574,7 @@ defmodule Minga.Agent.View.RendererTest do
 
     test "model info is embedded in bottom border" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, fn text ->
@@ -589,7 +587,7 @@ defmodule Minga.Agent.View.RendererTest do
   describe "dashboard panel" do
     test "shows session info when preview is empty" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       # Dashboard should show Context section
@@ -607,7 +605,7 @@ defmodule Minga.Agent.View.RendererTest do
           usage: %{input: 15_000, output: 2000, cache_read: 8000, cache_write: 0, cost: 0.042}
         })
 
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "17.0k tokens"))
@@ -616,7 +614,7 @@ defmodule Minga.Agent.View.RendererTest do
 
     test "shows working directory" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "Directory"))
@@ -624,7 +622,7 @@ defmodule Minga.Agent.View.RendererTest do
 
     test "shows LSP section with no servers when list is empty" do
       input = default_input(%{lsp_servers: []})
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "LSP"))
@@ -633,7 +631,7 @@ defmodule Minga.Agent.View.RendererTest do
 
     test "shows LSP section with active server names" do
       input = default_input(%{lsp_servers: [:lexical, :gopls]})
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "LSP"))
@@ -643,7 +641,7 @@ defmodule Minga.Agent.View.RendererTest do
 
     test "working directory is pinned to the bottom of the panel" do
       input = default_input()
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
 
       dir_draws =
         Enum.filter(draws, fn {_row, _col, text, _style} ->
@@ -669,7 +667,7 @@ defmodule Minga.Agent.View.RendererTest do
         )
 
       input = default_input(%{preview: preview})
-      draws = Renderer.render(input)
+      {draws, _metrics} = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       # File preview should be showing

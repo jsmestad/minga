@@ -8,8 +8,8 @@ defmodule Minga.Agent.View.PreviewTest do
     test "starts empty with auto-follow engaged" do
       p = Preview.new()
       assert p.content == :empty
-      assert p.scroll_offset == 0
-      assert p.auto_follow == true
+      assert p.scroll.offset == 0
+      assert p.scroll.pinned == true
     end
   end
 
@@ -17,8 +17,8 @@ defmodule Minga.Agent.View.PreviewTest do
     test "set_shell transitions to running shell state" do
       p = Preview.new() |> Preview.set_shell("mix test")
       assert {:shell, "mix test", "", :running} = p.content
-      assert p.scroll_offset == 0
-      assert p.auto_follow == true
+      assert p.scroll.offset == 0
+      assert p.scroll.pinned == true
     end
 
     test "update_shell_output appends output while running" do
@@ -48,18 +48,18 @@ defmodule Minga.Agent.View.PreviewTest do
       p = Preview.new() |> Preview.set_shell("tail -f log")
       p = Preview.update_shell_output(p, "line 1\nline 2\nline 3")
       # auto_follow true means the renderer pins to bottom; no sentinel
-      assert p.auto_follow
-      assert p.scroll_offset == 0
+      assert p.scroll.pinned
+      assert p.scroll.offset == 0
     end
 
     test "auto-follow pauses when user scrolls manually" do
       p = Preview.new() |> Preview.set_shell("tail -f log")
       p = Preview.scroll_up(p, 5)
-      refute p.auto_follow
+      refute p.scroll.pinned
 
       # New output does not re-engage auto-follow
       p = Preview.update_shell_output(p, "new output")
-      refute p.auto_follow
+      refute p.scroll.pinned
     end
   end
 
@@ -100,30 +100,30 @@ defmodule Minga.Agent.View.PreviewTest do
   describe "scrolling" do
     test "scroll_down increases offset and disengages auto-follow" do
       p = Preview.new() |> Preview.scroll_down(5)
-      assert p.scroll_offset == 5
-      assert p.auto_follow == false
+      assert p.scroll.offset == 5
+      assert p.scroll.pinned == false
     end
 
     test "scroll_up decreases offset, clamped at 0" do
-      p = %{Preview.new() | scroll_offset: 3}
+      p = %{Preview.new() | scroll: Minga.Scroll.new(3)}
       p = Preview.scroll_up(p, 10)
-      assert p.scroll_offset == 0
-      assert p.auto_follow == false
+      assert p.scroll.offset == 0
+      assert p.scroll.pinned == false
     end
 
     test "scroll_to_top resets to 0" do
-      p = %{Preview.new() | scroll_offset: 50}
+      p = %{Preview.new() | scroll: Minga.Scroll.new(50)}
       p = Preview.scroll_to_top(p)
-      assert p.scroll_offset == 0
+      assert p.scroll.offset == 0
     end
 
     test "scroll_to_bottom re-engages auto-follow without changing offset" do
       p = Preview.new() |> Preview.scroll_down(5)
-      refute p.auto_follow
+      refute p.scroll.pinned
       p = Preview.scroll_to_bottom(p)
       # offset stays at 5; renderer resolves "bottom"
-      assert p.scroll_offset == 5
-      assert p.auto_follow
+      assert p.scroll.offset == 5
+      assert p.scroll.pinned
     end
   end
 
@@ -154,8 +154,8 @@ defmodule Minga.Agent.View.PreviewTest do
       p = Preview.new() |> Preview.set_shell("ls") |> Preview.scroll_down(10)
       p = Preview.clear(p)
       assert p.content == :empty
-      assert p.scroll_offset == 0
-      assert p.auto_follow == true
+      assert p.scroll.offset == 0
+      assert p.scroll.pinned == true
     end
   end
 
