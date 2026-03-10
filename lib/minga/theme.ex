@@ -283,6 +283,9 @@ defmodule Minga.Theme do
       :system_fg,
       :search_match_bg,
       :search_current_bg,
+      :heading1_fg,
+      :heading2_fg,
+      :heading3_fg,
       :hint_fg,
       :dashboard_label
     ]
@@ -319,6 +322,9 @@ defmodule Minga.Theme do
       :system_fg,
       :search_match_bg,
       :search_current_bg,
+      :heading1_fg,
+      :heading2_fg,
+      :heading3_fg,
       :hint_fg,
       :dashboard_label
     ]
@@ -355,6 +361,9 @@ defmodule Minga.Theme do
             system_fg: Minga.Theme.color(),
             search_match_bg: Minga.Theme.color(),
             search_current_bg: Minga.Theme.color(),
+            heading1_fg: Minga.Theme.color(),
+            heading2_fg: Minga.Theme.color(),
+            heading3_fg: Minga.Theme.color(),
             hint_fg: Minga.Theme.color(),
             dashboard_label: Minga.Theme.color()
           }
@@ -465,6 +474,9 @@ defmodule Minga.Theme do
       system_fg: 0x73797E,
       search_match_bg: 0xECBE7B,
       search_current_bg: 0xFF6C6B,
+      heading1_fg: 0xC678DD,
+      heading2_fg: 0x51AFEF,
+      heading3_fg: 0x98BE65,
       hint_fg: 0x5C6370,
       dashboard_label: 0x61AFEF
     }

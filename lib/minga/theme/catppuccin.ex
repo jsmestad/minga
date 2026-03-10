@@ -121,6 +121,9 @@ defmodule Minga.Theme.Catppuccin do
         search_match_bg: p.yellow,
         search_current_bg: p.red,
         hint_fg: p.overlay0,
+        heading1_fg: p.mauve,
+        heading2_fg: p.blue,
+        heading3_fg: p.green,
         dashboard_label: p.blue
       },
       tab_bar: %Minga.Theme.TabBar{

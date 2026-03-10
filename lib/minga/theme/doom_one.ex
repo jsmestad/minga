@@ -139,6 +139,9 @@ defmodule Minga.Theme.DoomOne do
         search_match_bg: @yellow,
         search_current_bg: @red,
         hint_fg: 0x5C6370,
+        heading1_fg: @magenta,
+        heading2_fg: @blue,
+        heading3_fg: @green,
         dashboard_label: 0x61AFEF
       },
       tab_bar: %Minga.Theme.TabBar{

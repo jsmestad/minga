@@ -136,6 +136,9 @@ defmodule Minga.Theme.OneDark do
         search_match_bg: @hue_6_2,
         search_current_bg: @hue_5,
         hint_fg: 0x5C6370,
+        heading1_fg: @hue_3,
+        heading2_fg: @hue_2,
+        heading3_fg: @hue_4,
         dashboard_label: 0x61AFEF
       },
       tab_bar: %Minga.Theme.TabBar{
