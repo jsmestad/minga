@@ -869,7 +869,13 @@ defmodule Minga.Editor do
   @spec startup_view_state(GenServer.server(), pos_integer()) ::
           {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
   @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
-  defp initial_tab_bar(active_buf, keymap_scope) do
+  defp initial_tab_bar(_active_buf, :agent) do
+    # Boot into agent mode: only the agent tab. A file tab is created
+    # on demand when the user first switches to editor mode.
+    TabBar.new(Tab.new_agent(1, "Agent"))
+  end
+
+  defp initial_tab_bar(active_buf, _scope) do
     file_label =
       if active_buf && Process.alive?(active_buf) do
         Commands.Helpers.buffer_display_name(active_buf)
@@ -877,15 +883,7 @@ defmodule Minga.Editor do
         "*scratch*"
       end
 
-    file_tab_bar = TabBar.new(Tab.new_file(1, file_label))
-
-    if keymap_scope == :agent do
-      # Boot into agent mode: add an agent tab and make it active.
-      {tb, _agent_tab} = TabBar.add(file_tab_bar, :agent, "Agent")
-      tb
-    else
-      file_tab_bar
-    end
+    TabBar.new(Tab.new_file(1, file_label))
   end
 
   defp startup_view_state(port_manager, window_id) do

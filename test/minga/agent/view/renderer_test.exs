@@ -392,6 +392,8 @@ defmodule Minga.Agent.View.RendererTest do
           toast: nil
         },
         messages: [],
+        # Set preview to a file so the buffer preview renders (not dashboard)
+        preview: %Preview{content: {:file, "test.ex", "line one\nline two"}, scroll_offset: 0},
         usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
         buffer_snapshot: %{
           lines: ["line one", "line two"],

@@ -650,11 +650,12 @@ defmodule Minga.Input.Scoped do
           pos_integer()
         ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
-  # Agentic view active: route mouse events to the agentic view handler
+  # Agentic view active: route to the agentic mouse handler.
+  # It returns {:handled, state} for agent-owned regions (chat, input,
+  # file viewer, separator) or {:passthrough, state} for shared chrome
+  # (tab bar, modeline) so those flow to the editor mouse handler.
   def handle_mouse(%{agentic: %{active: true}} = state, row, col, button, mods, event_type, cc) do
-    new_state = AgentViewMouse.handle(state, row, col, button, mods, event_type, cc)
-
-    {:handled, new_state}
+    AgentViewMouse.handle(state, row, col, button, mods, event_type, cc)
   end
 
   # File tree: left click opens file/toggles dir, scroll wheel scrolls tree

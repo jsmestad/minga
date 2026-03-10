@@ -3,24 +3,21 @@ defmodule Minga.Agent.View.Mouse do
   Mouse event handling for the full-screen agentic view.
 
   Hit-tests against the agentic view layout regions (chat panel, file viewer,
-  input area, separator) and dispatches to the appropriate handler. All
-  functions are pure `state -> state` transformations.
+  input area, separator) and dispatches to the appropriate handler.
+
+  Returns `{:handled, state}` for events within agent-owned regions, or
+  `{:passthrough, state}` for shared chrome (tab bar, modeline) so the
+  editor's mouse handler can process those uniformly.
 
   ## Regions
 
-  The agentic view layout is:
-
-      ┌──────── tab bar (row 0) ────────────┐
-      ├──────── title bar (row 1) ──────────┤
-      │ chat panel  │sep│ file viewer       │
+      ┌──────── tab bar (row 0) ────────────┐  ← shared chrome (:passthrough)
+      ├──────── title bar (row 1) ──────────┤  ← agent-owned
+      │ chat panel  │sep│ file viewer       │  ← agent-owned
       │             │   │                   │
       │ input area  │   │ (continues)       │
-      ├──────── modeline ──────────────────-┤
-      └──────── minibuffer ────────────────-┘
-
-  The two-column split extends the full height. The input area lives
-  inside the left column. Mouse events are routed based on which
-  region they land in.
+      ├──────── modeline ──────────────────-┤  ← shared chrome (:passthrough)
+      └──────── minibuffer ────────────────-┘  ← shared chrome (:passthrough)
   """
 
   alias Minga.Agent.View.State, as: ViewState
@@ -33,13 +30,25 @@ defmodule Minga.Agent.View.Mouse do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
-  @doc "Dispatches a mouse event within the agentic view."
+  @type result :: {:handled, state()} | {:passthrough, state()}
+
+  @doc """
+  Dispatches a mouse event within the agentic view.
+
+  Returns `{:handled, state}` for agent-owned regions (chat, input,
+  file viewer, separator, title bar). Returns `{:passthrough, state}`
+  for shared chrome (tab bar, modeline) so those events flow through
+  to the editor mouse handler.
+  """
   @spec handle(state(), integer(), integer(), atom(), non_neg_integer(), atom(), pos_integer()) ::
-          state()
+          result()
 
   # Ignore negative coordinates
-  def handle(state, row, _col, _button, _mods, _type, _cc) when row < 0, do: state
-  def handle(state, _row, col, _button, _mods, _type, _cc) when col < 0, do: state
+  def handle(state, row, _col, _button, _mods, _type, _cc) when row < 0,
+    do: {:passthrough, state}
+
+  def handle(state, _row, col, _button, _mods, _type, _cc) when col < 0,
+    do: {:passthrough, state}
 
   # ── Separator drag (in progress) ──
 
@@ -52,7 +61,7 @@ defmodule Minga.Agent.View.Mouse do
         :drag,
         _cc
       ) do
-    handle_separator_drag(state, col)
+    {:handled, handle_separator_drag(state, col)}
   end
 
   def handle(
@@ -64,35 +73,56 @@ defmodule Minga.Agent.View.Mouse do
         :release,
         _cc
       ) do
-    %{state | mouse: MouseState.stop_resize(state.mouse)}
+    {:handled, %{state | mouse: MouseState.stop_resize(state.mouse)}}
   end
 
   # ── Scroll wheel ──
 
   def handle(state, row, col, :wheel_down, _mods, :press, _cc) do
-    region = hit_test(state, row, col)
-    handle_scroll(state, region, @scroll_lines)
+    dispatch_by_region(state, row, col, fn s, region ->
+      handle_scroll(s, region, @scroll_lines)
+    end)
   end
 
   def handle(state, row, col, :wheel_up, _mods, :press, _cc) do
-    region = hit_test(state, row, col)
-    handle_scroll(state, region, -@scroll_lines)
+    dispatch_by_region(state, row, col, fn s, region ->
+      handle_scroll(s, region, -@scroll_lines)
+    end)
   end
 
   # ── Left click ──
 
   def handle(state, row, col, :left, _mods, :press, _cc) do
-    region = hit_test(state, row, col)
-    handle_click(state, region, row, col)
+    dispatch_by_region(state, row, col, fn s, region ->
+      handle_click(s, region, row, col)
+    end)
   end
 
-  # ── Ignore all other events ──
+  # ── All other events ──
 
-  def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+  def handle(state, _row, _col, _button, _mods, _type, _cc), do: {:passthrough, state}
+
+  # ── Region dispatch ────────────────────────────────────────────────────────
+
+  # Shared chrome regions pass through to the editor mouse handler.
+  # Agent-owned regions are handled here.
+  @typep agent_region :: :title_bar | :chat | :file_viewer | :input | :separator
+  @typep chrome_region :: :tab_bar | :modeline
+  @typep region :: agent_region() | chrome_region() | :outside
+
+  @spec dispatch_by_region(state(), integer(), integer(), (state(), agent_region() -> state())) ::
+          result()
+  defp dispatch_by_region(state, row, col, handler_fn) do
+    case hit_test(state, row, col) do
+      region when region in [:tab_bar, :modeline, :outside] ->
+        {:passthrough, state}
+
+      region ->
+        {:handled, handler_fn.(state, region)}
+    end
+  end
 
   # ── Hit testing ────────────────────────────────────────────────────────────
-
-  @typep region :: :title | :chat | :file_viewer | :input | :separator | :modeline | :outside
 
   @typep layout_info :: %{
            sep_col: non_neg_integer(),
@@ -107,7 +137,8 @@ defmodule Minga.Agent.View.Mouse do
     layout = compute_layout(state)
 
     cond do
-      row < layout.panel_start -> :title
+      row == layout.panel_start - 2 -> :tab_bar
+      row == layout.panel_start - 1 -> :title_bar
       row >= layout.modeline_row -> :modeline
       row >= layout.input_row and col < layout.chat_width -> :input
       col == layout.sep_col -> :separator
@@ -151,7 +182,7 @@ defmodule Minga.Agent.View.Mouse do
 
   # ── Scroll handling ────────────────────────────────────────────────────────
 
-  @spec handle_scroll(state(), region(), integer()) :: state()
+  @spec handle_scroll(state(), agent_region(), integer()) :: state()
   defp handle_scroll(state, :chat, delta) when delta > 0 do
     update_agent(state, &AgentState.scroll_down(&1, abs(delta)))
   end
@@ -172,7 +203,7 @@ defmodule Minga.Agent.View.Mouse do
 
   # ── Click handling ─────────────────────────────────────────────────────────
 
-  @spec handle_click(state(), region(), integer(), integer()) :: state()
+  @spec handle_click(state(), agent_region(), integer(), integer()) :: state()
 
   defp handle_click(state, :chat, _row, _col) do
     update_agentic(state, fn av -> %{av | focus: :chat} end)
@@ -199,9 +230,7 @@ defmodule Minga.Agent.View.Mouse do
   @spec handle_separator_drag(state(), integer()) :: state()
   defp handle_separator_drag(state, col) do
     cols = state.viewport.cols
-    # Convert column to percentage
     new_pct = div(col * 100, max(cols, 1))
-    # Clamp to 30-80% range (matching ViewState constraints)
     clamped = new_pct |> max(30) |> min(80)
 
     state

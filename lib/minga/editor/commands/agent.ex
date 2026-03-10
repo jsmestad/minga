@@ -22,6 +22,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
+  alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.Layout
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -89,10 +90,9 @@ defmodule Minga.Editor.Commands.Agent do
 
     case find_file_tab(state) do
       nil ->
-        # No file tab to switch to, just deactivate in place.
-        %{state | keymap_scope: :editor}
-        |> Layout.invalidate()
-        |> EditorState.invalidate_all_windows()
+        # No file tab yet (e.g., cold boot into agent mode). Create one
+        # for the scratch buffer and switch to it.
+        create_and_switch_to_file_tab(state)
 
       file_tab ->
         EditorState.switch_tab(state, file_tab.id)
@@ -200,6 +200,30 @@ defmodule Minga.Editor.Commands.Agent do
   @spec find_agent_tab(state()) :: Tab.t() | nil
   defp find_agent_tab(%{tab_bar: nil}), do: nil
   defp find_agent_tab(%{tab_bar: tb}), do: TabBar.find_by_kind(tb, :agent)
+
+  # Creates a new file tab for the active buffer and switches to it.
+  # Used when deactivating the agentic view and no file tab exists yet
+  # (e.g., cold boot into agent mode).
+  @spec create_and_switch_to_file_tab(state()) :: state()
+  defp create_and_switch_to_file_tab(state) do
+    label =
+      if state.buffers.active && Process.alive?(state.buffers.active) do
+        CommandHelpers.buffer_display_name(state.buffers.active)
+      else
+        "*scratch*"
+      end
+
+    # Snapshot agent tab context before leaving.
+    agent_id = state.tab_bar.active_id
+    agent_ctx = EditorState.snapshot_tab_context(state)
+    tb = TabBar.update_context(state.tab_bar, agent_id, agent_ctx)
+
+    # Insert file tab (without switching active_id) so switch_tab
+    # performs the full snapshot/restore cycle.
+    {tb, file_tab} = TabBar.insert(tb, :file, label)
+    state = %{state | tab_bar: tb}
+    EditorState.switch_tab(state, file_tab.id)
+  end
 
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do

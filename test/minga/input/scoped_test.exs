@@ -10,6 +10,8 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
@@ -43,6 +45,14 @@ defmodule Minga.Input.ScopedTest do
       focus: Keyword.get(opts, :focus, :chat)
     }
 
+    tab_bar =
+      if Keyword.get(opts, :agentic_active, false) do
+        # Agent mode: tab bar with an agent tab active
+        TabBar.new(Tab.new_agent(1, "Agent"))
+      else
+        TabBar.new(Tab.new_file(1, "*scratch*"))
+      end
+
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
@@ -52,7 +62,8 @@ defmodule Minga.Input.ScopedTest do
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
-      agentic: agentic
+      agentic: agentic,
+      tab_bar: tab_bar
     }
   end
 
