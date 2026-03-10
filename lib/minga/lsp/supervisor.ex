@@ -91,6 +91,28 @@ defmodule Minga.LSP.Supervisor do
     |> Enum.map(fn {_, pid, _, _} -> pid end)
   end
 
+  @doc """
+  Returns the names of all active LSP servers (e.g., `[:lexical, :gopls]`).
+
+  Safe to call from the render pipeline. Returns an empty list if the
+  supervisor is not running or no clients are active.
+  """
+  @spec active_servers(GenServer.server()) :: [atom()]
+  def active_servers(supervisor \\ __MODULE__) do
+    supervisor
+    |> all_clients()
+    |> Enum.map(fn pid ->
+      try do
+        Client.server_name(pid)
+      catch
+        :exit, _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
   # ── Supervisor Callbacks ───────────────────────────────────────────────────
 
   @impl true

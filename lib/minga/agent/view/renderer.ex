@@ -82,7 +82,8 @@ defmodule Minga.Agent.View.Renderer do
       buf_index: 1,
       buf_count: 1,
       pending_approval: nil,
-      session_title: "Minga Agent"
+      session_title: "Minga Agent",
+      lsp_servers: []
     ]
 
     @type t :: %__MODULE__{
@@ -101,7 +102,8 @@ defmodule Minga.Agent.View.Renderer do
             buf_index: pos_integer(),
             buf_count: pos_integer(),
             pending_approval: map() | nil,
-            session_title: String.t()
+            session_title: String.t(),
+            lsp_servers: [atom()]
           }
 
     @typedoc "Agent panel fields needed for rendering."
@@ -320,8 +322,18 @@ defmodule Minga.Agent.View.Renderer do
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
       pending_approval: state.agent.pending_approval,
-      session_title: session_title(messages)
+      session_title: session_title(messages),
+      lsp_servers: safe_lsp_servers()
     }
+  end
+
+  @spec safe_lsp_servers() :: [atom()]
+  defp safe_lsp_servers do
+    Minga.LSP.Supervisor.active_servers()
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 
   @spec session_title([term()]) :: String.t()
@@ -509,17 +521,34 @@ defmodule Minga.Agent.View.Renderer do
 
     sections = dashboard_sections(input, width, at)
 
-    # Render sections line by line
+    # Working directory pinned to bottom 2 rows
+    cwd = File.cwd!() |> shorten_path()
+
+    dir_label =
+      dashboard_text(" Directory", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+
+    dir_value = dashboard_text("  #{cwd}", width, fg: at.text_fg, bg: at.panel_bg)
+
+    dir_start = row_off + max(height - 2, 0)
+
+    dir_cmds = [
+      dir_label.(dir_start, col_off),
+      dir_value.(min(dir_start + 1, row_off + height - 1), col_off)
+    ]
+
+    # Render sections top-down, stopping before the pinned directory
+    section_limit = max(height - 3, 1)
+
     {section_cmds, _} =
       Enum.reduce(sections, {[], row_off}, fn line, {acc, row} ->
-        if row >= row_off + height do
+        if row >= row_off + section_limit do
           {acc, row}
         else
           {[line.(row, col_off) | acc], row + 1}
         end
       end)
 
-    bg_cmds ++ Enum.reverse(section_cmds)
+    bg_cmds ++ Enum.reverse(section_cmds) ++ dir_cmds
   end
 
   @spec dashboard_sections(RenderInput.t(), pos_integer(), Theme.Agent.t()) :: [
@@ -602,14 +631,8 @@ defmodule Minga.Agent.View.Renderer do
       dashboard_blank(width, at)
     ]
 
-    # ── Working directory section ──
-    cwd = File.cwd!() |> shorten_path()
-
-    cwd_lines = [
-      dashboard_text(" Directory", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
-      dashboard_text("  #{cwd}", width, fg: at.text_fg, bg: at.panel_bg),
-      dashboard_blank(width, at)
-    ]
+    # ── LSP section ──
+    lsp_lines = dashboard_lsp_section(input.lsp_servers, width, at)
 
     # ── Status section ──
     status_text =
@@ -629,7 +652,31 @@ defmodule Minga.Agent.View.Renderer do
       )
     ]
 
-    title_lines ++ context_lines ++ model_lines ++ cwd_lines ++ status_lines
+    title_lines ++ context_lines ++ model_lines ++ lsp_lines ++ status_lines
+  end
+
+  @spec dashboard_lsp_section([atom()], pos_integer(), Theme.Agent.t()) :: [
+          (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
+        ]
+  defp dashboard_lsp_section([], width, at) do
+    [
+      dashboard_text(" LSP", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
+      dashboard_text("  No servers active", width, fg: at.hint_fg, bg: at.panel_bg),
+      dashboard_blank(width, at)
+    ]
+  end
+
+  defp dashboard_lsp_section(servers, width, at) do
+    header = [
+      dashboard_text(" LSP", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+    ]
+
+    server_lines =
+      Enum.map(servers, fn name ->
+        dashboard_text("  #{name}", width, fg: at.text_fg, bg: at.panel_bg)
+      end)
+
+    header ++ server_lines ++ [dashboard_blank(width, at)]
   end
 
   @spec dashboard_text(String.t(), pos_integer(), keyword()) ::
