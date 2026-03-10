@@ -112,6 +112,7 @@ defmodule Minga.Agent.View.Renderer do
             scroll_offset: non_neg_integer(),
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
+            provider_name: String.t(),
             thinking_level: String.t(),
             auto_scroll: boolean(),
             display_start_index: non_neg_integer(),
@@ -220,11 +221,17 @@ defmodule Minga.Agent.View.Renderer do
     if state.agent.panel.input_focused do
       panel = state.agent.panel
       {cursor_line, cursor_col} = panel.input_cursor
-      visible_lines = min(length(panel.input_lines), @max_input_lines)
-      input_height = visible_lines + 2
-      panel_end = rows - 1 - 1 - input_height
-      input_text_row = panel_end + 1 + min(cursor_line, visible_lines - 1)
-      input_col = 2 + cursor_col
+      visible_lines = max(min(length(panel.input_lines), @max_input_lines), 1)
+      input_height = compute_input_height(panel.input_lines)
+      modeline_row = rows - 1 - 1
+      panel_start = 2
+      panel_height = max(modeline_row - panel_start, 1)
+      chat_height = max(panel_height - input_height, 1)
+      input_row = panel_start + chat_height
+
+      # Text starts at input_row + 1 (after top border), col 4 (after "│" + 3 spaces)
+      input_text_row = input_row + 1 + min(cursor_line, visible_lines - 1)
+      input_col = 1 + 3 + cursor_col
       {input_text_row, input_col}
     else
       {rows, 0}
@@ -290,6 +297,7 @@ defmodule Minga.Agent.View.Renderer do
         scroll_offset: panel.scroll_offset,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
+        provider_name: panel.provider_name,
         thinking_level: panel.thinking_level,
         auto_scroll: panel.auto_scroll,
         display_start_index: panel.display_start_index,
@@ -345,7 +353,7 @@ defmodule Minga.Agent.View.Renderer do
     usage_text = format_usage(input.usage)
     context_text = format_context_bar(input.usage, panel.model_name)
 
-    left = " #{status_icon}  󰚩 #{panel.model_name}"
+    left = " #{status_icon} "
     center = input.session_title
 
     right_parts = [context_text, usage_text] |> Enum.reject(&(&1 == "")) |> Enum.join("  ")
@@ -361,7 +369,7 @@ defmodule Minga.Agent.View.Renderer do
 
     bar_text =
       left <>
-        String.duplicate("─", max(gap_left - 2, 1)) <>
+        String.duplicate("─", max(gap_left - 1, 1)) <>
         " " <>
         center <>
         " " <>
@@ -798,31 +806,46 @@ defmodule Minga.Agent.View.Renderer do
   @spec render_input_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
           [DisplayList.draw()]
   defp render_input_from_input(input, row, width) do
-    cols = width
     at = Theme.agent_theme(input.theme)
     panel = input.panel
+    border_style = [fg: at.input_border, bg: at.panel_bg]
 
-    label = "─── Prompt "
-    border_rest = String.duplicate("─", max(cols - String.length(label), 0))
-    border = label <> border_rest
-    border_cmd = DisplayList.draw(row, 0, border, fg: at.input_border, bg: at.panel_bg)
-
-    blank = String.duplicate(" ", cols)
     is_empty = panel.input_lines == [""]
     visible_lines = min(length(panel.input_lines), @max_input_lines)
 
+    # Horizontal layout: "│" (1) + "   " (3) + text + pad + " " (1) + "│" (1) = 6 chars of chrome
+    pad_left = 3
+    pad_right = 1
+    inner_width = max(width - 2 - pad_left - pad_right, 1)
+    left_pad = String.duplicate(" ", pad_left)
+    right_pad = String.duplicate(" ", pad_right)
+
+    # ── Top border: ╭─ Prompt ─────────╮
+    label = "─ Prompt "
+    fill_len = max(width - 2 - String.length(label), 0)
+    top_line = "╭" <> label <> String.duplicate("─", fill_len) <> "╮"
+    top_cmd = DisplayList.draw(row, 0, top_line, border_style)
+
+    # ── Content rows: │   text            │
+    content_start = row + 1
+
     line_cmds =
       if is_empty do
-        input_row = row + 1
-        blank_cmd = DisplayList.draw(input_row, 0, blank, bg: at.input_bg)
-        placeholder = String.slice("  Type a message, Enter to send", 0, cols)
+        placeholder = String.slice("Type a message, Enter to send", 0, inner_width)
+        padded = String.pad_trailing(placeholder, inner_width)
+        inner = left_pad <> padded <> right_pad
+        fill = String.pad_trailing(inner, max(width - 2, 0))
 
-        text_cmd =
-          DisplayList.draw(input_row, 0, placeholder, fg: at.input_placeholder, bg: at.input_bg)
-
-        [blank_cmd, text_cmd]
+        [
+          DisplayList.draw(content_start, 0, "│" <> fill <> "│", bg: at.input_bg),
+          DisplayList.draw(content_start, 0, "│", border_style),
+          DisplayList.draw(content_start, width - 1, "│", border_style),
+          DisplayList.draw(content_start, 1 + pad_left, padded,
+            fg: at.input_placeholder,
+            bg: at.input_bg
+          )
+        ]
       else
-        # Render visible input lines (scroll to keep cursor visible)
         {cursor_line, _cursor_col} = panel.input_cursor
         total_lines = length(panel.input_lines)
         scroll = input_scroll_offset(cursor_line, visible_lines, total_lines)
@@ -832,35 +855,56 @@ defmodule Minga.Agent.View.Renderer do
         |> Enum.take(visible_lines)
         |> Enum.with_index()
         |> Enum.flat_map(fn {line_text, idx} ->
-          r = row + 1 + idx
-          blank_cmd = DisplayList.draw(r, 0, blank, bg: at.input_bg)
-          display = String.slice("  " <> line_text, 0, cols)
-          text_cmd = DisplayList.draw(r, 0, display, fg: at.text_fg, bg: at.input_bg)
-          [blank_cmd, text_cmd]
+          r = content_start + idx
+          display = String.slice(line_text, 0, inner_width)
+          padded = String.pad_trailing(display, inner_width)
+          inner = left_pad <> padded <> right_pad
+          fill = String.pad_trailing(inner, max(width - 2, 0))
+
+          [
+            DisplayList.draw(r, 0, "│" <> fill <> "│", bg: at.input_bg),
+            DisplayList.draw(r, 0, "│", border_style),
+            DisplayList.draw(r, width - 1, "│", border_style),
+            DisplayList.draw(r, 1 + pad_left, padded, fg: at.text_fg, bg: at.input_bg)
+          ]
         end)
       end
 
-    # Model info line (replaces bottom padding)
-    pad_row = row + 1 + visible_lines
+    # ── Bottom border with model info: ╰─ 󰚩 model · provider ───╯
+    bottom_row = content_start + max(visible_lines, 1)
     model_label = model_info_text(input)
-    model_pad = String.pad_trailing(model_label, cols)
+    model_prefix = "─ " <> model_label <> " "
+    model_fill_len = max(width - 2 - String.length(model_prefix), 0)
+    bottom_line = "╰" <> model_prefix <> String.duplicate("─", model_fill_len) <> "╯"
+    bottom_cmd = DisplayList.draw(bottom_row, 0, bottom_line, border_style)
 
-    pad_cmd = DisplayList.draw(pad_row, 0, model_pad, fg: at.hint_fg, bg: at.input_bg)
-
-    [border_cmd | line_cmds] ++ [pad_cmd]
+    [top_cmd | line_cmds] ++ [bottom_cmd]
   end
 
   @spec model_info_text(RenderInput.t()) :: String.t()
   defp model_info_text(input) do
     panel = input.panel
+    model = titleize(panel.model_name)
+    provider = if panel.provider_name != "", do: " · #{titleize(panel.provider_name)}", else: ""
     thinking = if panel.thinking_level != "", do: " · #{panel.thinking_level}", else: ""
-    "  󰚩 #{panel.model_name}#{thinking}"
+    "󰚩 #{model}#{provider}#{thinking}"
   end
 
-  # Computes the dynamic input area height: border(1) + visible lines + padding(1).
+  @spec titleize(String.t()) :: String.t()
+  defp titleize(str) do
+    str
+    |> String.split(~r/[-_\s]+/)
+    |> Enum.map_join(" ", fn word ->
+      {first, rest} = String.split_at(word, 1)
+      String.upcase(first) <> rest
+    end)
+  end
+
+  # Computes the dynamic input area height for the bordered box:
+  # top border(1) + visible lines + bottom border(1)
   @spec compute_input_height([String.t()]) :: pos_integer()
   defp compute_input_height(input_lines) do
-    visible = min(length(input_lines), @max_input_lines)
+    visible = max(min(length(input_lines), @max_input_lines), 1)
     visible + 2
   end
 
@@ -1059,7 +1103,7 @@ defmodule Minga.Agent.View.Renderer do
   defp context_bar_text(pct) do
     filled = div(pct * @context_bar_width, 100)
     empty = @context_bar_width - filled
-    "[#{String.duplicate("█", filled)}#{String.duplicate("░", empty)}] #{pct}%"
+    "Context [#{String.duplicate("█", filled)}#{String.duplicate("░", empty)}] #{pct}%"
   end
 
   # Renders colored overlay draw commands for the context bar.

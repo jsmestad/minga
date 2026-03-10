@@ -521,17 +521,10 @@ defmodule Minga.Agent.ChatRenderer do
     [header | result_lines] ++ [footer, spacer]
   end
 
-  defp message_lines({:usage, usage}, at, width, _theme) do
-    text = format_turn_usage(usage)
-    padding = max(width - String.length(text) - 4, 0)
-
-    [
-      {[
-         {"  ", []},
-         {String.duplicate(" ", padding), []},
-         {text, [fg: at.usage_fg]}
-       ], :text, at.panel_bg}
-    ]
+  defp message_lines({:usage, _usage}, _at, _width, _theme) do
+    # Per-turn usage is logged to *Messages* instead of shown inline.
+    # See Minga.Agent.Session for the logging call.
+    []
   end
 
   defp message_lines({:system, text, level}, at, width, _theme) do
@@ -810,23 +803,6 @@ defmodule Minga.Agent.ChatRenderer do
   end
 
   defp approval_detail(_), do: ""
-
-  @spec format_turn_usage(map()) :: String.t()
-  defp format_turn_usage(%{input: i, output: o, cache_read: cr, cache_write: cw, cost: c}) do
-    cache_part =
-      if cr > 0 or cw > 0 do
-        cache = "cache:#{format_tokens(cr)}"
-        if cw > 0, do: " " <> cache <> "/#{format_tokens(cw)}w", else: " " <> cache
-      else
-        ""
-      end
-
-    "↑#{format_tokens(i)} ↓#{format_tokens(o)}#{cache_part} $#{Float.round(c, 3)}"
-  end
-
-  defp format_turn_usage(%{input: i, output: o, cost: c}) do
-    "↑#{format_tokens(i)} ↓#{format_tokens(o)} $#{Float.round(c, 3)}"
-  end
 
   @spec format_tool_timing(map()) :: String.t()
   defp format_tool_timing(%{status: :running, started_at: started_at})

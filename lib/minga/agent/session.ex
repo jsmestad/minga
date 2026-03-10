@@ -55,6 +55,7 @@ defmodule Minga.Agent.Session do
           pending_thinking_level: String.t() | nil,
           pending_approval: pending_approval(),
           model_name: String.t(),
+          provider_name: String.t(),
           save_timer: reference() | nil
         }
 
@@ -223,6 +224,11 @@ defmodule Minga.Agent.Session do
     session_id = Keyword.get(opts, :session_id, generate_session_id())
     model_name = Keyword.get(opts, :model_name, "unknown")
 
+    provider_name =
+      provider_opts
+      |> Keyword.get(:provider, "unknown")
+      |> to_string()
+
     state = %{
       session_id: session_id,
       provider: nil,
@@ -236,6 +242,7 @@ defmodule Minga.Agent.Session do
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
       model_name: model_name,
+      provider_name: provider_name,
       save_timer: nil,
       created_at: DateTime.utc_now()
     }
@@ -535,6 +542,8 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
     state =
       if usage do
+        log_turn_usage(usage, state)
+
         state = %{
           state
           | total_usage: %{
@@ -811,5 +820,42 @@ defmodule Minga.Agent.Session do
     [a, b, c, d, e]
     |> Enum.map_join("-", &Integer.to_string(&1, 16))
     |> String.downcase()
+  end
+
+  @spec log_turn_usage(map(), state()) :: :ok
+  defp log_turn_usage(usage, state) do
+    i = Map.get(usage, :input, 0)
+    o = Map.get(usage, :output, 0)
+    cr = Map.get(usage, :cache_read, 0)
+    cw = Map.get(usage, :cache_write, 0)
+    cost = Map.get(usage, :cost, 0.0)
+
+    provider = titleize(state.provider_name)
+    model = titleize(state.model_name)
+
+    cache_part =
+      if cr > 0 or cw > 0 do
+        " cache:#{format_k(cr)}/#{format_k(cw)}"
+      else
+        ""
+      end
+
+    Minga.Editor.log_to_messages(
+      "[Agent] #{provider}/#{model} turn: in:#{format_k(i)} out:#{format_k(o)}#{cache_part} cost:$#{Float.round(cost, 4)}"
+    )
+  end
+
+  @spec format_k(number()) :: String.t()
+  defp format_k(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
+  defp format_k(n), do: "#{n}"
+
+  @spec titleize(String.t()) :: String.t()
+  defp titleize(str) do
+    str
+    |> String.split(~r/[-_\s]+/)
+    |> Enum.map_join(" ", fn word ->
+      {first, rest} = String.split_at(word, 1)
+      String.upcase(first) <> rest
+    end)
   end
 end
