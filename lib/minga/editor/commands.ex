@@ -42,6 +42,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.State.TabBar
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Formatter
@@ -552,6 +553,20 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
+
+  # Tab bar click: tab_goto_N switches to tab with id N
+  def execute(%{tab_bar: %TabBar{}} = state, cmd) when is_atom(cmd) do
+    case Atom.to_string(cmd) do
+      "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {tab_id, ""} -> EditorState.switch_tab(state, tab_id)
+          _ -> state
+        end
+
+      _ ->
+        state
+    end
+  end
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state

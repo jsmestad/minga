@@ -552,7 +552,12 @@ defmodule Minga.Editor.Mouse do
        ),
        do: state
 
-  defp maybe_handle_content_click(state, row, col), do: handle_content_click(state, row, col)
+  defp maybe_handle_content_click(state, row, col) do
+    case tab_bar_click(state, row, col) do
+      {:command, cmd} -> Minga.Editor.dispatch_command(state, cmd)
+      :not_tab_bar -> handle_content_click(state, row, col)
+    end
+  end
 
   @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
           state()
@@ -866,6 +871,34 @@ defmodule Minga.Editor.Mouse do
       end
 
     BufferServer.move_to(buf, {target_line, target_col})
+  end
+
+  # ── Tab bar click detection ──────────────────────────────────────────────
+
+  @spec tab_bar_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:command, atom()} | :not_tab_bar
+  defp tab_bar_click(state, row, col) do
+    layout = Layout.get(state)
+    {tb_row, tb_col, tb_width, tb_height} = layout.tab_bar
+
+    if tb_height > 0 and row == tb_row and col >= tb_col and col < tb_col + tb_width do
+      find_tab_bar_region(state.tab_bar_click_regions, col)
+    else
+      :not_tab_bar
+    end
+  end
+
+  @spec find_tab_bar_region(
+          [Minga.Editor.TabBarRenderer.click_region()],
+          non_neg_integer()
+        ) :: {:command, atom()} | :not_tab_bar
+  defp find_tab_bar_region(regions, col) do
+    case Enum.find(regions, fn {start_col, end_col, _cmd} ->
+           col >= start_col and col <= end_col
+         end) do
+      {_, _, cmd} -> {:command, cmd}
+      nil -> :not_tab_bar
+    end
   end
 
   # ── Modeline segment click detection ─────────────────────────────────────
