@@ -319,6 +319,21 @@ defmodule Minga.Agent.PanelState do
   end
 
   # ── Scrolling ──────────────────────────────────────────────────────────────
+  #
+  # Scroll uses a two-field model:
+  #
+  #   scroll_offset  — concrete line count from the top of the rendered
+  #                    content. Always a real number, never a sentinel.
+  #   auto_scroll    — boolean flag meaning "pin to bottom." When true,
+  #                    the renderer ignores scroll_offset and computes the
+  #                    bottom position from the actual content dimensions.
+  #
+  # User-initiated scrolling (j/k, Ctrl-d/u, mouse wheel) sets auto_scroll
+  # to false and adjusts scroll_offset. The renderer clamps the offset to
+  # the valid range so overshooting is harmless.
+  #
+  # Streaming events call maybe_auto_scroll/1, which is a no-op when
+  # auto_scroll is false (user scrolled away manually).
 
   @doc "Scrolls the content up by the given number of lines. Disengages auto-scroll."
   @spec scroll_up(t(), non_neg_integer()) :: t()
@@ -332,10 +347,15 @@ defmodule Minga.Agent.PanelState do
     %{state | scroll_offset: state.scroll_offset + amount, auto_scroll: false}
   end
 
-  @doc "Scrolls to the bottom and re-engages auto-scroll."
+  @doc """
+  Pins the chat to the bottom and re-engages auto-scroll.
+
+  Does not modify `scroll_offset`. The renderer resolves "bottom" to a
+  concrete line number at render time using the actual content dimensions.
+  """
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = state) do
-    %{state | scroll_offset: 999_999, auto_scroll: true}
+    %{state | auto_scroll: true}
   end
 
   @doc "Scrolls to the top of the chat. Disengages auto-scroll."
@@ -345,19 +365,19 @@ defmodule Minga.Agent.PanelState do
   end
 
   @doc """
-  Scrolls to the bottom only if auto-scroll is engaged.
-
-  Called by event handlers when new streaming content arrives. No-ops if the
-  user has manually scrolled away from the bottom.
+  No-op unless auto-scroll is engaged. Called by streaming event handlers
+  so the chat follows new content. Does not touch scroll_offset; the
+  renderer handles the actual positioning.
   """
   @spec maybe_auto_scroll(t()) :: t()
-  def maybe_auto_scroll(%__MODULE__{auto_scroll: true} = state), do: scroll_to_bottom(state)
   def maybe_auto_scroll(%__MODULE__{} = state), do: state
 
-  @doc "Re-engages auto-scroll (e.g., on new agent turn start)."
+  @doc """
+  Re-engages auto-scroll (e.g., on G press or new agent turn start).
+  """
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{} = state) do
-    scroll_to_bottom(%{state | auto_scroll: true})
+    %{state | auto_scroll: true}
   end
 
   @doc "Sets the input focus state."

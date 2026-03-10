@@ -288,9 +288,11 @@ defmodule Minga.Agent.PanelStateTest do
       assert panel.scroll_offset == 0
     end
 
-    test "scroll_to_bottom sets large offset" do
-      panel = PanelState.new() |> PanelState.scroll_to_bottom()
-      assert panel.scroll_offset > 0
+    test "scroll_to_bottom engages auto_scroll without changing offset" do
+      panel = PanelState.new() |> PanelState.scroll_down(10) |> PanelState.scroll_to_bottom()
+      assert panel.auto_scroll
+      # offset stays at what scroll_down set; renderer resolves "bottom"
+      assert panel.scroll_offset == 10
     end
   end
 
@@ -324,9 +326,10 @@ defmodule Minga.Agent.PanelStateTest do
       assert panel.auto_scroll
     end
 
-    test "maybe_auto_scroll scrolls to bottom when engaged" do
+    test "maybe_auto_scroll is always a no-op (renderer handles pinning)" do
       panel = PanelState.new() |> PanelState.maybe_auto_scroll()
-      assert panel.scroll_offset == 999_999
+      # auto_scroll stays true (default), offset untouched
+      assert panel.scroll_offset == 0
       assert panel.auto_scroll
     end
 
@@ -340,14 +343,40 @@ defmodule Minga.Agent.PanelStateTest do
       refute panel.auto_scroll
     end
 
-    test "engage_auto_scroll re-engages and scrolls to bottom" do
+    test "engage_auto_scroll re-engages auto_scroll flag" do
       panel =
         PanelState.new()
         |> PanelState.scroll_up(5)
         |> PanelState.engage_auto_scroll()
 
       assert panel.auto_scroll
-      assert panel.scroll_offset == 999_999
+      # offset is not reset to a sentinel; renderer handles bottom pinning
+      assert panel.scroll_offset == 0
+    end
+
+    test "scroll_down from auto_scroll produces concrete offset, not sentinel" do
+      # This is the core regression test. Previously scroll_to_bottom set
+      # scroll_offset to 999_999. scroll_down(1) would produce 1_000_000,
+      # and the renderer's clamp made both resolve to the same visible
+      # content. With the two-field model, scroll_offset stays concrete.
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_down(5)
+
+      assert panel.scroll_offset == 5
+      refute panel.auto_scroll
+    end
+
+    test "scroll_up from auto_scroll produces concrete offset, not sentinel" do
+      # Previously: scroll_offset was 999_999, scroll_up(1) => 999_998,
+      # both clamped to the same value by the renderer. Now: offset starts
+      # at 0, scroll_up(1) => 0 (clamped), which is different from bottom.
+      panel =
+        PanelState.new()
+        |> PanelState.scroll_up(1)
+
+      assert panel.scroll_offset == 0
+      refute panel.auto_scroll
     end
   end
 
