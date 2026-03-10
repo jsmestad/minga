@@ -626,15 +626,18 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(%{buffers: %{active: buf}} = state, total_lines) do
+  defp gutter_width(%{buffers: %{active: buf}, git_buffers: git_buffers}, total_lines) do
+    ln_style =
+      if buf, do: Minga.Buffer.Server.get_option(buf, :line_numbers), else: :none
+
     number_w =
-      if state.line_numbers == :none, do: 0, else: Viewport.gutter_width(total_lines)
+      if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
 
     # Sign column is shown when the buffer has a file path or a git buffer
     # registered. This must match render_pipeline.ex's gutter_dimensions/4.
     has_sign_column =
       buf != nil and
-        (Map.has_key?(state.git_buffers, buf) or BufferServer.file_path(buf) != nil)
+        (Map.has_key?(git_buffers, buf) or BufferServer.file_path(buf) != nil)
 
     sign_w =
       if has_sign_column, do: Gutter.sign_column_width(), else: 0

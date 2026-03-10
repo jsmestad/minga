@@ -384,7 +384,7 @@ defmodule Minga.Editor.RenderPipeline do
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
     # Gutter dimensions
-    line_number_style = state.line_numbers
+    line_number_style = BufferServer.get_option(window.buffer, :line_numbers)
 
     {has_sign_column, gutter_w} =
       gutter_dimensions(state, window.buffer, line_number_style, line_count)

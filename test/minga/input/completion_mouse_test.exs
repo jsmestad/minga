@@ -17,8 +17,7 @@ defmodule Minga.Input.CompletionMouseTest do
       mode: :insert,
       mode_state: Mode.initial_state(),
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
-      completion: completion,
-      line_numbers: :hybrid
+      completion: completion
     }
   end
 

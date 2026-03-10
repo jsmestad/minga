@@ -144,16 +144,19 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Line number style ─────────────────────────────────────────────────────
 
-  def execute(state, :cycle_line_numbers) do
+  def execute(%{buffers: %{active: buf}} = state, :cycle_line_numbers) when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
     next =
-      case state.line_numbers do
+      case current do
         :hybrid -> :absolute
         :absolute -> :relative
         :relative -> :none
         :none -> :hybrid
       end
 
-    %{state | line_numbers: next}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
   def execute(%{buffers: %{active: buf}} = state, :toggle_wrap) when is_pid(buf) do
@@ -222,32 +225,47 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :number}}) do
-    %{state | line_numbers: :absolute}
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :number}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :line_numbers, :absolute)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :nonumber}}) do
-    %{state | line_numbers: :none}
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :nonumber}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :line_numbers, :none)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :relativenumber}}) do
-    new_style =
-      case state.line_numbers do
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :relativenumber}})
+      when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
+    next =
+      case current do
         :absolute -> :hybrid
         _ -> :relative
       end
 
-    %{state | line_numbers: new_style}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :norelativenumber}}) do
-    new_style =
-      case state.line_numbers do
+  def execute(
+        %{buffers: %{active: buf}} = state,
+        {:execute_ex_command, {:set, :norelativenumber}}
+      )
+      when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
+    next =
+      case current do
         :hybrid -> :absolute
         _ -> :none
       end
 
-    %{state | line_numbers: new_style}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
   def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :wrap}})

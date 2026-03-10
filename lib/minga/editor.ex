@@ -1624,12 +1624,10 @@ defmodule Minga.Editor do
   defp apply_config_options(state) do
     state =
       try do
-        line_numbers = ConfigOptions.get(:line_numbers)
-        autopair = ConfigOptions.get(:autopair)
         theme_name = ConfigOptions.get(:theme)
         theme = Minga.Theme.get!(theme_name)
 
-        %{state | line_numbers: line_numbers, autopair_enabled: autopair, theme: theme}
+        %{state | theme: theme}
       catch
         :exit, _ -> state
       end
