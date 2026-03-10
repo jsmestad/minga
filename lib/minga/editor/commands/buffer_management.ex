@@ -16,6 +16,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.TabBar
   alias Minga.Formatter
   alias Minga.Mode
 
@@ -435,6 +436,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
 
   @spec next_buffer(state()) :: state()
+  defp next_buffer(%{tab_bar: %TabBar{} = tb} = state) do
+    next_tb = TabBar.next(tb)
+
+    if next_tb.active_id != tb.active_id do
+      EditorState.switch_tab(state, next_tb.active_id)
+    else
+      state
+    end
+  end
+
   defp next_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
     switch_to_buffer(state, rem(idx + 1, Enum.count(buffers)))
   end
@@ -442,6 +453,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp next_buffer(state), do: state
 
   @spec prev_buffer(state()) :: state()
+  defp prev_buffer(%{tab_bar: %TabBar{} = tb} = state) do
+    prev_tb = TabBar.prev(tb)
+
+    if prev_tb.active_id != tb.active_id do
+      EditorState.switch_tab(state, prev_tb.active_id)
+    else
+      state
+    end
+  end
+
   defp prev_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
     len = Enum.count(buffers)
     new_idx = if idx == 0, do: len - 1, else: idx - 1

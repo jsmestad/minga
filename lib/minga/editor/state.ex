@@ -242,10 +242,43 @@ defmodule Minga.Editor.State do
   @doc """
   Adds a new buffer and makes it the active buffer for the current window.
 
-  Centralizes `Buffers.add` + window sync so callers don't need to remember
-  to call `sync_active_window_buffer/1`.
+  Also creates a file tab for the buffer in the tab bar. The current tab
+  is snapshotted before switching so its context is preserved.
   """
   @spec add_buffer(t(), pid()) :: t()
+  def add_buffer(%__MODULE__{buffers: bs, tab_bar: %TabBar{} = tb} = state, pid) do
+    label = buffer_label(pid)
+
+    # Snapshot the current tab. Override mode to :normal because
+    # add_buffer may run mid-command (e.g. during :e) when mode is
+    # :command. The saved context should reflect the resting state.
+    current_ctx =
+      snapshot_tab_context(state)
+      |> Map.put(:mode, :normal)
+      |> Map.put(:mode_state, Minga.Mode.initial_state())
+
+    tb = TabBar.update_context(tb, tb.active_id, current_ctx)
+
+    # Add the buffer to the pool
+    new_bs = Buffers.add(bs, pid)
+    state = %{state | buffers: new_bs}
+
+    # Create a file tab (TabBar.add makes it active)
+    {tb, new_tab} = TabBar.add(tb, :file, label)
+
+    # Snapshot the new tab's context. Use :normal mode for the same reason.
+    state = %{state | tab_bar: tb} |> sync_active_window_buffer()
+
+    new_ctx =
+      snapshot_tab_context(state)
+      |> Map.put(:mode, :normal)
+      |> Map.put(:mode_state, Minga.Mode.initial_state())
+
+    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+
+    %{state | tab_bar: tb}
+  end
+
   def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
     %{state | buffers: Buffers.add(bs, pid)}
     |> sync_active_window_buffer()
@@ -321,6 +354,25 @@ defmodule Minga.Editor.State do
         state
     end
   end
+
+  @spec buffer_label(pid()) :: String.t()
+  defp buffer_label(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: live_buffer_label(pid), else: "[dead]"
+  end
+
+  defp buffer_label(_), do: "[unknown]"
+
+  @spec live_buffer_label(pid()) :: String.t()
+  defp live_buffer_label(pid) do
+    case BufferServer.buffer_name(pid) do
+      nil -> BufferServer.file_path(pid) |> path_or_scratch()
+      name -> name
+    end
+  end
+
+  @spec path_or_scratch(String.t() | nil) :: String.t()
+  defp path_or_scratch(nil), do: "[scratch]"
+  defp path_or_scratch(path), do: Path.basename(path)
 
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 
