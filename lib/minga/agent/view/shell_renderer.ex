@@ -22,6 +22,7 @@ defmodule Minga.Agent.View.ShellRenderer do
           String.t(),
           status(),
           non_neg_integer(),
+          boolean(),
           non_neg_integer(),
           Theme.t()
         ) :: [DisplayList.draw()]
@@ -30,7 +31,8 @@ defmodule Minga.Agent.View.ShellRenderer do
         command,
         output,
         status,
-        scroll,
+        scroll_offset,
+        auto_follow,
         spinner_frame,
         theme
       ) do
@@ -39,7 +41,7 @@ defmodule Minga.Agent.View.ShellRenderer do
     header = render_header(row_off, col_off, width, command, status, spinner_frame, at)
     content_start = row_off + 1
     content_height = max(height - 1, 1)
-    content = render_output(content_start, col_off, width, content_height, output, scroll, at)
+    content = render_output(content_start, col_off, width, content_height, output, scroll_offset, auto_follow, at)
 
     header ++ content
   end
@@ -68,12 +70,14 @@ defmodule Minga.Agent.View.ShellRenderer do
           pos_integer(),
           String.t(),
           non_neg_integer(),
+          boolean(),
           Theme.Agent.t()
         ) :: [DisplayList.draw()]
-  defp render_output(start_row, col, width, height, output, scroll, at) do
+  defp render_output(start_row, col, width, height, output, scroll_offset, auto_follow, at) do
     lines = String.split(output, "\n")
     total = length(lines)
-    scroll_clamped = min(scroll, max(total - height, 0))
+    max_scroll = max(total - height, 0)
+    scroll_clamped = if auto_follow, do: max_scroll, else: min(scroll_offset, max_scroll)
 
     visible = Enum.slice(lines, scroll_clamped, height)
 

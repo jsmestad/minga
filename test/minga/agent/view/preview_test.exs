@@ -44,20 +44,22 @@ defmodule Minga.Agent.View.PreviewTest do
       assert {:shell, "false", "exit code 1", :error} = p.content
     end
 
-    test "auto-scroll engages on shell output when auto_follow is true" do
+    test "auto-follow stays engaged on shell output update" do
       p = Preview.new() |> Preview.set_shell("tail -f log")
       p = Preview.update_shell_output(p, "line 1\nline 2\nline 3")
-      assert p.scroll_offset == 999_999
+      # auto_follow true means the renderer pins to bottom; no sentinel
+      assert p.auto_follow
+      assert p.scroll_offset == 0
     end
 
-    test "auto-scroll pauses when user scrolls manually" do
+    test "auto-follow pauses when user scrolls manually" do
       p = Preview.new() |> Preview.set_shell("tail -f log")
       p = Preview.scroll_up(p, 5)
-      assert p.auto_follow == false
+      refute p.auto_follow
 
-      # New output does not auto-scroll
+      # New output does not re-engage auto-follow
       p = Preview.update_shell_output(p, "new output")
-      refute p.scroll_offset == 999_999
+      refute p.auto_follow
     end
   end
 
@@ -115,12 +117,13 @@ defmodule Minga.Agent.View.PreviewTest do
       assert p.scroll_offset == 0
     end
 
-    test "scroll_to_bottom sets large offset and re-engages auto-follow" do
+    test "scroll_to_bottom re-engages auto-follow without changing offset" do
       p = Preview.new() |> Preview.scroll_down(5)
-      assert p.auto_follow == false
+      refute p.auto_follow
       p = Preview.scroll_to_bottom(p)
-      assert p.scroll_offset == 999_999
-      assert p.auto_follow == true
+      # offset stays at 5; renderer resolves "bottom"
+      assert p.scroll_offset == 5
+      assert p.auto_follow
     end
   end
 

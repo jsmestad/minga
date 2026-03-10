@@ -140,10 +140,15 @@ defmodule Minga.Agent.View.Preview do
     %{preview | scroll_offset: 0, auto_follow: false}
   end
 
-  @doc "Scrolls to the bottom. Re-engages auto-follow."
+  @doc """
+  Pins to the bottom and re-engages auto-follow.
+
+  Does not modify scroll_offset. The renderer resolves "bottom" to a
+  concrete line number at render time using the actual content dimensions.
+  """
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = preview) do
-    %{preview | scroll_offset: 999_999, auto_follow: true}
+    %{preview | auto_follow: true}
   end
 
   # ── Queries ─────────────────────────────────────────────────────────────────
@@ -170,10 +175,8 @@ defmodule Minga.Agent.View.Preview do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  # When auto_follow is true, the renderer pins to bottom at render time.
+  # No sentinel value needed; just return the preview unchanged.
   @spec maybe_auto_scroll_preview(t()) :: t()
-  defp maybe_auto_scroll_preview(%__MODULE__{auto_follow: true} = preview) do
-    %{preview | scroll_offset: 999_999}
-  end
-
   defp maybe_auto_scroll_preview(%__MODULE__{} = preview), do: preview
 end

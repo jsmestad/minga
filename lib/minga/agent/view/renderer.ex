@@ -271,8 +271,17 @@ defmodule Minga.Agent.View.Renderer do
         empty_usage()
       end
 
-    # Pre-fetch buffer snapshot for file viewer
-    scroll = state.agentic.preview.scroll_offset
+    # Pre-fetch buffer snapshot for file viewer.
+    # When auto_follow is true, we ask for the tail of the buffer by
+    # passing a large offset; render_snapshot clamps internally.
+    preview_scroll =
+      if state.agentic.preview.auto_follow do
+        # Large value that render_snapshot will clamp to the real bottom.
+        999_999
+      else
+        state.agentic.preview.scroll_offset
+      end
+
     rows = state.viewport.rows
     input_h = compute_input_height(state.agent.panel.input_lines)
     content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
@@ -283,7 +292,7 @@ defmodule Minga.Agent.View.Renderer do
           nil
 
         buf ->
-          snapshot = BufferServer.render_snapshot(buf, scroll, content_rows)
+          snapshot = BufferServer.render_snapshot(buf, preview_scroll, content_rows)
           %{snapshot | name: snapshot_display_name(snapshot)}
       end
 
@@ -463,27 +472,44 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:shell, cmd, output, status}, scroll_offset: scroll}} =
+         %{preview: %Preview{content: {:shell, cmd, output, status}} = preview} =
            input,
          rect
        ) do
     spinner = input.panel.spinner_frame
-    ShellRenderer.render(rect, cmd, output, status, scroll, spinner, input.theme)
+
+    ShellRenderer.render(
+      rect,
+      cmd,
+      output,
+      status,
+      preview.scroll_offset,
+      preview.auto_follow,
+      spinner,
+      input.theme
+    )
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:file, path, content}, scroll_offset: scroll}} = input,
+         %{preview: %Preview{content: {:file, path, content}} = preview} = input,
          {row_off, col_off, width, height}
        ) do
-    render_file_preview(input, path, content, scroll, {row_off, col_off, width, height})
+    render_file_preview(
+      input,
+      path,
+      content,
+      preview.scroll_offset,
+      preview.auto_follow,
+      {row_off, col_off, width, height}
+    )
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:directory, path, entries}, scroll_offset: scroll}} =
+         %{preview: %Preview{content: {:directory, path, entries}} = preview} =
            input,
          rect
        ) do
-    DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
+    DirectoryRenderer.render(rect, path, entries, preview.scroll_offset, preview.auto_follow, input.theme)
   end
 
   defp render_preview(%{preview: %Preview{content: :empty}} = input, rect) do
@@ -691,16 +717,17 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── File content preview ────────────────────────────────────────────────────
 
-  @spec render_file_preview(RenderInput.t(), String.t(), String.t(), non_neg_integer(), rect()) ::
+  @spec render_file_preview(RenderInput.t(), String.t(), String.t(), non_neg_integer(), boolean(), rect()) ::
           [DisplayList.draw()]
-  defp render_file_preview(input, path, content, scroll, {row_off, col_off, width, height}) do
+  defp render_file_preview(input, path, content, scroll, auto_follow, {row_off, col_off, width, height}) do
     at = Theme.agent_theme(input.theme)
     lines = String.split(content, "\n")
     total = length(lines)
 
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
-    scroll_clamped = min(scroll, max(total - content_rows, 0))
+    max_scroll = max(total - content_rows, 0)
+    scroll_clamped = if auto_follow, do: max_scroll, else: min(scroll, max_scroll)
     visible = Enum.slice(lines, scroll_clamped, content_rows)
 
     gutter_w = file_viewer_gutter_width(total)
@@ -751,13 +778,19 @@ defmodule Minga.Agent.View.Renderer do
   @spec render_buffer_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
   defp render_buffer_preview(input, {row_off, col_off, width, height}) do
     snapshot = input.buffer_snapshot
-    scroll = input.preview.scroll_offset
 
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
 
     lines = snapshot.lines
     line_count = snapshot.line_count
+
+    scroll =
+      if input.preview.auto_follow do
+        max(line_count - content_rows, 0)
+      else
+        min(input.preview.scroll_offset, max(line_count - content_rows, 0))
+      end
 
     abs_gutter_col = max(col_off, 0)
     local_gutter_w = file_viewer_gutter_width(line_count)

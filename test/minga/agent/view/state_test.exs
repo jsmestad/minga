@@ -227,9 +227,9 @@ defmodule Minga.Agent.View.StateTest do
       assert av.preview.scroll_offset == 0
     end
 
-    test "scroll_viewer_to_bottom sets a large offset" do
-      av = ViewState.new() |> ViewState.scroll_viewer_to_bottom()
-      assert av.preview.scroll_offset > 0
+    test "scroll_viewer_to_bottom engages auto_follow" do
+      av = ViewState.new() |> ViewState.scroll_viewer_down(5) |> ViewState.scroll_viewer_to_bottom()
+      assert av.preview.auto_follow
     end
   end
 
