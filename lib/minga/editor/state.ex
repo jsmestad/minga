@@ -463,17 +463,13 @@ defmodule Minga.Editor.State do
       tb = TabBar.switch_to(tb, target_id)
 
       # Restore target tab's context
-      target = TabBar.active(tb)
+      %Tab{} = target = TabBar.active(tb)
       state = %{state | tab_bar: tb}
 
-      if target do
-        state
-        |> restore_tab_context(target.context)
-        |> invalidate_all_windows()
-        |> Map.put(:layout, nil)
-      else
-        state
-      end
+      state
+      |> restore_tab_context(target.context)
+      |> invalidate_all_windows()
+      |> Map.put(:layout, nil)
     end
   end
 
@@ -491,9 +487,7 @@ defmodule Minga.Editor.State do
   def active_tab_kind(%__MODULE__{tab_bar: nil}), do: :file
 
   def active_tab_kind(%__MODULE__{tab_bar: tb}) do
-    case TabBar.active(tb) do
-      %Tab{kind: kind} -> kind
-      nil -> :file
-    end
+    %Tab{kind: kind} = TabBar.active(tb)
+    kind
   end
 end

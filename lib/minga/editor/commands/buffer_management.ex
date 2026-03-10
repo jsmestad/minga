@@ -523,6 +523,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       new_buffers = List.delete_at(buffers, idx)
 
+      # Remove the current tab from the tab bar (if present).
+      # TabBar.remove handles neighbor selection.
+      state = remove_current_tab(state)
+
       case new_buffers do
         [] ->
           # Fall back to scratch buffer if available
@@ -545,6 +549,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp remove_current_buffer(state), do: state
+
+  @spec remove_current_tab(state()) :: state()
+  defp remove_current_tab(%{tab_bar: %TabBar{} = tb} = state) do
+    case TabBar.remove(tb, tb.active_id) do
+      {:ok, new_tb} -> %{state | tab_bar: new_tb}
+      :last_tab -> state
+    end
+  end
+
+  defp remove_current_tab(state), do: state
 
   @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
   defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
