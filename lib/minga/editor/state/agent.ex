@@ -136,10 +136,10 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.scroll_down(agent.panel, amount)}
   end
 
-  @doc "Sets the scroll offset to an absolute value."
+  @doc "Sets the scroll offset to an absolute value. Unpins from bottom."
   @spec set_scroll(t(), non_neg_integer()) :: t()
   def set_scroll(%__MODULE__{} = agent, offset) when is_integer(offset) and offset >= 0 do
-    %{agent | panel: %{agent.panel | scroll_offset: offset, auto_scroll: false}}
+    %{agent | panel: %{agent.panel | scroll: Minga.Scroll.set_offset(agent.panel.scroll, offset)}}
   end
 
   @doc "Scrolls to bottom only if auto-scroll is engaged."

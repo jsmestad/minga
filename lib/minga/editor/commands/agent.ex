@@ -414,7 +414,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     # Reset panel scroll and auto-scroll to reflect new session's content
     update_agent(state, fn agent ->
-      panel = %{agent.panel | scroll_offset: 0, auto_scroll: true}
+      panel = %{agent.panel | scroll: Minga.Scroll.new()}
       %{agent | panel: panel}
     end)
   end
@@ -743,7 +743,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Starts search mode in the chat."
   @spec scope_start_search(state()) :: state()
   def scope_start_search(state) do
-    scroll = state.agent.panel.scroll_offset
+    scroll = state.agent.panel.scroll.offset
     update_agentic(state, &ViewState.start_search(&1, scroll))
   end
 
@@ -1305,9 +1305,11 @@ defmodule Minga.Editor.Commands.Agent do
       line_map =
         ChatRenderer.line_message_map(messages, width, theme, panel.display_start_index)
 
-      offset = panel.scroll_offset
-      total_lines = length(line_map)
-      target = max(total_lines - offset - 1, 0)
+      # Use Scroll.resolve to get the effective scroll position, treating
+      # the line_map length as content and 1 as "visible" to get the
+      # line index at the current scroll position.
+      total = length(line_map)
+      target = Minga.Scroll.resolve(panel.scroll, total, 1)
 
       case Enum.at(line_map, target) do
         {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
@@ -1369,9 +1371,8 @@ defmodule Minga.Editor.Commands.Agent do
         panel.display_start_index
       )
 
-    offset = panel.scroll_offset
-    total_lines = length(line_map)
-    target = max(total_lines - offset - 1, 0)
+    total = length(line_map)
+    target = Minga.Scroll.resolve(panel.scroll, total, 1)
 
     {msg_idx, _type} =
       case Enum.at(line_map, target) do
@@ -1445,15 +1446,13 @@ defmodule Minga.Editor.Commands.Agent do
         state.agent.panel.display_start_index
       )
 
-    total_lines = length(line_map)
-
     case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
       nil ->
         state
 
       line_idx ->
-        scroll = max(total_lines - line_idx - 1, 0)
-        update_agent(state, &AgentState.set_scroll(&1, scroll))
+        # scroll_offset is lines from top; set_scroll also disengages auto_scroll
+        update_agent(state, &AgentState.set_scroll(&1, line_idx))
     end
   end
 

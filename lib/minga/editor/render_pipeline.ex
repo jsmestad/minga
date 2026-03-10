@@ -63,6 +63,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.Scroll
   alias Minga.Theme
   alias Minga.WhichKey
 
@@ -256,8 +257,20 @@ defmodule Minga.Editor.RenderPipeline do
 
   @spec run_agentic(state(), Layout.t()) :: state()
   defp run_agentic(state, layout) do
-    # Agentic path: Content is the ViewRenderer, Chrome is minimal
-    panel_draws = timed(:content, fn -> ViewRenderer.render(state) end)
+    # Agentic path: Content is the ViewRenderer, Chrome is minimal.
+    # The renderer returns scroll metrics alongside draw commands so
+    # PanelState.scroll_up/down can resolve auto_scroll→manual transitions
+    # using concrete content dimensions.
+    {panel_draws, scroll_metrics} = timed(:content, fn -> ViewRenderer.render(state) end)
+
+    # Cache scroll metrics in PanelState. This runs every frame, so the
+    # cache is always fresh when the next scroll command executes.
+    state =
+      update_in(
+        state,
+        [Access.key!(:agent), Access.key!(:panel), Access.key!(:scroll)],
+        &Scroll.update_metrics(&1, scroll_metrics.total_lines, scroll_metrics.visible_height)
+      )
 
     chrome = timed(:chrome, fn -> build_chrome_agentic(state, layout) end)
 
@@ -1549,12 +1562,11 @@ defmodule Minga.Editor.RenderPipeline do
       status: agent.status || :idle,
       input_lines: agent.panel.input_lines,
       input_cursor: agent.panel.input_cursor,
-      scroll_offset: agent.panel.scroll_offset,
+      scroll: agent.panel.scroll,
       spinner_frame: agent.panel.spinner_frame,
       usage: usage,
       model_name: agent.panel.model_name,
       thinking_level: agent.panel.thinking_level,
-      auto_scroll: agent.panel.auto_scroll,
       display_start_index: agent.panel.display_start_index,
       error_message: agent.error,
       pending_approval: agent.pending_approval,

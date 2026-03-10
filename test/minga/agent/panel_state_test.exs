@@ -16,9 +16,10 @@ defmodule Minga.Agent.PanelStateTest do
       assert PanelState.input_text(panel) == ""
     end
 
-    test "starts at scroll offset 0" do
+    test "starts pinned to bottom with scroll offset 0" do
       panel = PanelState.new()
-      assert panel.scroll_offset == 0
+      assert panel.scroll.offset == 0
+      assert panel.scroll.pinned
     end
 
     test "starts with empty prompt history" do
@@ -272,82 +273,72 @@ defmodule Minga.Agent.PanelStateTest do
     end
   end
 
-  describe "scrolling" do
-    test "scroll_down increases offset" do
-      panel = PanelState.new() |> PanelState.scroll_down(10)
-      assert panel.scroll_offset == 10
-    end
-
-    test "scroll_up decreases offset" do
-      panel = PanelState.new() |> PanelState.scroll_down(10) |> PanelState.scroll_up(5)
-      assert panel.scroll_offset == 5
-    end
-
-    test "scroll_up does not go below 0" do
-      panel = PanelState.new() |> PanelState.scroll_up(10)
-      assert panel.scroll_offset == 0
-    end
-
-    test "scroll_to_bottom sets large offset" do
-      panel = PanelState.new() |> PanelState.scroll_to_bottom()
-      assert panel.scroll_offset > 0
-    end
-  end
-
-  describe "auto-scroll" do
-    test "starts engaged" do
-      panel = PanelState.new()
-      assert panel.auto_scroll
-    end
-
-    test "scroll_up disengages auto-scroll" do
-      panel = PanelState.new() |> PanelState.scroll_up(5)
-      refute panel.auto_scroll
-    end
-
-    test "scroll_down disengages auto-scroll" do
-      panel = PanelState.new() |> PanelState.scroll_down(5)
-      refute panel.auto_scroll
-    end
-
-    test "scroll_to_top disengages auto-scroll" do
-      panel = PanelState.new() |> PanelState.scroll_to_top()
-      refute panel.auto_scroll
-    end
-
-    test "scroll_to_bottom re-engages auto-scroll" do
+  describe "scrolling (delegates to Minga.Scroll)" do
+    test "scroll_down from pinned materializes bottom then adds" do
+      # With metrics {total: 100, visible: 30}, bottom = 70
       panel =
         PanelState.new()
+        |> put_in(
+          [Access.key!(:scroll)],
+          Minga.Scroll.update_metrics(Minga.Scroll.new(), 100, 30)
+        )
+        |> PanelState.scroll_down(10)
+
+      assert panel.scroll.offset == 80
+      refute panel.scroll.pinned
+    end
+
+    test "scroll_up from unpinned decreases offset" do
+      panel =
+        PanelState.new()
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(10))
         |> PanelState.scroll_up(5)
+
+      assert panel.scroll.offset == 5
+    end
+
+    test "scroll_up clamps to 0" do
+      panel =
+        PanelState.new()
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(2))
+        |> PanelState.scroll_up(10)
+
+      assert panel.scroll.offset == 0
+    end
+
+    test "scroll_to_bottom pins without changing offset" do
+      panel =
+        PanelState.new()
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(42))
         |> PanelState.scroll_to_bottom()
 
-      assert panel.auto_scroll
+      assert panel.scroll.pinned
+      assert panel.scroll.offset == 42
     end
 
-    test "maybe_auto_scroll scrolls to bottom when engaged" do
+    test "scroll_to_top sets offset 0 and unpins" do
+      panel =
+        PanelState.new()
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(50))
+        |> PanelState.scroll_to_top()
+
+      assert panel.scroll.offset == 0
+      refute panel.scroll.pinned
+    end
+
+    test "maybe_auto_scroll is a no-op" do
       panel = PanelState.new() |> PanelState.maybe_auto_scroll()
-      assert panel.scroll_offset == 999_999
-      assert panel.auto_scroll
+      assert panel.scroll.offset == 0
+      assert panel.scroll.pinned
     end
 
-    test "maybe_auto_scroll is a no-op when disengaged" do
+    test "engage_auto_scroll re-pins" do
       panel =
         PanelState.new()
-        |> PanelState.scroll_down(50)
-        |> PanelState.maybe_auto_scroll()
-
-      assert panel.scroll_offset == 50
-      refute panel.auto_scroll
-    end
-
-    test "engage_auto_scroll re-engages and scrolls to bottom" do
-      panel =
-        PanelState.new()
-        |> PanelState.scroll_up(5)
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(10))
         |> PanelState.engage_auto_scroll()
 
-      assert panel.auto_scroll
-      assert panel.scroll_offset == 999_999
+      assert panel.scroll.pinned
     end
   end
 
@@ -357,14 +348,14 @@ defmodule Minga.Agent.PanelStateTest do
       assert panel.display_start_index == 5
     end
 
-    test "clear_display resets scroll and re-engages auto-scroll" do
+    test "clear_display resets scroll and re-pins" do
       panel =
         PanelState.new()
-        |> PanelState.scroll_down(50)
+        |> put_in([Access.key!(:scroll)], Minga.Scroll.new(50))
         |> PanelState.clear_display(3)
 
-      assert panel.scroll_offset == 0
-      assert panel.auto_scroll
+      assert panel.scroll.offset == 0
+      assert panel.scroll.pinned
     end
 
     test "starts with display_start_index of 0" do

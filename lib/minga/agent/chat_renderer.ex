@@ -27,13 +27,12 @@ defmodule Minga.Agent.ChatRenderer do
           status: :idle | :thinking | :tool_executing | :error,
           input_lines: [String.t()],
           input_cursor: {non_neg_integer(), non_neg_integer()},
-          scroll_offset: non_neg_integer(),
+          scroll: Minga.Scroll.t(),
           spinner_frame: non_neg_integer(),
           usage: map(),
           model_name: String.t(),
           thinking_level: String.t(),
           error_message: String.t() | nil,
-          auto_scroll: boolean(),
           display_start_index: non_neg_integer(),
           pending_approval: map() | nil,
           mention_completion: FileMention.completion() | nil
@@ -53,14 +52,15 @@ defmodule Minga.Agent.ChatRenderer do
     content_height = max(height - 2 - @input_height, 1)
     input_row = row_off + height - @input_height
 
-    commands =
+    cmds =
       []
       |> render_separator(row_off, col_off, width, at)
       |> render_header(row_off + 1, col_off, width, panel, at)
-      |> render_content(row_off + 2, col_off, width, content_height, panel, at, theme)
-      |> render_input(input_row, col_off, width, panel, at)
 
-    commands
+    {cmds, _metrics} =
+      render_content(cmds, row_off + 2, col_off, width, content_height, panel, at, theme)
+
+    render_input(cmds, input_row, col_off, width, panel, at)
   end
 
   @doc """
@@ -69,7 +69,11 @@ defmodule Minga.Agent.ChatRenderer do
   Used by the agentic view renderer, which handles the title bar and input
   area separately at full screen width.
   """
-  @spec render_messages_only(rect(), panel_state(), Theme.t()) :: [DisplayList.draw()]
+  @typedoc "Scroll metrics returned alongside draw commands for the render pipeline to cache."
+  @type scroll_metrics :: %{total_lines: non_neg_integer(), visible_height: pos_integer()}
+
+  @spec render_messages_only(rect(), panel_state(), Theme.t()) ::
+          {[DisplayList.draw()], scroll_metrics()}
   def render_messages_only({row_off, col_off, width, height}, panel, theme) do
     at = Theme.agent_theme(theme)
     render_content([], row_off, col_off, width, height, panel, at, theme)
@@ -183,7 +187,7 @@ defmodule Minga.Agent.ChatRenderer do
           panel_state(),
           Theme.Agent.t(),
           Theme.t()
-        ) :: [DisplayList.draw()]
+        ) :: {[DisplayList.draw()], scroll_metrics()}
   defp render_content(cmds, row_start, col, width, content_height, panel, at, theme) do
     display_start = Map.get(panel, :display_start_index, 0)
     visible_messages = Enum.drop(panel.messages, display_start)
@@ -200,9 +204,11 @@ defmodule Minga.Agent.ChatRenderer do
         lines
       end
 
-    # Apply scroll offset
+    # Resolve the effective scroll offset using Scroll.resolve/3, which
+    # handles both pinned (bottom) and unpinned (concrete offset) states.
     total = length(lines)
-    scroll = min(panel.scroll_offset, max(total - content_height, 0))
+    scroll = Minga.Scroll.resolve(panel.scroll, total, content_height)
+
     visible = lines |> Enum.drop(scroll) |> Enum.take(content_height)
 
     # Render visible lines.
@@ -242,27 +248,32 @@ defmodule Minga.Agent.ChatRenderer do
         cmds
       end
 
-    # "↓ new" indicator when auto-scroll is disengaged and content is below viewport
+    # "↓ new" indicator when scroll is unpinned and content is below viewport
     has_content_below = scroll + content_height < total
-    auto_scroll = Map.get(panel, :auto_scroll, true)
+    pinned = panel.scroll.pinned
     is_streaming = panel.status in [:thinking, :tool_executing]
 
-    if not auto_scroll and has_content_below and is_streaming do
-      indicator_row = row_start + content_height - 1
-      label = " ↓ new "
-      indicator_col = col + width - String.length(label)
+    metrics = %{total_lines: total, visible_height: content_height}
 
-      [
-        DisplayList.draw(indicator_row, indicator_col, label,
-          fg: at.panel_bg,
-          bg: at.assistant_label,
-          bold: true
-        )
-        | cmds
-      ]
-    else
-      cmds
-    end
+    final_cmds =
+      if not pinned and has_content_below and is_streaming do
+        indicator_row = row_start + content_height - 1
+        label = " ↓ new "
+        indicator_col = col + width - String.length(label)
+
+        [
+          DisplayList.draw(indicator_row, indicator_col, label,
+            fg: at.panel_bg,
+            bg: at.assistant_label,
+            bold: true
+          )
+          | cmds
+        ]
+      else
+        cmds
+      end
+
+    {final_cmds, metrics}
   end
 
   # ── Input area ──────────────────────────────────────────────────────────────

@@ -7,6 +7,8 @@ defmodule Minga.Agent.PanelState do
   Stored in `Editor.State` and updated by agent event handlers.
   """
 
+  alias Minga.Scroll
+
   @typedoc "Thinking level for models that support extended reasoning."
   @type thinking_level :: String.t()
 
@@ -19,7 +21,7 @@ defmodule Minga.Agent.PanelState do
   @typedoc "Agent panel UI state."
   @type t :: %__MODULE__{
           visible: boolean(),
-          scroll_offset: non_neg_integer(),
+          scroll: Scroll.t(),
           input_lines: [String.t()],
           input_cursor: cursor(),
           prompt_history: [String.t()],
@@ -29,7 +31,6 @@ defmodule Minga.Agent.PanelState do
           model_name: String.t(),
           thinking_level: thinking_level(),
           input_focused: boolean(),
-          auto_scroll: boolean(),
           display_start_index: non_neg_integer(),
           mention_completion: Minga.Agent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()]
@@ -46,7 +47,7 @@ defmodule Minga.Agent.PanelState do
 
   @enforce_keys []
   defstruct visible: false,
-            scroll_offset: 0,
+            scroll: %Scroll{},
             input_lines: [""],
             input_cursor: {0, 0},
             prompt_history: [],
@@ -56,7 +57,6 @@ defmodule Minga.Agent.PanelState do
             model_name: "claude-sonnet-4",
             thinking_level: "medium",
             input_focused: false,
-            auto_scroll: true,
             display_start_index: 0,
             mention_completion: nil,
             pasted_blocks: []
@@ -318,46 +318,40 @@ defmodule Minga.Agent.PanelState do
     %{state | input_lines: lines, input_cursor: cursor, history_index: new_idx}
   end
 
-  # ── Scrolling ──────────────────────────────────────────────────────────────
+  # ── Scrolling (delegates to Minga.Scroll) ────────────────────────────────
 
-  @doc "Scrolls the content up by the given number of lines. Disengages auto-scroll."
+  @doc "Scrolls the content up. Delegates to `Minga.Scroll.scroll_up/2`."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{} = state, amount) do
-    %{state | scroll_offset: max(state.scroll_offset - amount, 0), auto_scroll: false}
+    %{state | scroll: Scroll.scroll_up(state.scroll, amount)}
   end
 
-  @doc "Scrolls the content down by the given number of lines. Disengages auto-scroll."
+  @doc "Scrolls the content down. Delegates to `Minga.Scroll.scroll_down/2`."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{} = state, amount) do
-    %{state | scroll_offset: state.scroll_offset + amount, auto_scroll: false}
+    %{state | scroll: Scroll.scroll_down(state.scroll, amount)}
   end
 
-  @doc "Scrolls to the bottom and re-engages auto-scroll."
+  @doc "Pins chat to bottom. Delegates to `Minga.Scroll.pin_to_bottom/1`."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = state) do
-    %{state | scroll_offset: 999_999, auto_scroll: true}
+    %{state | scroll: Scroll.pin_to_bottom(state.scroll)}
   end
 
-  @doc "Scrolls to the top of the chat. Disengages auto-scroll."
+  @doc "Scrolls to top. Delegates to `Minga.Scroll.scroll_to_top/1`."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = state) do
-    %{state | scroll_offset: 0, auto_scroll: false}
+    %{state | scroll: Scroll.scroll_to_top(state.scroll)}
   end
 
-  @doc """
-  Scrolls to the bottom only if auto-scroll is engaged.
-
-  Called by event handlers when new streaming content arrives. No-ops if the
-  user has manually scrolled away from the bottom.
-  """
+  @doc "No-op. Streaming events call this; renderer handles pinning."
   @spec maybe_auto_scroll(t()) :: t()
-  def maybe_auto_scroll(%__MODULE__{auto_scroll: true} = state), do: scroll_to_bottom(state)
   def maybe_auto_scroll(%__MODULE__{} = state), do: state
 
-  @doc "Re-engages auto-scroll (e.g., on new agent turn start)."
+  @doc "Re-engages auto-scroll. Delegates to `Minga.Scroll.pin_to_bottom/1`."
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{} = state) do
-    scroll_to_bottom(%{state | auto_scroll: true})
+    %{state | scroll: Scroll.pin_to_bottom(state.scroll)}
   end
 
   @doc "Sets the input focus state."
@@ -378,7 +372,7 @@ defmodule Minga.Agent.PanelState do
   """
   @spec clear_display(t(), non_neg_integer()) :: t()
   def clear_display(%__MODULE__{} = state, message_count) do
-    %{state | display_start_index: message_count, scroll_offset: 0, auto_scroll: true}
+    %{state | display_start_index: message_count, scroll: Scroll.new()}
   end
 
   # ── Private: paste helpers ───────────────────────────────────────────────

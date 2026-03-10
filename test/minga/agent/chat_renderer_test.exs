@@ -10,17 +10,23 @@ defmodule Minga.Agent.ChatRendererTest do
   end
 
   defp panel(opts) do
+    scroll =
+      if Keyword.get(opts, :pinned, true) do
+        Minga.Scroll.new()
+      else
+        Minga.Scroll.new(Keyword.get(opts, :scroll_offset, 0))
+      end
+
     %{
       messages: Keyword.get(opts, :messages, []),
       status: Keyword.get(opts, :status, :idle),
       input_lines: Keyword.get(opts, :input_lines, [""]),
       input_cursor: Keyword.get(opts, :input_cursor, {0, 0}),
-      scroll_offset: Keyword.get(opts, :scroll_offset, 0),
+      scroll: scroll,
       spinner_frame: 0,
       usage: %{input: 0, output: 0, cost: 0.0},
       model_name: "claude-sonnet-4",
       thinking_level: "medium",
-      auto_scroll: Keyword.get(opts, :auto_scroll, true),
       display_start_index: Keyword.get(opts, :display_start_index, 0),
       error_message: nil,
       pending_approval: Keyword.get(opts, :pending_approval, nil),
@@ -45,7 +51,7 @@ defmodule Minga.Agent.ChatRendererTest do
       messages = [{:tool_call, tc}]
       rect = {0, 0, 60, 20}
       p = panel(messages: messages, status: :tool_executing)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       # Should have a braille spinner char, not the old static ⟳
@@ -73,7 +79,7 @@ defmodule Minga.Agent.ChatRendererTest do
       messages = [{:tool_call, tc}]
       rect = {0, 0, 60, 20}
       p = panel(messages: messages, status: :idle)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "✓"))
     end
@@ -86,7 +92,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       refute Enum.any?(texts, &String.contains?(&1, "$0.042")),
@@ -110,13 +116,16 @@ defmodule Minga.Agent.ChatRendererTest do
 
       # Without filtering, "First message" should appear
       p_all = panel(messages: messages, display_start_index: 0)
-      draws_all = ChatRenderer.render_messages_only(rect, p_all, default_theme())
+      {draws_all, _metrics} = ChatRenderer.render_messages_only(rect, p_all, default_theme())
       texts_all = Enum.map(draws_all, fn d -> elem(d, 2) end)
       assert Enum.any?(texts_all, &String.contains?(&1, "First message"))
 
       # With filtering at index 2, "First message" should not appear
       p_filtered = panel(messages: messages, display_start_index: 2)
-      draws_filtered = ChatRenderer.render_messages_only(rect, p_filtered, default_theme())
+
+      {draws_filtered, _metrics} =
+        ChatRenderer.render_messages_only(rect, p_filtered, default_theme())
+
       texts_filtered = Enum.map(draws_filtered, fn d -> elem(d, 2) end)
       refute Enum.any?(texts_filtered, &String.contains?(&1, "First message"))
       assert Enum.any?(texts_filtered, &String.contains?(&1, "Second message"))
@@ -171,11 +180,10 @@ defmodule Minga.Agent.ChatRendererTest do
         panel(
           messages: messages,
           status: :thinking,
-          auto_scroll: false,
-          scroll_offset: 0
+          pinned: false
         )
 
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
@@ -189,8 +197,8 @@ defmodule Minga.Agent.ChatRendererTest do
       messages = [{:assistant, long_text}]
 
       rect = {0, 0, 40, 10}
-      p = panel(messages: messages, status: :thinking, auto_scroll: true, scroll_offset: 0)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      p = panel(messages: messages, status: :thinking, pinned: true)
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
@@ -202,8 +210,8 @@ defmodule Minga.Agent.ChatRendererTest do
       messages = [{:assistant, long_text}]
 
       rect = {0, 0, 40, 10}
-      p = panel(messages: messages, status: :idle, auto_scroll: false, scroll_offset: 0)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      p = panel(messages: messages, status: :idle, pinned: false)
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
@@ -215,8 +223,8 @@ defmodule Minga.Agent.ChatRendererTest do
       messages = [{:assistant, "Short message"}]
 
       rect = {0, 0, 40, 10}
-      p = panel(messages: messages, status: :thinking, auto_scroll: false, scroll_offset: 0)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      p = panel(messages: messages, status: :thinking, pinned: false)
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_indicator = Enum.any?(texts, &String.contains?(&1, "↓ new"))
@@ -230,7 +238,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 10}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_session_text = Enum.any?(texts, &String.contains?(&1, "Session started"))
@@ -242,7 +250,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 10}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_error_text = Enum.any?(texts, &String.contains?(&1, "Error: connection timeout"))
@@ -254,7 +262,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 10}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_rules = Enum.any?(texts, &String.contains?(&1, "──"))
@@ -277,14 +285,14 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
 
-      draws_without =
+      {draws_without, _metrics} =
         ChatRenderer.render_messages_only(
           rect,
           panel(messages: messages_without),
           default_theme()
         )
 
-      draws_with =
+      {draws_with, _metrics} =
         ChatRenderer.render_messages_only(rect, panel(messages: messages_with), default_theme())
 
       # Count non-background draws (text content) by looking for draws with actual text
@@ -316,7 +324,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_session = Enum.any?(texts, &String.contains?(&1, "Session started"))
@@ -334,7 +342,7 @@ defmodule Minga.Agent.ChatRendererTest do
       # Render at a narrow width to force wrapping
       rect = {0, 0, 40, 30}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       # The draw commands should exist (not crashing is the baseline)
       assert is_list(draws)
@@ -347,7 +355,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 30, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       assert is_list(draws)
       assert draws != []
@@ -362,7 +370,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 40, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       # Should render without error
       assert is_list(draws)
@@ -378,7 +386,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 10}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_summary = Enum.any?(texts, &String.contains?(&1, "3 lines"))
@@ -390,7 +398,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 10}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       has_line_one = Enum.any?(texts, &String.contains?(&1, "Line one"))
@@ -405,7 +413,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 40, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       assert is_list(draws)
       assert draws != []
@@ -431,7 +439,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 40, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       assert is_list(draws)
       assert draws != []
@@ -445,7 +453,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages, pending_approval: approval)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       has_approval = Enum.any?(texts, &String.contains?(&1, "Execute shell"))
@@ -458,7 +466,7 @@ defmodule Minga.Agent.ChatRendererTest do
       approval = %{tool_call_id: "tc1", name: "shell", args: %{"command" => "mix test"}}
       rect = {0, 0, 60, 10}
       p = panel(messages: [], pending_approval: approval)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "mix test"))
@@ -468,7 +476,7 @@ defmodule Minga.Agent.ChatRendererTest do
       approval = %{tool_call_id: "tc1", name: "write_file", args: %{"path" => "lib/foo.ex"}}
       rect = {0, 0, 60, 10}
       p = panel(messages: [], pending_approval: approval)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "lib/foo.ex"))
@@ -477,7 +485,7 @@ defmodule Minga.Agent.ChatRendererTest do
     test "no approval prompt when nil" do
       rect = {0, 0, 60, 10}
       p = panel(messages: [{:user, "hello"}], pending_approval: nil)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       refute Enum.any?(texts, &String.contains?(&1, "Execute"))
@@ -503,7 +511,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       has_timing = Enum.any?(texts, &String.contains?(&1, "12.4s"))
@@ -528,7 +536,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       has_parens =
@@ -555,7 +563,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
 
       has_ms = Enum.any?(texts, &String.contains?(&1, "42ms"))
@@ -570,7 +578,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       # Should render without error and have draw commands
       assert is_list(draws)
@@ -587,7 +595,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       assert is_list(draws)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
@@ -600,7 +608,7 @@ defmodule Minga.Agent.ChatRendererTest do
 
       rect = {0, 0, 60, 20}
       p = panel(messages: messages)
-      draws = ChatRenderer.render_messages_only(rect, p, default_theme())
+      {draws, _metrics} = ChatRenderer.render_messages_only(rect, p, default_theme())
 
       assert is_list(draws)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)

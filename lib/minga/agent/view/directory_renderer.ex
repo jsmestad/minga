@@ -14,12 +14,15 @@ defmodule Minga.Agent.View.DirectoryRenderer do
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
 
   @doc "Renders a directory listing into draw commands."
-  @spec render(rect(), String.t(), [String.t()], non_neg_integer(), Theme.t()) ::
+  @spec render(rect(), String.t(), [String.t()], non_neg_integer(), boolean(), Theme.t()) ::
           [DisplayList.draw()]
-  def render({row_off, col_off, width, height}, path, entries, scroll, theme) do
+  def render({row_off, col_off, width, height}, path, entries, scroll_offset, auto_follow, theme) do
     at = Theme.agent_theme(theme)
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
+    total = length(entries)
+    max_scroll = max(total - content_rows, 0)
+    scroll = if auto_follow, do: max_scroll, else: min(scroll_offset, max_scroll)
 
     header = render_header(row_off, col_off, width, path, at)
     entry_cmds = render_entries(content_start, col_off, width, content_rows, entries, scroll, at)
@@ -53,9 +56,7 @@ defmodule Minga.Agent.View.DirectoryRenderer do
           Theme.Agent.t()
         ) :: [DisplayList.draw()]
   defp render_entries(start_row, col, width, content_rows, entries, scroll, at) do
-    total = length(entries)
-    scroll_clamped = min(scroll, max(total - content_rows, 0))
-    visible = Enum.slice(entries, scroll_clamped, content_rows)
+    visible = Enum.slice(entries, scroll, content_rows)
     blank = String.duplicate(" ", width)
 
     visible
@@ -84,9 +85,7 @@ defmodule Minga.Agent.View.DirectoryRenderer do
           Theme.Agent.t()
         ) :: [DisplayList.draw()]
   defp render_fill(start_row, col, width, content_rows, entries, scroll, at) do
-    total = length(entries)
-    scroll_clamped = min(scroll, max(total - content_rows, 0))
-    visible_count = length(Enum.slice(entries, scroll_clamped, content_rows))
+    visible_count = length(Enum.slice(entries, scroll, content_rows))
 
     if visible_count < content_rows do
       blank = String.duplicate(" ", width)

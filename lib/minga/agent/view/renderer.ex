@@ -40,6 +40,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Keymap.Scope
+  alias Minga.Scroll
   alias Minga.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
@@ -112,12 +113,11 @@ defmodule Minga.Agent.View.Renderer do
             input_focused: boolean(),
             input_lines: [String.t()],
             input_cursor: {non_neg_integer(), non_neg_integer()},
-            scroll_offset: non_neg_integer(),
+            scroll: Scroll.t(),
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
             provider_name: String.t(),
             thinking_level: String.t(),
-            auto_scroll: boolean(),
             display_start_index: non_neg_integer(),
             mention_completion: Minga.Agent.FileMention.completion() | nil,
             pasted_blocks: [PanelState.paste_block()]
@@ -141,7 +141,7 @@ defmodule Minga.Agent.View.Renderer do
   Preferred entry point for the pipeline. No GenServer calls are made;
   all data is pre-fetched in the input.
   """
-  @spec render(RenderInput.t()) :: [DisplayList.draw()]
+  @spec render(RenderInput.t()) :: {[DisplayList.draw()], scroll_metrics()}
   def render(%RenderInput{} = input) do
     cols = input.viewport.cols
     rows = input.viewport.rows
@@ -169,7 +169,8 @@ defmodule Minga.Agent.View.Renderer do
     title_commands = render_title_bar_from_input(input, 1, cols)
 
     # Left column: chat messages fill the top portion.
-    chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, chat_height})
+    {chat_commands, chat_metrics} =
+      render_chat_from_input(input, {panel_start, 0, chat_width, chat_height})
 
     # Separator and right column span the FULL panel height (alongside input).
     separator_commands =
@@ -202,11 +203,11 @@ defmodule Minga.Agent.View.Renderer do
 
     toast_cmds = render_toast_overlay(input, cols)
 
-    base ++ overlays ++ toast_cmds
+    {base ++ overlays ++ toast_cmds, chat_metrics}
   end
 
   # Legacy wrapper: extracts a RenderInput from full EditorState.
-  @spec render(state()) :: [DisplayList.draw()]
+  @spec render(state()) :: {[DisplayList.draw()], scroll_metrics()}
   def render(%EditorState{} = state) do
     input = extract_input(state)
     render(input)
@@ -271,8 +272,17 @@ defmodule Minga.Agent.View.Renderer do
         empty_usage()
       end
 
-    # Pre-fetch buffer snapshot for file viewer
-    scroll = state.agentic.preview.scroll_offset
+    # Pre-fetch buffer snapshot for file viewer.
+    # When pinned, we ask for the tail of the buffer by passing a large
+    # offset; render_snapshot clamps internally.
+    preview_scroll =
+      if state.agentic.preview.scroll.pinned do
+        # Large value that render_snapshot will clamp to the real bottom.
+        999_999
+      else
+        state.agentic.preview.scroll.offset
+      end
+
     rows = state.viewport.rows
     input_h = compute_input_height(state.agent.panel.input_lines)
     content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
@@ -283,7 +293,7 @@ defmodule Minga.Agent.View.Renderer do
           nil
 
         buf ->
-          snapshot = BufferServer.render_snapshot(buf, scroll, content_rows)
+          snapshot = BufferServer.render_snapshot(buf, preview_scroll, content_rows)
           %{snapshot | name: snapshot_display_name(snapshot)}
       end
 
@@ -298,12 +308,11 @@ defmodule Minga.Agent.View.Renderer do
         input_focused: panel.input_focused,
         input_lines: panel.input_lines,
         input_cursor: panel.input_cursor,
-        scroll_offset: panel.scroll_offset,
+        scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
         provider_name: panel.provider_name,
         thinking_level: panel.thinking_level,
-        auto_scroll: panel.auto_scroll,
         display_start_index: panel.display_start_index,
         mention_completion: panel.mention_completion,
         pasted_blocks: panel.pasted_blocks
@@ -412,19 +421,19 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Chat panel (messages only) ──────────────────────────────────────────────
 
-  @spec render_chat_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
+  @spec render_chat_from_input(RenderInput.t(), rect()) ::
+          {[DisplayList.draw()], ChatRenderer.scroll_metrics()}
   defp render_chat_from_input(input, rect) do
     panel_state = %{
       messages: input.messages,
       status: input.agent_status || :idle,
       input_lines: input.panel.input_lines,
       input_cursor: input.panel.input_cursor,
-      scroll_offset: input.panel.scroll_offset,
+      scroll: input.panel.scroll,
       spinner_frame: input.panel.spinner_frame,
       usage: input.usage,
       model_name: input.panel.model_name,
       thinking_level: input.panel.thinking_level,
-      auto_scroll: input.panel.auto_scroll,
       display_start_index: input.panel.display_start_index,
       error_message: nil,
       pending_approval: input.pending_approval,
@@ -433,6 +442,9 @@ defmodule Minga.Agent.View.Renderer do
 
     ChatRenderer.render_messages_only(rect, panel_state, input.theme)
   end
+
+  @typedoc "Scroll metrics propagated from the chat renderer for caching in PanelState."
+  @type scroll_metrics :: ChatRenderer.scroll_metrics()
 
   # ── Vertical separator ──────────────────────────────────────────────────────
 
@@ -463,27 +475,51 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:shell, cmd, output, status}, scroll_offset: scroll}} =
+         %{preview: %Preview{content: {:shell, cmd, output, status}, scroll: scroll}} =
            input,
          rect
        ) do
     spinner = input.panel.spinner_frame
-    ShellRenderer.render(rect, cmd, output, status, scroll, spinner, input.theme)
+
+    ShellRenderer.render(
+      rect,
+      cmd,
+      output,
+      status,
+      scroll.offset,
+      scroll.pinned,
+      spinner,
+      input.theme
+    )
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:file, path, content}, scroll_offset: scroll}} = input,
+         %{preview: %Preview{content: {:file, path, content}, scroll: scroll}} = input,
          {row_off, col_off, width, height}
        ) do
-    render_file_preview(input, path, content, scroll, {row_off, col_off, width, height})
+    render_file_preview(
+      input,
+      path,
+      content,
+      scroll.offset,
+      scroll.pinned,
+      {row_off, col_off, width, height}
+    )
   end
 
   defp render_preview(
-         %{preview: %Preview{content: {:directory, path, entries}, scroll_offset: scroll}} =
+         %{preview: %Preview{content: {:directory, path, entries}, scroll: scroll}} =
            input,
          rect
        ) do
-    DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
+    DirectoryRenderer.render(
+      rect,
+      path,
+      entries,
+      scroll.offset,
+      scroll.pinned,
+      input.theme
+    )
   end
 
   defp render_preview(%{preview: %Preview{content: :empty}} = input, rect) do
@@ -691,16 +727,31 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── File content preview ────────────────────────────────────────────────────
 
-  @spec render_file_preview(RenderInput.t(), String.t(), String.t(), non_neg_integer(), rect()) ::
+  @spec render_file_preview(
+          RenderInput.t(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          boolean(),
+          rect()
+        ) ::
           [DisplayList.draw()]
-  defp render_file_preview(input, path, content, scroll, {row_off, col_off, width, height}) do
+  defp render_file_preview(
+         input,
+         path,
+         content,
+         scroll,
+         auto_follow,
+         {row_off, col_off, width, height}
+       ) do
     at = Theme.agent_theme(input.theme)
     lines = String.split(content, "\n")
     total = length(lines)
 
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
-    scroll_clamped = min(scroll, max(total - content_rows, 0))
+    max_scroll = max(total - content_rows, 0)
+    scroll_clamped = if auto_follow, do: max_scroll, else: min(scroll, max_scroll)
     visible = Enum.slice(lines, scroll_clamped, content_rows)
 
     gutter_w = file_viewer_gutter_width(total)
@@ -751,13 +802,14 @@ defmodule Minga.Agent.View.Renderer do
   @spec render_buffer_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
   defp render_buffer_preview(input, {row_off, col_off, width, height}) do
     snapshot = input.buffer_snapshot
-    scroll = input.preview.scroll_offset
 
     content_start = row_off + 1
     content_rows = max(height - 1, 1)
 
     lines = snapshot.lines
     line_count = snapshot.line_count
+
+    scroll = Scroll.resolve(input.preview.scroll, line_count, content_rows)
 
     abs_gutter_col = max(col_off, 0)
     local_gutter_w = file_viewer_gutter_width(line_count)
