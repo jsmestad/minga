@@ -28,17 +28,17 @@ defmodule Minga.Agent.WordWrapTest do
       assert full_text == "Hello world, this is a test"
     end
 
-    test "continuation lines are indented" do
+    test "continuation lines are flush (no hanging indent)" do
       segments = [{"Hello world, this is a long sentence", [fg: :white]}]
       result = WordWrap.wrap_segments(segments, 15)
 
       # First line should not start with indent
       [{first_text, _} | _] = hd(result)
-      refute String.starts_with?(first_text, "  ")
+      refute String.starts_with?(first_text, " ")
 
-      # Second line should start with indent
-      [{indent_text, _} | _] = Enum.at(result, 1)
-      assert indent_text == "  "
+      # Second line should also not start with indent (flush wrap)
+      [{second_text, _} | _] = Enum.at(result, 1)
+      refute String.starts_with?(second_text, " ")
     end
 
     test "preserves style across word boundaries" do

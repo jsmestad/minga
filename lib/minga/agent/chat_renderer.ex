@@ -18,6 +18,10 @@ defmodule Minga.Agent.ChatRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Theme
 
+  # Right margin (in columns) between the last text character and the
+  # separator/edge. Prevents text from butting right up against the border.
+  @right_margin 2
+
   @typedoc "Screen rectangle: {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
 
@@ -395,7 +399,7 @@ defmodule Minga.Agent.ChatRenderer do
 
     parsed = Markdown.parse(text)
     border_prefix = [{"▎ ", [fg: at.assistant_border]}]
-    content_width = max(width - 2, 4)
+    content_width = max(width - 2 - @right_margin, 4)
 
     content =
       Enum.flat_map(parsed, fn {segments, line_type} ->
@@ -420,7 +424,7 @@ defmodule Minga.Agent.ChatRenderer do
 
   defp message_lines({:thinking, text, false}, at, width, _theme) do
     prefix = [{"  │ ", [fg: at.thinking_fg, italic: true]}]
-    content_width = max(width - 4, 4)
+    content_width = max(width - 4 - @right_margin, 4)
 
     header =
       {[{"  💭 Thinking", [fg: at.thinking_fg, italic: true, bold: true]}], :text, at.panel_bg}
@@ -474,7 +478,7 @@ defmodule Minga.Agent.ChatRenderer do
         []
       else
         tool_prefix = [{"  │ ", [fg: at.tool_border]}]
-        tool_content_width = max(width - 4, 4)
+        tool_content_width = max(width - 4 - @right_margin, 4)
 
         tc.result
         |> String.split("\n")
@@ -739,7 +743,7 @@ defmodule Minga.Agent.ChatRenderer do
         ]
   defp text_to_lines(text, at, width, border_color) do
     border_prefix = [{"▎ ", [fg: border_color]}]
-    content_width = max(width - 2, 4)
+    content_width = max(width - 2 - @right_margin, 4)
 
     text
     |> String.split("\n")

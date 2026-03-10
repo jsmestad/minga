@@ -18,7 +18,7 @@ defmodule Minga.Agent.WordWrap do
   @typedoc "A visual line is a list of styled segments."
   @type visual_line :: [segment()]
 
-  @default_indent "  "
+  @default_indent ""
 
   @doc """
   Wraps a list of styled segments to fit within `max_width` columns.
