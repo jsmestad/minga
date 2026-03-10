@@ -122,6 +122,15 @@ defmodule Minga.Theme.Catppuccin do
         search_current_bg: p.red,
         hint_fg: p.overlay0,
         dashboard_label: p.blue
+      },
+      tab_bar: %Minga.Theme.TabBar{
+        active_fg: p.text,
+        active_bg: p.base,
+        inactive_fg: p.overlay0,
+        inactive_bg: p.mantle,
+        separator_fg: p.surface0,
+        modified_fg: p.peach,
+        bg: p.mantle
       }
     }
   end

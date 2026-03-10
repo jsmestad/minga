@@ -75,15 +75,18 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   # ── Basic layout ─────────────────────────────────────────────────────────────
+  # Tab bar at row 0, editor starts at row 1, minibuffer at last row.
+  # For 24-row terminal: tab_bar={0,0,80,1}, editor={1,0,80,22}, minibuffer={23,0,80,1}
 
   describe "compute/1 single window" do
-    test "full terminal minus minibuffer row" do
+    test "full terminal minus minibuffer and tab bar rows" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
       assert layout.terminal == {0, 0, 80, 24}
+      assert layout.tab_bar == {0, 0, 80, 1}
       assert layout.minibuffer == {23, 0, 80, 1}
-      assert layout.editor_area == {0, 0, 80, 23}
+      assert layout.editor_area == {1, 0, 80, 22}
       assert layout.file_tree == nil
       assert layout.agent_panel == nil
     end
@@ -93,8 +96,8 @@ defmodule Minga.Editor.LayoutTest do
       layout = Layout.compute(state)
 
       assert %{1 => wl} = layout.window_layouts
-      assert wl.total == {0, 0, 80, 23}
-      assert wl.content == {0, 0, 80, 22}
+      assert wl.total == {1, 0, 80, 22}
+      assert wl.content == {1, 0, 80, 21}
       assert wl.modeline == {22, 0, 80, 1}
     end
   end
@@ -106,9 +109,9 @@ defmodule Minga.Editor.LayoutTest do
       state = new_state(24, 80) |> with_window() |> with_file_tree(30)
       layout = Layout.compute(state)
 
-      # Tree: columns 0..29, separator at 30, editor starts at 31
-      assert layout.file_tree == {0, 0, 30, 23}
-      assert layout.editor_area == {0, 31, 49, 23}
+      # Tree starts at row 1 (below tab bar), height = 22 (24 - tab bar - minibuffer)
+      assert layout.file_tree == {1, 0, 30, 22}
+      assert layout.editor_area == {1, 31, 49, 22}
     end
 
     test "window layouts use editor area coordinates" do
@@ -116,8 +119,8 @@ defmodule Minga.Editor.LayoutTest do
       layout = Layout.compute(state)
 
       %{1 => wl} = layout.window_layouts
-      assert wl.total == {0, 31, 49, 23}
-      assert wl.content == {0, 31, 49, 22}
+      assert wl.total == {1, 31, 49, 22}
+      assert wl.content == {1, 31, 49, 21}
       assert wl.modeline == {22, 31, 49, 1}
     end
   end
@@ -129,10 +132,10 @@ defmodule Minga.Editor.LayoutTest do
       state = new_state(24, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
 
-      # 35% of 24 = 8 rows for agent panel
-      # editor_height = 23 (total - minibuffer) - 8 = 15
+      # remaining = 22 (24-2). 35% of 24 = 8 rows for agent panel.
+      # editor_height = 22 - 8 = 14
       assert layout.agent_panel == {15, 0, 80, 8}
-      assert layout.editor_area == {0, 0, 80, 15}
+      assert layout.editor_area == {1, 0, 80, 14}
     end
 
     test "agent panel with file tree" do
@@ -240,9 +243,8 @@ defmodule Minga.Editor.LayoutTest do
 
   describe "constraints: agent panel" do
     test "stays when panel height meets minimum" do
-      # 16 rows. Minibuffer=1, remaining=15. Panel = 35% of 16 = 5. Editor = 10.
-      # Panel height 5 == min(5). Editor 10 >= min(3). Both survive.
-      state = new_state(16, 80) |> with_window() |> with_agent_panel()
+      # 17 rows. tab_bar=1, minibuffer=1, remaining=15. Panel = 35% of 17 = 5. Editor = 10.
+      state = new_state(17, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel != nil
       {_, _, _, ph} = layout.agent_panel
@@ -250,25 +252,24 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "collapses when panel height is below minimum (boundary)" do
-      # 14 rows. Minibuffer=1, remaining=13. Panel = 35% of 14 = 4.
-      # 4 < 5 (min), so panel collapses.
+      # 15 rows. tab_bar=1, minibuffer=1, remaining=13. Panel = 35% of 15 = 5.
+      # Editor = 13-5 = 8. Both survive.
+      # 14 rows. remaining=12. Panel = 35% of 14 = 4. 4 < 5 (min), collapse.
       state = new_state(14, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
       {_, _, _, eh} = layout.editor_area
-      assert eh == 13
+      assert eh == 12
     end
 
     test "collapses when remaining editor height would be below minimum" do
-      # Construct a case where panel height >= 5 but editor height < 3.
-      # 9 rows. Minibuffer=1, remaining=8. Panel = 35% of 9 = 3.
-      # 3 < 5 (panel min), so collapses on panel-too-small, not editor-too-small.
+      # 9 rows. remaining=7. Panel = 35% of 9 = 3. 3 < 5, collapse.
       state = new_state(9, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
 
-      # 20 rows. Panel = 35% of 20 = 7. Remaining = 19. Editor = 19-7 = 12. Fine.
-      state = new_state(20, 80) |> with_window() |> with_agent_panel()
+      # 21 rows. remaining=19. Panel = 35% of 21 = 7. Editor = 19-7 = 12. Fine.
+      state = new_state(21, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel != nil
       {_, _, _, eh} = layout.editor_area
@@ -278,7 +279,6 @@ defmodule Minga.Editor.LayoutTest do
 
   describe "constraints: file tree" do
     test "stays when editor width meets minimum (boundary)" do
-      # Tree width 10, separator 1, so editor needs >= 10 cols. Total = 21.
       state = new_state(24, 21) |> with_window() |> with_file_tree(10)
       layout = Layout.compute(state)
       assert layout.file_tree != nil
@@ -289,7 +289,6 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "collapses when editor width would be below minimum" do
-      # Tree width 10, separator 1, total = 20. Editor = 20-11 = 9 < 10.
       state = new_state(24, 20) |> with_window() |> with_file_tree(10)
       layout = Layout.compute(state)
       assert layout.file_tree == nil
@@ -299,17 +298,12 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "collapses when tree width is below its own minimum" do
-      # Tree wants 5 cols. 5 < 8 (file_tree_min_cols). Collapses even if editor fits.
-      # But file_tree_layout clamps tree width to max(total-1-3, 1).
-      # If total is large enough that clamped width is still 5, tree collapses.
-      # 80 cols, tree wants 5. Clamped to 5. 5 < 8 = collapse.
       state = new_state(24, 80) |> with_window() |> with_file_tree(5)
       layout = Layout.compute(state)
       assert layout.file_tree == nil
     end
 
     test "stays when tree width meets its own minimum (boundary)" do
-      # Tree wants 8 cols. 8 == 8 (file_tree_min_cols). Stays.
       state = new_state(24, 80) |> with_window() |> with_file_tree(8)
       layout = Layout.compute(state)
       assert layout.file_tree != nil
@@ -318,8 +312,6 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "wide tree gets clamped then collapses if clamped width < minimum" do
-      # 12 cols total. Tree wants 30. Clamped to max(12-1-3, 1) = 8.
-      # Editor = max(12-9, 1) = 3. 3 < 10 (editor min). Collapse.
       state = new_state(24, 12) |> with_window() |> with_file_tree(30)
       layout = Layout.compute(state)
       assert layout.file_tree == nil
@@ -338,7 +330,7 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "both collapse when terminal is tiny" do
-      state = new_state(4, 10) |> with_window() |> with_file_tree(8) |> with_agent_panel()
+      state = new_state(5, 10) |> with_window() |> with_file_tree(8) |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
       assert layout.file_tree == nil
@@ -349,7 +341,7 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "editor area always has positive dimensions at minimum terminal" do
-      state = new_state(2, 3) |> with_window()
+      state = new_state(3, 3) |> with_window()
       layout = Layout.compute(state)
       {_, _, w, h} = layout.editor_area
       assert w > 0
@@ -357,17 +349,12 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "file tree collapse recalculates agent panel rect with full width" do
-      # When file tree collapses, the agent panel rect should use the
-      # full terminal width, not the old narrower editor width.
-      # 25 cols, tree=12. Without collapse: editor_col=13, editor_w=12.
-      # 12 >= 10 so tree stays normally. But let's check agent panel gets right width.
       state = new_state(20, 40) |> with_window() |> with_file_tree(12) |> with_agent_panel()
       layout = Layout.compute(state)
 
       if layout.agent_panel != nil do
         {_, ac, aw, _} = layout.agent_panel
         {_, ec, ew, _} = layout.editor_area
-        # Agent panel and editor area should share the same column/width
         assert ac == ec
         assert aw == ew
       end
@@ -392,9 +379,7 @@ defmodule Minga.Editor.LayoutTest do
 
       narrow_state = %{state | viewport: Viewport.new(24, 25)}
       layout = Layout.compute(narrow_state)
-      # Tree = 20, separator = 1, editor = 4 < 10. Tree collapses.
       assert layout.file_tree == nil
-      # Agent panel should still exist (plenty of height)
       assert layout.agent_panel != nil
     end
 
@@ -404,7 +389,6 @@ defmodule Minga.Editor.LayoutTest do
       assert layout.agent_panel == nil
       assert layout.file_tree == nil
 
-      # Grow back
       big_state = %{state | viewport: Viewport.new(30, 100)}
       layout = Layout.compute(big_state)
       assert layout.agent_panel != nil
@@ -433,14 +417,12 @@ defmodule Minga.Editor.LayoutTest do
     end
   end
 
-  # ── Helpers ──────────────────────────────────────────────────────────────────
-
   # ── Property-based tests ──────────────────────────────────────────────────
 
   describe "property: no overlap for random configurations" do
     property "no regions overlap and no zero/negative dimensions for random terminal sizes" do
       check all(
-              rows <- StreamData.integer(2..100),
+              rows <- StreamData.integer(3..100),
               cols <- StreamData.integer(3..300),
               split_type <- StreamData.member_of([:none, :vertical, :horizontal]),
               has_tree <- StreamData.boolean(),
@@ -488,7 +470,7 @@ defmodule Minga.Editor.LayoutTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp collect_all_rects(layout) do
-    base = [layout.minibuffer]
+    base = [layout.tab_bar, layout.minibuffer]
     base = if layout.file_tree, do: [layout.file_tree | base], else: base
     base = if layout.agent_panel, do: [layout.agent_panel | base], else: base
 
@@ -501,18 +483,16 @@ defmodule Minga.Editor.LayoutTest do
     base ++ window_rects
   end
 
-  # Asserts that no two non-overlay regions share any cells.
   defp assert_no_overlap(layout) do
     rects =
       [
+        layout.tab_bar,
         layout.file_tree,
         layout.agent_panel,
         layout.minibuffer
       ]
       |> Enum.reject(&is_nil/1)
 
-    # Add window content and modeline rects (not total, to avoid double-counting).
-    # Skip zero-height rects (collapsed modelines in tiny windows).
     window_rects =
       layout.window_layouts
       |> Map.values()
@@ -530,8 +510,6 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   defp rects_overlap?({r1, c1, w1, h1}, {r2, c2, w2, h2}) do
-    # Two rects overlap if they share at least one cell.
-    # They don't overlap if one is entirely left/right/above/below the other.
     not (c1 + w1 <= c2 or c2 + w2 <= c1 or r1 + h1 <= r2 or r2 + h2 <= r1)
   end
 end

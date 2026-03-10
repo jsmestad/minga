@@ -37,6 +37,9 @@ defmodule Minga.Editor.Layout do
   @file_tree_min_cols 8
   @agent_panel_min_rows 5
 
+  # Row where editor content starts (below the tab bar).
+  @content_start 1
+
   # ── Types ──────────────────────────────────────────────────────────────────
 
   @typedoc "A screen rectangle: {row, col, width, height}."
@@ -58,6 +61,7 @@ defmodule Minga.Editor.Layout do
   @typedoc "Complete layout for one frame."
   @type t :: %__MODULE__{
           terminal: rect(),
+          tab_bar: rect(),
           file_tree: rect() | nil,
           editor_area: rect(),
           window_layouts: %{Window.id() => window_layout()},
@@ -65,11 +69,12 @@ defmodule Minga.Editor.Layout do
           minibuffer: rect()
         }
 
-  @enforce_keys [:terminal, :editor_area, :minibuffer]
+  @enforce_keys [:terminal, :editor_area, :minibuffer, :tab_bar]
   defstruct [
     :terminal,
     :editor_area,
     :minibuffer,
+    :tab_bar,
     file_tree: nil,
     window_layouts: %{},
     agent_panel: nil
@@ -115,9 +120,12 @@ defmodule Minga.Editor.Layout do
     vp = state.viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
+    # 0. Tab bar takes row 0.
+    tab_bar_row = 0
+
     # 1. Minibuffer always takes the last row.
     minibuffer = {vp.rows - 1, 0, vp.cols, 1}
-    remaining_height = vp.rows - 1
+    remaining_height = max(vp.rows - 1 - @content_start, 1)
 
     # 2. File tree takes a left column if open (collapse if not enough space).
     {file_tree_rect, editor_col, editor_width} = file_tree_layout(state, vp.cols)
@@ -140,8 +148,8 @@ defmodule Minga.Editor.Layout do
         remaining_height
       )
 
-    # 5. Editor area is what's left.
-    editor_area = {0, editor_col, editor_width, editor_height}
+    # 5. Editor area is what's left (starts at @content_start to leave room for tab bar).
+    editor_area = {@content_start, editor_col, editor_width, editor_height}
 
     # 6. Window layouts within the editor area.
     window_layouts =
@@ -154,6 +162,7 @@ defmodule Minga.Editor.Layout do
 
     %__MODULE__{
       terminal: terminal,
+      tab_bar: {tab_bar_row, 0, vp.cols, 1},
       file_tree: file_tree_rect,
       editor_area: editor_area,
       window_layouts: window_layouts,
@@ -223,7 +232,7 @@ defmodule Minga.Editor.Layout do
       if agent_rect != nil do
         {_ar, _ac, _aw, ah} = agent_rect
         new_editor_height = remaining_height - ah
-        new_agent_rect = {new_editor_height, editor_col, editor_width, ah}
+        new_agent_rect = {@content_start + new_editor_height, editor_col, editor_width, ah}
 
         if new_editor_height < @editor_min_rows do
           {nil, remaining_height}
@@ -246,14 +255,14 @@ defmodule Minga.Editor.Layout do
   end
 
   defp file_tree_layout(%{file_tree: %{tree: %FileTree{width: tw}}} = state, total_cols) do
-    # Tree occupies the full height minus the minibuffer row.
-    tree_height = state.viewport.rows - 1
+    # Tree occupies the full height minus the minibuffer row and tab bar row.
+    tree_height = state.viewport.rows - @content_start - 1
     # Clamp tree width so tree + separator + minimum editor width fits.
     # Minimum editor width is 3 to support vertical splits (left + separator + right).
     min_editor_w = 3
     max_tree_w = max(total_cols - 1 - min_editor_w, 1)
     clamped_tw = min(tw, max_tree_w)
-    tree_rect = {0, 0, clamped_tw, tree_height}
+    tree_rect = {@content_start, 0, clamped_tw, tree_height}
     # Separator at column clamped_tw, editor starts at clamped_tw+1.
     # editor_col + editor_width must not exceed total_cols.
     editor_col = clamped_tw + 1
@@ -273,7 +282,8 @@ defmodule Minga.Editor.Layout do
        ) do
     panel_height = div(state.viewport.rows * 35, 100)
     editor_height = remaining_height - panel_height
-    agent_rect = {editor_height, editor_col, editor_width, panel_height}
+    agent_row = @content_start + editor_height
+    agent_rect = {agent_row, editor_col, editor_width, panel_height}
     {agent_rect, editor_height}
   end
 

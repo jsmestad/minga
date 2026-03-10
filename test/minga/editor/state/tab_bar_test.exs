@@ -225,4 +225,69 @@ defmodule Minga.Editor.State.TabBarTest do
       assert TabBar.get(tb, 99) == nil
     end
   end
+
+  describe "has_tab?/2" do
+    test "returns true for existing tab" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      assert TabBar.has_tab?(tb, 1)
+    end
+
+    test "returns false for missing tab" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      refute TabBar.has_tab?(tb, 99)
+    end
+  end
+
+  describe "tab_at/2" do
+    test "returns tab at 1-based index" do
+      tb = TabBar.new(file_tab(1, "first.ex"))
+      {tb, _} = TabBar.add(tb, :file, "second.ex")
+      {tb, _} = TabBar.add(tb, :file, "third.ex")
+
+      assert TabBar.tab_at(tb, 1).label == "first.ex"
+      assert TabBar.tab_at(tb, 2).label == "second.ex"
+      assert TabBar.tab_at(tb, 3).label == "third.ex"
+    end
+
+    test "returns nil for out-of-range index" do
+      tb = TabBar.new(file_tab(1))
+      assert TabBar.tab_at(tb, 5) == nil
+      assert TabBar.tab_at(tb, 0) == nil
+    end
+  end
+
+  describe "next_of_kind/2" do
+    test "cycles through agent tabs only" do
+      tb = TabBar.new(file_tab(1, "file.ex"))
+      {tb, _} = TabBar.add(tb, :agent, "Agent 1")
+      {tb, _} = TabBar.add(tb, :file, "other.ex")
+      {tb, _} = TabBar.add(tb, :agent, "Agent 2")
+
+      # Start on file tab
+      tb = TabBar.switch_to(tb, 1)
+      tb = TabBar.next_of_kind(tb, :agent)
+      assert TabBar.active(tb).label == "Agent 1"
+
+      tb = TabBar.next_of_kind(tb, :agent)
+      assert TabBar.active(tb).label == "Agent 2"
+
+      tb = TabBar.next_of_kind(tb, :agent)
+      assert TabBar.active(tb).label == "Agent 1"
+    end
+
+    test "returns unchanged when no tabs of that kind exist" do
+      tb = TabBar.new(file_tab(1, "only.ex"))
+      tb2 = TabBar.next_of_kind(tb, :agent)
+      assert tb2.active_id == tb.active_id
+    end
+
+    test "stays on single agent tab" do
+      tb = TabBar.new(file_tab(1, "file.ex"))
+      {tb, _} = TabBar.add(tb, :agent, "Solo")
+      tb = TabBar.switch_to(tb, 1)
+
+      tb = TabBar.next_of_kind(tb, :agent)
+      assert TabBar.active(tb).label == "Solo"
+    end
+  end
 end

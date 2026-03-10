@@ -215,13 +215,13 @@ defmodule Minga.Agent.View.RendererTest do
   end
 
   describe "title bar" do
-    test "renders draw commands at row 0" do
+    test "renders draw commands at row 1 (title bar below tab bar)" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
 
-      row_0_cmds = Enum.filter(commands, fn {row, _col, _text, _style} -> row == 0 end)
+      row_1_cmds = Enum.filter(commands, fn {row, _col, _text, _style} -> row == 1 end)
 
-      assert row_0_cmds != [], "expected draw commands at row 0 (title bar)"
+      assert row_1_cmds != [], "expected draw commands at row 1 (title bar)"
     end
   end
 
@@ -244,20 +244,20 @@ defmodule Minga.Agent.View.RendererTest do
   end
 
   describe "file viewer header" do
-    test "file viewer header is at the top of the viewer panel (row 1)" do
+    test "file viewer header is at the top of the viewer panel (row 2)" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
 
       chat_width = div(100 * 65, 100)
       viewer_col = chat_width + 1
 
-      # Header should be at row 1 (panel_start), at viewer_col
+      # Header should be at row 2 (panel_start), at viewer_col
       header_cmds =
         Enum.filter(commands, fn {row, col, _text, _style} ->
-          row == 1 and col == viewer_col
+          row == 2 and col == viewer_col
         end)
 
-      assert header_cmds != [], "expected file viewer header at row 1"
+      assert header_cmds != [], "expected file viewer header at row 2"
     end
   end
 

@@ -137,6 +137,15 @@ defmodule Minga.Theme.OneLight do
         search_current_bg: @hue_5,
         hint_fg: 0xA0A1A7,
         dashboard_label: 0x4078F2
+      },
+      tab_bar: %Minga.Theme.TabBar{
+        active_fg: 0x383A42,
+        active_bg: @syntax_bg,
+        inactive_fg: @ui_fg,
+        inactive_bg: @ui_bg,
+        separator_fg: @syntax_guide,
+        modified_fg: @hue_6,
+        bg: @ui_bg
       }
     }
   end

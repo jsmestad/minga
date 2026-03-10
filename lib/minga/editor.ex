@@ -548,6 +548,7 @@ defmodule Minga.Editor do
   def handle_info({:agent_event, :messages_changed}, state) do
     state = update_agent(state, &AgentState.maybe_auto_scroll/1)
     state = sync_agent_buffer(state)
+    state = maybe_update_agent_tab_label(state)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -879,6 +880,73 @@ defmodule Minga.Editor do
   end
 
   defp sync_agent_buffer(state), do: state
+
+  # Updates the active agent tab's label to the first user prompt (truncated).
+  # Only updates if the current label is the default "New Agent" or "minga".
+  @spec maybe_update_agent_tab_label(EditorState.t()) :: EditorState.t()
+  defp maybe_update_agent_tab_label(
+         %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
+       )
+       when is_pid(session) do
+    case TabBar.active(tb) do
+      %{kind: :agent, label: label} when is_binary(label) ->
+        if default_agent_label?(label) do
+          update_agent_tab_from_session(state, tb, active_id, session)
+        else
+          state
+        end
+
+      _other ->
+        state
+    end
+  end
+
+  defp maybe_update_agent_tab_label(state), do: state
+
+  @spec update_agent_tab_from_session(EditorState.t(), TabBar.t(), Tab.id(), pid()) ::
+          EditorState.t()
+  defp update_agent_tab_from_session(state, tb, active_id, session) do
+    messages =
+      try do
+        AgentSession.messages(session)
+      catch
+        :exit, _ -> []
+      end
+
+    case first_user_message(messages) do
+      nil ->
+        state
+
+      text ->
+        label = truncate_label(text, 30)
+        %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
+    end
+  end
+
+  @spec default_agent_label?(String.t()) :: boolean()
+  defp default_agent_label?("New Agent"), do: true
+  defp default_agent_label?("minga"), do: true
+  defp default_agent_label?(_), do: false
+
+  @spec first_user_message([term()]) :: String.t() | nil
+  defp first_user_message(messages) do
+    Enum.find_value(messages, fn
+      {:user, text} -> text
+      _ -> nil
+    end)
+  end
+
+  @spec truncate_label(String.t(), pos_integer()) :: String.t()
+  defp truncate_label(text, max) do
+    # Take first line, trim, truncate
+    line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
+
+    if String.length(line) > max do
+      String.slice(line, 0, max - 1) <> "\u{2026}"
+    else
+      line
+    end
+  end
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do

@@ -13,7 +13,7 @@ defmodule Minga.Editor.MacroIntegrationTest do
       send_keys(ctx, "qaxjq")
 
       # First line should have "aa" (deleted first char)
-      assert_row_contains(ctx, 0, "aa")
+      assert_row_contains(ctx, 1, "aa")
       # Cursor should be on line 1
       assert buffer_cursor(ctx) == {1, 0}
 
@@ -21,7 +21,7 @@ defmodule Minga.Editor.MacroIntegrationTest do
       send_keys(ctx, "@a")
 
       # Second line should have "bb" (deleted first char)
-      assert_row_contains(ctx, 1, "bb")
+      assert_row_contains(ctx, 2, "bb")
       # Cursor should be on line 2
       assert buffer_cursor(ctx) == {2, 0}
     end

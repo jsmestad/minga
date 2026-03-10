@@ -82,7 +82,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       # and rows equal the content area (total rows minus 1 for global minibuffer)
       Enum.each(viewports, fn vp ->
         assert vp.cols < 80
-        assert vp.rows == 23
+        assert vp.rows == 22
       end)
     end
   end

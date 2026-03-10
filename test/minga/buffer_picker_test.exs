@@ -58,12 +58,13 @@ defmodule Minga.BufferPickerTest do
       send_key(ctx, ?b)
       send_key(ctx, ?a)
 
-      # Should see bar and baz but not foo
+      # Should see bar and baz but not foo (skip row 0 which is the tab bar)
       screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "bar.txt")
-      assert String.contains?(all_text, "baz.txt")
-      refute String.contains?(all_text, "foo.txt")
+      # Drop the tab bar row before checking picker content
+      picker_text = screen |> Enum.drop(1) |> Enum.join("\n")
+      assert String.contains?(picker_text, "bar.txt")
+      assert String.contains?(picker_text, "baz.txt")
+      refute String.contains?(picker_text, "foo.txt")
     end
   end
 
@@ -85,7 +86,7 @@ defmodule Minga.BufferPickerTest do
       send_key(ctx, ?j, 0x02)
 
       # Check that preview shows one of the buffer's content (file or scratch)
-      row0 = screen_row(ctx, 0)
+      row0 = screen_row(ctx, 1)
 
       assert String.contains?(row0, "first") or String.contains?(row0, "second") or
                String.contains?(row0, ";;")
@@ -114,7 +115,7 @@ defmodule Minga.BufferPickerTest do
       refute String.contains?(mb, ">")
 
       # Should be showing the first buffer's content
-      assert_row_contains(ctx, 0, "one content")
+      assert_row_contains(ctx, 1, "one content")
     end
 
     @tag :tmp_dir
@@ -137,7 +138,7 @@ defmodule Minga.BufferPickerTest do
       send_key(ctx, 13)
 
       # Should show bbb content
-      assert_row_contains(ctx, 0, "bbb content")
+      assert_row_contains(ctx, 1, "bbb content")
     end
   end
 
@@ -152,7 +153,7 @@ defmodule Minga.BufferPickerTest do
       ctx = start_editor("aaa content", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
       # Currently on buffer 2 (bbb)
-      assert_row_contains(ctx, 0, "bbb content")
+      assert_row_contains(ctx, 1, "bbb content")
 
       # Open picker, navigate to buffer 1 (preview changes), then cancel
       send_keys(ctx, "<SPC>bb")
@@ -161,7 +162,7 @@ defmodule Minga.BufferPickerTest do
       send_key(ctx, 27)
 
       # Should restore original buffer (bbb)
-      assert_row_contains(ctx, 0, "bbb content")
+      assert_row_contains(ctx, 1, "bbb content")
 
       # Picker should be closed
       mb = minibuffer(ctx)
@@ -185,7 +186,8 @@ defmodule Minga.BufferPickerTest do
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "[+]")
+      # Tab picker shows bullet (•) for modified buffers
+      assert String.contains?(all_text, "\u{2022}")
     end
   end
 

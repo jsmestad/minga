@@ -140,6 +140,15 @@ defmodule Minga.Theme.DoomOne do
         search_current_bg: @red,
         hint_fg: 0x5C6370,
         dashboard_label: 0x61AFEF
+      },
+      tab_bar: %Minga.Theme.TabBar{
+        active_fg: @fg,
+        active_bg: @bg,
+        inactive_fg: @base5,
+        inactive_bg: @base3,
+        separator_fg: 0x3F444A,
+        modified_fg: @orange,
+        bg: @base3
       }
     }
   end

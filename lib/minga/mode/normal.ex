@@ -493,6 +493,16 @@ defmodule Minga.Mode.Normal do
     {:execute, :move_to_logical_line_end, %{state | pending_g: false}}
   end
 
+  # gt — next tab
+  def handle_key({?t, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :tab_next, %{state | pending_g: false}}
+  end
+
+  # gT — previous tab
+  def handle_key({?T, 0}, %ModeState{pending_g: true} = state) do
+    {:execute, :tab_prev, %{state | pending_g: false}}
+  end
+
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do

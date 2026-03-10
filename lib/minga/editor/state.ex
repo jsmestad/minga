@@ -43,6 +43,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
+  alias Minga.Log
 
   alias Minga.Mode
   alias Minga.Port.Capabilities
@@ -92,7 +93,8 @@ defmodule Minga.Editor.State do
             tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
-            modeline_click_regions: []
+            modeline_click_regions: [],
+            tab_bar_click_regions: []
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -133,7 +135,8 @@ defmodule Minga.Editor.State do
           tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
-          modeline_click_regions: [Minga.Editor.Modeline.click_region()]
+          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()]
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -249,9 +252,11 @@ defmodule Minga.Editor.State do
   def add_buffer(%__MODULE__{buffers: bs, tab_bar: %TabBar{} = tb} = state, pid) do
     label = buffer_label(pid)
 
-    # Snapshot the current tab. Override mode to :normal because
-    # add_buffer may run mid-command (e.g. during :e) when mode is
-    # :command. The saved context should reflect the resting state.
+    Log.debug(:editor, fn ->
+      "[tab] add_buffer label=#{label} from_tab=#{tb.active_id} agentic=#{state.agentic.active}"
+    end)
+
+    # Snapshot the current tab before we modify anything.
     current_ctx =
       snapshot_tab_context(state)
       |> Map.put(:mode, :normal)
@@ -259,14 +264,21 @@ defmodule Minga.Editor.State do
 
     tb = TabBar.update_context(tb, tb.active_id, current_ctx)
 
-    # Add the buffer to the pool
-    new_bs = Buffers.add(bs, pid)
-    state = %{state | buffers: new_bs}
+    # Add the buffer to the pool (Buffers.add auto-activates it)
+    state = %{state | buffers: Buffers.add(bs, pid)}
 
-    # Create a file tab (TabBar.add makes it active)
+    # Create a file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # Snapshot the new tab's context. Use :normal mode for the same reason.
+    # If leaving agentic view, reset to file-tab defaults.
+    state =
+      if state.agentic.active do
+        %{state | agentic: %ViewState{}, keymap_scope: :editor}
+      else
+        state
+      end
+
+    # Snapshot the new tab's context with the correct active buffer.
     state = %{state | tab_bar: tb} |> sync_active_window_buffer()
 
     new_ctx =
@@ -275,6 +287,10 @@ defmodule Minga.Editor.State do
       |> Map.put(:mode_state, Minga.Mode.initial_state())
 
     tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+
+    Log.debug(:editor, fn ->
+      "[tab] add_buffer complete: tab=#{new_tab.id} agentic=#{state.agentic.active} scope=#{state.keymap_scope}"
+    end)
 
     %{state | tab_bar: tb}
   end
@@ -405,6 +421,10 @@ defmodule Minga.Editor.State do
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
+    # Empty context means a brand-new tab. Apply file-tab defaults so we
+    # don't inherit stale agentic state from the previous tab.
+    context = apply_file_tab_defaults(context)
+
     state
     |> maybe_restore(:windows, context)
     |> maybe_restore(:file_tree, context)
@@ -414,6 +434,42 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:agent, context)
     |> maybe_restore(:agentic, context)
     |> restore_active_buffer(context)
+  end
+
+  # When a tab has no saved context (just created), fill in file-tab
+  # defaults so we cleanly leave agentic mode. Uses proper struct
+  # defaults so downstream code (render pipeline, key handling) doesn't
+  # crash on missing fields.
+  @spec apply_file_tab_defaults(Tab.context()) :: Tab.context()
+  defp apply_file_tab_defaults(context) when map_size(context) == 0 do
+    %{
+      mode: :normal,
+      mode_state: Minga.Mode.initial_state(),
+      keymap_scope: :editor,
+      agentic: %ViewState{}
+    }
+  end
+
+  defp apply_file_tab_defaults(context), do: context
+
+  @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
+  defp log_switch_tab(tb, current_id, target_id) do
+    Log.debug(:editor, fn ->
+      from = format_tab_ref(TabBar.active(tb))
+      to = format_tab_ref(TabBar.get(tb, target_id))
+      "[tab] switch_tab #{current_id}(#{from}) -> #{target_id}(#{to})"
+    end)
+  end
+
+  @spec format_tab_ref(Tab.t() | nil) :: String.t()
+  defp format_tab_ref(%{kind: kind, label: label}), do: "#{kind}:#{label}"
+  defp format_tab_ref(nil), do: "nil"
+
+  @spec log_switch_tab_result(t()) :: :ok
+  defp log_switch_tab_result(state) do
+    Log.debug(:editor, fn ->
+      "[tab] switch_tab restored: agentic=#{state.agentic.active} scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
+    end)
   end
 
   @spec maybe_restore(t(), atom(), Tab.context()) :: t()
@@ -455,6 +511,8 @@ defmodule Minga.Editor.State do
     if current_id == target_id do
       state
     else
+      log_switch_tab(tb, current_id, target_id)
+
       # Snapshot current tab
       context = snapshot_tab_context(state)
       tb = TabBar.update_context(tb, current_id, context)
@@ -466,8 +524,11 @@ defmodule Minga.Editor.State do
       %Tab{} = target = TabBar.active(tb)
       state = %{state | tab_bar: tb}
 
+      state = restore_tab_context(state, target.context)
+
+      log_switch_tab_result(state)
+
       state
-      |> restore_tab_context(target.context)
       |> invalidate_all_windows()
       |> Map.put(:layout, nil)
     end
@@ -479,6 +540,16 @@ defmodule Minga.Editor.State do
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{tab_bar: nil}), do: nil
   def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
+
+  @doc "Finds a file tab whose context has the given buffer pid as active_buffer."
+  @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
+  def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
+
+  def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
+    Enum.find(tb.tabs, fn tab ->
+      tab.kind == :file and Map.get(tab.context, :active_buffer) == pid
+    end)
+  end
 
   @doc """
   Returns the kind of the active tab, or `:file` as default.

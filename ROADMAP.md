@@ -233,7 +233,11 @@ Current status and planned features. Updated as development progresses.
 | Mouse: cursor shape changes (GUI) | 📋 | #217 |
 | Split windows | ✅ | Vertical, horizontal, nested; `SPC w` navigation |
 | Floating windows | 📋 | Zig renderer supports panels |
-| Tab bar | 💭 | |
+| Tab bar | ✅ | Row 0, Powerline separators, per-filetype Nerd Font devicons, overflow scrolling, click/middle-click, `SPC 1-9`/`gt`/`gT` #249 |
+| Tab data model | ✅ | Tab/TabBar structs, snapshot/restore, 9 per-tab fields #251 |
+| Tab commands | ✅ | `SPC TAB n/p/d/a`, tab picker (`SPC b b`), `cycle_agent_tabs` #252 |
+| Nerd Font devicons | ✅ | 52 filetypes + 4 special buffers, `Minga.Devicon` registry #250 |
+| Dynamic agent tab labels | ✅ | First user prompt updates tab label #254 |
 
 ## LSP & Diagnostics
 

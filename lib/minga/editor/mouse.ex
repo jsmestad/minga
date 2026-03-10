@@ -115,15 +115,22 @@ defmodule Minga.Editor.Mouse do
   # ── Middle-click paste ──
 
   def handle(state, row, col, :middle, _mods, :press, _cc) do
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
+    # Middle-click on tab bar closes the clicked tab
+    case tab_bar_click(state, row, col) do
+      {:command, _cmd} ->
+        close_tab_at(state, row, col)
 
-      {target_line, target_col} ->
-        BufferServer.move_to(state.buffers.active, {target_line, target_col})
-        state = cancel_mode_for_mouse(state)
-        state = %{state | mode: :normal, mode_state: Mode.initial_state()}
-        Minga.Editor.dispatch_command(state, :paste_after)
+      :not_tab_bar ->
+        case mouse_to_buffer_pos(state, row, col) do
+          nil ->
+            state
+
+          {target_line, target_col} ->
+            BufferServer.move_to(state.buffers.active, {target_line, target_col})
+            state = cancel_mode_for_mouse(state)
+            state = %{state | mode: :normal, mode_state: Mode.initial_state()}
+            Minga.Editor.dispatch_command(state, :paste_after)
+        end
     end
   end
 
@@ -552,7 +559,12 @@ defmodule Minga.Editor.Mouse do
        ),
        do: state
 
-  defp maybe_handle_content_click(state, row, col), do: handle_content_click(state, row, col)
+  defp maybe_handle_content_click(state, row, col) do
+    case tab_bar_click(state, row, col) do
+      {:command, cmd} -> Minga.Editor.dispatch_command(state, cmd)
+      :not_tab_bar -> handle_content_click(state, row, col)
+    end
+  end
 
   @spec handle_separator_drag(state(), WindowTree.direction(), non_neg_integer(), integer()) ::
           state()
@@ -866,6 +878,70 @@ defmodule Minga.Editor.Mouse do
       end
 
     BufferServer.move_to(buf, {target_line, target_col})
+  end
+
+  # ── Tab bar close (middle-click) ─────────────────────────────────────────
+
+  @spec close_tab_at(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp close_tab_at(state, _row, col) do
+    case find_tab_bar_region(state.tab_bar_click_regions, col) do
+      {:command, cmd} -> close_tab_by_command(state, cmd)
+      :not_tab_bar -> state
+    end
+  end
+
+  @spec close_tab_by_command(state(), atom()) :: state()
+  defp close_tab_by_command(state, cmd) do
+    case parse_tab_id(cmd) do
+      {:ok, tab_id} ->
+        state = EditorState.switch_tab(state, tab_id)
+        Minga.Editor.dispatch_command(state, :kill_buffer)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec parse_tab_id(atom()) :: {:ok, pos_integer()} | :error
+  defp parse_tab_id(cmd) do
+    case Atom.to_string(cmd) do
+      "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {tab_id, ""} -> {:ok, tab_id}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  # ── Tab bar click detection ──────────────────────────────────────────────
+
+  @spec tab_bar_click(state(), non_neg_integer(), non_neg_integer()) ::
+          {:command, atom()} | :not_tab_bar
+  defp tab_bar_click(state, row, col) do
+    layout = Layout.get(state)
+    {tb_row, tb_col, tb_width, _tb_height} = layout.tab_bar
+
+    if row == tb_row and col >= tb_col and col < tb_col + tb_width do
+      find_tab_bar_region(state.tab_bar_click_regions, col)
+    else
+      :not_tab_bar
+    end
+  end
+
+  @spec find_tab_bar_region(
+          [Minga.Editor.TabBarRenderer.click_region()],
+          non_neg_integer()
+        ) :: {:command, atom()} | :not_tab_bar
+  defp find_tab_bar_region(regions, col) do
+    case Enum.find(regions, fn {start_col, end_col, _cmd} ->
+           col >= start_col and col <= end_col
+         end) do
+      {_, _, cmd} -> {:command, cmd}
+      nil -> :not_tab_bar
+    end
   end
 
   # ── Modeline segment click detection ─────────────────────────────────────

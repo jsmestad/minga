@@ -10,6 +10,7 @@ defmodule Minga.Picker.FileSource do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Log
 
   require Logger
 
@@ -39,10 +40,13 @@ defmodule Minga.Picker.FileSource do
   def on_select({rel_path, _label, _desc}, state) do
     abs_path = Path.expand(rel_path)
 
+    Log.debug(:editor, "[file_picker] on_select path=#{rel_path} agentic=#{state.agentic.active}")
+
     case find_buffer_by_path(state, abs_path) do
       nil ->
         case start_buffer(abs_path) do
           {:ok, pid} ->
+            Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
             EditorState.add_buffer(state, pid)
 
           {:error, reason} ->
@@ -51,7 +55,22 @@ defmodule Minga.Picker.FileSource do
         end
 
       idx ->
-        EditorState.switch_buffer(state, idx)
+        # If the buffer already has a tab, switch to that tab instead
+        # of just changing the buffer index. This correctly leaves
+        # agentic view when opening a file from an agent tab.
+        pid = Enum.at(state.buffers.list, idx)
+        tab = EditorState.find_tab_by_buffer(state, pid)
+
+        Log.debug(
+          :editor,
+          "[file_picker] existing buffer idx=#{idx} tab=#{inspect(tab && tab.id)}"
+        )
+
+        if tab do
+          EditorState.switch_tab(state, tab.id)
+        else
+          EditorState.switch_buffer(state, idx)
+        end
     end
   end
 

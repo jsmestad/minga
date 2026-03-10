@@ -99,6 +99,23 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Session history"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
 
+    # ── Tab ──────────────────────────────────────────────────────────────────
+    {[{9, @none}, {?n, @none}], :tab_next, "Next tab"},
+    {[{9, @none}, {?p, @none}], :tab_prev, "Previous tab"},
+    {[{9, @none}, {?d, @none}], :kill_buffer, "Close tab"},
+    {[{9, @none}, {?a, @none}], :cycle_agent_tabs, "Next agent tab"},
+
+    # ── Direct tab switching (SPC 1..9) ──────────────────────────────────────
+    {[{?1, @none}], :tab_goto_1, "Tab 1"},
+    {[{?2, @none}], :tab_goto_2, "Tab 2"},
+    {[{?3, @none}], :tab_goto_3, "Tab 3"},
+    {[{?4, @none}], :tab_goto_4, "Tab 4"},
+    {[{?5, @none}], :tab_goto_5, "Tab 5"},
+    {[{?6, @none}], :tab_goto_6, "Tab 6"},
+    {[{?7, @none}], :tab_goto_7, "Tab 7"},
+    {[{?8, @none}], :tab_goto_8, "Tab 8"},
+    {[{?9, @none}], :tab_goto_9, "Tab 9"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"},
     {[{?t, @none}, {?w, @none}], :toggle_wrap, "Toggle word wrap"}
@@ -106,6 +123,7 @@ defmodule Minga.Keymap.Defaults do
 
   # Group prefix descriptions shown in which-key at the SPC level.
   @group_prefixes [
+    {[{9, @none}], "+tab"},
     {[{?s, @none}], "+search"},
     {[{?f, @none}], "+file"},
     {[{?b, @none}], "+buffer"},

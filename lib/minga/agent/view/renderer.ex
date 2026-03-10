@@ -140,7 +140,8 @@ defmodule Minga.Agent.View.Renderer do
 
     input_height = compute_input_height(input.panel.input_lines)
     panel_end = rows - 1 - 1 - input_height
-    panel_start = 1
+    # Tab bar occupies row 0, title bar at row 1, content starts at row 2
+    panel_start = 2
     panel_height = max(panel_end - panel_start, 1)
 
     chat_width_pct = input.agentic.chat_width_pct
@@ -152,7 +153,7 @@ defmodule Minga.Agent.View.Renderer do
     input_row = panel_end
     modeline_row = input_row + input_height
 
-    title_commands = render_title_bar_from_input(input, 0, cols)
+    title_commands = render_title_bar_from_input(input, 1, cols)
     chat_commands = render_chat_from_input(input, {panel_start, 0, chat_width, panel_height})
 
     separator_commands =

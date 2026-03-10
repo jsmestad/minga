@@ -62,6 +62,19 @@ defmodule Minga.Editor.State.TabBar do
   """
   @spec add(t(), Tab.kind(), String.t()) :: {t(), Tab.t()}
   def add(%__MODULE__{} = tb, kind, label \\ "") do
+    {tb, tab} = insert(tb, kind, label)
+    {%{tb | active_id: tab.id}, tab}
+  end
+
+  @doc """
+  Inserts a new tab next to the active tab without switching to it.
+
+  Returns `{updated_tab_bar, new_tab}`. The caller is responsible for
+  calling `switch_to/2` or `EditorState.switch_tab/2` to activate it.
+  This is the primitive that `add/3` and `EditorState.add_buffer/2` build on.
+  """
+  @spec insert(t(), Tab.kind(), String.t()) :: {t(), Tab.t()}
+  def insert(%__MODULE__{} = tb, kind, label \\ "") do
     tab =
       case kind do
         :file -> Tab.new_file(tb.next_id, label)
@@ -73,7 +86,7 @@ defmodule Minga.Editor.State.TabBar do
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     new_tabs = before ++ [tab] ++ rest
 
-    {%{tb | tabs: new_tabs, active_id: tab.id, next_id: tb.next_id + 1}, tab}
+    {%{tb | tabs: new_tabs, next_id: tb.next_id + 1}, tab}
   end
 
   @doc """
@@ -106,6 +119,32 @@ defmodule Minga.Editor.State.TabBar do
 
         {:ok, %{tb | tabs: new_tabs, active_id: new_active}}
     end
+  end
+
+  @doc "Returns true if a tab with the given id exists."
+  @spec has_tab?(t(), Tab.id()) :: boolean()
+  def has_tab?(%__MODULE__{tabs: tabs}, id) do
+    Enum.any?(tabs, &(&1.id == id))
+  end
+
+  @doc "Returns the tab at the given 1-based position index, or nil."
+  @spec tab_at(t(), pos_integer()) :: Tab.t() | nil
+  def tab_at(%__MODULE__{tabs: tabs}, index) when index >= 1 do
+    Enum.at(tabs, index - 1)
+  end
+
+  def tab_at(_, _), do: nil
+
+  @doc "Updates the label of the tab with the given id."
+  @spec update_label(t(), Tab.id(), String.t()) :: t()
+  def update_label(%__MODULE__{tabs: tabs} = tb, id, label) do
+    tabs =
+      Enum.map(tabs, fn
+        %{id: ^id} = tab -> %{tab | label: label}
+        tab -> tab
+      end)
+
+    %{tb | tabs: tabs}
   end
 
   @doc "Switches the active tab to the one with the given id."
@@ -153,18 +192,6 @@ defmodule Minga.Editor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
-  @doc "Updates the label of the tab with the given id."
-  @spec update_label(t(), Tab.id(), String.t()) :: t()
-  def update_label(%__MODULE__{tabs: tabs} = tb, id, label) do
-    new_tabs =
-      Enum.map(tabs, fn
-        %Tab{id: ^id} = tab -> Tab.set_label(tab, label)
-        tab -> tab
-      end)
-
-    %{tb | tabs: new_tabs}
-  end
-
   @doc "Returns the first tab matching the given kind, or nil."
   @spec find_by_kind(t(), Tab.kind()) :: Tab.t() | nil
   def find_by_kind(%__MODULE__{tabs: tabs}, kind) do
@@ -189,5 +216,35 @@ defmodule Minga.Editor.State.TabBar do
     tabs
     |> Enum.filter(&(&1.kind == kind and &1.id != active_id))
     |> List.last()
+  end
+
+  @doc """
+  Cycles to the next tab of the given kind, wrapping around.
+  If the active tab is already of that kind, jumps to the next one.
+  If the active tab is a different kind, jumps to the first of the
+  requested kind. Returns unchanged if no tabs of that kind exist.
+  """
+  @spec next_of_kind(t(), Tab.kind()) :: t()
+  def next_of_kind(%__MODULE__{tabs: tabs, active_id: active_id} = tb, kind) do
+    kind_tabs = Enum.filter(tabs, &(&1.kind == kind))
+
+    case kind_tabs do
+      [] ->
+        tb
+
+      [only] ->
+        %{tb | active_id: only.id}
+
+      _ ->
+        current_idx = Enum.find_index(kind_tabs, &(&1.id == active_id))
+
+        next_tab =
+          case current_idx do
+            nil -> hd(kind_tabs)
+            idx -> Enum.at(kind_tabs, rem(idx + 1, length(kind_tabs)))
+          end
+
+        %{tb | active_id: next_tab.id}
+    end
   end
 end

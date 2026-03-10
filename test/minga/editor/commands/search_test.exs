@@ -265,11 +265,11 @@ defmodule Minga.Editor.Commands.SearchTest do
 
       # The gutter takes some columns; find where "foo" appears on screen.
       # Both occurrences of "foo" should have the search highlight bg.
-      row_text = screen_row(ctx, 0)
+      row_text = screen_row(ctx, 1)
       # Find the first "f" in the row text
       first_f = :binary.match(row_text, "f") |> elem(0)
 
-      cell = screen_cell(ctx, 0, first_f)
+      cell = screen_cell(ctx, 1, first_f)
 
       assert cell.bg == 0xECBE7B,
              "Expected search highlight bg on first 'foo', got: #{inspect(cell)}"
@@ -281,9 +281,9 @@ defmodule Minga.Editor.Commands.SearchTest do
       type_text(ctx, "foo")
 
       # Still in search mode — highlights should be visible
-      row_text = screen_row(ctx, 0)
+      row_text = screen_row(ctx, 1)
       first_f = :binary.match(row_text, "f") |> elem(0)
-      cell = screen_cell(ctx, 0, first_f)
+      cell = screen_cell(ctx, 1, first_f)
 
       assert cell.bg == 0xECBE7B,
              "Expected live search highlight during / mode, got: #{inspect(cell)}"
@@ -295,9 +295,9 @@ defmodule Minga.Editor.Commands.SearchTest do
       type_text(ctx, "%s/foo")
 
       # Still in command mode typing the substitute — highlights should show
-      row_text = screen_row(ctx, 0)
+      row_text = screen_row(ctx, 1)
       first_f = :binary.match(row_text, "f") |> elem(0)
-      cell = screen_cell(ctx, 0, first_f)
+      cell = screen_cell(ctx, 1, first_f)
 
       assert cell.bg == 0xECBE7B,
              "Expected live highlight during :%s typing, got: #{inspect(cell)}"
@@ -312,14 +312,14 @@ defmodule Minga.Editor.Commands.SearchTest do
       assert buffer_content(ctx) == "foo bar foo"
 
       # But the screen should show the preview
-      row_text = screen_row(ctx, 0)
+      row_text = screen_row(ctx, 1)
 
       assert String.contains?(row_text, "hello bar hello"),
              "Expected live preview of substitution, got: #{inspect(row_text)}"
 
       # The replacement text "hello" should be highlighted in yellow
       first_h = :binary.match(row_text, "h") |> elem(0)
-      cell = screen_cell(ctx, 0, first_h)
+      cell = screen_cell(ctx, 1, first_h)
 
       assert cell.bg == 0xECBE7B,
              "Expected replacement text highlighted in yellow, got: #{inspect(cell)}"

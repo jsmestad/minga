@@ -83,7 +83,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
   def execute(state, :buffer_list) do
-    PickerUI.open(state, Minga.Picker.BufferSource)
+    PickerUI.open(state, Minga.Picker.TabSource)
   end
 
   def execute(state, :buffer_list_all) do
@@ -92,7 +92,15 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(state, :buffer_next), do: next_buffer(state)
   def execute(state, :buffer_prev), do: prev_buffer(state)
-  def execute(state, :kill_buffer), do: remove_current_buffer(state)
+  def execute(state, :tab_next), do: next_buffer(state)
+  def execute(state, :tab_prev), do: prev_buffer(state)
+
+  def execute(state, :kill_buffer) do
+    case EditorState.active_tab_kind(state) do
+      :agent -> close_agent_tab(state)
+      _ -> remove_current_buffer(state)
+    end
+  end
 
   def execute(state, :new_buffer) do
     n = next_new_buffer_number(state.buffers.list)
@@ -576,6 +584,43 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp remove_current_buffer(state), do: state
+
+  @spec close_agent_tab(state()) :: state()
+  defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
+    # Stop the agent session if running
+    if state.agent.session && Process.alive?(state.agent.session) do
+      try do
+        GenServer.stop(state.agent.session, :normal)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    Minga.Editor.log_to_messages("Closed agent tab")
+
+    # Find a file tab to switch to
+    case TabBar.most_recent_of_kind(state.tab_bar, :file) do
+      %Tab{} ->
+        # Deactivate agentic view and switch to the file tab
+        state = %{state | agentic: %{state.agentic | active: false}, keymap_scope: :editor}
+        state = remove_current_tab(state)
+
+        # Restore the now-active tab's context
+        case EditorState.active_tab(state) do
+          %Tab{context: context} when is_map(context) and map_size(context) > 0 ->
+            EditorState.restore_tab_context(state, context)
+
+          _ ->
+            state
+        end
+
+      nil ->
+        # No file tabs left, just remove the agent tab
+        remove_current_tab(state)
+    end
+  end
+
+  defp close_agent_tab(state), do: state
 
   @spec remove_current_tab(state()) :: state()
   defp remove_current_tab(%{tab_bar: %TabBar{} = tb} = state) do

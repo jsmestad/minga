@@ -8,27 +8,30 @@ defmodule Minga.Editor.Renderer.LineTest do
 
   alias Minga.Test.HeadlessPort
 
+  # Content starts at row 1 because the tab bar occupies row 0.
+  @content_row 1
+
   describe "file content rendering" do
     test "opens a file and renders its content on screen" do
       ctx = start_editor("hello world\nsecond line\nthird line")
 
-      assert_row_contains(ctx, 0, "hello world")
-      assert_row_contains(ctx, 1, "second line")
-      assert_row_contains(ctx, 2, "third line")
+      assert_row_contains(ctx, @content_row, "hello world")
+      assert_row_contains(ctx, @content_row + 1, "second line")
+      assert_row_contains(ctx, @content_row + 2, "third line")
     end
 
     test "empty lines below content show tildes" do
       ctx = start_editor("just one line", height: 10)
 
-      assert_row_contains(ctx, 0, "just one line")
-      assert_row_contains(ctx, 1, "~")
+      assert_row_contains(ctx, @content_row, "just one line")
+      assert_row_contains(ctx, @content_row + 1, "~")
     end
 
     test "renders unicode content correctly" do
       ctx = start_editor("héllo wörld 🎉\nñoño")
 
-      assert_row_contains(ctx, 0, "héllo wörld")
-      assert_row_contains(ctx, 1, "ñoño")
+      assert_row_contains(ctx, @content_row, "héllo wörld")
+      assert_row_contains(ctx, @content_row + 1, "ñoño")
     end
   end
 
@@ -40,7 +43,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       send_key(ctx, ?X)
       send_key(ctx, ?Y)
 
-      assert_row_contains(ctx, 0, "XYhello")
+      assert_row_contains(ctx, @content_row, "XYhello")
     end
 
     test "newline in insert mode creates a new line on screen" do
@@ -49,7 +52,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       send_key(ctx, ?i)
       send_key(ctx, 13)
 
-      assert_row_contains(ctx, 1, "hello")
+      assert_row_contains(ctx, @content_row + 1, "hello")
     end
   end
 
@@ -57,20 +60,20 @@ defmodule Minga.Editor.Renderer.LineTest do
     test "CJK characters render without overlap or gaps" do
       ctx = start_editor("你好世界")
 
-      assert_row_contains(ctx, 0, "你好世界")
+      assert_row_contains(ctx, @content_row, "你好世界")
     end
 
     test "cursor on CJK character lands at correct display column" do
       ctx = start_editor("你好")
 
-      # Move right once — cursor steps to second CJK char (display col 2)
+      # Move right once - cursor steps to second CJK char (display col 2)
       send_key(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       {cursor_row, cursor_col} = screen.cursor
 
-      assert cursor_row == 0
-      # Gutter width for 1-line file is 3; '好' starts at display col 2 → 3+2=5
+      assert cursor_row == @content_row
+      # Gutter width for 1-line file is 3; '好' starts at display col 2 -> 3+2=5
       assert cursor_col == 5, "Expected cursor at display col 5, got #{cursor_col}"
     end
 
@@ -83,7 +86,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       send_key(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
-      row = Enum.at(screen.grid, 0)
+      row = Enum.at(screen.grid, @content_row)
 
       # HeadlessPort places one grapheme per cell at the draw command's col.
       # The draw command starts at display col 3 (gutter width).
@@ -101,35 +104,35 @@ defmodule Minga.Editor.Renderer.LineTest do
     test "emoji renders as 2 display columns" do
       ctx = start_editor("🎉 party")
 
-      assert_row_contains(ctx, 0, "🎉 party")
+      assert_row_contains(ctx, @content_row, "🎉 party")
     end
 
     test "precomposed accented characters render as 1 display column" do
       # é (U+00E9, precomposed) = 2 bytes, 1 display col
       ctx = start_editor("é hello")
 
-      assert_row_contains(ctx, 0, "é hello")
+      assert_row_contains(ctx, @content_row, "é hello")
 
       # Moving right from 'é' should step 1 display col (to the space)
       send_key(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       {_crow, cursor_col} = screen.cursor
-      # gutter=3, é is 1 col wide, so after `l` cursor is at display col 1 → col 3+1=4
+      # gutter=3, é is 1 col wide, so after `l` cursor is at display col 1 -> col 3+1=4
       assert cursor_col == 4, "Expected cursor at col 4 (é is 1 col wide), got #{cursor_col}"
     end
 
     test "ASCII behavior is unchanged" do
       ctx = start_editor("hello world")
 
-      assert_row_contains(ctx, 0, "hello world")
+      assert_row_contains(ctx, @content_row, "hello world")
 
       send_key(ctx, ?v)
       send_key(ctx, ?l)
       send_key(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
-      row = Enum.at(screen.grid, 0)
+      row = Enum.at(screen.grid, @content_row)
       # gutter=3; select "hel" = cols 3, 4, 5
       selected_cells = Enum.slice(row, 3, 3)
 
@@ -150,7 +153,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       send_key(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
-      row = Enum.at(screen.grid, 0)
+      row = Enum.at(screen.grid, @content_row)
 
       selected_cells = Enum.slice(row, @sel_gutter_w, 3)
 
@@ -170,12 +173,14 @@ defmodule Minga.Editor.Renderer.LineTest do
 
       for _ <- 1..10, do: send_key(ctx, ?j)
 
-      row0 = screen_row(ctx, 0)
+      row_text = screen_row(ctx, @content_row)
 
-      refute String.contains?(row0, "line 0"),
-             "Expected line 0 to have scrolled off, got: #{inspect(row0)}"
+      refute String.contains?(row_text, "line 0"),
+             "Expected line 0 to have scrolled off, got: #{inspect(row_text)}"
 
-      assert_row_contains(ctx, 7, "line 10")
+      # In a 10-row terminal with tab bar, there are 7 content rows (rows 1-7).
+      # After scrolling 10 lines, line 10 should be at the last content row.
+      assert_row_contains(ctx, @content_row + 6, "line 10")
     end
   end
 
@@ -196,9 +201,9 @@ defmodule Minga.Editor.Renderer.LineTest do
       send(editor, {:minga_input, {:ready, 80, 24}})
       :ok = HeadlessPort.await_frame(port)
 
-      row0 = HeadlessPort.get_row_text(port, 0)
-      # With special buffers, the editor now starts with *scratch* instead of splash
-      assert String.contains?(row0, "# This buffer") or String.contains?(row0, "Minga")
+      # Row 0 is the tab bar; content starts at row 1
+      row1 = HeadlessPort.get_row_text(port, @content_row)
+      assert String.contains?(row1, "# This buffer") or String.contains?(row1, "Minga")
     end
   end
 end

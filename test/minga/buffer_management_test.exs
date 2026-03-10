@@ -12,7 +12,7 @@ defmodule Minga.BufferManagementTest do
   describe "single buffer baseline" do
     test "editor starts with one buffer" do
       ctx = start_editor("hello")
-      assert_row_contains(ctx, 0, "hello")
+      assert_row_contains(ctx, 1, "hello")
       assert_mode(ctx, :normal)
     end
 
@@ -32,12 +32,12 @@ defmodule Minga.BufferManagementTest do
       File.write!(path2, "second file")
 
       ctx = start_editor("first file", file_path: path1)
-      assert_row_contains(ctx, 0, "first file")
+      assert_row_contains(ctx, 1, "first file")
 
       # Open second file via :e
       send_keys(ctx, ":e #{path2}<CR>")
 
-      assert_row_contains(ctx, 0, "second file")
+      assert_row_contains(ctx, 1, "second file")
       assert_modeline_contains(ctx, "file2.txt")
       assert_modeline_contains(ctx, "[2/2]")
     end
@@ -57,7 +57,7 @@ defmodule Minga.BufferManagementTest do
 
       # Open first file again — should switch back, not create a third buffer
       send_keys(ctx, ":e #{path1}<CR>")
-      assert_row_contains(ctx, 0, "first")
+      assert_row_contains(ctx, 1, "first")
       assert_modeline_contains(ctx, "[1/2]")
     end
   end
@@ -78,22 +78,22 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, ":e #{path3}<CR>")
 
       # Now on buffer 3/3 (gamma)
-      assert_row_contains(ctx, 0, "gamma")
+      assert_row_contains(ctx, 1, "gamma")
       assert_modeline_contains(ctx, "[3/3]")
 
       # SPC b n → wraps to buffer 1 (alpha)
       send_keys(ctx, "<SPC>bn")
-      assert_row_contains(ctx, 0, "alpha")
+      assert_row_contains(ctx, 1, "alpha")
       assert_modeline_contains(ctx, "[1/3]")
 
       # SPC b n → buffer 2 (beta)
       send_keys(ctx, "<SPC>bn")
-      assert_row_contains(ctx, 0, "beta")
+      assert_row_contains(ctx, 1, "beta")
       assert_modeline_contains(ctx, "[2/3]")
 
       # SPC b p → back to buffer 1 (alpha)
       send_keys(ctx, "<SPC>bp")
-      assert_row_contains(ctx, 0, "alpha")
+      assert_row_contains(ctx, 1, "alpha")
       assert_modeline_contains(ctx, "[1/3]")
     end
 
@@ -101,10 +101,10 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("only one")
 
       send_keys(ctx, "<SPC>bn")
-      assert_row_contains(ctx, 0, "only one")
+      assert_row_contains(ctx, 1, "only one")
 
       send_keys(ctx, "<SPC>bp")
-      assert_row_contains(ctx, 0, "only one")
+      assert_row_contains(ctx, 1, "only one")
     end
   end
 
@@ -118,12 +118,12 @@ defmodule Minga.BufferManagementTest do
 
       ctx = start_editor("ex", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
-      assert_row_contains(ctx, 0, "why")
+      assert_row_contains(ctx, 1, "why")
 
       # SPC b b → opens picker, first item is x.txt, Enter selects it
       send_keys(ctx, "<SPC>bb")
       send_key(ctx, 13)
-      assert_row_contains(ctx, 0, "ex")
+      assert_row_contains(ctx, 1, "ex")
     end
   end
 
@@ -142,7 +142,7 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, "<SPC>bd")
 
       # Should switch to the remaining buffer
-      assert_row_contains(ctx, 0, "first")
+      assert_row_contains(ctx, 1, "first")
       # No buffer indicator with single buffer
       ml = modeline(ctx)
       refute String.contains?(ml, "[")
@@ -157,7 +157,7 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, "<SPC>bd")
 
       # Should show scratch buffer as fallback
-      row0 = screen_row(ctx, 0)
+      row0 = screen_row(ctx, 1)
       assert String.contains?(row0, "# This buffer") or String.contains?(row0, "Minga")
     end
 
@@ -173,10 +173,10 @@ defmodule Minga.BufferManagementTest do
 
       # Switch back to first buffer and kill it
       send_keys(ctx, "<SPC>bp")
-      assert_row_contains(ctx, 0, "papa")
+      assert_row_contains(ctx, 1, "papa")
 
       send_keys(ctx, "<SPC>bd")
-      assert_row_contains(ctx, 0, "quebec")
+      assert_row_contains(ctx, 1, "quebec")
       ml = modeline(ctx)
       refute String.contains?(ml, "[")
     end
@@ -206,14 +206,14 @@ defmodule Minga.BufferManagementTest do
     test "SPC b s shows scratch buffer" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bs")
-      assert_row_contains(ctx, 0, "# This buffer is for notes")
+      assert_row_contains(ctx, 1, "# This buffer is for notes")
     end
 
     test "scratch buffer is editable" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bs")
       send_keys(ctx, "ggIedited: <Esc>")
-      assert_row_contains(ctx, 0, "edited:")
+      assert_row_contains(ctx, 1, "edited:")
     end
   end
 
@@ -239,7 +239,7 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("hello")
       send_keys(ctx, ":new<CR>")
       send_keys(ctx, "isome text<Esc>")
-      assert_row_contains(ctx, 0, "some text")
+      assert_row_contains(ctx, 1, "some text")
     end
   end
 

@@ -89,8 +89,8 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key(ctx, ?l)
 
       # Cells at grapheme positions 1 and 2 (gutter_w + 1, gutter_w + 2) should be reversed
-      cell_a = screen_cell(ctx, 0, gutter_w + 1)
-      cell_f = screen_cell(ctx, 0, gutter_w + 2)
+      cell_a = screen_cell(ctx, 1, gutter_w + 1)
+      cell_f = screen_cell(ctx, 1, gutter_w + 2)
 
       assert :reverse in cell_a.attrs,
              "Expected 'a' at col #{gutter_w + 1} to be selected"
@@ -99,7 +99,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
              "Expected 'f' at col #{gutter_w + 2} to be selected"
 
       # 'c' before selection should not be reversed
-      cell_c = screen_cell(ctx, 0, gutter_w)
+      cell_c = screen_cell(ctx, 1, gutter_w)
       refute :reverse in cell_c.attrs, "Expected 'c' not to be selected"
     end
 
@@ -111,7 +111,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key(ctx, ?v)
       send_key(ctx, ?$)
 
-      cell_a = screen_cell(ctx, 0, gutter_w)
+      cell_a = screen_cell(ctx, 1, gutter_w)
       assert :reverse in cell_a.attrs, "Expected 'a' to be selected"
     end
   end

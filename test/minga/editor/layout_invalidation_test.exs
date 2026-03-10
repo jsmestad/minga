@@ -144,7 +144,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
       # Recompute gives correct layout with file tree
       layout = Layout.compute(state)
       assert layout.file_tree != nil
-      assert layout.file_tree == {0, 0, 20, 23}
+      assert layout.file_tree == {1, 0, 20, 22}
 
       # Editor area starts after tree + separator
       {_r, col, _w, _h} = layout.editor_area
