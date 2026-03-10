@@ -7,7 +7,8 @@ defmodule Minga.Editor.Viewport do
   scrolls to keep the cursor visible.
   """
 
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
 
   @enforce_keys [:top, :left, :rows, :cols]
   defstruct [:top, :left, :rows, :cols, reserved: 2]
@@ -64,16 +65,37 @@ defmodule Minga.Editor.Viewport do
   """
   @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}) :: t()
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do
-    scroll_to_cursor(vp, {cursor_line, cursor_col}, scroll_margin())
+    margin =
+      try do
+        Options.get(:scroll_margin)
+      catch
+        :exit, _ -> 5
+      end
+
+    scroll_to_cursor(vp, {cursor_line, cursor_col}, margin)
   end
 
   @doc """
-  Scrolls the viewport with an explicit scroll margin.
+  Scrolls the viewport with a scroll margin.
 
-  The margin keeps `n` lines visible above and below the cursor when possible.
-  When the file is shorter than `2 * margin + 1`, the margin shrinks to fit.
+  Accepts either a buffer pid (reads `scroll_margin` from the buffer's
+  local options) or an explicit integer margin. The margin keeps `n`
+  lines visible above and below the cursor when possible. When the file
+  is shorter than `2 * margin + 1`, the margin shrinks to fit.
   """
-  @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()) :: t()
+  @spec scroll_to_cursor(t(), {non_neg_integer(), non_neg_integer()}, pid() | non_neg_integer()) ::
+          t()
+  def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, buf) when is_pid(buf) do
+    margin =
+      try do
+        BufferServer.get_option(buf, :scroll_margin)
+      catch
+        :exit, _ -> 5
+      end
+
+    scroll_to_cursor(vp, {cursor_line, cursor_col}, margin)
+  end
+
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, margin) do
     # Reserve rows for non-content elements (modeline, minibuffer, etc.)
     visible_rows = max(vp.rows - vp.reserved, 1)
@@ -140,11 +162,4 @@ defmodule Minga.Editor.Viewport do
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
-
-  @spec scroll_margin() :: non_neg_integer()
-  defp scroll_margin do
-    ConfigOptions.get(:scroll_margin)
-  catch
-    :exit, _ -> 5
-  end
 end

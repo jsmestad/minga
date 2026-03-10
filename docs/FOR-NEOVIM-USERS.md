@@ -120,7 +120,36 @@ Change your config, press `SPC h r`, and the editor reloads without restarting. 
 
 In Neovim, `vim.bo` vs `vim.o` vs `vim.g` is a source of constant confusion. Which options are buffer-local? Which are window-local? The answer is "it depends on the option" and there's a `:h` page you've never fully read.
 
-In Minga, each buffer is a process with its own state. Every option is inherently buffer-local. Global defaults exist, but overriding per-buffer is just updating that process's state. No `vim.bo` vs `vim.o` to remember.
+In Minga, each buffer is a BEAM process with its own state. Editing options (tab_width, wrap, indent_with, line_numbers, autopair, etc.) are inherently buffer-local. The scope is always explicit in the command:
+
+```vim
+:set wrap         " buffer-local: only this buffer
+:setglobal wrap   " global default: all buffers without a local override
+```
+
+Compare to Neovim's three confusing scopes:
+
+| Neovim | Minga | Scope |
+|--------|-------|-------|
+| `vim.bo[0].tabstop = 4` | `:set tab_width=4` | Current buffer |
+| `vim.o.tabstop = 4` | `:setglobal tab_width=4` | Global default |
+| `vim.wo[0].wrap = true` | `:set wrap` | Minga uses buffer-local (no window-local yet) |
+| `vim.g.some_plugin_var` | `Options.set(:name, val)` | Global |
+
+No `vim.bo` vs `vim.o` vs `vim.wo` to remember. `:set` is always buffer-local. `:setglobal` is always the global default. Process isolation makes this structural, not conventional.
+
+**Resolution chain:** When reading an option, Minga checks buffer-local first, then filetype defaults (like Neovim's `ftplugin`), then the global default. Options are eagerly seeded from filetype/global defaults when a buffer opens, so option reads are fast (no cross-process calls).
+
+```elixir
+# In config.exs (equivalent to ftplugin/go.vim):
+for_filetype :go do
+  set :tab_width, 8
+  set :indent_with, :tabs
+end
+
+# At runtime, override one buffer:
+Buffer.Server.set_option(buf, :tab_width, 4)
+```
 
 ### Live introspection
 

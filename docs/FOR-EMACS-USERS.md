@@ -17,7 +17,7 @@ The extensibility model you love transfers directly. Minga's runtime is the BEAM
 | `defun` / `fset` (redefine anything) | Hot code reloading (swap modules at runtime) | ✅ |
 | `define-advice` (wrap any function) | `advise :before/:after/:around/:override` | ✅ |
 | `add-hook` (attach to events) | `on :after_save, :after_open, :on_mode_change` | ✅ |
-| Buffer-local variables | Per-process state (isolation enforced by VM) | Planned |
+| Buffer-local variables | Per-process state (isolation enforced by VM) | ✅ |
 | `M-:` / `eval-expression` | `Code.eval_string` / eval prompt | ✅ |
 | `describe-function` / `describe-key` | `h/1`, `:sys.get_state`, runtime docs | ✅ |
 | `init.el` is real Elisp | `config.exs` is real Elixir | ✅ |
@@ -255,17 +255,36 @@ end
 **Elisp:**
 ```elisp
 ;; Is this global or local? Depends on make-local-variable. Have fun.
-(setq tab-width 4)
-(setq-local tab-width 2)
+(setq tab-width 4)         ;; global, unless someone called make-local-variable
+(setq-local tab-width 2)   ;; local to current buffer
+(setq-default tab-width 4) ;; sets the default for new buffers
 ```
 
-**Elixir:**
+In Emacs, whether `setq` writes a global or local depends on whether someone previously called `make-local-variable` on that symbol in the current buffer. This is invisible state that makes it hard to reason about what `setq` actually does.
+
+**Minga:**
 ```elixir
-Buffer.Server.set_option(buffer_pid, :tab_size, 2)  # always local
-Minga.Config.set(:tab_size, 4)                       # always global
+# In command mode:
+#   :set wrap          -> writes to THIS buffer
+#   :setglobal wrap    -> writes to the global default (all buffers without a local override)
+
+# In Elixir:
+Buffer.Server.set_option(buffer_pid, :tab_width, 2)  # always buffer-local
+Minga.Config.Options.set(:tab_width, 4)               # always global default
 ```
 
-**Where Elixir is stronger:** No `make-local-variable` dance. Process boundaries enforce the separation. You cannot accidentally mutate another buffer's state. The VM prevents it.
+The scope is always explicit in the command you choose. `:set` is buffer-local, `:setglobal` is the global default. There is no `make-local-variable` equivalent because every buffer is a BEAM process with its own state. Buffer-local is the structural default, not a mode you opt into.
+
+**Resolution chain:** When reading an option, Minga checks buffer-local first, then filetype defaults, then the global default. This maps to Emacs as:
+
+| Emacs | Minga |
+|-------|-------|
+| `setq-local` | `:set` or `Buffer.Server.set_option/3` |
+| `setq-default` | `:setglobal` or `Options.set/2` |
+| `make-local-variable` | Not needed. Process isolation makes every option structurally local. |
+| `kill-local-variable` | Not yet implemented. The buffer always has a value (from seeding). |
+
+**Where Elixir is stronger:** No `make-local-variable` dance. Process boundaries enforce the separation. You cannot accidentally mutate another buffer's state. The VM prevents it. Options are eagerly seeded from filetype/global defaults when a buffer opens, so reading an option never crosses a process boundary.
 
 ### 5. Live evaluation ✅
 

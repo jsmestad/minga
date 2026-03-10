@@ -104,43 +104,50 @@ defmodule Minga.Formatter do
   end
 
   @doc """
-  Applies whitespace cleanup to content before saving.
+  Applies whitespace transforms using the filetype to resolve options.
 
-  Handles `trim_trailing_whitespace` and `insert_final_newline` based on
-  the options for the given filetype.
+  Reads `trim_trailing_whitespace` and `insert_final_newline` from
+  `Config.Options` for the given filetype. Prefer the 3-arity version
+  with explicit booleans when you already have the option values (e.g.,
+  from buffer-local options).
   """
   @spec apply_save_transforms(String.t(), atom()) :: String.t()
-  def apply_save_transforms(content, filetype) do
+  def apply_save_transforms(content, filetype) when is_atom(filetype) do
+    trim = Options.get_for_filetype(:trim_trailing_whitespace, filetype)
+    final_nl = Options.get_for_filetype(:insert_final_newline, filetype)
+    apply_save_transforms(content, trim, final_nl)
+  end
+
+  @doc """
+  Applies whitespace transforms with explicit boolean flags.
+
+  Used by buffer-local option callers that have already resolved the
+  option values from `Buffer.Server.get_option/2`.
+  """
+  @spec apply_save_transforms(String.t(), boolean(), boolean()) :: String.t()
+  def apply_save_transforms(content, trim_trailing, insert_final_newline) do
     content
-    |> maybe_trim_trailing_whitespace(filetype)
-    |> maybe_insert_final_newline(filetype)
+    |> maybe_trim_trailing_whitespace(trim_trailing)
+    |> maybe_insert_final_newline(insert_final_newline)
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec maybe_trim_trailing_whitespace(String.t(), atom()) :: String.t()
-  defp maybe_trim_trailing_whitespace(content, filetype) do
-    if Options.get_for_filetype(:trim_trailing_whitespace, filetype) do
-      content
-      |> String.split("\n")
-      |> Enum.map_join("\n", &String.trim_trailing/1)
-    else
-      content
-    end
+  @spec maybe_trim_trailing_whitespace(String.t(), boolean()) :: String.t()
+  defp maybe_trim_trailing_whitespace(content, true) do
+    content
+    |> String.split("\n")
+    |> Enum.map_join("\n", &String.trim_trailing/1)
   end
 
-  @spec maybe_insert_final_newline(String.t(), atom()) :: String.t()
-  defp maybe_insert_final_newline(content, filetype) do
-    if Options.get_for_filetype(:insert_final_newline, filetype) do
-      if String.ends_with?(content, "\n") do
-        content
-      else
-        content <> "\n"
-      end
-    else
-      content
-    end
+  defp maybe_trim_trailing_whitespace(content, _), do: content
+
+  @spec maybe_insert_final_newline(String.t(), boolean()) :: String.t()
+  defp maybe_insert_final_newline(content, true) do
+    if String.ends_with?(content, "\n"), do: content, else: content <> "\n"
   end
+
+  defp maybe_insert_final_newline(content, _), do: content
 
   @spec temp_path() :: String.t()
   defp temp_path do

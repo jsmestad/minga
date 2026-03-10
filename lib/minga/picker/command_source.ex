@@ -3,13 +3,19 @@ defmodule Minga.Picker.CommandSource do
   Picker source for the command palette (M-x / SPC :).
 
   Lists all registered commands with their descriptions and keybinding
-  annotations. Selecting a command executes it.
+  annotations. Selecting a command executes it. Scopeable commands
+  (those with a `scope` descriptor) open a secondary scope picker
+  instead of executing immediately.
   """
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Editor.PickerUI
   alias Minga.Keymap.Defaults
+  alias Minga.Picker.OptionScopeSource
 
   require Logger
 
@@ -20,7 +26,6 @@ defmodule Minga.Picker.CommandSource do
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
   def candidates(_context) do
-    # Build a map of command_name → keybinding string for annotations
     keybind_map = build_keybind_map()
 
     try do
@@ -41,9 +46,13 @@ defmodule Minga.Picker.CommandSource do
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
   def on_select({command_name, _label, _desc}, state) do
-    # Execute the command by adding it to pending_commands, which the
-    # editor will pick up and execute through its normal command dispatch.
-    Map.update(state, :pending_command, command_name, fn _ -> command_name end)
+    case lookup_command(command_name) do
+      %Command{scope: %{} = scope} = cmd ->
+        open_scope_picker(state, cmd, scope)
+
+      _ ->
+        Map.update(state, :pending_command, command_name, fn _ -> command_name end)
+    end
   end
 
   @impl true
@@ -52,7 +61,42 @@ defmodule Minga.Picker.CommandSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # Build a map of command_name → key sequence string from leader defaults.
+  @spec lookup_command(atom()) :: Command.t() | nil
+  defp lookup_command(name) do
+    case CommandRegistry.lookup(CommandRegistry, name) do
+      {:ok, cmd} -> cmd
+      :error -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
+
+  # Opens the scope picker for a scopeable command. Reads the current
+  # value from the active buffer, computes the new value, and passes
+  # both through the picker context.
+  @spec open_scope_picker(term(), Command.t(), Command.scope()) :: term()
+  defp open_scope_picker(state, cmd, %{option: option_name} = _scope) do
+    buf = state.buffers.active
+
+    current_value =
+      if is_pid(buf) do
+        BufferServer.get_option(buf, option_name)
+      else
+        nil
+      end
+
+    new_value = Command.compute_new_value(cmd, current_value)
+
+    context = %{
+      option_name: option_name,
+      new_value: new_value,
+      command_name: cmd.name,
+      command_description: cmd.description
+    }
+
+    PickerUI.open(state, OptionScopeSource, context)
+  end
+
   @spec build_keybind_map() :: %{atom() => String.t()}
   defp build_keybind_map do
     Defaults.all_bindings()

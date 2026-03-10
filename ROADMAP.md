@@ -178,7 +178,7 @@ Current status and planned features. Updated as development progresses.
 | Formatter system | ✅ | `SPC c f`, format-on-save, default formatters for common languages |
 | Save transforms | ✅ | `trim_trailing_whitespace`, `insert_final_newline` applied on save |
 | Indent with tabs | ✅ | `indent_with: :tabs` for `>>` / `<<` |
-| Global / buffer-local options | 📋 | Per-buffer overrides with filetype defaults (see [Architecture](docs/ARCHITECTURE.md)) |
+| Global / buffer-local options | ✅ | Per-buffer overrides with filetype defaults, `:set`/`:setglobal` commands ([#257](https://github.com/jsmestad/minga/issues/257)) |
 
 ## Registers & Macros
 

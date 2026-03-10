@@ -55,6 +55,7 @@ defmodule Minga.Command.Parser do
           | {:agent_cycle_thinking, []}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
+          | {:setglobal, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
           | {:unknown, String.t()}
 
@@ -134,6 +135,17 @@ defmodule Minga.Command.Parser do
   defp do_parse("set nornu"), do: {:set, :norelativenumber}
   defp do_parse("set wrap"), do: {:set, :wrap}
   defp do_parse("set nowrap"), do: {:set, :nowrap}
+
+  defp do_parse("setglobal number"), do: {:setglobal, :number}
+  defp do_parse("setglobal nu"), do: {:setglobal, :number}
+  defp do_parse("setglobal nonumber"), do: {:setglobal, :nonumber}
+  defp do_parse("setglobal nonu"), do: {:setglobal, :nonumber}
+  defp do_parse("setglobal relativenumber"), do: {:setglobal, :relativenumber}
+  defp do_parse("setglobal rnu"), do: {:setglobal, :relativenumber}
+  defp do_parse("setglobal norelativenumber"), do: {:setglobal, :norelativenumber}
+  defp do_parse("setglobal nornu"), do: {:setglobal, :norelativenumber}
+  defp do_parse("setglobal wrap"), do: {:setglobal, :wrap}
+  defp do_parse("setglobal nowrap"), do: {:setglobal, :nowrap}
 
   defp do_parse("%s" <> rest), do: parse_substitute(rest)
   defp do_parse("s" <> rest), do: parse_substitute(rest)

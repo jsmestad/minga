@@ -86,6 +86,36 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — setglobal commands" do
+    test ":setglobal number" do
+      assert {:setglobal, :number} = Parser.parse("setglobal number")
+      assert {:setglobal, :number} = Parser.parse("setglobal nu")
+    end
+
+    test ":setglobal nonumber" do
+      assert {:setglobal, :nonumber} = Parser.parse("setglobal nonumber")
+      assert {:setglobal, :nonumber} = Parser.parse("setglobal nonu")
+    end
+
+    test ":setglobal relativenumber" do
+      assert {:setglobal, :relativenumber} = Parser.parse("setglobal relativenumber")
+      assert {:setglobal, :relativenumber} = Parser.parse("setglobal rnu")
+    end
+
+    test ":setglobal norelativenumber" do
+      assert {:setglobal, :norelativenumber} = Parser.parse("setglobal norelativenumber")
+      assert {:setglobal, :norelativenumber} = Parser.parse("setglobal nornu")
+    end
+
+    test ":setglobal wrap" do
+      assert {:setglobal, :wrap} = Parser.parse("setglobal wrap")
+    end
+
+    test ":setglobal nowrap" do
+      assert {:setglobal, :nowrap} = Parser.parse("setglobal nowrap")
+    end
+  end
+
   describe "parse/1 — substitute commands" do
     test ":%s/old/new/g parses to {:substitute, ...}" do
       assert {:substitute, "old", "new", [:global]} = Parser.parse("%s/old/new/g")

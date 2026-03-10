@@ -560,7 +560,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Use absolute numbering so only old+new cursor lines dirty
-      state = %{state | line_numbers: :absolute}
+      BufferServer.set_option(state.buffers.active, :line_numbers, :absolute)
 
       # Frame 1: full render
       state = RenderPipeline.run(state)
@@ -591,7 +591,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Hybrid numbering: every visible line number changes on cursor move
-      state = %{state | line_numbers: :hybrid}
+      BufferServer.set_option(state.buffers.active, :line_numbers, :hybrid)
 
       # Frame 1
       state = RenderPipeline.run(state)

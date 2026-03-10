@@ -296,6 +296,16 @@ defmodule Minga.Config.Options do
 
   # ── Validation ──────────────────────────────────────────────────────────────
 
+  @doc """
+  Validates an option name and value against the type registry.
+
+  Returns `:ok` if valid, or `{:error, reason}` if the name is unknown
+  or the value has the wrong type. Used by `Buffer.Server.set_option/3`
+  to validate buffer-local option overrides.
+  """
+  @spec validate_option(atom(), term()) :: :ok | {:error, String.t()}
+  def validate_option(name, value), do: validate(name, value)
+
   @spec validate(atom(), term()) :: :ok | {:error, String.t()}
   defp validate(name, value) do
     case Map.fetch(@types, name) do

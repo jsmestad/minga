@@ -3,6 +3,7 @@ defmodule Minga.Buffer.ServerTest do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server
+  alias Minga.Config.Options
 
   @moduletag :tmp_dir
 
@@ -601,6 +602,98 @@ defmodule Minga.Buffer.ServerTest do
       Server.insert_char(pid, "!")
       Server.replace_content(pid, "goodbye")
       assert [] = Server.flush_edits(pid)
+    end
+  end
+
+  # ── Buffer-local options ──────────────────────────────────────────────────
+
+  describe "buffer-local options" do
+    test "get_option falls back to global default when no local override" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      # tab_width global default is 2
+      assert Server.get_option(pid, :tab_width) == 2
+    end
+
+    test "set_option stores a buffer-local override" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:ok, 8} = Server.set_option(pid, :tab_width, 8)
+      assert Server.get_option(pid, :tab_width) == 8
+    end
+
+    test "buffer-local override wins over global default" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.set_option(pid, :tab_width, 4)
+      assert Server.get_option(pid, :tab_width) == 4
+    end
+
+    test "two buffers have independent options" do
+      {:ok, a} = Server.start_link(content: "alpha")
+      {:ok, b} = Server.start_link(content: "bravo")
+      Server.set_option(a, :tab_width, 8)
+      assert Server.get_option(a, :tab_width) == 8
+      assert Server.get_option(b, :tab_width) == 2
+    end
+
+    test "set_option rejects invalid values" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:error, _} = Server.set_option(pid, :tab_width, -1)
+      # Original value unchanged
+      assert Server.get_option(pid, :tab_width) == 2
+    end
+
+    test "set_option rejects unknown option names" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:error, _} = Server.set_option(pid, :nonexistent, true)
+    end
+
+    test "local_options returns seeded defaults plus any overrides" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      # Seeded with global defaults (tab_width: 2, wrap: false, etc.)
+      defaults = Server.local_options(pid)
+      assert defaults[:tab_width] == 2
+      assert defaults[:wrap] == false
+
+      # Override one option
+      Server.set_option(pid, :tab_width, 4)
+      updated = Server.local_options(pid)
+      assert updated[:tab_width] == 4
+      # Other seeded defaults still present
+      assert updated[:wrap] == false
+    end
+
+    test "filetype default wins over global when seeded at creation" do
+      # Set filetype override BEFORE creating buffer (eager seeding)
+      Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+      assert Server.get_option(pid, :tab_width) == 8
+    end
+
+    test "buffer-local wins over filetype default" do
+      Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+      # Buffer was seeded with filetype default of 8
+      assert Server.get_option(pid, :tab_width) == 8
+      # Override locally
+      Server.set_option(pid, :tab_width, 3)
+      assert Server.get_option(pid, :tab_width) == 3
     end
   end
 end

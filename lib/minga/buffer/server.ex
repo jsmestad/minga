@@ -21,6 +21,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options
   alias Minga.Filetype
 
   alias Minga.Buffer.State, as: BufState
@@ -271,6 +272,44 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :buffer_type)
   end
 
+  # ── Buffer-local options ──
+
+  @doc """
+  Returns a buffer-local option value using the resolution chain:
+  buffer-local → filetype override → global default.
+
+  Buffer-local options take highest priority. If no local override
+  exists, the filetype default from `Config.Options` is checked, then
+  the global default. This gives each buffer its own isolated option
+  state while inheriting sensible defaults.
+  """
+  @spec get_option(GenServer.server(), atom()) :: term()
+  def get_option(server, name) when is_atom(name) do
+    GenServer.call(server, {:get_option, name})
+  end
+
+  @doc """
+  Sets a buffer-local option override. Only affects this buffer.
+
+  The value is validated against the same type rules as
+  `Config.Options.set/2`. Returns `{:ok, value}` on success or
+  `{:error, reason}` if the value is invalid.
+  """
+  @spec set_option(GenServer.server(), atom(), term()) ::
+          {:ok, term()} | {:error, String.t()}
+  def set_option(server, name, value) when is_atom(name) do
+    GenServer.call(server, {:set_option, name, value})
+  end
+
+  @doc """
+  Returns all buffer-local option overrides (not the resolved values,
+  just the overrides set on this buffer).
+  """
+  @spec local_options(GenServer.server()) :: %{atom() => term()}
+  def local_options(server) do
+    GenServer.call(server, :local_options)
+  end
+
   @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
   @spec append(GenServer.server(), String.t()) :: :ok
   def append(server, text) when is_binary(text) do
@@ -434,7 +473,8 @@ defmodule Minga.Buffer.Server do
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
-          persistent: Keyword.get(opts, :persistent, false)
+          persistent: Keyword.get(opts, :persistent, false),
+          options: seed_options(filetype)
         }
 
         {:ok, state}
@@ -821,6 +861,28 @@ defmodule Minga.Buffer.Server do
     {:reply, state.buffer_type, state}
   end
 
+  # ── Buffer-local options handlers ──
+
+  def handle_call({:get_option, name}, _from, state) do
+    value = resolve_option(state, name)
+    {:reply, value, state}
+  end
+
+  def handle_call({:set_option, name, value}, _from, state) do
+    case Options.validate_option(name, value) do
+      :ok ->
+        new_state = %{state | options: Map.put(state.options, name, value)}
+        {:reply, {:ok, value}, new_state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call(:local_options, _from, state) do
+    {:reply, state.options, state}
+  end
+
   def handle_call({:append, text}, _from, state) do
     content = Document.content(state.document)
     new_content = content <> text
@@ -995,6 +1057,46 @@ defmodule Minga.Buffer.Server do
   end
 
   # ── Private ──
+
+  # Resolves an option using the chain: buffer-local → filetype → global.
+  # With eager seeding, the buffer-local map already contains filetype/global
+  # defaults, so the fallback path is rarely hit (only for options not in
+  # the seed list, or if the Options agent was unavailable at init time).
+  @spec resolve_option(BufState.t(), atom()) :: term()
+  defp resolve_option(%{options: opts, filetype: ft}, name) do
+    case Map.fetch(opts, name) do
+      {:ok, value} -> value
+      :error -> Options.get_for_filetype(name, ft)
+    end
+  end
+
+  # Buffer-local option names that get pre-populated from filetype/global
+  # defaults at buffer creation time. This avoids cross-process calls to
+  # the global Options agent on every keystroke or render frame.
+  @buffer_local_options [
+    :tab_width,
+    :indent_with,
+    :wrap,
+    :linebreak,
+    :breakindent,
+    :scroll_margin,
+    :autopair,
+    :clipboard,
+    :trim_trailing_whitespace,
+    :insert_final_newline,
+    :format_on_save,
+    :formatter,
+    :line_numbers
+  ]
+
+  @spec seed_options(atom()) :: %{atom() => term()}
+  defp seed_options(filetype) do
+    Map.new(@buffer_local_options, fn name ->
+      {name, Options.get_for_filetype(name, filetype)}
+    end)
+  catch
+    :exit, _ -> %{}
+  end
 
   @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
 

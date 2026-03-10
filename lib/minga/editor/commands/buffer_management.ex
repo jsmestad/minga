@@ -8,6 +8,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
+
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
@@ -144,21 +145,24 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Line number style ─────────────────────────────────────────────────────
 
-  def execute(state, :cycle_line_numbers) do
+  def execute(%{buffers: %{active: buf}} = state, :cycle_line_numbers) when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
     next =
-      case state.line_numbers do
+      case current do
         :hybrid -> :absolute
         :absolute -> :relative
         :relative -> :none
         :none -> :hybrid
       end
 
-    %{state | line_numbers: next}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
-  def execute(state, :toggle_wrap) do
-    current = ConfigOptions.get(:wrap)
-    ConfigOptions.set(:wrap, !current)
+  def execute(%{buffers: %{active: buf}} = state, :toggle_wrap) when is_pid(buf) do
+    current = BufferServer.get_option(buf, :wrap)
+    BufferServer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
     %{state | status_msg: "wrap #{label}"}
   end
@@ -222,40 +226,105 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :number}}) do
-    %{state | line_numbers: :absolute}
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :number}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :line_numbers, :absolute)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :nonumber}}) do
-    %{state | line_numbers: :none}
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :nonumber}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :line_numbers, :none)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :relativenumber}}) do
-    new_style =
-      case state.line_numbers do
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :relativenumber}})
+      when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
+    next =
+      case current do
         :absolute -> :hybrid
         _ -> :relative
       end
 
-    %{state | line_numbers: new_style}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :norelativenumber}}) do
-    new_style =
-      case state.line_numbers do
+  def execute(
+        %{buffers: %{active: buf}} = state,
+        {:execute_ex_command, {:set, :norelativenumber}}
+      )
+      when is_pid(buf) do
+    current = BufferServer.get_option(buf, :line_numbers)
+
+    next =
+      case current do
         :hybrid -> :absolute
         _ -> :none
       end
 
-    %{state | line_numbers: new_style}
+    BufferServer.set_option(buf, :line_numbers, next)
+    state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :wrap}}) do
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :wrap}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :wrap, true)
+    state
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :nowrap}})
+      when is_pid(buf) do
+    BufferServer.set_option(buf, :wrap, false)
+    state
+  end
+
+  # ── :setglobal — writes to the global Options agent ───────────────────────
+
+  def execute(state, {:execute_ex_command, {:setglobal, :number}}) do
+    ConfigOptions.set(:line_numbers, :absolute)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :nonumber}}) do
+    ConfigOptions.set(:line_numbers, :none)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :relativenumber}}) do
+    current = ConfigOptions.get(:line_numbers)
+
+    next =
+      case current do
+        :absolute -> :hybrid
+        _ -> :relative
+      end
+
+    ConfigOptions.set(:line_numbers, next)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :norelativenumber}}) do
+    current = ConfigOptions.get(:line_numbers)
+
+    next =
+      case current do
+        :hybrid -> :absolute
+        _ -> :none
+      end
+
+    ConfigOptions.set(:line_numbers, next)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :wrap}}) do
     ConfigOptions.set(:wrap, true)
     state
   end
 
-  def execute(state, {:execute_ex_command, {:set, :nowrap}}) do
+  def execute(state, {:execute_ex_command, {:setglobal, :nowrap}}) do
     ConfigOptions.set(:wrap, false)
     state
   end
@@ -490,25 +559,24 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec apply_pre_save_transforms(state(), pid()) :: state()
   defp apply_pre_save_transforms(state, buf) when is_pid(buf) do
-    filetype = BufferServer.filetype(buf)
-
-    state = maybe_format_on_save(state, buf, filetype)
-    apply_whitespace_transforms(buf, filetype)
+    state = maybe_format_on_save(state, buf, nil)
+    apply_whitespace_transforms(buf)
     state
   end
 
   @spec maybe_format_on_save(state(), pid(), atom()) :: state()
-  defp maybe_format_on_save(state, buf, filetype) do
-    if ConfigOptions.get_for_filetype(:format_on_save, filetype) do
-      run_format_on_save(state, buf, filetype)
+  defp maybe_format_on_save(state, buf, _filetype) do
+    if BufferServer.get_option(buf, :format_on_save) do
+      run_format_on_save(state, buf)
     else
       state
     end
   end
 
-  @spec run_format_on_save(state(), pid(), atom()) :: state()
-  defp run_format_on_save(state, buf, filetype) do
+  @spec run_format_on_save(state(), pid()) :: state()
+  defp run_format_on_save(state, buf) do
     file_path = BufferServer.file_path(buf)
+    filetype = BufferServer.filetype(buf)
     spec = Formatter.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
@@ -528,14 +596,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  @spec apply_whitespace_transforms(pid(), atom()) :: :ok
-  defp apply_whitespace_transforms(buf, filetype) do
-    needs_trim = ConfigOptions.get_for_filetype(:trim_trailing_whitespace, filetype)
-    needs_final_newline = ConfigOptions.get_for_filetype(:insert_final_newline, filetype)
+  @spec apply_whitespace_transforms(pid()) :: :ok
+  defp apply_whitespace_transforms(buf) do
+    needs_trim = BufferServer.get_option(buf, :trim_trailing_whitespace)
+    needs_final_newline = BufferServer.get_option(buf, :insert_final_newline)
 
     if needs_trim or needs_final_newline do
       content = BufferServer.content(buf)
-      transformed = Formatter.apply_save_transforms(content, filetype)
+      transformed = Formatter.apply_save_transforms(content, needs_trim, needs_final_newline)
 
       if transformed != content do
         BufferServer.replace_content(buf, transformed)

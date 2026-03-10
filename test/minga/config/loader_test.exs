@@ -8,7 +8,6 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config.Loader
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
-  alias Minga.Test.OptionsHelper
 
   setup do
     # Ensure all global servers are running (config eval needs them)
@@ -407,7 +406,8 @@ defmodule Minga.Config.LoaderTest do
       File.rm_rf!(base)
 
       try do
-        OptionsHelper.reset_for_test()
+        Options.reset()
+        Options.set(:clipboard, :none)
       catch
         :exit, _ -> :ok
       end

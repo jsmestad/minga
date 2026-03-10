@@ -626,15 +626,18 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(%{buffers: %{active: buf}} = state, total_lines) do
+  defp gutter_width(%{buffers: %{active: buf}, git_buffers: git_buffers}, total_lines) do
+    ln_style =
+      if buf, do: BufferServer.get_option(buf, :line_numbers), else: :none
+
     number_w =
-      if state.line_numbers == :none, do: 0, else: Viewport.gutter_width(total_lines)
+      if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
 
     # Sign column is shown when the buffer has a file path or a git buffer
     # registered. This must match render_pipeline.ex's gutter_dimensions/4.
     has_sign_column =
       buf != nil and
-        (Map.has_key?(state.git_buffers, buf) or BufferServer.file_path(buf) != nil)
+        (Map.has_key?(git_buffers, buf) or BufferServer.file_path(buf) != nil)
 
     sign_w =
       if has_sign_column, do: Gutter.sign_column_width(), else: 0
@@ -663,7 +666,7 @@ defmodule Minga.Editor.Mouse do
       %{content: {win_row, _win_col, content_w, win_h}} ->
         total_lines = BufferServer.line_count(buf)
         {cursor_line, _} = BufferServer.cursor(buf)
-        scroll_top = render_scroll_top(win_h, content_w, cursor_line)
+        scroll_top = render_scroll_top(win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         target_line = local_row + scroll_top
 
@@ -688,7 +691,7 @@ defmodule Minga.Editor.Mouse do
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = BufferServer.cursor(buf)
-        scroll_top = render_scroll_top(win_h, content_w, cursor_line)
+        scroll_top = render_scroll_top(win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
         target_line = local_row + scroll_top
@@ -714,7 +717,7 @@ defmodule Minga.Editor.Mouse do
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = window.cursor
-        scroll_top = render_scroll_top(content_h, content_w, cursor_line)
+        scroll_top = render_scroll_top(content_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0)
         target_line = local_row + scroll_top
@@ -744,11 +747,11 @@ defmodule Minga.Editor.Mouse do
   # which buffer line maps to screen row 0. We must replicate it here
   # because state.viewport.top is the *terminal* viewport (stale for
   # per-window scroll), not the per-frame viewport used for rendering.
-  @spec render_scroll_top(pos_integer(), pos_integer(), non_neg_integer()) ::
+  @spec render_scroll_top(pos_integer(), pos_integer(), non_neg_integer(), pid()) ::
           non_neg_integer()
-  defp render_scroll_top(content_height, content_width, cursor_line) do
+  defp render_scroll_top(content_height, content_width, cursor_line, buf) do
     vp = Viewport.new(content_height, content_width, 0)
-    vp = Viewport.scroll_to_cursor(vp, {cursor_line, 0})
+    vp = Viewport.scroll_to_cursor(vp, {cursor_line, 0}, buf)
     vp.top
   end
 

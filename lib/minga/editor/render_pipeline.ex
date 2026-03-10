@@ -367,9 +367,9 @@ defmodule Minga.Editor.RenderPipeline do
     {cursor_line, cursor_byte_col} = window_cursor(window, is_active)
 
     # Viewport from Layout content rect
-    wrap_on = wrap_enabled?()
+    wrap_on = wrap_enabled?(window.buffer)
     viewport = Viewport.new(content_height, content_width, 0)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, window.buffer)
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
@@ -384,7 +384,7 @@ defmodule Minga.Editor.RenderPipeline do
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
     # Gutter dimensions
-    line_number_style = state.line_numbers
+    line_number_style = BufferServer.get_option(window.buffer, :line_numbers)
 
     {has_sign_column, gutter_w} =
       gutter_dimensions(state, window.buffer, line_number_style, line_count)
@@ -392,7 +392,7 @@ defmodule Minga.Editor.RenderPipeline do
     content_w = max(viewport.cols - gutter_w, 1)
 
     # Horizontal scroll (disabled when wrapping)
-    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
+    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, window.buffer)
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -529,7 +529,8 @@ defmodule Minga.Editor.RenderPipeline do
       first_byte_off: snapshot.first_line_byte_offset,
       row_off: row_off,
       col_off: col_off,
-      window: window
+      window: window,
+      buffer: window.buffer
     }
 
     {gutter_draws, line_draws, rows_used, window} =
@@ -917,26 +918,26 @@ defmodule Minga.Editor.RenderPipeline do
   defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
-  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean()) ::
+  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean(), pid()) ::
           Viewport.t()
-  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on) do
-    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0})
+  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on, buf) do
+    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0}, buf)
   end
 
-  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on) do
-    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
+  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, buf) do
+    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col}, buf)
   end
 
-  @spec wrap_enabled?() :: boolean()
-  defp wrap_enabled? do
-    Options.get(:wrap)
+  @spec wrap_enabled?(pid()) :: boolean()
+  defp wrap_enabled?(buf) do
+    BufferServer.get_option(buf, :wrap)
   catch
     :exit, _ -> false
   end
 
-  @spec wrap_option(atom()) :: boolean()
-  defp wrap_option(name) do
-    Options.get(name)
+  @spec wrap_option(pid(), atom()) :: boolean()
+  defp wrap_option(buf, name) do
+    BufferServer.get_option(buf, name)
   catch
     :exit, _ -> true
   end
@@ -1021,7 +1022,8 @@ defmodule Minga.Editor.RenderPipeline do
            first_byte_off: non_neg_integer(),
            row_off: non_neg_integer(),
            col_off: non_neg_integer(),
-           window: Window.t()
+           window: Window.t(),
+           buffer: pid()
          }
 
   @spec render_lines_nowrap([String.t()], line_render_opts()) ::
@@ -1098,8 +1100,8 @@ defmodule Minga.Editor.RenderPipeline do
       col_off: col_off
     } = opts
 
-    breakindent = wrap_option(:breakindent)
-    linebreak = wrap_option(:linebreak)
+    breakindent = wrap_option(opts.buffer, :breakindent)
+    linebreak = wrap_option(opts.buffer, :linebreak)
 
     wrap_map =
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)

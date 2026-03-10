@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Comment
-  alias Minga.Config.Options
+
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -21,22 +21,15 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Deletion ──────────────────────────────────────────────────────────────
 
   def execute(
-        %{buffers: %{active: buf}, mode: :insert, autopair_enabled: true} = state,
+        %{buffers: %{active: buf}, mode: :insert} = state,
         :delete_before
       ) do
-    gb = BufferServer.snapshot(buf)
-    cursor = Document.cursor(gb)
-
-    case Minga.AutoPair.on_backspace(gb, cursor) do
-      :delete_pair ->
-        BufferServer.delete_before(buf)
-        BufferServer.delete_at(buf)
-
-      :passthrough ->
-        BufferServer.delete_before(buf)
+    if BufferServer.get_option(buf, :autopair) do
+      execute_autopair_delete(state, buf)
+    else
+      BufferServer.delete_before(buf)
+      state
     end
-
-    state
   end
 
   def execute(%{buffers: %{active: buf}} = state, :delete_before) do
@@ -57,24 +50,14 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{buffers: %{active: buf}, mode: :insert, autopair_enabled: true} = state,
+        %{buffers: %{active: buf}, mode: :insert} = state,
         {:insert_char, char}
       )
       when is_binary(char) do
-    gb = BufferServer.snapshot(buf)
-    cursor = Document.cursor(gb)
-
-    case Minga.AutoPair.on_insert(gb, cursor, char) do
-      {:pair, open, close} ->
-        BufferServer.insert_char(buf, open)
-        BufferServer.insert_char(buf, close)
-        BufferServer.move(buf, :left)
-
-      {:skip, _char} ->
-        BufferServer.move(buf, :right)
-
-      {:passthrough, char} ->
-        BufferServer.insert_char(buf, char)
+    if BufferServer.get_option(buf, :autopair) do
+      execute_autopair_insert(buf, char)
+    else
+      BufferServer.insert_char(buf, char)
     end
 
     state
@@ -405,6 +388,46 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
+  # ── Private autopair helpers ──────────────────────────────────────────────
+
+  @spec execute_autopair_delete(state(), pid()) :: state()
+  defp execute_autopair_delete(state, buf) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Document.cursor(gb)
+
+    case Minga.AutoPair.on_backspace(gb, cursor) do
+      :delete_pair ->
+        BufferServer.delete_before(buf)
+        BufferServer.delete_at(buf)
+
+      :passthrough ->
+        BufferServer.delete_before(buf)
+    end
+
+    state
+  end
+
+  @spec execute_autopair_insert(pid(), String.t()) :: :ok
+  defp execute_autopair_insert(buf, char) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Document.cursor(gb)
+
+    case Minga.AutoPair.on_insert(gb, cursor, char) do
+      {:pair, open, close} ->
+        BufferServer.insert_char(buf, open)
+        BufferServer.insert_char(buf, close)
+        BufferServer.move(buf, :left)
+
+      {:skip, _char} ->
+        BufferServer.move(buf, :right)
+
+      {:passthrough, char} ->
+        BufferServer.insert_char(buf, char)
+    end
+
+    :ok
+  end
+
   # ── Private indent helpers ────────────────────────────────────────────────
 
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
@@ -512,16 +535,14 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec uses_tabs?(pid()) :: boolean()
   defp uses_tabs?(buf) do
-    filetype = BufferServer.filetype(buf)
-    Options.get_for_filetype(:indent_with, filetype) == :tabs
+    BufferServer.get_option(buf, :indent_with) == :tabs
   catch
     :exit, _ -> false
   end
 
   @spec tab_width(pid()) :: pos_integer()
   defp tab_width(buf) when is_pid(buf) do
-    filetype = BufferServer.filetype(buf)
-    Options.get_for_filetype(:tab_width, filetype)
+    BufferServer.get_option(buf, :tab_width)
   catch
     :exit, _ -> 2
   end
