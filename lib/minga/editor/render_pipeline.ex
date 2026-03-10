@@ -367,7 +367,7 @@ defmodule Minga.Editor.RenderPipeline do
     {cursor_line, cursor_byte_col} = window_cursor(window, is_active)
 
     # Viewport from Layout content rect
-    wrap_on = wrap_enabled?()
+    wrap_on = wrap_enabled?(window.buffer)
     viewport = Viewport.new(content_height, content_width, 0)
     viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
     {first_line, _last_line} = Viewport.visible_range(viewport)
@@ -529,7 +529,8 @@ defmodule Minga.Editor.RenderPipeline do
       first_byte_off: snapshot.first_line_byte_offset,
       row_off: row_off,
       col_off: col_off,
-      window: window
+      window: window,
+      buffer: window.buffer
     }
 
     {gutter_draws, line_draws, rows_used, window} =
@@ -927,16 +928,16 @@ defmodule Minga.Editor.RenderPipeline do
     Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
   end
 
-  @spec wrap_enabled?() :: boolean()
-  defp wrap_enabled? do
-    Options.get(:wrap)
+  @spec wrap_enabled?(pid()) :: boolean()
+  defp wrap_enabled?(buf) do
+    BufferServer.get_option(buf, :wrap)
   catch
     :exit, _ -> false
   end
 
-  @spec wrap_option(atom()) :: boolean()
-  defp wrap_option(name) do
-    Options.get(name)
+  @spec wrap_option(pid(), atom()) :: boolean()
+  defp wrap_option(buf, name) do
+    BufferServer.get_option(buf, name)
   catch
     :exit, _ -> true
   end
@@ -1021,7 +1022,8 @@ defmodule Minga.Editor.RenderPipeline do
            first_byte_off: non_neg_integer(),
            row_off: non_neg_integer(),
            col_off: non_neg_integer(),
-           window: Window.t()
+           window: Window.t(),
+           buffer: pid()
          }
 
   @spec render_lines_nowrap([String.t()], line_render_opts()) ::
@@ -1098,8 +1100,8 @@ defmodule Minga.Editor.RenderPipeline do
       col_off: col_off
     } = opts
 
-    breakindent = wrap_option(:breakindent)
-    linebreak = wrap_option(:linebreak)
+    breakindent = wrap_option(opts.buffer, :breakindent)
+    linebreak = wrap_option(opts.buffer, :linebreak)
 
     wrap_map =
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
