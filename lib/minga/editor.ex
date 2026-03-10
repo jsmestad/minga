@@ -340,6 +340,13 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
+  def handle_info({:minga_input, {:paste_event, text}}, state) do
+    new_state = handle_paste_event(state, text)
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path}, state) do
     new_state = handle_file_change(state, path)
@@ -1654,6 +1661,32 @@ defmodule Minga.Editor do
     Project.record_file(file_path)
   catch
     :exit, _ -> :ok
+  end
+
+  # ── Paste event routing ───────────────────────────────────────────────────
+
+  @spec handle_paste_event(state(), String.t()) :: state()
+  defp handle_paste_event(state, text)
+
+  # Agent panel input is focused: route paste to agent input
+  defp handle_paste_event(
+         %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
+         text
+       ) do
+    Commands.Agent.input_paste(state, text)
+  end
+
+  # Insert mode in editor: insert text into the active buffer via bulk edit
+  defp handle_paste_event(%{mode: :insert, buffers: %{active: buf}} = state, text)
+       when is_pid(buf) do
+    {line, col} = BufferServer.cursor(buf)
+    BufferServer.apply_text_edit(buf, line, col, line, col, text)
+    state
+  end
+
+  # Not in a paste-accepting context: log and ignore
+  defp handle_paste_event(state, _text) do
+    log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 
   # ── File watcher helpers ──────────────────────────────────────────────────

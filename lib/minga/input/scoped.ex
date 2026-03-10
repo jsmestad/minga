@@ -40,6 +40,7 @@ defmodule Minga.Input.Scoped do
 
   @ctrl Protocol.mod_ctrl()
   @alt Protocol.mod_alt()
+  @tab 9
   @shift Protocol.mod_shift()
   @space 32
 
@@ -190,6 +191,22 @@ defmodule Minga.Input.Scoped do
   end
 
   # Normal dispatch: determine vim state and resolve through scope
+  # Tab on a paste placeholder line: toggle expand/collapse
+  defp handle_agent_key(
+         %{agent: %{panel: %{input_focused: true} = panel}} = state,
+         @tab,
+         0
+       ) do
+    {cursor_line, _} = panel.input_cursor
+    current_line = Enum.at(panel.input_lines, cursor_line)
+
+    if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
+      {:handled, AgentCommands.toggle_paste_expand(state)}
+    else
+      resolve_agent_key(state, :insert, @tab, 0)
+    end
+  end
+
   defp handle_agent_key(%{agent: %{panel: %{input_focused: true}}} = state, cp, mods) do
     resolve_agent_key(state, :insert, cp, mods)
   end
@@ -759,4 +776,31 @@ defmodule Minga.Input.Scoped do
   defp tree_scroll_offset(cursor, visible_rows) when visible_rows <= 0, do: cursor
   defp tree_scroll_offset(cursor, visible_rows) when cursor < visible_rows, do: 0
   defp tree_scroll_offset(cursor, visible_rows), do: cursor - visible_rows + 1
+
+  # Checks if the cursor is within the lines of an expanded paste block.
+  # Used to determine if Tab should trigger collapse.
+  @spec cursor_on_expanded_block?(PanelState.t()) :: boolean()
+  defp cursor_on_expanded_block?(%{
+         input_cursor: {cursor_line, _},
+         input_lines: lines,
+         pasted_blocks: blocks
+       }) do
+    blocks
+    |> Enum.filter(& &1.expanded)
+    |> Enum.any?(&expanded_block_spans_cursor?(&1, lines, cursor_line))
+  end
+
+  @spec expanded_block_spans_cursor?(PanelState.paste_block(), [String.t()], non_neg_integer()) ::
+          boolean()
+  defp expanded_block_spans_cursor?(block, lines, cursor_line) do
+    text_lines = String.split(block.text, "\n")
+    text_len = length(text_lines)
+    max_start = length(lines) - text_len
+
+    max_start >= 0 and
+      Enum.any?(0..max_start//1, fn start ->
+        Enum.slice(lines, start, text_len) == text_lines and
+          cursor_line >= start and cursor_line < start + text_len
+      end)
+  end
 end

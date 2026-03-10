@@ -7,6 +7,7 @@
 ///   0x02 resize:       width:u16, height:u16
 ///   0x03 ready:        width:u16, height:u16
 ///   0x04 mouse_event:  row:i16, col:i16, button:u8, modifiers:u8, event_type:u8
+///   0x06 paste_event:  text_len:u16, text:u8[text_len]
 ///
 /// Render commands (BEAM → Zig):
 ///   0x10 draw_text:  row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
@@ -25,6 +26,7 @@ pub const OP_RESIZE: u8 = 0x02;
 pub const OP_READY: u8 = 0x03;
 pub const OP_MOUSE_EVENT: u8 = 0x04;
 pub const OP_CAPABILITIES_UPDATED: u8 = 0x05;
+pub const OP_PASTE_EVENT: u8 = 0x06;
 pub const OP_DRAW_TEXT: u8 = 0x10;
 pub const OP_SET_CURSOR: u8 = 0x11;
 pub const OP_CLEAR: u8 = 0x12;
@@ -371,6 +373,21 @@ pub fn encodeMouseEvent(buf: []u8, row: i16, col: i16, button: u8, modifiers: u8
     buf[7] = event_type;
     buf[8] = click_count;
     return 9;
+}
+
+/// Encodes a paste_event into an allocator-owned buffer.
+/// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
+/// The text is UTF-8 encoded. Maximum text length is 65535 bytes (u16 max).
+/// Returns the allocated slice containing the encoded message.
+/// Caller owns the returned memory.
+pub fn encodePasteEvent(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
+    const text_len: u16 = @intCast(@min(text.len, std.math.maxInt(u16)));
+    const total: usize = 1 + 2 + text_len;
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_PASTE_EVENT;
+    std.mem.writeInt(u16, buf[1..3], text_len, .big);
+    @memcpy(buf[3..][0..text_len], text[0..text_len]);
+    return buf;
 }
 
 /// Writes a length-prefixed message to the writer.
@@ -1052,6 +1069,76 @@ test "encodeResize buffer too small returns error" {
     var buf: [4]u8 = undefined; // needs 5
     const result = encodeResize(&buf, 80, 24);
     try std.testing.expectError(error.Malformed, result);
+}
+
+// ── Encoding: paste event ─────────────────────────────────────────────────────
+
+test "encodePasteEvent basic text" {
+    const allocator = std.testing.allocator;
+    const text = "hello\nworld\nline 3";
+    const buf = try encodePasteEvent(allocator, text);
+    defer allocator.free(buf);
+
+    // opcode
+    try std.testing.expectEqual(OP_PASTE_EVENT, buf[0]);
+    // text_len (big-endian u16)
+    const text_len = std.mem.readInt(u16, buf[1..3], .big);
+    try std.testing.expectEqual(@as(u16, @intCast(text.len)), text_len);
+    // text payload
+    try std.testing.expectEqualStrings(text, buf[3..]);
+}
+
+test "encodePasteEvent empty text" {
+    const allocator = std.testing.allocator;
+    const buf = try encodePasteEvent(allocator, "");
+    defer allocator.free(buf);
+
+    try std.testing.expectEqual(OP_PASTE_EVENT, buf[0]);
+    const text_len = std.mem.readInt(u16, buf[1..3], .big);
+    try std.testing.expectEqual(@as(u16, 0), text_len);
+    try std.testing.expectEqual(@as(usize, 3), buf.len);
+}
+
+test "encodePasteEvent unicode text" {
+    const allocator = std.testing.allocator;
+    const text = "こんにちは\n🎉 emoji\n中文";
+    const buf = try encodePasteEvent(allocator, text);
+    defer allocator.free(buf);
+
+    try std.testing.expectEqual(OP_PASTE_EVENT, buf[0]);
+    const text_len = std.mem.readInt(u16, buf[1..3], .big);
+    try std.testing.expectEqual(@as(u16, @intCast(text.len)), text_len);
+    try std.testing.expectEqualStrings(text, buf[3..]);
+}
+
+test "encodePasteEvent single line (no newline)" {
+    const allocator = std.testing.allocator;
+    const text = "just a single line paste";
+    const buf = try encodePasteEvent(allocator, text);
+    defer allocator.free(buf);
+
+    try std.testing.expectEqual(OP_PASTE_EVENT, buf[0]);
+    try std.testing.expectEqualStrings(text, buf[3..]);
+}
+
+test "encodePasteEvent large text (near u16 max)" {
+    const allocator = std.testing.allocator;
+    // Create a text just under the u16 max (65535 bytes)
+    const large_text = try allocator.alloc(u8, 60000);
+    defer allocator.free(large_text);
+    @memset(large_text, 'A');
+    // Add some newlines for realism
+    large_text[100] = '\n';
+    large_text[200] = '\n';
+    large_text[300] = '\n';
+
+    const buf = try encodePasteEvent(allocator, large_text);
+    defer allocator.free(buf);
+
+    try std.testing.expectEqual(OP_PASTE_EVENT, buf[0]);
+    const text_len = std.mem.readInt(u16, buf[1..3], .big);
+    try std.testing.expectEqual(@as(u16, 60000), text_len);
+    try std.testing.expectEqualSlices(u8, large_text, buf[3..]);
 }
 
 // ── Encoding: special values ──────────────────────────────────────────────────

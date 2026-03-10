@@ -9,6 +9,7 @@ let OP_KEY_PRESS: UInt8 = 0x01
 let OP_RESIZE: UInt8 = 0x02
 let OP_READY: UInt8 = 0x03
 let OP_MOUSE_EVENT: UInt8 = 0x04
+let OP_PASTE_EVENT: UInt8 = 0x06
 
 // MARK: - Render command opcodes (BEAM → frontend)
 

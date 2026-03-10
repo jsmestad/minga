@@ -43,6 +43,7 @@ defmodule Minga.Port.Protocol do
   @op_ready 0x03
   @op_mouse_event 0x04
   @op_capabilities_updated 0x05
+  @op_paste_event 0x06
 
   alias Minga.Port.Capabilities
 
@@ -138,6 +139,7 @@ defmodule Minga.Port.Protocol do
           | {:ready, width :: pos_integer(), height :: pos_integer()}
           | {:ready, width :: pos_integer(), height :: pos_integer(), Capabilities.t()}
           | {:capabilities_updated, Capabilities.t()}
+          | {:paste_event, text :: String.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type(), click_count :: pos_integer()}
           | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
@@ -481,6 +483,11 @@ defmodule Minga.Port.Protocol do
     {:ok,
      {:mouse_event, row, col, decode_mouse_button(button), mods,
       decode_mouse_event_type(event_type), 1}}
+  end
+
+  # Paste event: opcode(1) + text_len(2, big-endian) + text(text_len)
+  def decode_event(<<@op_paste_event, text_len::16, text::binary-size(text_len)>>) do
+    {:ok, {:paste_event, text}}
   end
 
   def decode_event(<<@op_highlight_spans, version::32, count::32, rest::binary>>) do

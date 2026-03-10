@@ -386,4 +386,313 @@ defmodule Minga.Agent.PanelStateTest do
       assert panel.input_focused
     end
   end
+
+  # ── Paste handling ─────────────────────────────────────────────────────────
+
+  describe "insert_paste/2 — short pastes (below collapse threshold)" do
+    test "empty paste is a no-op" do
+      panel = PanelState.new()
+      result = PanelState.insert_paste(panel, "")
+      assert result == panel
+    end
+
+    test "single-line paste inserts inline" do
+      panel = PanelState.new()
+      result = PanelState.insert_paste(panel, "hello world")
+      assert result.input_lines == ["hello world"]
+      assert result.input_cursor == {0, 11}
+      assert result.pasted_blocks == []
+    end
+
+    test "two-line paste inserts inline as two lines" do
+      panel = PanelState.new()
+      result = PanelState.insert_paste(panel, "line 1\nline 2")
+      assert result.input_lines == ["line 1", "line 2"]
+      assert result.input_cursor == {1, 6}
+      assert result.pasted_blocks == []
+    end
+
+    test "single-line paste into existing text at cursor" do
+      panel = PanelState.new()
+      panel = PanelState.insert_char(panel, "h")
+      panel = PanelState.insert_char(panel, "i")
+      # cursor at {0, 2}, line is "hi"
+      result = PanelState.insert_paste(panel, " there")
+      assert result.input_lines == ["hi there"]
+      assert result.input_cursor == {0, 8}
+    end
+
+    test "two-line paste into middle of existing text" do
+      panel = %{PanelState.new() | input_lines: ["abcdef"], input_cursor: {0, 3}}
+      result = PanelState.insert_paste(panel, "X\nY")
+      assert result.input_lines == ["abcX", "Ydef"]
+      assert result.input_cursor == {1, 1}
+    end
+
+    test "two-line paste at start of existing text" do
+      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 0}}
+      result = PanelState.insert_paste(panel, "A\nB")
+      assert result.input_lines == ["A", "Bhello"]
+      assert result.input_cursor == {1, 1}
+    end
+
+    test "two-line paste at end of existing text" do
+      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 5}}
+      result = PanelState.insert_paste(panel, "A\nB")
+      assert result.input_lines == ["helloA", "B"]
+      assert result.input_cursor == {1, 1}
+    end
+  end
+
+  describe "insert_paste/2 — long pastes (at or above collapse threshold)" do
+    test "3-line paste creates a collapsed block" do
+      panel = PanelState.new()
+      text = "line 1\nline 2\nline 3"
+      result = PanelState.insert_paste(panel, text)
+
+      assert length(result.pasted_blocks) == 1
+      assert hd(result.pasted_blocks).text == text
+      assert hd(result.pasted_blocks).expanded == false
+
+      # Input should contain the placeholder
+      assert Enum.any?(result.input_lines, &PanelState.paste_placeholder?/1)
+    end
+
+    test "input_text/1 substitutes placeholder with full paste content" do
+      panel = PanelState.new()
+      text = "line 1\nline 2\nline 3"
+      result = PanelState.insert_paste(panel, text)
+
+      assert PanelState.input_text(result) == text
+    end
+
+    test "5-line paste into empty input" do
+      panel = PanelState.new()
+      text = "a\nb\nc\nd\ne"
+      result = PanelState.insert_paste(panel, text)
+
+      assert length(result.pasted_blocks) == 1
+      assert hd(result.pasted_blocks).text == text
+      assert PanelState.input_text(result) == text
+    end
+
+    test "paste into existing text preserves surrounding content" do
+      panel = %{PanelState.new() | input_lines: ["question: "], input_cursor: {0, 10}}
+      text = "line 1\nline 2\nline 3"
+      result = PanelState.insert_paste(panel, text)
+
+      full_text = PanelState.input_text(result)
+      assert String.starts_with?(full_text, "question: ")
+      assert String.contains?(full_text, text)
+    end
+
+    test "paste into middle of existing text splits around placeholder" do
+      panel = %{PanelState.new() | input_lines: ["abcdef"], input_cursor: {0, 3}}
+      text = "X\nY\nZ"
+      result = PanelState.insert_paste(panel, text)
+
+      full_text = PanelState.input_text(result)
+      assert full_text == "abc\nX\nY\nZ\ndef"
+    end
+
+    test "paste at start of line with existing content" do
+      panel = %{PanelState.new() | input_lines: ["existing"], input_cursor: {0, 0}}
+      text = "a\nb\nc"
+      result = PanelState.insert_paste(panel, text)
+
+      full_text = PanelState.input_text(result)
+      # Placeholder is its own line; "existing" stays after
+      assert String.ends_with?(full_text, "\nexisting")
+    end
+
+    test "paste at end of existing line" do
+      panel = %{PanelState.new() | input_lines: ["existing"], input_cursor: {0, 8}}
+      text = "a\nb\nc"
+      result = PanelState.insert_paste(panel, text)
+
+      full_text = PanelState.input_text(result)
+      assert String.starts_with?(full_text, "existing\n")
+    end
+
+    test "multiple pastes accumulate separate blocks" do
+      panel = PanelState.new()
+      text1 = "a\nb\nc"
+      text2 = "d\ne\nf"
+
+      result =
+        panel
+        |> PanelState.insert_paste(text1)
+        |> PanelState.insert_paste(text2)
+
+      assert length(result.pasted_blocks) == 2
+      assert Enum.at(result.pasted_blocks, 0).text == text1
+      assert Enum.at(result.pasted_blocks, 1).text == text2
+
+      full_text = PanelState.input_text(result)
+      assert String.contains?(full_text, text1)
+      assert String.contains?(full_text, text2)
+    end
+
+    test "unicode paste content is preserved" do
+      panel = PanelState.new()
+      text = "こんにちは\n🎉 emoji\n中文テスト"
+      result = PanelState.insert_paste(panel, text)
+
+      assert PanelState.input_text(result) == text
+    end
+
+    test "paste with trailing newline" do
+      panel = PanelState.new()
+      text = "line 1\nline 2\nline 3\n"
+      result = PanelState.insert_paste(panel, text)
+
+      assert PanelState.input_text(result) == text
+    end
+
+    test "paste with only newlines" do
+      panel = PanelState.new()
+      text = "\n\n\n"
+      result = PanelState.insert_paste(panel, text)
+
+      # 4 lines (split on \n gives ["", "", "", ""])
+      assert length(result.pasted_blocks) == 1
+      assert PanelState.input_text(result) == text
+    end
+
+    test "NUL bytes in pasted text are stripped to prevent placeholder injection" do
+      panel = PanelState.new()
+      # Try to inject a fake placeholder
+      text = "\0PASTE:99\nline 2\nline 3"
+      result = PanelState.insert_paste(panel, text)
+
+      # The NUL should be stripped, so it's treated as a regular 3-line paste
+      assert hd(result.pasted_blocks).text == "PASTE:99\nline 2\nline 3"
+    end
+  end
+
+  describe "toggle_paste_expand/1" do
+    test "expands a collapsed paste block" do
+      panel = PanelState.new()
+      text = "line 1\nline 2\nline 3"
+      panel = PanelState.insert_paste(panel, text)
+
+      # Find the placeholder line
+      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
+      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+
+      expanded = PanelState.toggle_paste_expand(panel)
+
+      # After expanding, pasted_blocks[0].expanded should be true
+      assert Enum.at(expanded.pasted_blocks, 0).expanded == true
+
+      # The placeholder should be replaced with actual text lines
+      refute Enum.any?(expanded.input_lines, &PanelState.paste_placeholder?/1)
+      assert "line 1" in expanded.input_lines
+      assert "line 2" in expanded.input_lines
+      assert "line 3" in expanded.input_lines
+    end
+
+    test "collapses an expanded paste block" do
+      panel = PanelState.new()
+      text = "line 1\nline 2\nline 3"
+      panel = PanelState.insert_paste(panel, text)
+
+      # Expand it first
+      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
+      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+      panel = PanelState.toggle_paste_expand(panel)
+
+      # Now collapse: put cursor on the first line of the expanded text
+      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+      collapsed = PanelState.toggle_paste_expand(panel)
+
+      # After collapsing, should have placeholder back
+      assert Enum.any?(collapsed.input_lines, &PanelState.paste_placeholder?/1)
+      assert Enum.at(collapsed.pasted_blocks, 0).expanded == false
+    end
+
+    test "no-op when cursor is not on a placeholder line" do
+      panel = PanelState.new()
+      panel = %{panel | input_lines: ["regular text"], input_cursor: {0, 0}}
+      result = PanelState.toggle_paste_expand(panel)
+      assert result == panel
+    end
+
+    test "input_text returns same content whether expanded or collapsed" do
+      panel = PanelState.new()
+      text = "alpha\nbeta\ngamma"
+      panel = PanelState.insert_paste(panel, text)
+      collapsed_text = PanelState.input_text(panel)
+
+      # Expand
+      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
+
+      expanded_panel =
+        %{panel | input_cursor: {placeholder_idx, 0}} |> PanelState.toggle_paste_expand()
+
+      expanded_text = PanelState.input_text(expanded_panel)
+
+      assert collapsed_text == expanded_text
+    end
+  end
+
+  describe "paste_placeholder?/1" do
+    test "detects placeholder lines" do
+      assert PanelState.paste_placeholder?("\0PASTE:0")
+      assert PanelState.paste_placeholder?("\0PASTE:42")
+    end
+
+    test "rejects normal text" do
+      refute PanelState.paste_placeholder?("normal text")
+      refute PanelState.paste_placeholder?("")
+      refute PanelState.paste_placeholder?("PASTE:0")
+    end
+  end
+
+  describe "paste_block_index/1" do
+    test "extracts index from placeholder" do
+      assert PanelState.paste_block_index("\0PASTE:0") == 0
+      assert PanelState.paste_block_index("\0PASTE:5") == 5
+      assert PanelState.paste_block_index("\0PASTE:123") == 123
+    end
+
+    test "returns nil for non-placeholder" do
+      assert PanelState.paste_block_index("regular text") == nil
+      assert PanelState.paste_block_index("") == nil
+    end
+  end
+
+  describe "paste_block_line_count/2" do
+    test "returns line count for a paste block" do
+      panel = PanelState.new()
+      panel = PanelState.insert_paste(panel, "a\nb\nc\nd\ne")
+      assert PanelState.paste_block_line_count(panel, 0) == 5
+    end
+
+    test "returns 0 for invalid index" do
+      panel = PanelState.new()
+      assert PanelState.paste_block_line_count(panel, 99) == 0
+    end
+  end
+
+  describe "clear_input/1 with pasted blocks" do
+    test "clears pasted_blocks along with input" do
+      panel = PanelState.new()
+      panel = PanelState.insert_paste(panel, "a\nb\nc")
+
+      assert length(panel.pasted_blocks) == 1
+
+      cleared = PanelState.clear_input(panel)
+      assert cleared.pasted_blocks == []
+      assert cleared.input_lines == [""]
+      assert cleared.input_cursor == {0, 0}
+    end
+  end
+
+  describe "new/0 with pasted_blocks" do
+    test "starts with empty pasted_blocks" do
+      panel = PanelState.new()
+      assert panel.pasted_blocks == []
+    end
+  end
 end

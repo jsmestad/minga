@@ -13,6 +13,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendKeyPress(codepoint: UInt32, modifiers: UInt8)
     func sendResize(cols: UInt16, rows: UInt16)
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
+    func sendPasteEvent(text: String)
     func sendLog(level: UInt8, message: String)
 }
 
@@ -75,6 +76,21 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[6] = modifiers
         buf[7] = eventType
         buf[8] = clickCount
+        writeFrame(buf)
+    }
+
+    /// Send a paste event to the BEAM containing the full pasted text.
+    /// Layout: opcode(1) + text_len(2, big-endian) + text(text_len).
+    /// Text is UTF-8 encoded. Maximum length is 65535 bytes (UInt16.max).
+    func sendPasteEvent(text: String) {
+        let utf8 = Array(text.utf8)
+        let textLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 3 + textLen)
+        buf[0] = OP_PASTE_EVENT
+        writeU16(&buf, 1, UInt16(textLen))
+        if textLen > 0 {
+            buf.replaceSubrange(3..<(3 + textLen), with: utf8[0..<textLen])
+        }
         writeFrame(buf)
     }
 

@@ -166,6 +166,18 @@ defmodule Minga.Editor.State.Agent do
     %{agent | panel: PanelState.insert_char(agent.panel, char)}
   end
 
+  @doc "Inserts pasted text into the agent input. Collapses multi-line pastes."
+  @spec insert_paste(t(), String.t()) :: t()
+  def insert_paste(%__MODULE__{} = agent, text) do
+    %{agent | panel: PanelState.insert_paste(agent.panel, text)}
+  end
+
+  @doc "Toggles expand/collapse on the paste block at the current cursor line."
+  @spec toggle_paste_expand(t()) :: t()
+  def toggle_paste_expand(%__MODULE__{} = agent) do
+    %{agent | panel: PanelState.toggle_paste_expand(agent.panel)}
+  end
+
   @doc "Deletes the last character from the agent input."
   @spec delete_char(t()) :: t()
   def delete_char(%__MODULE__{} = agent) do
