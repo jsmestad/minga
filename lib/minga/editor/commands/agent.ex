@@ -420,6 +420,24 @@ defmodule Minga.Editor.Commands.Agent do
     update_agent(state, &AgentState.insert_char(&1, char))
   end
 
+  @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
+  @spec input_paste(state(), String.t()) :: state()
+  def input_paste(
+        %{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state,
+        _text
+      ),
+      do: state
+
+  def input_paste(state, text) do
+    update_agent(state, &AgentState.insert_paste(&1, text))
+  end
+
+  @doc "Toggles expand/collapse on the paste block at the cursor."
+  @spec toggle_paste_expand(state()) :: state()
+  def toggle_paste_expand(state) do
+    update_agent(state, &AgentState.toggle_paste_expand/1)
+  end
+
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
   def input_backspace(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
