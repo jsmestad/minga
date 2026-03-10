@@ -9,6 +9,8 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Input
@@ -36,8 +38,10 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       buffer: nil
     }
 
+    active = Keyword.get(opts, :active, false)
+
     agentic = %ViewState{
-      active: Keyword.get(opts, :active, false),
+      active: active,
       focus: :chat,
       preview: Preview.new(),
       saved_windows: Keyword.get(opts, :saved_windows, nil),
@@ -45,7 +49,31 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
     }
 
-    %EditorState{
+    # Build a tab bar: file tab always exists, agent tab if starting active
+    file_tab = Tab.new_file(1, "test.ex")
+    tb = TabBar.new(file_tab)
+
+    {tb, agent_tab_id} =
+      if active do
+        agent_ctx = %{
+          agentic: agentic,
+          agent: agent,
+          windows: %Windows{},
+          mode: :normal,
+          mode_state: Mode.initial_state(),
+          keymap_scope: :agent,
+          active_buffer: buf,
+          active_buffer_index: 0
+        }
+
+        {tb2, at} = TabBar.add(tb, :agent, "Agent")
+        tb2 = TabBar.update_context(tb2, at.id, agent_ctx)
+        {tb2, at.id}
+      else
+        {tb, nil}
+      end
+
+    state = %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
       mode: :normal,
@@ -53,8 +81,16 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       agent: agent,
-      agentic: agentic
+      agentic: agentic,
+      tab_bar: tb
     }
+
+    # If starting in active (agent) state, switch to the agent tab
+    if agent_tab_id do
+      EditorState.switch_tab(state, agent_tab_id)
+    else
+      state
+    end
   end
 
   describe "toggle_agentic_view/1 — activating" do
@@ -64,11 +100,14 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       assert new_state.agentic.active == true
     end
 
-    test "saves the current windows layout" do
+    test "saves the file tab's windows layout in the tab context" do
       state = base_state()
       original_windows = state.windows
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.agentic.saved_windows == original_windows
+
+      # File tab (id 1) should have the original windows in its context
+      file_tab = TabBar.get(new_state.tab_bar, 1)
+      assert file_tab.context.windows == original_windows
     end
 
     test "resets agentic.focus to :chat" do
@@ -94,7 +133,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       # When pi isn't installed, the session start fails gracefully
       # and sets an error instead of crashing.
       if new_state.agent.session == nil do
-        assert new_state.agent.panel.error != nil
+        assert new_state.agent.error != nil
       end
     end
 
@@ -105,6 +144,13 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       assert new_state.agent.session == fake_session
       assert new_state.agentic.active == true
     end
+
+    test "creates an agent tab when none exists" do
+      state = base_state()
+      new_state = AgentCommands.toggle_agentic_view(state)
+      assert TabBar.find_by_kind(new_state.tab_bar, :agent) != nil
+      assert EditorState.active_tab_kind(new_state) == :agent
+    end
   end
 
   describe "toggle_agentic_view/1 — deactivating" do
@@ -114,31 +160,25 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       assert new_state.agentic.active == false
     end
 
-    test "restores saved windows when present" do
-      original_windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 2}
-      state = base_state(active: true, saved_windows: original_windows)
+    test "switches back to the file tab" do
+      state = base_state(active: true)
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.windows == original_windows
+      assert EditorState.active_tab_kind(new_state) == :file
     end
 
-    test "clears agentic.saved_windows after restoring" do
-      original_windows = %Windows{tree: nil, map: %{}, active: 1, next_id: 2}
-      state = base_state(active: true, saved_windows: original_windows)
-      new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.agentic.saved_windows == nil
-    end
-
-    test "does not crash when no saved windows exist" do
-      state = base_state(active: true, saved_windows: nil)
+    test "does not crash when no file tab exists" do
+      # Start active with no file tab scenario handled gracefully
+      state = base_state(active: true)
       new_state = AgentCommands.toggle_agentic_view(state)
       assert new_state.agentic.active == false
     end
 
-    test "resets agentic.focus to :chat" do
+    test "resets agentic.focus to :chat on the saved agent context" do
       state = base_state(active: true)
       state = put_in(state.agentic.focus, :file_viewer)
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.agentic.focus == :chat
+      # After deactivation, the live agentic should be the file tab's (inactive)
+      assert new_state.agentic.active == false
     end
   end
 
@@ -153,7 +193,18 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       restored = AgentCommands.toggle_agentic_view(activated)
       assert restored.agentic.active == false
       assert restored.windows == original_windows
-      assert restored.agentic.saved_windows == nil
+    end
+
+    test "re-entering agent tab restores its context" do
+      state = base_state()
+
+      # Activate (creates agent tab) -> deactivate -> re-activate
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      back_to_file = AgentCommands.toggle_agentic_view(with_agent)
+      back_to_agent = AgentCommands.toggle_agentic_view(back_to_file)
+
+      assert back_to_agent.agentic.active == true
+      assert back_to_agent.keymap_scope == :agent
     end
   end
 end

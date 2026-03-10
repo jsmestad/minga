@@ -26,6 +26,9 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Git.Diff
 
@@ -65,56 +68,122 @@ defmodule Minga.Editor.Commands.Agent do
   @doc """
   Toggles the full-screen agentic view on or off.
 
-  On activate: saves the current window layout, sets `agentic_view: true`, and
-  ensures an agent session is running (starting one if needed). On deactivate:
-  restores the saved window layout and sets `agentic_view: false`.
+  On activate: switches to an agent tab (creating one if none exists),
+  which snapshots the current file tab's context and restores the agent
+  context. On deactivate: switches back to the most recent file tab.
   """
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(%{agentic: %{active: true}} = state) do
-    {new_av, saved_windows, saved_file_tree} = ViewState.deactivate(state.agentic)
-
-    state =
-      if saved_windows do
-        %{state | windows: saved_windows}
-      else
-        state
-      end
-
-    state =
-      if saved_file_tree do
-        %{state | file_tree: saved_file_tree}
-      else
-        state
-      end
-
-    %{state | agentic: new_av, keymap_scope: :editor}
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+    deactivate_agentic_view(state)
   end
 
   def toggle_agentic_view(%{agentic: %{active: false}} = state) do
-    # Save current window layout and activate the agentic view.
-    state = %{state | agentic: ViewState.activate(state.agentic, state.windows, state.file_tree)}
+    activate_agentic_view(state)
+  end
 
-    # Close any open splits and file tree — the agentic view takes the full screen.
-    %Windows{} = ws = state.windows
-    alias Minga.Editor.State.FileTree, as: FileTreeState
-    state = %{state | windows: %{ws | tree: nil}, file_tree: FileTreeState.close(state.file_tree)}
+  @spec deactivate_agentic_view(state()) :: state()
+  defp deactivate_agentic_view(state) do
+    # Mark the agentic view as inactive before snapshotting, so the
+    # saved context reflects "agent panel not visible".
+    state = %{state | agentic: %{state.agentic | active: false}}
 
-    # Set keymap scope to agent
-    state = %{state | keymap_scope: :agent}
+    case find_file_tab(state) do
+      nil ->
+        # No file tab to switch to, just deactivate in place.
+        %{state | keymap_scope: :editor}
+        |> Layout.invalidate()
+        |> EditorState.invalidate_all_windows()
 
-    # Ensure a session is running; start one if not.
-    state =
-      if state.agent.session == nil do
-        start_agent_session(state)
-      else
-        state
-      end
+      file_tab ->
+        EditorState.switch_tab(state, file_tab.id)
+    end
+  end
 
-    state
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+  @spec activate_agentic_view(state()) :: state()
+  defp activate_agentic_view(state) do
+    case find_agent_tab(state) do
+      nil ->
+        create_and_switch_to_agent_tab(state)
+
+      agent_tab ->
+        switch_to_existing_agent_tab(state, agent_tab)
+    end
+  end
+
+  # Creates a new agent tab, snapshots the current file tab, and switches.
+  @spec create_and_switch_to_agent_tab(state()) :: state()
+  defp create_and_switch_to_agent_tab(state) do
+    # 1. Snapshot the current file tab before we leave it.
+    file_tab_id = state.tab_bar.active_id
+    file_context = EditorState.snapshot_tab_context(state)
+    tb = TabBar.update_context(state.tab_bar, file_tab_id, file_context)
+
+    # 2. Add agent tab (TabBar.add makes it active).
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+
+    # 3. Build and store the agent context.
+    agent_context = new_agent_context(state)
+    tb = TabBar.update_context(tb, agent_tab.id, agent_context)
+
+    # 4. Restore agent context into the live state.
+    state = %{state | tab_bar: tb}
+    state = EditorState.restore_tab_context(state, agent_context)
+    maybe_start_session(state)
+  end
+
+  # Switches to an existing agent tab, re-activating its agentic view.
+  @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
+  defp switch_to_existing_agent_tab(state, agent_tab) do
+    # The agent tab's context has agentic.active == false (set during
+    # deactivation). Patch it to active before switching.
+    ctx = agent_tab.context
+
+    updated_agentic =
+      Map.get(ctx, :agentic, ViewState.new())
+      |> Map.put(:active, true)
+      |> Map.put(:focus, :chat)
+
+    tb =
+      TabBar.update_context(state.tab_bar, agent_tab.id, Map.put(ctx, :agentic, updated_agentic))
+
+    state = %{state | tab_bar: tb}
+    state = EditorState.switch_tab(state, agent_tab.id)
+    maybe_start_session(state)
+  end
+
+  @spec new_agent_context(state()) :: Tab.context()
+  defp new_agent_context(state) do
+    %{
+      agentic: %{ViewState.new() | active: true, focus: :chat},
+      windows: %Windows{},
+      file_tree: FileTreeState.close(state.file_tree),
+      mode: :normal,
+      mode_state: Minga.Mode.initial_state(),
+      keymap_scope: :agent,
+      agent: state.agent,
+      active_buffer: state.buffers.active,
+      active_buffer_index: state.buffers.active_index
+    }
+  end
+
+  @spec find_file_tab(state()) :: Tab.t() | nil
+  defp find_file_tab(%{tab_bar: nil}), do: nil
+
+  defp find_file_tab(%{tab_bar: tb}) do
+    TabBar.most_recent_of_kind(tb, :file) || TabBar.find_by_kind(tb, :file)
+  end
+
+  @spec find_agent_tab(state()) :: Tab.t() | nil
+  defp find_agent_tab(%{tab_bar: nil}), do: nil
+  defp find_agent_tab(%{tab_bar: tb}), do: TabBar.find_by_kind(tb, :agent)
+
+  @spec maybe_start_session(state()) :: state()
+  defp maybe_start_session(state) do
+    if state.agent.session == nil do
+      start_agent_session(state)
+    else
+      state
+    end
   end
 
   @doc "Submits the current input text as a prompt."
@@ -222,18 +291,43 @@ defmodule Minga.Editor.Commands.Agent do
 
   def ensure_agent_session(state), do: state
 
-  @doc "Starts a fresh agent session."
+  @doc """
+  Creates a new agent tab with a fresh session.
+
+  If the current tab is a file tab, snapshots it and switches to a new
+  agent tab. If already on an agent tab, creates a new one alongside it.
+  """
   @spec new_agent_session(state()) :: state()
-  def new_agent_session(%{agent: %{session: nil}} = state) do
+  def new_agent_session(%{tab_bar: %TabBar{}} = state) do
+    # Snapshot current tab before leaving it.
+    current_id = state.tab_bar.active_id
+    current_ctx = EditorState.snapshot_tab_context(state)
+    tb = TabBar.update_context(state.tab_bar, current_id, current_ctx)
+
+    # Add new agent tab (becomes active).
+    {tb, agent_tab} = TabBar.add(tb, :agent, "New Agent")
+
+    # Fresh agent state for the new tab.
+    agent_context = %{
+      agentic: %{ViewState.new() | active: true, focus: :chat},
+      windows: %Windows{},
+      file_tree: FileTreeState.close(state.file_tree),
+      mode: :normal,
+      mode_state: Minga.Mode.initial_state(),
+      keymap_scope: :agent,
+      agent: %AgentState{},
+      active_buffer: state.buffers.active,
+      active_buffer_index: state.buffers.active_index
+    }
+
+    tb = TabBar.update_context(tb, agent_tab.id, agent_context)
+    state = %{state | tab_bar: tb}
+    state = EditorState.restore_tab_context(state, agent_context)
     start_agent_session(state)
   end
 
+  # Fallback for bare maps or states without a tab bar (tests, slash commands).
   def new_agent_session(state) do
-    # Unsubscribe from the old session (it stays alive in the DynamicSupervisor)
-    old_pid = state.agent.session
-    Session.unsubscribe(old_pid)
-
-    # Start a fresh session; set_session archives the old pid in session_history
     start_agent_session(state)
   end
 
