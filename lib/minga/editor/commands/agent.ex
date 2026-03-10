@@ -152,6 +152,9 @@ defmodule Minga.Editor.Commands.Agent do
     # 4. Restore agent context into the live state.
     state = %{state | tab_bar: tb}
     state = EditorState.restore_tab_context(state, agent_context)
+
+    # 5. Focus the input so the user can start typing immediately.
+    state = update_agent(state, &AgentState.focus_input(&1, true))
     maybe_start_session(state)
   end
 
@@ -172,6 +175,9 @@ defmodule Minga.Editor.Commands.Agent do
 
     state = %{state | tab_bar: tb}
     state = EditorState.switch_tab(state, agent_tab.id)
+
+    # Focus the input so the user can start typing immediately.
+    state = update_agent(state, &AgentState.focus_input(&1, true))
     maybe_start_session(state)
   end
 
