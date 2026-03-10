@@ -60,6 +60,8 @@ defmodule Minga.Editor do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -175,6 +177,8 @@ defmodule Minga.Editor do
       agentic: agentic_state,
       focus_stack: Minga.Input.default_stack()
     }
+
+    state = %{state | tab_bar: initial_tab_bar(active_buf)}
 
     # Redirect Logger and stderr to a log file when running with a real TUI.
     # In headless tests the port_manager is a pid (HeadlessPort), not the
@@ -703,6 +707,18 @@ defmodule Minga.Editor do
   # is a pid, not the PortManager atom), always uses editor mode.
   @spec startup_view_state(GenServer.server(), pos_integer()) ::
           {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
+  @spec initial_tab_bar(pid() | nil) :: TabBar.t()
+  defp initial_tab_bar(active_buf) do
+    label =
+      if active_buf && Process.alive?(active_buf) do
+        Commands.Helpers.buffer_display_name(active_buf)
+      else
+        "*scratch*"
+      end
+
+    TabBar.new(Tab.new_file(1, label))
+  end
+
   defp startup_view_state(port_manager, window_id) do
     tui_mode? = port_manager == PortManager
     cli_flags = Minga.CLI.startup_flags()

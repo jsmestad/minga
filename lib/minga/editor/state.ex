@@ -35,6 +35,8 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.Picker
   alias Minga.Editor.State.Registers
   alias Minga.Editor.State.Search
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
@@ -87,6 +89,7 @@ defmodule Minga.Editor.State do
             focus_stack: [],
             keymap_scope: :editor,
             agentic: %ViewState{},
+            tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
             modeline_click_regions: []
@@ -127,6 +130,7 @@ defmodule Minga.Editor.State do
           focus_stack: [module()],
           keymap_scope: Minga.Keymap.Scope.scope_name(),
           agentic: ViewState.t(),
+          tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()]
@@ -315,6 +319,129 @@ defmodule Minga.Editor.State do
 
       _ ->
         state
+    end
+  end
+
+  # ── Tab bar helpers ───────────────────────────────────────────────────────
+
+  @doc """
+  Captures the current per-tab fields into a context map.
+
+  The returned map is stored in the outgoing tab so it can be restored
+  when the user switches back.
+  """
+  @spec snapshot_tab_context(t()) :: Tab.context()
+  def snapshot_tab_context(%__MODULE__{} = state) do
+    %{
+      windows: state.windows,
+      file_tree: state.file_tree,
+      mode: state.mode,
+      mode_state: state.mode_state,
+      keymap_scope: state.keymap_scope,
+      active_buffer: state.buffers.active,
+      active_buffer_index: state.buffers.active_index,
+      agent: state.agent,
+      agentic: state.agentic
+    }
+  end
+
+  @doc """
+  Writes a tab context back into the live editor state.
+
+  Fields not present in the context map are left unchanged (safe for
+  partial contexts from older tab snapshots).
+  """
+  @spec restore_tab_context(t(), Tab.context()) :: t()
+  def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
+    state
+    |> maybe_restore(:windows, context)
+    |> maybe_restore(:file_tree, context)
+    |> maybe_restore(:mode, context)
+    |> maybe_restore(:mode_state, context)
+    |> maybe_restore(:keymap_scope, context)
+    |> maybe_restore(:agent, context)
+    |> maybe_restore(:agentic, context)
+    |> restore_active_buffer(context)
+  end
+
+  @spec maybe_restore(t(), atom(), Tab.context()) :: t()
+  defp maybe_restore(state, key, context) do
+    case Map.fetch(context, key) do
+      {:ok, value} -> Map.put(state, key, value)
+      :error -> state
+    end
+  end
+
+  @spec restore_active_buffer(t(), Tab.context()) :: t()
+  defp restore_active_buffer(state, context) do
+    case Map.fetch(context, :active_buffer) do
+      {:ok, buf_pid} ->
+        idx = Map.get(context, :active_buffer_index, state.buffers.active_index)
+
+        %{state | buffers: %{state.buffers | active: buf_pid, active_index: idx}}
+        |> sync_active_window_buffer()
+
+      :error ->
+        state
+    end
+  end
+
+  @doc """
+  Switches to the tab with `target_id`.
+
+  Snapshots the current tab's context, stores it, updates the tab bar's
+  active pointer, and restores the target tab's saved context into the
+  live editor state. Invalidates layout and window caches since the
+  entire visual context changes.
+  """
+  @spec switch_tab(t(), Tab.id()) :: t()
+  def switch_tab(%__MODULE__{tab_bar: nil} = state, _target_id), do: state
+
+  def switch_tab(%__MODULE__{tab_bar: tb} = state, target_id) do
+    current_id = tb.active_id
+
+    if current_id == target_id do
+      state
+    else
+      # Snapshot current tab
+      context = snapshot_tab_context(state)
+      tb = TabBar.update_context(tb, current_id, context)
+
+      # Switch pointer
+      tb = TabBar.switch_to(tb, target_id)
+
+      # Restore target tab's context
+      target = TabBar.active(tb)
+      state = %{state | tab_bar: tb}
+
+      if target do
+        state
+        |> restore_tab_context(target.context)
+        |> invalidate_all_windows()
+        |> Map.put(:layout, nil)
+      else
+        state
+      end
+    end
+  end
+
+  @doc """
+  Returns the active tab, or nil if the tab bar isn't initialized.
+  """
+  @spec active_tab(t()) :: Tab.t() | nil
+  def active_tab(%__MODULE__{tab_bar: nil}), do: nil
+  def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
+
+  @doc """
+  Returns the kind of the active tab, or `:file` as default.
+  """
+  @spec active_tab_kind(t()) :: Tab.kind()
+  def active_tab_kind(%__MODULE__{tab_bar: nil}), do: :file
+
+  def active_tab_kind(%__MODULE__{tab_bar: tb}) do
+    case TabBar.active(tb) do
+      %Tab{kind: kind} -> kind
+      nil -> :file
     end
   end
 end
