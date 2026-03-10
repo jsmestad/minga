@@ -195,6 +195,19 @@ final class EditorNSView: MTKView {
     override func keyDown(with event: NSEvent) {
         let mods = modifierBits(from: event.modifierFlags)
 
+        // Cmd+V: intercept paste and send as a single paste_event instead
+        // of decomposing into individual key_press events. This lets the
+        // BEAM side detect multi-line pastes and collapse them.
+        if event.modifierFlags.contains(.command),
+           let chars = event.charactersIgnoringModifiers,
+           chars == "v"
+        {
+            if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
+                encoder.sendPasteEvent(text: text)
+            }
+            return
+        }
+
         // Special keys (arrows, Enter, Escape, etc.)
         if let codepoint = mapKeyCode(event) {
             encoder.sendKeyPress(codepoint: codepoint, modifiers: mods)
