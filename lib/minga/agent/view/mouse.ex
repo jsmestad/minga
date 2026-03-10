@@ -26,6 +26,8 @@ defmodule Minga.Agent.View.Mouse do
   alias Minga.Editor.State.Mouse, as: MouseState
 
   @scroll_lines 3
+  # Must match @max_input_lines in Renderer to keep hit-testing aligned.
+  @max_input_lines 8
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -135,18 +137,21 @@ defmodule Minga.Agent.View.Mouse do
   @spec hit_test(state(), integer(), integer()) :: region()
   defp hit_test(state, row, col) do
     layout = compute_layout(state)
-
-    cond do
-      row == layout.panel_start - 2 -> :tab_bar
-      row == layout.panel_start - 1 -> :title_bar
-      row >= layout.modeline_row -> :modeline
-      row >= layout.input_row and col < layout.chat_width -> :input
-      col == layout.sep_col -> :separator
-      col < layout.chat_width -> :chat
-      col > layout.sep_col -> :file_viewer
-      true -> :outside
-    end
+    classify_region(layout, row, col)
   end
+
+  @spec classify_region(layout_info(), integer(), integer()) :: region()
+  defp classify_region(layout, row, _col) when row == layout.panel_start - 2, do: :tab_bar
+  defp classify_region(layout, row, _col) when row == layout.panel_start - 1, do: :title_bar
+  defp classify_region(layout, row, _col) when row >= layout.modeline_row, do: :modeline
+
+  defp classify_region(layout, row, col) when row >= layout.input_row and col < layout.chat_width,
+    do: :input
+
+  defp classify_region(layout, _row, col) when col == layout.sep_col, do: :separator
+  defp classify_region(layout, _row, col) when col < layout.chat_width, do: :chat
+  defp classify_region(layout, _row, col) when col > layout.sep_col, do: :file_viewer
+  defp classify_region(_layout, _row, _col), do: :outside
 
   @spec compute_layout(state()) :: layout_info()
   defp compute_layout(state) do
@@ -154,7 +159,7 @@ defmodule Minga.Agent.View.Mouse do
     rows = state.viewport.rows
 
     input_lines = state.agent.panel.input_lines
-    input_height = min(length(input_lines), 5) + 2
+    input_height = max(min(length(input_lines), @max_input_lines), 1) + 2
 
     # Tab bar at row 0, title bar at row 1, content starts at row 2.
     panel_start = 2
