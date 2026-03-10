@@ -366,7 +366,9 @@ defmodule Minga.Agent.View.RendererTest do
       assert Enum.all?(commands, &is_tuple/1)
     end
 
-    test "renders with buffer snapshot data" do
+    test "renders with file preview data" do
+      preview = Preview.set_file(Preview.new(), "/tmp/test.ex", "line one\nline two")
+
       input = %Renderer.RenderInput{
         viewport: Viewport.new(30, 100),
         theme: Theme.get!(:doom_one),
@@ -393,12 +395,8 @@ defmodule Minga.Agent.View.RendererTest do
         },
         messages: [],
         usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
-        buffer_snapshot: %{
-          lines: ["line one", "line two"],
-          line_count: 2,
-          first_line_byte_offset: 0,
-          name: "test.ex"
-        },
+        preview: preview,
+        buffer_snapshot: nil,
         highlight: nil,
         mode: :normal,
         mode_state: nil,
