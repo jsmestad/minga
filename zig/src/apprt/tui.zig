@@ -144,6 +144,15 @@ pub const TuiRuntime = struct {
     /// batch + the correct post-resize batch). Decremented per batch.
     refresh_batches: u8 = 0,
 
+    /// True while inside a bracketed paste (between paste_start and paste_end).
+    /// Key press events during this state are accumulated into `paste_buf`
+    /// instead of being sent as individual key_press messages.
+    pasting: bool = false,
+
+    /// Accumulates UTF-8 bytes from key_press events during a bracketed paste.
+    /// Cleared on paste_start, sent as a single paste_event on paste_end.
+    paste_buf: std.ArrayList(u8) = .empty,
+
     /// Initialize the TUI runtime: open TTY, set up vaxis, enter alt screen.
     pub fn init(alloc: std.mem.Allocator) !TuiRuntime {
         // We need a stable pointer for the tty_write_buf, but since TuiRuntime
@@ -172,6 +181,13 @@ pub const TuiRuntime = struct {
 
         // Enable mouse mode.
         try self.vx.setMouseMode(self.tty.writer(), true);
+
+        // Enable bracketed paste so multi-line pastes arrive as
+        // paste_start / key_press* / paste_end instead of bare key_press.
+        try self.vx.setBracketedPaste(self.tty.writer(), true);
+
+        // Paste buffer uses the runtime allocator for dynamic accumulation.
+        self.paste_buf = .empty;
 
         // Install signal handlers.
         installSignalHandlers();
@@ -218,6 +234,7 @@ pub const TuiRuntime = struct {
 
     /// Clean up: free renderer, vaxis, and restore terminal.
     pub fn deinit(self: *TuiRuntime) void {
+        self.paste_buf.deinit(self.alloc);
         self.rend.deinit();
         // Restore the terminal title saved at init.
         self.tty.writer().writeAll("\x1b[23;0t") catch {};
@@ -347,7 +364,7 @@ pub const TuiRuntime = struct {
                     seq_start += result.n;
 
                     const event = result.event orelse continue;
-                    handleTtyEvent(&self.vx, event, stdout) catch |err| {
+                    handleTtyEvent(self, event, stdout) catch |err| {
                         std.log.warn("tty event error: {}", .{err});
                     };
                 }
@@ -456,11 +473,43 @@ fn installSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.INT, &quit_act, null);
 }
 
-/// Converts a vaxis key event to bytes for a PTY.
 /// Process a parsed terminal event.
-fn handleTtyEvent(vx: *vaxis.Vaxis, event: vaxis.Event, stdout: *std.Io.Writer) !void {
+///
+/// During a bracketed paste (between paste_start and paste_end), key_press
+/// events are accumulated in `self.paste_buf` instead of being sent
+/// individually. On paste_end, the accumulated text is sent as a single
+/// paste_event message.
+fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer) !void {
+    const vx = &self.vx;
+
     switch (event) {
+        .paste_start => {
+            self.pasting = true;
+            self.paste_buf.clearRetainingCapacity();
+        },
+
+        .paste_end => {
+            self.pasting = false;
+            if (self.paste_buf.items.len > 0) {
+                const paste_msg = try protocol.encodePasteEvent(self.alloc, self.paste_buf.items);
+                defer self.alloc.free(paste_msg);
+                try protocol.writeMessage(stdout, paste_msg);
+                try stdout.flush();
+            }
+            self.paste_buf.clearRetainingCapacity();
+        },
+
         .key_press => |key| {
+            if (self.pasting) {
+                // During a bracketed paste, accumulate the character into
+                // the paste buffer instead of sending a key_press event.
+                // Encode the codepoint as UTF-8.
+                var cp_buf: [4]u8 = undefined;
+                const cp_len = std.unicode.utf8Encode(key.codepoint, &cp_buf) catch return;
+                try self.paste_buf.appendSlice(self.alloc, cp_buf[0..cp_len]);
+                return;
+            }
+
             var mods: u8 = 0;
             if (key.mods.shift) mods |= protocol.MOD_SHIFT;
             if (key.mods.ctrl) mods |= protocol.MOD_CTRL;
