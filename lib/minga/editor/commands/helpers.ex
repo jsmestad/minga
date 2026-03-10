@@ -192,7 +192,7 @@ defmodule Minga.Editor.Commands.Helpers do
   # :none if no buffer is active (safe default: no clipboard calls).
   @spec resolve_clipboard(state()) :: clipboard_mode()
   defp resolve_clipboard(%{buffers: %{active: buf}}) when is_pid(buf) do
-    Minga.Buffer.Server.get_option(buf, :clipboard)
+    BufferServer.get_option(buf, :clipboard)
   catch
     :exit, _ -> :none
   end

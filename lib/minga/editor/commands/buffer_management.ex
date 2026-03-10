@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
+  alias Minga.Config.Options, as: ConfigOptions
 
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
@@ -283,17 +284,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── :setglobal — writes to the global Options agent ───────────────────────
 
   def execute(state, {:execute_ex_command, {:setglobal, :number}}) do
-    Minga.Config.Options.set(:line_numbers, :absolute)
+    ConfigOptions.set(:line_numbers, :absolute)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :nonumber}}) do
-    Minga.Config.Options.set(:line_numbers, :none)
+    ConfigOptions.set(:line_numbers, :none)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :relativenumber}}) do
-    current = Minga.Config.Options.get(:line_numbers)
+    current = ConfigOptions.get(:line_numbers)
 
     next =
       case current do
@@ -301,12 +302,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :relative
       end
 
-    Minga.Config.Options.set(:line_numbers, next)
+    ConfigOptions.set(:line_numbers, next)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :norelativenumber}}) do
-    current = Minga.Config.Options.get(:line_numbers)
+    current = ConfigOptions.get(:line_numbers)
 
     next =
       case current do
@@ -314,17 +315,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :none
       end
 
-    Minga.Config.Options.set(:line_numbers, next)
+    ConfigOptions.set(:line_numbers, next)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :wrap}}) do
-    Minga.Config.Options.set(:wrap, true)
+    ConfigOptions.set(:wrap, true)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :nowrap}}) do
-    Minga.Config.Options.set(:wrap, false)
+    ConfigOptions.set(:wrap, false)
     state
   end
 

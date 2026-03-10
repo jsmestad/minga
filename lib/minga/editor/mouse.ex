@@ -628,7 +628,7 @@ defmodule Minga.Editor.Mouse do
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
   defp gutter_width(%{buffers: %{active: buf}, git_buffers: git_buffers}, total_lines) do
     ln_style =
-      if buf, do: Minga.Buffer.Server.get_option(buf, :line_numbers), else: :none
+      if buf, do: BufferServer.get_option(buf, :line_numbers), else: :none
 
     number_w =
       if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)

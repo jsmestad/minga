@@ -3,6 +3,7 @@ defmodule Minga.Buffer.ServerTest do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server
+  alias Minga.Config.Options
 
   @moduletag :tmp_dir
 
@@ -662,11 +663,11 @@ defmodule Minga.Buffer.ServerTest do
 
     test "filetype default wins over global when seeded at creation" do
       # Set filetype override BEFORE creating buffer (eager seeding)
-      Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
+      Options.set_for_filetype(:go, :tab_width, 8)
 
       on_exit(fn ->
         try do
-          Minga.Config.Options.set_for_filetype(:go, :tab_width, 2)
+          Options.set_for_filetype(:go, :tab_width, 2)
         catch
           :exit, _ -> :ok
         end
@@ -677,11 +678,11 @@ defmodule Minga.Buffer.ServerTest do
     end
 
     test "buffer-local wins over filetype default" do
-      Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
+      Options.set_for_filetype(:go, :tab_width, 8)
 
       on_exit(fn ->
         try do
-          Minga.Config.Options.set_for_filetype(:go, :tab_width, 2)
+          Options.set_for_filetype(:go, :tab_width, 2)
         catch
           :exit, _ -> :ok
         end
