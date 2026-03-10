@@ -369,7 +369,7 @@ defmodule Minga.Editor.RenderPipeline do
     # Viewport from Layout content rect
     wrap_on = wrap_enabled?(window.buffer)
     viewport = Viewport.new(content_height, content_width, 0)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0})
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, window.buffer)
     {first_line, _last_line} = Viewport.visible_range(viewport)
     visible_rows = Viewport.content_rows(viewport)
 
@@ -392,7 +392,7 @@ defmodule Minga.Editor.RenderPipeline do
     content_w = max(viewport.cols - gutter_w, 1)
 
     # Horizontal scroll (disabled when wrapping)
-    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on)
+    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, window.buffer)
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -918,14 +918,14 @@ defmodule Minga.Editor.RenderPipeline do
   defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
-  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean()) ::
+  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean(), pid()) ::
           Viewport.t()
-  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on) do
-    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0})
+  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on, buf) do
+    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0}, buf)
   end
 
-  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on) do
-    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col})
+  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, buf) do
+    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col}, buf)
   end
 
   @spec wrap_enabled?(pid()) :: boolean()
