@@ -11,7 +11,6 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Clipboard
-  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
@@ -27,18 +26,30 @@ defmodule Minga.Editor.Commands.Helpers do
   @typedoc "Text object action kind."
   @type text_object_action :: :delete | :yank
 
+  @typedoc "Clipboard sync mode controlling automatic system clipboard integration."
+  @type clipboard_mode :: :unnamedplus | :unnamed | :none
+
   # ── Register helpers ────────────────────────────────────────────────────────
 
   @doc """
   Writes `text` into the appropriate register(s) based on `reg.active`
   and the operation kind (`:yank` or `:delete`).
+
+  Reads `clipboard_mode` from `state` to decide whether to sync to the
+  system clipboard. The 4-arity version lets callers override this
+  explicitly (useful in tests to avoid depending on global Options state).
   """
   @spec put_register(state(), String.t(), :yank | :delete) :: state()
-  def put_register(%{reg: %{active: "_"}} = state, _text, _kind) do
+  def put_register(state, text, kind) do
+    put_register(state, text, kind, resolve_clipboard(state))
+  end
+
+  @spec put_register(state(), String.t(), :yank | :delete, clipboard_mode()) :: state()
+  def put_register(%{reg: %{active: "_"}} = state, _text, _kind, _clipboard) do
     reset_active_register(state)
   end
 
-  def put_register(%{reg: %{active: "+"}} = state, text, kind) do
+  def put_register(%{reg: %{active: "+"}} = state, text, kind, _clipboard) do
     case Clipboard.write(text) do
       :ok ->
         :ok
@@ -53,7 +64,7 @@ defmodule Minga.Editor.Commands.Helpers do
     state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
   end
 
-  def put_register(%{reg: %{active: name} = reg} = state, text, kind)
+  def put_register(%{reg: %{active: name} = reg} = state, text, kind, clipboard)
       when name >= "A" and name <= "Z" do
     lower = String.downcase(name)
     existing = Registers.get(reg, lower) || ""
@@ -63,27 +74,27 @@ defmodule Minga.Editor.Commands.Helpers do
     |> put_in_register(lower, appended)
     |> write_unnamed(text)
     |> maybe_write_yank(text, kind)
-    |> maybe_sync_clipboard(text)
+    |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
 
-  def put_register(%{reg: %{active: name}} = state, text, kind)
+  def put_register(%{reg: %{active: name}} = state, text, kind, clipboard)
       when name >= "a" and name <= "z" do
     state
     |> put_in_register(name, text)
     |> write_unnamed(text)
     |> maybe_write_yank(text, kind)
-    |> maybe_sync_clipboard(text)
+    |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
 
-  def put_register(state, text, kind) do
+  def put_register(state, text, kind, clipboard) do
     name = if state.reg.active == "", do: "", else: state.reg.active
 
     state
     |> put_in_register(name, text)
     |> maybe_write_yank(text, kind)
-    |> maybe_sync_clipboard(text)
+    |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
 
@@ -94,35 +105,41 @@ defmodule Minga.Editor.Commands.Helpers do
   (no explicit `"x` prefix), the system clipboard is read and preferred
   if it contains content that differs from the stored unnamed register
   (indicating the user copied something in another app).
+
+  Reads `clipboard_mode` from `state` by default. The 2-arity version
+  lets callers override this explicitly for testing.
   """
   @spec get_register(state()) :: {String.t() | nil, state()}
-  def get_register(%{reg: %{active: "+"}} = state) do
+  def get_register(state) do
+    get_register(state, resolve_clipboard(state))
+  end
+
+  @spec get_register(state(), clipboard_mode()) :: {String.t() | nil, state()}
+  def get_register(%{reg: %{active: "+"}} = state, _clipboard) do
     text = Clipboard.read()
     {text, reset_active_register(state)}
   end
 
-  def get_register(%{reg: reg} = state) do
+  def get_register(%{reg: reg} = state, clipboard) do
     key = if reg.active == "", do: "", else: reg.active
     stored = Registers.get(reg, key)
-    text = maybe_read_clipboard(key, stored)
+    text = maybe_read_clipboard(key, stored, clipboard)
     {text, reset_active_register(state)}
   end
 
   # When pasting from the unnamed register with clipboard sync enabled,
   # check the system clipboard. If its content differs from what we stored,
   # the user copied something externally, so prefer the clipboard content.
-  @spec maybe_read_clipboard(String.t(), String.t() | nil) :: String.t() | nil
-  defp maybe_read_clipboard("", stored) do
-    clip_setting = ConfigOptions.get(:clipboard)
-
-    if clip_setting in [:unnamedplus, :unnamed] do
+  @spec maybe_read_clipboard(String.t(), String.t() | nil, clipboard_mode()) :: String.t() | nil
+  defp maybe_read_clipboard("", stored, clipboard) do
+    if clipboard in [:unnamedplus, :unnamed] do
       read_clipboard_or_fallback(stored)
     else
       stored
     end
   end
 
-  defp maybe_read_clipboard(_key, stored), do: stored
+  defp maybe_read_clipboard(_key, stored, _clipboard), do: stored
 
   @spec read_clipboard_or_fallback(String.t() | nil) :: String.t() | nil
   defp read_clipboard_or_fallback(stored) do
@@ -148,29 +165,34 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc """
   Syncs text to the system clipboard when the `clipboard` option is set
-  to `:unnamedplus` or `:unnamed`. Called automatically by `put_register/3`
+  to `:unnamedplus` or `:unnamed`. Called automatically by `put_register/4`
   for all register writes except `"_"` (black hole) and `"+"` (explicit
   clipboard, which already writes directly).
+
+  The `clipboard` parameter is passed through from `put_register/4` so
+  the decision is made once at the top of the call chain.
   """
-  @spec maybe_sync_clipboard(state(), String.t()) :: state()
-  def maybe_sync_clipboard(state, text) do
-    case ConfigOptions.get(:clipboard) do
-      clip when clip in [:unnamedplus, :unnamed] ->
-        case Clipboard.write(text) do
-          :ok -> :ok
-          :unavailable -> :ok
-          {:error, _} -> :ok
-        end
-
-        state
-
-      _ ->
-        state
+  @spec maybe_sync_clipboard(state(), String.t(), clipboard_mode()) :: state()
+  def maybe_sync_clipboard(state, text, clipboard) when clipboard in [:unnamedplus, :unnamed] do
+    case Clipboard.write(text) do
+      :ok -> :ok
+      :unavailable -> :ok
+      {:error, _} -> :ok
     end
+
+    state
   end
+
+  def maybe_sync_clipboard(state, _text, _clipboard), do: state
 
   @spec reset_active_register(state()) :: state()
   def reset_active_register(state), do: %{state | reg: Registers.reset_active(state.reg)}
+
+  # Reads clipboard_mode from state when present (EditorState sets it from
+  # Options at init). Falls back to :none for bare maps in unit tests that
+  # don't include the key, which is the safe default (no clipboard calls).
+  @spec resolve_clipboard(state()) :: clipboard_mode()
+  defp resolve_clipboard(state), do: Map.get(state, :clipboard_mode, :none)
 
   # ── Positional helpers ──────────────────────────────────────────────────────
 

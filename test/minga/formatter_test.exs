@@ -7,7 +7,7 @@ defmodule Minga.FormatterTest do
   setup do
     case Options.start_link() do
       {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> Options.reset()
+      {:error, {:already_started, _}} -> Minga.Test.OptionsHelper.reset_for_test()
     end
 
     :ok

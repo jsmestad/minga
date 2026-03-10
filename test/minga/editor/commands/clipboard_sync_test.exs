@@ -5,12 +5,16 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
   Uses a Hammox mock for the clipboard backend so tests never touch the
   real system clipboard. An Agent acts as in-memory clipboard storage,
   letting read/write stubs behave naturally without external side effects.
+
+  Clipboard behavior is injected via the `clipboard` parameter on
+  `put_register/4` and `get_register/2` rather than mutating global
+  Options state, so these tests can run `async: true` without leaking
+  into other test modules.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Hammox
 
-  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State.Registers
 
@@ -42,16 +46,10 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
   end
 
   describe "put_register with clipboard: :unnamedplus" do
-    setup do
-      ConfigOptions.set(:clipboard, :unnamedplus)
-      on_exit(fn -> ConfigOptions.set(:clipboard, :none) end)
-      :ok
-    end
-
     test "yy syncs to system clipboard", %{clipboard: agent} do
       sentinel = "yank-sync-#{System.unique_integer([:positive])}"
       state = make_state()
-      Helpers.put_register(state, sentinel, :yank)
+      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -59,7 +57,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "delete syncs to system clipboard", %{clipboard: agent} do
       sentinel = "delete-sync-#{System.unique_integer([:positive])}"
       state = make_state()
-      Helpers.put_register(state, sentinel, :delete)
+      Helpers.put_register(state, sentinel, :delete, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -67,7 +65,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "named register also syncs to clipboard", %{clipboard: agent} do
       sentinel = "named-sync-#{System.unique_integer([:positive])}"
       state = %{make_state() | reg: %{%Registers{} | active: "a"}}
-      Helpers.put_register(state, sentinel, :yank)
+      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -76,7 +74,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       sentinel = "blackhole-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
       state = %{make_state() | reg: %{%Registers{} | active: "_"}}
-      Helpers.put_register(state, "should not appear", :yank)
+      Helpers.put_register(state, "should not appear", :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -84,24 +82,18 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "explicit + register still works", %{clipboard: agent} do
       sentinel = "explicit-clip-#{System.unique_integer([:positive])}"
       state = %{make_state() | reg: %{%Registers{} | active: "+"}}
-      Helpers.put_register(state, sentinel, :yank)
+      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
     end
   end
 
   describe "put_register with clipboard: :none" do
-    setup do
-      ConfigOptions.set(:clipboard, :none)
-      on_exit(fn -> ConfigOptions.set(:clipboard, :unnamedplus) end)
-      :ok
-    end
-
     test "yy does not sync to system clipboard", %{clipboard: agent} do
       sentinel = "none-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
       state = make_state()
-      Helpers.put_register(state, "should not sync", :yank)
+      Helpers.put_register(state, "should not sync", :yank, :none)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -109,19 +101,13 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "explicit + register still works even with clipboard: :none", %{clipboard: agent} do
       sentinel = "none-explicit-#{System.unique_integer([:positive])}"
       state = %{make_state() | reg: %{%Registers{} | active: "+"}}
-      Helpers.put_register(state, sentinel, :yank)
+      Helpers.put_register(state, sentinel, :yank, :none)
 
       assert clipboard_contents(agent) == sentinel
     end
   end
 
   describe "get_register with clipboard: :unnamedplus" do
-    setup do
-      ConfigOptions.set(:clipboard, :unnamedplus)
-      on_exit(fn -> ConfigOptions.set(:clipboard, :none) end)
-      :ok
-    end
-
     test "paste from unnamed register prefers system clipboard when content differs", %{
       clipboard: agent
     } do
@@ -129,20 +115,20 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       internal = "internal-#{System.unique_integer([:positive])}"
       external = "external-#{System.unique_integer([:positive])}"
       # Put something in the unnamed register
-      state = Helpers.put_register(state, internal, :yank)
+      state = Helpers.put_register(state, internal, :yank, :unnamedplus)
       # Simulate external copy by writing directly to the in-memory clipboard
       Agent.update(agent, fn _ -> external end)
 
-      {text, _state} = Helpers.get_register(state)
+      {text, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == external
     end
 
     test "paste from unnamed register uses internal when clipboard matches" do
       sentinel = "same-#{System.unique_integer([:positive])}"
       state = make_state()
-      state = Helpers.put_register(state, sentinel, :yank)
+      state = Helpers.put_register(state, sentinel, :yank, :unnamedplus)
       # Clipboard was synced, so it should match
-      {text, _state} = Helpers.get_register(state)
+      {text, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel
     end
 
@@ -153,25 +139,18 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       state = Helpers.put_in_register(state, "a", sentinel)
       state = %{state | reg: %{state.reg | active: "a"}}
 
-      {text, _state} = Helpers.get_register(state)
+      {text, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel
     end
   end
 
   describe "clipboard option" do
     test "compile-time default is :unnamedplus" do
-      ConfigOptions.set(:clipboard, :unnamedplus)
-      assert ConfigOptions.get(:clipboard) == :unnamedplus
-      ConfigOptions.set(:clipboard, :none)
-    end
-
-    test "can be set to :none" do
-      ConfigOptions.set(:clipboard, :none)
-      assert ConfigOptions.get(:clipboard) == :none
+      assert Minga.Config.Options.default(:clipboard) == :unnamedplus
     end
 
     test "rejects invalid values" do
-      assert {:error, _} = ConfigOptions.set(:clipboard, :invalid)
+      assert {:error, _} = Minga.Config.Options.set(:clipboard, :invalid)
     end
   end
 end

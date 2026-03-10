@@ -12,8 +12,9 @@ defmodule Minga.LogTest do
     # instead since Minga.Log reads from the global Options agent.
     # For these tests we'll set levels on the global agent directly.
     on_exit(fn ->
-      # Reset global options to defaults after each test
-      Options.reset()
+      # Reset global options to defaults after each test,
+      # preserving test-time overrides (e.g. clipboard: :none).
+      Minga.Test.OptionsHelper.reset_for_test()
     end)
 
     %{opts: opts}

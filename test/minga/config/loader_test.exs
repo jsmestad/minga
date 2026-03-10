@@ -406,7 +406,7 @@ defmodule Minga.Config.LoaderTest do
       File.rm_rf!(base)
 
       try do
-        Options.reset()
+        Minga.Test.OptionsHelper.reset_for_test()
       catch
         :exit, _ -> :ok
       end
