@@ -110,6 +110,62 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  describe "decode_event/1 — paste_event" do
+    test "decodes basic multi-line paste" do
+      text = "line 1\nline 2\nline 3"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes empty paste" do
+      payload = <<0x06, 0::16>>
+      assert {:ok, {:paste_event, ""}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes single-line paste" do
+      text = "just one line"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes unicode paste" do
+      text = "こんにちは\n🎉 emoji\n中文"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes paste with trailing newline" do
+      text = "line 1\nline 2\n"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes large paste (near u16 max)" do
+      text = String.duplicate("A", 60_000) <> "\n" <> String.duplicate("B", 5_000)
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "decodes paste with only newlines" do
+      text = "\n\n\n\n"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+
+    test "preserves exact whitespace in paste" do
+      text = "  indented\n\ttabbed\n    spaced"
+      text_len = byte_size(text)
+      payload = <<0x06, text_len::16, text::binary>>
+      assert {:ok, {:paste_event, ^text}} = Protocol.decode_event(payload)
+    end
+  end
+
   describe "decode_event/1 — errors" do
     test "returns error for unknown opcode" do
       assert {:error, :unknown_opcode} = Protocol.decode_event(<<0xFF, 0, 0, 0>>)

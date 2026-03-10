@@ -210,6 +210,57 @@ struct ProtocolEncoderTests {
         #expect(FRONTEND_NATIVE_GUI == 1)
         #expect(COLOR_RGB == 2)
     }
+
+    @Test("Paste event opcode matches protocol constant")
+    func pasteEventOpcode() {
+        #expect(OP_PASTE_EVENT == 0x06)
+    }
+}
+
+@Suite("Paste Event Encoder")
+struct PasteEventEncoderTests {
+    @Test("sendPasteEvent records call with correct text")
+    func sendPasteBasic() {
+        let spy = SpyEncoder()
+        spy.sendPasteEvent(text: "hello\nworld\nline 3")
+        #expect(spy.pasteCalls.count == 1)
+        #expect(spy.pasteCalls[0].text == "hello\nworld\nline 3")
+    }
+
+    @Test("sendPasteEvent with empty text")
+    func sendPasteEmpty() {
+        let spy = SpyEncoder()
+        spy.sendPasteEvent(text: "")
+        #expect(spy.pasteCalls.count == 1)
+        #expect(spy.pasteCalls[0].text == "")
+    }
+
+    @Test("sendPasteEvent with unicode text")
+    func sendPasteUnicode() {
+        let spy = SpyEncoder()
+        let text = "こんにちは\n🎉 emoji\n中文"
+        spy.sendPasteEvent(text: text)
+        #expect(spy.pasteCalls.count == 1)
+        #expect(spy.pasteCalls[0].text == text)
+    }
+
+    @Test("sendPasteEvent with single line")
+    func sendPasteSingleLine() {
+        let spy = SpyEncoder()
+        spy.sendPasteEvent(text: "just one line")
+        #expect(spy.pasteCalls.count == 1)
+        #expect(spy.pasteCalls[0].text == "just one line")
+    }
+
+    @Test("multiple paste events accumulate correctly")
+    func sendPasteMultiple() {
+        let spy = SpyEncoder()
+        spy.sendPasteEvent(text: "first paste\nwith lines")
+        spy.sendPasteEvent(text: "second paste")
+        #expect(spy.pasteCalls.count == 2)
+        #expect(spy.pasteCalls[0].text == "first paste\nwith lines")
+        #expect(spy.pasteCalls[1].text == "second paste")
+    }
 }
 
 // MARK: - Spy encoder for testing resize behavior
@@ -222,6 +273,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     struct Resize: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Ready: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Log: Sendable { let level: UInt8; let message: String }
+    struct Paste: Sendable { let text: String }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -229,11 +281,13 @@ final class SpyEncoder: InputEncoder, Sendable {
         var resizeCalls: [Resize] = []
         var readyCalls: [Ready] = []
         var logCalls: [Log] = []
+        var pasteCalls: [Paste] = []
     }
 
     var resizeCalls: [Resize] { state.withLock { $0.resizeCalls } }
     var readyCalls: [Ready] { state.withLock { $0.readyCalls } }
     var logCalls: [Log] { state.withLock { $0.logCalls } }
+    var pasteCalls: [Paste] { state.withLock { $0.pasteCalls } }
 
     func sendReady(cols: UInt16, rows: UInt16) {
         state.withLock { $0.readyCalls.append(Ready(cols: cols, rows: rows)) }
@@ -243,6 +297,9 @@ final class SpyEncoder: InputEncoder, Sendable {
         state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }
     }
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {}
+    func sendPasteEvent(text: String) {
+        state.withLock { $0.pasteCalls.append(Paste(text: text)) }
+    }
     func sendLog(level: UInt8, message: String) {
         state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
     }
