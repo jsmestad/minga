@@ -621,6 +621,49 @@ defmodule Minga.Agent.View.RendererTest do
       assert Enum.any?(texts, &String.contains?(&1, "Directory"))
     end
 
+    test "shows LSP section with no servers when list is empty" do
+      input = default_input(%{lsp_servers: []})
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "LSP"))
+      assert Enum.any?(texts, &String.contains?(&1, "No servers active"))
+    end
+
+    test "shows LSP section with active server names" do
+      input = default_input(%{lsp_servers: [:lexical, :gopls]})
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "LSP"))
+      assert Enum.any?(texts, &String.contains?(&1, "lexical"))
+      assert Enum.any?(texts, &String.contains?(&1, "gopls"))
+    end
+
+    test "working directory is pinned to the bottom of the panel" do
+      input = default_input()
+      draws = Renderer.render(input)
+
+      dir_draws =
+        Enum.filter(draws, fn {_row, _col, text, _style} ->
+          String.contains?(text, "Directory")
+        end)
+
+      status_draws =
+        Enum.filter(draws, fn {_row, _col, text, _style} ->
+          String.contains?(text, "Status")
+        end)
+
+      assert dir_draws != []
+      assert status_draws != []
+
+      dir_row = dir_draws |> hd() |> elem(0)
+      status_row = status_draws |> hd() |> elem(0)
+
+      assert dir_row > status_row,
+             "Directory (row #{dir_row}) should be below Status (row #{status_row})"
+    end
+
     test "not shown when preview has file content" do
       preview =
         Preview.set_file(
