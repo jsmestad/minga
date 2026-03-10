@@ -15,14 +15,16 @@ defmodule Minga.Editor.State.Picker do
           source: module() | nil,
           restore: non_neg_integer() | nil,
           restore_theme: Minga.Theme.t() | nil,
-          action_menu: action_menu()
+          action_menu: action_menu(),
+          context: map() | nil
         }
 
   defstruct picker: nil,
             source: nil,
             restore: nil,
             restore_theme: nil,
-            action_menu: nil
+            action_menu: nil,
+            context: nil
 
   @doc "Returns true if a picker is currently open."
   @spec open?(t()) :: boolean()

@@ -54,9 +54,16 @@ defmodule Minga.Editor.PickerUI do
           }
   end
 
-  @doc "Opens the picker for the given source module."
-  @spec open(state(), module()) :: state()
-  def open(state, source_module) do
+  @doc """
+  Opens the picker for the given source module.
+
+  An optional context map can be passed and will be stored in
+  `state.picker_ui.context` for the source's `on_select` callback
+  to read. Used by `OptionScopeSource` to pass the option name and
+  new value through the picker flow.
+  """
+  @spec open(state(), module(), map() | nil) :: state()
+  def open(state, source_module, context \\ nil) do
     items = source_module.candidates(state)
 
     case items do
@@ -83,7 +90,8 @@ defmodule Minga.Editor.PickerUI do
               picker: picker,
               source: source_module,
               restore: state.buffers.active_index,
-              restore_theme: state.theme
+              restore_theme: state.theme,
+              context: context
             }
         }
     end

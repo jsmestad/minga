@@ -58,7 +58,7 @@ defmodule Minga.Command.Registry do
     {:page_down, "Scroll page down"},
     {:page_up, "Scroll page up"},
     {:cycle_line_numbers, "Cycle line number style (hybrid → absolute → relative → none)"},
-    {:toggle_wrap, "Toggle word wrap for the current buffer"},
+    {:toggle_wrap, "Toggle word wrap"},
     {:diagnostics_list, "List buffer diagnostics"},
     {:next_diagnostic, "Jump to next diagnostic"},
     {:prev_diagnostic, "Jump to previous diagnostic"},
@@ -225,10 +225,30 @@ defmodule Minga.Command.Registry do
       cmd = %Command{
         name: name,
         description: description,
-        execute: built_in_execute(name)
+        execute: built_in_execute(name),
+        scope: built_in_scope(name)
       }
 
       Map.put(acc, name, cmd)
     end)
   end
+
+  # Scope descriptors for commands that toggle buffer-local options.
+  # Returns nil for non-scopeable commands.
+  @spec built_in_scope(atom()) :: Command.scope() | nil
+  defp built_in_scope(:toggle_wrap), do: %{option: :wrap, toggle: true}
+
+  defp built_in_scope(:cycle_line_numbers) do
+    %{
+      option: :line_numbers,
+      toggle: fn
+        :hybrid -> :absolute
+        :absolute -> :relative
+        :relative -> :none
+        :none -> :hybrid
+      end
+    }
+  end
+
+  defp built_in_scope(_), do: nil
 end
