@@ -5,9 +5,14 @@ defmodule Minga.Editor.TabBarRenderer do
   Produces a list of draw commands for row 0 and a list of click regions
   for mouse hit-testing, following the same segment pattern as the
   modeline renderer.
+
+  Uses Powerline slant separators between tabs and handles overflow when
+  tabs exceed the terminal width by scrolling to keep the active tab
+  visible.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -17,9 +22,12 @@ defmodule Minga.Editor.TabBarRenderer do
   @type click_region ::
           {col_start :: non_neg_integer(), col_end :: non_neg_integer(), command :: atom()}
 
-  @separator " │ "
+  # Powerline separators (right-pointing triangle)
+  @sep_right ""
   @agent_icon "󰚩 "
   @file_icon " "
+  @overflow_left "◂ "
+  @overflow_right " ▸"
 
   @doc """
   Renders the tab bar at the given row.
@@ -29,76 +37,224 @@ defmodule Minga.Editor.TabBarRenderer do
   @spec render(non_neg_integer(), pos_integer(), TabBar.t(), Theme.t()) ::
           {[DisplayList.draw()], [click_region()]}
   def render(row, cols, %TabBar{} = tb, %Theme{} = theme) do
-    tab_colors = tab_bar_colors(theme)
-    active_id = tb.active_id
+    colors = tab_bar_colors(theme)
 
-    # Build segments for each tab
-    {draws, regions, final_col} =
-      Enum.reduce(tb.tabs, {[], [], 0}, fn tab, {draws_acc, regions_acc, col} ->
-        is_active = tab.id == active_id
-        {tab_draws, tab_regions, end_col} = render_tab(row, col, tab, is_active, tab_colors)
+    # Build logical segments for each tab (text, colors, tab id, width)
+    segments = build_segments(tb, colors)
 
-        # Separator after this tab (unless we're past screen width)
-        {sep_draws, sep_end} =
-          if end_col < cols do
-            sep_text = @separator
-            sep_w = String.length(sep_text)
+    # Calculate total width to detect overflow
+    total_width = Enum.reduce(segments, 0, fn seg, acc -> acc + seg.width + 1 end)
 
-            sep_draw =
-              {row, end_col, sep_text, [fg: tab_colors.separator_fg, bg: tab_colors.bg]}
+    if total_width <= cols do
+      render_segments(row, cols, segments, colors)
+    else
+      render_overflow(row, cols, segments, tb.active_id, colors)
+    end
+  end
 
-            {[sep_draw], end_col + sep_w}
-          else
-            {[], end_col}
-          end
+  # ── Segment building ───────────────────────────────────────────────────────
 
-        {draws_acc ++ tab_draws ++ sep_draws, regions_acc ++ tab_regions, sep_end}
-      end)
+  @typep segment :: %{
+           text: String.t(),
+           fg: Theme.color(),
+           bg: Theme.color(),
+           tab_id: pos_integer(),
+           width: non_neg_integer()
+         }
 
-    # Fill remaining width with background
-    fill_draws =
-      if final_col < cols do
-        fill_width = cols - final_col
-        fill = String.duplicate(" ", fill_width)
-        [{row, final_col, fill, [bg: tab_colors.bg]}]
+  @spec build_segments(TabBar.t(), map()) :: [segment()]
+  defp build_segments(tb, colors) do
+    Enum.map(tb.tabs, fn tab ->
+      is_active = tab.id == tb.active_id
+
+      {fg, bg} =
+        if is_active do
+          {colors.active_fg, colors.active_bg}
+        else
+          {colors.inactive_fg, colors.inactive_bg}
+        end
+
+      icon = tab_icon(tab)
+      label = tab_label(tab)
+      dirty = tab_dirty_marker(tab, colors)
+
+      text = " #{icon}#{label}#{dirty} "
+      width = Unicode.display_width(text)
+
+      %{text: text, fg: fg, bg: bg, tab_id: tab.id, width: width}
+    end)
+  end
+
+  # ── Normal rendering (fits in terminal width) ──────────────────────────────
+
+  @spec render_segments(non_neg_integer(), pos_integer(), [segment()], map()) ::
+          {[DisplayList.draw()], [click_region()]}
+  defp render_segments(row, cols, segments, colors) do
+    {draws, regions, col} = emit_segments(row, 0, segments, colors)
+
+    # Fill remaining width
+    fill = fill_draws(row, col, cols, colors.bg)
+    {draws ++ fill, regions}
+  end
+
+  # ── Overflow rendering (tabs exceed terminal width) ─────────────────────────
+
+  @spec render_overflow(non_neg_integer(), pos_integer(), [segment()], pos_integer(), map()) ::
+          {[DisplayList.draw()], [click_region()]}
+  defp render_overflow(row, cols, segments, active_id, colors) do
+    left_indicator_w = String.length(@overflow_left)
+    right_indicator_w = String.length(@overflow_right)
+    usable = cols - left_indicator_w - right_indicator_w
+
+    # Find the scroll offset that keeps the active tab visible.
+    # Walk segments left to right, accumulating width. The scroll offset
+    # is the first pixel column that's visible.
+    {scroll_offset, _} = find_scroll_offset(segments, active_id, usable)
+
+    # Render visible segments with clipping
+    {draws, regions, end_col} =
+      emit_segments_clipped(row, left_indicator_w, segments, colors, scroll_offset, usable)
+
+    # Left overflow indicator
+    show_left = scroll_offset > 0
+
+    left_draws =
+      if show_left do
+        [{row, 0, @overflow_left, [fg: colors.separator_fg, bg: colors.bg]}]
       else
         []
       end
 
-    {draws ++ fill_draws, regions}
-  end
+    # Right overflow indicator
+    show_right = end_col > left_indicator_w + usable
 
-  @spec render_tab(
-          non_neg_integer(),
-          non_neg_integer(),
-          Tab.t(),
-          boolean(),
-          map()
-        ) :: {[DisplayList.draw()], [click_region()], non_neg_integer()}
-  defp render_tab(row, col, tab, is_active, colors) do
-    {fg, bg} =
-      if is_active do
-        {colors.active_fg, colors.active_bg}
+    right_draws =
+      if show_right do
+        [
+          {row, cols - right_indicator_w, @overflow_right,
+           [fg: colors.separator_fg, bg: colors.bg]}
+        ]
       else
-        {colors.inactive_fg, colors.inactive_bg}
+        []
       end
 
-    icon = tab_icon(tab)
-    label = tab_label(tab)
-    dirty = tab_dirty_marker(tab)
+    fill =
+      fill_draws(
+        row,
+        min(end_col, left_indicator_w + usable),
+        cols - right_indicator_w,
+        colors.bg
+      )
 
-    text = " #{icon}#{label}#{dirty} "
-    width = String.length(text)
-
-    draw = {row, col, text, [fg: fg, bg: bg]}
-    end_col = col + width
-
-    # Click region: command to switch to this tab
-    command = :"tab_goto_#{tab.id}"
-    region = {col, end_col - 1, command}
-
-    {[draw], [region], end_col}
+    {left_draws ++ draws ++ right_draws ++ fill, regions}
   end
+
+  @spec find_scroll_offset([segment()], pos_integer(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp find_scroll_offset(segments, active_id, usable) do
+    # Walk segments to find the active tab's logical start column and width.
+    # Each segment occupies seg.width + 1 cols (content + separator).
+    {_pos, active_start, active_width} =
+      Enum.reduce(segments, {0, 0, 0}, fn seg, {pos, a_start, a_width} ->
+        seg_total = seg.width + 1
+
+        if seg.tab_id == active_id do
+          {pos + seg_total, pos, seg_total}
+        else
+          {pos + seg_total, a_start, a_width}
+        end
+      end)
+
+    # Center the active tab in the visible area
+    active_mid = active_start + div(active_width, 2)
+    ideal_offset = max(active_mid - div(usable, 2), 0)
+
+    total = Enum.reduce(segments, 0, fn seg, acc -> acc + seg.width + 1 end)
+    max_offset = max(total - usable, 0)
+
+    {min(ideal_offset, max_offset), active_start + active_width}
+  end
+
+  # ── Shared emit helpers ────────────────────────────────────────────────────
+
+  @spec emit_segments(non_neg_integer(), non_neg_integer(), [segment()], map()) ::
+          {[DisplayList.draw()], [click_region()], non_neg_integer()}
+  defp emit_segments(row, start_col, segments, colors) do
+    Enum.reduce(segments, {[], [], start_col}, fn seg, {draws, regions, col} ->
+      # Tab content
+      tab_draw = {row, col, seg.text, [fg: seg.fg, bg: seg.bg]}
+      tab_end = col + seg.width
+
+      # Click region
+      region = {col, tab_end - 1, :"tab_goto_#{seg.tab_id}"}
+
+      # Powerline separator
+      {sep_draws, sep_end} = powerline_sep(row, tab_end, seg.bg, colors.bg, colors)
+
+      {draws ++ [tab_draw | sep_draws], [region | regions], sep_end}
+    end)
+  end
+
+  @spec emit_segments_clipped(
+          non_neg_integer(),
+          non_neg_integer(),
+          [segment()],
+          map(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: {[DisplayList.draw()], [click_region()], non_neg_integer()}
+  defp emit_segments_clipped(row, screen_start, segments, colors, scroll_offset, usable) do
+    screen_end = screen_start + usable
+
+    Enum.reduce(segments, {[], [], 0}, fn seg, {draws, regions, logical_col} ->
+      seg_end = logical_col + seg.width + 1
+      screen_col = screen_start + logical_col - scroll_offset
+
+      if seg_end <= scroll_offset or screen_col >= screen_end do
+        {draws, regions, seg_end}
+      else
+        tab_draw = {row, screen_col, seg.text, [fg: seg.fg, bg: seg.bg]}
+        tab_screen_end = screen_col + seg.width
+        region = clipped_region(screen_col, tab_screen_end, screen_start, screen_end, seg.tab_id)
+        {sep_draws, _} = powerline_sep(row, tab_screen_end, seg.bg, colors.bg, colors)
+
+        {draws ++ [tab_draw | sep_draws], maybe_add_region(regions, region), seg_end}
+      end
+    end)
+  end
+
+  @spec maybe_add_region([click_region()], click_region() | nil) :: [click_region()]
+  defp maybe_add_region(regions, nil), do: regions
+  defp maybe_add_region(regions, region), do: [region | regions]
+
+  @spec clipped_region(integer(), integer(), integer(), integer(), pos_integer()) ::
+          click_region() | nil
+  defp clipped_region(screen_col, tab_screen_end, screen_start, screen_end, tab_id) do
+    if tab_screen_end > screen_start and screen_col < screen_end do
+      {max(screen_col, screen_start), min(tab_screen_end - 1, screen_end - 1),
+       :"tab_goto_#{tab_id}"}
+    else
+      nil
+    end
+  end
+
+  @spec powerline_sep(non_neg_integer(), non_neg_integer(), Theme.color(), Theme.color(), map()) ::
+          {[DisplayList.draw()], non_neg_integer()}
+  defp powerline_sep(row, col, left_bg, right_bg, _colors) do
+    sep_draw = {row, col, @sep_right, [fg: left_bg, bg: right_bg]}
+    {[sep_draw], col + 1}
+  end
+
+  @spec fill_draws(non_neg_integer(), non_neg_integer(), non_neg_integer(), Theme.color()) ::
+          [DisplayList.draw()]
+  defp fill_draws(_row, col, max_col, _bg) when col >= max_col, do: []
+
+  defp fill_draws(row, col, max_col, bg) do
+    fill = String.duplicate(" ", max_col - col)
+    [{row, col, fill, [bg: bg]}]
+  end
+
+  # ── Tab content helpers ────────────────────────────────────────────────────
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%Tab{kind: :agent}), do: @agent_icon
@@ -108,18 +264,18 @@ defmodule Minga.Editor.TabBarRenderer do
   defp tab_label(%Tab{label: ""}), do: "[No Name]"
   defp tab_label(%Tab{label: label}), do: label
 
-  @spec tab_dirty_marker(Tab.t()) :: String.t()
-  defp tab_dirty_marker(%Tab{kind: :file, context: %{active_buffer: buf}}) when is_pid(buf) do
+  @spec tab_dirty_marker(Tab.t(), map()) :: String.t()
+  defp tab_dirty_marker(%Tab{kind: :file, context: %{active_buffer: buf}}, _colors)
+       when is_pid(buf) do
     if Process.alive?(buf) and BufferServer.dirty?(buf), do: " ●", else: ""
   end
 
-  defp tab_dirty_marker(_), do: ""
+  defp tab_dirty_marker(_, _), do: ""
 
   @spec tab_bar_colors(Theme.t()) :: map()
   defp tab_bar_colors(%Theme{tab_bar: %Theme.TabBar{} = tb}), do: Map.from_struct(tb)
 
   defp tab_bar_colors(%Theme{editor: editor, modeline: ml}) do
-    # Fallback for themes without tab_bar colors
     %{
       active_fg: editor.fg,
       active_bg: editor.bg,

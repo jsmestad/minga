@@ -115,15 +115,22 @@ defmodule Minga.Editor.Mouse do
   # ── Middle-click paste ──
 
   def handle(state, row, col, :middle, _mods, :press, _cc) do
-    case mouse_to_buffer_pos(state, row, col) do
-      nil ->
-        state
+    # Middle-click on tab bar closes the clicked tab
+    case tab_bar_click(state, row, col) do
+      {:command, _cmd} ->
+        close_tab_at(state, row, col)
 
-      {target_line, target_col} ->
-        BufferServer.move_to(state.buffers.active, {target_line, target_col})
-        state = cancel_mode_for_mouse(state)
-        state = %{state | mode: :normal, mode_state: Mode.initial_state()}
-        Minga.Editor.dispatch_command(state, :paste_after)
+      :not_tab_bar ->
+        case mouse_to_buffer_pos(state, row, col) do
+          nil ->
+            state
+
+          {target_line, target_col} ->
+            BufferServer.move_to(state.buffers.active, {target_line, target_col})
+            state = cancel_mode_for_mouse(state)
+            state = %{state | mode: :normal, mode_state: Mode.initial_state()}
+            Minga.Editor.dispatch_command(state, :paste_after)
+        end
     end
   end
 
@@ -871,6 +878,42 @@ defmodule Minga.Editor.Mouse do
       end
 
     BufferServer.move_to(buf, {target_line, target_col})
+  end
+
+  # ── Tab bar close (middle-click) ─────────────────────────────────────────
+
+  @spec close_tab_at(state(), non_neg_integer(), non_neg_integer()) :: state()
+  defp close_tab_at(state, _row, col) do
+    case find_tab_bar_region(state.tab_bar_click_regions, col) do
+      {:command, cmd} -> close_tab_by_command(state, cmd)
+      :not_tab_bar -> state
+    end
+  end
+
+  @spec close_tab_by_command(state(), atom()) :: state()
+  defp close_tab_by_command(state, cmd) do
+    case parse_tab_id(cmd) do
+      {:ok, tab_id} ->
+        state = EditorState.switch_tab(state, tab_id)
+        Minga.Editor.dispatch_command(state, :kill_buffer)
+
+      :error ->
+        state
+    end
+  end
+
+  @spec parse_tab_id(atom()) :: {:ok, pos_integer()} | :error
+  defp parse_tab_id(cmd) do
+    case Atom.to_string(cmd) do
+      "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {tab_id, ""} -> {:ok, tab_id}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
   end
 
   # ── Tab bar click detection ──────────────────────────────────────────────
