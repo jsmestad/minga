@@ -28,7 +28,8 @@ defmodule Minga.Picker.OptionScopeSource do
   def candidates(_context) do
     [
       {:buffer, "This Buffer", "Set for the current buffer only"},
-      {:global, "All Buffers (Default)", "Set the default for all buffers without a local override"}
+      {:global, "All Buffers (Default)",
+       "Set the default for all buffers without a local override"}
     ]
   end
 

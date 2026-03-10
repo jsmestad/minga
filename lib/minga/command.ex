@@ -76,5 +76,7 @@ defmodule Minga.Command do
   """
   @spec compute_new_value(t(), term()) :: term()
   def compute_new_value(%__MODULE__{scope: %{toggle: true}}, current), do: !current
-  def compute_new_value(%__MODULE__{scope: %{toggle: f}}, current) when is_function(f, 1), do: f.(current)
+
+  def compute_new_value(%__MODULE__{scope: %{toggle: f}}, current) when is_function(f, 1),
+    do: f.(current)
 end

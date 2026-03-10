@@ -162,5 +162,4 @@ defmodule Minga.Editor.Viewport do
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
-
 end
