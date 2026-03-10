@@ -200,9 +200,19 @@ defmodule Minga.Agent.ChatRenderer do
         lines
       end
 
-    # Apply scroll offset
+    # Apply scroll offset. When auto_scroll is true the chat is pinned to
+    # the bottom: we compute the real bottom offset from the content size.
+    # Otherwise we use the concrete scroll_offset, clamped to valid range.
     total = length(lines)
-    scroll = min(panel.scroll_offset, max(total - content_height, 0))
+    max_scroll = max(total - content_height, 0)
+
+    scroll =
+      if panel.auto_scroll do
+        max_scroll
+      else
+        min(panel.scroll_offset, max_scroll)
+      end
+
     visible = lines |> Enum.drop(scroll) |> Enum.take(content_height)
 
     # Render visible lines.
