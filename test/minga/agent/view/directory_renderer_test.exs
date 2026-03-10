@@ -12,7 +12,10 @@ defmodule Minga.Agent.View.DirectoryRendererTest do
   describe "render/6" do
     test "renders header with directory path" do
       rect = {0, 0, 60, 20}
-      draws = DirectoryRenderer.render(rect, "lib/minga", ["foo.ex", "bar/"], 0, false, default_theme())
+
+      draws =
+        DirectoryRenderer.render(rect, "lib/minga", ["foo.ex", "bar/"], 0, false, default_theme())
+
       texts = Enum.map(draws, fn {_r, _c, text, _opts} -> text end)
       assert Enum.any?(texts, &String.contains?(&1, "lib/minga"))
     end

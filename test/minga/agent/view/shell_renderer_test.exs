@@ -12,7 +12,10 @@ defmodule Minga.Agent.View.ShellRendererTest do
   describe "render/8" do
     test "renders header with command name" do
       rect = {0, 0, 60, 20}
-      draws = ShellRenderer.render(rect, "mix test", "output\n", :running, 0, false, 0, default_theme())
+
+      draws =
+        ShellRenderer.render(rect, "mix test", "output\n", :running, 0, false, 0, default_theme())
+
       texts = Enum.map(draws, fn {_r, _c, text, _opts} -> text end)
       assert Enum.any?(texts, &String.contains?(&1, "mix test"))
     end

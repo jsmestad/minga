@@ -41,7 +41,18 @@ defmodule Minga.Agent.View.ShellRenderer do
     header = render_header(row_off, col_off, width, command, status, spinner_frame, at)
     content_start = row_off + 1
     content_height = max(height - 1, 1)
-    content = render_output(content_start, col_off, width, content_height, output, scroll_offset, auto_follow, at)
+
+    content =
+      render_output(
+        content_start,
+        col_off,
+        width,
+        content_height,
+        output,
+        scroll_offset,
+        auto_follow,
+        at
+      )
 
     header ++ content
   end

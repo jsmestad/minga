@@ -1305,9 +1305,14 @@ defmodule Minga.Editor.Commands.Agent do
       line_map =
         ChatRenderer.line_message_map(messages, width, theme, panel.display_start_index)
 
-      offset = panel.scroll_offset
-      total_lines = length(line_map)
-      target = max(total_lines - offset - 1, 0)
+      # scroll_offset is lines from top. When auto_scroll is true, the
+      # view is pinned to bottom, so the first visible line is at the end.
+      target =
+        if panel.auto_scroll do
+          max(length(line_map) - 1, 0)
+        else
+          min(panel.scroll_offset, max(length(line_map) - 1, 0))
+        end
 
       case Enum.at(line_map, target) do
         {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
@@ -1369,9 +1374,14 @@ defmodule Minga.Editor.Commands.Agent do
         panel.display_start_index
       )
 
-    offset = panel.scroll_offset
-    total_lines = length(line_map)
-    target = max(total_lines - offset - 1, 0)
+    # scroll_offset is lines from top. When auto_scroll is true, use the
+    # last line (bottom-pinned).
+    target =
+      if panel.auto_scroll do
+        max(length(line_map) - 1, 0)
+      else
+        min(panel.scroll_offset, max(length(line_map) - 1, 0))
+      end
 
     {msg_idx, _type} =
       case Enum.at(line_map, target) do
@@ -1445,15 +1455,13 @@ defmodule Minga.Editor.Commands.Agent do
         state.agent.panel.display_start_index
       )
 
-    total_lines = length(line_map)
-
     case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
       nil ->
         state
 
       line_idx ->
-        scroll = max(total_lines - line_idx - 1, 0)
-        update_agent(state, &AgentState.set_scroll(&1, scroll))
+        # scroll_offset is lines from top; set_scroll also disengages auto_scroll
+        update_agent(state, &AgentState.set_scroll(&1, line_idx))
     end
   end
 

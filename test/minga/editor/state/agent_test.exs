@@ -47,9 +47,9 @@ defmodule Minga.Editor.State.AgentTest do
       assert agent.panel.input_focused
     end
 
-    test "scroll_to_bottom sets a large scroll offset" do
-      agent = new_agent() |> AgentState.scroll_to_bottom()
-      assert agent.panel.scroll_offset > 0
+    test "scroll_to_bottom engages auto_scroll" do
+      agent = new_agent() |> AgentState.scroll_down(5) |> AgentState.scroll_to_bottom()
+      assert agent.panel.auto_scroll
     end
 
     test "scroll_up and scroll_down adjust offset" do
@@ -72,14 +72,14 @@ defmodule Minga.Editor.State.AgentTest do
       assert PanelState.input_text(agent.panel) == "h"
     end
 
-    test "clear_input_and_scroll empties input and scrolls" do
+    test "clear_input_and_scroll empties input and engages auto_scroll" do
       agent =
         new_agent()
         |> AgentState.insert_char("hello")
         |> AgentState.clear_input_and_scroll()
 
       assert PanelState.input_text(agent.panel) == ""
-      assert agent.panel.scroll_offset > 0
+      assert agent.panel.auto_scroll
     end
 
     test "toggle_panel flips visibility" do

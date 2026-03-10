@@ -509,7 +509,14 @@ defmodule Minga.Agent.View.Renderer do
            input,
          rect
        ) do
-    DirectoryRenderer.render(rect, path, entries, preview.scroll_offset, preview.auto_follow, input.theme)
+    DirectoryRenderer.render(
+      rect,
+      path,
+      entries,
+      preview.scroll_offset,
+      preview.auto_follow,
+      input.theme
+    )
   end
 
   defp render_preview(%{preview: %Preview{content: :empty}} = input, rect) do
@@ -717,9 +724,23 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── File content preview ────────────────────────────────────────────────────
 
-  @spec render_file_preview(RenderInput.t(), String.t(), String.t(), non_neg_integer(), boolean(), rect()) ::
+  @spec render_file_preview(
+          RenderInput.t(),
+          String.t(),
+          String.t(),
+          non_neg_integer(),
+          boolean(),
+          rect()
+        ) ::
           [DisplayList.draw()]
-  defp render_file_preview(input, path, content, scroll, auto_follow, {row_off, col_off, width, height}) do
+  defp render_file_preview(
+         input,
+         path,
+         content,
+         scroll,
+         auto_follow,
+         {row_off, col_off, width, height}
+       ) do
     at = Theme.agent_theme(input.theme)
     lines = String.split(content, "\n")
     total = length(lines)

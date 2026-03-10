@@ -228,7 +228,9 @@ defmodule Minga.Agent.View.StateTest do
     end
 
     test "scroll_viewer_to_bottom engages auto_follow" do
-      av = ViewState.new() |> ViewState.scroll_viewer_down(5) |> ViewState.scroll_viewer_to_bottom()
+      av =
+        ViewState.new() |> ViewState.scroll_viewer_down(5) |> ViewState.scroll_viewer_to_bottom()
+
       assert av.preview.auto_follow
     end
   end
