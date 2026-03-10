@@ -99,6 +99,30 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
+  @doc """
+  Cycles through agent tabs. If no agent tabs exist, creates one.
+  If on an agent tab, jumps to the next agent tab. If on a file tab,
+  jumps to the first agent tab.
+  """
+  @spec cycle_agent_tabs(state()) :: state()
+  def cycle_agent_tabs(state) do
+    agent_tabs = TabBar.filter_by_kind(state.tab_bar, :agent)
+
+    case agent_tabs do
+      [] ->
+        activate_agentic_view(state)
+
+      _ ->
+        new_tb = TabBar.next_of_kind(state.tab_bar, :agent)
+
+        if new_tb.active_id != state.tab_bar.active_id do
+          EditorState.switch_tab(state, new_tb.active_id)
+        else
+          state
+        end
+    end
+  end
+
   @spec activate_agentic_view(state()) :: state()
   defp activate_agentic_view(state) do
     case find_agent_tab(state) do

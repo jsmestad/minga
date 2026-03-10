@@ -103,6 +103,7 @@ defmodule Minga.Keymap.Defaults do
     {[{9, @none}, {?n, @none}], :tab_next, "Next tab"},
     {[{9, @none}, {?p, @none}], :tab_prev, "Previous tab"},
     {[{9, @none}, {?d, @none}], :kill_buffer, "Close tab"},
+    {[{9, @none}, {?a, @none}], :cycle_agent_tabs, "Next agent tab"},
 
     # ── Direct tab switching (SPC 1..9) ──────────────────────────────────────
     {[{?1, @none}], :tab_goto_1, "Tab 1"},

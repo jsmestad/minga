@@ -46,6 +46,7 @@ defmodule Minga.Command.Registry do
     {:kill_buffer, "Kill current buffer"},
     {:tab_next, "Next tab"},
     {:tab_prev, "Previous tab"},
+    {:cycle_agent_tabs, "Cycle agent tabs"},
     {:tab_goto_1, "Switch to tab 1"},
     {:tab_goto_2, "Switch to tab 2"},
     {:tab_goto_3, "Switch to tab 3"},

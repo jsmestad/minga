@@ -122,6 +122,18 @@ defmodule Minga.Editor.State.TabBar do
 
   def tab_at(_, _), do: nil
 
+  @doc "Updates the label of the tab with the given id."
+  @spec update_label(t(), Tab.id(), String.t()) :: t()
+  def update_label(%__MODULE__{tabs: tabs} = tb, id, label) do
+    tabs =
+      Enum.map(tabs, fn
+        %{id: ^id} = tab -> %{tab | label: label}
+        tab -> tab
+      end)
+
+    %{tb | tabs: tabs}
+  end
+
   @doc "Switches the active tab to the one with the given id."
   @spec switch_to(t(), Tab.id()) :: t()
   def switch_to(%__MODULE__{tabs: tabs} = tb, id) do
@@ -167,18 +179,6 @@ defmodule Minga.Editor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
-  @doc "Updates the label of the tab with the given id."
-  @spec update_label(t(), Tab.id(), String.t()) :: t()
-  def update_label(%__MODULE__{tabs: tabs} = tb, id, label) do
-    new_tabs =
-      Enum.map(tabs, fn
-        %Tab{id: ^id} = tab -> Tab.set_label(tab, label)
-        tab -> tab
-      end)
-
-    %{tb | tabs: new_tabs}
-  end
-
   @doc "Returns the first tab matching the given kind, or nil."
   @spec find_by_kind(t(), Tab.kind()) :: Tab.t() | nil
   def find_by_kind(%__MODULE__{tabs: tabs}, kind) do
@@ -203,5 +203,35 @@ defmodule Minga.Editor.State.TabBar do
     tabs
     |> Enum.filter(&(&1.kind == kind and &1.id != active_id))
     |> List.last()
+  end
+
+  @doc """
+  Cycles to the next tab of the given kind, wrapping around.
+  If the active tab is already of that kind, jumps to the next one.
+  If the active tab is a different kind, jumps to the first of the
+  requested kind. Returns unchanged if no tabs of that kind exist.
+  """
+  @spec next_of_kind(t(), Tab.kind()) :: t()
+  def next_of_kind(%__MODULE__{tabs: tabs, active_id: active_id} = tb, kind) do
+    kind_tabs = Enum.filter(tabs, &(&1.kind == kind))
+
+    case kind_tabs do
+      [] ->
+        tb
+
+      [only] ->
+        %{tb | active_id: only.id}
+
+      _ ->
+        current_idx = Enum.find_index(kind_tabs, &(&1.id == active_id))
+
+        next_tab =
+          case current_idx do
+            nil -> hd(kind_tabs)
+            idx -> Enum.at(kind_tabs, rem(idx + 1, length(kind_tabs)))
+          end
+
+        %{tb | active_id: next_tab.id}
+    end
   end
 end

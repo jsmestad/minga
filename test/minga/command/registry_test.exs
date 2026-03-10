@@ -36,6 +36,7 @@ defmodule Minga.Command.RegistryTest do
           :buffer_next,
           :buffer_prev,
           :kill_buffer,
+          :cycle_agent_tabs,
           :command_palette,
           :delete_line,
           :yank_line,
