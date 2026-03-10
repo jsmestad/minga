@@ -472,7 +472,8 @@ defmodule Minga.Buffer.Server do
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
-          persistent: Keyword.get(opts, :persistent, false)
+          persistent: Keyword.get(opts, :persistent, false),
+          options: seed_options(filetype)
         }
 
         {:ok, state}
@@ -1057,12 +1058,43 @@ defmodule Minga.Buffer.Server do
   # ── Private ──
 
   # Resolves an option using the chain: buffer-local → filetype → global.
+  # With eager seeding, the buffer-local map already contains filetype/global
+  # defaults, so the fallback path is rarely hit (only for options not in
+  # the seed list, or if the Options agent was unavailable at init time).
   @spec resolve_option(BufState.t(), atom()) :: term()
   defp resolve_option(%{options: opts, filetype: ft}, name) do
     case Map.fetch(opts, name) do
       {:ok, value} -> value
       :error -> Minga.Config.Options.get_for_filetype(name, ft)
     end
+  end
+
+  # Buffer-local option names that get pre-populated from filetype/global
+  # defaults at buffer creation time. This avoids cross-process calls to
+  # the global Options agent on every keystroke or render frame.
+  @buffer_local_options [
+    :tab_width,
+    :indent_with,
+    :wrap,
+    :linebreak,
+    :breakindent,
+    :scroll_margin,
+    :autopair,
+    :clipboard,
+    :trim_trailing_whitespace,
+    :insert_final_newline,
+    :format_on_save,
+    :formatter,
+    :line_numbers
+  ]
+
+  @spec seed_options(atom()) :: %{atom() => term()}
+  defp seed_options(filetype) do
+    Map.new(@buffer_local_options, fn name ->
+      {name, Minga.Config.Options.get_for_filetype(name, filetype)}
+    end)
+  catch
+    :exit, _ -> %{}
   end
 
   @typep file_meta :: {integer() | nil, non_neg_integer() | nil}

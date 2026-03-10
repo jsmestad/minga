@@ -645,16 +645,23 @@ defmodule Minga.Buffer.ServerTest do
       assert {:error, _} = Server.set_option(pid, :nonexistent, true)
     end
 
-    test "local_options returns only buffer-local overrides" do
+    test "local_options returns seeded defaults plus any overrides" do
       {:ok, pid} = Server.start_link(content: "hello")
-      assert Server.local_options(pid) == %{}
+      # Seeded with global defaults (tab_width: 2, wrap: false, etc.)
+      defaults = Server.local_options(pid)
+      assert defaults[:tab_width] == 2
+      assert defaults[:wrap] == false
+
+      # Override one option
       Server.set_option(pid, :tab_width, 4)
-      Server.set_option(pid, :wrap, true)
-      assert Server.local_options(pid) == %{tab_width: 4, wrap: true}
+      updated = Server.local_options(pid)
+      assert updated[:tab_width] == 4
+      # Other seeded defaults still present
+      assert updated[:wrap] == false
     end
 
-    test "filetype default wins over global when no local override" do
-      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+    test "filetype default wins over global when seeded at creation" do
+      # Set filetype override BEFORE creating buffer (eager seeding)
       Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
 
       on_exit(fn ->
@@ -665,11 +672,11 @@ defmodule Minga.Buffer.ServerTest do
         end
       end)
 
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
       assert Server.get_option(pid, :tab_width) == 8
     end
 
     test "buffer-local wins over filetype default" do
-      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
       Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
 
       on_exit(fn ->
@@ -680,6 +687,10 @@ defmodule Minga.Buffer.ServerTest do
         end
       end)
 
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+      # Buffer was seeded with filetype default of 8
+      assert Server.get_option(pid, :tab_width) == 8
+      # Override locally
       Server.set_option(pid, :tab_width, 3)
       assert Server.get_option(pid, :tab_width) == 3
     end
