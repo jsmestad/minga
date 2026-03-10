@@ -2,161 +2,229 @@ defmodule Minga.Devicon do
   @moduledoc """
   Maps filetypes and special buffer types to Nerd Font icons and colors.
 
-  A pure functional module with pattern-matched clauses. No GenServer, no
-  ETS, no config. The icon/color data is compiled into the module. This
-  mirrors how `Minga.Filetype` works.
-
   Used by the tab bar, file tree, buffer picker, and anywhere else that
-  displays a filename alongside a visual indicator.
+  displays a filename alongside a visual indicator. Pure functional module
+  with pattern-matched clauses; no GenServer, no ETS.
+
+  Colors follow community conventions (nvim-web-devicons palette).
   """
 
-  @type filetype :: atom()
+  @typedoc "A 24-bit RGB color value."
+  @type color :: 0x000000..0xFFFFFF
 
-  @doc "Returns the Nerd Font icon for the given filetype."
-  @spec icon(filetype()) :: String.t()
-  def icon(ft), do: elem(icon_and_color(ft), 0)
+  # ── Icon constants (Nerd Font codepoints) ─────────────────────────────────
+  # Using module attributes so they're defined once and reusable.
 
-  @doc "Returns the 24-bit RGB color for the given filetype."
-  @spec color(filetype()) :: non_neg_integer()
-  def color(ft), do: elem(icon_and_color(ft), 1)
+  # Special buffer types
+  @icon_agent "\u{F06A9}"
+  @icon_messages "\u{F449}"
+  @icon_scratch "\u{F0399}"
+  @icon_help "\u{F059}"
 
-  @doc "Returns `{icon, color}` for the given filetype."
-  @spec icon_and_color(filetype()) :: {String.t(), non_neg_integer()}
+  # Languages
+  @icon_elixir "\u{E62D}"
+  @icon_erlang "\u{E7B1}"
+  @icon_heex "\u{E62D}"
+  @icon_gleam "\u{E62D}"
+  @icon_zig "\u{E6A9}"
+  @icon_rust "\u{E7A8}"
+  @icon_go "\u{E626}"
+  @icon_c "\u{E61E}"
+  @icon_cpp "\u{E61D}"
+  @icon_c_sharp "\u{F031B}"
+  @icon_java "\u{E738}"
+  @icon_kotlin "\u{E634}"
+  @icon_scala "\u{E737}"
+  @icon_python "\u{E73C}"
+  @icon_ruby "\u{E739}"
+  @icon_javascript "\u{E74E}"
+  @icon_react "\u{E7BA}"
+  @icon_typescript "\u{E628}"
+  @icon_lua "\u{E620}"
+  @icon_bash "\u{E795}"
+  @icon_fish "\u{E795}"
+  @icon_php "\u{E73D}"
+  @icon_perl "\u{E769}"
+  @icon_r "\u{F25D}"
+  @icon_haskell "\u{E777}"
+  @icon_ocaml "\u{E67A}"
+  @icon_swift "\u{E755}"
+  @icon_dart "\u{E798}"
+  @icon_nix "\u{F313}"
+  @icon_emacs "\u{E632}"
+  @icon_vim "\u{E62B}"
 
-  # ── Languages ──────────────────────────────────────────────────────────────
+  # Markup & data
+  @icon_html "\u{E736}"
+  @icon_css "\u{E749}"
+  @icon_scss "\u{E749}"
+  @icon_markdown "\u{E73E}"
+  @icon_json "\u{E60B}"
+  @icon_yaml "\u{E6A8}"
+  @icon_toml "\u{E6B2}"
+  @icon_xml "\u{F05C0}"
+  @icon_graphql "\u{E662}"
+  @icon_sql "\u{E706}"
+  @icon_csv "\u{F0219}"
+  @icon_protobuf "\u{E6A8}"
+  @icon_hcl "\u{E6A8}"
 
-  # Elixir (nf-custom-elixir)
-  def icon_and_color(:elixir), do: {"\u{E62D}", 0x9B59B6}
-  # Erlang (nf-dev-erlang)
-  def icon_and_color(:erlang), do: {"\u{E7B1}", 0xA90533}
-  # HEEx (same as Elixir)
-  def icon_and_color(:heex), do: {"\u{E62D}", 0x9B59B6}
-  # LFE (Erlang family)
-  def icon_and_color(:lfe), do: {"\u{E7B1}", 0xA90533}
-  # Zig (nf-seti-zig)
-  def icon_and_color(:zig), do: {"\u{E6A9}", 0xF69A1B}
-  # Rust (nf-dev-rust)
-  def icon_and_color(:rust), do: {"\u{E7A8}", 0xDEA584}
-  # Go (nf-seti-go)
-  def icon_and_color(:go), do: {"\u{E626}", 0x00ADD8}
-  # JavaScript (nf-seti-javascript)
-  def icon_and_color(:javascript), do: {"\u{E781}", 0xF7DF1E}
-  # JSX (nf-seti-react)
-  def icon_and_color(:javascript_react), do: {"\u{E7BA}", 0x61DAFB}
-  # TypeScript (nf-seti-typescript)
-  def icon_and_color(:typescript), do: {"\u{E628}", 0x3178C6}
-  # TSX (nf-seti-react)
-  def icon_and_color(:typescript_react), do: {"\u{E7BA}", 0x3178C6}
-  # Python (nf-dev-python)
-  def icon_and_color(:python), do: {"\u{E73C}", 0x3776AB}
-  # Ruby (nf-dev-ruby)
-  def icon_and_color(:ruby), do: {"\u{E739}", 0xCC342D}
-  # C (nf-custom-c)
-  def icon_and_color(:c), do: {"\u{E61E}", 0x599EFF}
-  # C++ (nf-custom-cpp)
-  def icon_and_color(:cpp), do: {"\u{E61D}", 0xF34B7D}
-  # C# (nf-md-language_csharp)
-  def icon_and_color(:c_sharp), do: {"\u{F031B}", 0x68217A}
-  # Java (nf-dev-java)
-  def icon_and_color(:java), do: {"\u{E738}", 0xCC3E44}
-  # Kotlin (nf-seti-kotlin)
-  def icon_and_color(:kotlin), do: {"\u{E634}", 0x7F52FF}
-  # Scala (nf-dev-scala)
-  def icon_and_color(:scala), do: {"\u{E737}", 0xCC3E44}
-  # Swift (nf-dev-swift)
-  def icon_and_color(:swift), do: {"\u{E755}", 0xF05138}
-  # Dart (nf-dev-dart)
-  def icon_and_color(:dart), do: {"\u{E798}", 0x03589C}
-  # Lua (nf-seti-lua)
-  def icon_and_color(:lua), do: {"\u{E620}", 0x000080}
-  # PHP (nf-dev-php)
-  def icon_and_color(:php), do: {"\u{E73D}", 0x777BB3}
-  # Perl (nf-dev-perl)
-  def icon_and_color(:perl), do: {"\u{E769}", 0x39457E}
-  # R (nf-seti-r)
-  def icon_and_color(:r), do: {"\u{E68A}", 0x276DC3}
-  # Haskell (nf-dev-haskell)
-  def icon_and_color(:haskell), do: {"\u{E777}", 0x5E5086}
-  # OCaml (nf-seti-ocaml)
-  def icon_and_color(:ocaml), do: {"\u{E67F}", 0xEC6813}
-  # Gleam (star/sparkle)
-  def icon_and_color(:gleam), do: {"\u{F0E7}", 0xFFAFEF}
-  # Nix (nf-md-nix)
-  def icon_and_color(:nix), do: {"\u{F0313}", 0x7EBAE4}
-  # Emacs Lisp (nf-custom-emacs)
-  def icon_and_color(:emacs_lisp), do: {"\u{E632}", 0x7F5AB6}
-  # Vim (nf-dev-vim)
-  def icon_and_color(:vim), do: {"\u{E62B}", 0x019833}
-  # Fish (nf-dev-terminal)
-  def icon_and_color(:fish), do: {"\u{E795}", 0x89E051}
-  # Bash/Shell (nf-dev-terminal)
-  def icon_and_color(:bash), do: {"\u{E795}", 0x89E051}
+  # Config & infra
+  @icon_dockerfile "\u{E7B0}"
+  @icon_make "\u{E779}"
+  @icon_git "\u{E702}"
+  @icon_config "\u{E615}"
+  @icon_diff "\u{E728}"
+  @icon_text "\u{F0219}"
+  @icon_fallback "\u{F15B}"
 
-  # ── Web / markup ───────────────────────────────────────────────────────────
+  @doc "Returns the Nerd Font icon for a filetype or special buffer type."
+  @spec icon(atom()) :: String.t()
 
-  # HTML (nf-seti-html)
-  def icon_and_color(:html), do: {"\u{E736}", 0xE34C26}
-  # CSS (nf-dev-css3)
-  def icon_and_color(:css), do: {"\u{E749}", 0x563D7C}
-  # SCSS (nf-dev-sass)
-  def icon_and_color(:scss), do: {"\u{E74B}", 0xCD6799}
-  # GraphQL (nf-md-graphql)
-  def icon_and_color(:graphql), do: {"\u{F0877}", 0xE10098}
+  # ── Special buffer types ──────────────────────────────────────────────────
+  def icon(:agent), do: @icon_agent
+  def icon(:messages), do: @icon_messages
+  def icon(:scratch), do: @icon_scratch
+  def icon(:help), do: @icon_help
 
-  # ── Data / config ──────────────────────────────────────────────────────────
+  # ── Languages ─────────────────────────────────────────────────────────────
+  def icon(:elixir), do: @icon_elixir
+  def icon(:erlang), do: @icon_erlang
+  def icon(:heex), do: @icon_heex
+  def icon(:lfe), do: @icon_erlang
+  def icon(:gleam), do: @icon_gleam
+  def icon(:zig), do: @icon_zig
+  def icon(:rust), do: @icon_rust
+  def icon(:go), do: @icon_go
+  def icon(:c), do: @icon_c
+  def icon(:cpp), do: @icon_cpp
+  def icon(:c_sharp), do: @icon_c_sharp
+  def icon(:java), do: @icon_java
+  def icon(:kotlin), do: @icon_kotlin
+  def icon(:scala), do: @icon_scala
+  def icon(:python), do: @icon_python
+  def icon(:ruby), do: @icon_ruby
+  def icon(:javascript), do: @icon_javascript
+  def icon(:javascript_react), do: @icon_react
+  def icon(:typescript), do: @icon_typescript
+  def icon(:typescript_react), do: @icon_react
+  def icon(:lua), do: @icon_lua
+  def icon(:bash), do: @icon_bash
+  def icon(:fish), do: @icon_fish
+  def icon(:php), do: @icon_php
+  def icon(:perl), do: @icon_perl
+  def icon(:r), do: @icon_r
+  def icon(:haskell), do: @icon_haskell
+  def icon(:ocaml), do: @icon_ocaml
+  def icon(:swift), do: @icon_swift
+  def icon(:dart), do: @icon_dart
+  def icon(:nix), do: @icon_nix
+  def icon(:emacs_lisp), do: @icon_emacs
+  def icon(:vim), do: @icon_vim
 
-  # JSON (nf-seti-json)
-  def icon_and_color(:json), do: {"\u{E60B}", 0xCBCB41}
-  # YAML (nf-seti-yml)
-  def icon_and_color(:yaml), do: {"\u{E6A8}", 0xCB171E}
-  # TOML (nf-seti-config)
-  def icon_and_color(:toml), do: {"\u{E615}", 0x9C4221}
-  # XML (nf-md-xml)
-  def icon_and_color(:xml), do: {"\u{F05C0}", 0xE37933}
-  # CSV (nf-fa-table)
-  def icon_and_color(:csv), do: {"\u{F0CE}", 0x89E051}
-  # SQL (nf-dev-database)
-  def icon_and_color(:sql), do: {"\u{E706}", 0xDAD8D8}
-  # Protobuf (nf-md-code_braces)
-  def icon_and_color(:protobuf), do: {"\u{F0614}", 0x6A9FB5}
-  # INI/Config (nf-seti-config)
-  def icon_and_color(:ini), do: {"\u{E615}", 0x6D8086}
-  def icon_and_color(:conf), do: {"\u{E615}", 0x6D8086}
-  def icon_and_color(:editorconfig), do: {"\u{E615}", 0x6D8086}
-  # HCL/Terraform (nf-md-terraform)
-  def icon_and_color(:hcl), do: {"\u{F1062}", 0x7B42BC}
+  # ── Markup & data ─────────────────────────────────────────────────────────
+  def icon(:html), do: @icon_html
+  def icon(:css), do: @icon_css
+  def icon(:scss), do: @icon_scss
+  def icon(:markdown), do: @icon_markdown
+  def icon(:json), do: @icon_json
+  def icon(:yaml), do: @icon_yaml
+  def icon(:toml), do: @icon_toml
+  def icon(:xml), do: @icon_xml
+  def icon(:graphql), do: @icon_graphql
+  def icon(:sql), do: @icon_sql
+  def icon(:csv), do: @icon_csv
+  def icon(:protobuf), do: @icon_protobuf
+  def icon(:hcl), do: @icon_hcl
 
-  # ── Markdown / docs ────────────────────────────────────────────────────────
+  # ── Config & infra ───────────────────────────────────────────────────────
+  def icon(:dockerfile), do: @icon_dockerfile
+  def icon(:make), do: @icon_make
+  def icon(:gitconfig), do: @icon_git
+  def icon(:editorconfig), do: @icon_config
+  def icon(:conf), do: @icon_config
+  def icon(:ini), do: @icon_config
+  def icon(:diff), do: @icon_diff
+  def icon(:text), do: @icon_text
 
-  # Markdown (nf-dev-markdown)
-  def icon_and_color(:markdown), do: {"\u{E73E}", 0x519ABA}
-  # Text (nf-seti-text)
-  def icon_and_color(:text), do: {"\u{E612}", 0x89E051}
+  # ── Fallback ──────────────────────────────────────────────────────────────
+  def icon(_), do: @icon_fallback
 
-  # ── DevOps ─────────────────────────────────────────────────────────────────
+  @doc "Returns the 24-bit RGB color for a filetype or special buffer type."
+  @spec color(atom()) :: color()
 
-  # Docker (nf-md-docker)
-  def icon_and_color(:dockerfile), do: {"\u{F0868}", 0x0DB7ED}
-  # Makefile (nf-seti-makefile)
-  def icon_and_color(:make), do: {"\u{E673}", 0x6D8086}
-  # Diff (nf-md-compare)
-  def icon_and_color(:diff), do: {"\u{F1492}", 0x41535B}
-  # Git (nf-dev-git)
-  def icon_and_color(:gitconfig), do: {"\u{E702}", 0xF14C28}
+  # ── Special buffer types ──────────────────────────────────────────────────
+  def color(:agent), do: 0x98BE65
+  def color(:messages), do: 0x51AFEF
+  def color(:scratch), do: 0xECBE7B
+  def color(:help), do: 0x46D9FF
 
-  # ── Special buffer types ───────────────────────────────────────────────────
+  # ── Languages ─────────────────────────────────────────────────────────────
+  def color(:elixir), do: 0x9B59B6
+  def color(:erlang), do: 0xA90533
+  def color(:heex), do: 0x9B59B6
+  def color(:lfe), do: 0xA90533
+  def color(:gleam), do: 0xFFAFEE
+  def color(:zig), do: 0xF69A1B
+  def color(:rust), do: 0xDEA584
+  def color(:go), do: 0x00ADD8
+  def color(:c), do: 0x599EFF
+  def color(:cpp), do: 0xF34B7D
+  def color(:c_sharp), do: 0x68217A
+  def color(:java), do: 0xCC3E44
+  def color(:kotlin), do: 0x7F52FF
+  def color(:scala), do: 0xCC3E44
+  def color(:python), do: 0x3776AB
+  def color(:ruby), do: 0xCC342D
+  def color(:javascript), do: 0xF7DF1E
+  def color(:javascript_react), do: 0x61DAFB
+  def color(:typescript), do: 0x3178C6
+  def color(:typescript_react), do: 0x61DAFB
+  def color(:lua), do: 0x000080
+  def color(:bash), do: 0x89E051
+  def color(:fish), do: 0x89E051
+  def color(:php), do: 0x777BB3
+  def color(:perl), do: 0x39457E
+  def color(:r), do: 0x276DC3
+  def color(:haskell), do: 0x5E5086
+  def color(:ocaml), do: 0xF18803
+  def color(:swift), do: 0xF05138
+  def color(:dart), do: 0x00B4AB
+  def color(:nix), do: 0x7EBAE4
+  def color(:emacs_lisp), do: 0x7F5AB6
+  def color(:vim), do: 0x019833
 
-  # Agent (nf-md-robot)
-  def icon_and_color(:agent), do: {"\u{F06A9}", 0x7EC8E3}
-  # Messages (nf-md-message_text)
-  def icon_and_color(:messages), do: {"\u{F0369}", 0x519ABA}
-  # Scratch (nf-md-note_edit)
-  def icon_and_color(:scratch), do: {"\u{F03EB}", 0xCBCB41}
-  # Help (nf-md-help_circle)
-  def icon_and_color(:help), do: {"\u{F02D7}", 0x00ADD8}
+  # ── Markup & data ─────────────────────────────────────────────────────────
+  def color(:html), do: 0xE34C26
+  def color(:css), do: 0x563D7C
+  def color(:scss), do: 0xCD6799
+  def color(:markdown), do: 0x519ABA
+  def color(:json), do: 0xCBCB41
+  def color(:yaml), do: 0xCB171E
+  def color(:toml), do: 0x9C4221
+  def color(:xml), do: 0xE37933
+  def color(:graphql), do: 0xE10098
+  def color(:sql), do: 0xDAD8D8
+  def color(:csv), do: 0x89E051
+  def color(:protobuf), do: 0x5B9BD5
+  def color(:hcl), do: 0x844FBA
 
-  # ── Fallback ───────────────────────────────────────────────────────────────
+  # ── Config & infra ───────────────────────────────────────────────────────
+  def color(:dockerfile), do: 0x2496ED
+  def color(:make), do: 0x6D8086
+  def color(:gitconfig), do: 0xF14E32
+  def color(:editorconfig), do: 0x6D8086
+  def color(:conf), do: 0x6D8086
+  def color(:ini), do: 0x6D8086
+  def color(:diff), do: 0x41535B
+  def color(:text), do: 0x89E051
 
-  # Generic file (nf-seti-default)
-  def icon_and_color(_), do: {"\u{E612}", 0x6D8086}
+  # ── Fallback ──────────────────────────────────────────────────────────────
+  def color(_), do: 0x6D8086
+
+  @doc "Returns `{icon, color}` for a filetype or special buffer type."
+  @spec icon_and_color(atom()) :: {String.t(), color()}
+  def icon_and_color(filetype) do
+    {icon(filetype), color(filetype)}
+  end
 end
