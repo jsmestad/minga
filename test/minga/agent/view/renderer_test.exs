@@ -34,6 +34,7 @@ defmodule Minga.Agent.View.RendererTest do
         scroll_offset: 0,
         spinner_frame: 0,
         model_name: "claude-sonnet-4",
+        provider_name: "anthropic",
         thinking_level: "medium",
         auto_scroll: true,
         display_start_index: 0,
@@ -242,26 +243,24 @@ defmodule Minga.Agent.View.RendererTest do
       assert input_cmds != [], "expected input border at col 0"
     end
 
-    test "input border width is constrained to left column (chat_width)" do
+    test "input box width is constrained to left column (chat_width)" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
       commands = Renderer.render(state)
 
       chat_width = div(cols * 65, 100)
-      input_border_row = 30 - 1 - 1 - 3
 
-      # Find the Prompt border command
-      border_cmds =
-        Enum.filter(commands, fn {row, col, text, _style} ->
-          row == input_border_row and col == 0 and String.contains?(text, "Prompt")
+      # Find the top border of the input box
+      top_border_cmds =
+        Enum.filter(commands, fn {_row, col, text, _style} ->
+          col == 0 and String.starts_with?(text, "╭─ Prompt")
         end)
 
-      assert [border_cmd | _] = border_cmds
-      {_row, _col, border_text, _style} = border_cmd
+      assert [top_cmd | _] = top_border_cmds
+      {_row, _col, top_text, _style} = top_cmd
 
-      # Border text should be at most chat_width characters, not full terminal width
-      assert String.length(border_text) <= chat_width,
-             "input border should be ≤ chat_width (#{chat_width}), got #{String.length(border_text)}"
+      assert String.length(top_text) <= chat_width,
+             "input box should be ≤ chat_width (#{chat_width}), got #{String.length(top_text)}"
     end
 
     test "right panel extends alongside the input area" do
@@ -339,6 +338,7 @@ defmodule Minga.Agent.View.RendererTest do
           scroll_offset: 0,
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
+          provider_name: "anthropic",
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
@@ -378,6 +378,7 @@ defmodule Minga.Agent.View.RendererTest do
           scroll_offset: 0,
           spinner_frame: 3,
           model_name: "claude-sonnet-4",
+          provider_name: "anthropic",
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
@@ -431,6 +432,7 @@ defmodule Minga.Agent.View.RendererTest do
           scroll_offset: 0,
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
+          provider_name: "anthropic",
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
@@ -517,6 +519,7 @@ defmodule Minga.Agent.View.RendererTest do
             scroll_offset: 0,
             spinner_frame: 0,
             model_name: "claude-sonnet-4",
+            provider_name: "anthropic",
             thinking_level: "medium",
             auto_scroll: true,
             display_start_index: 0,
@@ -543,6 +546,41 @@ defmodule Minga.Agent.View.RendererTest do
       draws = Renderer.render(input)
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "medium"))
+    end
+
+    test "provider name appears in model info line (titleized)" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "Anthropic"))
+    end
+  end
+
+  describe "input box border" do
+    test "input area has rounded box border with Prompt label" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt")),
+             "expected top border with Prompt label"
+
+      assert Enum.any?(texts, &String.starts_with?(&1, "╰─")),
+             "expected bottom border"
+
+      refute Enum.any?(texts, &String.contains?(&1, "─── Prompt")),
+             "should not have old Prompt border"
+    end
+
+    test "model info is embedded in bottom border" do
+      input = default_input()
+      draws = Renderer.render(input)
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+
+      assert Enum.any?(texts, fn text ->
+               String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
+             end),
+             "expected model info in bottom border"
     end
   end
 
