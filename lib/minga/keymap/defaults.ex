@@ -99,6 +99,11 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Session history"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
 
+    # ── Tab ──────────────────────────────────────────────────────────────────
+    {[{9, @none}, {?n, @none}], :tab_next, "Next tab"},
+    {[{9, @none}, {?p, @none}], :tab_prev, "Previous tab"},
+    {[{9, @none}, {?d, @none}], :kill_buffer, "Close tab"},
+
     # ── Toggle ────────────────────────────────────────────────────────────────
     {[{?t, @none}, {?l, @none}], :cycle_line_numbers, "Toggle line numbers"},
     {[{?t, @none}, {?w, @none}], :toggle_wrap, "Toggle word wrap"}
@@ -106,6 +111,7 @@ defmodule Minga.Keymap.Defaults do
 
   # Group prefix descriptions shown in which-key at the SPC level.
   @group_prefixes [
+    {[{9, @none}], "+tab"},
     {[{?s, @none}], "+search"},
     {[{?f, @none}], "+file"},
     {[{?b, @none}], "+buffer"},

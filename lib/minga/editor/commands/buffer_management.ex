@@ -92,6 +92,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(state, :buffer_next), do: next_buffer(state)
   def execute(state, :buffer_prev), do: prev_buffer(state)
+  def execute(state, :tab_next), do: next_buffer(state)
+  def execute(state, :tab_prev), do: prev_buffer(state)
 
   def execute(state, :kill_buffer) do
     case EditorState.active_tab_kind(state) do
