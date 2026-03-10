@@ -374,6 +374,16 @@ defmodule Minga.Editor.Commands.Agent do
     # Switch in agent state (moves current to history, target to active)
     state = update_agent(state, &AgentState.switch_session(&1, pid))
 
+    # Update the Tab's session reference for event routing
+    state =
+      case state do
+        %{tab_bar: %TabBar{active_id: id}} ->
+          EditorState.set_tab_session(state, id, pid)
+
+        _ ->
+          state
+      end
+
     # Reset panel scroll and auto-scroll to reflect new session's content
     update_agent(state, fn agent ->
       panel = %{agent.panel | scroll_offset: 0, auto_scroll: true}
@@ -1056,7 +1066,16 @@ defmodule Minga.Editor.Commands.Agent do
             state
           end
 
-        update_agent(state, &AgentState.set_session(&1, pid))
+        state = update_agent(state, &AgentState.set_session(&1, pid))
+
+        # Record the session pid on the Tab struct for event routing.
+        case state do
+          %{tab_bar: %TabBar{active_id: id}} ->
+            EditorState.set_tab_session(state, id, pid)
+
+          _ ->
+            state
+        end
 
       {:error, reason} ->
         require Logger

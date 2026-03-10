@@ -561,4 +561,92 @@ defmodule Minga.Editor.State do
     %Tab{kind: kind} = TabBar.active(tb)
     kind
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Per-tab agent event routing
+  # ══════════════════════════════════════════════════════════════════════════
+
+  @typedoc """
+  Result of resolving which tab an agent event belongs to.
+
+  - `{:active, tab}` — the event targets the currently active tab, so
+    the caller should update `state.agent` / `state.agentic` directly.
+  - `{:background, tab}` — the event targets a background tab. The caller
+    should use `update_background_agent/3` or `update_background_agentic/3`.
+  - `:not_found` — no tab owns this session (stale event after tab close).
+  """
+  @type route_result :: {:active, Tab.t()} | {:background, Tab.t()} | :not_found
+
+  @doc """
+  Resolves which tab an agent event belongs to, based on the session pid.
+
+  Checks the active tab's live `state.agent.session` first (fast path),
+  then falls back to scanning background tabs via `Tab.session`.
+  """
+  @spec route_agent_event(t(), pid()) :: route_result()
+  def route_agent_event(%__MODULE__{tab_bar: nil}, _session_pid), do: :not_found
+
+  def route_agent_event(%__MODULE__{agent: %{session: sid}, tab_bar: tb}, session_pid)
+      when sid == session_pid do
+    {:active, TabBar.active(tb)}
+  end
+
+  def route_agent_event(%__MODULE__{tab_bar: tb}, session_pid) do
+    find_session_in_tabs(tb, session_pid)
+  end
+
+  @spec find_session_in_tabs(TabBar.t(), pid()) :: route_result()
+  defp find_session_in_tabs(tb, session_pid) do
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{id: id} = tab when id == tb.active_id -> {:active, tab}
+      %Tab{} = tab -> {:background, tab}
+      nil -> :not_found
+    end
+  end
+
+  @doc """
+  Updates the `agent` field inside a background tab's stored context.
+
+  The function `fun` receives the tab's stored `%AgentState{}` and must
+  return a new `%AgentState{}`. Does nothing if the tab has no agent
+  context (file tabs, empty context).
+  """
+  @spec update_background_agent(t(), Tab.id(), (AgentState.t() -> AgentState.t())) :: t()
+  def update_background_agent(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
+    case TabBar.get(tb, tab_id) do
+      %Tab{context: %{agent: agent}} = _tab when is_struct(agent, AgentState) ->
+        new_agent = fun.(agent)
+        new_ctx = Map.put(TabBar.get(tb, tab_id).context, :agent, new_agent)
+        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
+
+      _ ->
+        state
+    end
+  end
+
+  @doc """
+  Updates the `agentic` (ViewState) field inside a background tab's stored context.
+  """
+  @spec update_background_agentic(t(), Tab.id(), (ViewState.t() -> ViewState.t())) :: t()
+  def update_background_agentic(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
+    case TabBar.get(tb, tab_id) do
+      %Tab{context: %{agentic: agentic}} = _tab when is_struct(agentic, ViewState) ->
+        new_agentic = fun.(agentic)
+        new_ctx = Map.put(TabBar.get(tb, tab_id).context, :agentic, new_agentic)
+        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
+
+      _ ->
+        state
+    end
+  end
+
+  @doc """
+  Sets the `Tab.session` field for the tab with the given id.
+
+  Called when a session is started or switched so `find_by_session/2` works.
+  """
+  @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
+  def set_tab_session(%__MODULE__{tab_bar: tb} = state, tab_id, session_pid) do
+    %{state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
+  end
 end

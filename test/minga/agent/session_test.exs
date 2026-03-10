@@ -71,7 +71,7 @@ defmodule Minga.Agent.SessionTest do
   # final action when a turn completes, so receiving that event guarantees
   # all handle_info callbacks have run.
   defp await_turn_complete do
-    assert_receive {:agent_event, {:status_changed, :idle}}, 200
+    assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
   end
 
   # ── Tests ───────────────────────────────────────────────────────────────────
@@ -134,15 +134,15 @@ defmodule Minga.Agent.SessionTest do
     test "broadcasts status changes", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
 
-      assert_receive {:agent_event, {:status_changed, :thinking}}, 200
-      assert_receive {:agent_event, {:status_changed, :idle}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
     end
 
     test "broadcasts text deltas", %{session: session} do
       :ok = Session.send_prompt(session, "Test")
 
-      assert_receive {:agent_event, {:text_delta, "Hello "}}, 200
-      assert_receive {:agent_event, {:text_delta, "world!"}}, 200
+      assert_receive {:agent_event, _, {:text_delta, "Hello "}}, 200
+      assert_receive {:agent_event, _, {:text_delta, "world!"}}, 200
     end
   end
 
@@ -240,7 +240,7 @@ defmodule Minga.Agent.SessionTest do
 
       :ok = Session.send_prompt(session, "Test")
 
-      refute_receive {:agent_event, _}, 100
+      refute_receive {:agent_event, _, _}, 100
     end
   end
 
@@ -382,7 +382,8 @@ defmodule Minga.Agent.SessionTest do
 
       send(session, {:agent_provider_event, event})
 
-      assert_receive {:agent_event, {:file_changed, "lib/foo.ex", "old content", "new content"}},
+      assert_receive {:agent_event, _,
+                      {:file_changed, "lib/foo.ex", "old content", "new content"}},
                      200
     end
   end
@@ -399,7 +400,7 @@ defmodule Minga.Agent.SessionTest do
       send(session, {:agent_provider_event, approval})
 
       # Broadcast should arrive
-      assert_receive {:agent_event, {:approval_pending, data}}, 200
+      assert_receive {:agent_event, _, {:approval_pending, data}}, 200
       assert data.name == "shell"
       assert data.tool_call_id == "tc1"
     end
@@ -414,14 +415,14 @@ defmodule Minga.Agent.SessionTest do
       }
 
       send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, {:approval_pending, _}}, 200
+      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
 
       :ok = Session.respond_to_approval(session, :approve)
 
       # Should receive the response directly
       assert_receive {:tool_approval_response, "tc1", :approve}
       # And the resolution broadcast
-      assert_receive {:agent_event, {:approval_resolved, :approve}}, 200
+      assert_receive {:agent_event, _, {:approval_resolved, :approve}}, 200
     end
 
     test "respond_to_approval with :reject sends reject", %{session: session} do
@@ -433,7 +434,7 @@ defmodule Minga.Agent.SessionTest do
       }
 
       send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, {:approval_pending, _}}, 200
+      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
 
       :ok = Session.respond_to_approval(session, :reject)
       assert_receive {:tool_approval_response, "tc1", :reject}
@@ -452,7 +453,7 @@ defmodule Minga.Agent.SessionTest do
       }
 
       send(session, {:agent_provider_event, approval})
-      assert_receive {:agent_event, {:approval_pending, _}}, 200
+      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
 
       :ok = Session.abort(session)
 
@@ -538,7 +539,7 @@ defmodule Minga.Agent.SessionTest do
     test "first_prompt returns first user message text", %{session: session} do
       Session.send_prompt(session, "Hello there")
       # Wait for prompt to be added to messages
-      assert_receive {:agent_event, :messages_changed}, 1000
+      assert_receive {:agent_event, _, :messages_changed}, 1000
 
       meta = Session.metadata(session)
       assert meta.first_prompt == "Hello there"

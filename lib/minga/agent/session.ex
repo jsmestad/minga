@@ -15,7 +15,7 @@ defmodule Minga.Agent.Session do
 
   ## Subscribing to events
 
-  Call `subscribe/2` with a pid to receive `{:agent_event, event}`
+  Call `subscribe/2` with a pid to receive `{:agent_event, session_pid, event}`
   messages. The editor uses this to update the modeline and chat panel.
   """
 
@@ -703,8 +703,10 @@ defmodule Minga.Agent.Session do
 
   @spec broadcast(state(), term()) :: :ok
   defp broadcast(state, event) do
+    session_pid = self()
+
     Enum.each(state.subscribers, fn pid ->
-      send(pid, {:agent_event, event})
+      send(pid, {:agent_event, session_pid, event})
     end)
   end
 

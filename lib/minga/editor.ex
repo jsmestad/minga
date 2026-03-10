@@ -494,186 +494,344 @@ defmodule Minga.Editor do
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
+  #
+  # All agent events are tagged with the session pid so we can route them
+  # to the correct tab. Active-tab events update live state as before.
+  # Background-tab events update the stored tab context so changes are
+  # preserved until the user switches to that tab.
 
-  def handle_info({:agent_event, {:status_changed, status}}, state) do
-    state = update_agent(state, &AgentState.set_status(&1, status))
+  def handle_info({:agent_event, session_pid, {:status_changed, status}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = handle_status_changed_active(state, status)
+        {:noreply, state}
 
-    state =
-      case status do
-        :error ->
-          state = log_message(state, "Agent: error")
-          push_toast(state, "Agent error", :error)
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.set_status(&1, status))
 
-        :idle ->
-          state
+        # Re-render tab bar so the status icon updates
+        {:noreply, schedule_render(state, 16)}
 
-        :thinking ->
-          state
-
-        :tool_executing ->
-          state
-      end
-
-    # Re-engage auto-scroll when a new agent turn starts (thinking)
-    state =
-      case status do
-        :thinking -> update_agent(state, &AgentState.engage_auto_scroll/1)
-        _ -> state
-      end
-
-    # Start/stop spinner timer based on status
-    state =
-      case status do
-        s when s in [:thinking, :tool_executing] ->
-          update_agent(state, &AgentState.start_spinner_timer/1)
-
-        _ ->
-          update_agent(state, &AgentState.stop_spinner_timer/1)
-      end
-
-    state = Renderer.render(state)
-    {:noreply, state}
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:text_delta, _delta}}, state) do
-    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
-    {:noreply, schedule_render(state, 16)}
+  def handle_info({:agent_event, session_pid, {:text_delta, _delta}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+        {:noreply, schedule_render(state, 16)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:thinking_delta, _delta}}, state) do
-    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
-    {:noreply, schedule_render(state, 50)}
+  def handle_info({:agent_event, session_pid, {:thinking_delta, _delta}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+        {:noreply, schedule_render(state, 50)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, :messages_changed}, state) do
-    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
-    state = sync_agent_buffer(state)
-    state = maybe_update_agent_tab_label(state)
-    {:noreply, schedule_render(state, 16)}
+  def handle_info({:agent_event, session_pid, :messages_changed}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+        state = sync_agent_buffer(state)
+        state = maybe_update_agent_tab_label(state)
+        {:noreply, schedule_render(state, 16)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
+
+        state = maybe_update_background_tab_label(state, tab, session_pid)
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
   # Shell tool: stream output to preview pane
-  def handle_info({:agent_event, {:tool_started, "shell", args}}, state) do
+  def handle_info({:agent_event, session_pid, {:tool_started, "shell", args}}, state) do
     command = Map.get(args, "command", "")
-    state = update_preview(state, &Preview.set_shell(&1, command))
-    {:noreply, schedule_render(state, 16)}
+
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_preview(state, &Preview.set_shell(&1, command))
+        {:noreply, schedule_render(state, 16)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agentic(state, tab.id, fn vs ->
+            ViewState.update_preview(vs, &Preview.set_shell(&1, command))
+          end)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:tool_update, _id, "shell", partial}}, state) do
-    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
-    state = update_preview(state, &Preview.update_shell_output(&1, partial))
-    {:noreply, schedule_render(state, 50)}
+  def handle_info({:agent_event, session_pid, {:tool_update, _id, "shell", partial}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+        state = update_preview(state, &Preview.update_shell_output(&1, partial))
+        {:noreply, schedule_render(state, 50)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
+
+        state =
+          EditorState.update_background_agentic(state, tab.id, fn vs ->
+            ViewState.update_preview(vs, &Preview.update_shell_output(&1, partial))
+          end)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:tool_update, _id, _name, _partial}}, state) do
-    state = update_agent(state, &AgentState.maybe_auto_scroll/1)
-    {:noreply, schedule_render(state, 50)}
+  def handle_info({:agent_event, session_pid, {:tool_update, _id, _name, _partial}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.maybe_auto_scroll/1)
+        {:noreply, schedule_render(state, 50)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:tool_ended, "shell", result, status}}, state) do
+  def handle_info({:agent_event, session_pid, {:tool_ended, "shell", result, status}}, state) do
     shell_status = if status == :error, do: :error, else: :done
-    state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
-    {:noreply, schedule_render(state, 16)}
+
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
+        {:noreply, schedule_render(state, 16)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agentic(state, tab.id, fn vs ->
+            ViewState.update_preview(vs, &Preview.finish_shell(&1, result, shell_status))
+          end)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
   # Read file tool: show file content in preview
-  def handle_info({:agent_event, {:tool_started, "read_file", args}}, state) do
+  def handle_info({:agent_event, session_pid, {:tool_started, "read_file", args}}, state) do
     path = Map.get(args, "path", "")
-    state = update_preview(state, &Preview.set_file(&1, path, ""))
-    {:noreply, schedule_render(state, 16)}
-  end
 
-  def handle_info({:agent_event, {:tool_ended, "read_file", result, _status}}, state) do
-    # Update the file content with the actual result
-    case state.agentic.preview.content do
-      {:file, path, _} ->
-        state = update_preview(state, &Preview.set_file(&1, path, result))
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_preview(state, &Preview.set_file(&1, path, ""))
         {:noreply, schedule_render(state, 16)}
 
-      _ ->
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agentic(state, tab.id, fn vs ->
+            ViewState.update_preview(vs, &Preview.set_file(&1, path, ""))
+          end)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:agent_event, session_pid, {:tool_ended, "read_file", result, _status}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        case state.agentic.preview.content do
+          {:file, path, _} ->
+            state = update_preview(state, &Preview.set_file(&1, path, result))
+            {:noreply, schedule_render(state, 16)}
+
+          _ ->
+            {:noreply, state}
+        end
+
+      {:background, tab} ->
+        state = update_bg_file_preview(state, tab.id, result)
+        {:noreply, state}
+
+      :not_found ->
         {:noreply, state}
     end
   end
 
   # List directory: show directory listing in preview pane
-  def handle_info({:agent_event, {:tool_started, "list_directory", args}}, state) do
+  def handle_info({:agent_event, session_pid, {:tool_started, "list_directory", args}}, state) do
     path = Map.get(args, "path", ".")
-    state = update_preview(state, &Preview.set_directory(&1, path, []))
-    {:noreply, schedule_render(state, 16)}
-  end
 
-  def handle_info({:agent_event, {:tool_ended, "list_directory", result, _status}}, state) do
-    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
-
-    case state.agentic.preview.content do
-      {:directory, path, _} ->
-        state = update_preview(state, &Preview.set_directory(&1, path, entries))
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_preview(state, &Preview.set_directory(&1, path, []))
         {:noreply, schedule_render(state, 16)}
 
-      _ ->
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agentic(state, tab.id, fn vs ->
+            ViewState.update_preview(vs, &Preview.set_directory(&1, path, []))
+          end)
+
+        {:noreply, state}
+
+      :not_found ->
         {:noreply, state}
     end
   end
 
-  # Other tool starts/ends: no preview change
-  def handle_info({:agent_event, {:tool_started, _name, _args}}, state) do
+  def handle_info(
+        {:agent_event, session_pid, {:tool_ended, "list_directory", result, _status}},
+        state
+      ) do
+    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        case state.agentic.preview.content do
+          {:directory, path, _} ->
+            state = update_preview(state, &Preview.set_directory(&1, path, entries))
+            {:noreply, schedule_render(state, 16)}
+
+          _ ->
+            {:noreply, state}
+        end
+
+      {:background, tab} ->
+        state = update_bg_directory_preview(state, tab.id, entries)
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
+  end
+
+  # Other tool starts/ends: no preview change needed
+  def handle_info({:agent_event, _session_pid, {:tool_started, _name, _args}}, state) do
     {:noreply, state}
   end
 
-  def handle_info({:agent_event, {:tool_ended, _name, _result, _status}}, state) do
+  def handle_info({:agent_event, _session_pid, {:tool_ended, _name, _result, _status}}, state) do
     {:noreply, state}
   end
 
   # File changed: show diff in preview pane
-  def handle_info({:agent_event, {:file_changed, path, before_content, after_content}}, state) do
-    # Record the baseline on first edit to this path in the current turn.
-    # Subsequent edits reuse the original baseline for cumulative diffs.
-    state = %{state | agentic: ViewState.record_baseline(state.agentic, path, before_content)}
-    baseline = ViewState.get_baseline(state.agentic, path)
+  def handle_info(
+        {:agent_event, session_pid, {:file_changed, path, before_content, after_content}},
+        state
+      ) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        handle_file_changed_active(state, path, before_content, after_content)
 
-    # If a diff review for this same path already exists, update it
-    # to preserve any hunk resolutions the user has made.
-    existing_review = existing_diff_for_path(state, path)
-
-    review =
-      case existing_review do
-        nil ->
-          DiffReview.new(path, baseline, after_content)
-
-        existing ->
-          DiffReview.update_after(existing, after_content)
-      end
-
-    case review do
-      nil ->
+      {:background, tab} ->
+        state = update_bg_file_changed(state, tab.id, path, before_content, after_content)
         {:noreply, state}
 
-      _ ->
-        state = update_preview(state, &Preview.set_diff(&1, review))
-        state = %{state | agentic: ViewState.set_focus(state.agentic, :file_viewer)}
-        state = Renderer.render(state)
+      :not_found ->
         {:noreply, state}
     end
   end
 
-  def handle_info({:agent_event, {:approval_pending, approval}}, state) do
-    # Strip reply_to before caching (Editor doesn't need the Task pid)
+  def handle_info({:agent_event, session_pid, {:approval_pending, approval}}, state) do
     cached = Map.take(approval, [:tool_call_id, :name, :args])
-    state = update_agent(state, &AgentState.set_pending_approval(&1, cached))
-    state = Renderer.render(state)
-    {:noreply, state}
+
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.set_pending_approval(&1, cached))
+        state = Renderer.render(state)
+        {:noreply, state}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(
+            state,
+            tab.id,
+            &AgentState.set_pending_approval(&1, cached)
+          )
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:approval_resolved, _decision}}, state) do
-    state = update_agent(state, &AgentState.clear_pending_approval/1)
-    {:noreply, schedule_render(state, 16)}
+  def handle_info({:agent_event, session_pid, {:approval_resolved, _decision}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.clear_pending_approval/1)
+        {:noreply, schedule_render(state, 16)}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.clear_pending_approval/1)
+
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:agent_event, {:error, message}}, state) do
-    state = update_agent(state, &AgentState.set_error(&1, message))
-    state = log_message(state, "Agent error: #{message}")
-    state = Renderer.render(state)
-    {:noreply, state}
+  def handle_info({:agent_event, session_pid, {:error, message}}, state) do
+    case EditorState.route_agent_event(state, session_pid) do
+      {:active, _tab} ->
+        state = update_agent(state, &AgentState.set_error(&1, message))
+        state = log_message(state, "Agent error: #{message}")
+        state = Renderer.render(state)
+        {:noreply, state}
+
+      {:background, tab} ->
+        state =
+          EditorState.update_background_agent(state, tab.id, &AgentState.set_error(&1, message))
+
+        state = log_message(state, "Agent error (tab #{tab.id}): #{message}")
+        {:noreply, state}
+
+      :not_found ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(:agent_spinner_tick, state) do
@@ -780,6 +938,143 @@ defmodule Minga.Editor do
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+  end
+
+  # ── Active-tab agent event helpers ─────────────────────────────────────────
+  #
+  # These extract the active-tab logic from handle_info clauses that
+  # need non-trivial processing (multi-branch, sequential updates).
+
+  @spec handle_status_changed_active(state(), AgentState.status()) :: state()
+  defp handle_status_changed_active(state, status) do
+    state = update_agent(state, &AgentState.set_status(&1, status))
+
+    state =
+      case status do
+        :error ->
+          state = log_message(state, "Agent: error")
+          push_toast(state, "Agent error", :error)
+
+        :idle ->
+          state
+
+        :thinking ->
+          state
+
+        :tool_executing ->
+          state
+      end
+
+    state =
+      case status do
+        :thinking -> update_agent(state, &AgentState.engage_auto_scroll/1)
+        _ -> state
+      end
+
+    state =
+      case status do
+        s when s in [:thinking, :tool_executing] ->
+          update_agent(state, &AgentState.start_spinner_timer/1)
+
+        _ ->
+          update_agent(state, &AgentState.stop_spinner_timer/1)
+      end
+
+    Renderer.render(state)
+  end
+
+  @spec handle_file_changed_active(state(), String.t(), String.t(), String.t()) ::
+          {:noreply, state()}
+  defp handle_file_changed_active(state, path, before_content, after_content) do
+    state = %{state | agentic: ViewState.record_baseline(state.agentic, path, before_content)}
+    baseline = ViewState.get_baseline(state.agentic, path)
+
+    existing_review = existing_diff_for_path(state, path)
+
+    review =
+      case existing_review do
+        nil -> DiffReview.new(path, baseline, after_content)
+        existing -> DiffReview.update_after(existing, after_content)
+      end
+
+    case review do
+      nil ->
+        {:noreply, state}
+
+      _ ->
+        state = update_preview(state, &Preview.set_diff(&1, review))
+        state = %{state | agentic: ViewState.set_focus(state.agentic, :file_viewer)}
+        state = Renderer.render(state)
+        {:noreply, state}
+    end
+  end
+
+  # ── Background tab preview helpers ─────────────────────────────────────────
+  #
+  # These update a background tab's ViewState preview without nesting
+  # a case inside the update_background_agentic anonymous function.
+
+  @spec update_bg_file_preview(state(), Tab.id(), String.t()) :: state()
+  defp update_bg_file_preview(state, tab_id, result) do
+    EditorState.update_background_agentic(state, tab_id, fn vs ->
+      case vs.preview.content do
+        {:file, path, _} -> ViewState.update_preview(vs, &Preview.set_file(&1, path, result))
+        _ -> vs
+      end
+    end)
+  end
+
+  @spec update_bg_directory_preview(state(), Tab.id(), [String.t()]) :: state()
+  defp update_bg_directory_preview(state, tab_id, entries) do
+    EditorState.update_background_agentic(state, tab_id, fn vs ->
+      case vs.preview.content do
+        {:directory, path, _} ->
+          ViewState.update_preview(vs, &Preview.set_directory(&1, path, entries))
+
+        _ ->
+          vs
+      end
+    end)
+  end
+
+  @spec update_bg_file_changed(state(), Tab.id(), String.t(), String.t(), String.t()) :: state()
+  defp update_bg_file_changed(state, tab_id, path, before_content, after_content) do
+    EditorState.update_background_agentic(state, tab_id, fn vs ->
+      vs = ViewState.record_baseline(vs, path, before_content)
+      baseline = ViewState.get_baseline(vs, path)
+
+      case DiffReview.new(path, baseline, after_content) do
+        nil ->
+          vs
+
+        review ->
+          vs = ViewState.update_preview(vs, &Preview.set_diff(&1, review))
+          ViewState.set_focus(vs, :file_viewer)
+      end
+    end)
+  end
+
+  @spec maybe_update_background_tab_label(state(), Tab.t(), pid()) :: state()
+  defp maybe_update_background_tab_label(state, tab, session_pid) do
+    if default_agent_label?(tab.label) do
+      messages =
+        try do
+          AgentSession.messages(session_pid)
+        catch
+          :exit, _ -> []
+        end
+
+      case first_user_message(messages) do
+        nil ->
+          state
+
+        text ->
+          label = truncate_label(text, 30)
+          %{state | tab_bar: TabBar.update_label(state.tab_bar, tab.id, label)}
+      end
+    else
+      state
+    end
   end
 
   # If the agentic view was activated during init, start the agent session

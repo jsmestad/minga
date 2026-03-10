@@ -50,14 +50,16 @@ defmodule Minga.Editor.State.Tab do
           id: id(),
           kind: kind(),
           label: String.t(),
-          context: context()
+          context: context(),
+          session: pid() | nil
         }
 
   @enforce_keys [:id, :kind]
   defstruct id: nil,
             kind: nil,
             label: "",
-            context: %{}
+            context: %{},
+            session: nil
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -92,4 +94,10 @@ defmodule Minga.Editor.State.Tab do
   @spec agent?(t()) :: boolean()
   def agent?(%__MODULE__{kind: :agent}), do: true
   def agent?(%__MODULE__{}), do: false
+
+  @doc "Sets the session pid for an agent tab."
+  @spec set_session(t(), pid() | nil) :: t()
+  def set_session(%__MODULE__{} = tab, pid) do
+    %{tab | session: pid}
+  end
 end
