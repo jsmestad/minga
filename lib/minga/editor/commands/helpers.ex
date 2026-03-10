@@ -188,11 +188,16 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec reset_active_register(state()) :: state()
   def reset_active_register(state), do: %{state | reg: Registers.reset_active(state.reg)}
 
-  # Reads clipboard_mode from state when present (EditorState sets it from
-  # Options at init). Falls back to :none for bare maps in unit tests that
-  # don't include the key, which is the safe default (no clipboard calls).
+  # Reads clipboard mode from the active buffer's options. Falls back to
+  # :none if no buffer is active (safe default: no clipboard calls).
   @spec resolve_clipboard(state()) :: clipboard_mode()
-  defp resolve_clipboard(state), do: Map.get(state, :clipboard_mode, :none)
+  defp resolve_clipboard(%{buffers: %{active: buf}}) when is_pid(buf) do
+    Minga.Buffer.Server.get_option(buf, :clipboard)
+  catch
+    :exit, _ -> :none
+  end
+
+  defp resolve_clipboard(_state), do: :none
 
   # ── Positional helpers ──────────────────────────────────────────────────────
 

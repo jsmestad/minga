@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
-  alias Minga.Config.Options, as: ConfigOptions
+
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_up) do
-    if wrap_enabled?() do
+    if wrap_enabled?(buf) do
       visual_line_move(buf, state, :up)
     else
       BufferServer.move(buf, :up)
@@ -64,7 +64,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_down) do
-    if wrap_enabled?() do
+    if wrap_enabled?(buf) do
       visual_line_move(buf, state, :down)
     else
       BufferServer.move(buf, :down)
@@ -87,7 +87,7 @@ defmodule Minga.Editor.Commands.Movement do
   # ── Line start / end ──────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :move_to_line_start) do
-    if wrap_enabled?() do
+    if wrap_enabled?(buf) do
       visual_line_edge(buf, state, :start)
     else
       logical_line_start(buf)
@@ -96,7 +96,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{buffers: %{active: buf}} = state, :move_to_line_end) do
-    if wrap_enabled?() do
+    if wrap_enabled?(buf) do
       visual_line_edge(buf, state, :end)
     else
       logical_line_end(buf)
@@ -469,9 +469,9 @@ defmodule Minga.Editor.Commands.Movement do
     Viewport.content_cols(vp, line_count)
   end
 
-  @spec wrap_enabled?() :: boolean()
-  defp wrap_enabled? do
-    ConfigOptions.get(:wrap)
+  @spec wrap_enabled?(pid()) :: boolean()
+  defp wrap_enabled?(buf) do
+    BufferServer.get_option(buf, :wrap)
   catch
     :exit, _ -> false
   end

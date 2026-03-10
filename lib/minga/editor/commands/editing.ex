@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Comment
-  alias Minga.Config.Options
+
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -512,16 +512,14 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec uses_tabs?(pid()) :: boolean()
   defp uses_tabs?(buf) do
-    filetype = BufferServer.filetype(buf)
-    Options.get_for_filetype(:indent_with, filetype) == :tabs
+    BufferServer.get_option(buf, :indent_with) == :tabs
   catch
     :exit, _ -> false
   end
 
   @spec tab_width(pid()) :: pos_integer()
   defp tab_width(buf) when is_pid(buf) do
-    filetype = BufferServer.filetype(buf)
-    Options.get_for_filetype(:tab_width, filetype)
+    BufferServer.get_option(buf, :tab_width)
   catch
     :exit, _ -> 2
   end
