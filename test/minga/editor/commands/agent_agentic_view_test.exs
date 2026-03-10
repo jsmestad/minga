@@ -182,6 +182,52 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     end
   end
 
+  describe "kill_buffer on agent tab" do
+    alias Minga.Editor.Commands.BufferManagement
+
+    test "closes agent tab and switches to file tab" do
+      state = base_state(active: true)
+      assert EditorState.active_tab_kind(state) == :agent
+
+      new_state = BufferManagement.execute(state, :kill_buffer)
+
+      assert EditorState.active_tab_kind(new_state) == :file
+      assert new_state.agentic.active == false
+      assert new_state.keymap_scope == :editor
+    end
+
+    test "restores file tab context after closing agent tab" do
+      state = base_state()
+      original_windows = state.windows
+
+      # Activate agent
+      state = AgentCommands.toggle_agentic_view(state)
+      assert EditorState.active_tab_kind(state) == :agent
+
+      # Close agent tab via kill_buffer
+      state = BufferManagement.execute(state, :kill_buffer)
+
+      assert EditorState.active_tab_kind(state) == :file
+      assert state.windows == original_windows
+    end
+
+    test "does not crash when agent tab has no session" do
+      state = base_state(active: true, session: nil)
+      new_state = BufferManagement.execute(state, :kill_buffer)
+      assert EditorState.active_tab_kind(new_state) == :file
+    end
+
+    test "removes agent tab from tab bar" do
+      state = base_state(active: true)
+      agent_tabs_before = TabBar.filter_by_kind(state.tab_bar, :agent)
+      assert length(agent_tabs_before) == 1
+
+      new_state = BufferManagement.execute(state, :kill_buffer)
+      agent_tabs_after = TabBar.filter_by_kind(new_state.tab_bar, :agent)
+      assert agent_tabs_after == []
+    end
+  end
+
   describe "round-trip toggle" do
     test "activating then deactivating restores the windows layout" do
       state = base_state()

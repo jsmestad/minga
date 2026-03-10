@@ -602,7 +602,15 @@ defmodule Minga.Editor.Commands.BufferManagement do
         # Deactivate agentic view and switch to the file tab
         state = %{state | agentic: %{state.agentic | active: false}, keymap_scope: :editor}
         state = remove_current_tab(state)
-        EditorState.restore_tab_context(state, state.tab_bar.active_id)
+
+        # Restore the now-active tab's context
+        case EditorState.active_tab(state) do
+          %Tab{context: context} when is_map(context) and map_size(context) > 0 ->
+            EditorState.restore_tab_context(state, context)
+
+          _ ->
+            state
+        end
 
       nil ->
         # No file tabs left, just remove the agent tab
