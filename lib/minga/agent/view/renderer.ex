@@ -977,16 +977,42 @@ defmodule Minga.Agent.View.Renderer do
           "Tab focus  j/k scroll  ? help  q quit"
       end
 
+    version_text = " • Minga #{Minga.version()} "
     hint_text = " #{hints} "
-    hint_col = max(cols - String.length(hint_text), 0)
+    right_text = hint_text <> version_text
+    right_col = max(cols - String.length(right_text), 0)
 
     hint_cmd =
-      DisplayList.draw(row, hint_col, hint_text,
+      DisplayList.draw(row, right_col, hint_text,
         fg: at.hint_fg,
         bg: input.theme.modeline.bar_bg
       )
 
-    draws ++ [hint_cmd]
+    version_cmd =
+      DisplayList.draw(row, right_col + String.length(hint_text), version_text,
+        fg: at.hint_fg,
+        bg: input.theme.modeline.bar_bg
+      )
+
+    # Idle dots animation: subtle braille spinner when agent is idle
+    idle_cmds =
+      case input.agent_status do
+        status when status in [:idle, nil] ->
+          frames = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+          frame = Enum.at(frames, rem(input.panel.spinner_frame, length(frames)))
+
+          [
+            DisplayList.draw(row, right_col - 3, " #{frame} ",
+              fg: at.hint_fg,
+              bg: input.theme.modeline.bar_bg
+            )
+          ]
+
+        _active ->
+          []
+      end
+
+    draws ++ idle_cmds ++ [hint_cmd, version_cmd]
   end
 
   @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [
