@@ -64,7 +64,9 @@ defmodule Minga.Editor.TabBarRenderer do
 
   @spec build_segments(TabBar.t(), map()) :: [segment()]
   defp build_segments(tb, colors) do
-    Enum.map(tb.tabs, fn tab ->
+    tb.tabs
+    |> Enum.with_index(1)
+    |> Enum.map(fn {tab, position} ->
       is_active = tab.id == tb.active_id
 
       {fg, bg} =
@@ -77,8 +79,9 @@ defmodule Minga.Editor.TabBarRenderer do
       icon = tab_icon(tab)
       label = tab_label(tab)
       dirty = tab_dirty_marker(tab, colors)
+      number = tab_number(position)
 
-      text = " #{icon}#{label}#{dirty} "
+      text = " #{number}#{icon} #{label}#{dirty} "
       width = Unicode.display_width(text)
 
       %{text: text, fg: fg, bg: bg, tab_id: tab.id, width: width}
@@ -255,6 +258,10 @@ defmodule Minga.Editor.TabBarRenderer do
   end
 
   # ── Tab content helpers ────────────────────────────────────────────────────
+
+  @spec tab_number(pos_integer()) :: String.t()
+  defp tab_number(n) when n >= 1 and n <= 9, do: "#{n}:"
+  defp tab_number(_), do: ""
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%Tab{kind: :agent}), do: Devicon.icon(:agent)

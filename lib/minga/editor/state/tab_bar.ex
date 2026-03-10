@@ -108,6 +108,20 @@ defmodule Minga.Editor.State.TabBar do
     end
   end
 
+  @doc "Returns true if a tab with the given id exists."
+  @spec has_tab?(t(), Tab.id()) :: boolean()
+  def has_tab?(%__MODULE__{tabs: tabs}, id) do
+    Enum.any?(tabs, &(&1.id == id))
+  end
+
+  @doc "Returns the tab at the given 1-based position index, or nil."
+  @spec tab_at(t(), pos_integer()) :: Tab.t() | nil
+  def tab_at(%__MODULE__{tabs: tabs}, index) when index >= 1 do
+    Enum.at(tabs, index - 1)
+  end
+
+  def tab_at(_, _), do: nil
+
   @doc "Switches the active tab to the one with the given id."
   @spec switch_to(t(), Tab.id()) :: t()
   def switch_to(%__MODULE__{tabs: tabs} = tb, id) do

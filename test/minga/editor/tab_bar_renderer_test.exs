@@ -151,6 +151,22 @@ defmodule Minga.Editor.TabBarRendererTest do
     end
   end
 
+  describe "tab numbers" do
+    test "tabs 1-9 show position number" do
+      tab1 = Tab.new_file(1, "a.ex")
+      tb = TabBar.new(tab1)
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
+      {tb, _} = TabBar.add(tb, :file, "c.ex")
+
+      {draws, _} = TabBarRenderer.render(0, 120, tb, doom_theme())
+
+      all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
+      assert String.contains?(all_text, "1:")
+      assert String.contains?(all_text, "2:")
+      assert String.contains?(all_text, "3:")
+    end
+  end
+
   describe "agent tabs" do
     test "agent tab shows agent icon" do
       tab = Tab.new_agent(1, "My Session")

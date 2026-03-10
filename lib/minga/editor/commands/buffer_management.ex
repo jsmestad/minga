@@ -83,7 +83,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
   def execute(state, :buffer_list) do
-    PickerUI.open(state, Minga.Picker.BufferSource)
+    PickerUI.open(state, Minga.Picker.TabSource)
   end
 
   def execute(state, :buffer_list_all) do

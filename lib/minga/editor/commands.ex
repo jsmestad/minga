@@ -554,22 +554,45 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
 
-  # Tab bar click: tab_goto_N switches to tab with id N
-  def execute(%{tab_bar: %TabBar{}} = state, cmd) when is_atom(cmd) do
-    case Atom.to_string(cmd) do
-      "tab_goto_" <> id_str ->
-        case Integer.parse(id_str) do
-          {tab_id, ""} -> EditorState.switch_tab(state, tab_id)
-          _ -> state
-        end
-
-      _ ->
-        state
+  # Tab bar click: tab_goto_N switches to tab with id N.
+  # SPC 1..9 also routes here; N is treated as both a tab ID (for click
+  # regions) and a 1-based position index (for keyboard shortcuts).
+  # If no tab has that exact ID, we fall back to positional lookup.
+  def execute(%{tab_bar: %TabBar{} = tb} = state, cmd) when is_atom(cmd) do
+    case parse_tab_goto(cmd) do
+      {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
+      :error -> state
     end
   end
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state
+
+  @spec parse_tab_goto(atom()) :: {:ok, pos_integer()} | :error
+  defp parse_tab_goto(cmd) do
+    case Atom.to_string(cmd) do
+      "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {n, ""} -> {:ok, n}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @spec switch_tab_by_id_or_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
+  defp switch_tab_by_id_or_index(state, tb, n) do
+    if TabBar.has_tab?(tb, n) do
+      EditorState.switch_tab(state, n)
+    else
+      case TabBar.tab_at(tb, n) do
+        %{id: id} -> EditorState.switch_tab(state, id)
+        nil -> state
+      end
+    end
+  end
 
   # ── Private formatting helpers ─────────────────────────────────────────────
 
