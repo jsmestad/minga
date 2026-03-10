@@ -513,6 +513,10 @@ defmodule Minga.Editor.State do
     else
       log_switch_tab(tb, current_id, target_id)
 
+      # Stop the outgoing agent's spinner timer so it doesn't leak.
+      # The timer ref is in state.agent (the live field) before snapshot.
+      state = stop_outgoing_spinner(state)
+
       # Snapshot current tab
       context = snapshot_tab_context(state)
       tb = TabBar.update_context(tb, current_id, context)
@@ -525,6 +529,9 @@ defmodule Minga.Editor.State do
       state = %{state | tab_bar: tb}
 
       state = restore_tab_context(state, target.context)
+
+      # Restart spinner for incoming agent if it's busy.
+      state = maybe_restart_incoming_spinner(state)
 
       log_switch_tab_result(state)
 
@@ -593,6 +600,22 @@ defmodule Minga.Editor.State do
 
   def route_agent_event(%__MODULE__{tab_bar: tb}, session_pid) do
     find_session_in_tabs(tb, session_pid)
+  end
+
+  # ── Spinner lifecycle for tab switching ──────────────────────────────────────
+
+  @spec stop_outgoing_spinner(t()) :: t()
+  defp stop_outgoing_spinner(%__MODULE__{agent: %AgentState{} = agent} = state) do
+    %{state | agent: AgentState.stop_spinner_timer(agent)}
+  end
+
+  @spec maybe_restart_incoming_spinner(t()) :: t()
+  defp maybe_restart_incoming_spinner(%__MODULE__{agent: %AgentState{} = agent} = state) do
+    if AgentState.busy?(agent) and agent.spinner_timer == nil do
+      %{state | agent: AgentState.start_spinner_timer(agent)}
+    else
+      state
+    end
   end
 
   @spec find_session_in_tabs(TabBar.t(), pid()) :: route_result()

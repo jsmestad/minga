@@ -3,10 +3,11 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
-  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.{Tab, TabBar}
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Mode
@@ -25,80 +26,89 @@ defmodule Minga.Picker.AgentSessionSourceTest do
   end
 
   describe "candidates/1" do
-    test "returns only disk candidates when no live session" do
-      state = %{agent: %AgentState{session: nil}}
+    test "returns only disk candidates when no agent tabs" do
+      tb = TabBar.new(Tab.new_file(1, "main.ex"))
+      state = %{tab_bar: tb, agent: %AgentState{session: nil}}
       candidates = AgentSessionSource.candidates(state)
-      # All entries should be :disk, none {:live, _}
+
       Enum.each(candidates, fn {{_, tag}, _, _} ->
         assert tag == :disk
       end)
     end
 
-    test "returns live session metadata when sessions exist" do
+    test "returns tab candidates when agent tabs exist" do
       {:ok, pid} = start_test_session()
       Session.subscribe(pid)
 
-      state = %{agent: %AgentState{session: pid}}
+      state = state_with_agent_tab(pid)
       candidates = AgentSessionSource.candidates(state)
-      live = Enum.filter(candidates, fn {{_, tag}, _, _} -> match?({:live, _}, tag) end)
-      assert live != []
+      tab_entries = Enum.filter(candidates, fn {{_, tag}, _, _} -> match?({:tab, _}, tag) end)
+      assert tab_entries != []
 
-      {_id, label, desc} = hd(live)
-      assert String.contains?(label, "●")
+      {{_, {:tab, _tab_id}}, label, desc} = hd(tab_entries)
+      assert is_binary(label)
       assert String.contains?(desc, "test-model")
 
       Session.unsubscribe(pid)
       stop_session(pid)
     end
 
-    test "active session is marked with bullet" do
+    test "active agent tab is marked with bullet" do
       {:ok, pid} = start_test_session()
       Session.subscribe(pid)
 
-      state = %{agent: %AgentState{session: pid}}
+      state = state_with_agent_tab(pid)
       candidates = AgentSessionSource.candidates(state)
-      active = Enum.find(candidates, fn {{_, {:live, p}}, _, _} -> p == pid end)
+
+      active =
+        Enum.find(candidates, fn
+          {{_, {:tab, _}}, label, _} -> String.contains?(label, "\u{2022}")
+          _ -> false
+        end)
+
       assert active != nil
-      {_, label, _} = active
-      assert String.starts_with?(label, "●")
 
       Session.unsubscribe(pid)
       stop_session(pid)
     end
 
-    test "history sessions do not have bullet" do
+    test "background agent tab is not marked with bullet" do
       {:ok, pid1} = start_test_session()
       {:ok, pid2} = start_test_session()
+      Session.subscribe(pid1)
       Session.subscribe(pid2)
 
-      state = %{agent: %AgentState{session: pid2, session_history: [pid1]}}
+      state = state_with_two_agent_tabs(pid1, pid2)
       candidates = AgentSessionSource.candidates(state)
 
-      live_history =
+      # Active tab is the first one (pid1). Background tab (pid2) should not have bullet.
+      bg_tabs =
         Enum.filter(candidates, fn
-          {{_, {:live, p}}, _, _} -> p != pid2
+          {{_, {:tab, id}}, _, _} -> id != state.tab_bar.active_id
           _ -> false
         end)
 
-      Enum.each(live_history, fn {_, label, _} ->
-        refute String.starts_with?(label, "●")
+      Enum.each(bg_tabs, fn {_, label, _} ->
+        refute String.contains?(label, "\u{2022}")
       end)
 
+      Session.unsubscribe(pid1)
       Session.unsubscribe(pid2)
       stop_session(pid1)
       stop_session(pid2)
     end
   end
 
-  describe "on_select/2 with live session" do
-    test "returns state unchanged when selecting current session" do
+  describe "on_select/2" do
+    test "with tab entry switches to that tab" do
       {:ok, pid} = start_test_session()
       Session.subscribe(pid)
 
-      state = base_state(pid)
-      item = {{"some-id", {:live, pid}}, "label", "desc"}
+      state = state_with_two_tabs_file_active(pid)
+      agent_tab_id = Enum.find(state.tab_bar.tabs, &(&1.kind == :agent)).id
+      item = {{"some-id", {:tab, agent_tab_id}}, "label", "desc"}
       result = AgentSessionSource.on_select(item, state)
-      assert result.agent.session == pid
+      assert result.tab_bar.active_id == agent_tab_id
 
       Session.unsubscribe(pid)
       stop_session(pid)
@@ -128,26 +138,99 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     Minga.Agent.Supervisor.stop_session(pid)
   end
 
-  defp base_state(session_pid) do
-    %{
-      agent: %AgentState{
-        session: session_pid,
-        panel: PanelState.new()
-      },
-      agentic: %ViewState{
-        active: true,
-        focus: :chat,
-        preview: Preview.new(),
-        saved_windows: nil,
-        pending_prefix: nil,
-        saved_file_tree: nil
-      },
+  defp state_with_agent_tab(session_pid) do
+    tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent 1")
+    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
+    # Make the agent tab active
+    tb = TabBar.switch_to(tb, agent_tab.id)
+
+    agent_ctx = %{
+      agent: %AgentState{session: session_pid, status: :idle},
+      agentic: %ViewState{active: true, focus: :chat},
+      windows: %Windows{},
+      file_tree: nil,
+      mode: :normal,
+      mode_state: %{},
+      keymap_scope: :agent,
+      active_buffer: nil,
+      active_buffer_index: 0
+    }
+
+    tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
+
+    %EditorState{
+      port_manager: self(),
       viewport: Viewport.new(24, 80),
+      tab_bar: tb,
+      buffers: %Buffers{},
+      agentic: %ViewState{active: true, focus: :chat},
+      windows: %Windows{},
       mode: :normal,
       mode_state: Mode.initial_state(),
-      buffers: %Buffers{},
+      keymap_scope: :agent,
+      agent: %AgentState{session: session_pid, status: :idle, panel: PanelState.new()},
+      file_tree: nil
+    }
+  end
+
+  defp state_with_two_agent_tabs(session1, session2) do
+    tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, tab1} = TabBar.add(tb, :agent, "Agent 1")
+    tb = TabBar.update_tab(tb, tab1.id, &Tab.set_session(&1, session1))
+    {tb, tab2} = TabBar.add(tb, :agent, "Agent 2")
+    tb = TabBar.update_tab(tb, tab2.id, &Tab.set_session(&1, session2))
+    # First agent tab is active
+    tb = TabBar.switch_to(tb, tab1.id)
+
+    %EditorState{
       port_manager: self(),
-      windows: %Windows{}
+      viewport: Viewport.new(24, 80),
+      tab_bar: tb,
+      buffers: %Buffers{},
+      agentic: %ViewState{active: true, focus: :chat},
+      windows: %Windows{},
+      mode: :normal,
+      mode_state: Mode.initial_state(),
+      keymap_scope: :agent,
+      agent: %AgentState{session: session1, status: :idle, panel: PanelState.new()},
+      file_tree: nil
+    }
+  end
+
+  defp state_with_two_tabs_file_active(session_pid) do
+    tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent 1")
+    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
+
+    agent_ctx = %{
+      agent: %AgentState{session: session_pid, status: :idle},
+      agentic: %ViewState{active: true, focus: :chat},
+      windows: %Windows{},
+      file_tree: nil,
+      mode: :normal,
+      mode_state: %{},
+      keymap_scope: :agent,
+      active_buffer: nil,
+      active_buffer_index: 0
+    }
+
+    tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
+    # File tab (1) is active
+    tb = TabBar.switch_to(tb, 1)
+
+    %EditorState{
+      port_manager: self(),
+      viewport: Viewport.new(24, 80),
+      tab_bar: tb,
+      buffers: %Buffers{},
+      agentic: %ViewState{},
+      windows: %Windows{},
+      mode: :normal,
+      mode_state: Mode.initial_state(),
+      keymap_scope: :editor,
+      agent: %AgentState{panel: PanelState.new()},
+      file_tree: nil
     }
   end
 end

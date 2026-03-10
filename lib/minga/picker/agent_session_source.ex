@@ -11,7 +11,10 @@ defmodule Minga.Picker.AgentSessionSource do
 
   alias Minga.Agent.Session
   alias Minga.Agent.SessionStore
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
 
   @impl true
   @spec title() :: String.t()
@@ -23,31 +26,25 @@ defmodule Minga.Picker.AgentSessionSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{agent: %AgentState{} = agent}) do
-    live = live_candidates(agent)
-    disk = disk_candidates(agent)
+  def candidates(%{tab_bar: %TabBar{} = tb, agent: %AgentState{}} = _state) do
+    live = tab_candidates(tb)
+    disk = disk_candidates()
 
-    # Merge: live sessions take priority over disk entries with the same id
     live_ids = MapSet.new(live, fn {{id, _}, _, _} -> id end)
 
-    merged =
-      live ++
-        Enum.reject(disk, fn {{id, _}, _, _} -> MapSet.member?(live_ids, id) end)
-
-    # Sort by most recent first (already sorted within each source)
-    merged
+    live ++
+      Enum.reject(disk, fn {{id, _}, _, _} -> MapSet.member?(live_ids, id) end)
   end
 
   def candidates(_state), do: []
 
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({{_id, {:live, pid}}, _label, _desc}, state) do
-    Minga.Editor.Commands.Agent.switch_to_session(state, pid)
+  def on_select({{_id, {:tab, tab_id}}, _label, _desc}, state) do
+    EditorState.switch_tab(state, tab_id)
   end
 
   def on_select({{session_id, :disk}, _label, _desc}, state) do
-    # Load a persisted session into the current session process
     case state.agent.session do
       nil ->
         state
@@ -64,31 +61,36 @@ defmodule Minga.Picker.AgentSessionSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec live_candidates(AgentState.t()) :: [Minga.Picker.item()]
-  defp live_candidates(agent) do
-    pids = AgentState.all_sessions(agent)
-
-    pids
-    |> Enum.map(fn pid ->
-      try do
-        meta = Session.metadata(pid)
-        {pid, meta}
-      catch
-        :exit, _ -> nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.sort_by(fn {_, meta} -> meta.created_at end, {:desc, DateTime})
-    |> Enum.map(fn {pid, meta} ->
-      is_active = pid == agent.session
-      label = format_label(meta, is_active)
-      desc = format_desc(meta)
-      {{meta.id, {:live, pid}}, label, desc}
-    end)
+  @spec tab_candidates(TabBar.t()) :: [Minga.Picker.item()]
+  defp tab_candidates(tb) do
+    tb
+    |> TabBar.filter_by_kind(:agent)
+    |> Enum.map(&tab_to_candidate(&1, &1.id == tb.active_id))
   end
 
-  @spec disk_candidates(AgentState.t()) :: [Minga.Picker.item()]
-  defp disk_candidates(_agent) do
+  @spec tab_to_candidate(Tab.t(), boolean()) :: Minga.Picker.item()
+  defp tab_to_candidate(tab, is_active) do
+    case session_metadata(tab.session) do
+      {:ok, meta} ->
+        {{meta.id, {:tab, tab.id}}, format_label(meta, is_active), format_desc(meta)}
+
+      :error ->
+        label = if is_active, do: "\u{2022} #{tab.label}", else: tab.label
+        {{tab.id, {:tab, tab.id}}, label, "No session"}
+    end
+  end
+
+  @spec session_metadata(pid() | nil) :: {:ok, Session.metadata()} | :error
+  defp session_metadata(nil), do: :error
+
+  defp session_metadata(pid) do
+    {:ok, Session.metadata(pid)}
+  catch
+    :exit, _ -> :error
+  end
+
+  @spec disk_candidates() :: [Minga.Picker.item()]
+  defp disk_candidates do
     SessionStore.list()
     |> Enum.map(fn meta ->
       label = "#{meta.preview}"
@@ -103,7 +105,7 @@ defmodule Minga.Picker.AgentSessionSource do
   @spec format_label(Session.metadata(), boolean()) :: String.t()
   defp format_label(meta, true) do
     prompt = truncate_prompt(meta.first_prompt)
-    "● #{prompt}"
+    "\u{2022} #{prompt}"
   end
 
   defp format_label(meta, false) do
