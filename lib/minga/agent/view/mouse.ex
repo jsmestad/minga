@@ -10,14 +10,17 @@ defmodule Minga.Agent.View.Mouse do
 
   The agentic view layout is:
 
-      ┌─────── title bar (row 0) ───────────┐
-      │ chat panel  │sep│ file viewer        │
-      │             │   │                    │
-      ├─────── input area ──────────────────-┤
-      ├─────── modeline ────────────────────-┤
-      └─────── minibuffer ──────────────────-┘
+      ┌──────── tab bar (row 0) ────────────┐
+      ├──────── title bar (row 1) ──────────┤
+      │ chat panel  │sep│ file viewer       │
+      │             │   │                   │
+      │ input area  │   │ (continues)       │
+      ├──────── modeline ──────────────────-┤
+      └──────── minibuffer ────────────────-┘
 
-  Mouse events are routed based on which region they land in.
+  The two-column split extends the full height. The input area lives
+  inside the left column. Mouse events are routed based on which
+  region they land in.
   """
 
   alias Minga.Agent.View.State, as: ViewState
@@ -91,30 +94,30 @@ defmodule Minga.Agent.View.Mouse do
 
   @typep region :: :title | :chat | :file_viewer | :input | :separator | :modeline | :outside
 
+  @typep layout_info :: %{
+           sep_col: non_neg_integer(),
+           chat_width: pos_integer(),
+           input_row: non_neg_integer(),
+           modeline_row: non_neg_integer(),
+           panel_start: non_neg_integer()
+         }
+
   @spec hit_test(state(), integer(), integer()) :: region()
   defp hit_test(state, row, col) do
-    {_chat_rect, _viewer_rect, sep_col, input_row, modeline_row, panel_start} =
-      compute_layout(state)
-
-    cols = state.viewport.cols
-    chat_width_pct = state.agentic.chat_width_pct
-    chat_width = max(div(cols * chat_width_pct, 100), 20)
+    layout = compute_layout(state)
 
     cond do
-      row == 0 -> :title
-      row >= modeline_row -> :modeline
-      row >= input_row -> :input
-      row < panel_start -> :title
-      col == sep_col -> :separator
-      col < chat_width -> :chat
-      col > sep_col -> :file_viewer
+      row < layout.panel_start -> :title
+      row >= layout.modeline_row -> :modeline
+      row >= layout.input_row and col < layout.chat_width -> :input
+      col == layout.sep_col -> :separator
+      col < layout.chat_width -> :chat
+      col > layout.sep_col -> :file_viewer
       true -> :outside
     end
   end
 
-  @spec compute_layout(state()) ::
-          {rect :: tuple(), rect :: tuple(), non_neg_integer(), non_neg_integer(),
-           non_neg_integer(), non_neg_integer()}
+  @spec compute_layout(state()) :: layout_info()
   defp compute_layout(state) do
     cols = state.viewport.cols
     rows = state.viewport.rows
@@ -122,23 +125,28 @@ defmodule Minga.Agent.View.Mouse do
     input_lines = state.agent.panel.input_lines
     input_height = min(length(input_lines), 5) + 2
 
-    panel_start = 1
-    panel_end = rows - 1 - 1 - input_height
-    panel_height = max(panel_end - panel_start, 1)
+    # Tab bar at row 0, title bar at row 1, content starts at row 2.
+    panel_start = 2
+    modeline_row = rows - 1 - 1
+
+    # Two-column split extends from panel_start to modeline_row.
+    panel_height = max(modeline_row - panel_start, 1)
+
+    # Left column: chat on top, input at bottom.
+    chat_height = max(panel_height - input_height, 1)
+    input_row = panel_start + chat_height
 
     chat_width_pct = state.agentic.chat_width_pct
     chat_width = max(div(cols * chat_width_pct, 100), 20)
     sep_col = chat_width
-    viewer_col = chat_width + 1
-    viewer_width = max(cols - viewer_col, 10)
 
-    input_row = panel_end
-    modeline_row = input_row + input_height
-
-    chat_rect = {panel_start, 0, chat_width, panel_height}
-    viewer_rect = {panel_start, viewer_col, viewer_width, panel_height}
-
-    {chat_rect, viewer_rect, sep_col, input_row, modeline_row, panel_start}
+    %{
+      sep_col: sep_col,
+      chat_width: chat_width,
+      input_row: input_row,
+      modeline_row: modeline_row,
+      panel_start: panel_start
+    }
   end
 
   # ── Scroll handling ────────────────────────────────────────────────────────

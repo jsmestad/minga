@@ -78,12 +78,21 @@ defmodule Minga.Agent.View.MouseTest do
       assert new_state.agentic.focus == :file_viewer
     end
 
-    test "clicking input area focuses input" do
+    test "clicking input area in left column focuses input" do
       state = agentic_state()
-      # Input area starts at panel_end. With rows=30, input_height=3,
-      # panel_end = 30 - 1 - 1 - 3 = 25, so input_row = 25
+      # With rows=30: modeline at 28, panel_height=26, input_height=3,
+      # chat_height=23, input_row = 2 + 23 = 25. Click within left column.
       new_state = Mouse.handle(state, 25, 10, :left, 0, :press, 1)
       assert new_state.agent.panel.input_focused == true
+    end
+
+    test "clicking right column at input row height does NOT focus input" do
+      state = agentic_state()
+      # Same row 25, but in the right column (col 50 with 50% split of 80 cols)
+      # sep_col = 40, so col 50 is in the file_viewer region.
+      new_state = Mouse.handle(state, 25, 50, :left, 0, :press, 1)
+      assert new_state.agent.panel.input_focused == false
+      assert new_state.agentic.focus == :file_viewer
     end
 
     test "clicking chat unfocuses input" do

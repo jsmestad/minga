@@ -225,14 +225,14 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
-  describe "full-width input area" do
-    test "input area renders at columns starting from 0" do
+  describe "input area inside left column" do
+    test "input border renders at col 0 within the left panel" do
       state = base_state(rows: 30, cols: 100)
       commands = Renderer.render(state)
 
-      # The input border should be at col 0 near the bottom
-      rows = state.viewport.rows
-      input_border_row = rows - 1 - 1 - 3
+      # With the new layout: modeline at row 28, input_height = 3,
+      # input starts at row 28 - 3 = 25
+      input_border_row = 30 - 1 - 1 - 3
 
       input_cmds =
         Enum.filter(commands, fn {row, col, _text, _style} ->
@@ -240,6 +240,71 @@ defmodule Minga.Agent.View.RendererTest do
         end)
 
       assert input_cmds != [], "expected input border at col 0"
+    end
+
+    test "input border width is constrained to left column (chat_width)" do
+      cols = 100
+      state = base_state(rows: 30, cols: cols)
+      commands = Renderer.render(state)
+
+      chat_width = div(cols * 65, 100)
+      input_border_row = 30 - 1 - 1 - 3
+
+      # Find the Prompt border command
+      border_cmds =
+        Enum.filter(commands, fn {row, col, text, _style} ->
+          row == input_border_row and col == 0 and String.contains?(text, "Prompt")
+        end)
+
+      assert [border_cmd | _] = border_cmds
+      {_row, _col, border_text, _style} = border_cmd
+
+      # Border text should be at most chat_width characters, not full terminal width
+      assert String.length(border_text) <= chat_width,
+             "input border should be ≤ chat_width (#{chat_width}), got #{String.length(border_text)}"
+    end
+
+    test "right panel extends alongside the input area" do
+      cols = 100
+      state = base_state(rows: 30, cols: cols)
+      commands = Renderer.render(state)
+
+      chat_width = div(cols * 65, 100)
+      viewer_col = chat_width + 1
+      input_border_row = 30 - 1 - 1 - 3
+
+      # The viewer/dashboard should have draw commands at rows alongside the input
+      viewer_at_input_rows =
+        Enum.filter(commands, fn {row, col, _text, _style} ->
+          row >= input_border_row and row < 30 - 2 and col >= viewer_col
+        end)
+
+      assert viewer_at_input_rows != [],
+             "expected right panel content at rows alongside the input area"
+    end
+
+    test "separator extends the full panel height including alongside input" do
+      cols = 100
+      state = base_state(rows: 30, cols: cols)
+      commands = Renderer.render(state)
+
+      chat_width = div(cols * 65, 100)
+      sep_col = chat_width
+      panel_start = 2
+      modeline_row = 30 - 2
+
+      sep_cmds =
+        Enum.filter(commands, fn {_row, col, text, _style} ->
+          col == sep_col and text == "│"
+        end)
+
+      sep_rows = Enum.map(sep_cmds, fn {row, _, _, _} -> row end) |> Enum.sort()
+
+      # Separator should span from panel_start to modeline_row - 1
+      expected_rows = Enum.to_list(panel_start..(modeline_row - 1))
+
+      assert sep_rows == expected_rows,
+             "separator should span rows #{panel_start}..#{modeline_row - 1}, got #{inspect(sep_rows)}"
     end
   end
 
