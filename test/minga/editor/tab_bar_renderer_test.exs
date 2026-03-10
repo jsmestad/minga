@@ -71,7 +71,7 @@ defmodule Minga.Editor.TabBarRendererTest do
 
       # Should contain a Powerline character
       all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
-      assert String.contains?(all_text, "")
+      assert String.contains?(all_text, "\u{E0B0}")
     end
   end
 
@@ -159,7 +159,7 @@ defmodule Minga.Editor.TabBarRendererTest do
       {draws, _} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
       all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
-      assert String.contains?(all_text, "󰚩")
+      assert String.contains?(all_text, "\u{F06A9}")
     end
   end
 end

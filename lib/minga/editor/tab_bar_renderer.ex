@@ -13,9 +13,11 @@ defmodule Minga.Editor.TabBarRenderer do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Devicon
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Filetype
   alias Minga.Theme
 
   @typedoc "A clickable region: column range mapping to a command."
@@ -23,11 +25,9 @@ defmodule Minga.Editor.TabBarRenderer do
           {col_start :: non_neg_integer(), col_end :: non_neg_integer(), command :: atom()}
 
   # Powerline separators (right-pointing triangle)
-  @sep_right ""
-  @agent_icon "󰚩 "
-  @file_icon " "
-  @overflow_left "◂ "
-  @overflow_right " ▸"
+  @sep_right "\u{E0B0}"
+  @overflow_left "\u{25C2} "
+  @overflow_right " \u{25B8}"
 
   @doc """
   Renders the tab bar at the given row.
@@ -257,8 +257,8 @@ defmodule Minga.Editor.TabBarRenderer do
   # ── Tab content helpers ────────────────────────────────────────────────────
 
   @spec tab_icon(Tab.t()) :: String.t()
-  defp tab_icon(%Tab{kind: :agent}), do: @agent_icon
-  defp tab_icon(%Tab{kind: :file}), do: @file_icon
+  defp tab_icon(%Tab{kind: :agent}), do: Devicon.icon(:agent)
+  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
 
   @spec tab_label(Tab.t()) :: String.t()
   defp tab_label(%Tab{label: ""}), do: "[No Name]"
