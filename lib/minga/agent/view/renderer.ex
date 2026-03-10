@@ -611,25 +611,7 @@ defmodule Minga.Agent.View.Renderer do
       dashboard_blank(width, at)
     ]
 
-    # ── Status section ──
-    status_text =
-      case input.agent_status do
-        :idle -> "Idle"
-        :thinking -> "Thinking..."
-        :tool_executing -> "Executing tool..."
-        :error -> "Error"
-        nil -> "Ready"
-      end
-
-    status_lines = [
-      dashboard_text(" Status", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
-      dashboard_text("  #{status_text}", width,
-        fg: status_fg(input.agent_status, at),
-        bg: at.panel_bg
-      )
-    ]
-
-    title_lines ++ context_lines ++ model_lines ++ cwd_lines ++ status_lines
+    title_lines ++ context_lines ++ model_lines ++ cwd_lines
   end
 
   @spec dashboard_text(String.t(), pos_integer(), keyword()) ::

@@ -596,8 +596,7 @@ defmodule Minga.Agent.View.RendererTest do
       assert Enum.any?(texts, &String.contains?(&1, "Model"))
       # Dashboard should show the model name
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
-      # Dashboard should show Status section
-      assert Enum.any?(texts, &String.contains?(&1, "Status"))
+      # Status is shown in the title bar, not the dashboard
     end
 
     test "shows token usage when available" do

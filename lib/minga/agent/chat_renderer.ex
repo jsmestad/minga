@@ -375,32 +375,10 @@ defmodule Minga.Agent.ChatRenderer do
           pos_integer(),
           Theme.t()
         ) :: [render_line()]
-  defp messages_to_lines(messages, status, spinner_frame, at, width, theme) do
-    lines =
-      Enum.flat_map(messages, fn msg ->
-        message_lines(msg, at, width, theme)
-      end)
-
-    # Add thinking indicator or streaming cursor
-    case status do
-      :thinking ->
-        char = spinner(spinner_frame)
-        dots = thinking_dots(spinner_frame)
-
-        indicator =
-          {[{"  #{char} Thinking#{dots}", [fg: at.thinking_fg, italic: true]}], :text,
-           at.panel_bg}
-
-        # Append streaming cursor to the last assistant line if text is streaming
-        lines = append_streaming_cursor(lines, spinner_frame, at)
-        lines ++ [indicator]
-
-      :tool_executing ->
-        lines
-
-      _ ->
-        lines
-    end
+  defp messages_to_lines(messages, _status, _spinner_frame, at, width, theme) do
+    Enum.flat_map(messages, fn msg ->
+      message_lines(msg, at, width, theme)
+    end)
   end
 
   @spec message_lines(Message.t(), Theme.Agent.t(), pos_integer(), Theme.t()) :: [render_line()]
@@ -854,20 +832,8 @@ defmodule Minga.Agent.ChatRenderer do
 
   # ── Animation helpers ───────────────────────────────────────────────────────
 
-  @doc false
-  @spec thinking_dots(non_neg_integer()) :: String.t()
-  defp thinking_dots(frame) do
-    case rem(div(frame, 3), 4) do
-      0 -> ""
-      1 -> "."
-      2 -> ".."
-      3 -> "..."
-    end
-  end
-
   @tool_progress_chars ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 
-  @doc false
   @spec tool_progress(non_neg_integer()) :: String.t()
   defp tool_progress(frame) do
     Enum.at(@tool_progress_chars, rem(frame, 10))
@@ -880,39 +846,4 @@ defmodule Minga.Agent.ChatRenderer do
   end
 
   defp tool_animation_frame(_tc), do: 0
-
-  @spec append_streaming_cursor([render_line()], non_neg_integer(), Theme.Agent.t()) :: [
-          render_line()
-        ]
-  defp append_streaming_cursor(lines, spinner_frame, at) do
-    # Only show cursor on even frames (blink effect)
-    cursor_visible = rem(spinner_frame, 2) == 0
-
-    if cursor_visible do
-      append_cursor_to_last_assistant(lines, at)
-    else
-      lines
-    end
-  end
-
-  @spec append_cursor_to_last_assistant([render_line()], Theme.Agent.t()) :: [render_line()]
-  defp append_cursor_to_last_assistant([], _at), do: []
-
-  defp append_cursor_to_last_assistant(lines, at) do
-    # Find the last non-empty assistant content line and append ▌
-    {before, target_and_rest} =
-      lines
-      |> Enum.reverse()
-      |> Enum.split_while(fn {_segments, type, _bg} -> type == :empty end)
-
-    case target_and_rest do
-      [{segments, type, bg} | rest] ->
-        new_segments = segments ++ [{"▌", [fg: at.assistant_label, bold: true]}]
-        new_line = {new_segments, type, bg}
-        Enum.reverse(rest) ++ [new_line | Enum.reverse(before)]
-
-      [] ->
-        lines
-    end
-  end
 end
