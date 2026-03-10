@@ -6,12 +6,13 @@ defmodule Minga.ConfigTest do
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
+  alias Minga.Test.OptionsHelper
 
   setup do
     # Ensure required servers are running
     case Options.start_link() do
       {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> Minga.Test.OptionsHelper.reset_for_test()
+      {:error, {:already_started, _}} -> OptionsHelper.reset_for_test()
     end
 
     case KeymapActive.start_link() do
@@ -39,7 +40,7 @@ defmodule Minga.ConfigTest do
       end
 
       try do
-        Minga.Test.OptionsHelper.reset_for_test()
+        OptionsHelper.reset_for_test()
       catch
         :exit, _ -> :ok
       end

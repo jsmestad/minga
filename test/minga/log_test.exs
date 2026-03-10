@@ -4,6 +4,7 @@ defmodule Minga.LogTest do
   import ExUnit.CaptureLog
 
   alias Minga.Config.Options
+  alias Minga.Test.OptionsHelper
 
   setup do
     {:ok, opts} = Options.start_link(name: :"opts_#{System.unique_integer()}")
@@ -14,7 +15,7 @@ defmodule Minga.LogTest do
     on_exit(fn ->
       # Reset global options to defaults after each test,
       # preserving test-time overrides (e.g. clipboard: :none).
-      Minga.Test.OptionsHelper.reset_for_test()
+      OptionsHelper.reset_for_test()
     end)
 
     %{opts: opts}

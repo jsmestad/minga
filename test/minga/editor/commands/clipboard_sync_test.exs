@@ -15,6 +15,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
   import Hammox
 
+  alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State.Registers
 
@@ -146,11 +147,11 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
   describe "clipboard option" do
     test "compile-time default is :unnamedplus" do
-      assert Minga.Config.Options.default(:clipboard) == :unnamedplus
+      assert Options.default(:clipboard) == :unnamedplus
     end
 
     test "rejects invalid values" do
-      assert {:error, _} = Minga.Config.Options.set(:clipboard, :invalid)
+      assert {:error, _} = Options.set(:clipboard, :invalid)
     end
   end
 end

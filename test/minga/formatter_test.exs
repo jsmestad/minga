@@ -3,11 +3,12 @@ defmodule Minga.FormatterTest do
 
   alias Minga.Config.Options
   alias Minga.Formatter
+  alias Minga.Test.OptionsHelper
 
   setup do
     case Options.start_link() do
       {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> Minga.Test.OptionsHelper.reset_for_test()
+      {:error, {:already_started, _}} -> OptionsHelper.reset_for_test()
     end
 
     :ok
