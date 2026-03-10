@@ -210,7 +210,8 @@ defmodule Minga.Editor.State do
   def tree_rect(%__MODULE__{file_tree: %{tree: nil}}), do: nil
 
   def tree_rect(%__MODULE__{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}) do
-    {0, 0, tw, vp.rows - 1}
+    # Row 0 is the tab bar; file tree starts at row 1.
+    {1, 0, tw, vp.rows - 2}
   end
 
   # ── Cross-cutting window + buffer helpers ─────────────────────────────────

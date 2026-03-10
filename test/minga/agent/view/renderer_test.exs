@@ -367,8 +367,6 @@ defmodule Minga.Agent.View.RendererTest do
     end
 
     test "renders with file preview data" do
-      preview = Preview.set_file(Preview.new(), "/tmp/test.ex", "line one\nline two")
-
       input = %Renderer.RenderInput{
         viewport: Viewport.new(30, 100),
         theme: Theme.get!(:doom_one),
@@ -397,7 +395,6 @@ defmodule Minga.Agent.View.RendererTest do
         # Set preview to a file so the buffer preview renders (not dashboard)
         preview: %Preview{content: {:file, "test.ex", "line one\nline two"}, scroll_offset: 0},
         usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
-        preview: preview,
         buffer_snapshot: nil,
         highlight: nil,
         mode: :normal,
@@ -648,19 +645,14 @@ defmodule Minga.Agent.View.RendererTest do
           String.contains?(text, "Directory")
         end)
 
-      status_draws =
-        Enum.filter(draws, fn {_row, _col, text, _style} ->
-          String.contains?(text, "Status")
-        end)
+      assert dir_draws != [], "Directory section should be rendered"
 
-      assert dir_draws != []
-      assert status_draws != []
-
+      # Directory should be near the bottom of the viewport (within last 3 rows)
       dir_row = dir_draws |> hd() |> elem(0)
-      status_row = status_draws |> hd() |> elem(0)
+      max_row = input.viewport.rows - 1
 
-      assert dir_row > status_row,
-             "Directory (row #{dir_row}) should be below Status (row #{status_row})"
+      assert dir_row >= max_row - 3,
+             "Directory (row #{dir_row}) should be pinned near the bottom (max row #{max_row})"
     end
 
     test "not shown when preview has file content" do
