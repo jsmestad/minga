@@ -178,7 +178,7 @@ defmodule Minga.Editor do
       focus_stack: Minga.Input.default_stack()
     }
 
-    state = %{state | tab_bar: initial_tab_bar(active_buf)}
+    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
 
     # Redirect Logger and stderr to a log file when running with a real TUI.
     # In headless tests the port_manager is a pid (HeadlessPort), not the
@@ -835,7 +835,9 @@ defmodule Minga.Editor do
   end
 
   def handle_info(:agent_spinner_tick, state) do
-    if AgentState.visible?(state.agent) and AgentState.busy?(state.agent) do
+    agent_visible = AgentState.visible?(state.agent) or state.agentic.active
+
+    if agent_visible and AgentState.busy?(state.agent) do
       state = update_agent(state, &AgentState.tick_spinner/1)
       {:noreply, schedule_render(state, 16)}
     else
@@ -866,16 +868,22 @@ defmodule Minga.Editor do
   # is a pid, not the PortManager atom), always uses editor mode.
   @spec startup_view_state(GenServer.server(), pos_integer()) ::
           {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
-  @spec initial_tab_bar(pid() | nil) :: TabBar.t()
-  defp initial_tab_bar(active_buf) do
-    label =
+  @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
+  defp initial_tab_bar(_active_buf, :agent) do
+    # Boot into agent mode: only the agent tab. A file tab is created
+    # on demand when the user first switches to editor mode.
+    TabBar.new(Tab.new_agent(1, "Agent"))
+  end
+
+  defp initial_tab_bar(active_buf, _scope) do
+    file_label =
       if active_buf && Process.alive?(active_buf) do
         Commands.Helpers.buffer_display_name(active_buf)
       else
         "*scratch*"
       end
 
-    TabBar.new(Tab.new_file(1, label))
+    TabBar.new(Tab.new_file(1, file_label))
   end
 
   defp startup_view_state(port_manager, window_id) do
