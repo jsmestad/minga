@@ -62,6 +62,19 @@ defmodule Minga.Editor.State.TabBar do
   """
   @spec add(t(), Tab.kind(), String.t()) :: {t(), Tab.t()}
   def add(%__MODULE__{} = tb, kind, label \\ "") do
+    {tb, tab} = insert(tb, kind, label)
+    {%{tb | active_id: tab.id}, tab}
+  end
+
+  @doc """
+  Inserts a new tab next to the active tab without switching to it.
+
+  Returns `{updated_tab_bar, new_tab}`. The caller is responsible for
+  calling `switch_to/2` or `EditorState.switch_tab/2` to activate it.
+  This is the primitive that `add/3` and `EditorState.add_buffer/2` build on.
+  """
+  @spec insert(t(), Tab.kind(), String.t()) :: {t(), Tab.t()}
+  def insert(%__MODULE__{} = tb, kind, label \\ "") do
     tab =
       case kind do
         :file -> Tab.new_file(tb.next_id, label)
@@ -73,7 +86,7 @@ defmodule Minga.Editor.State.TabBar do
     # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
     new_tabs = before ++ [tab] ++ rest
 
-    {%{tb | tabs: new_tabs, active_id: tab.id, next_id: tb.next_id + 1}, tab}
+    {%{tb | tabs: new_tabs, next_id: tb.next_id + 1}, tab}
   end
 
   @doc """

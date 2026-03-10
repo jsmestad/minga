@@ -251,15 +251,12 @@ defmodule Minga.Editor.State do
   @spec add_buffer(t(), pid()) :: t()
   def add_buffer(%__MODULE__{buffers: bs, tab_bar: %TabBar{} = tb} = state, pid) do
     label = buffer_label(pid)
-    from_agentic = state.agentic.active
 
     Log.debug(:editor, fn ->
-      "[tab] add_buffer label=#{label} from_tab=#{tb.active_id} agentic=#{from_agentic}"
+      "[tab] add_buffer label=#{label} from_tab=#{tb.active_id} agentic=#{state.agentic.active}"
     end)
 
-    # Snapshot the current tab. Override mode to :normal because
-    # add_buffer may run mid-command (e.g. during :e) when mode is
-    # :command. The saved context should reflect the resting state.
+    # Snapshot the current tab before we modify anything.
     current_ctx =
       snapshot_tab_context(state)
       |> Map.put(:mode, :normal)
@@ -267,40 +264,33 @@ defmodule Minga.Editor.State do
 
     tb = TabBar.update_context(tb, tb.active_id, current_ctx)
 
-    # Add the buffer to the shared pool
-    new_bs = Buffers.add(bs, pid)
-    state = %{state | buffers: new_bs}
+    # Add the buffer to the pool (Buffers.add auto-activates it)
+    state = %{state | buffers: Buffers.add(bs, pid)}
 
-    # Create a file tab (but don't make it active yet)
+    # Create a file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
-    state = %{state | tab_bar: tb}
 
-    Log.debug(:editor, fn ->
-      "[tab] created file tab id=#{new_tab.id} label=#{label}, switching..."
-    end)
+    # If leaving agentic view, reset to file-tab defaults.
+    state =
+      if state.agentic.active do
+        %{state | agentic: %ViewState{}, keymap_scope: :editor}
+      else
+        state
+      end
 
-    # Use switch_tab for a proper context swap. This handles leaving
-    # agentic view, restoring file-tab defaults (windows, file_tree,
-    # keymap_scope), and snapshotting correctly.
-    state = switch_tab(state, new_tab.id)
+    # Snapshot the new tab's context with the correct active buffer.
+    state = %{state | tab_bar: tb} |> sync_active_window_buffer()
 
-    # The new tab needs a fresh context with this buffer active.
-    # switch_tab restored the *previous* file tab's context (if any)
-    # or the agent tab's context. Override buffers to point at the new buffer.
-    state = %{state | buffers: Buffers.switch_to_pid(state.buffers, pid)}
-    state = sync_active_window_buffer(state)
-
-    Log.debug(:editor, fn ->
-      "[tab] add_buffer complete: active_tab=#{state.tab_bar.active_id} agentic=#{state.agentic.active} scope=#{state.keymap_scope}"
-    end)
-
-    # Snapshot the corrected context into the new tab.
     new_ctx =
       snapshot_tab_context(state)
       |> Map.put(:mode, :normal)
       |> Map.put(:mode_state, Minga.Mode.initial_state())
 
     tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+
+    Log.debug(:editor, fn ->
+      "[tab] add_buffer complete: tab=#{new_tab.id} agentic=#{state.agentic.active} scope=#{state.keymap_scope}"
+    end)
 
     %{state | tab_bar: tb}
   end
@@ -447,14 +437,16 @@ defmodule Minga.Editor.State do
   end
 
   # When a tab has no saved context (just created), fill in file-tab
-  # defaults so we cleanly leave agentic mode.
+  # defaults so we cleanly leave agentic mode. Uses proper struct
+  # defaults so downstream code (render pipeline, key handling) doesn't
+  # crash on missing fields.
   @spec apply_file_tab_defaults(Tab.context()) :: Tab.context()
   defp apply_file_tab_defaults(context) when map_size(context) == 0 do
     %{
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :editor,
-      agentic: %{active: false}
+      agentic: %ViewState{}
     }
   end
 
