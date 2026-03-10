@@ -471,7 +471,7 @@ defmodule Minga.Agent.View.Renderer do
     DirectoryRenderer.render(rect, path, entries, scroll, input.theme)
   end
 
-  defp render_preview(%{preview: %Preview{content: :empty}, buffer_snapshot: nil} = input, rect) do
+  defp render_preview(%{preview: %Preview{content: :empty}} = input, rect) do
     render_dashboard(input, rect)
   end
 
