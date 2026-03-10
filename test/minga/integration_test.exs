@@ -22,7 +22,7 @@ defmodule Minga.IntegrationTest do
       assert buffer_content(ctx) == original
       assert buffer_cursor(ctx) == {0, 2}
       # Screen cursor is offset by gutter width (3 for a 3-line file)
-      assert screen_cursor(ctx) == {0, 3 + 2}
+      assert screen_cursor(ctx) == {1, 3 + 2}
     end
 
     test "h moves cursor left" do
@@ -81,7 +81,7 @@ defmodule Minga.IntegrationTest do
       type_text(ctx, "abc")
 
       assert buffer_content(ctx) == "abchello"
-      assert_row_contains(ctx, 0, "abchello")
+      assert_row_contains(ctx, 1, "abchello")
     end
 
     test "Escape returns to normal mode — subsequent keys move, not insert" do
@@ -265,7 +265,7 @@ defmodule Minga.IntegrationTest do
       # Enter insert mode and type
       send_keys(ctx, "iINSERTED<Esc>")
       assert String.contains?(buffer_content(ctx), "INSERTED")
-      assert_row_contains(ctx, 1, "INSERTED")
+      assert_row_contains(ctx, 2, "INSERTED")
 
       # Delete the line
       send_key(ctx, ?d)
@@ -275,7 +275,7 @@ defmodule Minga.IntegrationTest do
       # Undo the delete
       send_key(ctx, ?u)
       assert String.contains?(buffer_content(ctx), "INSERTED")
-      assert_row_contains(ctx, 1, "INSERTED")
+      assert_row_contains(ctx, 2, "INSERTED")
 
       # Editor stays alive throughout
       assert Process.alive?(ctx.editor)

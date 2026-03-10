@@ -119,9 +119,9 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert mh == 1
 
       {er, _ec, ew, eh} = layout.editor_area
-      assert er == 0
+      assert er == 1
       assert ew == 100
-      assert eh == 29
+      assert eh == 28
     end
   end
 

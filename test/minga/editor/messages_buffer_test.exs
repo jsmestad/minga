@@ -18,7 +18,7 @@ defmodule Minga.Editor.MessagesBufferTest do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bm")
 
-      row0 = screen_row(ctx, 0)
+      row0 = screen_row(ctx, 1)
       assert String.contains?(row0, "Editor started")
     end
 

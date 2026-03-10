@@ -391,7 +391,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("just plain text", file_path: path)
 
       # Should render normally with no highlights
-      assert_row_contains(ctx, 0, "just plain text")
+      assert_row_contains(ctx, 1, "just plain text")
 
       state = :sys.get_state(ctx.editor)
       assert state.highlight.current.capture_names == []

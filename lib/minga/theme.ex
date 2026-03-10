@@ -45,7 +45,8 @@ defmodule Minga.Theme do
     :search,
     :popup,
     :tree,
-    :agent
+    :agent,
+    :tab_bar
   ]
 
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
@@ -69,7 +70,8 @@ defmodule Minga.Theme do
           search: Minga.Theme.Search.t(),
           popup: Minga.Theme.Popup.t(),
           tree: Minga.Theme.Tree.t(),
-          agent: Minga.Theme.Agent.t() | nil
+          agent: Minga.Theme.Agent.t() | nil,
+          tab_bar: Minga.Theme.TabBar.t() | nil
         }
 
   # ── Color group structs ─────────────────────────────────────────────────────
@@ -212,6 +214,38 @@ defmodule Minga.Theme do
             fg: Minga.Theme.color(),
             bg: Minga.Theme.color(),
             border_fg: Minga.Theme.color()
+          }
+  end
+
+  defmodule TabBar do
+    @moduledoc "Tab bar colors."
+    @enforce_keys [
+      :active_fg,
+      :active_bg,
+      :inactive_fg,
+      :inactive_bg,
+      :separator_fg,
+      :modified_fg,
+      :bg
+    ]
+    defstruct [
+      :active_fg,
+      :active_bg,
+      :inactive_fg,
+      :inactive_bg,
+      :separator_fg,
+      :modified_fg,
+      :bg
+    ]
+
+    @type t :: %__MODULE__{
+            active_fg: Minga.Theme.color(),
+            active_bg: Minga.Theme.color(),
+            inactive_fg: Minga.Theme.color(),
+            inactive_bg: Minga.Theme.color(),
+            separator_fg: Minga.Theme.color(),
+            modified_fg: Minga.Theme.color(),
+            bg: Minga.Theme.color()
           }
   end
 

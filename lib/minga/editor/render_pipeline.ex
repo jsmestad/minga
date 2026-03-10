@@ -52,6 +52,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
@@ -171,6 +172,8 @@ defmodule Minga.Editor.RenderPipeline do
 
     defstruct modeline_draws: %{},
               modeline_click_regions: [],
+              tab_bar: [],
+              tab_bar_click_regions: [],
               minibuffer: [],
               separators: [],
               file_tree: [],
@@ -181,6 +184,8 @@ defmodule Minga.Editor.RenderPipeline do
     @type t :: %__MODULE__{
             modeline_draws: %{non_neg_integer() => [DisplayList.draw()]},
             modeline_click_regions: [Minga.Editor.Modeline.click_region()],
+            tab_bar: [DisplayList.draw()],
+            tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
             minibuffer: [DisplayList.draw()],
             separators: [DisplayList.draw()],
             file_tree: [DisplayList.draw()],
@@ -235,8 +240,9 @@ defmodule Minga.Editor.RenderPipeline do
     # Stage 5: Chrome
     chrome = timed(:chrome, fn -> build_chrome(state, layout, scrolls, cursor_info) end)
 
-    # Cache modeline click regions on state for mouse hit-testing
+    # Cache click regions on state for mouse hit-testing
     state = %{state | modeline_click_regions: chrome.modeline_click_regions}
+    state = %{state | tab_bar_click_regions: chrome.tab_bar_click_regions}
 
     # Stage 6: Compose
     frame =
@@ -254,6 +260,9 @@ defmodule Minga.Editor.RenderPipeline do
     panel_draws = timed(:content, fn -> ViewRenderer.render(state) end)
 
     chrome = timed(:chrome, fn -> build_chrome_agentic(state, layout) end)
+
+    # Cache tab bar click regions
+    state = %{state | tab_bar_click_regions: chrome.tab_bar_click_regions}
 
     frame =
       timed(:compose, fn -> compose_agentic(panel_draws, chrome, state) end)
@@ -700,12 +709,17 @@ defmodule Minga.Editor.RenderPipeline do
       ]
       |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
+    # Tab bar
+    {tab_bar_draws, tab_bar_regions} = render_tab_bar(state, layout)
+
     # Region definitions
     regions = Regions.define_regions(layout)
 
     %Chrome{
       modeline_draws: modeline_draws,
       modeline_click_regions: modeline_click_regions,
+      tab_bar: tab_bar_draws,
+      tab_bar_click_regions: tab_bar_regions,
       minibuffer: [minibuffer_draw],
       separators: separator_draws,
       file_tree: tree_draws,
@@ -739,9 +753,14 @@ defmodule Minga.Editor.RenderPipeline do
       ]
       |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
+    # Tab bar
+    {tab_bar_draws, tab_bar_regions} = render_tab_bar(state, layout)
+
     regions = Regions.define_regions(layout)
 
     %Chrome{
+      tab_bar: tab_bar_draws,
+      tab_bar_click_regions: tab_bar_regions,
       minibuffer: [minibuffer_draw],
       overlays: overlays,
       regions: regions
@@ -796,6 +815,7 @@ defmodule Minga.Editor.RenderPipeline do
     %Frame{
       cursor: cursor,
       cursor_shape: cursor_shape,
+      tab_bar: chrome.tab_bar,
       windows: window_frames,
       file_tree: chrome.file_tree,
       separators: chrome.separators,
@@ -831,6 +851,7 @@ defmodule Minga.Editor.RenderPipeline do
     %Frame{
       cursor: cursor,
       cursor_shape: cursor_shape,
+      tab_bar: chrome.tab_bar,
       agentic_view: panel_draws,
       minibuffer: chrome.minibuffer,
       overlays: chrome.overlays,
@@ -1268,6 +1289,15 @@ defmodule Minga.Editor.RenderPipeline do
 
   @spec render_window_modeline(state(), WindowScroll.t()) ::
           {[DisplayList.draw()], [Minga.Editor.Modeline.click_region()]}
+  @spec render_tab_bar(state(), Layout.t()) ::
+          {[DisplayList.draw()], [TabBarRenderer.click_region()]}
+  defp render_tab_bar(%{tab_bar: nil}, _layout), do: {[], []}
+
+  defp render_tab_bar(state, layout) do
+    {tab_row, _col, tab_width, _h} = layout.tab_bar
+    TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme)
+  end
+
   defp render_window_modeline(state, %WindowScroll{win_layout: %{modeline: {_, _, _, 0}}}) do
     _ = state
     {[], []}

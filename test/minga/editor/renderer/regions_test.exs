@@ -7,6 +7,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
   describe "define_regions/1" do
     test "generates minibuffer region for minimal layout" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 0, 80, 23},
         minibuffer: {23, 0, 80, 1},
@@ -32,6 +33,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
 
     test "includes file tree region when present" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 31, 49, 23},
         file_tree: {0, 0, 30, 23},
@@ -52,6 +54,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
 
     test "includes agent panel region when present" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 0, 80, 15},
         agent_panel: {15, 0, 80, 8},
@@ -72,6 +75,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
 
     test "generates regions for multiple windows in split" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 0, 80, 23},
         minibuffer: {23, 0, 80, 1},
@@ -96,6 +100,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
 
     test "skips zero-height modelines" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 0, 80, 23},
         minibuffer: {23, 0, 80, 1},
@@ -129,6 +134,7 @@ defmodule Minga.Editor.Renderer.RegionsTest do
   describe "round-trip with Protocol decoder" do
     test "region commands are valid define_region binaries" do
       layout = %Layout{
+        tab_bar: {0, 0, 80, 1},
         terminal: {0, 0, 80, 24},
         editor_area: {0, 0, 80, 23},
         minibuffer: {23, 0, 80, 1},

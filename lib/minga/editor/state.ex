@@ -92,7 +92,8 @@ defmodule Minga.Editor.State do
             tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
-            modeline_click_regions: []
+            modeline_click_regions: [],
+            tab_bar_click_regions: []
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -133,7 +134,8 @@ defmodule Minga.Editor.State do
           tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
-          modeline_click_regions: [Minga.Editor.Modeline.click_region()]
+          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()]
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

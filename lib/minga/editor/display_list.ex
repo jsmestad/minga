@@ -117,6 +117,7 @@ defmodule Minga.Editor.DisplayList do
     @enforce_keys [:cursor, :cursor_shape]
     defstruct cursor: {0, 0},
               cursor_shape: :block,
+              tab_bar: [],
               windows: [],
               file_tree: [],
               agent_panel: [],
@@ -132,6 +133,7 @@ defmodule Minga.Editor.DisplayList do
     @type t :: %__MODULE__{
             cursor: {non_neg_integer(), non_neg_integer()},
             cursor_shape: :block | :beam | :underline,
+            tab_bar: [DisplayList.draw()],
             windows: [WindowFrame.t()],
             file_tree: [DisplayList.draw()],
             agent_panel: [DisplayList.draw()],
@@ -255,7 +257,8 @@ defmodule Minga.Editor.DisplayList do
       end
 
     all_draws =
-      frame.file_tree ++
+      frame.tab_bar ++
+        frame.file_tree ++
         frame.agentic_view ++
         window_draws ++
         frame.separators ++

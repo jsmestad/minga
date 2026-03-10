@@ -6,6 +6,8 @@ defmodule Minga.Editor.MouseMultiClickTest do
   alias Minga.Editor
 
   @gutter 3
+  # Content starts at row 1 because the tab bar occupies row 0.
+  @content_row 1
 
   defp start_editor(content) do
     {:ok, buffer} = BufferServer.start_link(content: content)
@@ -38,7 +40,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
     test "double-click selects word under cursor" do
       {editor, buffer} = start_editor("hello world foo")
       # Double-click on "world" (col 6 in buffer, +gutter)
-      send_mouse(editor, 0, @gutter + 6, :left, :press, 0, 2)
+      send_mouse(editor, @content_row, @gutter + 6, :left, :press, 0, 2)
 
       s = state(editor)
       assert s.mode == :visual
@@ -54,7 +56,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
 
     test "double-click on first word selects it" do
       {editor, buffer} = start_editor("hello world")
-      send_mouse(editor, 0, @gutter + 2, :left, :press, 0, 2)
+      send_mouse(editor, @content_row, @gutter + 2, :left, :press, 0, 2)
 
       s = state(editor)
       assert s.mode == :visual
@@ -67,7 +69,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
 
     test "double-click on space selects the space" do
       {editor, _buffer} = start_editor("hello world")
-      send_mouse(editor, 0, @gutter + 5, :left, :press, 0, 2)
+      send_mouse(editor, @content_row, @gutter + 5, :left, :press, 0, 2)
 
       s = state(editor)
       assert s.mode == :visual
@@ -77,7 +79,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
   describe "triple-click line selection" do
     test "triple-click selects entire line in visual line mode" do
       {editor, _buffer} = start_editor("hello\nworld\nfoo")
-      send_mouse(editor, 1, @gutter + 2, :left, :press, 0, 3)
+      send_mouse(editor, @content_row + 1, @gutter + 2, :left, :press, 0, 3)
 
       s = state(editor)
       assert s.mode == :visual
@@ -92,11 +94,11 @@ defmodule Minga.Editor.MouseMultiClickTest do
     test "shift+click from normal mode starts visual selection" do
       {editor, buffer} = start_editor("hello world foo bar")
       # Position cursor at col 0
-      send_mouse(editor, 0, @gutter + 0, :left, :press)
-      send_mouse(editor, 0, @gutter + 0, :left, :release)
+      send_mouse(editor, @content_row, @gutter + 0, :left, :press)
+      send_mouse(editor, @content_row, @gutter + 0, :left, :release)
 
       # Shift+click at col 10
-      send_mouse(editor, 0, @gutter + 10, :left, :press, 0x01)
+      send_mouse(editor, @content_row, @gutter + 10, :left, :press, 0x01)
 
       s = state(editor)
       assert s.mode == :visual
@@ -115,7 +117,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_key(editor, ?l)
 
       # Shift+click further right
-      send_mouse(editor, 0, @gutter + 15, :left, :press, 0x01)
+      send_mouse(editor, @content_row, @gutter + 15, :left, :press, 0x01)
 
       s = state(editor)
       assert s.mode == :visual
@@ -127,7 +129,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
   describe "middle-click paste" do
     test "middle-click moves cursor to click position" do
       {editor, buffer} = start_editor("hello world")
-      send_mouse(editor, 0, @gutter + 5, :middle, :press)
+      send_mouse(editor, @content_row, @gutter + 5, :middle, :press)
 
       {line, col} = BufferServer.cursor(buffer)
       assert line == 0
@@ -136,7 +138,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
 
     test "middle-click doesn't crash when no yank register content" do
       {editor, _buffer} = start_editor("hello world")
-      send_mouse(editor, 0, @gutter + 5, :middle, :press)
+      send_mouse(editor, @content_row, @gutter + 5, :middle, :press)
       assert Process.alive?(editor)
     end
   end
@@ -180,7 +182,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
     test "ctrl+click moves cursor and doesn't crash" do
       {editor, buffer} = start_editor("hello world")
       # Ctrl+click (0x02 is ctrl modifier)
-      send_mouse(editor, 0, @gutter + 3, :left, :press, 0x02)
+      send_mouse(editor, @content_row, @gutter + 3, :left, :press, 0x02)
 
       {line, col} = BufferServer.cursor(buffer)
       assert line == 0
