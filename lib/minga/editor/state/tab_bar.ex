@@ -198,6 +198,31 @@ defmodule Minga.Editor.State.TabBar do
     Enum.find(tabs, &(&1.kind == kind))
   end
 
+  @doc "Returns the agent tab whose session matches the given pid, or nil."
+  @spec find_by_session(t(), pid()) :: Tab.t() | nil
+  def find_by_session(%__MODULE__{tabs: tabs}, session_pid) when is_pid(session_pid) do
+    Enum.find(tabs, fn
+      %Tab{kind: :agent, session: ^session_pid} -> true
+      _ -> false
+    end)
+  end
+
+  @doc """
+  Applies `fun` to the tab with `id`, replacing it in the list.
+
+  Returns the updated tab bar. If no tab matches, returns unchanged.
+  """
+  @spec update_tab(t(), Tab.id(), (Tab.t() -> Tab.t())) :: t()
+  def update_tab(%__MODULE__{tabs: tabs} = tb, id, fun) when is_function(fun, 1) do
+    new_tabs =
+      Enum.map(tabs, fn
+        %Tab{id: ^id} = tab -> fun.(tab)
+        tab -> tab
+      end)
+
+    %{tb | tabs: new_tabs}
+  end
+
   @doc "Returns all tabs matching the given kind."
   @spec filter_by_kind(t(), Tab.kind()) :: [Tab.t()]
   def filter_by_kind(%__MODULE__{tabs: tabs}, kind) do

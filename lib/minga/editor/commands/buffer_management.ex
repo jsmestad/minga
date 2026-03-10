@@ -4,6 +4,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   ex-command dispatch, and line number style cycling.
   """
 
+  alias Minga.Agent.Session
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
@@ -16,6 +17,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.TabBar
   alias Minga.Formatter
   alias Minga.Mode
@@ -587,12 +589,23 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec close_agent_tab(state()) :: state()
   defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
-    # Stop the agent session if running
-    if state.agent.session && Process.alive?(state.agent.session) do
+    # Stop spinner timer before it leaks
+    state = update_in(state.agent, &AgentState.stop_spinner_timer/1)
+
+    # Unsubscribe and stop the agent session if running
+    if state.agent.session do
       try do
-        GenServer.stop(state.agent.session, :normal)
+        Session.unsubscribe(state.agent.session)
       catch
         :exit, _ -> :ok
+      end
+
+      if Process.alive?(state.agent.session) do
+        try do
+          GenServer.stop(state.agent.session, :normal)
+        catch
+          :exit, _ -> :ok
+        end
       end
     end
 
