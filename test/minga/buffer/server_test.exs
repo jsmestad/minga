@@ -603,4 +603,85 @@ defmodule Minga.Buffer.ServerTest do
       assert [] = Server.flush_edits(pid)
     end
   end
+
+  # ── Buffer-local options ──────────────────────────────────────────────────
+
+  describe "buffer-local options" do
+    test "get_option falls back to global default when no local override" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      # tab_width global default is 2
+      assert Server.get_option(pid, :tab_width) == 2
+    end
+
+    test "set_option stores a buffer-local override" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:ok, 8} = Server.set_option(pid, :tab_width, 8)
+      assert Server.get_option(pid, :tab_width) == 8
+    end
+
+    test "buffer-local override wins over global default" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.set_option(pid, :tab_width, 4)
+      assert Server.get_option(pid, :tab_width) == 4
+    end
+
+    test "two buffers have independent options" do
+      {:ok, a} = Server.start_link(content: "alpha")
+      {:ok, b} = Server.start_link(content: "bravo")
+      Server.set_option(a, :tab_width, 8)
+      assert Server.get_option(a, :tab_width) == 8
+      assert Server.get_option(b, :tab_width) == 2
+    end
+
+    test "set_option rejects invalid values" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:error, _} = Server.set_option(pid, :tab_width, -1)
+      # Original value unchanged
+      assert Server.get_option(pid, :tab_width) == 2
+    end
+
+    test "set_option rejects unknown option names" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:error, _} = Server.set_option(pid, :nonexistent, true)
+    end
+
+    test "local_options returns only buffer-local overrides" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert Server.local_options(pid) == %{}
+      Server.set_option(pid, :tab_width, 4)
+      Server.set_option(pid, :wrap, true)
+      assert Server.local_options(pid) == %{tab_width: 4, wrap: true}
+    end
+
+    test "filetype default wins over global when no local override" do
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+      Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Minga.Config.Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      assert Server.get_option(pid, :tab_width) == 8
+    end
+
+    test "buffer-local wins over filetype default" do
+      {:ok, pid} = Server.start_link(content: "package main", filetype: :go)
+      Minga.Config.Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Minga.Config.Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      Server.set_option(pid, :tab_width, 3)
+      assert Server.get_option(pid, :tab_width) == 3
+    end
+  end
 end

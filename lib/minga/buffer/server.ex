@@ -271,6 +271,44 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :buffer_type)
   end
 
+  # ── Buffer-local options ──
+
+  @doc """
+  Returns a buffer-local option value using the resolution chain:
+  buffer-local → filetype override → global default.
+
+  Buffer-local options take highest priority. If no local override
+  exists, the filetype default from `Config.Options` is checked, then
+  the global default. This gives each buffer its own isolated option
+  state while inheriting sensible defaults.
+  """
+  @spec get_option(GenServer.server(), atom()) :: term()
+  def get_option(server, name) when is_atom(name) do
+    GenServer.call(server, {:get_option, name})
+  end
+
+  @doc """
+  Sets a buffer-local option override. Only affects this buffer.
+
+  The value is validated against the same type rules as
+  `Config.Options.set/2`. Returns `{:ok, value}` on success or
+  `{:error, reason}` if the value is invalid.
+  """
+  @spec set_option(GenServer.server(), atom(), term()) ::
+          {:ok, term()} | {:error, String.t()}
+  def set_option(server, name, value) when is_atom(name) do
+    GenServer.call(server, {:set_option, name, value})
+  end
+
+  @doc """
+  Returns all buffer-local option overrides (not the resolved values,
+  just the overrides set on this buffer).
+  """
+  @spec local_options(GenServer.server()) :: %{atom() => term()}
+  def local_options(server) do
+    GenServer.call(server, :local_options)
+  end
+
   @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
   @spec append(GenServer.server(), String.t()) :: :ok
   def append(server, text) when is_binary(text) do
@@ -821,6 +859,28 @@ defmodule Minga.Buffer.Server do
     {:reply, state.buffer_type, state}
   end
 
+  # ── Buffer-local options handlers ──
+
+  def handle_call({:get_option, name}, _from, state) do
+    value = resolve_option(state, name)
+    {:reply, value, state}
+  end
+
+  def handle_call({:set_option, name, value}, _from, state) do
+    case Minga.Config.Options.validate_option(name, value) do
+      :ok ->
+        new_state = %{state | options: Map.put(state.options, name, value)}
+        {:reply, {:ok, value}, new_state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call(:local_options, _from, state) do
+    {:reply, state.options, state}
+  end
+
   def handle_call({:append, text}, _from, state) do
     content = Document.content(state.document)
     new_content = content <> text
@@ -995,6 +1055,15 @@ defmodule Minga.Buffer.Server do
   end
 
   # ── Private ──
+
+  # Resolves an option using the chain: buffer-local → filetype → global.
+  @spec resolve_option(BufState.t(), atom()) :: term()
+  defp resolve_option(%{options: opts, filetype: ft}, name) do
+    case Map.fetch(opts, name) do
+      {:ok, value} -> value
+      :error -> Minga.Config.Options.get_for_filetype(name, ft)
+    end
+  end
 
   @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
 

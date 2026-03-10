@@ -43,7 +43,8 @@ defmodule Minga.Buffer.State do
             read_only: false,
             unlisted: false,
             persistent: false,
-            pending_edits: []
+            pending_edits: [],
+            options: %{}
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -61,7 +62,8 @@ defmodule Minga.Buffer.State do
           read_only: boolean(),
           unlisted: boolean(),
           persistent: boolean(),
-          pending_edits: [EditDelta.t()]
+          pending_edits: [EditDelta.t()],
+          options: %{atom() => term()}
         }
 
   @max_undo_stack 1000
