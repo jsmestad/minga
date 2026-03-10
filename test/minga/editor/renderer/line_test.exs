@@ -161,12 +161,12 @@ defmodule Minga.Editor.Renderer.LineTest do
 
   describe "scrolling" do
     test "content scrolls when cursor moves past viewport" do
-      # Disable scroll margin so we can assert exact scroll positions
-      alias Minga.Config.Options
-      Options.set(:scroll_margin, 0)
-
       lines = Enum.map_join(0..30, "\n", &"line #{&1}")
       ctx = start_editor(lines, height: 10)
+
+      # Set scroll margin to 0 on this buffer (not global) so we can
+      # assert exact scroll positions without affecting other async tests.
+      BufferServer.set_option(ctx.buffer, :scroll_margin, 0)
 
       for _ <- 1..10, do: send_key(ctx, ?j)
 
