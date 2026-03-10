@@ -38,7 +38,8 @@ defmodule Minga.Agent.View.RendererTest do
         thinking_level: "medium",
         auto_scroll: true,
         display_start_index: 0,
-        mention_completion: nil
+        mention_completion: nil,
+        pasted_blocks: []
       },
       agentic: %{
         chat_width_pct: 65,
@@ -342,7 +343,8 @@ defmodule Minga.Agent.View.RendererTest do
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
-          mention_completion: nil
+          mention_completion: nil,
+          pasted_blocks: []
         },
         agentic: %{
           chat_width_pct: 65,
@@ -384,7 +386,8 @@ defmodule Minga.Agent.View.RendererTest do
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
-          mention_completion: nil
+          mention_completion: nil,
+          pasted_blocks: []
         },
         agentic: %{
           chat_width_pct: 65,
@@ -434,7 +437,8 @@ defmodule Minga.Agent.View.RendererTest do
           thinking_level: "medium",
           auto_scroll: true,
           display_start_index: 0,
-          mention_completion: nil
+          mention_completion: nil,
+          pasted_blocks: []
         },
         agentic: %{chat_width_pct: 65, help_visible: false, focus: :chat, search: nil, toast: nil},
         messages: [],
@@ -521,7 +525,8 @@ defmodule Minga.Agent.View.RendererTest do
             thinking_level: "medium",
             auto_scroll: true,
             display_start_index: 0,
-            mention_completion: nil
+            mention_completion: nil,
+            pasted_blocks: []
           }
         })
 

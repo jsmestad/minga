@@ -26,6 +26,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffRenderer
   alias Minga.Agent.ModelLimits
+  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.DirectoryRenderer
   alias Minga.Agent.View.Preview
@@ -118,7 +119,8 @@ defmodule Minga.Agent.View.Renderer do
             thinking_level: String.t(),
             auto_scroll: boolean(),
             display_start_index: non_neg_integer(),
-            mention_completion: Minga.Agent.FileMention.completion() | nil
+            mention_completion: Minga.Agent.FileMention.completion() | nil,
+            pasted_blocks: [PanelState.paste_block()]
           }
 
     @typedoc "Agentic view fields needed for rendering."
@@ -303,7 +305,8 @@ defmodule Minga.Agent.View.Renderer do
         thinking_level: panel.thinking_level,
         auto_scroll: panel.auto_scroll,
         display_start_index: panel.display_start_index,
-        mention_completion: panel.mention_completion
+        mention_completion: panel.mention_completion,
+        pasted_blocks: panel.pasted_blocks
       },
       agentic: %{
         chat_width_pct: state.agentic.chat_width_pct,
@@ -903,8 +906,9 @@ defmodule Minga.Agent.View.Renderer do
         |> Enum.with_index()
         |> Enum.flat_map(fn {line_text, idx} ->
           r = content_start + idx
-          display = String.slice(line_text, 0, inner_width)
-          padded = String.pad_trailing(display, inner_width)
+
+          {display_text, fg_color} = input_line_display(line_text, inner_width, panel, at)
+          padded = String.pad_trailing(display_text, inner_width)
           inner = left_pad <> padded <> right_pad
           fill = String.pad_trailing(inner, max(width - 2, 0))
 
@@ -912,7 +916,7 @@ defmodule Minga.Agent.View.Renderer do
             DisplayList.draw(r, 0, "│" <> fill <> "│", bg: at.input_bg),
             DisplayList.draw(r, 0, "│", border_style),
             DisplayList.draw(r, width - 1, "│", border_style),
-            DisplayList.draw(r, 1 + pad_left, padded, fg: at.text_fg, bg: at.input_bg)
+            DisplayList.draw(r, 1 + pad_left, padded, fg: fg_color, bg: at.input_bg)
           ]
         end)
       end
@@ -945,6 +949,33 @@ defmodule Minga.Agent.View.Renderer do
       {first, rest} = String.split_at(word, 1)
       String.upcase(first) <> rest
     end)
+  end
+
+  # Returns the display text and foreground color for an input line.
+  # Paste placeholder lines render as a compact indicator; normal lines
+  # render as-is. The returned text is already sliced to fit inner_width.
+  @spec input_line_display(String.t(), pos_integer(), RenderInput.panel_data(), Theme.Agent.t()) ::
+          {String.t(), Theme.color()}
+  defp input_line_display(line_text, inner_width, panel, at) do
+    case PanelState.paste_block_index(line_text) do
+      nil ->
+        {String.slice(line_text, 0, inner_width), at.text_fg}
+
+      block_index ->
+        line_count = paste_block_line_count(panel.pasted_blocks, block_index)
+        indicator = "󰆏 [pasted #{line_count} lines]"
+        {String.slice(indicator, 0, inner_width), at.hint_fg}
+    end
+  end
+
+  # Count lines in a paste block by index. Returns 0 if the index is invalid.
+  @spec paste_block_line_count([PanelState.paste_block()], non_neg_integer()) ::
+          non_neg_integer()
+  defp paste_block_line_count(blocks, index) do
+    case Enum.at(blocks, index) do
+      %{text: text} -> text |> String.split("\n") |> length()
+      nil -> 0
+    end
   end
 
   # Computes the dynamic input area height for the bordered box:
