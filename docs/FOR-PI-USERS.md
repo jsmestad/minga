@@ -126,7 +126,9 @@ Minga agrees. There's no dedicated "plan UI." The agent chat is the planning int
 
 ### "No MCP. Use CLI tools with READMEs."
 
-Minga agrees. No MCP support is planned. The agent uses bash, which is the universal adapter. A CLI tool with a README is cheaper to build, cheaper on tokens (progressive disclosure: read the README only when needed), and easier to debug than an MCP server. Minga's extension system for agent tooling follows the same principle: small, focused, discoverable.
+Minga's default agent follows the same philosophy: bash is the universal adapter, CLI tools with READMEs are cheaper on tokens (progressive disclosure: read the README only when needed), and easier to debug than MCP servers.
+
+For users with existing MCP infrastructure, Minga offers MCP as an **optional extension** ([#286](https://github.com/jsmestad/minga/issues/286)). Enable it in your config, declare your servers, and the extension manages their lifecycles under its own supervisor. The key design decision: MCP tool descriptions are not dumped into the system prompt. Instead, a lightweight meta-tool lets the agent discover available MCP tools on demand. This keeps the context overhead near zero (~100 tokens instead of 13K+) until the agent actually needs an MCP tool. Users who don't enable the extension see zero impact.
 
 ### "Context engineering is paramount."
 
@@ -158,6 +160,10 @@ Minga is a full-screen editor. It takes ownership of the terminal viewport and d
 The blog argues against built-in sub-agents, preferring to spawn pi via bash for observability. This makes sense for a CLI tool where tmux is a natural companion.
 
 Minga has first-class agent processes. Each agent session is a supervised BEAM process tree with structured event streaming, inline diff review, and tool approval. The editor's split-panel design gives you observability that a raw bash sub-spawn can't: you see the chat, the diffs, and the affected files simultaneously in one viewport.
+
+### MCP as an extension, not core
+
+Pi has no MCP support and never will. The blog argues MCP servers are overkill and waste context. Minga agrees for the default experience, but ships MCP as an optional extension for users with existing MCP infrastructure. The extension uses lazy tool description injection (a meta-tool instead of dumping all descriptions upfront) to avoid the context bloat the blog criticizes. If you don't enable it, it doesn't exist.
 
 ### Optional tool approval
 

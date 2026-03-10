@@ -203,7 +203,10 @@ defmodule Minga.Editor.Commands.Agent do
 
   # Creates a new file tab for the active buffer and switches to it.
   # Used when deactivating the agentic view and no file tab exists yet
-  # (e.g., cold boot into agent mode).
+  # (e.g., cold boot into agent mode). The new tab starts with an empty
+  # context; `EditorState.restore_tab_context` detects this and calls
+  # `build_file_tab_defaults` to set up a proper window tree, editor
+  # keymap scope, and buffer binding.
   @spec create_and_switch_to_file_tab(state()) :: state()
   defp create_and_switch_to_file_tab(state) do
     label =
@@ -219,7 +222,8 @@ defmodule Minga.Editor.Commands.Agent do
     tb = TabBar.update_context(state.tab_bar, agent_id, agent_ctx)
 
     # Insert file tab (without switching active_id) so switch_tab
-    # performs the full snapshot/restore cycle.
+    # performs the full snapshot/restore cycle. The tab has empty
+    # context, which triggers build_file_tab_defaults during restore.
     {tb, file_tab} = TabBar.insert(tb, :file, label)
     state = %{state | tab_bar: tb}
     EditorState.switch_tab(state, file_tab.id)

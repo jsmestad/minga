@@ -421,9 +421,15 @@ defmodule Minga.Editor.State do
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
-    # Empty context means a brand-new tab. Apply file-tab defaults so we
-    # don't inherit stale agentic state from the previous tab.
-    context = apply_file_tab_defaults(context)
+    # Empty context means a brand-new tab. Build file-tab defaults from
+    # the live state so we get a proper window tree, viewport-sized window,
+    # and clean editor scope.
+    context =
+      if map_size(context) == 0 do
+        build_file_tab_defaults(state)
+      else
+        context
+      end
 
     state
     |> maybe_restore(:windows, context)
@@ -436,21 +442,41 @@ defmodule Minga.Editor.State do
     |> restore_active_buffer(context)
   end
 
-  # When a tab has no saved context (just created), fill in file-tab
-  # defaults so we cleanly leave agentic mode. Uses proper struct
-  # defaults so downstream code (render pipeline, key handling) doesn't
-  # crash on missing fields.
-  @spec apply_file_tab_defaults(Tab.context()) :: Tab.context()
-  defp apply_file_tab_defaults(context) when map_size(context) == 0 do
+  # Builds a complete file-tab context from the live state. This is the
+  # single source of truth for "what does a fresh file tab look like?"
+  # Uses the active buffer and viewport dimensions to create a proper
+  # window tree so splits, scrolling, and cursor positioning all work.
+  @spec build_file_tab_defaults(t()) :: Tab.context()
+  defp build_file_tab_defaults(state) do
+    win_id = state.windows.next_id
+    rows = state.viewport.rows
+    cols = state.viewport.cols
+    buf = state.buffers.active
+
+    windows =
+      if buf && Process.alive?(buf) do
+        window = Window.new(win_id, buf, max(rows, 1), max(cols, 1))
+
+        %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => window},
+          active: win_id,
+          next_id: win_id + 1
+        }
+      else
+        %Windows{}
+      end
+
     %{
+      windows: windows,
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :editor,
-      agentic: %ViewState{}
+      agentic: %ViewState{},
+      active_buffer: buf,
+      active_buffer_index: state.buffers.active_index
     }
   end
-
-  defp apply_file_tab_defaults(context), do: context
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
