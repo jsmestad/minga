@@ -245,18 +245,72 @@ defmodule Minga.Editor.State do
   @doc """
   Adds a new buffer and makes it the active buffer for the current window.
 
-  Also creates a file tab for the buffer in the tab bar. The current tab
-  is snapshotted before switching so its context is preserved.
+  When the active tab is a file tab, the buffer replaces the current
+  tab's buffer in-place (like Vim `:e`). When the active tab is an
+  agent tab, a new file tab is created and switched to. This matches
+  the expected workflow: opening files from the tree or picker reuses
+  the current file tab; opening from the agentic view creates a
+  dedicated file tab.
   """
   @spec add_buffer(t(), pid()) :: t()
   def add_buffer(%__MODULE__{buffers: bs, tab_bar: %TabBar{} = tb} = state, pid) do
     label = buffer_label(pid)
+    active_tab = TabBar.active(tb)
 
     Log.debug(:editor, fn ->
-      "[tab] add_buffer label=#{label} from_tab=#{tb.active_id} agentic=#{state.agentic.active}"
+      "[tab] add_buffer label=#{label} tab=#{tb.active_id} kind=#{active_tab.kind}"
     end)
 
-    # Snapshot the current tab before we modify anything.
+    # Add the buffer to the pool (Buffers.add auto-activates it)
+    state = %{state | buffers: Buffers.add(bs, pid)}
+
+    case active_tab.kind do
+      :file ->
+        add_buffer_to_current_tab(state, label)
+
+      :agent ->
+        add_buffer_as_new_tab(state, label)
+    end
+  end
+
+  def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
+    %{state | buffers: Buffers.add(bs, pid)}
+    |> sync_active_window_buffer()
+  end
+
+  # Reuses the current file tab: updates its label and syncs the active
+  # buffer into the current window. No new tab is created.
+  @spec add_buffer_to_current_tab(t(), String.t()) :: t()
+  defp add_buffer_to_current_tab(state, label) do
+    tb = TabBar.update_label(state.tab_bar, state.tab_bar.active_id, label)
+
+    %{state | tab_bar: tb}
+    |> sync_active_window_buffer()
+  end
+
+  # Updates the active file tab's label to match the current buffer name.
+  # No-op if there's no tab bar or the active tab isn't a file tab.
+  @spec sync_active_tab_label(t()) :: t()
+  defp sync_active_tab_label(%__MODULE__{tab_bar: nil} = state), do: state
+
+  defp sync_active_tab_label(%__MODULE__{tab_bar: tb, buffers: bs} = state) do
+    case TabBar.active(tb) do
+      %Tab{kind: :file} ->
+        label = buffer_label(bs.active)
+        %{state | tab_bar: TabBar.update_label(tb, tb.active_id, label)}
+
+      _ ->
+        state
+    end
+  end
+
+  # Creates a new file tab and switches to it. Used when the active tab
+  # is an agent tab and we need a dedicated file tab for the buffer.
+  @spec add_buffer_as_new_tab(t(), String.t()) :: t()
+  defp add_buffer_as_new_tab(state, label) do
+    tb = state.tab_bar
+
+    # Snapshot current tab before leaving.
     current_ctx =
       snapshot_tab_context(state)
       |> Map.put(:mode, :normal)
@@ -264,23 +318,14 @@ defmodule Minga.Editor.State do
 
     tb = TabBar.update_context(tb, tb.active_id, current_ctx)
 
-    # Add the buffer to the pool (Buffers.add auto-activates it)
-    state = %{state | buffers: Buffers.add(bs, pid)}
-
-    # Create a file tab (TabBar.add auto-activates it)
+    # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # If leaving agentic view, reset to file-tab defaults.
-    state =
-      if state.agentic.active do
-        %{state | agentic: %ViewState{}, keymap_scope: :editor}
-      else
-        state
-      end
+    # Leave agentic view.
+    state = %{state | agentic: %ViewState{}, keymap_scope: :editor, tab_bar: tb}
+    state = sync_active_window_buffer(state)
 
-    # Snapshot the new tab's context with the correct active buffer.
-    state = %{state | tab_bar: tb} |> sync_active_window_buffer()
-
+    # Snapshot the new tab's context.
     new_ctx =
       snapshot_tab_context(state)
       |> Map.put(:mode, :normal)
@@ -289,15 +334,10 @@ defmodule Minga.Editor.State do
     tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
-      "[tab] add_buffer complete: tab=#{new_tab.id} agentic=#{state.agentic.active} scope=#{state.keymap_scope}"
+      "[tab] add_buffer new tab=#{new_tab.id} label=#{label}"
     end)
 
     %{state | tab_bar: tb}
-  end
-
-  def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
-    %{state | buffers: Buffers.add(bs, pid)}
-    |> sync_active_window_buffer()
   end
 
   @doc """
@@ -308,8 +348,9 @@ defmodule Minga.Editor.State do
   """
   @spec switch_buffer(t(), non_neg_integer()) :: t()
   def switch_buffer(%__MODULE__{buffers: bs} = state, idx) do
-    %{state | buffers: Buffers.switch_to(bs, idx)}
-    |> sync_active_window_buffer()
+    state = %{state | buffers: Buffers.switch_to(bs, idx)}
+    state = sync_active_window_buffer(state)
+    sync_active_tab_label(state)
   end
 
   @doc """

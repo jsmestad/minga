@@ -85,7 +85,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
   def execute(state, :buffer_list) do
-    PickerUI.open(state, Minga.Picker.TabSource)
+    PickerUI.open(state, Minga.Picker.BufferSource)
   end
 
   def execute(state, :buffer_list_all) do
@@ -94,8 +94,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(state, :buffer_next), do: next_buffer(state)
   def execute(state, :buffer_prev), do: prev_buffer(state)
-  def execute(state, :tab_next), do: next_buffer(state)
-  def execute(state, :tab_prev), do: prev_buffer(state)
+  def execute(state, :tab_next), do: next_tab(state)
+  def execute(state, :tab_prev), do: prev_tab(state)
 
   def execute(state, :kill_buffer) do
     case EditorState.active_tab_kind(state) do
@@ -473,7 +473,47 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec next_buffer(state()) :: state()
-  defp next_buffer(%{tab_bar: %TabBar{} = tb} = state) do
+  defp next_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
+    cycle_buffer_in_tab(state, rem(idx + 1, Enum.count(buffers)))
+  end
+
+  defp next_buffer(state), do: state
+
+  @spec prev_buffer(state()) :: state()
+  defp prev_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
+    count = Enum.count(buffers)
+    cycle_buffer_in_tab(state, rem(idx - 1 + count, count))
+  end
+
+  defp prev_buffer(state), do: state
+
+  # Cycles the buffer in the current tab. If the target buffer already
+  # has its own file tab, switches to that tab instead.
+  @spec cycle_buffer_in_tab(state(), non_neg_integer()) :: state()
+  defp cycle_buffer_in_tab(%{tab_bar: %TabBar{}} = state, idx) do
+    target_buf = Enum.at(state.buffers.list, idx)
+
+    case find_tab_for_buffer(state.tab_bar, target_buf) do
+      nil ->
+        # Buffer has no dedicated tab; switch in-place.
+        EditorState.switch_buffer(state, idx)
+
+      tab_id when tab_id == state.tab_bar.active_id ->
+        # Buffer's tab is the current tab; switch in-place.
+        EditorState.switch_buffer(state, idx)
+
+      tab_id ->
+        # Buffer lives in another tab; switch to it.
+        EditorState.switch_tab(state, tab_id)
+    end
+  end
+
+  defp cycle_buffer_in_tab(state, idx) do
+    EditorState.switch_buffer(state, idx)
+  end
+
+  @spec next_tab(state()) :: state()
+  defp next_tab(%{tab_bar: %TabBar{} = tb} = state) do
     next_tb = TabBar.next(tb)
 
     if next_tb.active_id != tb.active_id do
@@ -483,14 +523,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  defp next_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
-    switch_to_buffer(state, rem(idx + 1, Enum.count(buffers)))
-  end
+  defp next_tab(state), do: state
 
-  defp next_buffer(state), do: state
-
-  @spec prev_buffer(state()) :: state()
-  defp prev_buffer(%{tab_bar: %TabBar{} = tb} = state) do
+  @spec prev_tab(state()) :: state()
+  defp prev_tab(%{tab_bar: %TabBar{} = tb} = state) do
     prev_tb = TabBar.prev(tb)
 
     if prev_tb.active_id != tb.active_id do
@@ -500,13 +536,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  defp prev_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
-    len = Enum.count(buffers)
-    new_idx = if idx == 0, do: len - 1, else: idx - 1
-    switch_to_buffer(state, new_idx)
-  end
-
-  defp prev_buffer(state), do: state
+  defp prev_tab(state), do: state
 
   @spec remove_current_buffer(state()) :: state()
 

@@ -186,8 +186,8 @@ defmodule Minga.BufferPickerTest do
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
-      # Tab picker shows bullet (•) for modified buffers
-      assert String.contains?(all_text, "\u{2022}")
+      # Buffer picker shows [+] for modified buffers
+      assert String.contains?(all_text, "[+]")
     end
   end
 
