@@ -280,6 +280,54 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
+  # ── :setglobal — writes to the global Options agent ───────────────────────
+
+  def execute(state, {:execute_ex_command, {:setglobal, :number}}) do
+    Minga.Config.Options.set(:line_numbers, :absolute)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :nonumber}}) do
+    Minga.Config.Options.set(:line_numbers, :none)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :relativenumber}}) do
+    current = Minga.Config.Options.get(:line_numbers)
+
+    next =
+      case current do
+        :absolute -> :hybrid
+        _ -> :relative
+      end
+
+    Minga.Config.Options.set(:line_numbers, next)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :norelativenumber}}) do
+    current = Minga.Config.Options.get(:line_numbers)
+
+    next =
+      case current do
+        :hybrid -> :absolute
+        _ -> :none
+      end
+
+    Minga.Config.Options.set(:line_numbers, next)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :wrap}}) do
+    Minga.Config.Options.set(:wrap, true)
+    state
+  end
+
+  def execute(state, {:execute_ex_command, {:setglobal, :nowrap}}) do
+    Minga.Config.Options.set(:wrap, false)
+    state
+  end
+
   def execute(
         %{buffers: %{active: buf}} = state,
         {:execute_ex_command, {:substitute, pattern, replacement, flags}}
