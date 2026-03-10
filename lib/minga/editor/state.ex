@@ -268,6 +268,15 @@ defmodule Minga.Editor.State do
     # Create a file tab (TabBar.add makes it active)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
+    # If we're leaving an agentic view, deactivate it so the new file
+    # tab doesn't inherit agentic.active: true in its context snapshot.
+    state =
+      if state.agentic.active do
+        %{state | agentic: %{state.agentic | active: false}, keymap_scope: :editor}
+      else
+        state
+      end
+
     # Snapshot the new tab's context. Use :normal mode for the same reason.
     state = %{state | tab_bar: tb} |> sync_active_window_buffer()
 
@@ -481,6 +490,16 @@ defmodule Minga.Editor.State do
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{tab_bar: nil}), do: nil
   def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
+
+  @doc "Finds a file tab whose context has the given buffer pid as active_buffer."
+  @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
+  def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
+
+  def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
+    Enum.find(tb.tabs, fn tab ->
+      tab.kind == :file and Map.get(tab.context, :active_buffer) == pid
+    end)
+  end
 
   @doc """
   Returns the kind of the active tab, or `:file` as default.
