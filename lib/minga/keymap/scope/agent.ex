@@ -156,9 +156,12 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
     # Backspace
     |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
-    # Navigation in input
+    # Left/right arrows handled by Vim.handle_key (shared primitive).
+    # Up/down arrows handled here: moves cursor OR recalls prompt history.
     |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
     |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
+    |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
+    |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
     # Ctrl modifiers
     |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")

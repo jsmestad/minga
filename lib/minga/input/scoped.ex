@@ -209,12 +209,20 @@ defmodule Minga.Input.Scoped do
   end
 
   defp handle_agent_key(%{agent: %{panel: %{input_focused: true} = panel}} = state, cp, mods) do
-    mode = PanelState.input_mode(panel)
+    # Try Vim first for ALL modes (handles arrow keys in insert, all keys
+    # in normal/visual/operator-pending). Falls through to scope trie for
+    # surface-specific keys (self-insert, Enter, Backspace, Ctrl combos).
+    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
+      {:handled, new_vim, new_tf} ->
+        new_panel = %{panel | vim: new_vim, input: new_tf}
+        {:handled, %{state | agent: %{state.agent | panel: new_panel}}}
 
-    if mode == :insert do
-      resolve_agent_key(state, :insert, cp, mods)
-    else
-      {:handled, dispatch_vim_key(state, cp, mods)}
+      :not_handled ->
+        if PanelState.input_mode(panel) == :insert do
+          resolve_agent_key(state, :insert, cp, mods)
+        else
+          {:handled, dispatch_vim_key(state, cp, mods)}
+        end
     end
   end
 
@@ -403,16 +411,21 @@ defmodule Minga.Input.Scoped do
     AgentCommands.handle_mention_key(state, cp, mods)
   end
 
-  # Non-insert modes (normal, visual, operator-pending): route through the
-  # Vim grammar module. If Vim doesn't handle it, fall through to scope trie
-  # for meta keys (Escape/unfocus, Ctrl+C/submit, etc.).
+  # All modes: try Vim first (handles arrow keys in insert, all keys in
+  # normal/visual/operator-pending). Falls through to surface-specific
+  # handlers for self-insert, Enter, Backspace, Ctrl combos, etc.
   defp handle_panel_input(%{agent: %{panel: panel}} = state, cp, mods) do
-    mode = PanelState.input_mode(panel)
+    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
+      {:handled, new_vim, new_tf} ->
+        new_panel = %{panel | vim: new_vim, input: new_tf}
+        %{state | agent: %{state.agent | panel: new_panel}}
 
-    if mode == :insert do
-      handle_panel_insert(state, cp, mods)
-    else
-      dispatch_vim_key(state, cp, mods)
+      :not_handled ->
+        if PanelState.input_mode(panel) == :insert do
+          handle_panel_insert(state, cp, mods)
+        else
+          dispatch_vim_key(state, cp, mods)
+        end
     end
   end
 
@@ -498,31 +511,16 @@ defmodule Minga.Input.Scoped do
     AgentCommands.submit_prompt(state)
   end
 
-  # Up arrow: move cursor up or recall history
-  defp handle_panel_insert(state, cp, _mods) when cp == 0xF700 do
+  # Up arrow: move cursor up or recall history (macOS, Kitty, legacy encodings)
+  defp handle_panel_insert(state, cp, _mods) when cp in [0xF700, 57_352, 0x415B1B] do
     case AgentState.move_cursor_up(state.agent) do
       :at_top -> update_agent(state, &AgentState.history_prev/1)
       agent -> %{state | agent: agent}
     end
   end
 
-  # Down arrow: move cursor down or forward history
-  defp handle_panel_insert(state, cp, _mods) when cp == 0xF701 do
-    case AgentState.move_cursor_down(state.agent) do
-      :at_bottom -> update_agent(state, &AgentState.history_next/1)
-      agent -> %{state | agent: agent}
-    end
-  end
-
-  # Legacy arrow encodings (escape sequences from Zig TUI)
-  defp handle_panel_insert(state, 0x415B1B, _mods) do
-    case AgentState.move_cursor_up(state.agent) do
-      :at_top -> update_agent(state, &AgentState.history_prev/1)
-      agent -> %{state | agent: agent}
-    end
-  end
-
-  defp handle_panel_insert(state, 0x425B1B, _mods) do
+  # Down arrow: move cursor down or forward history (macOS, Kitty, legacy encodings)
+  defp handle_panel_insert(state, cp, _mods) when cp in [0xF701, 57_353, 0x425B1B] do
     case AgentState.move_cursor_down(state.agent) do
       :at_bottom -> update_agent(state, &AgentState.history_next/1)
       agent -> %{state | agent: agent}

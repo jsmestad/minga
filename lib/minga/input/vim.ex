@@ -144,13 +144,23 @@ defmodule Minga.Input.Vim do
   def visual_range(_, _), do: nil
 
   @doc """
-  Main key dispatch. Call for every key event when `mode/1` is not
-  `:insert`. Returns `{:handled, vim, tf}` if the key was consumed,
-  or `:not_handled` to fall through to scope bindings.
+  Main key dispatch. Call for every key event in any mode. Returns
+  `{:handled, vim, tf}` if the key was consumed, or `:not_handled` to
+  fall through to surface-specific handlers (self-insert, Enter, etc.).
+
+  In insert mode, only arrow keys and Escape are handled here.
+  Everything else returns `:not_handled` so the surface can do
+  self-insert, submit, mention completion, etc.
   """
   @spec handle_key(t(), TextField.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, t(), TextField.t()} | :not_handled
-  def handle_key(%__MODULE__{state: :insert}, _tf, _cp, _mods), do: :not_handled
+  def handle_key(%__MODULE__{state: :insert} = vim, tf, cp, _mods) do
+    case insert_motion(cp) do
+      nil -> :not_handled
+      motion_fn -> {:handled, vim, TextField.set_cursor(tf, motion_fn.(tf))}
+    end
+  end
+
   def handle_key(%__MODULE__{state: :normal} = v, tf, cp, m), do: handle_normal(v, tf, cp, m)
   def handle_key(%__MODULE__{state: :g_prefix} = v, tf, cp, _m), do: handle_g_prefix(v, tf, cp)
 
@@ -592,6 +602,44 @@ defmodule Minga.Input.Vim do
   defp motion_fn(0xF703), do: &move_right/2
   defp motion_fn(_), do: nil
 
+  # ── Insert-mode arrow keys ──────────────────────────────────────────────
+  # Returns a 1-arity fn (tf -> cursor) for arrow codepoints, nil otherwise.
+  # Insert mode allows cursor past last char and wraps left/right across lines.
+
+  @spec insert_motion(non_neg_integer()) :: (TextField.t() -> TextField.cursor()) | nil
+  # Left/right arrows are universal cursor movement, handled by Vim.
+  # Up/down arrows are NOT handled here: surfaces need to intercept them
+  # for history recall (up on line 0 → history prev, down on last line →
+  # history next). Surfaces handle up/down and fall back to move_cursor.
+  defp insert_motion(57_350), do: &insert_move_left/1
+  defp insert_motion(57_351), do: &insert_move_right/1
+  defp insert_motion(0xF702), do: &insert_move_left/1
+  defp insert_motion(0xF703), do: &insert_move_right/1
+  defp insert_motion(_), do: nil
+
+  @spec insert_move_left(TextField.t()) :: TextField.cursor()
+  defp insert_move_left(%{cursor: {0, 0}}), do: {0, 0}
+
+  defp insert_move_left(%{cursor: {line, 0}, lines: lines}) do
+    prev_len = String.length(Enum.at(lines, line - 1, ""))
+    {line - 1, prev_len}
+  end
+
+  defp insert_move_left(%{cursor: {line, col}}), do: {line, col - 1}
+
+  @spec insert_move_right(TextField.t()) :: TextField.cursor()
+  defp insert_move_right(%{cursor: {line, col}, lines: lines}) do
+    current_len = String.length(Enum.at(lines, line, ""))
+    max_line = length(lines) - 1
+
+    if col >= current_len and line < max_line do
+      {line + 1, 0}
+    else
+      {line, min(col + 1, current_len)}
+    end
+  end
+
+  # ── Normal-mode motions ────────────────────────────────────────────────
   # In normal mode, h/l don't wrap across lines (vim semantics)
   @spec move_left(TextField.t(), TextField.cursor()) :: TextField.cursor()
   defp move_left(_tf, {line, col}), do: {line, max(col - 1, 0)}

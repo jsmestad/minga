@@ -527,4 +527,54 @@ defmodule Minga.Input.VimTest do
       assert Vim.mode(vim) == :normal
     end
   end
+
+  describe "insert mode arrow keys" do
+    test "left arrow moves cursor left" do
+      tf = TextField.from_parts(["hello"], {0, 3})
+      vim = Vim.enter_insert(Vim.new())
+
+      {:handled, vim, tf} = Vim.handle_key(vim, tf, 57_350, 0)
+      assert Vim.mode(vim) == :insert
+      assert tf.cursor == {0, 2}
+    end
+
+    test "right arrow moves cursor right" do
+      tf = TextField.from_parts(["hello"], {0, 2})
+      vim = Vim.enter_insert(Vim.new())
+
+      {:handled, _vim, tf} = Vim.handle_key(vim, tf, 57_351, 0)
+      assert tf.cursor == {0, 3}
+    end
+
+    test "left arrow wraps to previous line" do
+      tf = TextField.from_parts(["ab", "cd"], {1, 0})
+      vim = Vim.enter_insert(Vim.new())
+
+      {:handled, _vim, tf} = Vim.handle_key(vim, tf, 57_350, 0)
+      assert tf.cursor == {0, 2}
+    end
+
+    test "right arrow wraps to next line" do
+      tf = TextField.from_parts(["ab", "cd"], {0, 2})
+      vim = Vim.enter_insert(Vim.new())
+
+      {:handled, _vim, tf} = Vim.handle_key(vim, tf, 57_351, 0)
+      assert tf.cursor == {1, 0}
+    end
+
+    test "printable chars return :not_handled" do
+      tf = TextField.from_parts(["hello"], {0, 3})
+      vim = Vim.enter_insert(Vim.new())
+
+      assert :not_handled = Vim.handle_key(vim, tf, ?x, 0)
+    end
+
+    test "macOS arrow codepoints also work" do
+      tf = TextField.from_parts(["hello"], {0, 3})
+      vim = Vim.enter_insert(Vim.new())
+
+      {:handled, _vim, tf} = Vim.handle_key(vim, tf, 0xF702, 0)
+      assert tf.cursor == {0, 2}
+    end
+  end
 end
