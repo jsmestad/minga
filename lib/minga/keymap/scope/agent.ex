@@ -176,7 +176,9 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec input_normal_trie() :: Bindings.node_t()
   defp input_normal_trie do
     Bindings.new()
-    |> Bindings.bind([{@escape, 0}], :agent_unfocus_input, "Back to chat nav")
+    # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
+    # Use `q` or Ctrl+Q to leave the input field.
+    |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
     |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down")
     |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up")

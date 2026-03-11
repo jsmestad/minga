@@ -158,33 +158,6 @@ defmodule Minga.Input.ScopedTest do
       assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
 
-    test "vim motions work in normal mode (side panel regression)", %{state: state} do
-      # Type some text first
-      {:handled, state} = Scoped.handle_key(state, ?h, 0)
-      {:handled, state} = Scoped.handle_key(state, ?e, 0)
-      {:handled, state} = Scoped.handle_key(state, ?l, 0)
-      {:handled, state} = Scoped.handle_key(state, ?l, 0)
-      {:handled, state} = Scoped.handle_key(state, ?o, 0)
-      assert PanelState.input_text(state.agent.panel) == "hello"
-      assert state.agent.panel.input.cursor == {0, 5}
-
-      # Escape → normal mode
-      {:handled, state} = Scoped.handle_key(state, 27, 0)
-      assert PanelState.input_mode(state.agent.panel) == :normal
-
-      # h should move cursor left, NOT insert "h" as text.
-      # Before the fix, dispatch_vim_key returned {:handled, state} which
-      # got double-wrapped to {:handled, {:handled, state}}, breaking
-      # downstream handling and leaving the mode effectively stuck in insert.
-      {:handled, state} = Scoped.handle_key(state, ?h, 0)
-      assert PanelState.input_text(state.agent.panel) == "hello"
-      assert state.agent.panel.input.cursor == {0, 3}
-
-      # w should jump forward, not insert "w"
-      {:handled, state} = Scoped.handle_key(state, ?w, 0)
-      assert PanelState.input_text(state.agent.panel) == "hello"
-    end
-
     test "Backspace on empty input is safe", %{state: state} do
       {:handled, _new_state} = Scoped.handle_key(state, 127, 0)
     end

@@ -465,7 +465,7 @@ defmodule Minga.Input.Scoped do
     AgentCommands.clear_chat_display(state)
   end
 
-  # Escape: unfocus the input
+  # Escape: switch to normal mode (vim-style)
   defp handle_panel_insert(state, 27, _mods) do
     AgentCommands.input_to_normal(state)
   end
