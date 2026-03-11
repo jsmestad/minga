@@ -32,6 +32,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.LspActions
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
+  alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.FileTree
@@ -522,24 +523,12 @@ defmodule Minga.Editor do
 
   # ── Surface lifecycle ──────────────────────────────────────────────────────
 
-  alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.Bridge, as: AVBridge
-  alias Minga.Surface.AgentView.State, as: AVState
-  alias Minga.Surface.BufferView
-  alias Minga.Surface.BufferView.Bridge, as: BVBridge
-  alias Minga.Surface.BufferView.State, as: BVState
-
   @doc """
   Applies a list of surface effects to the editor state.
 
   Surfaces return `{new_state, [effect()]}` from their callbacks.
-  The Editor interprets each effect without knowing the surface's
-  internal logic. This keeps surfaces testable as pure
-  `state -> {state, effects}` functions.
-
-  During Phase 1, most surfaces return empty effect lists. This
-  infrastructure is ready for when surfaces start producing effects
-  in later phases.
+  The Editor interprets each effect. This keeps surfaces testable as
+  pure `state -> {state, effects}` functions.
   """
   @spec apply_effects(EditorState.t(), [Minga.Surface.effect()]) :: EditorState.t()
   def apply_effects(state, []), do: state
@@ -550,17 +539,11 @@ defmodule Minga.Editor do
   end
 
   @spec apply_effect(EditorState.t(), Minga.Surface.effect()) :: EditorState.t()
-  defp apply_effect(state, :render) do
-    schedule_render(state, 16)
-  end
+  defp apply_effect(state, :render), do: schedule_render(state, 16)
+  defp apply_effect(state, {:set_status, msg}) when is_binary(msg), do: %{state | status_msg: msg}
 
-  defp apply_effect(state, {:set_status, msg}) when is_binary(msg) do
-    %{state | status_msg: msg}
-  end
-
-  defp apply_effect(state, {:open_file, path}) when is_binary(path) do
-    Commands.execute(state, {:edit_file, path})
-  end
+  defp apply_effect(state, {:open_file, path}) when is_binary(path),
+    do: Commands.execute(state, {:edit_file, path})
 
   defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
     case Enum.find_index(state.buffers.list, &(&1 == pid)) do
@@ -569,99 +552,37 @@ defmodule Minga.Editor do
     end
   end
 
-  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod) do
-    %{state | focus_stack: [mod | state.focus_stack]}
-  end
+  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod),
+    do: %{state | focus_stack: [mod | state.focus_stack]}
 
-  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod) do
-    %{state | focus_stack: List.delete(state.focus_stack, mod)}
-  end
+  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod),
+    do: %{state | focus_stack: List.delete(state.focus_stack, mod)}
 
-  defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms) do
-    schedule_render(state, delay_ms)
-  end
+  defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms),
+    do: schedule_render(state, delay_ms)
 
-  defp apply_effect(state, {:log_message, msg}) when is_binary(msg) do
-    log_message(state, msg)
-  end
+  defp apply_effect(state, {:log_message, msg}) when is_binary(msg), do: log_message(state, msg)
+  defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
 
-  defp apply_effect(state, :sync_agent_buffer) do
-    AgentLifecycle.sync_buffer(state)
-  end
+  defp apply_effect(state, {:update_tab_label, _label}),
+    do: AgentLifecycle.maybe_update_tab_label(state)
 
-  defp apply_effect(state, {:update_tab_label, _label}) do
-    AgentLifecycle.maybe_update_tab_label(state)
-  end
+  # Surface init, sync, and event dispatch delegated to SurfaceSync.
 
   @doc false
-  @spec init_surface(EditorState.t()) :: EditorState.t()
-  defp init_surface(%EditorState{keymap_scope: :agent} = state) do
-    av_state = AVBridge.from_editor_state(state)
-    %{state | surface_module: AgentView, surface_state: av_state}
-  end
+  defdelegate init_surface(state), to: SurfaceSync
 
-  defp init_surface(%EditorState{} = state) do
-    bv_state = BVBridge.from_editor_state(state)
-    %{state | surface_module: BufferView, surface_state: bv_state}
-  end
-
-  @doc """
-  Updates the surface state from the current EditorState fields.
-
-  Call this after any operation that modifies EditorState fields that
-  are also owned by the surface (buffers, windows, mode, etc.) to keep
-  the surface state in sync.
-  """
   @spec sync_surface_from_editor(EditorState.t()) :: EditorState.t()
-  def sync_surface_from_editor(%EditorState{surface_module: BufferView} = state) do
-    %{state | surface_state: BVBridge.from_editor_state(state)}
-  end
+  defdelegate sync_surface_from_editor(state), to: SurfaceSync, as: :sync_from_editor
 
-  def sync_surface_from_editor(%EditorState{surface_module: AgentView} = state) do
-    %{state | surface_state: AVBridge.from_editor_state(state)}
-  end
-
-  def sync_surface_from_editor(state), do: state
-
-  @doc """
-  Updates EditorState fields from the current surface state.
-
-  Call this after a surface callback returns updated state to write
-  the changes back to EditorState.
-  """
   @spec sync_editor_from_surface(EditorState.t()) :: EditorState.t()
-  def sync_editor_from_surface(
-        %EditorState{surface_module: BufferView, surface_state: %BVState{} = bv} = state
-      ) do
-    BVBridge.to_editor_state(state, bv)
-  end
+  defdelegate sync_editor_from_surface(state), to: SurfaceSync, as: :sync_to_editor
 
-  def sync_editor_from_surface(
-        %EditorState{surface_module: AgentView, surface_state: %AVState{} = av} = state
-      ) do
-    AVBridge.to_editor_state(state, av)
-  end
-
-  def sync_editor_from_surface(state), do: state
-
-  @doc """
-  Dispatches an event through the active surface's handle_event callback.
-
-  Syncs the surface state from EditorState, calls handle_event, writes
-  back the updated surface state, and applies any effects. Used to
-  route agent events through AgentView.
-  """
   @spec dispatch_surface_event(EditorState.t(), term()) :: EditorState.t()
-  def dispatch_surface_event(%EditorState{surface_module: mod} = state, event)
-      when mod != nil do
-    state = sync_surface_from_editor(state)
-    {new_surface_state, effects} = mod.handle_event(state.surface_state, event)
-    state = %{state | surface_state: new_surface_state}
-    state = sync_editor_from_surface(state)
+  def dispatch_surface_event(state, event) do
+    {state, effects} = SurfaceSync.dispatch_event(state, event)
     apply_effects(state, effects)
   end
-
-  def dispatch_surface_event(state, _event), do: state
 
   # Tab bar, view state, capabilities, parser subscription helpers
   # extracted to Minga.Editor.Startup.
