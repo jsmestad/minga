@@ -29,7 +29,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
-  alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.MacroReplay
   alias Minga.Editor.ModeTransitions
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
@@ -825,7 +825,7 @@ defmodule Minga.Editor do
 
     # ── Macro recording ──────────────────────────────────────────────────
     # Record keys into macro register if actively recording (and not replaying).
-    state = maybe_record_macro_key(state, key, commands)
+    state = MacroReplay.maybe_record_key(state, key, commands)
 
     # Guard: block insert/replace transitions on read-only buffers.
     {new_mode, commands, new_mode_state, state} =
@@ -952,7 +952,7 @@ defmodule Minga.Editor do
     execute = fn s ->
       case Commands.execute(s, cmd) do
         {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
-        {s2, {:replay_macro, register}} -> replay_macro(s2, register)
+        {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
         {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
         s2 -> s2
       end
@@ -1088,52 +1088,7 @@ defmodule Minga.Editor do
     end
   end
 
-  # ── Macro recording helpers ───────────────────────────────────────────────
-
-  @spec maybe_record_macro_key(
-          state(),
-          {non_neg_integer(), non_neg_integer()},
-          [Mode.command()]
-        ) :: state()
-  defp maybe_record_macro_key(%{macro_recorder: %{replaying: true}} = state, _key, _cmds),
-    do: state
-
-  defp maybe_record_macro_key(%{macro_recorder: rec} = state, key, commands) do
-    case MacroRecorder.recording?(rec) do
-      {true, _reg} ->
-        # Don't record the `q` that stops recording
-        has_stop? = Enum.any?(commands, &match?(:toggle_macro_recording, &1))
-
-        if has_stop? do
-          state
-        else
-          %{state | macro_recorder: MacroRecorder.record_key(rec, key)}
-        end
-
-      false ->
-        state
-    end
-  end
-
-  @spec replay_macro(state(), String.t()) :: state()
-  defp replay_macro(%{macro_recorder: rec} = state, register) do
-    case MacroRecorder.get_macro(rec, register) do
-      nil ->
-        state
-
-      keys ->
-        rec = MacroRecorder.start_replay(rec)
-        state = %{state | macro_recorder: rec}
-
-        state =
-          Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
-            do_handle_key(acc, codepoint, modifiers)
-          end)
-
-        rec = MacroRecorder.stop_replay(state.macro_recorder)
-        %{state | macro_recorder: rec}
-    end
-  end
+  # Macro recording and replay extracted to Minga.Editor.MacroReplay.
 
   # ── File tree helpers ───────────────────────────────────────────────────
 
