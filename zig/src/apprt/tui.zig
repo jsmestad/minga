@@ -167,7 +167,20 @@ pub const TuiRuntime = struct {
             return err;
         };
 
-        self.vx = try vaxis.init(alloc, .{});
+        self.vx = try vaxis.init(alloc, .{
+            // Request only "disambiguate" from the Kitty keyboard protocol.
+            // This lets the terminal report modifiers on keys like Enter
+            // (so Shift+Enter differs from Enter) without the side effects
+            // of report_all_as_ctl_seqs, which causes bare modifier presses
+            // (Shift, Ctrl, Alt) to generate key events.
+            .kitty_keyboard_flags = .{
+                .disambiguate = true,
+                .report_events = false,
+                .report_alternate_keys = false,
+                .report_all_as_ctl_seqs = false,
+                .report_text = false,
+            },
+        });
 
         // Allocate screen buffers at the real terminal size.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
