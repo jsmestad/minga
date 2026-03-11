@@ -13,6 +13,7 @@ defmodule Minga.Picker.AgentSessionSource do
   alias Minga.Agent.SessionStore
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
@@ -45,7 +46,7 @@ defmodule Minga.Picker.AgentSessionSource do
   end
 
   def on_select({{session_id, :disk}, _label, _desc}, state) do
-    case state.agent.session do
+    case AgentAccess.session(state) do
       nil ->
         state
 

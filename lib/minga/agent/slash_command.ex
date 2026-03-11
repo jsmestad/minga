@@ -13,6 +13,7 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
 
   @typedoc "Editor state (same as EditorState.t())."
   @type state :: map()
@@ -97,11 +98,11 @@ defmodule Minga.Agent.SlashCommand do
   defp do_thinking(state, level) do
     level = String.trim(level)
 
-    if state.agent.session do
-      case Session.set_thinking_level(state.agent.session, level) do
+    if AgentAccess.session(state) do
+      case Session.set_thinking_level(AgentAccess.session(state), level) do
         :ok ->
-          state = update_agent(state, &AgentState.set_thinking_level(&1, level))
-          Session.add_system_message(state.agent.session, "Thinking: #{level}")
+          state = AgentAccess.update_agent(state, &AgentState.set_thinking_level(&1, level))
+          Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
           %{state | status_msg: "Thinking: #{level}"}
 
         {:error, reason} ->
@@ -127,8 +128,8 @@ defmodule Minga.Agent.SlashCommand do
       @commands
       |> Enum.map_join("\n", fn cmd -> "  /#{cmd.name} — #{cmd.description}" end)
 
-    if state.agent.session do
-      Session.add_system_message(state.agent.session, "Available commands:\n#{help_text}")
+    if AgentAccess.session(state) do
+      Session.add_system_message(AgentAccess.session(state), "Available commands:\n#{help_text}")
     end
 
     %{state | status_msg: "Commands listed in chat"}
@@ -149,11 +150,6 @@ defmodule Minga.Agent.SlashCommand do
       [cmd] -> {String.downcase(cmd), ""}
       [cmd, args] -> {String.downcase(cmd), args}
     end
-  end
-
-  @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun) do
-    %{state | agent: fun.(state.agent)}
   end
 
   # Silence the "unused alias" warning; PanelState is used transitively

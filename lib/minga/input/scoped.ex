@@ -29,6 +29,7 @@ defmodule Minga.Input.Scoped do
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
   alias Minga.Input.Vim
   alias Minga.Keymap.Scope
@@ -79,61 +80,66 @@ defmodule Minga.Input.Scoped do
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
   # Dismiss toast on any key (then re-process)
-  defp handle_agent_key(%{agentic: %{toast: toast}} = state, cp, mods)
-       when toast != nil do
-    state = %{state | agentic: ViewState.dismiss_toast(state.agentic)}
-    handle_agent_key(state, cp, mods)
-  end
-
-  # SPC when not in insert mode: passthrough to leader/which-key
-  defp handle_agent_key(
-         %{agent: %{panel: %{input_focused: false}}} = state,
-         @space,
-         mods
-       )
-       when band(mods, @ctrl) == 0 do
-    {:passthrough, state}
-  end
-
-  # Leader sequence in progress: passthrough ALL keys to mode FSM
-  defp handle_agent_key(
-         %{mode_state: %{leader_node: node}, agent: %{panel: %{input_focused: false}}} = state,
-         _cp,
-         _mods
-       )
-       when is_map(node) do
-    {:passthrough, state}
-  end
-
-  # Sub-state handlers (search, mention, approval, diff review) are now
-  # separate Input.Handler modules in the surface handler list. They run
-  # before Scoped in the focus stack walk. See Input.surface_handlers/0.
-
-  # Normal dispatch: determine vim state and resolve through scope
-  # Tab on a paste placeholder line: toggle expand/collapse
-  defp handle_agent_key(
-         %{agent: %{panel: %{input_focused: true} = panel}} = state,
-         @tab,
-         0
-       ) do
-    {cursor_line, _} = panel.input.cursor
-    current_line = Enum.at(panel.input.lines, cursor_line)
-
-    if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
-      {:handled, AgentCommands.toggle_paste_expand(state)}
+  defp handle_agent_key(state, cp, mods) do
+    if AgentAccess.agentic(state).toast != nil do
+      state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
+      handle_agent_key(state, cp, mods)
     else
-      resolve_agent_key(state, :insert, @tab, 0)
+      do_handle_agent_key(state, cp, mods)
     end
   end
 
-  defp handle_agent_key(%{agent: %{panel: %{input_focused: true} = panel}} = state, cp, mods) do
+  defp do_handle_agent_key(state, cp, mods) do
+    panel = AgentAccess.panel(state)
+
+    # SPC when not in insert mode: passthrough to leader/which-key
+    if cp == @space and not panel.input_focused and band(mods, @ctrl) == 0 do
+      {:passthrough, state}
+      # Leader sequence in progress: passthrough ALL keys to mode FSM
+    else
+      if is_map(state.mode_state.leader_node) and not panel.input_focused do
+        {:passthrough, state}
+      else
+        dispatch_agent_key_inner(state, cp, mods)
+      end
+    end
+  end
+
+  defp dispatch_agent_key_inner(state, cp, mods) do
+    panel = AgentAccess.panel(state)
+
+    # Sub-state handlers (search, mention, approval, diff review) are now
+    # separate Input.Handler modules in the surface handler list. They run
+    # before Scoped in the focus stack walk. See Input.surface_handlers/0.
+
+    # Normal dispatch: determine vim state and resolve through scope
+    # Tab on a paste placeholder line: toggle expand/collapse
+    if cp == @tab and mods == 0 and panel.input_focused do
+      {cursor_line, _} = panel.input.cursor
+      current_line = Enum.at(panel.input.lines, cursor_line)
+
+      if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
+        {:handled, AgentCommands.toggle_paste_expand(state)}
+      else
+        resolve_agent_key(state, :insert, @tab, 0)
+      end
+    else
+      if panel.input_focused do
+        handle_focused_input(state, panel, cp, mods)
+      else
+        resolve_agent_key(state, :normal, cp, mods)
+      end
+    end
+  end
+
+  defp handle_focused_input(state, panel, cp, mods) do
     # Try Vim first for ALL modes (handles arrow keys in insert, all keys
     # in normal/visual/operator-pending). Falls through to scope trie for
     # surface-specific keys (self-insert, Enter, Backspace, Ctrl combos).
     case Vim.handle_key(panel.vim, panel.input, cp, mods) do
       {:handled, new_vim, new_tf} ->
         new_panel = %{panel | vim: new_vim, input: new_tf}
-        {:handled, %{state | agent: %{state.agent | panel: new_panel}}}
+        {:handled, AgentAccess.update_agent(state, fn agent -> %{agent | panel: new_panel} end)}
 
       :not_handled ->
         if PanelState.input_mode(panel) == :insert do
@@ -142,10 +148,6 @@ defmodule Minga.Input.Scoped do
           {:handled, AgentPanel.dispatch_vim_key(state, cp, mods)}
         end
     end
-  end
-
-  defp handle_agent_key(state, cp, mods) do
-    resolve_agent_key(state, :normal, cp, mods)
   end
 
   # ── Agent scope trie resolution ────────────────────────────────────────────
@@ -161,14 +163,14 @@ defmodule Minga.Input.Scoped do
     key = {cp, mods}
 
     # Check if we're continuing a prefix sequence
-    case state.agentic.pending_prefix do
+    case AgentAccess.agentic(state).pending_prefix do
       nil ->
         # Fresh lookup
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
 
       prefix_node when is_map(prefix_node) ->
         # Continuing a prefix sequence stored as a trie node
-        state = %{state | agentic: ViewState.clear_prefix(state.agentic)}
+        state = AgentAccess.update_agentic(state, &ViewState.clear_prefix/1)
 
         case Scope.resolve_key_in_node(prefix_node, key) do
           {:command, command} ->
@@ -176,7 +178,7 @@ defmodule Minga.Input.Scoped do
 
           {:prefix, sub_node} ->
             # Another prefix level (rare)
-            {:handled, %{state | agentic: ViewState.set_prefix(state.agentic, sub_node)}}
+            {:handled, AgentAccess.update_agentic(state, &ViewState.set_prefix(&1, sub_node))}
 
           :not_found ->
             # Invalid prefix continuation, re-process the key normally
@@ -185,7 +187,7 @@ defmodule Minga.Input.Scoped do
 
       _atom_prefix ->
         # Legacy atom prefix (shouldn't happen in new system, but handle gracefully)
-        state = %{state | agentic: ViewState.clear_prefix(state.agentic)}
+        state = AgentAccess.update_agentic(state, &ViewState.clear_prefix/1)
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
     end
   end
@@ -206,7 +208,7 @@ defmodule Minga.Input.Scoped do
 
       {:prefix, prefix_node} ->
         # Store the prefix node for the next key
-        {:handled, %{state | agentic: ViewState.set_prefix(state.agentic, prefix_node)}}
+        {:handled, AgentAccess.update_agentic(state, &ViewState.set_prefix(&1, prefix_node))}
 
       :not_found ->
         # No scope binding. In insert mode, self-insert printable chars.

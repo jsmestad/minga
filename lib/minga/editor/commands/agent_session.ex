@@ -8,10 +8,10 @@ defmodule Minga.Editor.Commands.AgentSession do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
 
   @type state :: EditorState.t()
@@ -21,41 +21,43 @@ defmodule Minga.Editor.Commands.AgentSession do
   @doc "Stops the current session and restarts if the panel is visible."
   @spec restart_session(state(), String.t()) :: state()
   def restart_session(state, message) do
-    if state.agent.session do
+    if AgentAccess.session(state) do
       try do
-        GenServer.stop(state.agent.session, :normal, 1000)
+        GenServer.stop(AgentAccess.session(state), :normal, 1000)
       catch
         :exit, _ -> :ok
       end
     end
 
-    state = update_agent(state, &AgentState.clear_session/1)
+    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
     state = %{state | status_msg: message}
-    if AgentState.visible?(state.agent), do: start_agent_session(state), else: state
+    if AgentState.visible?(AgentAccess.agent(state)), do: start_agent_session(state), else: state
   end
 
   @doc "Starts a new agent session and subscribes to its events."
   @spec start_agent_session(state()) :: state()
   def start_agent_session(state) do
+    panel = AgentAccess.panel(state)
+
     opts = [
-      thinking_level: state.agent.panel.thinking_level,
+      thinking_level: panel.thinking_level,
       provider_opts: [
-        provider: state.agent.panel.provider_name,
-        model: state.agent.panel.model_name
+        provider: panel.provider_name,
+        model: panel.model_name
       ]
     ]
 
     case start_and_subscribe(opts) do
       {:ok, pid} ->
         state =
-          if state.agent.buffer == nil do
+          if AgentAccess.agent(state).buffer == nil do
             buf = AgentBufferSync.start_buffer()
-            update_agent(state, &AgentState.set_buffer(&1, buf))
+            AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
           else
             state
           end
 
-        state = update_agent(state, &AgentState.set_session(&1, pid))
+        state = AgentAccess.update_agent(state, &AgentState.set_session(&1, pid))
 
         case state do
           %{tab_bar: %TabBar{active_id: id}} ->
@@ -70,7 +72,7 @@ defmodule Minga.Editor.Commands.AgentSession do
         msg = format_session_error(reason)
         Logger.error("[Agent] #{msg}")
         Minga.Editor.log_to_messages("[Agent] #{msg}")
-        update_agent(state, &AgentState.set_error(&1, msg))
+        AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
     end
   end
 
@@ -96,9 +98,9 @@ defmodule Minga.Editor.Commands.AgentSession do
 
     state = put_in(state.buffers.active, buf)
 
-    if state.agent.session do
+    if AgentAccess.session(state) do
       Session.add_system_message(
-        state.agent.session,
+        AgentAccess.session(state),
         "Opened #{if(language == "", do: "text", else: language)} code block in buffer"
       )
     end
@@ -183,16 +185,5 @@ defmodule Minga.Editor.Commands.AgentSession do
     }
 
     Map.get(mapping, String.downcase(lang))
-  end
-
-  @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun) do
-    %{state | agent: fun.(state.agent)}
-  end
-
-  @doc "Updates the agentic view state with the given function."
-  @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
-  def update_agentic(state, fun) do
-    %{state | agentic: fun.(state.agentic)}
   end
 end

@@ -26,6 +26,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Input.Vim
@@ -38,30 +39,32 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Toggles the agent chat panel."
   @spec toggle_panel(state()) :: state()
-  def toggle_panel(%{agent: %{panel: %{visible: true, input_focused: false}}} = state) do
-    update_agent(state, &AgentState.focus_input(&1, true))
-  end
-
   def toggle_panel(state) do
-    state = update_agent(state, &AgentState.toggle_panel/1)
+    panel = AgentAccess.panel(state)
 
-    state =
-      if state.agent.panel.visible and state.agent.session == nil do
-        AgentSession.start_agent_session(state)
-      else
-        state
-      end
+    if panel.visible and not AgentAccess.input_focused?(state) do
+      update_agent(state, &AgentState.focus_input(&1, true))
+    else
+      state = update_agent(state, &AgentState.toggle_panel/1)
 
-    state =
-      if state.agent.panel.visible do
-        update_agent(state, &AgentState.focus_input(&1, true))
-      else
-        update_agent(state, &AgentState.focus_input(&1, false))
-      end
+      state =
+        if AgentAccess.panel(state).visible and AgentAccess.session(state) == nil do
+          AgentSession.start_agent_session(state)
+        else
+          state
+        end
 
-    state
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
+      state =
+        if AgentAccess.panel(state).visible do
+          update_agent(state, &AgentState.focus_input(&1, true))
+        else
+          update_agent(state, &AgentState.focus_input(&1, false))
+        end
+
+      state
+      |> Layout.invalidate()
+      |> EditorState.invalidate_all_windows()
+    end
   end
 
   @doc """
@@ -179,7 +182,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec new_agent_context(state()) :: Tab.context()
   defp new_agent_context(state) do
-    agent = state.agent
+    agent = AgentAccess.agent(state)
     agentic = %{ViewState.new() | active: true, focus: :chat}
 
     av_state = %AVState{
@@ -236,7 +239,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
-    if state.agent.session == nil do
+    if AgentAccess.session(state) == nil do
       AgentSession.start_agent_session(state)
     else
       state
@@ -245,20 +248,25 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Submits the current input text as a prompt."
   @spec submit_prompt(state()) :: state()
-  def submit_prompt(%{agent: %{panel: %{input: %{lines: [""]}}}} = state), do: state
-
-  def submit_prompt(%{agent: %{session: nil}} = state) do
-    %{state | status_msg: "No agent session, try closing and reopening the panel"}
-  end
-
   def submit_prompt(state) do
-    text = PanelState.input_text(state.agent.panel)
+    panel = AgentAccess.panel(state)
 
-    if SlashCommand.slash_command?(text) do
-      state = update_agent(state, &AgentState.clear_input_and_scroll/1)
-      execute_slash_command(state, text)
-    else
-      send_prompt_to_llm(state, text)
+    cond do
+      panel.input.lines == [""] ->
+        state
+
+      AgentAccess.session(state) == nil ->
+        %{state | status_msg: "No agent session, try closing and reopening the panel"}
+
+      true ->
+        text = PanelState.input_text(panel)
+
+        if SlashCommand.slash_command?(text) do
+          state = update_agent(state, &AgentState.clear_input_and_scroll/1)
+          execute_slash_command(state, text)
+        else
+          send_prompt_to_llm(state, text)
+        end
     end
   end
 
@@ -273,22 +281,22 @@ defmodule Minga.Editor.Commands.Agent do
   @spec send_prompt_to_llm(state(), String.t()) :: state()
   defp send_prompt_to_llm(state, text) do
     # Resolve @file mentions before sending to the LLM
-    case resolve_mentions(text) do
-      {:ok, resolved_text} ->
-        case Session.send_prompt(state.agent.session, resolved_text) do
-          :ok ->
-            state = update_agent(state, &AgentState.clear_input_and_scroll/1)
-            %{state | agentic: ViewState.clear_baselines(state.agentic)}
+    with {:ok, resolved_text} <- resolve_mentions(text),
+         :ok <- Session.send_prompt(AgentAccess.session(state), resolved_text) do
+      state = update_agent(state, &AgentState.clear_input_and_scroll/1)
 
-          {:error, :provider_not_ready} ->
-            %{state | status_msg: "Agent provider still starting, try again in a moment"}
+      AgentAccess.update_agentic(state, fn _ ->
+        ViewState.clear_baselines(AgentAccess.agentic(state))
+      end)
+    else
+      {:error, :provider_not_ready} ->
+        %{state | status_msg: "Agent provider still starting, try again in a moment"}
 
-          {:error, reason} ->
-            %{state | status_msg: "Agent error: #{inspect(reason)}"}
-        end
-
-      {:error, msg} ->
+      {:error, msg} when is_binary(msg) ->
         %{state | status_msg: msg}
+
+      {:error, reason} ->
+        %{state | status_msg: "Agent error: #{inspect(reason)}"}
     end
   end
 
@@ -312,9 +320,9 @@ defmodule Minga.Editor.Commands.Agent do
   @spec clear_chat_display(state()) :: state()
   def clear_chat_display(state) do
     msg_count =
-      if state.agent.session do
+      if AgentAccess.session(state) do
         try do
-          length(Session.messages(state.agent.session))
+          length(Session.messages(AgentAccess.session(state)))
         catch
           :exit, _ -> 0
         end
@@ -324,8 +332,8 @@ defmodule Minga.Editor.Commands.Agent do
 
     state = update_agent(state, &AgentState.clear_display(&1, msg_count))
 
-    if state.agent.session do
-      Session.add_system_message(state.agent.session, "Display cleared")
+    if AgentAccess.session(state) do
+      Session.add_system_message(AgentAccess.session(state), "Display cleared")
     end
 
     state
@@ -333,20 +341,24 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Aborts the current agent operation."
   @spec abort_agent(state()) :: state()
-  def abort_agent(%{agent: %{session: nil}} = state), do: state
-
   def abort_agent(state) do
-    Session.abort(state.agent.session)
-    state
+    if AgentAccess.session(state) == nil do
+      state
+    else
+      Session.abort(AgentAccess.session(state))
+      state
+    end
   end
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
-  def ensure_agent_session(%{agent: %{session: nil}} = state) do
-    AgentSession.start_agent_session(state)
+  def ensure_agent_session(state) do
+    if AgentAccess.session(state) == nil do
+      AgentSession.start_agent_session(state)
+    else
+      state
+    end
   end
-
-  def ensure_agent_session(state), do: state
 
   @doc """
   Creates a new agent tab with a fresh session.
@@ -380,38 +392,39 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Switches to an existing session by pid."
   @spec switch_to_session(state(), pid()) :: state()
-  def switch_to_session(%{agent: %{session: current}} = state, pid)
-      when is_pid(pid) and pid == current do
-    state
-  end
-
   def switch_to_session(state, pid) when is_pid(pid) do
-    # Unsubscribe from current session if one exists
-    if state.agent.session do
-      Session.unsubscribe(state.agent.session)
-    end
+    current = AgentAccess.session(state)
 
-    # Subscribe to the target session
-    Session.subscribe(pid)
-
-    # Switch in agent state (moves current to history, target to active)
-    state = update_agent(state, &AgentState.switch_session(&1, pid))
-
-    # Update the Tab's session reference for event routing
-    state =
-      case state do
-        %{tab_bar: %TabBar{active_id: id}} ->
-          EditorState.set_tab_session(state, id, pid)
-
-        _ ->
-          state
+    if pid == current do
+      state
+    else
+      # Unsubscribe from current session if one exists
+      if current do
+        Session.unsubscribe(current)
       end
 
-    # Reset panel scroll and auto-scroll to reflect new session's content
-    update_agent(state, fn agent ->
-      panel = %{agent.panel | scroll: Minga.Scroll.new()}
-      %{agent | panel: panel}
-    end)
+      # Subscribe to the target session
+      Session.subscribe(pid)
+
+      # Switch in agent state (moves current to history, target to active)
+      state = update_agent(state, &AgentState.switch_session(&1, pid))
+
+      # Update the Tab's session reference for event routing
+      state =
+        case state do
+          %{tab_bar: %TabBar{active_id: id}} ->
+            EditorState.set_tab_session(state, id, pid)
+
+          _ ->
+            state
+        end
+
+      # Reset panel scroll and auto-scroll to reflect new session's content
+      update_agent(state, fn agent ->
+        panel = %{agent.panel | scroll: Minga.Scroll.new()}
+        %{agent | panel: panel}
+      end)
+    end
   end
 
   @doc "Scrolls the chat panel up by half the panel height."
@@ -466,22 +479,22 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Cycles the thinking level (off → low → medium → high)."
   @spec cycle_thinking_level(state()) :: state()
-  def cycle_thinking_level(%{agent: %{session: nil}} = state) do
-    %{state | status_msg: "No agent session"}
-  end
-
   def cycle_thinking_level(state) do
-    case Session.cycle_thinking_level(state.agent.session) do
-      {:ok, %{"level" => level}} when is_binary(level) ->
-        state = update_agent(state, &AgentState.set_thinking_level(&1, level))
-        Session.add_system_message(state.agent.session, "Thinking: #{level}")
-        %{state | status_msg: "Thinking: #{level}"}
+    if AgentAccess.session(state) == nil do
+      %{state | status_msg: "No agent session"}
+    else
+      case Session.cycle_thinking_level(AgentAccess.session(state)) do
+        {:ok, %{"level" => level}} when is_binary(level) ->
+          state = update_agent(state, &AgentState.set_thinking_level(&1, level))
+          Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
+          %{state | status_msg: "Thinking: #{level}"}
 
-      {:ok, nil} ->
-        %{state | status_msg: "Model does not support thinking levels"}
+        {:ok, nil} ->
+          %{state | status_msg: "Model does not support thinking levels"}
 
-      {:error, reason} ->
-        %{state | status_msg: "Error: #{inspect(reason)}"}
+        {:error, reason} ->
+          %{state | status_msg: "Error: #{inspect(reason)}"}
+      end
     end
   end
 
@@ -509,66 +522,66 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls down 1 line in the focused panel."
   @spec scope_scroll_down(state()) :: state()
-  def scope_scroll_down(%{agentic: %{focus: :file_viewer}} = state) do
-    update_agentic(state, &ViewState.scroll_viewer_down(&1, 1))
-  end
-
   def scope_scroll_down(state) do
-    update_agent(state, &AgentState.scroll_down(&1, 1))
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_down(&1, 1))
+    else
+      update_agent(state, &AgentState.scroll_down(&1, 1))
+    end
   end
 
   @doc "Scrolls up 1 line in the focused panel."
   @spec scope_scroll_up(state()) :: state()
-  def scope_scroll_up(%{agentic: %{focus: :file_viewer}} = state) do
-    update_agentic(state, &ViewState.scroll_viewer_up(&1, 1))
-  end
-
   def scope_scroll_up(state) do
-    update_agent(state, &AgentState.scroll_up(&1, 1))
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_up(&1, 1))
+    else
+      update_agent(state, &AgentState.scroll_up(&1, 1))
+    end
   end
 
   @doc "Scrolls down half a page in the focused panel."
   @spec scope_scroll_half_down(state()) :: state()
-  def scope_scroll_half_down(%{agentic: %{focus: :file_viewer}} = state) do
-    amount = half_page(state)
-    update_agentic(state, &ViewState.scroll_viewer_down(&1, amount))
-  end
-
   def scope_scroll_half_down(state) do
     amount = half_page(state)
-    update_agent(state, &AgentState.scroll_down(&1, amount))
+
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_down(&1, amount))
+    else
+      update_agent(state, &AgentState.scroll_down(&1, amount))
+    end
   end
 
   @doc "Scrolls up half a page in the focused panel."
   @spec scope_scroll_half_up(state()) :: state()
-  def scope_scroll_half_up(%{agentic: %{focus: :file_viewer}} = state) do
-    amount = half_page(state)
-    update_agentic(state, &ViewState.scroll_viewer_up(&1, amount))
-  end
-
   def scope_scroll_half_up(state) do
     amount = half_page(state)
-    update_agent(state, &AgentState.scroll_up(&1, amount))
+
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_up(&1, amount))
+    else
+      update_agent(state, &AgentState.scroll_up(&1, amount))
+    end
   end
 
   @doc "Scrolls to the bottom of the focused panel."
   @spec scope_scroll_bottom(state()) :: state()
-  def scope_scroll_bottom(%{agentic: %{focus: :file_viewer}} = state) do
-    update_agentic(state, &ViewState.scroll_viewer_to_bottom/1)
-  end
-
   def scope_scroll_bottom(state) do
-    update_agent(state, &AgentState.scroll_to_bottom/1)
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_to_bottom/1)
+    else
+      update_agent(state, &AgentState.scroll_to_bottom/1)
+    end
   end
 
   @doc "Scrolls to the top of the focused panel."
   @spec scope_scroll_top(state()) :: state()
-  def scope_scroll_top(%{agentic: %{focus: :file_viewer}} = state) do
-    update_agentic(state, &ViewState.scroll_viewer_to_top/1)
-  end
-
   def scope_scroll_top(state) do
-    update_agent(state, &AgentState.scroll_to_top/1)
+    if AgentAccess.agentic(state).focus == :file_viewer do
+      update_agentic(state, &ViewState.scroll_viewer_to_top/1)
+    else
+      update_agent(state, &AgentState.scroll_to_top/1)
+    end
   end
 
   # ── Fold / Collapse ────────────────────────────────────────────────────────
@@ -605,11 +618,15 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
-  def scope_next_code_block(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
-  end
+  def scope_next_code_block(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, review}} ->
+        update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
 
-  def scope_next_code_block(state), do: state
+      _ ->
+        state
+    end
+  end
 
   @doc "Jumps to next tool call (stubbed)."
   @spec scope_next_tool_call(state()) :: state()
@@ -621,11 +638,15 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
-  def scope_prev_code_block(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
-  end
+  def scope_prev_code_block(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, review}} ->
+        update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
 
-  def scope_prev_code_block(state), do: state
+      _ ->
+        state
+    end
+  end
 
   @doc "Jumps to previous tool call (stubbed)."
   @spec scope_prev_tool_call(state()) :: state()
@@ -737,12 +758,12 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
-  def scope_switch_focus(%{agentic: %{focus: :chat}} = state) do
-    update_agentic(state, &ViewState.set_focus(&1, :file_viewer))
-  end
-
   def scope_switch_focus(state) do
-    update_agentic(state, &ViewState.set_focus(&1, :chat))
+    if AgentAccess.agentic(state).focus == :chat do
+      update_agentic(state, &ViewState.set_focus(&1, :file_viewer))
+    else
+      update_agentic(state, &ViewState.set_focus(&1, :chat))
+    end
   end
 
   # ── Search ─────────────────────────────────────────────────────────────────
@@ -778,11 +799,13 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Dismisses active overlays or does nothing (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
-  def scope_dismiss_or_noop(%{agentic: %{help_visible: true}} = state) do
-    update_agentic(state, &ViewState.dismiss_help/1)
+  def scope_dismiss_or_noop(state) do
+    if AgentAccess.agentic(state).help_visible do
+      update_agentic(state, &ViewState.dismiss_help/1)
+    else
+      state
+    end
   end
-
-  def scope_dismiss_or_noop(state), do: state
 
   # ── Clear ──────────────────────────────────────────────────────────────────
 
@@ -807,7 +830,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Submits if input has text, aborts if agent is active."
   @spec scope_submit_or_abort(state()) :: state()
   def scope_submit_or_abort(state) do
-    if PanelState.input_text(state.agent.panel) != "" do
+    if PanelState.input_text(AgentAccess.panel(state)) != "" do
       submit_prompt(state)
     else
       abort_if_active(state)
@@ -817,7 +840,8 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Moves cursor up in input or recalls history."
   @spec scope_input_up(state()) :: state()
   def scope_input_up(state) do
-    {line, _col} = state.agent.panel.input.cursor
+    panel = AgentAccess.panel(state)
+    {line, _col} = panel.input.cursor
 
     if line == 0 do
       update_agent(state, &AgentState.history_prev/1)
@@ -829,8 +853,9 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Moves cursor down in input or advances history."
   @spec scope_input_down(state()) :: state()
   def scope_input_down(state) do
-    {line, _col} = state.agent.panel.input.cursor
-    max_line = length(state.agent.panel.input.lines) - 1
+    panel = AgentAccess.panel(state)
+    {line, _col} = panel.input.cursor
+    max_line = length(panel.input.lines) - 1
 
     if line >= max_line do
       update_agent(state, &AgentState.history_next/1)
@@ -855,7 +880,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Aborts agent operation if one is active."
   @spec scope_abort_if_active(state()) :: state()
   def scope_abort_if_active(state) do
-    if state.agent.status in [:thinking, :tool_executing] do
+    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
       abort_agent(state)
     else
       state
@@ -909,22 +934,20 @@ defmodule Minga.Editor.Commands.Agent do
   # is visible, meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()
   defp no_agent_ui?(%{surface_module: AgentView}), do: false
-  defp no_agent_ui?(%{agent: %{panel: %{visible: true}}}), do: false
-  defp no_agent_ui?(_state), do: true
+
+  defp no_agent_ui?(state) do
+    not AgentAccess.panel(state).visible
+  end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun) do
-    %{state | agent: fun.(state.agent)}
-  end
+  defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
   @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
-  defp update_agentic(state, fun) do
-    %{state | agentic: fun.(state.agentic)}
-  end
+  defp update_agentic(state, fun), do: AgentAccess.update_agentic(state, fun)
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
   end
 
   @spec panel_height(state()) :: non_neg_integer()
@@ -937,7 +960,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec abort_if_active(state()) :: state()
   defp abort_if_active(state) do
-    if state.agent.status in [:thinking, :tool_executing] do
+    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
       abort_agent(state)
     else
       state
@@ -946,8 +969,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec toggle_all_collapses(state()) :: state()
   defp toggle_all_collapses(state) do
-    if state.agent.session do
-      Session.toggle_all_tool_collapses(state.agent.session)
+    if AgentAccess.session(state) do
+      Session.toggle_all_tool_collapses(AgentAccess.session(state))
     end
 
     state
@@ -956,8 +979,8 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scroll_context(state()) ::
           {non_neg_integer(), Message.t(), ChatRenderer.line_type()} | nil
   defp scroll_context(state) do
-    session = state.agent.session
-    panel = state.agent.panel
+    session = AgentAccess.session(state)
+    panel = AgentAccess.panel(state)
 
     if session do
       messages = safe_messages(session)
@@ -986,15 +1009,15 @@ defmodule Minga.Editor.Commands.Agent do
   defp copy_to_clipboard(state, text, label) do
     case Clipboard.write(text) do
       :ok ->
-        if state.agent.session do
-          Session.add_system_message(state.agent.session, "Copied #{label} to clipboard")
+        if AgentAccess.session(state) do
+          Session.add_system_message(AgentAccess.session(state), "Copied #{label} to clipboard")
         end
 
         update_agentic(state, &ViewState.push_toast(&1, "Copied #{label}", :info))
 
       _error ->
-        if state.agent.session do
-          Session.add_system_message(state.agent.session, "Clipboard write failed", :error)
+        if AgentAccess.session(state) do
+          Session.add_system_message(AgentAccess.session(state), "Clipboard write failed", :error)
         end
 
         update_agentic(state, &ViewState.push_toast(&1, "Clipboard write failed", :error))
@@ -1021,8 +1044,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec code_block_index_for_scroll(state(), [Markdown.code_block()]) :: non_neg_integer()
   defp code_block_index_for_scroll(state, blocks) do
-    session = state.agent.session
-    panel = state.agent.panel
+    session = AgentAccess.session(state)
+    panel = AgentAccess.panel(state)
     messages = safe_messages(session)
 
     line_map =

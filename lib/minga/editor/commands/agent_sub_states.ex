@@ -16,6 +16,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Git.Diff
   alias Minga.Input.TextField
 
@@ -32,13 +33,13 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   end
 
   def handle_search_key(state, 27) do
-    saved = ViewState.search_saved_scroll(state.agentic)
+    saved = ViewState.search_saved_scroll(AgentAccess.agentic(state))
     state = update_agentic(state, &ViewState.cancel_search/1)
     if saved, do: update_agent(state, &AgentState.set_scroll(&1, saved)), else: state
   end
 
   def handle_search_key(state, 127) do
-    query = ViewState.search_query(state.agentic) || ""
+    query = ViewState.search_query(AgentAccess.agentic(state)) || ""
 
     if query == "" do
       handle_search_key(state, 27)
@@ -51,7 +52,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   def handle_search_key(state, cp) when cp >= 32 and cp <= 126 do
     char = <<cp::utf8>>
-    query = (ViewState.search_query(state.agentic) || "") <> char
+    query = (ViewState.search_query(AgentAccess.agentic(state)) || "") <> char
     state = update_agentic(state, &ViewState.update_search_query(&1, query))
     run_search(state, query)
   end
@@ -61,26 +62,30 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Starts search mode in the chat."
   @spec start_search(state()) :: state()
   def start_search(state) do
-    scroll = state.agent.panel.scroll.offset
+    scroll = AgentAccess.panel(state).scroll.offset
     update_agentic(state, &ViewState.start_search(&1, scroll))
   end
 
   @doc "Jumps to the next search match."
   @spec next_match(state()) :: state()
-  def next_match(%{agentic: %{search: %{input_active: true}}} = state), do: state
-
   def next_match(state) do
-    state = update_agentic(state, &ViewState.next_search_match/1)
-    scroll_to_current_match(state)
+    if AgentAccess.agentic(state).search.input_active do
+      state
+    else
+      state = update_agentic(state, &ViewState.next_search_match/1)
+      scroll_to_current_match(state)
+    end
   end
 
   @doc "Jumps to the previous search match."
   @spec prev_match(state()) :: state()
-  def prev_match(%{agentic: %{search: %{input_active: true}}} = state), do: state
-
   def prev_match(state) do
-    state = update_agentic(state, &ViewState.prev_search_match/1)
-    scroll_to_current_match(state)
+    if AgentAccess.agentic(state).search.input_active do
+      state
+    else
+      state = update_agentic(state, &ViewState.prev_search_match/1)
+      scroll_to_current_match(state)
+    end
   end
 
   # ── Mention completion handling ────────────────────────────────────────────
@@ -108,7 +113,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   end
 
   def handle_mention_key(state, 127, _mods) do
-    comp = state.agent.panel.mention_completion
+    comp = AgentAccess.panel(state).mention_completion
 
     if comp.prefix == "" do
       state = AgentCommands.input_backspace(state)
@@ -145,81 +150,113 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @doc "Accepts the current diff hunk during review."
   @spec accept_hunk(state()) :: state()
-  def accept_hunk(%{agentic: %{preview: %Preview{content: {:diff, _review}}}} = state) do
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_current(r) end))
+  def accept_hunk(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, _review}} ->
+        state =
+          update_preview(
+            state,
+            &Preview.update_diff(&1, fn r -> DiffReview.accept_current(r) end)
+          )
 
-    maybe_finish_review(state)
+        maybe_finish_review(state)
+
+      _ ->
+        state
+    end
   end
-
-  def accept_hunk(state), do: state
 
   @doc "Rejects the current diff hunk during review."
   @spec reject_hunk(state()) :: state()
-  def reject_hunk(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    hunk = DiffReview.current_hunk(review)
-    if hunk, do: revert_hunk_on_disk(review.path, hunk)
+  def reject_hunk(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, review}} ->
+        hunk = DiffReview.current_hunk(review)
+        if hunk, do: revert_hunk_on_disk(review.path, hunk)
 
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_current(r) end))
+        state =
+          update_preview(
+            state,
+            &Preview.update_diff(&1, fn r -> DiffReview.reject_current(r) end)
+          )
 
-    maybe_finish_review(state)
+        maybe_finish_review(state)
+
+      _ ->
+        state
+    end
   end
-
-  def reject_hunk(state), do: state
 
   @doc "Accepts all remaining diff hunks."
   @spec accept_all_hunks(state()) :: state()
-  def accept_all_hunks(%{agentic: %{preview: %Preview{content: {:diff, _}}}} = state) do
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
+  def accept_all_hunks(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, _}} ->
+        state =
+          update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
 
-    maybe_finish_review(state)
+        maybe_finish_review(state)
+
+      _ ->
+        state
+    end
   end
-
-  def accept_all_hunks(state), do: state
 
   @doc "Rejects all remaining diff hunks."
   @spec reject_all_hunks(state()) :: state()
-  def reject_all_hunks(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    unresolved_hunks =
-      review.hunks
-      |> Enum.with_index()
-      |> Enum.reject(fn {_hunk, idx} -> Map.has_key?(review.resolutions, idx) end)
-      |> Enum.map(fn {hunk, _idx} -> hunk end)
-      |> Enum.reverse()
+  def reject_all_hunks(state) do
+    case AgentAccess.agentic(state).preview do
+      %Preview{content: {:diff, review}} ->
+        unresolved_hunks =
+          review.hunks
+          |> Enum.with_index()
+          |> Enum.reject(fn {_hunk, idx} -> Map.has_key?(review.resolutions, idx) end)
+          |> Enum.map(fn {hunk, _idx} -> hunk end)
+          |> Enum.reverse()
 
-    revert_hunks_on_disk(review.path, unresolved_hunks)
+        revert_hunks_on_disk(review.path, unresolved_hunks)
 
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
+        state =
+          update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
 
-    maybe_finish_review(state)
+        maybe_finish_review(state)
+
+      _ ->
+        state
+    end
   end
-
-  def reject_all_hunks(state), do: state
 
   # ── Tool approval commands ─────────────────────────────────────────────────
 
   @doc "Approves the pending tool execution."
   @spec approve_tool(state()) :: state()
-  def approve_tool(%{agent: %{session: session, pending_approval: approval}} = state)
-      when is_pid(session) and is_map(approval) do
-    Session.respond_to_approval(session, :approve)
-    update_agent(state, &AgentState.clear_pending_approval/1)
-  end
+  def approve_tool(state) do
+    agent = AgentAccess.agent(state)
+    session = agent.session
+    approval = agent.pending_approval
 
-  def approve_tool(state), do: state
+    if is_pid(session) and is_map(approval) do
+      Session.respond_to_approval(session, :approve)
+      update_agent(state, &AgentState.clear_pending_approval/1)
+    else
+      state
+    end
+  end
 
   @doc "Denies the pending tool execution."
   @spec deny_tool(state()) :: state()
-  def deny_tool(%{agent: %{session: session, pending_approval: approval}} = state)
-      when is_pid(session) and is_map(approval) do
-    Session.respond_to_approval(session, :reject)
-    update_agent(state, &AgentState.clear_pending_approval/1)
-  end
+  def deny_tool(state) do
+    agent = AgentAccess.agent(state)
+    session = agent.session
+    approval = agent.pending_approval
 
-  def deny_tool(state), do: state
+    if is_pid(session) and is_map(approval) do
+      Session.respond_to_approval(session, :reject)
+      update_agent(state, &AgentState.clear_pending_approval/1)
+    else
+      state
+    end
+  end
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
@@ -231,7 +268,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   defp mention_insert_char(state, char) do
     state = AgentCommands.input_char(state, char)
-    comp = state.agent.panel.mention_completion
+    comp = AgentAccess.panel(state).mention_completion
     new_prefix = comp.prefix <> char
 
     update_panel(state, fn p ->
@@ -241,7 +278,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec should_trigger_mention?(state()) :: boolean()
   defp should_trigger_mention?(state) do
-    panel = state.agent.panel
+    panel = AgentAccess.panel(state)
     {line, col} = panel.input.cursor
     current_line = Enum.at(panel.input.lines, line, "")
     col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
@@ -250,21 +287,21 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @spec start_mention_completion(state()) :: state()
   defp start_mention_completion(state) do
     files = list_project_files()
-    {line, col} = state.agent.panel.input.cursor
+    {line, col} = AgentAccess.panel(state).input.cursor
     completion = FileMention.new_completion(files, line, col - 1)
     update_panel(state, fn p -> %{p | mention_completion: completion} end)
   end
 
   @spec accept_mention_completion(state()) :: state()
   defp accept_mention_completion(state) do
-    comp = state.agent.panel.mention_completion
+    comp = AgentAccess.panel(state).mention_completion
 
     case FileMention.selected_path(comp) do
       nil ->
         update_panel(state, fn p -> %{p | mention_completion: nil} end)
 
       path ->
-        panel = state.agent.panel
+        panel = AgentAccess.panel(state)
         {line, _col} = panel.input.cursor
         current = Enum.at(panel.input.lines, line)
         anchor_col = comp.anchor_col
@@ -308,32 +345,38 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec run_search(state(), String.t()) :: state()
   defp run_search(state, query) do
-    messages = if state.agent.session, do: safe_messages(state.agent.session), else: []
+    session = AgentAccess.session(state)
+    messages = if session, do: safe_messages(session), else: []
     matches = ChatSearch.find_matches(messages, query)
     state = update_agentic(state, &ViewState.set_search_matches(&1, matches))
     if matches != [], do: scroll_to_current_match(state), else: state
   end
 
   @spec scroll_to_current_match(state()) :: state()
-  defp scroll_to_current_match(%{agentic: %{search: nil}} = state), do: state
+  defp scroll_to_current_match(state) do
+    case AgentAccess.agentic(state).search do
+      nil ->
+        state
 
-  defp scroll_to_current_match(%{agentic: %{search: search}} = state) do
-    case Enum.at(search.matches, search.current) do
-      nil -> state
-      match -> scroll_to_message(state, ChatSearch.match_message_index(match))
+      search ->
+        case Enum.at(search.matches, search.current) do
+          nil -> state
+          match -> scroll_to_message(state, ChatSearch.match_message_index(match))
+        end
     end
   end
 
   @spec scroll_to_message(state(), non_neg_integer()) :: state()
   defp scroll_to_message(state, msg_idx) do
-    messages = if state.agent.session, do: safe_messages(state.agent.session), else: []
+    session = AgentAccess.session(state)
+    messages = if session, do: safe_messages(session), else: []
 
     line_map =
       ChatRenderer.line_message_map(
         messages,
         state.viewport.cols,
         state.theme,
-        state.agent.panel.display_start_index
+        AgentAccess.panel(state).display_start_index
       )
 
     case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
@@ -344,7 +387,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec maybe_finish_review(state()) :: state()
   defp maybe_finish_review(state) do
-    case Preview.diff_review(state.agentic.preview) do
+    case Preview.diff_review(AgentAccess.agentic(state).preview) do
       %DiffReview{} = review ->
         if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
 
@@ -391,21 +434,25 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     :exit, _ -> []
   end
 
-  # ── State update helpers (duplicated from Agent for independence) ───────────
+  # ── State update helpers (delegated to AA) ─────────────────────────────────
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun), do: %{state | agent: fun.(state.agent)}
+  defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
   @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
-  defp update_agentic(state, fun), do: %{state | agentic: fun.(state.agentic)}
+  defp update_agentic(state, fun), do: AgentAccess.update_agentic(state, fun)
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    %{state | agentic: %{state.agentic | preview: fun.(state.agentic.preview)}}
+    AgentAccess.update_agentic(state, fn agentic ->
+      %{agentic | preview: fun.(agentic.preview)}
+    end)
   end
 
   @spec update_panel(state(), (term() -> term())) :: state()
   defp update_panel(state, fun) do
-    %{state | agent: %{state.agent | panel: fun.(state.agent.panel)}}
+    AgentAccess.update_agent(state, fn agent ->
+      %{agent | panel: fun.(agent.panel)}
+    end)
   end
 end

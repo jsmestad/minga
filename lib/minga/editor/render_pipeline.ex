@@ -47,6 +47,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
@@ -843,7 +844,7 @@ defmodule Minga.Editor.RenderPipeline do
       if state.picker_ui.picker do
         :beam
       else
-        ChromeHelpers.input_cursor_shape(state.agent.panel)
+        ChromeHelpers.input_cursor_shape(AgentAccess.panel(state))
       end
 
     cursor =

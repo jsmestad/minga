@@ -55,6 +55,7 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -417,10 +418,10 @@ defmodule Minga.Editor do
   @toast_duration_ms 3_000
 
   def handle_info(:dismiss_toast, state) do
-    state = %{state | agentic: ViewState.dismiss_toast(state.agentic)}
+    state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
 
     # If there's another toast in the queue, schedule its dismissal
-    if ViewState.toast_visible?(state.agentic) do
+    if ViewState.toast_visible?(AgentAccess.agentic(state)) do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
     end
 
