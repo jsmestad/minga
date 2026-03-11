@@ -322,6 +322,81 @@ defmodule Minga.Surface.ContractTest do
       assert %AVState{} = new_state
       assert is_list(effects)
     end
+
+    test "status_changed updates agent status" do
+      av = build_av_state()
+      {new_state, effects} = AgentView.handle_event(av, {:status_changed, :thinking})
+
+      assert new_state.agent.status == :thinking
+      assert :render in effects
+    end
+
+    test "text_delta requests render" do
+      av = build_av_state()
+      {_new_state, effects} = AgentView.handle_event(av, {:text_delta, "hello"})
+
+      assert {:render, 16} in effects
+    end
+
+    test "thinking_delta requests throttled render" do
+      av = build_av_state()
+      {_new_state, effects} = AgentView.handle_event(av, {:thinking_delta, "hmm"})
+
+      assert {:render, 50} in effects
+    end
+
+    test "messages_changed requests sync and render" do
+      av = build_av_state()
+      {_new_state, effects} = AgentView.handle_event(av, :messages_changed)
+
+      assert {:render, 16} in effects
+      assert :sync_agent_buffer in effects
+    end
+
+    test "tool_started shell sets preview" do
+      av = build_av_state()
+
+      {new_state, effects} =
+        AgentView.handle_event(av, {:tool_started, "shell", %{"command" => "ls"}})
+
+      assert {:render, 16} in effects
+      assert match?({:shell, _, _, _}, new_state.agentic.preview.content)
+    end
+
+    test "approval_pending sets pending approval" do
+      av = build_av_state()
+      approval = %{tool_call_id: "tc_1", name: "write", args: %{}}
+      {new_state, effects} = AgentView.handle_event(av, {:approval_pending, approval})
+
+      assert new_state.agent.pending_approval != nil
+      assert :render in effects
+    end
+
+    test "approval_resolved clears pending approval" do
+      av = %{
+        build_av_state()
+        | agent: %AgentState{pending_approval: %{tool_call_id: "tc_1", name: "w", args: %{}}}
+      }
+
+      {new_state, _effects} = AgentView.handle_event(av, {:approval_resolved, :approve})
+
+      assert new_state.agent.pending_approval == nil
+    end
+
+    test "error sets error state and logs" do
+      av = build_av_state()
+      {new_state, effects} = AgentView.handle_event(av, {:error, "something broke"})
+
+      assert new_state.agent.status == :error
+      assert {:log_message, "Agent error: something broke"} in effects
+    end
+
+    test "spinner_tick when not busy stops spinner" do
+      av = build_av_state()
+      {_new_state, effects} = AgentView.handle_event(av, :spinner_tick)
+
+      assert effects == []
+    end
   end
 
   describe "AgentView.cursor/1" do
