@@ -347,15 +347,15 @@ defmodule Minga.Input.ScopedTest do
       {:handled, searching} = Scoped.handle_key(state, ?/, 0)
       assert ViewState.searching?(searching.agentic)
 
-      # Type a search char
-      {:handled, with_char} = Scoped.handle_key(searching, ?h, 0)
+      # Type a search char (goes through AgentSearch handler now)
+      {:handled, with_char} = walk_surface_handlers(searching, ?h, 0)
       assert ViewState.search_query(with_char.agentic) == "h"
     end
 
     test "ESC cancels search" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
       {:handled, searching} = Scoped.handle_key(state, ?/, 0)
-      {:handled, cancelled} = Scoped.handle_key(searching, 27, 0)
+      {:handled, cancelled} = walk_surface_handlers(searching, 27, 0)
       refute ViewState.searching?(cancelled.agentic)
     end
   end
@@ -604,23 +604,22 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "Tab moves to next candidate", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, 9, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 9, 0)
       assert new_state.agent.panel.mention_completion.selected == 1
     end
 
     test "Enter accepts the selected candidate", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, 13, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 13, 0)
       assert new_state.agent.panel.mention_completion == nil
     end
 
     test "Escape cancels mention completion", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert new_state.agent.panel.mention_completion == nil
     end
 
     test "printable char narrows candidates", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?t, 0)
-      # Should narrow the candidates based on the new prefix
+      {:handled, new_state} = walk_surface_handlers(state, ?t, 0)
       comp = new_state.agent.panel.mention_completion
 
       if comp != nil do
@@ -629,11 +628,8 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "mention only intercepts in insert mode", %{state: state} do
-      # Switch to normal mode by removing input_focused
       state = put_in(state.agent.panel.input_focused, false)
-      # In normal mode with mention_completion set, the key should NOT
-      # go through mention handling (the guard checks input_focused: true)
-      {:handled, _new_state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
     end
   end
 
@@ -663,7 +659,7 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "mention completion intercepts keys in editor panel too", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert new_state.agent.panel.mention_completion == nil
     end
   end
@@ -699,6 +695,19 @@ defmodule Minga.Input.ScopedTest do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  # Walks all surface handlers (including the new sub-state handlers)
+  # in order, returning the result from the first handler that handles
+  # the key.
+  defp walk_surface_handlers(state, cp, mods) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
+                                                                                {_, acc} ->
+      case handler.handle_key(acc, cp, mods) do
+        {:handled, new_state} -> {:halt, {:handled, new_state}}
+        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+      end
+    end)
+  end
 
   defp make_tree_state(tmp_dir, file_count \\ 5) do
     if file_count > 0 do
