@@ -180,6 +180,11 @@ defmodule Minga.Editor do
 
     state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
 
+    # Initialize the active surface. File tabs use BufferView; agent tabs
+    # will use AgentView (Phase 2). The surface state is extracted from
+    # EditorState via the bridge and kept in sync on every operation.
+    state = init_surface(state)
+
     # Redirect Logger and stderr to a log file when running with a real TUI.
     # In headless tests the port_manager is a pid (HeadlessPort), not the
     # registered PortManager atom, so we skip the redirect to keep ExUnit clean.
@@ -337,14 +342,14 @@ defmodule Minga.Editor do
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = Input.Router.dispatch(state, codepoint, modifiers)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
   def handle_info({:minga_input, {:paste_event, text}}, state) do
     new_state = handle_paste_event(state, text)
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   # ── File watcher notification ──
@@ -363,7 +368,7 @@ defmodule Minga.Editor do
       Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, click_count)
 
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   # Backward compat: 6-element mouse_event (no click_count)
@@ -373,7 +378,7 @@ defmodule Minga.Editor do
       ) do
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
@@ -875,6 +880,53 @@ defmodule Minga.Editor do
   # is a pid, not the PortManager atom), always uses editor mode.
   @spec startup_view_state(GenServer.server(), pos_integer()) ::
           {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
+  # ── Surface lifecycle ──────────────────────────────────────────────────────
+
+  alias Minga.Surface.BufferView
+  alias Minga.Surface.BufferView.Bridge, as: BVBridge
+  alias Minga.Surface.BufferView.State, as: BVState
+
+  @doc false
+  @spec init_surface(EditorState.t()) :: EditorState.t()
+  defp init_surface(%EditorState{keymap_scope: :agent} = state) do
+    # Agent tabs will get AgentView in Phase 2. For now, no surface.
+    state
+  end
+
+  defp init_surface(%EditorState{} = state) do
+    bv_state = BVBridge.from_editor_state(state)
+    %{state | surface_module: BufferView, surface_state: bv_state}
+  end
+
+  @doc """
+  Updates the surface state from the current EditorState fields.
+
+  Call this after any operation that modifies EditorState fields that
+  are also owned by the surface (buffers, windows, mode, etc.) to keep
+  the surface state in sync.
+  """
+  @spec sync_surface_from_editor(EditorState.t()) :: EditorState.t()
+  def sync_surface_from_editor(%EditorState{surface_module: BufferView} = state) do
+    %{state | surface_state: BVBridge.from_editor_state(state)}
+  end
+
+  def sync_surface_from_editor(state), do: state
+
+  @doc """
+  Updates EditorState fields from the current surface state.
+
+  Call this after a surface callback returns updated state to write
+  the changes back to EditorState.
+  """
+  @spec sync_editor_from_surface(EditorState.t()) :: EditorState.t()
+  def sync_editor_from_surface(
+        %EditorState{surface_module: BufferView, surface_state: %BVState{} = bv} = state
+      ) do
+    BVBridge.to_editor_state(state, bv)
+  end
+
+  def sync_editor_from_surface(state), do: state
+
   @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
   defp initial_tab_bar(_active_buf, :agent) do
     # Boot into agent mode: only the agent tab. A file tab is created

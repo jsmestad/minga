@@ -94,7 +94,9 @@ defmodule Minga.Editor.State do
             capabilities: %Capabilities{},
             layout: nil,
             modeline_click_regions: [],
-            tab_bar_click_regions: []
+            tab_bar_click_regions: [],
+            surface_module: nil,
+            surface_state: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -136,7 +138,9 @@ defmodule Minga.Editor.State do
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
-          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()]
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
+          surface_module: module() | nil,
+          surface_state: term() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -451,7 +455,9 @@ defmodule Minga.Editor.State do
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       agent: state.agent,
-      agentic: state.agentic
+      agentic: state.agentic,
+      surface_module: state.surface_module,
+      surface_state: state.surface_state
     }
   end
 
@@ -481,6 +487,8 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:keymap_scope, context)
     |> maybe_restore(:agent, context)
     |> maybe_restore(:agentic, context)
+    |> maybe_restore(:surface_module, context)
+    |> maybe_restore(:surface_state, context)
     |> restore_active_buffer(context)
   end
 

@@ -42,8 +42,13 @@ defmodule Minga.Editor.State.Tab do
           optional(:active_buffer) => pid() | nil,
           optional(:active_buffer_index) => non_neg_integer(),
           optional(:agent) => AgentState.t(),
-          optional(:agentic) => ViewState.t()
+          optional(:agentic) => ViewState.t(),
+          optional(:surface_module) => module() | nil,
+          optional(:surface_state) => term() | nil
         }
+
+  @typedoc "Opaque surface state stored on the tab when it's inactive."
+  @type surface_state :: term() | nil
 
   @typedoc "A tab."
   @type t :: %__MODULE__{
@@ -51,7 +56,9 @@ defmodule Minga.Editor.State.Tab do
           kind: kind(),
           label: String.t(),
           context: context(),
-          session: pid() | nil
+          session: pid() | nil,
+          surface_module: module() | nil,
+          surface_state: surface_state()
         }
 
   @enforce_keys [:id, :kind]
@@ -59,7 +66,9 @@ defmodule Minga.Editor.State.Tab do
             kind: nil,
             label: "",
             context: %{},
-            session: nil
+            session: nil,
+            surface_module: nil,
+            surface_state: nil
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
