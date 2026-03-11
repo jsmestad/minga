@@ -173,7 +173,8 @@ defmodule Minga.Surface.BufferView do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec cursor_shape(Minga.Mode.mode()) :: atom()
-  defp cursor_shape(:insert), do: :bar
+  defp cursor_shape(:insert), do: :beam
+  defp cursor_shape(:search), do: :beam
   defp cursor_shape(:replace), do: :underline
   defp cursor_shape(_mode), do: :block
 end

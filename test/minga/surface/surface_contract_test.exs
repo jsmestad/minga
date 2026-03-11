@@ -119,7 +119,7 @@ defmodule Minga.Surface.ContractTest do
       assert shape == :block
     end
 
-    test "cursor shape is :bar in insert mode" do
+    test "cursor shape is :beam in insert mode" do
       bv = %{
         build_bv_state()
         | editing: %VimState{
@@ -129,7 +129,7 @@ defmodule Minga.Surface.ContractTest do
       }
 
       {_row, _col, shape} = BufferView.cursor(bv)
-      assert shape == :bar
+      assert shape == :beam
     end
 
     test "cursor shape is :underline in replace mode" do

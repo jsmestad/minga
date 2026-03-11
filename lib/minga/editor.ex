@@ -310,7 +310,7 @@ defmodule Minga.Editor do
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
     new_state = maybe_start_agent_session(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   def handle_info({:minga_input, {:capabilities_updated, caps}}, state) do
@@ -332,7 +332,7 @@ defmodule Minga.Editor do
     new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   # ── Key press dispatch ──
@@ -357,7 +357,7 @@ defmodule Minga.Editor do
     new_state = handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   def handle_info(
@@ -446,7 +446,7 @@ defmodule Minga.Editor do
       end
 
     new_state = Renderer.render(new_state)
-    {:noreply, new_state}
+    {:noreply, sync_surface_from_editor(new_state)}
   end
 
   def handle_info({tag, {:grammar_loaded, _success, _name}}, state)
@@ -502,7 +502,7 @@ defmodule Minga.Editor do
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
     state = Renderer.render(state)
-    {:noreply, %{state | render_timer: nil}}
+    {:noreply, sync_surface_from_editor(%{state | render_timer: nil})}
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
@@ -885,6 +885,54 @@ defmodule Minga.Editor do
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.Bridge, as: BVBridge
   alias Minga.Surface.BufferView.State, as: BVState
+
+  @doc """
+  Applies a list of surface effects to the editor state.
+
+  Surfaces return `{new_state, [effect()]}` from their callbacks.
+  The Editor interprets each effect without knowing the surface's
+  internal logic. This keeps surfaces testable as pure
+  `state -> {state, effects}` functions.
+
+  During Phase 1, most surfaces return empty effect lists. This
+  infrastructure is ready for when surfaces start producing effects
+  in later phases.
+  """
+  @spec apply_effects(EditorState.t(), [Minga.Surface.effect()]) :: EditorState.t()
+  def apply_effects(state, []), do: state
+
+  def apply_effects(state, [effect | rest]) do
+    state = apply_effect(state, effect)
+    apply_effects(state, rest)
+  end
+
+  @spec apply_effect(EditorState.t(), Minga.Surface.effect()) :: EditorState.t()
+  defp apply_effect(state, :render) do
+    schedule_render(state, 16)
+  end
+
+  defp apply_effect(state, {:set_status, msg}) when is_binary(msg) do
+    %{state | status_msg: msg}
+  end
+
+  defp apply_effect(state, {:open_file, path}) when is_binary(path) do
+    Commands.execute(state, {:edit_file, path})
+  end
+
+  defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
+    case Enum.find_index(state.buffers.list, &(&1 == pid)) do
+      nil -> state
+      idx -> EditorState.switch_buffer(state, idx)
+    end
+  end
+
+  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod) do
+    %{state | focus_stack: [mod | state.focus_stack]}
+  end
+
+  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod) do
+    %{state | focus_stack: List.delete(state.focus_stack, mod)}
+  end
 
   @doc false
   @spec init_surface(EditorState.t()) :: EditorState.t()

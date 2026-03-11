@@ -9,9 +9,11 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Editor
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.State, as: BVState
   alias Minga.Surface.BufferView.State.VimState
+  alias Minga.Test.HeadlessPort
 
   describe "surface initialization" do
     test "editor creates a BufferView surface on startup" do
@@ -78,6 +80,78 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
 
       assert context.surface_module == BufferView
       assert %BVState{} = context.surface_state
+    end
+  end
+
+  describe "surface sync after resize" do
+    test "surface state reflects new viewport after resize" do
+      ctx = start_editor("hello", width: 80, height: 24)
+
+      # Send a resize event
+      ref = HeadlessPort.prepare_await(ctx.port)
+      send(ctx.editor, {:minga_input, {:resize, 120, 40}})
+      :ok = HeadlessPort.collect_frame(ref)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.viewport.cols == 120
+      assert state.viewport.rows == 40
+      assert state.surface_state.viewport.cols == 120
+      assert state.surface_state.viewport.rows == 40
+    end
+  end
+
+  describe "surface sync after file events" do
+    test "surface state stays in sync after highlight setup" do
+      ctx = start_editor("hello")
+
+      # The highlight setup happens during init. After the editor
+      # is ready, surface state should reflect highlight state.
+      state = :sys.get_state(ctx.editor)
+
+      assert state.surface_state.highlight == state.highlight
+    end
+  end
+
+  describe "effect interpretation" do
+    test "apply_effects with empty list is a no-op" do
+      ctx = start_editor("hello")
+      state = :sys.get_state(ctx.editor)
+
+      new_state = Editor.apply_effects(state, [])
+      assert new_state == state
+    end
+
+    test "apply_effects :render schedules a render timer" do
+      ctx = start_editor("hello")
+      state = :sys.get_state(ctx.editor)
+      state = %{state | render_timer: nil}
+
+      new_state = Editor.apply_effects(state, [:render])
+      assert is_reference(new_state.render_timer)
+    end
+
+    test "apply_effects {:set_status, msg} sets the status message" do
+      ctx = start_editor("hello")
+      state = :sys.get_state(ctx.editor)
+
+      new_state = Editor.apply_effects(state, [{:set_status, "hello world"}])
+      assert new_state.status_msg == "hello world"
+    end
+
+    test "apply_effects handles multiple effects in order" do
+      ctx = start_editor("hello")
+      state = :sys.get_state(ctx.editor)
+      state = %{state | render_timer: nil}
+
+      new_state =
+        Editor.apply_effects(state, [
+          {:set_status, "doing stuff"},
+          :render
+        ])
+
+      assert new_state.status_msg == "doing stuff"
+      assert is_reference(new_state.render_timer)
     end
   end
 end
