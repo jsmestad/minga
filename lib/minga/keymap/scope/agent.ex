@@ -46,6 +46,7 @@ defmodule Minga.Keymap.Scope.Agent do
           Bindings.node_t()
   def keymap(:normal, _context), do: normal_trie()
   def keymap(:insert, _context), do: insert_trie()
+  def keymap(:input_normal, _context), do: input_normal_trie()
   def keymap(_state, _context), do: Bindings.new()
 
   @impl true
@@ -128,8 +129,8 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec insert_trie() :: Bindings.node_t()
   defp insert_trie do
     Bindings.new()
-    # ESC exits insert mode (unfocus input)
-    |> Bindings.bind([{@escape, 0}], :agent_unfocus_input, "Unfocus input")
+    # ESC switches to input normal mode (vim-style)
+    |> Bindings.bind([{@escape, 0}], :agent_input_to_normal, "Normal mode")
     # Ctrl+Q unfocus + quit
     |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus input and quit")
     # Enter submits; Shift+Enter inserts a newline.
@@ -155,15 +156,38 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
     # Backspace
     |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
-    # Navigation in input
+    # Left/right arrows handled by Vim.handle_key (shared primitive).
+    # Up/down arrows handled here: moves cursor OR recalls prompt history.
     |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
     |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
+    |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
+    |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
     # Ctrl modifiers
     |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
     |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
     |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
     |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
+  end
+
+  # ── Input normal mode meta keys ──────────────────────────────────────────
+  #
+  # Vim editing keys (motions, operators, text objects, counts, visual mode)
+  # are handled by Minga.Input.Vim.handle_key/4 before reaching the trie.
+  # This trie only contains meta keys that the Vim module passes through.
+
+  @spec input_normal_trie() :: Bindings.node_t()
+  defp input_normal_trie do
+    Bindings.new()
+    # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
+    # Use `q` or Ctrl+Q to leave the input field.
+    |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
+    |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
+    |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down")
+    |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up")
+    |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat")
+    |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
+    |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus and quit")
   end
 
   # ── Shared bindings (both normal and insert) ───────────────────────────────

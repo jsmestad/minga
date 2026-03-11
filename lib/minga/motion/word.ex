@@ -10,11 +10,11 @@ defmodule Minga.Motion.Word do
   parallel byte-offset lookup table.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Motion.Helpers
+  alias Minga.Text.Readable
 
   @typedoc "A zero-indexed {line, byte_col} cursor position."
-  @type position :: Document.position()
+  @type position :: {non_neg_integer(), non_neg_integer()}
 
   # ── word motions (w / b / e) ──────────────────────────────────────────────
 
@@ -27,9 +27,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_forward(buf, {0, 0})
       {0, 6}
   """
-  @spec word_forward(Document.t(), position()) :: position()
-  def word_forward(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_forward(Readable.t(), position()) :: position()
+  def word_forward(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
@@ -44,7 +44,7 @@ defmodule Minga.Motion.Word do
       new_byte_off =
         Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-      Document.offset_to_position(buf, new_byte_off)
+      Readable.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -57,9 +57,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_backward(buf, {0, 6})
       {0, 0}
   """
-  @spec word_backward(Document.t(), position()) :: position()
-  def word_backward(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_backward(Readable.t(), position()) :: position()
+  def word_backward(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
 
     if tuple_size(graphemes) == 0 do
@@ -77,7 +77,7 @@ defmodule Minga.Motion.Word do
         new_byte_off =
           Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-        Document.offset_to_position(buf, new_byte_off)
+        Readable.offset_to_position(buf, new_byte_off)
       end
     end
   end
@@ -91,9 +91,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_end(buf, {0, 0})
       {0, 4}
   """
-  @spec word_end(Document.t(), position()) :: position()
-  def word_end(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_end(Readable.t(), position()) :: position()
+  def word_end(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
@@ -108,7 +108,7 @@ defmodule Minga.Motion.Word do
       new_byte_off =
         Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-      Document.offset_to_position(buf, new_byte_off)
+      Readable.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -123,9 +123,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_forward_big(buf, {0, 0})
       {0, 8}
   """
-  @spec word_forward_big(Document.t(), position()) :: position()
-  def word_forward_big(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_forward_big(Readable.t(), position()) :: position()
+  def word_forward_big(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
@@ -140,7 +140,7 @@ defmodule Minga.Motion.Word do
       new_byte_off =
         Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-      Document.offset_to_position(buf, new_byte_off)
+      Readable.offset_to_position(buf, new_byte_off)
     end
   end
 
@@ -153,9 +153,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_backward_big(buf, {0, 8})
       {0, 0}
   """
-  @spec word_backward_big(Document.t(), position()) :: position()
-  def word_backward_big(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_backward_big(Readable.t(), position()) :: position()
+  def word_backward_big(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
 
     if tuple_size(graphemes) == 0 do
@@ -173,7 +173,7 @@ defmodule Minga.Motion.Word do
         new_byte_off =
           Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-        Document.offset_to_position(buf, new_byte_off)
+        Readable.offset_to_position(buf, new_byte_off)
       end
     end
   end
@@ -187,9 +187,9 @@ defmodule Minga.Motion.Word do
       iex> Minga.Motion.Word.word_end_big(buf, {0, 0})
       {0, 6}
   """
-  @spec word_end_big(Document.t(), position()) :: position()
-  def word_end_big(%Document{} = buf, {line, col} = pos) do
-    text = Document.content(buf)
+  @spec word_end_big(Readable.t(), position()) :: position()
+  def word_end_big(buf, {line, col} = pos) do
+    text = Readable.content(buf)
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     total = tuple_size(graphemes)
 
@@ -204,7 +204,7 @@ defmodule Minga.Motion.Word do
       new_byte_off =
         Helpers.grapheme_index_to_byte_offset(byte_offsets, new_g_idx, byte_size(text))
 
-      Document.offset_to_position(buf, new_byte_off)
+      Readable.offset_to_position(buf, new_byte_off)
     end
   end
 

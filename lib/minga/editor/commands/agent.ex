@@ -33,6 +33,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.Windows
   alias Minga.Git.Diff
   alias Minga.Input.TextField
+  alias Minga.Input.Vim
 
   import Bitwise
 
@@ -713,6 +714,21 @@ defmodule Minga.Editor.Commands.Agent do
   def scope_unfocus_and_quit(state) do
     state = update_agent(state, &AgentState.focus_input(&1, false))
     toggle_agentic_view(state)
+  end
+
+  # ── Input vim mode commands ──────────────────────────────────────────────
+  #
+  # Vim editing (motions, operators, visual mode, counts, text objects) is
+  # handled entirely by Minga.Input.Vim.handle_key/4 in the dispatch layer.
+  # Only mode transitions that originate from scope trie bindings live here.
+
+  @doc "Switches the input from insert to normal mode (called on Escape in insert)."
+  @spec input_to_normal(state()) :: state()
+  def input_to_normal(state) do
+    update_agent(state, fn agent ->
+      {new_vim, new_tf} = Vim.enter_normal(agent.panel.vim, agent.panel.input)
+      %{agent | panel: %{agent.panel | vim: new_vim, input: new_tf}}
+    end)
   end
 
   # ── Panel management ───────────────────────────────────────────────────────

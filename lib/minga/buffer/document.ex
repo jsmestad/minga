@@ -859,3 +859,14 @@ defmodule Minga.Buffer.Document do
     end
   end
 end
+
+defimpl Minga.Text.Readable, for: Minga.Buffer.Document do
+  @moduledoc false
+
+  alias Minga.Buffer.Document
+
+  def content(doc), do: Document.content(doc)
+  def line_at(doc, n), do: Document.line_at(doc, n)
+  def line_count(doc), do: Document.line_count(doc)
+  def offset_to_position(doc, offset), do: Document.offset_to_position(doc, offset)
+end

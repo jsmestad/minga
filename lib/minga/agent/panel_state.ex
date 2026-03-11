@@ -13,6 +13,7 @@ defmodule Minga.Agent.PanelState do
   """
 
   alias Minga.Input.TextField
+  alias Minga.Input.Vim
   alias Minga.Scroll
 
   @typedoc "Thinking level for models that support extended reasoning."
@@ -21,11 +22,15 @@ defmodule Minga.Agent.PanelState do
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
   @type paste_block :: %{text: String.t(), expanded: boolean()}
 
+  @typedoc "Vim mode for the input field when focused."
+  @type input_mode :: :insert | :normal | :visual | :visual_line | :operator_pending
+
   @typedoc "Agent panel UI state."
   @type t :: %__MODULE__{
           visible: boolean(),
           scroll: Scroll.t(),
           input: TextField.t(),
+          vim: Vim.t(),
           prompt_history: [String.t()],
           history_index: integer(),
           spinner_frame: non_neg_integer(),
@@ -51,6 +56,7 @@ defmodule Minga.Agent.PanelState do
   defstruct visible: false,
             scroll: %Scroll{},
             input: %TextField{},
+            vim: %Vim{},
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
@@ -304,10 +310,18 @@ defmodule Minga.Agent.PanelState do
     %{state | scroll: Scroll.pin_to_bottom(state.scroll)}
   end
 
-  @doc "Sets the input focus state."
+  @doc "Returns the current input vim mode, derived from the Vim state."
+  @spec input_mode(t()) :: input_mode()
+  def input_mode(%__MODULE__{vim: vim}), do: Vim.mode(vim)
+
+  @doc "Sets the input focus state. Entering focus starts in insert mode; leaving resets vim state."
   @spec set_input_focused(t(), boolean()) :: t()
-  def set_input_focused(%__MODULE__{} = state, focused) do
-    %{state | input_focused: focused}
+  def set_input_focused(%__MODULE__{} = state, true) do
+    %{state | input_focused: true, vim: Vim.enter_insert(state.vim)}
+  end
+
+  def set_input_focused(%__MODULE__{} = state, false) do
+    %{state | input_focused: false, vim: Vim.enter_insert(state.vim)}
   end
 
   @doc "Returns the number of input lines."

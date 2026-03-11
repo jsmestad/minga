@@ -215,6 +215,9 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:agent_self_insert, char}),
     do: AgentCommands.scope_self_insert(state, char)
 
+  # Input mode transition (insert → normal on Escape)
+  def execute(state, :agent_input_to_normal), do: AgentCommands.input_to_normal(state)
+
   def execute(state, :agent_accept_hunk), do: AgentCommands.scope_accept_hunk(state)
   def execute(state, :agent_reject_hunk), do: AgentCommands.scope_reject_hunk(state)
   def execute(state, :agent_accept_all_hunks), do: AgentCommands.scope_accept_all_hunks(state)

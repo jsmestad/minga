@@ -3,11 +3,11 @@ defmodule Minga.Motion.Document do
   Document-level and paragraph cursor motion functions.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Motion.Line
+  alias Minga.Text.Readable
 
   @typedoc "A zero-indexed {line, col} cursor position."
-  @type position :: Document.position()
+  @type position :: {non_neg_integer(), non_neg_integer()}
 
   @doc """
   Move to the very start of the buffer (Vim's `gg`).
@@ -18,8 +18,8 @@ defmodule Minga.Motion.Document do
       iex> Minga.Motion.Document.document_start(Minga.Buffer.Document.new("hello\\nworld"))
       {0, 0}
   """
-  @spec document_start(Document.t()) :: position()
-  def document_start(%Document{}), do: {0, 0}
+  @spec document_start(Readable.t()) :: position()
+  def document_start(_buf), do: {0, 0}
 
   @doc """
   Move to the last character of the last line (Vim's `G`).
@@ -30,9 +30,9 @@ defmodule Minga.Motion.Document do
       iex> Minga.Motion.Document.document_end(buf)
       {1, 4}
   """
-  @spec document_end(Document.t()) :: position()
-  def document_end(%Document{} = buf) do
-    last_line = Document.line_count(buf) - 1
+  @spec document_end(Readable.t()) :: position()
+  def document_end(buf) do
+    last_line = Readable.line_count(buf) - 1
     Line.line_end(buf, {last_line, 0})
   end
 
@@ -45,9 +45,9 @@ defmodule Minga.Motion.Document do
       iex> Minga.Motion.Document.paragraph_forward(buf, {0, 0})
       {2, 0}
   """
-  @spec paragraph_forward(Document.t(), position()) :: position()
-  def paragraph_forward(%Document{} = buf, {line, _col}) do
-    total = Document.line_count(buf)
+  @spec paragraph_forward(Readable.t(), position()) :: position()
+  def paragraph_forward(buf, {line, _col}) do
+    total = Readable.line_count(buf)
     find_paragraph_boundary(buf, line + 1, total, :forward)
   end
 
@@ -60,13 +60,13 @@ defmodule Minga.Motion.Document do
       iex> Minga.Motion.Document.paragraph_backward(buf, {3, 0})
       {2, 0}
   """
-  @spec paragraph_backward(Document.t(), position()) :: position()
-  def paragraph_backward(%Document{} = buf, {line, _col}) do
-    find_paragraph_boundary(buf, line - 1, Document.line_count(buf), :backward)
+  @spec paragraph_backward(Readable.t(), position()) :: position()
+  def paragraph_backward(buf, {line, _col}) do
+    find_paragraph_boundary(buf, line - 1, Readable.line_count(buf), :backward)
   end
 
   @spec find_paragraph_boundary(
-          Document.t(),
+          Readable.t(),
           integer(),
           non_neg_integer(),
           :forward | :backward
@@ -78,7 +78,7 @@ defmodule Minga.Motion.Document do
   end
 
   defp find_paragraph_boundary(buf, line, total, dir) do
-    line_text = Document.line_at(buf, line) || ""
+    line_text = Readable.line_at(buf, line) || ""
     next = if dir == :forward, do: line + 1, else: line - 1
 
     if blank_line?(line_text) do

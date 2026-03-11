@@ -112,12 +112,13 @@ defmodule Minga.Input.AgentPanelNavTest do
   end
 
   describe "agent panel input mode (via Scoped)" do
-    test "Escape unfocuses input" do
+    test "Escape switches to input normal mode" do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      assert new_state.agent.panel.input_focused == false
+      assert new_state.agent.panel.input_focused == true
+      assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
 
     test "input mode intercepts printable chars" do

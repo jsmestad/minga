@@ -80,7 +80,7 @@ defmodule Minga.Input.TextField do
 
   @doc "Returns the full text by joining lines with newlines."
   @spec text(t()) :: String.t()
-  def text(%__MODULE__{lines: lines}), do: Enum.join(lines, "\n")
+  def text(%__MODULE__{} = tf), do: content(tf)
 
   @doc "Returns the number of logical lines."
   @spec line_count(t()) :: pos_integer()
@@ -332,8 +332,158 @@ defmodule Minga.Input.TextField do
     %{tf | cursor: {line, col}}
   end
 
+  # ── Range operations (for vim operators) ────────────────────────────────
+
+  @doc """
+  Returns the text between two positions (inclusive of `from`, exclusive of `to`).
+
+  Positions are `{line, col}` where col is a byte offset. The range is
+  extracted from the full content string. Returns an empty string if the
+  range is empty or reversed.
+  """
+  @spec get_range(t(), cursor(), cursor()) :: String.t()
+  def get_range(%__MODULE__{} = tf, from, to) do
+    {from, to} = sort_positions(from, to)
+    text = content(tf)
+    from_byte = position_to_byte_offset(tf, from)
+    to_byte = position_to_byte_offset(tf, to)
+    binary_part(text, from_byte, max(to_byte - from_byte, 0))
+  end
+
+  @doc """
+  Deletes text between two positions and returns `{updated_tf, deleted_text}`.
+
+  The cursor is placed at the `from` position (or clamped to the end of
+  the resulting text if `from` is past the new content).
+  """
+  @spec delete_range(t(), cursor(), cursor()) :: {t(), String.t()}
+  def delete_range(%__MODULE__{} = tf, from, to) do
+    {from, to} = sort_positions(from, to)
+    text = content(tf)
+    from_byte = position_to_byte_offset(tf, from)
+    to_byte = position_to_byte_offset(tf, to)
+    deleted = binary_part(text, from_byte, max(to_byte - from_byte, 0))
+
+    new_text =
+      binary_part(text, 0, from_byte) <> binary_part(text, to_byte, byte_size(text) - to_byte)
+
+    new_tf = new(new_text) |> set_cursor(from)
+    {new_tf, deleted}
+  end
+
+  @doc """
+  Deletes an entire line by index. Returns `{updated_tf, deleted_line_text}`.
+
+  If the buffer has only one line, it is cleared. The cursor moves to
+  the same line index (clamped) at column 0.
+  """
+  @spec delete_line(t(), non_neg_integer()) :: {t(), String.t()}
+  def delete_line(%__MODULE__{lines: [only]} = tf, 0) do
+    {%{tf | lines: [""], cursor: {0, 0}}, only}
+  end
+
+  def delete_line(%__MODULE__{lines: lines} = tf, line_idx)
+      when is_integer(line_idx) and line_idx >= 0 and line_idx < length(lines) do
+    deleted = Enum.at(lines, line_idx)
+    new_lines = List.delete_at(lines, line_idx)
+    new_line = min(line_idx, length(new_lines) - 1)
+    {%{tf | lines: new_lines, cursor: {new_line, 0}}, deleted}
+  end
+
+  def delete_line(%__MODULE__{} = tf, _line_idx), do: {tf, ""}
+
+  @doc """
+  Replaces text between two positions with new text.
+
+  The cursor is placed at the end of the inserted text.
+  """
+  @spec replace_range(t(), cursor(), cursor(), String.t()) :: t()
+  def replace_range(%__MODULE__{} = tf, from, to, replacement) do
+    {from, to} = sort_positions(from, to)
+    text = content(tf)
+    from_byte = position_to_byte_offset(tf, from)
+    to_byte = position_to_byte_offset(tf, to)
+
+    new_text =
+      binary_part(text, 0, from_byte) <>
+        replacement <>
+        binary_part(text, to_byte, byte_size(text) - to_byte)
+
+    # Place cursor at end of replacement
+    replacement_end_byte = from_byte + byte_size(replacement)
+    new_tf = new(new_text)
+    end_pos = offset_to_position(new_tf, replacement_end_byte)
+    set_cursor(new_tf, end_pos)
+  end
+
+  # ── Read access (used by Minga.Text.Readable protocol) ──────────────────
+
+  @doc "Returns the full text content as a single string."
+  @spec content(t()) :: String.t()
+  def content(%__MODULE__{lines: lines}), do: Enum.join(lines, "\n")
+
+  @doc "Returns the line at the given 0-based index, or nil if out of range."
+  @spec line_at(t(), non_neg_integer()) :: String.t() | nil
+  def line_at(%__MODULE__{lines: lines}, index) when is_integer(index) and index >= 0 do
+    Enum.at(lines, index)
+  end
+
+  def line_at(%__MODULE__{}, _index), do: nil
+
+  @doc """
+  Converts a byte offset from the start of content to a `{line, col}` position.
+
+  Walks through the text byte by byte, incrementing line on newlines.
+  """
+  @spec offset_to_position(t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  def offset_to_position(%__MODULE__{} = tf, offset) when is_integer(offset) and offset >= 0 do
+    do_offset_to_position(content(tf), offset, 0, 0)
+  end
+
   # ── Private ───────────────────────────────────────────────────────────────
+
+  @spec do_offset_to_position(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp do_offset_to_position(_text, 0, line, col), do: {line, col}
+  defp do_offset_to_position("", _offset, line, col), do: {line, col}
+
+  defp do_offset_to_position(<<"\n", rest::binary>>, offset, line, _col) do
+    do_offset_to_position(rest, offset - 1, line + 1, 0)
+  end
+
+  defp do_offset_to_position(<<_byte, rest::binary>>, offset, line, col) do
+    do_offset_to_position(rest, offset - 1, line, col + 1)
+  end
 
   @spec clamp(integer(), integer(), integer()) :: integer()
   defp clamp(value, min_val, max_val), do: max(min_val, min(value, max_val))
+
+  @spec sort_positions(cursor(), cursor()) :: {cursor(), cursor()}
+  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
+    if l1 < l2 or (l1 == l2 and c1 <= c2), do: {p1, p2}, else: {p2, p1}
+  end
+
+  # Converts a {line, col} position to a byte offset into the content string.
+  # col is a byte offset within the line.
+  @spec position_to_byte_offset(t(), cursor()) :: non_neg_integer()
+  defp position_to_byte_offset(%__MODULE__{lines: lines}, {line, col}) do
+    # Sum bytes of all lines before `line`, plus 1 for each newline separator
+    line_bytes =
+      lines
+      |> Enum.take(line)
+      |> Enum.reduce(0, fn l, acc -> acc + byte_size(l) + 1 end)
+
+    line_bytes + min(col, byte_size(Enum.at(lines, line) || ""))
+  end
+end
+
+defimpl Minga.Text.Readable, for: Minga.Input.TextField do
+  @moduledoc false
+
+  alias Minga.Input.TextField
+
+  def content(tf), do: TextField.content(tf)
+  def line_at(tf, n), do: TextField.line_at(tf, n)
+  def line_count(tf), do: TextField.line_count(tf)
+  def offset_to_position(tf, offset), do: TextField.offset_to_position(tf, offset)
 end
