@@ -9,8 +9,8 @@ defmodule Minga.Editor.State.SnapshotTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
-  alias Minga.Surface.AgentView.State, as: AVState
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
 
   defp make_state(opts \\ []) do
     buf = Keyword.get(opts, :buffer)
@@ -58,7 +58,7 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       ctx = EditorState.snapshot_tab_context(state)
 
-      assert %BVState{} = ctx.surface_state
+      assert %BufferViewState{} = ctx.surface_state
       assert ctx.surface_state.buffers.active == buf
       assert ctx.surface_state.editing.mode == :insert
     end
@@ -92,7 +92,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       assert ctx.surface_module == Minga.Surface.AgentView
-      assert %AVState{} = ctx.surface_state
+      assert %AgentViewState{} = ctx.surface_state
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.keymap_scope == :agent
@@ -188,7 +188,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       # Tab a should have been snapshotted as a canonical context
       saved_a = TabBar.get(switched.tab_bar, tab_a.id)
       assert saved_a.context.keymap_scope == :editor
-      assert %BVState{} = saved_a.context.surface_state
+      assert %BufferViewState{} = saved_a.context.surface_state
       assert saved_a.context.surface_state.editing.mode == :normal
       assert saved_a.context.surface_state.buffers.active == buf_a
     end

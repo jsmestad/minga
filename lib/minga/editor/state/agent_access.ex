@@ -16,20 +16,20 @@ defmodule Minga.Editor.State.AgentAccess do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Readers ────────────────────────────────────────────────────────────────
 
   @doc "Returns the agent state from the active surface or background tab."
   @spec agent(EditorState.t() | map()) :: AgentState.t()
-  def agent(%EditorState{surface_state: %AVState{agent: a}}), do: a
+  def agent(%EditorState{surface_state: %AgentViewState{agent: a}}), do: a
   def agent(%EditorState{agent: a}), do: a
   def agent(%{agent: a}), do: a
   def agent(_), do: %AgentState{}
 
   @doc "Returns the agentic view state from the active surface or background tab."
   @spec agentic(EditorState.t() | map()) :: ViewState.t()
-  def agentic(%EditorState{surface_state: %AVState{agentic: a}}), do: a
+  def agentic(%EditorState{surface_state: %AgentViewState{agentic: a}}), do: a
   def agentic(%EditorState{agentic: a}), do: a
   def agentic(%{agentic: a}), do: a
   def agentic(_), do: ViewState.new()
@@ -62,7 +62,7 @@ defmodule Minga.Editor.State.AgentAccess do
   """
   @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
           EditorState.t() | map()
-  def update_agent(%EditorState{surface_state: %AVState{} = av} = state, fun) do
+  def update_agent(%EditorState{surface_state: %AgentViewState{} = av} = state, fun) do
     new_agent = fun.(av.agent)
     new_av = %{av | agent: new_agent}
     %{state | agent: new_agent, surface_state: new_av}
@@ -82,7 +82,7 @@ defmodule Minga.Editor.State.AgentAccess do
   """
   @spec update_agentic(EditorState.t() | map(), (ViewState.t() -> ViewState.t())) ::
           EditorState.t() | map()
-  def update_agentic(%EditorState{surface_state: %AVState{} = av} = state, fun) do
+  def update_agentic(%EditorState{surface_state: %AgentViewState{} = av} = state, fun) do
     new_agentic = fun.(av.agentic)
     new_av = %{av | agentic: new_agentic}
     %{state | agentic: new_agentic, surface_state: new_av}
@@ -109,7 +109,7 @@ defmodule Minga.Editor.State.AgentAccess do
   @spec agent_from_tab(EditorState.t()) :: AgentState.t()
   def agent_from_tab(%EditorState{tab_bar: %TabBar{} = tb}) do
     case find_agent_tab(tb) do
-      %{context: %{surface_state: %AVState{agent: a}}} -> a
+      %{context: %{surface_state: %AgentViewState{agent: a}}} -> a
       _ -> %AgentState{}
     end
   end
@@ -122,7 +122,7 @@ defmodule Minga.Editor.State.AgentAccess do
   @spec agentic_from_tab(EditorState.t()) :: ViewState.t()
   def agentic_from_tab(%EditorState{tab_bar: %TabBar{} = tb}) do
     case find_agent_tab(tb) do
-      %{context: %{surface_state: %AVState{agentic: a}}} -> a
+      %{context: %{surface_state: %AgentViewState{agentic: a}}} -> a
       _ -> ViewState.new()
     end
   end

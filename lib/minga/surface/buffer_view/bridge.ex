@@ -12,7 +12,7 @@ defmodule Minga.Surface.BufferView.Bridge do
   """
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
   alias Minga.Surface.BufferView.State.VimState
   alias Minga.Surface.Context
 
@@ -22,9 +22,9 @@ defmodule Minga.Surface.BufferView.Bridge do
   Copies all buffer-view-related fields into the BufferView struct,
   including the vim editing model sub-state.
   """
-  @spec from_editor_state(EditorState.t()) :: BVState.t()
+  @spec from_editor_state(EditorState.t()) :: BufferViewState.t()
   def from_editor_state(%EditorState{} = es) do
-    %BVState{
+    %BufferViewState{
       buffers: es.buffers,
       windows: es.windows,
       file_tree: es.file_tree,
@@ -59,8 +59,8 @@ defmodule Minga.Surface.BufferView.Bridge do
   shared infrastructure (port_manager, theme, tab_bar, etc.), and
   transient fields (render_timer, layout) are untouched.
   """
-  @spec to_editor_state(EditorState.t(), BVState.t()) :: EditorState.t()
-  def to_editor_state(%EditorState{} = es, %BVState{editing: %VimState{} = vim} = bv) do
+  @spec to_editor_state(EditorState.t(), BufferViewState.t()) :: EditorState.t()
+  def to_editor_state(%EditorState{} = es, %BufferViewState{editing: %VimState{} = vim} = bv) do
     es = %{
       es
       | buffers: bv.buffers,

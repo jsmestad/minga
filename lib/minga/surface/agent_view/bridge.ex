@@ -12,15 +12,15 @@ defmodule Minga.Surface.AgentView.Bridge do
   """
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.Context
 
   @doc """
   Extracts an `AgentView.State` from the current `EditorState`.
   """
-  @spec from_editor_state(EditorState.t()) :: AVState.t()
+  @spec from_editor_state(EditorState.t()) :: AgentViewState.t()
   def from_editor_state(%EditorState{} = es) do
-    %AVState{
+    %AgentViewState{
       agent: es.agent,
       agentic: es.agentic,
       context: Context.from_editor_state(es)
@@ -34,8 +34,8 @@ defmodule Minga.Surface.AgentView.Bridge do
   Buffer-related fields, shared infrastructure, and transient fields
   are untouched.
   """
-  @spec to_editor_state(EditorState.t(), AVState.t()) :: EditorState.t()
-  def to_editor_state(%EditorState{} = es, %AVState{} = av) do
+  @spec to_editor_state(EditorState.t(), AgentViewState.t()) :: EditorState.t()
+  def to_editor_state(%EditorState{} = es, %AgentViewState{} = av) do
     es = %{
       es
       | agent: av.agent,

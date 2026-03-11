@@ -515,7 +515,7 @@ defmodule Minga.Editor.State do
   # viewport dimensions.
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
-    alias Minga.Surface.BufferView.State, as: BVState
+    alias Minga.Surface.BufferView.State, as: BufferViewState
     alias Minga.Surface.BufferView.State.VimState
 
     win_id = state.windows.next_id
@@ -537,7 +537,7 @@ defmodule Minga.Editor.State do
         %Windows{}
       end
 
-    bv_state = %BVState{
+    bv_state = %BufferViewState{
       buffers: %Buffers{
         active: buf,
         list: if(buf, do: [buf], else: []),
@@ -730,7 +730,7 @@ defmodule Minga.Editor.State do
   def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
 
   def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
-    alias Minga.Surface.BufferView.State, as: BVState
+    alias Minga.Surface.BufferView.State, as: BufferViewState
 
     Enum.find(tb.tabs, fn tab ->
       tab.kind == :file and tab_has_active_buffer?(tab, pid)
@@ -739,10 +739,10 @@ defmodule Minga.Editor.State do
 
   @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
   defp tab_has_active_buffer?(tab, pid) do
-    alias Minga.Surface.BufferView.State, as: BVState
+    alias Minga.Surface.BufferView.State, as: BufferViewState
 
     case Map.get(tab.context, :surface_state) do
-      %BVState{buffers: %{active: ^pid}} -> true
+      %BufferViewState{buffers: %{active: ^pid}} -> true
       _ -> Map.get(tab.context, :active_buffer) == pid
     end
   end
@@ -826,10 +826,10 @@ defmodule Minga.Editor.State do
   """
   @spec update_background_agent(t(), Tab.id(), (AgentState.t() -> AgentState.t())) :: t()
   def update_background_agent(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
-    alias Minga.Surface.AgentView.State, as: AVState
+    alias Minga.Surface.AgentView.State, as: AgentViewState
 
     update_background_surface(state, tb, tab_id, fn
-      %AVState{agent: agent} = av -> %{av | agent: fun.(agent)}
+      %AgentViewState{agent: agent} = av -> %{av | agent: fun.(agent)}
       other -> other
     end)
   end
@@ -839,10 +839,10 @@ defmodule Minga.Editor.State do
   """
   @spec update_background_agentic(t(), Tab.id(), (ViewState.t() -> ViewState.t())) :: t()
   def update_background_agentic(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
-    alias Minga.Surface.AgentView.State, as: AVState
+    alias Minga.Surface.AgentView.State, as: AgentViewState
 
     update_background_surface(state, tb, tab_id, fn
-      %AVState{agentic: agentic} = av -> %{av | agentic: fun.(agentic)}
+      %AgentViewState{agentic: agentic} = av -> %{av | agentic: fun.(agentic)}
       other -> other
     end)
   end

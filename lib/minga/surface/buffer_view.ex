@@ -25,7 +25,7 @@ defmodule Minga.Surface.BufferView do
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
   alias Minga.Surface.BufferView.Bridge
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
   alias Minga.Surface.Context
 
   # ── Surface callbacks ──────────────────────────────────────────────────────
@@ -48,13 +48,13 @@ defmodule Minga.Surface.BufferView do
   phases it becomes the primary entry point.
   """
   @impl Minga.Surface
-  @spec handle_key(BVState.t(), non_neg_integer(), non_neg_integer()) ::
-          {BVState.t(), [Minga.Surface.effect()]}
-  def handle_key(%BVState{context: nil} = bv_state, _codepoint, _modifiers) do
+  @spec handle_key(BufferViewState.t(), non_neg_integer(), non_neg_integer()) ::
+          {BufferViewState.t(), [Minga.Surface.effect()]}
+  def handle_key(%BufferViewState{context: nil} = bv_state, _codepoint, _modifiers) do
     {bv_state, []}
   end
 
-  def handle_key(%BVState{} = bv_state, codepoint, modifiers) do
+  def handle_key(%BufferViewState{} = bv_state, codepoint, modifiers) do
     editor_state = reconstruct_editor_state(bv_state)
 
     new_editor_state =
@@ -77,19 +77,27 @@ defmodule Minga.Surface.BufferView do
   """
   @impl Minga.Surface
   @spec handle_mouse(
-          BVState.t(),
+          BufferViewState.t(),
           integer(),
           integer(),
           atom(),
           non_neg_integer(),
           atom(),
           pos_integer()
-        ) :: {BVState.t(), [Minga.Surface.effect()]}
-  def handle_mouse(%BVState{context: nil} = bv_state, _row, _col, _button, _mods, _et, _cc) do
+        ) :: {BufferViewState.t(), [Minga.Surface.effect()]}
+  def handle_mouse(
+        %BufferViewState{context: nil} = bv_state,
+        _row,
+        _col,
+        _button,
+        _mods,
+        _et,
+        _cc
+      ) do
     {bv_state, []}
   end
 
-  def handle_mouse(%BVState{} = bv_state, row, col, button, mods, event_type, click_count) do
+  def handle_mouse(%BufferViewState{} = bv_state, row, col, button, mods, event_type, click_count) do
     editor_state = reconstruct_editor_state(bv_state)
 
     new_editor_state =
@@ -111,13 +119,16 @@ defmodule Minga.Surface.BufferView do
   refreshed render caches (per-window dirty-line tracking).
   """
   @impl Minga.Surface
-  @spec render(BVState.t(), {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}) ::
-          {BVState.t(), [Minga.Editor.DisplayList.draw()]}
-  def render(%BVState{context: nil} = bv_state, _rect) do
+  @spec render(
+          BufferViewState.t(),
+          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+        ) ::
+          {BufferViewState.t(), [Minga.Editor.DisplayList.draw()]}
+  def render(%BufferViewState{context: nil} = bv_state, _rect) do
     {bv_state, []}
   end
 
-  def render(%BVState{} = bv_state, _rect) do
+  def render(%BufferViewState{} = bv_state, _rect) do
     editor_state = reconstruct_editor_state(bv_state)
 
     # Pre-pipeline: sync cursor and compute layout (normally done by
@@ -140,8 +151,9 @@ defmodule Minga.Surface.BufferView do
   state changes back to the surface.
   """
   @impl Minga.Surface
-  @spec handle_event(BVState.t(), term()) :: {BVState.t(), [Minga.Surface.effect()]}
-  def handle_event(%BVState{} = bv_state, _event) do
+  @spec handle_event(BufferViewState.t(), term()) ::
+          {BufferViewState.t(), [Minga.Surface.effect()]}
+  def handle_event(%BufferViewState{} = bv_state, _event) do
     # Phase 1: events are handled by Editor.handle_info and bridged.
     {bv_state, []}
   end
@@ -153,9 +165,9 @@ defmodule Minga.Surface.BufferView do
   determine the cursor shape.
   """
   @impl Minga.Surface
-  @spec cursor(BVState.t()) ::
+  @spec cursor(BufferViewState.t()) ::
           {non_neg_integer(), non_neg_integer(), atom()}
-  def cursor(%BVState{editing: %{mode: mode}} = bv_state) do
+  def cursor(%BufferViewState{editing: %{mode: mode}} = bv_state) do
     case bv_state.windows do
       %{active: active_id, map: map} when is_map_key(map, active_id) ->
         window = Map.fetch!(map, active_id)
@@ -175,8 +187,8 @@ defmodule Minga.Surface.BufferView do
   Editor's tab-switching logic.
   """
   @impl Minga.Surface
-  @spec activate(BVState.t()) :: BVState.t()
-  def activate(%BVState{} = bv_state) do
+  @spec activate(BufferViewState.t()) :: BufferViewState.t()
+  def activate(%BufferViewState{} = bv_state) do
     bv_state
   end
 
@@ -187,8 +199,8 @@ defmodule Minga.Surface.BufferView do
   snapshotting needed because the surface owns its state directly.
   """
   @impl Minga.Surface
-  @spec deactivate(BVState.t()) :: BVState.t()
-  def deactivate(%BVState{} = bv_state) do
+  @spec deactivate(BufferViewState.t()) :: BufferViewState.t()
+  def deactivate(%BufferViewState{} = bv_state) do
     bv_state
   end
 
@@ -200,7 +212,7 @@ defmodule Minga.Surface.BufferView do
   Convenience wrapper around `Bridge.from_editor_state/1`.
   """
   @impl Minga.Surface
-  @spec from_editor_state(Minga.Editor.State.t()) :: BVState.t()
+  @spec from_editor_state(Minga.Editor.State.t()) :: BufferViewState.t()
   defdelegate from_editor_state(editor_state), to: Bridge
 
   @doc """
@@ -209,7 +221,7 @@ defmodule Minga.Surface.BufferView do
   Convenience wrapper around `Bridge.to_editor_state/2`.
   """
   @impl Minga.Surface
-  @spec to_editor_state(Minga.Editor.State.t(), BVState.t()) :: Minga.Editor.State.t()
+  @spec to_editor_state(Minga.Editor.State.t(), BufferViewState.t()) :: Minga.Editor.State.t()
   defdelegate to_editor_state(editor_state, bv_state), to: Bridge
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -264,8 +276,8 @@ defmodule Minga.Surface.BufferView do
   # operate on EditorState, so we reconstruct one for delegation. The context
   # carries the shared fields (theme, port_manager, etc.) that the surface
   # doesn't own.
-  @spec reconstruct_editor_state(BVState.t()) :: EditorState.t()
-  defp reconstruct_editor_state(%BVState{context: %Context{} = ctx, editing: vim} = bv) do
+  @spec reconstruct_editor_state(BufferViewState.t()) :: EditorState.t()
+  defp reconstruct_editor_state(%BufferViewState{context: %Context{} = ctx, editing: vim} = bv) do
     # Build agent defaults for fields carried in context.
     # These are Phase 1 scaffolding: the agent fields live in context
     # so Input.Scoped's agent-panel branches work correctly.

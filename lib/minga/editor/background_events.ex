@@ -136,10 +136,10 @@ defmodule Minga.Editor.BackgroundEvents do
   defp background_tab_session(%Tab{session: pid}) when is_pid(pid), do: pid
 
   defp background_tab_session(%Tab{context: ctx}) do
-    alias Minga.Surface.AgentView.State, as: AVState
+    alias Minga.Surface.AgentView.State, as: AgentViewState
 
     case Map.get(ctx, :surface_state) do
-      %AVState{agent: agent} -> agent.session
+      %AgentViewState{agent: agent} -> agent.session
       _ -> Map.get(ctx, :agent, %AgentState{}).session
     end
   end

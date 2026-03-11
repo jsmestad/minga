@@ -13,7 +13,7 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Surface.BufferView
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
   alias Minga.Surface.BufferView.State.VimState
   alias Minga.Test.HeadlessPort
 
@@ -23,14 +23,14 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
       state = :sys.get_state(ctx.editor)
 
       assert state.surface_module == BufferView
-      assert %BVState{} = state.surface_state
+      assert %BufferViewState{} = state.surface_state
     end
 
     test "surface state reflects the editor's initial mode" do
       ctx = start_editor("hello")
       state = :sys.get_state(ctx.editor)
 
-      assert %BVState{editing: %VimState{mode: :normal}} = state.surface_state
+      assert %BufferViewState{editing: %VimState{mode: :normal}} = state.surface_state
     end
 
     test "surface state reflects the editor's viewport dimensions" do
@@ -81,7 +81,7 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
       context = Minga.Editor.State.snapshot_tab_context(state)
 
       assert context.surface_module == BufferView
-      assert %BVState{} = context.surface_state
+      assert %BufferViewState{} = context.surface_state
     end
   end
 
@@ -132,7 +132,7 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
     end
 
     test "handle_key without context is a no-op" do
-      bv_state = %BVState{
+      bv_state = %BufferViewState{
         viewport: Viewport.new(24, 80),
         editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         context: nil
@@ -157,7 +157,7 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
       # Calling render should succeed and return updated state
       {new_bv, draws} = BufferView.render(bv_state, {0, 0, 80, 24})
 
-      assert %BVState{} = new_bv
+      assert %BufferViewState{} = new_bv
       assert is_list(draws)
     end
   end

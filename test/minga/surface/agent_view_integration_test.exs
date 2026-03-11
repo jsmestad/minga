@@ -24,7 +24,7 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.Bridge, as: BVBridge
 
@@ -81,7 +81,7 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
       state = base_state()
       new_state = AgentCommands.new_agent_session(state)
 
-      assert %AVState{} = new_state.surface_state
+      assert %AgentViewState{} = new_state.surface_state
     end
 
     test "agent tab context includes surface_module" do
@@ -145,13 +145,13 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
 
   describe "AgentView activate/deactivate lifecycle" do
     test "activate sets agentic.active to true" do
-      av = %AVState{agent: %AgentState{}, agentic: %ViewState{active: false}}
+      av = %AgentViewState{agent: %AgentState{}, agentic: %ViewState{active: false}}
       activated = AgentView.activate(av)
       assert activated.agentic.active == true
     end
 
     test "deactivate sets agentic.active to false" do
-      av = %AVState{agent: %AgentState{}, agentic: %ViewState{active: true}}
+      av = %AgentViewState{agent: %AgentState{}, agentic: %ViewState{active: true}}
       deactivated = AgentView.deactivate(av)
       assert deactivated.agentic.active == false
     end

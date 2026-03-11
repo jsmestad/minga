@@ -9,7 +9,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
   alias Minga.Editor.Viewport
 
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp make_state(opts \\ []) do
     session1 = opts[:session1] || spawn(fn -> :timer.sleep(:infinity) end)
@@ -22,7 +22,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
     agent_ctx = %{
       keymap_scope: :agent,
       surface_module: AgentView,
-      surface_state: %AVState{
+      surface_state: %AgentViewState{
         agent: %AgentState{session: session1, status: :idle},
         agentic: %ViewState{active: true, focus: :chat}
       }
@@ -37,7 +37,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
     agent_ctx2 = %{
       keymap_scope: :agent,
       surface_module: AgentView,
-      surface_state: %AVState{
+      surface_state: %AgentViewState{
         agent: %AgentState{session: session2, status: :idle},
         agentic: %ViewState{active: true, focus: :chat}
       }

@@ -31,7 +31,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.TabBar
   alias Minga.Input.Vim
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.Context
 
   @typedoc "Internal editor state."
@@ -166,7 +166,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     ctx =
       case Map.get(ctx, :surface_state) do
-        %AVState{agentic: agentic} = av ->
+        %AgentViewState{agentic: agentic} = av ->
           Map.put(ctx, :surface_state, %{av | agentic: %{agentic | focus: :chat}})
 
         _ ->
@@ -185,7 +185,7 @@ defmodule Minga.Editor.Commands.Agent do
     agent = AgentAccess.agent(state)
     agentic = %{ViewState.new() | active: true, focus: :chat}
 
-    av_state = %AVState{
+    av_state = %AgentViewState{
       agent: agent,
       agentic: agentic,
       context: Context.from_editor_state(state)

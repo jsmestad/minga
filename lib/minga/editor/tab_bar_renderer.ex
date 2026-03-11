@@ -280,11 +280,13 @@ defmodule Minga.Editor.TabBarRenderer do
 
   defp tab_dirty_marker(_, _), do: ""
 
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
-  defp tab_active_buffer(%Tab{context: %{surface_state: %BVState{buffers: %{active: buf}}}}),
-    do: buf
+  defp tab_active_buffer(%Tab{
+         context: %{surface_state: %BufferViewState{buffers: %{active: buf}}}
+       }),
+       do: buf
 
   defp tab_active_buffer(_), do: nil
 
