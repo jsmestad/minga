@@ -39,6 +39,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.State.Windows
+  alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -47,6 +48,7 @@ defmodule Minga.Editor.State do
 
   alias Minga.Mode
   alias Minga.Port.Capabilities
+  alias Minga.Surface.BufferView.Bridge, as: BVBridge
   alias Minga.Theme
 
   @typedoc "Stored last find-char motion for ; and , repeat."
@@ -446,6 +448,14 @@ defmodule Minga.Editor.State do
   """
   @spec snapshot_tab_context(t()) :: Tab.context()
   def snapshot_tab_context(%__MODULE__{} = state) do
+    # Initialize surface if not yet set (defensive for tests and early lifecycle).
+    state =
+      if state.surface_module == nil do
+        SurfaceSync.init_surface(state)
+      else
+        SurfaceSync.sync_from_editor(state)
+      end
+
     %{
       windows: state.windows,
       file_tree: state.file_tree,
@@ -454,8 +464,6 @@ defmodule Minga.Editor.State do
       keymap_scope: state.keymap_scope,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
-      agent: state.agent,
-      agentic: state.agentic,
       surface_module: state.surface_module,
       surface_state: state.surface_state
     }
@@ -485,11 +493,10 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:mode, context)
     |> maybe_restore(:mode_state, context)
     |> maybe_restore(:keymap_scope, context)
-    |> maybe_restore(:agent, context)
-    |> maybe_restore(:agentic, context)
     |> maybe_restore(:surface_module, context)
     |> maybe_restore(:surface_state, context)
     |> restore_active_buffer(context)
+    |> sync_agent_from_surface(context)
   end
 
   # Builds a complete file-tab context from the live state. This is the
@@ -517,15 +524,24 @@ defmodule Minga.Editor.State do
         %Windows{}
       end
 
-    %{
+    file_state = %{
       windows: windows,
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :editor,
-      agentic: %ViewState{},
       active_buffer: buf,
-      active_buffer_index: state.buffers.active_index
+      active_buffer_index: state.buffers.active_index,
+      surface_module: Minga.Surface.BufferView
     }
+
+    # Build surface state for the new file tab by temporarily applying
+    # these defaults, then syncing to create a BufferView.State.
+    temp_state =
+      Enum.reduce(file_state, state, fn {k, v}, acc -> Map.put(acc, k, v) end)
+
+    temp_state = %{temp_state | agent: %AgentState{}, agentic: %ViewState{}}
+    bv_state = BVBridge.from_editor_state(temp_state)
+    Map.put(file_state, :surface_state, bv_state)
   end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
@@ -546,6 +562,25 @@ defmodule Minga.Editor.State do
     Log.debug(:editor, fn ->
       "[tab] switch_tab restored: agentic=#{state.agentic.active} scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
     end)
+  end
+
+  # Populates agent/agentic fields from the restored surface state.
+  # For AgentView surfaces, the surface state carries these fields.
+  # For BufferView surfaces or older context maps that still have
+  # agent/agentic keys, falls back to the context map values.
+  @spec sync_agent_from_surface(t(), Tab.context()) :: t()
+  defp sync_agent_from_surface(state, context) do
+    state = SurfaceSync.sync_to_editor(state)
+
+    # Legacy fallback: older context maps may have agent/agentic keys
+    # but no surface_state. Support them during the transition.
+    if Map.has_key?(context, :surface_state) do
+      state
+    else
+      state
+      |> maybe_restore(:agent, context)
+      |> maybe_restore(:agentic, context)
+    end
   end
 
   @spec maybe_restore(t(), atom(), Tab.context()) :: t()
