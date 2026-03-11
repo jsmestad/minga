@@ -52,10 +52,10 @@ defmodule Minga.Editor.AgentLifecycle do
   def maybe_set_auto_context(state, file_path, buffer_pid) do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
-    agentic_active = state.agentic.active
+    agent_surface_active = state.surface_module == Minga.Surface.AgentView
     preview_empty = state.agentic.preview.content == :empty
 
-    if agentic_active and preview_empty and auto_context and not cli_flags.no_context do
+    if agent_surface_active and preview_empty and auto_context and not cli_flags.no_context do
       content = BufferServer.content(buffer_pid)
       update_preview(state, &Preview.set_file(&1, file_path, content))
     else

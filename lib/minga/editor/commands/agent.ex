@@ -158,8 +158,8 @@ defmodule Minga.Editor.Commands.Agent do
   # Switches to an existing agent tab, re-activating its agentic view.
   @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
   defp switch_to_existing_agent_tab(state, agent_tab) do
-    # The agent tab's context has agentic.active == false (set during
-    # deactivation). Patch it to active before switching.
+    # The agent tab's stored context has agentic.active == false (set
+    # during deactivation). Patch it to active before switching.
     ctx = agent_tab.context
 
     updated_agentic =

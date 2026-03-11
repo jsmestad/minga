@@ -560,7 +560,7 @@ defmodule Minga.Editor.State do
   @spec log_switch_tab_result(t()) :: :ok
   defp log_switch_tab_result(state) do
     Log.debug(:editor, fn ->
-      "[tab] switch_tab restored: agentic=#{state.agentic.active} scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
+      "[tab] switch_tab restored: surface=#{state.surface_module} scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
     end)
   end
 

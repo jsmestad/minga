@@ -19,7 +19,7 @@ defmodule Minga.Agent.View.Renderer do
   full width. The right panel (preview/dashboard) extends alongside the
   input area. This matches the OpenCode reference layout.
 
-  Called by `Minga.Editor.RenderPipeline` when `state.agentic.active` is true.
+  Called by `Minga.Editor.RenderPipeline` when the active surface is `AgentView`.
   Returns `DisplayList.draw()` tuples.
   """
 
