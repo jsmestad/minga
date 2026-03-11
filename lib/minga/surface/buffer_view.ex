@@ -199,6 +199,7 @@ defmodule Minga.Surface.BufferView do
 
   Convenience wrapper around `Bridge.from_editor_state/1`.
   """
+  @impl Minga.Surface
   @spec from_editor_state(Minga.Editor.State.t()) :: BVState.t()
   defdelegate from_editor_state(editor_state), to: Bridge
 
@@ -207,6 +208,7 @@ defmodule Minga.Surface.BufferView do
 
   Convenience wrapper around `Bridge.to_editor_state/2`.
   """
+  @impl Minga.Surface
   @spec to_editor_state(Minga.Editor.State.t(), BVState.t()) :: Minga.Editor.State.t()
   defdelegate to_editor_state(editor_state, bv_state), to: Bridge
 
