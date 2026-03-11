@@ -11,8 +11,18 @@ defmodule Minga.Input.FileTreeNavTest do
   alias Minga.Editor.Viewport
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
-  alias Minga.Input.Scoped
+  alias Minga.Input.FileTreeHandler
   alias Minga.Mode
+
+  defp walk_surface_handlers(state, cp, mods) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
+                                                                                {_, acc} ->
+      case handler.handle_key(acc, cp, mods) do
+        {:handled, new_state} -> {:halt, {:handled, new_state}}
+        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+      end
+    end)
+  end
 
   # Build a minimal EditorState with file tree focused and keymap_scope: :file_tree
   defp make_state(tmp_dir, file_count \\ 5) do
@@ -46,27 +56,27 @@ defmodule Minga.Input.FileTreeNavTest do
       state = make_state(tmp_dir)
       assert state.file_tree.tree.cursor == 0
 
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 1
 
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 2
     end
 
     test "k moves tree cursor up", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
       # Move down first
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 2
 
-      {:handled, state} = Scoped.handle_key(state, ?k, 0)
+      {:handled, state} = walk_surface_handlers(state, ?k, 0)
       assert state.file_tree.tree.cursor == 1
     end
 
     test "q closes the file tree via scope resolution", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
-      {:handled, state} = Scoped.handle_key(state, ?q, 0)
+      {:handled, state} = walk_surface_handlers(state, ?q, 0)
       assert state.file_tree.tree == nil
       assert state.file_tree.focused == false
       assert state.keymap_scope == :editor
@@ -74,7 +84,7 @@ defmodule Minga.Input.FileTreeNavTest do
 
     test "Escape closes the file tree", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
-      {:handled, state} = Scoped.handle_key(state, 27, 0)
+      {:handled, state} = walk_surface_handlers(state, 27, 0)
       assert state.file_tree.tree == nil
       assert state.keymap_scope == :editor
     end
@@ -82,7 +92,7 @@ defmodule Minga.Input.FileTreeNavTest do
     test "passthrough when tree not focused", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
       state = put_in(state.file_tree.focused, false)
-      {:passthrough, _state} = Scoped.handle_key(state, ?j, 0)
+      {:passthrough, _state} = FileTreeHandler.handle_key(state, ?j, 0)
     end
 
     test "tree cursor stays in bounds", %{tmp_dir: tmp_dir} do
@@ -93,7 +103,7 @@ defmodule Minga.Input.FileTreeNavTest do
       # Move down past the end
       state =
         Enum.reduce(1..(max_idx + 5), state, fn _i, acc ->
-          {:handled, new_acc} = Scoped.handle_key(acc, ?j, 0)
+          {:handled, new_acc} = walk_surface_handlers(acc, ?j, 0)
           new_acc
         end)
 
@@ -104,8 +114,8 @@ defmodule Minga.Input.FileTreeNavTest do
       state = make_state(tmp_dir)
       buf = state.file_tree.buffer
 
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
 
       {buf_line, _col} = BufferServer.cursor(buf)
       assert buf_line == state.file_tree.tree.cursor

@@ -20,8 +20,17 @@ defmodule Minga.Input.VimNavIntegrationTest do
   alias Minga.Editor.Viewport
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
-  alias Minga.Input.Scoped
   alias Minga.Mode
+
+  defp walk_surface_handlers(state, cp, mods) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
+                                                                                {_, acc} ->
+      case handler.handle_key(acc, cp, mods) do
+        {:handled, new_state} -> {:halt, {:handled, new_state}}
+        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+      end
+    end)
+  end
 
   defp make_tree_state(tmp_dir, file_count \\ 10) do
     if file_count > 0 do
@@ -61,7 +70,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
       entries = FileTree.visible_entries(state.file_tree.tree)
       max_idx = length(entries) - 1
 
-      {:handled, state} = Scoped.handle_key(state, ?G, 0)
+      {:handled, state} = walk_surface_handlers(state, ?G, 0)
       assert state.file_tree.tree.cursor == max_idx
     end
 
@@ -69,12 +78,12 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # First move to bottom
-      {:handled, state} = Scoped.handle_key(state, ?G, 0)
+      {:handled, state} = walk_surface_handlers(state, ?G, 0)
       assert state.file_tree.tree.cursor > 0
 
       # Then gg to top (g is pending_g, second g triggers)
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
       assert state.file_tree.tree.cursor == 0
     end
   end
@@ -85,8 +94,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
       assert state.file_tree.tree.cursor == 0
 
       # Type 3j
-      {:handled, state} = Scoped.handle_key(state, ?3, 0)
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?3, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 3
     end
   end
@@ -98,8 +107,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
       content_before = BufferServer.content(buf)
 
       # yy should yank without error
-      {:handled, state} = Scoped.handle_key(state, ?y, 0)
-      {:handled, _state} = Scoped.handle_key(state, ?y, 0)
+      {:handled, state} = walk_surface_handlers(state, ?y, 0)
+      {:handled, _state} = walk_surface_handlers(state, ?y, 0)
 
       assert BufferServer.content(buf) == content_before
     end
@@ -111,21 +120,21 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
       # i is not a tree-specific key, so it delegates to mode FSM
       # The mode FSM should block insert on read-only buffer
-      {:handled, state} = Scoped.handle_key(state, ?i, 0)
+      {:handled, state} = walk_surface_handlers(state, ?i, 0)
       assert state.mode == :normal
     end
 
     test "a does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = Scoped.handle_key(state, ?a, 0)
+      {:handled, state} = walk_surface_handlers(state, ?a, 0)
       assert state.mode == :normal
     end
 
     test "o does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = Scoped.handle_key(state, ?o, 0)
+      {:handled, state} = walk_surface_handlers(state, ?o, 0)
       assert state.mode == :normal
     end
   end
@@ -147,7 +156,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
         state =
           if dir_idx > 0 do
             Enum.reduce(1..dir_idx, state, fn _i, acc ->
-              {:handled, new_acc} = Scoped.handle_key(acc, ?j, 0)
+              {:handled, new_acc} = walk_surface_handlers(acc, ?j, 0)
               new_acc
             end)
           else
@@ -156,7 +165,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
         # Press Tab to expand
         entries_before = length(FileTree.visible_entries(state.file_tree.tree))
-        {:handled, state} = Scoped.handle_key(state, 9, 0)
+        {:handled, state} = walk_surface_handlers(state, 9, 0)
         entries_after = length(FileTree.visible_entries(state.file_tree.tree))
 
         # Should have more entries after expanding
@@ -171,7 +180,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir, 0)
       entries_default = FileTree.visible_entries(state.file_tree.tree)
 
-      {:handled, state} = Scoped.handle_key(state, ?H, 0)
+      {:handled, state} = walk_surface_handlers(state, ?H, 0)
       entries_with_hidden = FileTree.visible_entries(state.file_tree.tree)
 
       # Toggling hidden should change the entry count
@@ -181,7 +190,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
     test "q closes the file tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
-      {:handled, state} = Scoped.handle_key(state, ?q, 0)
+      {:handled, state} = walk_surface_handlers(state, ?q, 0)
       assert state.file_tree.tree == nil
       assert state.file_tree.focused == false
     end
@@ -192,16 +201,16 @@ defmodule Minga.Input.VimNavIntegrationTest do
       state = make_tree_state(tmp_dir)
 
       # Move down first so we can verify gg works
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
-      {:handled, state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
+      {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 2
 
       # g should delegate to mode FSM (pending_g)
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
       assert state.mode_state.pending_g == true
 
       # second g should trigger gg (go to top)
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
       assert state.file_tree.tree.cursor == 0
     end
   end
