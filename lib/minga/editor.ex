@@ -26,6 +26,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
@@ -36,7 +37,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
-  alias Minga.FileWatcher
+
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Input
   alias Minga.Mode
@@ -98,7 +99,7 @@ defmodule Minga.Editor do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     port_manager = Keyword.get(opts, :port_manager, PortManager)
-    file_watcher = Keyword.get(opts, :file_watcher)
+    _file_watcher = Keyword.get(opts, :file_watcher)
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -114,7 +115,7 @@ defmodule Minga.Editor do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
 
     # Register initial buffer with file watcher
-    maybe_watch_buffer(file_watcher, buffer)
+    FileWatcherHelpers.maybe_watch_buffer(buffer)
 
     buffers = if buffer, do: [buffer], else: []
 
@@ -223,7 +224,7 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
-        maybe_watch_buffer(file_watcher_pid(), pid)
+        FileWatcherHelpers.maybe_watch_buffer(pid)
         maybe_detect_project(file_path)
         maybe_record_file(file_path)
         new_state = Commands.add_buffer(state, pid)
@@ -351,7 +352,7 @@ defmodule Minga.Editor do
 
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path}, state) do
-    new_state = handle_file_change(state, path)
+    new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
     new_state = Renderer.render(new_state)
     {:noreply, sync_surface_from_editor(new_state)}
@@ -1012,81 +1013,7 @@ defmodule Minga.Editor do
     log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 
-  # ── File watcher helpers ──────────────────────────────────────────────────
-
-  @spec handle_file_change(state(), String.t()) :: state()
-  defp handle_file_change(state, path) do
-    case find_buffer_for_path(state, path) do
-      nil ->
-        state
-
-      buf ->
-        buf_state = :sys.get_state(buf)
-        {disk_mtime, disk_size} = file_stat(path)
-
-        cond do
-          # Can't stat or no stored mtime — skip
-          disk_mtime == nil or buf_state.mtime == nil ->
-            state
-
-          # No change detected (same mtime AND same size)
-          disk_mtime == buf_state.mtime and disk_size == buf_state.file_size ->
-            state
-
-          # Unmodified buffer — silent reload
-          not buf_state.dirty ->
-            BufferServer.reload(buf)
-            name = Path.basename(path)
-            %{state | status_msg: "#{name} reloaded (changed on disk)"}
-
-          # Modified buffer — prompt user
-          true ->
-            name = Path.basename(path)
-
-            %{
-              state
-              | pending_conflict: {buf, path},
-                status_msg: "#{name} changed on disk. [r]eload / [k]eep"
-            }
-        end
-    end
-  end
-
-  @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
-  defp find_buffer_for_path(%{buffers: %{list: buffers}}, path) do
-    expanded = Path.expand(path)
-
-    Enum.find(buffers, fn buf ->
-      Process.alive?(buf) and BufferServer.file_path(buf) == expanded
-    end)
-  end
-
-  @spec maybe_watch_buffer(GenServer.server() | nil, pid() | nil) :: :ok
-  defp maybe_watch_buffer(nil, _buf), do: :ok
-  defp maybe_watch_buffer(_watcher, nil), do: :ok
-
-  defp maybe_watch_buffer(watcher, buf) do
-    case BufferServer.file_path(buf) do
-      nil -> :ok
-      path -> FileWatcher.watch_path(watcher, path)
-    end
-  end
-
-  @spec file_watcher_pid() :: pid() | nil
-  defp file_watcher_pid do
-    case Process.whereis(FileWatcher) do
-      nil -> nil
-      pid -> pid
-    end
-  end
-
-  @spec file_stat(String.t()) :: {integer() | nil, non_neg_integer() | nil}
-  defp file_stat(path) do
-    case File.stat(path, time: :posix) do
-      {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
-      {:error, _} -> {nil, nil}
-    end
-  end
+  # File watcher helpers extracted to Minga.Editor.FileWatcherHelpers.
 
   # Macro recording and replay extracted to Minga.Editor.MacroReplay.
 
@@ -1095,7 +1022,7 @@ defmodule Minga.Editor do
   @doc false
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
-    maybe_watch_buffer(file_watcher_pid(), pid)
+    FileWatcherHelpers.maybe_watch_buffer(pid)
     maybe_detect_project(path)
     maybe_record_file(path)
     new_state = Commands.add_buffer(state, pid)
