@@ -432,7 +432,6 @@ defmodule Minga.Editor do
   end
 
   # Tab bar, view state, capabilities, parser subscription helpers
-  # extracted to Minga.Editor.Startup.
 
   # ── Surface lifecycle ──────────────────────────────────────────────────────
 
@@ -480,8 +479,6 @@ defmodule Minga.Editor do
   defp apply_effect(state, {:update_tab_label, _label}),
     do: AgentLifecycle.maybe_update_tab_label(state)
 
-  # Surface init, sync, and event dispatch delegated to SurfaceSync.
-
   @doc false
   defdelegate init_surface(state), to: SurfaceSync
 
@@ -498,12 +495,8 @@ defmodule Minga.Editor do
   end
 
   # Tab bar, view state, capabilities, parser subscription helpers
-  # extracted to Minga.Editor.Startup.
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
-  # tab labels) extracted to Minga.Editor.AgentLifecycle.
-  # Background agent event handling extracted to Minga.Editor.BackgroundEvents.
-  # Active-tab agent event handling lives in AgentView.handle_event/2.
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
@@ -590,10 +583,6 @@ defmodule Minga.Editor do
     log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 
-  # File watcher helpers extracted to Minga.Editor.FileWatcherHelpers.
-
-  # Macro recording and replay extracted to Minga.Editor.MacroReplay.
-
   # ── File tree helpers ───────────────────────────────────────────────────
 
   @doc false
@@ -609,10 +598,6 @@ defmodule Minga.Editor do
     fire_hook(:after_open, [pid, path])
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
-
-  # Special buffers extracted to Minga.Editor.Startup.
-
-  # Message logging delegated to Minga.Editor.MessageLog.
 
   @spec log_message(state(), String.t()) :: state()
   defp log_message(state, text), do: MessageLog.log(state, text)
@@ -634,8 +619,6 @@ defmodule Minga.Editor do
     end)
   end
 
-  # LSP and Git buffer lifecycle extracted to Minga.Editor.BufferLifecycle.
-
   # ── Config options ──────────────────────────────────────────────────────
 
   alias Minga.Config.Hooks, as: ConfigHooks
@@ -646,8 +629,6 @@ defmodule Minga.Editor do
   catch
     :exit, _ -> :ok
   end
-
-  # apply_config_options and send_font_config extracted to Minga.Editor.Startup.
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 
