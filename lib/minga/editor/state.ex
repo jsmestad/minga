@@ -48,7 +48,7 @@ defmodule Minga.Editor.State do
 
   alias Minga.Mode
   alias Minga.Port.Capabilities
-  alias Minga.Surface.BufferView.Bridge, as: BVBridge
+  # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
   alias Minga.Theme
 
   @typedoc "Stored last find-char motion for ; and , repeat."
@@ -318,11 +318,7 @@ defmodule Minga.Editor.State do
     tb = state.tab_bar
 
     # Snapshot current tab before leaving.
-    current_ctx =
-      snapshot_tab_context(state)
-      |> Map.put(:mode, :normal)
-      |> Map.put(:mode_state, Minga.Mode.initial_state())
-
+    current_ctx = snapshot_tab_context(state)
     tb = TabBar.update_context(tb, tb.active_id, current_ctx)
 
     # Create file tab (TabBar.add auto-activates it)
@@ -333,12 +329,8 @@ defmodule Minga.Editor.State do
     state = SurfaceSync.init_surface(state)
     state = sync_active_window_buffer(state)
 
-    # Snapshot the new tab's context.
-    new_ctx =
-      snapshot_tab_context(state)
-      |> Map.put(:mode, :normal)
-      |> Map.put(:mode_state, Minga.Mode.initial_state())
-
+    # Snapshot the new tab's context (surface state has the fresh buffer view).
+    new_ctx = snapshot_tab_context(state)
     tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
@@ -477,29 +469,25 @@ defmodule Minga.Editor.State do
   @spec snapshot_tab_fields(t()) :: Tab.context()
   defp snapshot_tab_fields(state) do
     %{
-      windows: state.windows,
-      file_tree: state.file_tree,
-      mode: state.mode,
-      mode_state: state.mode_state,
-      keymap_scope: state.keymap_scope,
-      active_buffer: state.buffers.active,
-      active_buffer_index: state.buffers.active_index,
       surface_module: state.surface_module,
-      surface_state: state.surface_state
+      surface_state: state.surface_state,
+      keymap_scope: state.keymap_scope
     }
   end
 
   @doc """
   Writes a tab context back into the live editor state.
 
-  Fields not present in the context map are left unchanged (safe for
-  partial contexts from older tab snapshots).
+  The context carries three fields: `surface_module`, `surface_state`,
+  and `keymap_scope`. All per-view state (buffers, windows, mode, etc.)
+  lives inside `surface_state` and is synced back to EditorState via
+  the surface's `to_editor_state` bridge.
+
+  Empty context means a brand-new tab; we build a fresh BufferView
+  surface with the current active buffer and viewport dimensions.
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
-    # Empty context means a brand-new tab. Build file-tab defaults from
-    # the live state so we get a proper window tree, viewport-sized window,
-    # and clean editor scope.
     context =
       if map_size(context) == 0 do
         build_file_tab_defaults(state)
@@ -507,25 +495,27 @@ defmodule Minga.Editor.State do
         context
       end
 
+    # Support legacy contexts that have per-field snapshots but no
+    # surface_state (from older sessions or tests).
+    context = maybe_migrate_legacy_context(state, context)
+
     state
-    |> maybe_restore(:windows, context)
-    |> maybe_restore(:file_tree, context)
-    |> maybe_restore(:mode, context)
-    |> maybe_restore(:mode_state, context)
     |> maybe_restore(:keymap_scope, context)
     |> maybe_restore(:surface_module, context)
     |> maybe_restore(:surface_state, context)
     |> ensure_surface_initialized(context)
-    |> restore_active_buffer(context)
-    |> sync_agent_from_surface(context)
+    |> SurfaceSync.sync_to_editor()
   end
 
-  # Builds a complete file-tab context from the live state. This is the
-  # single source of truth for "what does a fresh file tab look like?"
-  # Uses the active buffer and viewport dimensions to create a proper
-  # window tree so splits, scrolling, and cursor positioning all work.
+  # Builds a file-tab context for a brand-new tab. Returns only the three
+  # canonical context fields (surface_module, surface_state, keymap_scope).
+  # The BufferView.State is built directly from the live state's buffer and
+  # viewport dimensions.
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
+    alias Minga.Surface.BufferView.State, as: BVState
+    alias Minga.Surface.BufferView.State.VimState
+
     win_id = state.windows.next_id
     rows = state.viewport.rows
     cols = state.viewport.cols
@@ -545,25 +535,70 @@ defmodule Minga.Editor.State do
         %Windows{}
       end
 
-    file_state = %{
+    bv_state = %BVState{
+      buffers: %Buffers{
+        active: buf,
+        list: if(buf, do: [buf], else: []),
+        active_index: state.buffers.active_index
+      },
       windows: windows,
-      mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
-      keymap_scope: :editor,
-      active_buffer: buf,
-      active_buffer_index: state.buffers.active_index,
-      surface_module: Minga.Surface.BufferView
+      viewport: state.viewport,
+      editing: %VimState{
+        mode: :normal,
+        mode_state: Mode.initial_state()
+      }
     }
 
-    # Build surface state for the new file tab by temporarily applying
-    # these defaults, then syncing to create a BufferView.State.
-    temp_state =
-      Enum.reduce(file_state, state, fn {k, v}, acc -> Map.put(acc, k, v) end)
-
-    temp_state = %{temp_state | agent: %AgentState{}, agentic: %ViewState{}}
-    bv_state = BVBridge.from_editor_state(temp_state)
-    Map.put(file_state, :surface_state, bv_state)
+    %{
+      surface_module: Minga.Surface.BufferView,
+      surface_state: bv_state,
+      keymap_scope: :editor
+    }
   end
+
+  # Migrates a legacy context (with per-field snapshots like :windows,
+  # :mode, :active_buffer) into the canonical 3-field format. If the
+  # context already has :surface_state, returns it unchanged.
+  @spec maybe_migrate_legacy_context(t(), Tab.context()) :: Tab.context()
+  defp maybe_migrate_legacy_context(_state, %{surface_state: _} = context), do: context
+
+  defp maybe_migrate_legacy_context(state, context) do
+    # Build a temporary EditorState with the legacy fields applied,
+    # then snapshot it through the bridge to create a surface state.
+    temp =
+      state
+      |> maybe_restore(:windows, context)
+      |> maybe_restore(:file_tree, context)
+      |> maybe_restore(:mode, context)
+      |> maybe_restore(:mode_state, context)
+      |> maybe_restore(:agent, context)
+      |> maybe_restore(:agentic, context)
+
+    temp =
+      case Map.fetch(context, :active_buffer) do
+        {:ok, buf_pid} ->
+          idx = Map.get(context, :active_buffer_index, temp.buffers.active_index)
+          %{temp | buffers: %{temp.buffers | active: buf_pid, active_index: idx}}
+
+        :error ->
+          temp
+      end
+
+    scope = Map.get(context, :keymap_scope, :editor)
+    mod = Map.get(context, :surface_module) || scope_to_surface(scope)
+    temp = %{temp | keymap_scope: scope, surface_module: mod}
+    temp = SurfaceSync.init_surface(temp)
+
+    %{
+      surface_module: temp.surface_module,
+      surface_state: temp.surface_state,
+      keymap_scope: scope
+    }
+  end
+
+  @spec scope_to_surface(atom()) :: module()
+  defp scope_to_surface(:agent), do: Minga.Surface.AgentView
+  defp scope_to_surface(_), do: Minga.Surface.BufferView
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
@@ -585,25 +620,6 @@ defmodule Minga.Editor.State do
     end)
   end
 
-  # Populates agent/agentic fields from the restored surface state.
-  # For AgentView surfaces, the surface state carries these fields.
-  # For BufferView surfaces or older context maps that still have
-  # agent/agentic keys, falls back to the context map values.
-  @spec sync_agent_from_surface(t(), Tab.context()) :: t()
-  defp sync_agent_from_surface(state, context) do
-    state = SurfaceSync.sync_to_editor(state)
-
-    # Legacy fallback: older context maps may have agent/agentic keys
-    # but no surface_state. Support them during the transition.
-    if Map.has_key?(context, :surface_state) do
-      state
-    else
-      state
-      |> maybe_restore(:agent, context)
-      |> maybe_restore(:agentic, context)
-    end
-  end
-
   # Ensures surface_module and surface_state are set after restoring
   # a tab context. Handles legacy contexts that don't carry surface data
   # by deriving the surface from keymap_scope.
@@ -622,20 +638,6 @@ defmodule Minga.Editor.State do
     case Map.fetch(context, key) do
       {:ok, value} -> Map.put(state, key, value)
       :error -> state
-    end
-  end
-
-  @spec restore_active_buffer(t(), Tab.context()) :: t()
-  defp restore_active_buffer(state, context) do
-    case Map.fetch(context, :active_buffer) do
-      {:ok, buf_pid} ->
-        idx = Map.get(context, :active_buffer_index, state.buffers.active_index)
-
-        %{state | buffers: %{state.buffers | active: buf_pid, active_index: idx}}
-        |> sync_active_window_buffer()
-
-      :error ->
-        state
     end
   end
 
@@ -721,14 +723,26 @@ defmodule Minga.Editor.State do
   def active_tab(%__MODULE__{tab_bar: nil}), do: nil
   def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
 
-  @doc "Finds a file tab whose context has the given buffer pid as active_buffer."
+  @doc "Finds a file tab whose surface state has the given buffer pid as active."
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
   def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
 
   def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
+    alias Minga.Surface.BufferView.State, as: BVState
+
     Enum.find(tb.tabs, fn tab ->
-      tab.kind == :file and Map.get(tab.context, :active_buffer) == pid
+      tab.kind == :file and tab_has_active_buffer?(tab, pid)
     end)
+  end
+
+  @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
+  defp tab_has_active_buffer?(tab, pid) do
+    alias Minga.Surface.BufferView.State, as: BVState
+
+    case Map.get(tab.context, :surface_state) do
+      %BVState{buffers: %{active: ^pid}} -> true
+      _ -> Map.get(tab.context, :active_buffer) == pid
+    end
   end
 
   @doc """
@@ -801,34 +815,43 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
-  Updates the `agent` field inside a background tab's stored context.
+  Updates the `agent` field inside a background tab's stored surface state.
 
   The function `fun` receives the tab's stored `%AgentState{}` and must
-  return a new `%AgentState{}`. Does nothing if the tab has no agent
-  context (file tabs, empty context).
+  return a new `%AgentState{}`. Operates on the surface_state inside
+  the tab's context. Does nothing if the tab has no agent surface state.
   """
   @spec update_background_agent(t(), Tab.id(), (AgentState.t() -> AgentState.t())) :: t()
   def update_background_agent(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
-    case TabBar.get(tb, tab_id) do
-      %Tab{context: %{agent: agent}} = _tab when is_struct(agent, AgentState) ->
-        new_agent = fun.(agent)
-        new_ctx = Map.put(TabBar.get(tb, tab_id).context, :agent, new_agent)
-        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
+    alias Minga.Surface.AgentView.State, as: AVState
 
-      _ ->
-        state
-    end
+    update_background_surface(state, tb, tab_id, fn
+      %AVState{agent: agent} = av -> %{av | agent: fun.(agent)}
+      other -> other
+    end)
   end
 
   @doc """
-  Updates the `agentic` (ViewState) field inside a background tab's stored context.
+  Updates the `agentic` (ViewState) field inside a background tab's stored surface state.
   """
   @spec update_background_agentic(t(), Tab.id(), (ViewState.t() -> ViewState.t())) :: t()
   def update_background_agentic(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
+    alias Minga.Surface.AgentView.State, as: AVState
+
+    update_background_surface(state, tb, tab_id, fn
+      %AVState{agentic: agentic} = av -> %{av | agentic: fun.(agentic)}
+      other -> other
+    end)
+  end
+
+  # Updates the surface_state inside a background tab's context map.
+  @spec update_background_surface(t(), TabBar.t(), Tab.id(), (term() -> term())) :: t()
+  defp update_background_surface(state, tb, tab_id, fun) do
     case TabBar.get(tb, tab_id) do
-      %Tab{context: %{agentic: agentic}} = _tab when is_struct(agentic, ViewState) ->
-        new_agentic = fun.(agentic)
-        new_ctx = Map.put(TabBar.get(tb, tab_id).context, :agentic, new_agentic)
+      %Tab{context: %{surface_state: ss}} when ss != nil ->
+        new_ss = fun.(ss)
+        ctx = TabBar.get(tb, tab_id).context
+        new_ctx = Map.put(ctx, :surface_state, new_ss)
         %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
 
       _ ->

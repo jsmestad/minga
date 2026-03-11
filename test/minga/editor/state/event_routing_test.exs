@@ -8,6 +8,9 @@ defmodule Minga.Editor.State.EventRoutingTest do
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
 
+  alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.State, as: AVState
+
   defp make_state(opts \\ []) do
     session1 = opts[:session1] || spawn(fn -> :timer.sleep(:infinity) end)
     session2 = opts[:session2] || spawn(fn -> :timer.sleep(:infinity) end)
@@ -17,15 +20,12 @@ defmodule Minga.Editor.State.EventRoutingTest do
     tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session1))
 
     agent_ctx = %{
-      agentic: %ViewState{active: true, focus: :chat},
-      windows: %Windows{},
-      file_tree: nil,
-      mode: :normal,
-      mode_state: %{},
       keymap_scope: :agent,
-      agent: %AgentState{session: session1, status: :idle},
-      active_buffer: nil,
-      active_buffer_index: 0
+      surface_module: AgentView,
+      surface_state: %AVState{
+        agent: %AgentState{session: session1, status: :idle},
+        agentic: %ViewState{active: true, focus: :chat}
+      }
     }
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
@@ -35,15 +35,12 @@ defmodule Minga.Editor.State.EventRoutingTest do
     tb = TabBar.update_tab(tb, agent_tab2.id, &Tab.set_session(&1, session2))
 
     agent_ctx2 = %{
-      agentic: %ViewState{active: true, focus: :chat},
-      windows: %Windows{},
-      file_tree: nil,
-      mode: :normal,
-      mode_state: %{},
       keymap_scope: :agent,
-      agent: %AgentState{session: session2, status: :idle},
-      active_buffer: nil,
-      active_buffer_index: 0
+      surface_module: AgentView,
+      surface_state: %AVState{
+        agent: %AgentState{session: session2, status: :idle},
+        agentic: %ViewState{active: true, focus: :chat}
+      }
     }
 
     tb = TabBar.update_context(tb, agent_tab2.id, agent_ctx2)
@@ -111,14 +108,14 @@ defmodule Minga.Editor.State.EventRoutingTest do
   end
 
   describe "update_background_agent/3" do
-    test "updates agent status in background tab's context" do
+    test "updates agent status in background tab's surface_state" do
       %{state: state, tab2_id: tab_id} = make_state()
 
       state =
         EditorState.update_background_agent(state, tab_id, &AgentState.set_status(&1, :thinking))
 
       tab = TabBar.get(state.tab_bar, tab_id)
-      assert tab.context[:agent].status == :thinking
+      assert tab.context.surface_state.agent.status == :thinking
     end
 
     test "does not affect active tab's live state" do
@@ -132,7 +129,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
   end
 
   describe "update_background_agentic/3" do
-    test "updates agentic view state in background tab's context" do
+    test "updates agentic view state in background tab's surface_state" do
       %{state: state, tab2_id: tab_id} = make_state()
 
       state =
@@ -143,7 +140,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
         )
 
       tab = TabBar.get(state.tab_bar, tab_id)
-      assert tab.context[:agentic].focus == :file_viewer
+      assert tab.context.surface_state.agentic.focus == :file_viewer
     end
   end
 

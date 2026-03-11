@@ -26,14 +26,12 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
-  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Windows
   alias Minga.Input.Vim
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.Bridge, as: AVBridge
   alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.Context
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -154,26 +152,22 @@ defmodule Minga.Editor.Commands.Agent do
   end
 
   # Switches to an existing agent tab, re-activating its agentic view.
+  # The surface's `activate` callback sets `agentic.active = true`.
+  # We also ensure `focus: :chat` for a clean return to the chat view.
   @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
   defp switch_to_existing_agent_tab(state, agent_tab) do
-    # The agent tab's stored surface state has agentic.active == false
-    # (set during deactivation). Patch it to active before switching.
+    # Patch the stored surface state to set focus before switch_tab
+    # calls activate. This ensures the user lands on :chat, not whatever
+    # focus was saved when they left (could be :file_viewer, :dashboard).
     ctx = agent_tab.context
 
     ctx =
       case Map.get(ctx, :surface_state) do
         %AVState{agentic: agentic} = av ->
-          updated_agentic = %{agentic | active: true, focus: :chat}
-          Map.put(ctx, :surface_state, %{av | agentic: updated_agentic})
+          Map.put(ctx, :surface_state, %{av | agentic: %{agentic | focus: :chat}})
 
         _ ->
-          # Legacy context without surface_state: patch agentic directly
-          updated_agentic =
-            Map.get(ctx, :agentic, ViewState.new())
-            |> Map.put(:active, true)
-            |> Map.put(:focus, :chat)
-
-          Map.put(ctx, :agentic, updated_agentic)
+          ctx
       end
 
     tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
@@ -188,20 +182,16 @@ defmodule Minga.Editor.Commands.Agent do
     agent = state.agent
     agentic = %{ViewState.new() | active: true, focus: :chat}
 
-    # Build an AVState for the surface by creating a temporary
-    # EditorState with the agent context applied.
-    temp_state = %{state | agent: agent, agentic: agentic, keymap_scope: :agent}
+    av_state = %AVState{
+      agent: agent,
+      agentic: agentic,
+      context: Context.from_editor_state(state)
+    }
 
     %{
-      windows: %Windows{},
-      file_tree: FileTreeState.close(state.file_tree),
-      mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      active_buffer: state.buffers.active,
-      active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
-      surface_state: AVBridge.from_editor_state(temp_state)
+      surface_state: av_state
     }
   end
 
@@ -375,22 +365,7 @@ defmodule Minga.Editor.Commands.Agent do
     {tb, agent_tab} = TabBar.add(tb, :agent, "New Agent")
 
     # Fresh agent state for the new tab.
-    fresh_agent = %AgentState{}
-    fresh_agentic = %{ViewState.new() | active: true, focus: :chat}
-
-    temp_state = %{state | agent: fresh_agent, agentic: fresh_agentic, keymap_scope: :agent}
-
-    agent_context = %{
-      windows: %Windows{},
-      file_tree: FileTreeState.close(state.file_tree),
-      mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
-      keymap_scope: :agent,
-      active_buffer: state.buffers.active,
-      active_buffer_index: state.buffers.active_index,
-      surface_module: AgentView,
-      surface_state: AVBridge.from_editor_state(temp_state)
-    }
+    agent_context = new_agent_context(state)
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_context)
     state = %{state | tab_bar: tb}
