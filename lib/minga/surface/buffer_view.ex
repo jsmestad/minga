@@ -21,8 +21,12 @@ defmodule Minga.Surface.BufferView do
 
   @behaviour Minga.Surface
 
+  alias Minga.Editor.Layout
+  alias Minga.Editor.RenderPipeline
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Surface.BufferView.Bridge
   alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.Context
 
   # ── Surface callbacks ──────────────────────────────────────────────────────
 
@@ -33,30 +37,43 @@ defmodule Minga.Surface.BufferView do
   @doc """
   Processes a key press for the buffer view.
 
-  During Phase 1, the Editor still dispatches keys through the focus
-  stack (overlays, Input.Scoped, ModeFSM). This callback is wired in
-  but delegates back through the existing pipeline via the bridge.
+  Walks the surface-level handlers (Scoped, GlobalBindings, ModeFSM)
+  on a reconstructed EditorState. Overlays (picker, completion,
+  conflict prompt) have already been checked by the Editor before
+  this callback is reached.
 
-  The Editor calls this when the active surface is BufferView and no
-  overlay has consumed the key. The implementation converts
-  BufferView.State to EditorState, runs the key through the existing
-  handlers, and converts back.
+  During Phase 1, the Router calls surface handlers on EditorState
+  directly (not through this callback) to preserve all side effects.
+  This callback is available for standalone use and testing. In later
+  phases it becomes the primary entry point.
   """
   @impl Minga.Surface
   @spec handle_key(BVState.t(), non_neg_integer(), non_neg_integer()) ::
           {BVState.t(), [Minga.Surface.effect()]}
-  def handle_key(%BVState{} = bv_state, _codepoint, _modifiers) do
-    # Phase 1: input dispatch still goes through the Editor's focus stack.
-    # This callback exists to satisfy the behaviour contract. The Editor
-    # calls the focus stack directly and updates the surface state via
-    # the bridge after dispatch.
+  def handle_key(%BVState{context: nil} = bv_state, _codepoint, _modifiers) do
     {bv_state, []}
+  end
+
+  def handle_key(%BVState{} = bv_state, codepoint, modifiers) do
+    editor_state = reconstruct_editor_state(bv_state)
+
+    new_editor_state =
+      Enum.reduce_while(Minga.Input.surface_handlers(), editor_state, fn handler, acc ->
+        case handler.handle_key(acc, codepoint, modifiers) do
+          {:handled, new_state} -> {:halt, new_state}
+          {:passthrough, new_state} -> {:cont, new_state}
+        end
+      end)
+
+    new_bv_state = Bridge.from_editor_state(new_editor_state)
+    {new_bv_state, []}
   end
 
   @doc """
   Processes a mouse event for the buffer view.
 
-  Same Phase 1 delegation pattern as `handle_key/3`.
+  Walks the surface-level handlers that implement `handle_mouse/7`.
+  Overlays have already been checked by the Editor.
   """
   @impl Minga.Surface
   @spec handle_mouse(
@@ -68,27 +85,50 @@ defmodule Minga.Surface.BufferView do
           atom(),
           pos_integer()
         ) :: {BVState.t(), [Minga.Surface.effect()]}
-  def handle_mouse(%BVState{} = bv_state, _row, _col, _button, _mods, _event_type, _cc) do
-    # Phase 1: mouse dispatch still goes through Input.Router.dispatch_mouse.
+  def handle_mouse(%BVState{context: nil} = bv_state, _row, _col, _button, _mods, _et, _cc) do
     {bv_state, []}
+  end
+
+  def handle_mouse(%BVState{} = bv_state, row, col, button, mods, event_type, click_count) do
+    editor_state = reconstruct_editor_state(bv_state)
+
+    new_editor_state =
+      walk_mouse_handlers(editor_state, row, col, button, mods, event_type, click_count)
+
+    new_bv_state = Bridge.from_editor_state(new_editor_state)
+    {new_bv_state, []}
   end
 
   @doc """
   Renders the buffer view into the given rect.
 
-  During Phase 1, the RenderPipeline's `run_windows` path handles
-  rendering via the bridge. This callback returns an empty draw list.
-  The Editor calls `RenderPipeline.run/1` with the full EditorState
-  (reconstructed via the bridge) and the pipeline produces the frame.
+  Reconstructs an EditorState with layout computed, then calls
+  `RenderPipeline.run_windows_pipeline/2` for the actual scroll,
+  content, chrome, compose, and emit stages.
+
+  During Phase 1 the pipeline emits directly to the port, so the
+  returned draw list is empty. The surface state is updated with
+  refreshed render caches (per-window dirty-line tracking).
   """
   @impl Minga.Surface
   @spec render(BVState.t(), {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}) ::
           {BVState.t(), [Minga.Editor.DisplayList.draw()]}
-  def render(%BVState{} = bv_state, _rect) do
-    # Phase 1: rendering goes through RenderPipeline.run/1 with the
-    # full EditorState. The surface's render callback will take over
-    # in a later phase.
+  def render(%BVState{context: nil} = bv_state, _rect) do
     {bv_state, []}
+  end
+
+  def render(%BVState{} = bv_state, _rect) do
+    editor_state = reconstruct_editor_state(bv_state)
+
+    # Pre-pipeline: sync cursor and compute layout (normally done by
+    # RenderPipeline.run before delegating to the surface).
+    editor_state = EditorState.sync_active_window_cursor(editor_state)
+    editor_state = RenderPipeline.compute_layout(editor_state)
+    layout = Layout.get(editor_state)
+
+    new_editor_state = RenderPipeline.run_windows_pipeline(editor_state, layout)
+    new_bv_state = Bridge.from_editor_state(new_editor_state)
+    {new_bv_state, []}
   end
 
   @doc """
@@ -172,9 +212,105 @@ defmodule Minga.Surface.BufferView do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec walk_mouse_handlers(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) ::
+          EditorState.t()
+  defp walk_mouse_handlers(state, row, col, button, mods, event_type, click_count) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), state, fn handler, acc ->
+      dispatch_mouse_to_handler(handler, acc, row, col, button, mods, event_type, click_count)
+    end)
+  end
+
+  @spec dispatch_mouse_to_handler(
+          module(),
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: {:halt, EditorState.t()} | {:cont, EditorState.t()}
+  defp dispatch_mouse_to_handler(handler, state, row, col, button, mods, event_type, cc) do
+    Code.ensure_loaded(handler)
+
+    if function_exported?(handler, :handle_mouse, 7) do
+      case handler.handle_mouse(state, row, col, button, mods, event_type, cc) do
+        {:handled, new_state} -> {:halt, new_state}
+        {:passthrough, new_state} -> {:cont, new_state}
+      end
+    else
+      {:cont, state}
+    end
+  end
+
   @spec cursor_shape(Minga.Mode.mode()) :: atom()
   defp cursor_shape(:insert), do: :beam
   defp cursor_shape(:search), do: :beam
   defp cursor_shape(:replace), do: :underline
   defp cursor_shape(_mode), do: :block
+
+  # Builds an EditorState from the BufferView state and its shared context.
+  # This is Phase 1 scaffolding: the focus stack handlers and render pipeline
+  # operate on EditorState, so we reconstruct one for delegation. The context
+  # carries the shared fields (theme, port_manager, etc.) that the surface
+  # doesn't own.
+  @spec reconstruct_editor_state(BVState.t()) :: EditorState.t()
+  defp reconstruct_editor_state(%BVState{context: %Context{} = ctx, editing: vim} = bv) do
+    # Build agent defaults for fields carried in context.
+    # These are Phase 1 scaffolding: the agent fields live in context
+    # so Input.Scoped's agent-panel branches work correctly.
+    agent = ctx.agent || %Minga.Editor.State.Agent{}
+    agentic = ctx.agentic || %Minga.Agent.View.State{}
+
+    %EditorState{
+      # Buffer-view owned fields
+      buffers: bv.buffers,
+      windows: bv.windows,
+      file_tree: bv.file_tree,
+      viewport: bv.viewport,
+      mouse: bv.mouse,
+      highlight: bv.highlight,
+      lsp: bv.lsp,
+      completion: bv.completion,
+      completion_trigger: bv.completion_trigger,
+      git_buffers: bv.git_buffers,
+      injection_ranges: bv.injection_ranges,
+      search: bv.search,
+      pending_conflict: bv.pending_conflict,
+      # Vim editing model fields
+      mode: vim.mode,
+      mode_state: vim.mode_state,
+      reg: vim.reg,
+      marks: vim.marks,
+      last_jump_pos: vim.last_jump_pos,
+      last_find_char: vim.last_find_char,
+      change_recorder: vim.change_recorder,
+      macro_recorder: vim.macro_recorder,
+      # Shared context fields
+      port_manager: ctx.port_manager,
+      theme: ctx.theme,
+      capabilities: ctx.capabilities,
+      status_msg: ctx.status_msg,
+      focus_stack: ctx.focus_stack,
+      keymap_scope: ctx.keymap_scope,
+      layout: ctx.layout,
+      tab_bar: ctx.tab_bar,
+      render_timer: ctx.render_timer,
+      picker_ui: ctx.picker_ui,
+      whichkey: ctx.whichkey,
+      modeline_click_regions: ctx.modeline_click_regions,
+      tab_bar_click_regions: ctx.tab_bar_click_regions,
+      # Agent fields (Phase 1 scaffolding, removed in Phase 2)
+      agent: agent,
+      agentic: agentic
+    }
+  end
 end

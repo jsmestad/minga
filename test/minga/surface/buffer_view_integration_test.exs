@@ -10,6 +10,8 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Editor
+  alias Minga.Editor.Viewport
+  alias Minga.Mode
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.State, as: BVState
   alias Minga.Surface.BufferView.State.VimState
@@ -110,6 +112,53 @@ defmodule Minga.Surface.BufferViewIntegrationTest do
       state = :sys.get_state(ctx.editor)
 
       assert state.surface_state.highlight == state.highlight
+    end
+  end
+
+  describe "handle_key dispatches through focus stack" do
+    test "handle_key with context changes mode" do
+      ctx = start_editor("hello")
+      state = :sys.get_state(ctx.editor)
+
+      # The surface state has context populated by the bridge
+      bv_state = state.surface_state
+      assert bv_state.context != nil
+
+      # Press 'i' to enter insert mode
+      {new_bv, effects} = BufferView.handle_key(bv_state, ?i, 0)
+
+      assert new_bv.editing.mode == :insert
+      assert is_list(effects)
+    end
+
+    test "handle_key without context is a no-op" do
+      bv_state = %BVState{
+        viewport: Viewport.new(24, 80),
+        editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+        context: nil
+      }
+
+      {new_bv, effects} = BufferView.handle_key(bv_state, ?i, 0)
+
+      # Without context, can't dispatch. Mode should remain :normal.
+      assert new_bv.editing.mode == :normal
+      assert effects == []
+    end
+  end
+
+  describe "render callable through BufferView" do
+    test "render with context runs the pipeline and updates state" do
+      ctx = start_editor("hello world")
+      state = :sys.get_state(ctx.editor)
+
+      bv_state = state.surface_state
+      assert bv_state.context != nil
+
+      # Calling render should succeed and return updated state
+      {new_bv, draws} = BufferView.render(bv_state, {0, 0, 80, 24})
+
+      assert %BVState{} = new_bv
+      assert is_list(draws)
     end
   end
 

@@ -103,7 +103,8 @@ defmodule Minga.Surface.BufferView.State do
           },
           search: Search.t(),
           pending_conflict: {pid(), String.t()} | nil,
-          editing: editing_state()
+          editing: editing_state(),
+          context: Minga.Surface.Context.t() | nil
         }
 
   @enforce_keys [:viewport, :editing]
@@ -120,5 +121,6 @@ defmodule Minga.Surface.BufferView.State do
             injection_ranges: %{},
             search: %Search{},
             pending_conflict: nil,
-            editing: nil
+            editing: nil,
+            context: nil
 end

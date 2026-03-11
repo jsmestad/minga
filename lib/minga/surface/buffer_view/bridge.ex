@@ -14,6 +14,7 @@ defmodule Minga.Surface.BufferView.Bridge do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Surface.BufferView.State, as: BVState
   alias Minga.Surface.BufferView.State.VimState
+  alias Minga.Surface.Context
 
   @doc """
   Extracts a `BufferView.State` from the current `EditorState`.
@@ -46,7 +47,8 @@ defmodule Minga.Surface.BufferView.Bridge do
         last_find_char: es.last_find_char,
         change_recorder: es.change_recorder,
         macro_recorder: es.macro_recorder
-      }
+      },
+      context: Context.from_editor_state(es)
     }
   end
 
@@ -59,7 +61,7 @@ defmodule Minga.Surface.BufferView.Bridge do
   """
   @spec to_editor_state(EditorState.t(), BVState.t()) :: EditorState.t()
   def to_editor_state(%EditorState{} = es, %BVState{editing: %VimState{} = vim} = bv) do
-    %{
+    es = %{
       es
       | buffers: bv.buffers,
         windows: bv.windows,
@@ -83,5 +85,12 @@ defmodule Minga.Surface.BufferView.Bridge do
         change_recorder: vim.change_recorder,
         macro_recorder: vim.macro_recorder
     }
+
+    # Write back any context changes (layout cache, click regions).
+    if bv.context do
+      Context.to_editor_state(es, bv.context)
+    else
+      es
+    end
   end
 end

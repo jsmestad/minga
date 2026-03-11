@@ -45,7 +45,7 @@ defmodule Minga.Surface.ContractTest do
   # ── Contract: handle_key/3 ──────────────────────────────────────────────
 
   describe "BufferView.handle_key/3" do
-    test "returns a {state, effects} tuple" do
+    test "returns a {state, effects} tuple without context" do
       bv = build_bv_state()
       {new_state, effects} = BufferView.handle_key(bv, ?j, 0)
 
