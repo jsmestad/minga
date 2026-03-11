@@ -8,6 +8,18 @@ defmodule Minga.Input.AgentPanelNavTest do
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Input.AgentPanel
+
+  defp walk_surface_handlers(state, cp, mods) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
+                                                                                {_, acc} ->
+      case handler.handle_key(acc, cp, mods) do
+        {:handled, new_state} -> {:halt, {:handled, new_state}}
+        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
+      end
+    end)
+  end
+
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
   alias Minga.Input.Scoped
@@ -57,7 +69,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       # Cursor starts at end (auto-scroll from sync)
       {start_line, _} = BufferServer.cursor(buf)
 
-      {:handled, _state} = Scoped.handle_key(state, ?k, 0)
+      {:handled, _state} = walk_surface_handlers(state, ?k, 0)
 
       # After k, cursor should have moved up
       {new_line, _} = BufferServer.cursor(buf)
@@ -67,26 +79,26 @@ defmodule Minga.Input.AgentPanelNavTest do
     test "i focuses the input" do
       state = make_state()
 
-      {:handled, new_state} = Scoped.handle_key(state, ?i, 0)
+      {:handled, new_state} = walk_surface_handlers(state, ?i, 0)
       assert new_state.agent.panel.input_focused == true
     end
 
     test "passthrough when panel not visible" do
       state = make_state()
       state = put_in(state.agent.panel.visible, false)
-      {:passthrough, _state} = Scoped.handle_key(state, ?j, 0)
+      {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
 
     test "passthrough when no buffer" do
       state = make_state()
       state = put_in(state.agent.buffer, nil)
-      {:passthrough, _state} = Scoped.handle_key(state, ?j, 0)
+      {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
 
     test "q closes the panel" do
       state = make_state()
 
-      {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
+      {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
       # toggle_panel on a non-input-focused panel will focus input
       # (the first toggle re-focuses, second one closes)
       assert new_state.agent.panel.input_focused == true
@@ -99,12 +111,12 @@ defmodule Minga.Input.AgentPanelNavTest do
       # Move cursor to top first
       {_, _} = BufferServer.cursor(buf)
       # Navigate with gg to get to top
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
-      {:handled, state} = Scoped.handle_key(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
+      {:handled, state} = walk_surface_handlers(state, ?g, 0)
 
       {start_line, _} = BufferServer.cursor(buf)
 
-      {:handled, _state} = Scoped.handle_key(state, ?j, 0)
+      {:handled, _state} = walk_surface_handlers(state, ?j, 0)
 
       {new_line, _} = BufferServer.cursor(buf)
       assert new_line > start_line
@@ -116,7 +128,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert new_state.agent.panel.input_focused == true
       assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
@@ -125,7 +137,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, new_state} = Scoped.handle_key(state, ?a, 0)
+      {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
       assert PanelState.input_text(new_state.agent.panel) =~ "a"
     end
 
@@ -133,7 +145,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, _new_state} = Scoped.handle_key(state, ?d, 0x02)
+      {:handled, _new_state} = walk_surface_handlers(state, ?d, 0x02)
       # Doesn't crash; scroll may or may not change depending on content
     end
 
@@ -141,14 +153,14 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, _new_state} = Scoped.handle_key(state, ?u, 0x02)
+      {:handled, _new_state} = walk_surface_handlers(state, ?u, 0x02)
     end
 
     test "Enter submits prompt (empty is no-op)" do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, new_state} = Scoped.handle_key(state, 13, 0)
+      {:handled, new_state} = walk_surface_handlers(state, 13, 0)
       # Empty prompt is a no-op
       assert new_state.agent.panel.input_focused == true
     end
@@ -157,7 +169,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, new_state} = Scoped.handle_key(state, 13, 0x01)
+      {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
       assert length(new_state.agent.panel.input.lines) > 1
     end
@@ -166,7 +178,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
       state = put_in(state.agent.panel.input_focused, true)
 
-      {:handled, _new_state} = Scoped.handle_key(state, 127, 0)
+      {:handled, _new_state} = walk_surface_handlers(state, 127, 0)
     end
   end
 end
