@@ -29,6 +29,7 @@ defmodule Minga.Editor.RenderPipeline do
   """
 
   alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.Renderer, as: ViewRenderer
   alias Minga.Buffer.Document
@@ -1520,7 +1521,14 @@ defmodule Minga.Editor.RenderPipeline do
     {cursor_line, cursor_col} = panel.input.cursor
     input_row = row + h - @agent_input_height + 1 + cursor_line
     input_col = col + 2 + cursor_col
-    {{input_row, input_col}, :beam}
+
+    shape =
+      case panel do
+        %PanelState{} -> if PanelState.input_mode(panel) == :insert, do: :beam, else: :block
+        _ -> :beam
+      end
+
+    {{input_row, input_col}, shape}
   end
 
   defp agent_cursor_override_from_layout(_state, cursor, shape, _layout) do

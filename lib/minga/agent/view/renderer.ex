@@ -39,6 +39,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Input.Vim
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.Keymap.Scope
   alias Minga.Scroll
@@ -113,6 +114,7 @@ defmodule Minga.Agent.View.Renderer do
     @type panel_data :: %{
             input_focused: boolean(),
             input: Minga.Input.TextField.t(),
+            vim: Vim.t(),
             scroll: Scroll.t(),
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
@@ -324,6 +326,7 @@ defmodule Minga.Agent.View.Renderer do
       panel: %{
         input_focused: panel.input_focused,
         input: panel.input,
+        vim: panel.vim,
         scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
@@ -920,10 +923,12 @@ defmodule Minga.Agent.View.Renderer do
     left_pad = String.duplicate(" ", pad_left)
     right_pad = String.duplicate(" ", pad_right)
 
-    # ── Top border: ╭─ Prompt ─────────╮
+    # ── Top border: ╭─ Prompt ─────────── NORMAL ─╮
+    mode_tag = input_mode_label(panel)
     label = "─ Prompt "
-    fill_len = max(width - 2 - String.length(label), 0)
-    top_line = "╭" <> label <> String.duplicate("─", fill_len) <> "╮"
+    right_tag = if mode_tag != "", do: " " <> mode_tag <> " ─", else: ""
+    fill_len = max(width - 2 - String.length(label) - String.length(right_tag), 0)
+    top_line = "╭" <> label <> String.duplicate("─", fill_len) <> right_tag <> "╮"
     top_cmd = DisplayList.draw(row, 0, top_line, border_style)
 
     # ── Content rows: │   text            │
@@ -1073,6 +1078,21 @@ defmodule Minga.Agent.View.Renderer do
   # Layout: "│" (1) + padding_left (3) + text + padding_right (1) + "│" (1) = 6 chars chrome.
   @spec input_inner_width(pos_integer()) :: pos_integer()
   defp input_inner_width(box_width), do: max(box_width - 6, 1)
+
+  # Returns a mode label for the input border (empty string in insert mode).
+  # Checks for Vim state on PanelState structs; returns "" for plain maps (tests).
+  @spec input_mode_label(map()) :: String.t()
+  defp input_mode_label(%{vim: %Vim{} = vim}) do
+    case Vim.mode(vim) do
+      :insert -> ""
+      :normal -> "NORMAL"
+      :visual -> "VISUAL"
+      :visual_line -> "V-LINE"
+      :operator_pending -> "OP"
+    end
+  end
+
+  defp input_mode_label(_panel), do: ""
 
   # Computes the dynamic input area height for the bordered box:
   # top border(1) + visible lines + bottom border(1).
