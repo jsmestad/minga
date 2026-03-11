@@ -94,7 +94,9 @@ defmodule Minga.Editor.State do
             capabilities: %Capabilities{},
             layout: nil,
             modeline_click_regions: [],
-            tab_bar_click_regions: []
+            tab_bar_click_regions: [],
+            surface_module: nil,
+            surface_state: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -136,7 +138,9 @@ defmodule Minga.Editor.State do
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
-          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()]
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
+          surface_module: module() | nil,
+          surface_state: term() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -451,7 +455,9 @@ defmodule Minga.Editor.State do
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       agent: state.agent,
-      agentic: state.agentic
+      agentic: state.agentic,
+      surface_module: state.surface_module,
+      surface_state: state.surface_state
     }
   end
 
@@ -481,6 +487,8 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:keymap_scope, context)
     |> maybe_restore(:agent, context)
     |> maybe_restore(:agentic, context)
+    |> maybe_restore(:surface_module, context)
+    |> maybe_restore(:surface_state, context)
     |> restore_active_buffer(context)
   end
 
@@ -562,6 +570,24 @@ defmodule Minga.Editor.State do
     end
   end
 
+  # ── Surface lifecycle ──────────────────────────────────────────────────────
+
+  @spec deactivate_surface(t()) :: t()
+  defp deactivate_surface(%__MODULE__{surface_module: nil} = state), do: state
+  defp deactivate_surface(%__MODULE__{surface_state: nil} = state), do: state
+
+  defp deactivate_surface(%__MODULE__{surface_module: mod, surface_state: ss} = state) do
+    %{state | surface_state: mod.deactivate(ss)}
+  end
+
+  @spec activate_surface(t()) :: t()
+  defp activate_surface(%__MODULE__{surface_module: nil} = state), do: state
+  defp activate_surface(%__MODULE__{surface_state: nil} = state), do: state
+
+  defp activate_surface(%__MODULE__{surface_module: mod, surface_state: ss} = state) do
+    %{state | surface_state: mod.activate(ss)}
+  end
+
   @doc """
   Switches to the tab with `target_id`.
 
@@ -585,6 +611,9 @@ defmodule Minga.Editor.State do
       # The timer ref is in state.agent (the live field) before snapshot.
       state = stop_outgoing_spinner(state)
 
+      # Deactivate the outgoing surface (if any).
+      state = deactivate_surface(state)
+
       # Snapshot current tab
       context = snapshot_tab_context(state)
       tb = TabBar.update_context(tb, current_id, context)
@@ -597,6 +626,9 @@ defmodule Minga.Editor.State do
       state = %{state | tab_bar: tb}
 
       state = restore_tab_context(state, target.context)
+
+      # Activate the incoming surface (if any).
+      state = activate_surface(state)
 
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)

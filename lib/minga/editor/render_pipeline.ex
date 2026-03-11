@@ -226,12 +226,27 @@ defmodule Minga.Editor.RenderPipeline do
     if state.agentic.active do
       run_agentic(state, layout)
     else
-      run_windows(state, layout)
+      # Delegate to the active surface for the windows render path.
+      # The surface calls run_windows_pipeline/2 internally via the bridge.
+      # When no surface is set (shouldn't happen for file tabs, but
+      # defensive), fall back to the direct call.
+      run_windows_pipeline(state, layout)
     end
   end
 
-  @spec run_windows(state(), Layout.t()) :: state()
-  defp run_windows(state, layout) do
+  @doc """
+  Runs the windows render pipeline stages: scroll, content, chrome,
+  compose, and emit.
+
+  This is the core rendering logic for the buffer view. Called by
+  `BufferView.render/2` through the bridge, and directly by the
+  pipeline when no surface is set.
+
+  Public so that `BufferView` can call it during Phase 1 while the
+  rendering code still operates on `EditorState`.
+  """
+  @spec run_windows_pipeline(state(), Layout.t()) :: state()
+  def run_windows_pipeline(state, layout) do
     # Stage 3: Scroll (also runs per-window invalidation detection)
     {scrolls, state} = timed(:scroll, fn -> scroll_windows(state, layout) end)
 

@@ -2,15 +2,20 @@ defmodule Minga.Input do
   @moduledoc """
   Key input dispatch infrastructure.
 
-  Provides the default focus stack and re-exports the handler behaviour.
-  The focus stack determines the priority order for key processing:
-  highest-priority handlers (modal overlays) are first, the mode FSM
-  is last.
+  The input pipeline has two layers:
 
-  Only truly modal overlays (picker, completion, conflict prompt) appear
-  as separate handlers in the stack. All view-type-specific keybindings
-  (agent, file tree) are handled by `Minga.Input.Scoped` through the
-  keymap scope system.
+  1. **Overlay handlers** — modal UI overlays (picker, completion,
+     conflict prompt) that take priority over everything. These live
+     in the Editor's focus stack and are checked first.
+
+  2. **Surface handlers** — scope-specific dispatch (Scoped), global
+     bindings (Ctrl+S, Ctrl+Q), and the mode FSM (vim normal/insert/
+     visual). These live inside the active surface and are called
+     after overlays pass through.
+
+  The `default_stack/0` returns the combined stack for backward
+  compatibility. New code should use `overlay_handlers/0` and
+  `surface_handlers/0` to build the split dispatch.
   """
 
   alias Minga.Input.Completion
@@ -21,7 +26,7 @@ defmodule Minga.Input do
   alias Minga.Input.Scoped
 
   @doc """
-  Returns the default focus stack.
+  Returns the full default focus stack.
 
   Priority order (first handler wins):
   1. ConflictPrompt — modal, swallows all keys when active
@@ -43,6 +48,39 @@ defmodule Minga.Input do
       ConflictPrompt,
       Picker,
       Completion,
+      Scoped,
+      GlobalBindings,
+      ModeFSM
+    ]
+  end
+
+  @doc """
+  Returns the overlay handlers that sit above the surface.
+
+  These are modal UI elements (picker, completion menu, conflict
+  prompt) that must intercept keys before any surface sees them.
+  The Editor walks these first; if none consume the key, it
+  delegates to the active surface.
+  """
+  @spec overlay_handlers() :: [module()]
+  def overlay_handlers do
+    [
+      ConflictPrompt,
+      Picker,
+      Completion
+    ]
+  end
+
+  @doc """
+  Returns the surface-level handlers for the buffer view.
+
+  These handle scope-specific dispatch, global bindings, and the
+  vim mode FSM. They run inside `BufferView.handle_key` after
+  overlays have passed through.
+  """
+  @spec surface_handlers() :: [module()]
+  def surface_handlers do
+    [
       Scoped,
       GlobalBindings,
       ModeFSM
