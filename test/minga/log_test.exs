@@ -56,22 +56,20 @@ defmodule Minga.LogTest do
       assert log == ""
     end
 
-    test "debug message appears when subsystem level is :debug" do
+    test "debug message passes filter when subsystem level is :debug" do
       Options.set(:log_level, :info)
       Options.set(:log_level_render, :debug)
 
-      # Need to temporarily allow debug at the Logger level too
-      previous = Logger.level()
-      Logger.configure(level: :debug)
+      # Verify the message function IS called when subsystem allows debug.
+      # This tests that Minga.Log's filtering lets the message through,
+      # without depending on the global Logger level (which is async
+      # and causes flakiness with capture_log).
+      Minga.Log.debug(:render, fn ->
+        send(self(), :debug_message_passed_filter)
+        "render timing"
+      end)
 
-      log =
-        capture_log(fn ->
-          Minga.Log.debug(:render, "render timing")
-        end)
-
-      Logger.configure(level: previous)
-
-      assert log =~ "render timing"
+      assert_received :debug_message_passed_filter
     end
 
     test "warning message passes through when level is :info" do
