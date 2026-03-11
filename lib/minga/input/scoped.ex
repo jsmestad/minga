@@ -429,8 +429,17 @@ defmodule Minga.Input.Scoped do
     AgentCommands.input_backspace(state)
   end
 
-  # Shift+Enter or Alt+Enter: insert newline
+  # Insert newline: all the ways Shift+Enter arrives across terminals.
+  # See agent.ex keymap/1 comments for the full explanation.
   defp handle_panel_input(state, 13, mods) when band(mods, @shift) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_panel_input(state, ?j, mods) when band(mods, @ctrl) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_panel_input(state, 0x0A, _mods) do
     update_agent(state, &AgentState.insert_newline/1)
   end
 

@@ -132,9 +132,26 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{@escape, 0}], :agent_unfocus_input, "Unfocus input")
     # Ctrl+Q unfocus + quit
     |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus input and quit")
-    # Enter submits (plain), Shift+Enter or Alt+Enter inserts newline
+    # Enter submits; Shift+Enter inserts a newline.
+    #
+    # Why four bindings for "insert newline":
+    #
+    # 1. {Enter, shift} — correct Kitty protocol behavior (CSI 13;2 u).
+    #    Works on terminals where Shift+Enter is truly "modified Enter."
+    #
+    # 2. {?j, ctrl} — Ghostty/macOS. Shift+Enter produces LF (0x0A) at
+    #    the OS level. The Kitty protocol disambiguates LF as Ctrl+J
+    #    (codepoint 'j' with ctrl). Also standard Vim: Ctrl+J = newline.
+    #
+    # 3. {0x0A, 0} — legacy terminals without Kitty protocol. Shift+Enter
+    #    sends raw LF (0x0A) with no modifier info.
+    #
+    # 4. {Enter, alt} — universal fallback. Alt+Enter works everywhere
+    #    because Alt changes the escape sequence even in legacy mode.
     |> Bindings.bind([{@enter, 0}], :agent_submit_or_newline, "Submit prompt")
     |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
+    |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
+    |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
     |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
     # Backspace
     |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")

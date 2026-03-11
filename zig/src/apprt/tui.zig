@@ -549,6 +549,8 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             if (key.mods.alt) mods |= protocol.MOD_ALT;
             if (key.mods.super) mods |= protocol.MOD_SUPER;
 
+
+
             var kbuf: [6]u8 = undefined;
             const klen = try protocol.encodeKeyPress(&kbuf, key.codepoint, mods);
             try protocol.writeMessage(stdout, kbuf[0..klen]);
