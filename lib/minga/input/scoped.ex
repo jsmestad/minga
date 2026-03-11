@@ -197,8 +197,8 @@ defmodule Minga.Input.Scoped do
          @tab,
          0
        ) do
-    {cursor_line, _} = panel.input_cursor
-    current_line = Enum.at(panel.input_lines, cursor_line)
+    {cursor_line, _} = panel.input.cursor
+    current_line = Enum.at(panel.input.lines, cursor_line)
 
     if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
       {:handled, AgentCommands.toggle_paste_expand(state)}
@@ -429,8 +429,17 @@ defmodule Minga.Input.Scoped do
     AgentCommands.input_backspace(state)
   end
 
-  # Shift+Enter or Alt+Enter: insert newline
+  # Insert newline: all the ways Shift+Enter arrives across terminals.
+  # See agent.ex keymap/1 comments for the full explanation.
   defp handle_panel_input(state, 13, mods) when band(mods, @shift) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_panel_input(state, ?j, mods) when band(mods, @ctrl) != 0 do
+    update_agent(state, &AgentState.insert_newline/1)
+  end
+
+  defp handle_panel_input(state, 0x0A, _mods) do
     update_agent(state, &AgentState.insert_newline/1)
   end
 
@@ -781,8 +790,7 @@ defmodule Minga.Input.Scoped do
   # Used to determine if Tab should trigger collapse.
   @spec cursor_on_expanded_block?(PanelState.t()) :: boolean()
   defp cursor_on_expanded_block?(%{
-         input_cursor: {cursor_line, _},
-         input_lines: lines,
+         input: %{cursor: {cursor_line, _}, lines: lines},
          pasted_blocks: blocks
        }) do
     blocks

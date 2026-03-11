@@ -13,6 +13,7 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.Viewport
   alias Minga.Input
+  alias Minga.Input.TextField
   alias Minga.Mode
   alias Minga.Theme
 
@@ -29,8 +30,7 @@ defmodule Minga.Agent.View.RendererTest do
       agent_status: :idle,
       panel: %{
         input_focused: false,
-        input_lines: [""],
-        input_cursor: {0, 0},
+        input: TextField.new(),
         scroll: Minga.Scroll.new(),
         spinner_frame: 0,
         model_name: "claude-sonnet-4",
@@ -59,12 +59,15 @@ defmodule Minga.Agent.View.RendererTest do
     cols = Keyword.get(opts, :cols, 120)
     {:ok, buf} = BufferServer.start_link(content: "line one\nline two\nline three")
 
+    input_lines = Keyword.get(opts, :input_lines, [Keyword.get(opts, :input_text, "")])
+
+    input_cursor =
+      Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))})
+
     panel = %PanelState{
       visible: true,
       input_focused: Keyword.get(opts, :input_focused, false),
-      input_lines: Keyword.get(opts, :input_lines, [Keyword.get(opts, :input_text, "")]),
-      input_cursor:
-        Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))}),
+      input: TextField.from_parts(input_lines, input_cursor),
       scroll: Minga.Scroll.new(),
       spinner_frame: 0,
       provider_name: "anthropic",
@@ -333,8 +336,7 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :idle,
         panel: %{
           input_focused: false,
-          input_lines: [""],
-          input_cursor: {0, 0},
+          input: TextField.from_parts([""], {0, 0}),
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
@@ -373,8 +375,7 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :thinking,
         panel: %{
           input_focused: true,
-          input_lines: ["hello"],
-          input_cursor: {0, 5},
+          input: TextField.from_parts(["hello"], {0, 5}),
           scroll: Minga.Scroll.new(),
           spinner_frame: 3,
           model_name: "claude-sonnet-4",
@@ -427,8 +428,7 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :idle,
         panel: %{
           input_focused: false,
-          input_lines: [""],
-          input_cursor: {0, 0},
+          input: TextField.from_parts([""], {0, 0}),
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
@@ -514,8 +514,7 @@ defmodule Minga.Agent.View.RendererTest do
         default_input(%{
           panel: %{
             input_focused: true,
-            input_lines: [""],
-            input_cursor: {0, 0},
+            input: TextField.from_parts([""], {0, 0}),
             scroll: Minga.Scroll.new(),
             spinner_frame: 0,
             model_name: "claude-sonnet-4",

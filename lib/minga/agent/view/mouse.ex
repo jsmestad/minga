@@ -153,7 +153,7 @@ defmodule Minga.Agent.View.Mouse do
     cols = state.viewport.cols
     rows = state.viewport.rows
 
-    input_lines = state.agent.panel.input_lines
+    input_lines = state.agent.panel.input.lines
     input_height = min(length(input_lines), 5) + 2
 
     # Tab bar at row 0, title bar at row 1, content starts at row 2.

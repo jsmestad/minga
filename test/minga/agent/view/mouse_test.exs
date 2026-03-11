@@ -29,7 +29,6 @@ defmodule Minga.Agent.View.MouseTest do
       agent: %AgentState{
         panel: %PanelState{
           visible: false,
-          input_lines: [""],
           input_focused: input_focused
         }
       },

@@ -2,6 +2,18 @@ defmodule Minga.Agent.PanelStateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
+  alias Minga.Input.TextField
+
+  # Creates a PanelState with the given input lines and cursor.
+  defp panel_with_input(lines, cursor \\ nil) do
+    cursor = cursor || {0, 0}
+    %{PanelState.new() | input: TextField.from_parts(lines, cursor)}
+  end
+
+  # Moves the input cursor to a new position within the existing text.
+  defp set_input_cursor(panel, cursor) do
+    %{panel | input: TextField.set_cursor(panel.input, cursor)}
+  end
 
   describe "new/0" do
     test "starts not visible" do
@@ -11,8 +23,8 @@ defmodule Minga.Agent.PanelStateTest do
 
     test "starts with empty input" do
       panel = PanelState.new()
-      assert panel.input_lines == [""]
-      assert panel.input_cursor == {0, 0}
+      assert panel.input.lines == [""]
+      assert panel.input.cursor == {0, 0}
       assert PanelState.input_text(panel) == ""
     end
 
@@ -43,7 +55,7 @@ defmodule Minga.Agent.PanelStateTest do
 
   describe "input_text/1" do
     test "joins multiple lines with newlines" do
-      panel = %{PanelState.new() | input_lines: ["hello", "world"]}
+      panel = panel_with_input(["hello", "world"])
       assert PanelState.input_text(panel) == "hello\nworld"
     end
 
@@ -57,14 +69,14 @@ defmodule Minga.Agent.PanelStateTest do
     test "inserts character at cursor position" do
       panel = PanelState.new() |> PanelState.insert_char("h") |> PanelState.insert_char("i")
       assert PanelState.input_text(panel) == "hi"
-      assert panel.input_cursor == {0, 2}
+      assert panel.input.cursor == {0, 2}
     end
 
     test "inserts in the middle of text" do
-      panel = %{PanelState.new() | input_lines: ["hlo"], input_cursor: {0, 1}}
+      panel = panel_with_input(["hlo"], {0, 1})
       panel = PanelState.insert_char(panel, "el")
-      assert panel.input_lines == ["hello"]
-      assert panel.input_cursor == {0, 3}
+      assert panel.input.lines == ["hello"]
+      assert panel.input.cursor == {0, 3}
     end
 
     test "resets history index on edit" do
@@ -76,24 +88,24 @@ defmodule Minga.Agent.PanelStateTest do
 
   describe "insert_newline/1" do
     test "splits line at cursor" do
-      panel = %{PanelState.new() | input_lines: ["hello world"], input_cursor: {0, 5}}
+      panel = panel_with_input(["hello world"], {0, 5})
       panel = PanelState.insert_newline(panel)
-      assert panel.input_lines == ["hello", " world"]
-      assert panel.input_cursor == {1, 0}
+      assert panel.input.lines == ["hello", " world"]
+      assert panel.input.cursor == {1, 0}
     end
 
     test "inserts at end of line" do
-      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 5}}
+      panel = panel_with_input(["hello"], {0, 5})
       panel = PanelState.insert_newline(panel)
-      assert panel.input_lines == ["hello", ""]
-      assert panel.input_cursor == {1, 0}
+      assert panel.input.lines == ["hello", ""]
+      assert panel.input.cursor == {1, 0}
     end
 
     test "inserts at start of line" do
-      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 0}}
+      panel = panel_with_input(["hello"], {0, 0})
       panel = PanelState.insert_newline(panel)
-      assert panel.input_lines == ["", "hello"]
-      assert panel.input_cursor == {1, 0}
+      assert panel.input.lines == ["", "hello"]
+      assert panel.input.cursor == {1, 0}
     end
   end
 
@@ -106,27 +118,27 @@ defmodule Minga.Agent.PanelStateTest do
         |> PanelState.delete_char()
 
       assert PanelState.input_text(panel) == "h"
-      assert panel.input_cursor == {0, 1}
+      assert panel.input.cursor == {0, 1}
     end
 
     test "no-op at start of first line" do
       panel = PanelState.new() |> PanelState.delete_char()
       assert PanelState.input_text(panel) == ""
-      assert panel.input_cursor == {0, 0}
+      assert panel.input.cursor == {0, 0}
     end
 
     test "joins with previous line when at start of non-first line" do
-      panel = %{PanelState.new() | input_lines: ["hello", "world"], input_cursor: {1, 0}}
+      panel = panel_with_input(["hello", "world"], {1, 0})
       panel = PanelState.delete_char(panel)
-      assert panel.input_lines == ["helloworld"]
-      assert panel.input_cursor == {0, 5}
+      assert panel.input.lines == ["helloworld"]
+      assert panel.input.cursor == {0, 5}
     end
 
     test "deletes in middle of text" do
-      panel = %{PanelState.new() | input_lines: ["abc"], input_cursor: {0, 2}}
+      panel = panel_with_input(["abc"], {0, 2})
       panel = PanelState.delete_char(panel)
-      assert panel.input_lines == ["ac"]
-      assert panel.input_cursor == {0, 1}
+      assert panel.input.lines == ["ac"]
+      assert panel.input.cursor == {0, 1}
     end
   end
 
@@ -137,8 +149,8 @@ defmodule Minga.Agent.PanelStateTest do
         |> PanelState.insert_char("test")
         |> PanelState.clear_input()
 
-      assert panel.input_lines == [""]
-      assert panel.input_cursor == {0, 0}
+      assert panel.input.lines == [""]
+      assert panel.input.cursor == {0, 0}
     end
 
     test "saves to history before clearing" do
@@ -163,15 +175,15 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "move_cursor_up moves to previous line" do
-      panel = %{PanelState.new() | input_lines: ["ab", "cd"], input_cursor: {1, 1}}
+      panel = panel_with_input(["ab", "cd"], {1, 1})
       panel = PanelState.move_cursor_up(panel)
-      assert panel.input_cursor == {0, 1}
+      assert panel.input.cursor == {0, 1}
     end
 
     test "move_cursor_up clamps column to shorter line" do
-      panel = %{PanelState.new() | input_lines: ["ab", "cdef"], input_cursor: {1, 3}}
+      panel = panel_with_input(["ab", "cdef"], {1, 3})
       panel = PanelState.move_cursor_up(panel)
-      assert panel.input_cursor == {0, 2}
+      assert panel.input.cursor == {0, 2}
     end
 
     test "move_cursor_down returns :at_bottom when on last line" do
@@ -180,15 +192,15 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "move_cursor_down moves to next line" do
-      panel = %{PanelState.new() | input_lines: ["ab", "cd"], input_cursor: {0, 1}}
+      panel = panel_with_input(["ab", "cd"], {0, 1})
       panel = PanelState.move_cursor_down(panel)
-      assert panel.input_cursor == {1, 1}
+      assert panel.input.cursor == {1, 1}
     end
 
     test "move_cursor_down clamps column to shorter line" do
-      panel = %{PanelState.new() | input_lines: ["abcd", "ef"], input_cursor: {0, 3}}
+      panel = panel_with_input(["abcd", "ef"], {0, 3})
       panel = PanelState.move_cursor_down(panel)
-      assert panel.input_cursor == {1, 2}
+      assert panel.input.cursor == {1, 2}
     end
   end
 
@@ -242,12 +254,12 @@ defmodule Minga.Agent.PanelStateTest do
     test "history preserves multi-line prompts" do
       panel = %{PanelState.new() | prompt_history: ["line1\nline2"]}
       panel = PanelState.history_prev(panel)
-      assert panel.input_lines == ["line1", "line2"]
-      assert panel.input_cursor == {1, 5}
+      assert panel.input.lines == ["line1", "line2"]
+      assert panel.input.cursor == {1, 5}
     end
 
     test "save_to_history adds text to history" do
-      panel = %{PanelState.new() | input_lines: ["hello"]}
+      panel = panel_with_input(["hello"])
       panel = PanelState.save_to_history(panel)
       assert panel.prompt_history == ["hello"]
     end
@@ -256,7 +268,7 @@ defmodule Minga.Agent.PanelStateTest do
       panel = PanelState.new() |> PanelState.save_to_history()
       assert panel.prompt_history == []
 
-      panel2 = %{PanelState.new() | input_lines: ["  "]}
+      panel2 = panel_with_input(["  "])
       panel2 = PanelState.save_to_history(panel2)
       assert panel2.prompt_history == []
     end
@@ -268,7 +280,7 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "returns count for multi-line input" do
-      panel = %{PanelState.new() | input_lines: ["a", "b", "c"]}
+      panel = panel_with_input(["a", "b", "c"])
       assert PanelState.input_line_count(panel) == 3
     end
   end
@@ -390,16 +402,16 @@ defmodule Minga.Agent.PanelStateTest do
     test "single-line paste inserts inline" do
       panel = PanelState.new()
       result = PanelState.insert_paste(panel, "hello world")
-      assert result.input_lines == ["hello world"]
-      assert result.input_cursor == {0, 11}
+      assert result.input.lines == ["hello world"]
+      assert result.input.cursor == {0, 11}
       assert result.pasted_blocks == []
     end
 
     test "two-line paste inserts inline as two lines" do
       panel = PanelState.new()
       result = PanelState.insert_paste(panel, "line 1\nline 2")
-      assert result.input_lines == ["line 1", "line 2"]
-      assert result.input_cursor == {1, 6}
+      assert result.input.lines == ["line 1", "line 2"]
+      assert result.input.cursor == {1, 6}
       assert result.pasted_blocks == []
     end
 
@@ -409,29 +421,29 @@ defmodule Minga.Agent.PanelStateTest do
       panel = PanelState.insert_char(panel, "i")
       # cursor at {0, 2}, line is "hi"
       result = PanelState.insert_paste(panel, " there")
-      assert result.input_lines == ["hi there"]
-      assert result.input_cursor == {0, 8}
+      assert result.input.lines == ["hi there"]
+      assert result.input.cursor == {0, 8}
     end
 
     test "two-line paste into middle of existing text" do
-      panel = %{PanelState.new() | input_lines: ["abcdef"], input_cursor: {0, 3}}
+      panel = panel_with_input(["abcdef"], {0, 3})
       result = PanelState.insert_paste(panel, "X\nY")
-      assert result.input_lines == ["abcX", "Ydef"]
-      assert result.input_cursor == {1, 1}
+      assert result.input.lines == ["abcX", "Ydef"]
+      assert result.input.cursor == {1, 1}
     end
 
     test "two-line paste at start of existing text" do
-      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 0}}
+      panel = panel_with_input(["hello"], {0, 0})
       result = PanelState.insert_paste(panel, "A\nB")
-      assert result.input_lines == ["A", "Bhello"]
-      assert result.input_cursor == {1, 1}
+      assert result.input.lines == ["A", "Bhello"]
+      assert result.input.cursor == {1, 1}
     end
 
     test "two-line paste at end of existing text" do
-      panel = %{PanelState.new() | input_lines: ["hello"], input_cursor: {0, 5}}
+      panel = panel_with_input(["hello"], {0, 5})
       result = PanelState.insert_paste(panel, "A\nB")
-      assert result.input_lines == ["helloA", "B"]
-      assert result.input_cursor == {1, 1}
+      assert result.input.lines == ["helloA", "B"]
+      assert result.input.cursor == {1, 1}
     end
   end
 
@@ -446,7 +458,7 @@ defmodule Minga.Agent.PanelStateTest do
       assert hd(result.pasted_blocks).expanded == false
 
       # Input should contain the placeholder
-      assert Enum.any?(result.input_lines, &PanelState.paste_placeholder?/1)
+      assert Enum.any?(result.input.lines, &PanelState.paste_placeholder?/1)
     end
 
     test "input_text/1 substitutes placeholder with full paste content" do
@@ -468,7 +480,7 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "paste into existing text preserves surrounding content" do
-      panel = %{PanelState.new() | input_lines: ["question: "], input_cursor: {0, 10}}
+      panel = panel_with_input(["question: "], {0, 10})
       text = "line 1\nline 2\nline 3"
       result = PanelState.insert_paste(panel, text)
 
@@ -478,7 +490,7 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "paste into middle of existing text splits around placeholder" do
-      panel = %{PanelState.new() | input_lines: ["abcdef"], input_cursor: {0, 3}}
+      panel = panel_with_input(["abcdef"], {0, 3})
       text = "X\nY\nZ"
       result = PanelState.insert_paste(panel, text)
 
@@ -487,7 +499,7 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "paste at start of line with existing content" do
-      panel = %{PanelState.new() | input_lines: ["existing"], input_cursor: {0, 0}}
+      panel = panel_with_input(["existing"], {0, 0})
       text = "a\nb\nc"
       result = PanelState.insert_paste(panel, text)
 
@@ -497,7 +509,7 @@ defmodule Minga.Agent.PanelStateTest do
     end
 
     test "paste at end of existing line" do
-      panel = %{PanelState.new() | input_lines: ["existing"], input_cursor: {0, 8}}
+      panel = panel_with_input(["existing"], {0, 8})
       text = "a\nb\nc"
       result = PanelState.insert_paste(panel, text)
 
@@ -568,8 +580,8 @@ defmodule Minga.Agent.PanelStateTest do
       panel = PanelState.insert_paste(panel, text)
 
       # Find the placeholder line
-      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
-      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+      placeholder_idx = Enum.find_index(panel.input.lines, &PanelState.paste_placeholder?/1)
+      panel = set_input_cursor(panel, {placeholder_idx, 0})
 
       expanded = PanelState.toggle_paste_expand(panel)
 
@@ -577,10 +589,10 @@ defmodule Minga.Agent.PanelStateTest do
       assert Enum.at(expanded.pasted_blocks, 0).expanded == true
 
       # The placeholder should be replaced with actual text lines
-      refute Enum.any?(expanded.input_lines, &PanelState.paste_placeholder?/1)
-      assert "line 1" in expanded.input_lines
-      assert "line 2" in expanded.input_lines
-      assert "line 3" in expanded.input_lines
+      refute Enum.any?(expanded.input.lines, &PanelState.paste_placeholder?/1)
+      assert "line 1" in expanded.input.lines
+      assert "line 2" in expanded.input.lines
+      assert "line 3" in expanded.input.lines
     end
 
     test "collapses an expanded paste block" do
@@ -589,22 +601,22 @@ defmodule Minga.Agent.PanelStateTest do
       panel = PanelState.insert_paste(panel, text)
 
       # Expand it first
-      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
-      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+      placeholder_idx = Enum.find_index(panel.input.lines, &PanelState.paste_placeholder?/1)
+      panel = set_input_cursor(panel, {placeholder_idx, 0})
       panel = PanelState.toggle_paste_expand(panel)
 
       # Now collapse: put cursor on the first line of the expanded text
-      panel = %{panel | input_cursor: {placeholder_idx, 0}}
+      panel = set_input_cursor(panel, {placeholder_idx, 0})
       collapsed = PanelState.toggle_paste_expand(panel)
 
       # After collapsing, should have placeholder back
-      assert Enum.any?(collapsed.input_lines, &PanelState.paste_placeholder?/1)
+      assert Enum.any?(collapsed.input.lines, &PanelState.paste_placeholder?/1)
       assert Enum.at(collapsed.pasted_blocks, 0).expanded == false
     end
 
     test "no-op when cursor is not on a placeholder line" do
       panel = PanelState.new()
-      panel = %{panel | input_lines: ["regular text"], input_cursor: {0, 0}}
+      panel = %{panel | input: TextField.from_parts(["regular text"], {0, 0})}
       result = PanelState.toggle_paste_expand(panel)
       assert result == panel
     end
@@ -616,10 +628,10 @@ defmodule Minga.Agent.PanelStateTest do
       collapsed_text = PanelState.input_text(panel)
 
       # Expand
-      placeholder_idx = Enum.find_index(panel.input_lines, &PanelState.paste_placeholder?/1)
+      placeholder_idx = Enum.find_index(panel.input.lines, &PanelState.paste_placeholder?/1)
 
       expanded_panel =
-        %{panel | input_cursor: {placeholder_idx, 0}} |> PanelState.toggle_paste_expand()
+        set_input_cursor(panel, {placeholder_idx, 0}) |> PanelState.toggle_paste_expand()
 
       expanded_text = PanelState.input_text(expanded_panel)
 
@@ -675,8 +687,8 @@ defmodule Minga.Agent.PanelStateTest do
 
       cleared = PanelState.clear_input(panel)
       assert cleared.pasted_blocks == []
-      assert cleared.input_lines == [""]
-      assert cleared.input_cursor == {0, 0}
+      assert cleared.input.lines == [""]
+      assert cleared.input.cursor == {0, 0}
     end
   end
 

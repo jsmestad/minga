@@ -32,6 +32,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Git.Diff
+  alias Minga.Input.TextField
 
   import Bitwise
 
@@ -240,7 +241,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Submits the current input text as a prompt."
   @spec submit_prompt(state()) :: state()
-  def submit_prompt(%{agent: %{panel: %{input_lines: [""]}}} = state), do: state
+  def submit_prompt(%{agent: %{panel: %{input: %{lines: [""]}}}} = state), do: state
 
   def submit_prompt(%{agent: %{session: nil}} = state) do
     %{state | status_msg: "No agent session, try closing and reopening the panel"}
@@ -826,7 +827,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Moves cursor up in input or recalls history."
   @spec scope_input_up(state()) :: state()
   def scope_input_up(state) do
-    {line, _col} = state.agent.panel.input_cursor
+    {line, _col} = state.agent.panel.input.cursor
 
     if line == 0 do
       update_agent(state, &AgentState.history_prev/1)
@@ -838,8 +839,8 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Moves cursor down in input or advances history."
   @spec scope_input_down(state()) :: state()
   def scope_input_down(state) do
-    {line, _col} = state.agent.panel.input_cursor
-    max_line = length(state.agent.panel.input_lines) - 1
+    {line, _col} = state.agent.panel.input.cursor
+    max_line = length(state.agent.panel.input.lines) - 1
 
     if line >= max_line do
       update_agent(state, &AgentState.history_next/1)
@@ -1501,15 +1502,15 @@ defmodule Minga.Editor.Commands.Agent do
   @spec should_trigger_mention?(state()) :: boolean()
   defp should_trigger_mention?(state) do
     panel = state.agent.panel
-    {line, col} = panel.input_cursor
-    current_line = Enum.at(panel.input_lines, line, "")
+    {line, col} = panel.input.cursor
+    current_line = Enum.at(panel.input.lines, line, "")
     col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
   end
 
   @spec start_mention_completion(state()) :: state()
   defp start_mention_completion(state) do
     files = list_project_files()
-    {line, col} = state.agent.panel.input_cursor
+    {line, col} = state.agent.panel.input.cursor
     completion = FileMention.new_completion(files, line, col - 1)
     update_panel(state, fn p -> %{p | mention_completion: completion} end)
   end
@@ -1524,8 +1525,8 @@ defmodule Minga.Editor.Commands.Agent do
 
       path ->
         panel = state.agent.panel
-        {line, _col} = panel.input_cursor
-        current = Enum.at(panel.input_lines, line)
+        {line, _col} = panel.input.cursor
+        current = Enum.at(panel.input.lines, line)
         anchor_col = comp.anchor_col
 
         before = String.slice(current, 0, anchor_col)
@@ -1539,10 +1540,10 @@ defmodule Minga.Editor.Commands.Agent do
 
         new_line = before <> "@" <> path <> " " <> after_prefix
         new_col = anchor_col + 1 + String.length(path) + 1
-        new_lines = List.replace_at(panel.input_lines, line, new_line)
+        new_lines = List.replace_at(panel.input.lines, line, new_line)
 
         update_panel(state, fn p ->
-          %{p | input_lines: new_lines, input_cursor: {line, new_col}, mention_completion: nil}
+          %{p | input: TextField.from_parts(new_lines, {line, new_col}), mention_completion: nil}
         end)
     end
   end

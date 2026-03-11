@@ -1668,9 +1668,9 @@ defmodule Minga.Editor do
   @spec handle_paste_event(state(), String.t()) :: state()
   defp handle_paste_event(state, text)
 
-  # Agent panel input is focused: route paste to agent input
+  # Agent input is focused (split panel or full-screen agentic view): route paste to agent input
   defp handle_paste_event(
-         %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
+         %{agent: %{panel: %{input_focused: true}}} = state,
          text
        ) do
     Commands.Agent.input_paste(state, text)

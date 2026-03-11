@@ -167,7 +167,20 @@ pub const TuiRuntime = struct {
             return err;
         };
 
-        self.vx = try vaxis.init(alloc, .{});
+        self.vx = try vaxis.init(alloc, .{
+            // Request only "disambiguate" from the Kitty keyboard protocol.
+            // This lets the terminal report modifiers on keys like Enter
+            // (so Shift+Enter differs from Enter) without the side effects
+            // of report_all_as_ctl_seqs, which causes bare modifier presses
+            // (Shift, Ctrl, Alt) to generate key events.
+            .kitty_keyboard_flags = .{
+                .disambiguate = true,
+                .report_events = false,
+                .report_alternate_keys = false,
+                .report_all_as_ctl_seqs = false,
+                .report_text = false,
+            },
+        });
 
         // Allocate screen buffers at the real terminal size.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
@@ -186,6 +199,14 @@ pub const TuiRuntime = struct {
         // paste_start / key_press* / paste_end instead of bare key_press.
         try self.vx.setBracketedPaste(self.tty.writer(), true);
 
+        // NOTE: terminal capability queries (queryTerminalSend) are deferred
+        // to run() because init() returns self by value. The tty writer holds
+        // a pointer to tty_write_buf; after the move, that pointer is stale.
+        // Any tty writes in init() work because they flush immediately, but
+        // the cap_da1 handler (which enables detected features) runs later in
+        // the event loop when the old pointer is invalid. Querying in run()
+        // (after pointer fixup) avoids this.
+
         // Paste buffer uses the runtime allocator for dynamic accumulation.
         self.paste_buf = .empty;
 
@@ -202,10 +223,22 @@ pub const TuiRuntime = struct {
     /// Run the event loop. Blocks until quit signal or stdin EOF.
     pub fn run(self: *TuiRuntime) !void {
         // Fix up internal pointers after the struct has been moved to its
-        // final location on the caller's stack.
+        // final location on the caller's stack. init() returns by value, so
+        // any stored pointers to self's fields (especially tty_write_buf)
+        // are stale. We must reinitialize them here where self is stable.
+        const tty_file = std.fs.File{ .handle = self.tty.fd };
+        self.tty.tty_writer = .initStreaming(tty_file, &self.tty_write_buf);
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
+
+        // Query terminal capabilities (Kitty keyboard protocol, RGB color,
+        // Unicode width, graphics support, etc.). This must happen in run(),
+        // not init(), because the tty writer's buffer pointer is only valid
+        // after the fixup above. The terminal's responses arrive as cap_*
+        // events; when cap_da1 fires (the final response), we call
+        // enableDetectedFeatures() to activate Kitty keyboard, etc.
+        try self.vx.queryTerminalSend(self.tty.writer());
 
         // Stdout (Port protocol channel).
         var stdout_buf: [4096]u8 = undefined;
@@ -516,6 +549,8 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             if (key.mods.alt) mods |= protocol.MOD_ALT;
             if (key.mods.super) mods |= protocol.MOD_SUPER;
 
+
+
             var kbuf: [6]u8 = undefined;
             const klen = try protocol.encodeKeyPress(&kbuf, key.codepoint, mods);
             try protocol.writeMessage(stdout, kbuf[0..klen]);
@@ -536,8 +571,20 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             std.Thread.Futex.wake(&vx.query_futex, 10);
             vx.queries_done.store(true, .unordered);
 
-            // Terminal capability detection is complete. Send a
-            // capabilities_updated event with the actual detected caps.
+            // Terminal capability detection is complete. Enable all
+            // detected features (Kitty keyboard protocol, Unicode
+            // mode 2027, etc.). This is the custom-event-loop
+            // counterpart to the blocking queryTerminal() call.
+            try vx.enableDetectedFeatures(self.tty.writer());
+
+            std.log.info("terminal caps: kitty_kb={} rgb={} unicode={s} kitty_gfx={}", .{
+                vx.caps.kitty_keyboard,
+                vx.caps.rgb,
+                @tagName(vx.caps.unicode),
+                vx.caps.kitty_graphics,
+            });
+
+            // Send a capabilities_updated event with the actual detected caps.
             const caps = protocol.Capabilities{
                 .frontend_type = protocol.FRONTEND_TUI,
                 .color_depth = if (vx.caps.rgb) protocol.COLOR_RGB else protocol.COLOR_256,
