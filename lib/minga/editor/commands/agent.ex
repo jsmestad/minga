@@ -74,20 +74,18 @@ defmodule Minga.Editor.Commands.Agent do
   context. On deactivate: switches back to the most recent file tab.
   """
   @spec toggle_agentic_view(state()) :: state()
-  def toggle_agentic_view(%{agentic: %{active: true}} = state) do
+  def toggle_agentic_view(%{surface_module: Minga.Surface.AgentView} = state) do
     deactivate_agentic_view(state)
   end
 
-  def toggle_agentic_view(%{agentic: %{active: false}} = state) do
+  def toggle_agentic_view(state) do
     activate_agentic_view(state)
   end
 
   @spec deactivate_agentic_view(state()) :: state()
   defp deactivate_agentic_view(state) do
-    # Mark the agentic view as inactive before snapshotting, so the
-    # saved context reflects "agent panel not visible".
-    state = %{state | agentic: %{state.agentic | active: false}}
-
+    # switch_tab handles deactivation: sync_from_editor -> deactivate_surface
+    # -> snapshot. The surface's deactivate callback sets active: false.
     case find_file_tab(state) do
       nil ->
         # No file tab yet (e.g., cold boot into agent mode). Create one
@@ -383,13 +381,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: fresh_agent, agentic: fresh_agentic, keymap_scope: :agent}
 
     agent_context = %{
-      agentic: fresh_agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: fresh_agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,

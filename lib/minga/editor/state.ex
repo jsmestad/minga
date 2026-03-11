@@ -457,6 +457,25 @@ defmodule Minga.Editor.State do
         SurfaceSync.sync_from_editor(state)
       end
 
+    snapshot_tab_fields(state)
+  end
+
+  # Internal: snapshots tab fields without syncing. Used by switch_tab
+  # where the caller has already synced and deactivated the surface.
+  @spec snapshot_tab_context_no_sync(t()) :: Tab.context()
+  defp snapshot_tab_context_no_sync(%__MODULE__{} = state) do
+    state =
+      if state.surface_module == nil do
+        SurfaceSync.init_surface(state)
+      else
+        state
+      end
+
+    snapshot_tab_fields(state)
+  end
+
+  @spec snapshot_tab_fields(t()) :: Tab.context()
+  defp snapshot_tab_fields(state) do
     %{
       windows: state.windows,
       file_tree: state.file_tree,
@@ -496,6 +515,7 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:keymap_scope, context)
     |> maybe_restore(:surface_module, context)
     |> maybe_restore(:surface_state, context)
+    |> ensure_surface_initialized(context)
     |> restore_active_buffer(context)
     |> sync_agent_from_surface(context)
   end
@@ -584,6 +604,19 @@ defmodule Minga.Editor.State do
     end
   end
 
+  # Ensures surface_module and surface_state are set after restoring
+  # a tab context. Handles legacy contexts that don't carry surface data
+  # by deriving the surface from keymap_scope.
+  @spec ensure_surface_initialized(t(), Tab.context()) :: t()
+  defp ensure_surface_initialized(%__MODULE__{surface_module: mod} = state, _context)
+       when mod != nil do
+    state
+  end
+
+  defp ensure_surface_initialized(state, _context) do
+    SurfaceSync.init_surface(state)
+  end
+
   @spec maybe_restore(t(), atom(), Tab.context()) :: t()
   defp maybe_restore(state, key, context) do
     case Map.fetch(context, key) do
@@ -647,11 +680,15 @@ defmodule Minga.Editor.State do
       # The timer ref is in state.agent (the live field) before snapshot.
       state = stop_outgoing_spinner(state)
 
-      # Deactivate the outgoing surface (if any).
+      # Sync surface state from editor, then deactivate it.
+      # Order matters: sync first so the surface has current editor state,
+      # then deactivate marks the surface as inactive. snapshot_tab_context
+      # skips sync_from_editor because we just did it.
+      state = SurfaceSync.sync_from_editor(state)
       state = deactivate_surface(state)
 
-      # Snapshot current tab
-      context = snapshot_tab_context(state)
+      # Snapshot current tab (surface state is already up-to-date + deactivated)
+      context = snapshot_tab_context_no_sync(state)
       tb = TabBar.update_context(tb, current_id, context)
 
       # Switch pointer

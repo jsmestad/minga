@@ -57,6 +57,11 @@ defmodule Minga.Input.ScopedTest do
         TabBar.new(Tab.new_file(1, "*scratch*"))
       end
 
+    is_agent = Keyword.get(opts, :agentic_active, false)
+
+    surface_module =
+      if is_agent, do: Minga.Surface.AgentView, else: Minga.Surface.BufferView
+
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
@@ -67,7 +72,8 @@ defmodule Minga.Input.ScopedTest do
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
       agentic: agentic,
-      tab_bar: tab_bar
+      tab_bar: tab_bar,
+      surface_module: surface_module
     }
   end
 
@@ -218,7 +224,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "q closes agentic view", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
-      refute new_state.agentic.active
+      assert new_state.surface_module != Minga.Surface.AgentView
       assert new_state.keymap_scope == :editor
     end
 

@@ -645,7 +645,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case TabBar.most_recent_of_kind(state.tab_bar, :file) do
       %Tab{} ->
         # Deactivate agentic view and switch to the file tab
-        state = %{state | agentic: %{state.agentic | active: false}, keymap_scope: :editor}
+        # Deactivate agent surface; restore_tab_context will set up the
+        # correct surface for the file tab we're switching to.
+        state = %{state | keymap_scope: :editor}
         state = remove_current_tab(state)
 
         # Restore the now-active tab's context
