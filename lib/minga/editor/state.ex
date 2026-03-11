@@ -328,8 +328,9 @@ defmodule Minga.Editor.State do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # Leave agentic view.
+    # Leave agentic view: reset to editor scope with BufferView surface.
     state = %{state | agentic: %ViewState{}, keymap_scope: :editor, tab_bar: tb}
+    state = SurfaceSync.init_surface(state)
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context.

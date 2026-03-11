@@ -158,25 +158,24 @@ defmodule Minga.Editor.Commands.Agent do
   # Switches to an existing agent tab, re-activating its agentic view.
   @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
   defp switch_to_existing_agent_tab(state, agent_tab) do
-    # The agent tab's stored context has agentic.active == false (set
-    # during deactivation). Patch it to active before switching.
+    # The agent tab's stored surface state has agentic.active == false
+    # (set during deactivation). Patch it to active before switching.
     ctx = agent_tab.context
 
-    updated_agentic =
-      Map.get(ctx, :agentic, ViewState.new())
-      |> Map.put(:active, true)
-      |> Map.put(:focus, :chat)
-
-    ctx = Map.put(ctx, :agentic, updated_agentic)
-
-    # Also update the surface_state if present
     ctx =
       case Map.get(ctx, :surface_state) do
-        %AVState{} = av ->
+        %AVState{agentic: agentic} = av ->
+          updated_agentic = %{agentic | active: true, focus: :chat}
           Map.put(ctx, :surface_state, %{av | agentic: updated_agentic})
 
         _ ->
-          ctx
+          # Legacy context without surface_state: patch agentic directly
+          updated_agentic =
+            Map.get(ctx, :agentic, ViewState.new())
+            |> Map.put(:active, true)
+            |> Map.put(:focus, :chat)
+
+          Map.put(ctx, :agentic, updated_agentic)
       end
 
     tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
@@ -196,13 +195,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: agent, agentic: agentic, keymap_scope: :agent}
 
     %{
-      agentic: agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
