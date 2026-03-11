@@ -1,7 +1,31 @@
 # Surface Extraction Refactor
 
-**Status:** Phase 1-4 complete + post-phase decomposition
+**Status:** Phase 1-4 complete + post-phase decomposition + Step 1-2 (agent fields) in progress
 **Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 landed), 2026-03-11 (post-phase extractions)
+
+## Current Migration Status (Step 2)
+
+PR #319 (`refactor/surface-owns-state-step1`) implements the first two steps of making surfaces truly own their state:
+
+### Step 1: Surface state authoritative for tab lifecycle (done)
+- Tab contexts store only `{surface_module, surface_state, keymap_scope}`
+- `snapshot_tab_context` / `restore_tab_context` sync through surface state
+- Legacy context auto-migration for backwards compatibility
+
+### Step 2: Agent fields routed through AgentAccess (done)
+- All 27+ files that read `state.agent` or `state.agentic` now go through `Minga.Editor.State.AgentAccess`
+- Zero direct reads remain outside the access layer, bridge modules, and struct definitions
+- `AgentAccess` provides surface-aware accessors: when AgentView is active, reads/writes go through `surface_state`; otherwise falls back to EditorState fields
+- Dual-write strategy keeps both locations in sync during migration
+- Safe fallbacks: `AgentAccess.agent/1` and `agentic/1` return defaults when called with bare maps or states lacking agent fields
+
+### Remaining work
+- **Remove `agent`/`agentic` fields from EditorState defstruct**: blocked on solving the "side panel without agent tab" edge case (toggle_panel from a file tab creates agent state before an agent tab exists)
+- **Buffer field migration**: ~221 refs across the codebase. The right approach is changing command signatures (Step 3), not wrapping reads in an access module
+- **Step 3**: Change `Input.Handler` callbacks to `handle_key(surface_state, editor_context, ...)`
+- **Step 4**: Route agent events directly to surfaces
+
+---
 
 The Editor GenServer has become a God Object. It fuses orchestration, state ownership, event routing, and view-specific logic into a single 2,235-line process. Every new feature requires changes in two places (editor path and agent path) because the agentic view was bolted onto the Editor as "just another mode" instead of being built as a peer.
 
