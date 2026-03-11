@@ -18,12 +18,16 @@ defmodule Minga.Input do
   `surface_handlers/0` to build the split dispatch.
   """
 
+  alias Minga.Input.AgentSearch
   alias Minga.Input.Completion
   alias Minga.Input.ConflictPrompt
+  alias Minga.Input.DiffReview
   alias Minga.Input.GlobalBindings
+  alias Minga.Input.MentionCompletion
   alias Minga.Input.ModeFSM
   alias Minga.Input.Picker
   alias Minga.Input.Scoped
+  alias Minga.Input.ToolApproval
 
   @doc """
   Returns the full default focus stack.
@@ -81,6 +85,10 @@ defmodule Minga.Input do
   @spec surface_handlers() :: [module()]
   def surface_handlers do
     [
+      AgentSearch,
+      MentionCompletion,
+      ToolApproval,
+      DiffReview,
       Scoped,
       GlobalBindings,
       ModeFSM

@@ -13,10 +13,6 @@ defmodule Minga.Editor do
 
   use GenServer
 
-  alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.DiffReview
-  alias Minga.Agent.Session, as: AgentSession
-  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
@@ -24,25 +20,28 @@ defmodule Minga.Editor do
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
-  alias Minga.Editor.ChangeRecorder
+  alias Minga.Editor.AgentLifecycle
+  alias Minga.Editor.BackgroundEvents
+  alias Minga.Editor.BufferLifecycle
+  alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
-  alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.MacroReplay
+  alias Minga.Editor.ModeTransitions
   alias Minga.Editor.Renderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
-  alias Minga.FileWatcher
-  alias Minga.Git.Buffer, as: GitBuffer
+
   alias Minga.Input
   alias Minga.Mode
-  alias Minga.Mode.CommandState
-  alias Minga.Mode.EvalState
+
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
@@ -59,7 +58,6 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
@@ -101,7 +99,7 @@ defmodule Minga.Editor do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     port_manager = Keyword.get(opts, :port_manager, PortManager)
-    file_watcher = Keyword.get(opts, :file_watcher)
+    _file_watcher = Keyword.get(opts, :file_watcher)
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -117,7 +115,7 @@ defmodule Minga.Editor do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
 
     # Register initial buffer with file watcher
-    maybe_watch_buffer(file_watcher, buffer)
+    FileWatcherHelpers.maybe_watch_buffer(buffer)
 
     buffers = if buffer, do: [buffer], else: []
 
@@ -226,15 +224,15 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
-        maybe_watch_buffer(file_watcher_pid(), pid)
+        FileWatcherHelpers.maybe_watch_buffer(pid)
         maybe_detect_project(file_path)
         maybe_record_file(file_path)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
-        new_state = lsp_buffer_opened(new_state, pid)
-        new_state = git_buffer_opened(new_state, pid)
+        new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
+        new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
-        new_state = maybe_set_auto_context(new_state, file_path, pid)
+        new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -309,7 +307,7 @@ defmodule Minga.Editor do
     send(self(), :setup_highlight)
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
-    new_state = maybe_start_agent_session(new_state)
+    new_state = AgentLifecycle.maybe_start_session(new_state)
     {:noreply, sync_surface_from_editor(new_state)}
   end
 
@@ -354,7 +352,7 @@ defmodule Minga.Editor do
 
   # ── File watcher notification ──
   def handle_info({:file_changed_on_disk, path}, state) do
-    new_state = handle_file_change(state, path)
+    new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
     new_state = Renderer.render(new_state)
     {:noreply, sync_surface_from_editor(new_state)}
@@ -519,7 +517,7 @@ defmodule Minga.Editor do
         {:noreply, state}
 
       {:background, tab} ->
-        state = handle_background_agent_event(state, tab, event)
+        state = BackgroundEvents.handle(state, tab, event)
         {:noreply, state}
 
       :not_found ->
@@ -620,11 +618,11 @@ defmodule Minga.Editor do
   end
 
   defp apply_effect(state, :sync_agent_buffer) do
-    sync_agent_buffer(state)
+    AgentLifecycle.sync_buffer(state)
   end
 
   defp apply_effect(state, {:update_tab_label, _label}) do
-    maybe_update_agent_tab_label(state)
+    AgentLifecycle.maybe_update_tab_label(state)
   end
 
   @doc false
@@ -767,353 +765,10 @@ defmodule Minga.Editor do
     :exit, _ -> Logger.warning("Could not subscribe to parser manager")
   end
 
-  @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
-  defp update_preview(state, fun) do
-    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
-  end
-
-  # ── Active-tab agent event helpers ─────────────────────────────────────────
-  #
-  # These extract the active-tab logic from handle_info clauses that
-  # need non-trivial processing (multi-branch, sequential updates).
-
-  # Handles agent events for background tabs by updating the stored tab
-  # context. The surface isn't live for background tabs, so we update
-  # the agent/agentic fields in the tab's context map directly.
-  @spec handle_background_agent_event(state(), Tab.t(), term()) :: state()
-  defp handle_background_agent_event(state, tab, {:status_changed, status}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.set_status(&1, status))
-
-    schedule_render(state, 16)
-  end
-
-  defp handle_background_agent_event(state, tab, {:text_delta, _delta}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:thinking_delta, _delta}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, :messages_changed) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-
-    maybe_update_background_tab_label(
-      state,
-      tab,
-      Map.get(tab.context, :agent, %AgentState{}).session
-    )
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "shell", args}) do
-    command = Map.get(args, "command", "")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_shell(&1, command))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_update, _id, "shell", partial}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.update_shell_output(&1, partial))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_update, _id, _name, _partial}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "shell", result, status}) do
-    shell_status = if status == :error, do: :error, else: :done
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.finish_shell(&1, result, shell_status))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "read_file", args}) do
-    path = Map.get(args, "path", "")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_file(&1, path, ""))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "read_file", result, _status}) do
-    update_bg_file_preview(state, tab.id, result)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "list_directory", args}) do
-    path = Map.get(args, "path", ".")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_directory(&1, path, []))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "list_directory", result, _status}) do
-    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
-    update_bg_directory_preview(state, tab.id, entries)
-  end
-
-  defp handle_background_agent_event(state, _tab, {:tool_started, _name, _args}), do: state
-
-  defp handle_background_agent_event(state, _tab, {:tool_ended, _name, _result, _status}),
-    do: state
-
-  defp handle_background_agent_event(
-         state,
-         tab,
-         {:file_changed, path, before_content, after_content}
-       ) do
-    update_bg_file_changed(state, tab.id, path, before_content, after_content)
-  end
-
-  defp handle_background_agent_event(state, tab, {:approval_pending, approval}) do
-    cached = Map.take(approval, [:tool_call_id, :name, :args])
-
-    EditorState.update_background_agent(
-      state,
-      tab.id,
-      &AgentState.set_pending_approval(&1, cached)
-    )
-  end
-
-  defp handle_background_agent_event(state, tab, {:approval_resolved, _decision}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.clear_pending_approval/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:error, message}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.set_error(&1, message))
-
-    log_message(state, "Agent error (tab #{tab.id}): #{message}")
-  end
-
-  defp handle_background_agent_event(state, _tab, _event), do: state
-
-  # Active-tab agent event helpers removed in Phase 3.
-  # handle_status_changed_active and handle_file_changed_active
-  # logic now lives in AgentView.handle_event/2.
-
-  # ── Background tab preview helpers ─────────────────────────────────────────
-  #
-  # These update a background tab's ViewState preview without nesting
-  # a case inside the update_background_agentic anonymous function.
-
-  @spec update_bg_file_preview(state(), Tab.id(), String.t()) :: state()
-  defp update_bg_file_preview(state, tab_id, result) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      case vs.preview.content do
-        {:file, path, _} -> ViewState.update_preview(vs, &Preview.set_file(&1, path, result))
-        _ -> vs
-      end
-    end)
-  end
-
-  @spec update_bg_directory_preview(state(), Tab.id(), [String.t()]) :: state()
-  defp update_bg_directory_preview(state, tab_id, entries) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      case vs.preview.content do
-        {:directory, path, _} ->
-          ViewState.update_preview(vs, &Preview.set_directory(&1, path, entries))
-
-        _ ->
-          vs
-      end
-    end)
-  end
-
-  @spec update_bg_file_changed(state(), Tab.id(), String.t(), String.t(), String.t()) :: state()
-  defp update_bg_file_changed(state, tab_id, path, before_content, after_content) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      vs = ViewState.record_baseline(vs, path, before_content)
-      baseline = ViewState.get_baseline(vs, path)
-
-      case DiffReview.new(path, baseline, after_content) do
-        nil ->
-          vs
-
-        review ->
-          vs = ViewState.update_preview(vs, &Preview.set_diff(&1, review))
-          ViewState.set_focus(vs, :file_viewer)
-      end
-    end)
-  end
-
-  @spec maybe_update_background_tab_label(state(), Tab.t(), pid()) :: state()
-  defp maybe_update_background_tab_label(state, tab, session_pid) do
-    if default_agent_label?(tab.label) do
-      messages =
-        try do
-          AgentSession.messages(session_pid)
-        catch
-          :exit, _ -> []
-        end
-
-      case first_user_message(messages) do
-        nil ->
-          state
-
-        text ->
-          label = truncate_label(text, 30)
-          %{state | tab_bar: TabBar.update_label(state.tab_bar, tab.id, label)}
-      end
-    else
-      state
-    end
-  end
-
-  # If the agentic view was activated during init, start the agent session
-  # now that the port is ready. Also loads auto-context if configured.
-  @spec maybe_start_agent_session(state()) :: state()
-  defp maybe_start_agent_session(%{agentic: %{active: true}, agent: %{session: nil}} = state) do
-    state = Commands.Agent.ensure_agent_session(state)
-    cli_flags = Minga.CLI.startup_flags()
-    maybe_load_auto_context(state, cli_flags)
-  rescue
-    e ->
-      Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
-      state
-  end
-
-  defp maybe_start_agent_session(state), do: state
-
-  # Loads the active buffer's file into the agentic preview pane when
-  # agent_auto_context is enabled and a file buffer is open. Called once
-  # during startup after the agentic view activates.
-  @spec maybe_load_auto_context(state(), Minga.CLI.flags()) :: state()
-  defp maybe_load_auto_context(state, %{no_context: true}), do: state
-
-  defp maybe_load_auto_context(state, _flags) do
-    auto_context = ConfigOptions.get(:agent_auto_context)
-    active_buf = state.buffers.active
-
-    if auto_context and active_buf do
-      load_buffer_as_preview(state, active_buf)
-    else
-      state
-    end
-  end
-
-  # Sets a file's content as the agentic preview pane if the view is active
-  # and the preview is still empty. Used both at startup (via
-  # maybe_load_auto_context) and when a file is opened while the agentic
-  # view is already active (via maybe_set_auto_context).
-  @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
-  defp maybe_set_auto_context(state, file_path, buffer_pid) do
-    cli_flags = Minga.CLI.startup_flags()
-    auto_context = ConfigOptions.get(:agent_auto_context)
-    agentic_active = state.agentic.active
-    preview_empty = state.agentic.preview.content == :empty
-
-    if agentic_active and preview_empty and auto_context and not cli_flags.no_context do
-      content = BufferServer.content(buffer_pid)
-      update_preview(state, &Preview.set_file(&1, file_path, content))
-    else
-      state
-    end
-  end
-
-  @spec load_buffer_as_preview(state(), pid()) :: state()
-  defp load_buffer_as_preview(state, buffer_pid) do
-    case BufferServer.file_path(buffer_pid) do
-      nil ->
-        state
-
-      path ->
-        content = BufferServer.content(buffer_pid)
-        update_preview(state, &Preview.set_file(&1, path, content))
-    end
-  end
-
-  @spec sync_agent_buffer(state()) :: state()
-  defp sync_agent_buffer(%{agent: %{buffer: buf, session: session}} = state)
-       when is_pid(buf) and is_pid(session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
-
-    AgentBufferSync.sync(buf, messages)
-    state
-  end
-
-  defp sync_agent_buffer(state), do: state
-
-  # Updates the active agent tab's label to the first user prompt (truncated).
-  # Only updates if the current label is the default "New Agent" or "minga".
-  @spec maybe_update_agent_tab_label(EditorState.t()) :: EditorState.t()
-  defp maybe_update_agent_tab_label(
-         %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
-       )
-       when is_pid(session) do
-    case TabBar.active(tb) do
-      %{kind: :agent, label: label} when is_binary(label) ->
-        if default_agent_label?(label) do
-          update_agent_tab_from_session(state, tb, active_id, session)
-        else
-          state
-        end
-
-      _other ->
-        state
-    end
-  end
-
-  defp maybe_update_agent_tab_label(state), do: state
-
-  @spec update_agent_tab_from_session(EditorState.t(), TabBar.t(), Tab.id(), pid()) ::
-          EditorState.t()
-  defp update_agent_tab_from_session(state, tb, active_id, session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
-
-    case first_user_message(messages) do
-      nil ->
-        state
-
-      text ->
-        label = truncate_label(text, 30)
-        %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
-    end
-  end
-
-  @spec default_agent_label?(String.t()) :: boolean()
-  defp default_agent_label?("New Agent"), do: true
-  defp default_agent_label?("minga"), do: true
-  defp default_agent_label?(_), do: false
-
-  @spec first_user_message([term()]) :: String.t() | nil
-  defp first_user_message(messages) do
-    Enum.find_value(messages, fn
-      {:user, text} -> text
-      _ -> nil
-    end)
-  end
-
-  @spec truncate_label(String.t(), pos_integer()) :: String.t()
-  defp truncate_label(text, max) do
-    # Take first line, trim, truncate
-    line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
-
-    if String.length(line) > max do
-      String.slice(line, 0, max - 1) <> "\u{2026}"
-    else
-      line
-    end
-  end
+  # Agent lifecycle helpers (session startup, auto-context, buffer sync,
+  # tab labels) extracted to Minga.Editor.AgentLifecycle.
+  # Background agent event handling extracted to Minga.Editor.BackgroundEvents.
+  # Active-tab agent event handling lives in AgentView.handle_event/2.
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
@@ -1167,11 +822,11 @@ defmodule Minga.Editor do
 
     # ── Change recording ─────────────────────────────────────────────────
     # Record keys for dot repeat, unless we're currently replaying.
-    state = maybe_record_change(state, old_mode, new_mode, commands, key)
+    state = ChangeTracking.maybe_record_change(state, old_mode, new_mode, commands, key)
 
     # ── Macro recording ──────────────────────────────────────────────────
     # Record keys into macro register if actively recording (and not replaying).
-    state = maybe_record_macro_key(state, key, commands)
+    state = MacroReplay.maybe_record_key(state, key, commands)
 
     # Guard: block insert/replace transitions on read-only buffers.
     {new_mode, commands, new_mode_state, state} =
@@ -1184,7 +839,7 @@ defmodule Minga.Editor do
 
     # When transitioning INTO visual or command mode, adjust mode_state.
     new_mode_state =
-      adjust_mode_state_on_transition(new_mode_state, old_mode, new_mode, state)
+      ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
 
     base_state = %{state | mode: new_mode, mode_state: new_mode_state}
 
@@ -1220,196 +875,8 @@ defmodule Minga.Editor do
     after_commands
   end
 
-  # ── Change recording helpers ───────────────────────────────────────────────
-
-  # No-op during replay — don't overwrite the stored change.
-  @spec maybe_record_change(
-          state(),
-          Mode.mode(),
-          Mode.mode(),
-          [Mode.command()],
-          {non_neg_integer(), non_neg_integer()}
-        ) :: state()
-  defp maybe_record_change(%{change_recorder: %{replaying: true}} = state, _, _, _, _), do: state
-
-  defp maybe_record_change(%{change_recorder: rec} = state, old_mode, new_mode, commands, key) do
-    rec = update_recorder(rec, old_mode, new_mode, commands, key)
-    %{state | change_recorder: rec}
-  end
-
-  # ── Already recording: record key and check for change end ──
-
-  @spec update_recorder(
-          ChangeRecorder.t(),
-          Mode.mode(),
-          Mode.mode(),
-          [Mode.command()],
-          ChangeRecorder.key()
-        ) :: ChangeRecorder.t()
-  defp update_recorder(%{recording: true} = rec, old_mode, :normal, _commands, key)
-       when old_mode in [:insert, :replace, :operator_pending] do
-    rec |> ChangeRecorder.record_key(key) |> ChangeRecorder.stop_recording()
-  end
-
-  defp update_recorder(%{recording: true} = rec, _old_mode, _new_mode, _commands, key) do
-    ChangeRecorder.record_key(rec, key)
-  end
-
-  # ── From Normal: mode transition starts recording ──
-
-  defp update_recorder(rec, :normal, new_mode, _commands, key)
-       when new_mode in [:insert, :replace, :operator_pending] do
-    rec |> ChangeRecorder.start_recording() |> ChangeRecorder.record_key(key)
-  end
-
-  # ── From Normal: single-key edit stays in Normal ──
-
-  defp update_recorder(rec, :normal, :normal, commands, key) do
-    do_update_normal_to_normal(rec, commands, key)
-  end
-
-  # ── From OperatorPending: record and handle completion ──
-
-  defp update_recorder(rec, :operator_pending, :normal, _commands, key) do
-    rec
-    |> ChangeRecorder.start_recording_if_not()
-    |> ChangeRecorder.record_key(key)
-    |> ChangeRecorder.stop_recording()
-  end
-
-  defp update_recorder(rec, :operator_pending, :insert, _commands, key) do
-    rec
-    |> ChangeRecorder.start_recording_if_not()
-    |> ChangeRecorder.record_key(key)
-  end
-
-  defp update_recorder(rec, :operator_pending, :operator_pending, _commands, key) do
-    rec
-    |> ChangeRecorder.start_recording_if_not()
-    |> ChangeRecorder.record_key(key)
-  end
-
-  defp update_recorder(rec, :operator_pending, _new_mode, _commands, _key) do
-    ChangeRecorder.cancel_recording(rec)
-  end
-
-  # ── All other mode transitions: no recording changes ──
-
-  defp update_recorder(rec, _old_mode, _new_mode, _commands, _key), do: rec
-
-  # ── Mode state adjustments on transition ────────────────────────────────────
-
-  # Entering visual mode: capture cursor as selection anchor.
-  @spec adjust_mode_state_on_transition(Mode.state(), Mode.mode(), Mode.mode(), state()) ::
-          Mode.state()
-  defp adjust_mode_state_on_transition(mode_state, old_mode, :visual, %{buffers: %{active: buf}})
-       when old_mode != :visual and is_pid(buf) do
-    anchor = BufferServer.cursor(buf)
-    %{mode_state | visual_anchor: anchor}
-  end
-
-  # Entering command mode: ensure CommandState.
-  defp adjust_mode_state_on_transition(mode_state, old_mode, :command, _state)
-       when old_mode != :command do
-    case mode_state do
-      %CommandState{} -> mode_state
-      _ -> %CommandState{}
-    end
-  end
-
-  # Entering eval mode: ensure EvalState.
-  defp adjust_mode_state_on_transition(mode_state, old_mode, :eval, _state)
-       when old_mode != :eval do
-    case mode_state do
-      %EvalState{} -> mode_state
-      _ -> %EvalState{}
-    end
-  end
-
-  # Entering search mode: capture cursor for restore on Escape.
-  defp adjust_mode_state_on_transition(
-         %Minga.Mode.SearchState{} = mode_state,
-         old_mode,
-         :search,
-         %{buffers: %{active: buf}}
-       )
-       when old_mode != :search and is_pid(buf) do
-    cursor = BufferServer.cursor(buf)
-    %{mode_state | original_cursor: cursor}
-  end
-
-  # All other transitions: pass through.
-  defp adjust_mode_state_on_transition(mode_state, _old_mode, _new_mode, _state), do: mode_state
-
-  # Handle Normal → Normal: detect edits, pending keys, or motions.
-  @spec do_update_normal_to_normal(ChangeRecorder.t(), [Mode.command()], ChangeRecorder.key()) ::
-          ChangeRecorder.t()
-
-  # No commands (count accumulation, pending prefix) — buffer the key.
-  defp do_update_normal_to_normal(rec, [], key) do
-    ChangeRecorder.buffer_pending_key(rec, key)
-  end
-
-  # Commands present — check if any are editing commands.
-  defp do_update_normal_to_normal(rec, commands, key) do
-    case Enum.any?(commands, &editing_command?/1) do
-      true ->
-        rec
-        |> ChangeRecorder.start_recording()
-        |> ChangeRecorder.record_key(key)
-        |> ChangeRecorder.stop_recording()
-
-      false ->
-        ChangeRecorder.clear_pending(rec)
-    end
-  end
-
-  @spec editing_command?(Mode.command()) :: boolean()
-  defp editing_command?(:delete_at), do: true
-  defp editing_command?(:delete_before), do: true
-  defp editing_command?(:delete_line), do: true
-  defp editing_command?(:change_line), do: true
-  defp editing_command?(:join_lines), do: true
-  defp editing_command?(:toggle_case), do: true
-  defp editing_command?(:indent_line), do: true
-  defp editing_command?(:dedent_line), do: true
-  defp editing_command?(:paste_after), do: true
-  defp editing_command?(:paste_before), do: true
-  defp editing_command?({:replace_char, _}), do: true
-  defp editing_command?({:delete_motion, _}), do: true
-  defp editing_command?({:indent_lines, _}), do: true
-  defp editing_command?({:dedent_lines, _}), do: true
-  defp editing_command?(_), do: false
-
-  # ── Dot repeat replay ──────────────────────────────────────────────────────
-
-  @spec replay_last_change(state(), non_neg_integer() | nil) :: state()
-  defp replay_last_change(%{change_recorder: rec} = state, count) do
-    case ChangeRecorder.get_last_change(rec) do
-      nil ->
-        # No prior change — no-op.
-        state
-
-      keys ->
-        # If a count was given with `.` (e.g. `3.`), replace the original
-        # change's count prefix with the new one.
-        keys = ChangeRecorder.replace_count(keys, count)
-
-        # Enter replay mode — suppresses recording.
-        rec = ChangeRecorder.start_replay(rec)
-        state = %{state | change_recorder: rec}
-
-        # Feed each key through handle_key sequentially.
-        state =
-          Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
-            do_handle_key(acc, codepoint, modifiers)
-          end)
-
-        # Exit replay mode.
-        rec = ChangeRecorder.stop_replay(state.change_recorder)
-        %{state | change_recorder: rec}
-    end
-  end
+  # Change recording, mode transition, and dot repeat extracted to
+  # Minga.Editor.ChangeTracking and Minga.Editor.ModeTransitions.
 
   # ── Command execution ────────────────────────────────────────────────────────
 
@@ -1460,8 +927,8 @@ defmodule Minga.Editor do
     state =
       if content_changed do
         state
-        |> lsp_buffer_changed()
-        |> git_buffer_changed()
+        |> BufferLifecycle.lsp_buffer_changed()
+        |> BufferLifecycle.git_buffer_changed()
       else
         state
       end
@@ -1485,8 +952,8 @@ defmodule Minga.Editor do
 
     execute = fn s ->
       case Commands.execute(s, cmd) do
-        {s2, {:dot_repeat, count}} -> replay_last_change(s2, count)
-        {s2, {:replay_macro, register}} -> replay_macro(s2, register)
+        {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
+        {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
         {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
         s2 -> s2
       end
@@ -1494,7 +961,7 @@ defmodule Minga.Editor do
 
     result = ConfigAdvice.wrap(cmd_name, execute).(state)
 
-    lsp_after_command(result, cmd, old_buffer)
+    BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
   end
 
   # Extracts the command name atom from a command (which may be an atom or tuple).
@@ -1546,141 +1013,22 @@ defmodule Minga.Editor do
     log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 
-  # ── File watcher helpers ──────────────────────────────────────────────────
+  # File watcher helpers extracted to Minga.Editor.FileWatcherHelpers.
 
-  @spec handle_file_change(state(), String.t()) :: state()
-  defp handle_file_change(state, path) do
-    case find_buffer_for_path(state, path) do
-      nil ->
-        state
-
-      buf ->
-        buf_state = :sys.get_state(buf)
-        {disk_mtime, disk_size} = file_stat(path)
-
-        cond do
-          # Can't stat or no stored mtime — skip
-          disk_mtime == nil or buf_state.mtime == nil ->
-            state
-
-          # No change detected (same mtime AND same size)
-          disk_mtime == buf_state.mtime and disk_size == buf_state.file_size ->
-            state
-
-          # Unmodified buffer — silent reload
-          not buf_state.dirty ->
-            BufferServer.reload(buf)
-            name = Path.basename(path)
-            %{state | status_msg: "#{name} reloaded (changed on disk)"}
-
-          # Modified buffer — prompt user
-          true ->
-            name = Path.basename(path)
-
-            %{
-              state
-              | pending_conflict: {buf, path},
-                status_msg: "#{name} changed on disk. [r]eload / [k]eep"
-            }
-        end
-    end
-  end
-
-  @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
-  defp find_buffer_for_path(%{buffers: %{list: buffers}}, path) do
-    expanded = Path.expand(path)
-
-    Enum.find(buffers, fn buf ->
-      Process.alive?(buf) and BufferServer.file_path(buf) == expanded
-    end)
-  end
-
-  @spec maybe_watch_buffer(GenServer.server() | nil, pid() | nil) :: :ok
-  defp maybe_watch_buffer(nil, _buf), do: :ok
-  defp maybe_watch_buffer(_watcher, nil), do: :ok
-
-  defp maybe_watch_buffer(watcher, buf) do
-    case BufferServer.file_path(buf) do
-      nil -> :ok
-      path -> FileWatcher.watch_path(watcher, path)
-    end
-  end
-
-  @spec file_watcher_pid() :: pid() | nil
-  defp file_watcher_pid do
-    case Process.whereis(FileWatcher) do
-      nil -> nil
-      pid -> pid
-    end
-  end
-
-  @spec file_stat(String.t()) :: {integer() | nil, non_neg_integer() | nil}
-  defp file_stat(path) do
-    case File.stat(path, time: :posix) do
-      {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
-      {:error, _} -> {nil, nil}
-    end
-  end
-
-  # ── Macro recording helpers ───────────────────────────────────────────────
-
-  @spec maybe_record_macro_key(
-          state(),
-          {non_neg_integer(), non_neg_integer()},
-          [Mode.command()]
-        ) :: state()
-  defp maybe_record_macro_key(%{macro_recorder: %{replaying: true}} = state, _key, _cmds),
-    do: state
-
-  defp maybe_record_macro_key(%{macro_recorder: rec} = state, key, commands) do
-    case MacroRecorder.recording?(rec) do
-      {true, _reg} ->
-        # Don't record the `q` that stops recording
-        has_stop? = Enum.any?(commands, &match?(:toggle_macro_recording, &1))
-
-        if has_stop? do
-          state
-        else
-          %{state | macro_recorder: MacroRecorder.record_key(rec, key)}
-        end
-
-      false ->
-        state
-    end
-  end
-
-  @spec replay_macro(state(), String.t()) :: state()
-  defp replay_macro(%{macro_recorder: rec} = state, register) do
-    case MacroRecorder.get_macro(rec, register) do
-      nil ->
-        state
-
-      keys ->
-        rec = MacroRecorder.start_replay(rec)
-        state = %{state | macro_recorder: rec}
-
-        state =
-          Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
-            do_handle_key(acc, codepoint, modifiers)
-          end)
-
-        rec = MacroRecorder.stop_replay(state.macro_recorder)
-        %{state | macro_recorder: rec}
-    end
-  end
+  # Macro recording and replay extracted to Minga.Editor.MacroReplay.
 
   # ── File tree helpers ───────────────────────────────────────────────────
 
   @doc false
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
-    maybe_watch_buffer(file_watcher_pid(), pid)
+    FileWatcherHelpers.maybe_watch_buffer(pid)
     maybe_detect_project(path)
     maybe_record_file(path)
     new_state = Commands.add_buffer(state, pid)
     new_state = log_message(new_state, "Opened: #{path}")
-    new_state = lsp_buffer_opened(new_state, pid)
-    new_state = git_buffer_opened(new_state, pid)
+    new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
+    new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
     fire_hook(:after_open, [pid, path])
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
@@ -1776,115 +1124,7 @@ defmodule Minga.Editor do
     end)
   end
 
-  # ── LSP lifecycle helpers ────────────────────────────────────────────────
-
-  @spec lsp_buffer_opened(state(), pid()) :: state()
-  defp lsp_buffer_opened(state, buffer_pid) do
-    new_lsp = DocumentSync.on_buffer_open(state.lsp, buffer_pid)
-    %{state | lsp: new_lsp}
-  end
-
-  @spec lsp_buffer_changed(state()) :: state()
-  defp lsp_buffer_changed(%{buffers: %{active: nil}} = state), do: state
-
-  defp lsp_buffer_changed(%{buffers: %{active: buf}} = state) do
-    new_lsp = DocumentSync.on_buffer_change(state.lsp, buf)
-    %{state | lsp: new_lsp}
-  end
-
-  @spec lsp_after_command(state(), Mode.command(), pid() | nil) :: state()
-  defp lsp_after_command(state, cmd, old_buffer) do
-    state
-    |> lsp_after_save(cmd)
-    |> lsp_after_kill(cmd, old_buffer)
-  end
-
-  @spec lsp_after_save(state(), Mode.command()) :: state()
-  defp lsp_after_save(%{buffers: %{active: buf}} = state, cmd) when is_pid(buf) do
-    if cmd in [
-         :save,
-         :force_save,
-         {:execute_ex_command, {:save, []}},
-         {:execute_ex_command, {:save_quit, []}}
-       ] do
-      # Fire after_save hooks
-      path = BufferServer.file_path(buf)
-      if path, do: fire_hook(:after_save, [buf, path])
-
-      new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
-      %{state | lsp: new_lsp}
-    else
-      state
-    end
-  end
-
-  defp lsp_after_save(state, _cmd), do: state
-
-  @spec lsp_after_kill(state(), Mode.command(), pid() | nil) :: state()
-  defp lsp_after_kill(state, cmd, old_buffer)
-       when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
-    # The old buffer was closed — notify LSP if it changed
-    if state.buffers.active != old_buffer do
-      new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
-      %{state | lsp: new_lsp}
-    else
-      state
-    end
-  end
-
-  defp lsp_after_kill(state, _cmd, _old_buffer), do: state
-
-  # ── Git buffer lifecycle ───────────────────────────────────────────────
-
-  @spec git_buffer_opened(state(), pid()) :: state()
-  defp git_buffer_opened(state, buffer_pid) do
-    with path when is_binary(path) <- BufferServer.file_path(buffer_pid),
-         {:ok, git_root} <- Minga.Git.root_for(path) do
-      start_git_buffer(state, buffer_pid, git_root, path)
-    else
-      _ -> state
-    end
-  end
-
-  @spec start_git_buffer(state(), pid(), String.t(), String.t()) :: state()
-  defp start_git_buffer(state, buffer_pid, git_root, path) do
-    {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-
-    case DynamicSupervisor.start_child(
-           Minga.Buffer.Supervisor,
-           {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
-         ) do
-      {:ok, git_pid} ->
-        rel_path = Path.relative_to(path, git_root)
-
-        log_message(state, "Git: tracking #{rel_path}")
-        |> then(&%{&1 | git_buffers: Map.put(&1.git_buffers, buffer_pid, git_pid)})
-
-      {:error, reason} ->
-        Logger.warning("Failed to start git buffer: #{inspect(reason)}")
-        state
-    end
-  end
-
-  @spec git_buffer_changed(state()) :: state()
-  defp git_buffer_changed(%{buffers: %{active: nil}} = state), do: state
-
-  defp git_buffer_changed(%{buffers: %{active: buf}} = state) do
-    case Map.get(state.git_buffers, buf) do
-      nil -> state
-      git_pid -> git_buffer_update(state, buf, git_pid)
-    end
-  end
-
-  @spec git_buffer_update(state(), pid(), pid()) :: state()
-  defp git_buffer_update(state, buf, git_pid) do
-    if Process.alive?(git_pid) do
-      {content, _cursor} = BufferServer.content_and_cursor(buf)
-      GitBuffer.update(git_pid, content)
-    end
-
-    state
-  end
+  # LSP and Git buffer lifecycle extracted to Minga.Editor.BufferLifecycle.
 
   # ── Config options ──────────────────────────────────────────────────────
 
@@ -1986,7 +1226,7 @@ defmodule Minga.Editor do
       BufferServer.insert_text(buf, text)
     end
 
-    state |> lsp_buffer_changed() |> git_buffer_changed()
+    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
   end
 
   defp accept_completion_text(state, _completion, _text), do: state
@@ -2002,7 +1242,7 @@ defmodule Minga.Editor do
       edit.new_text
     )
 
-    state |> lsp_buffer_changed() |> git_buffer_changed()
+    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
   end
 
   defp apply_completion_text_edit(state, _edit), do: state
