@@ -7,7 +7,6 @@ defmodule Minga.Editor.Commands.Agent do
   `state → state` transformations.
   """
 
-  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
@@ -18,9 +17,9 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
+  alias Minga.Editor.Commands.AgentSession
   alias Minga.Editor.Commands.AgentSubStates
   alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.Layout
@@ -50,7 +49,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     state =
       if state.agent.panel.visible and state.agent.session == nil do
-        start_agent_session(state)
+        AgentSession.start_agent_session(state)
       else
         state
       end
@@ -253,7 +252,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
     if state.agent.session == nil do
-      start_agent_session(state)
+      AgentSession.start_agent_session(state)
     else
       state
     end
@@ -359,7 +358,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
   def ensure_agent_session(%{agent: %{session: nil}} = state) do
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   def ensure_agent_session(state), do: state
@@ -403,12 +402,12 @@ defmodule Minga.Editor.Commands.Agent do
     tb = TabBar.update_context(tb, agent_tab.id, agent_context)
     state = %{state | tab_bar: tb}
     state = EditorState.restore_tab_context(state, agent_context)
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   # Fallback for bare maps or states without a tab bar (tests, slash commands).
   def new_agent_session(state) do
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   @doc "Switches to an existing session by pid."
@@ -528,14 +527,14 @@ defmodule Minga.Editor.Commands.Agent do
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do
     state = update_agent(state, &AgentState.set_provider_name(&1, provider))
-    restart_session(state, "Provider: #{provider}")
+    AgentSession.restart_session(state, "Provider: #{provider}")
   end
 
   @doc "Sets the agent model and restarts the session."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
     state = update_agent(state, &AgentState.set_model_name(&1, model))
-    restart_session(state, "Model: #{model}")
+    AgentSession.restart_session(state, "Model: #{model}")
   end
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
@@ -714,7 +713,10 @@ defmodule Minga.Editor.Commands.Agent do
         text = Message.text(msg)
         blocks = Markdown.extract_code_blocks(text)
         block = code_block_at_scroll(state, blocks)
-        if block, do: open_code_block(state, block.language, block.content), else: state
+
+        if block,
+          do: AgentSession.open_code_block(state, block.language, block.content),
+          else: state
 
       {_idx, _msg, _other_type} ->
         state
@@ -935,170 +937,11 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_trigger_mention(state()) :: state()
   defdelegate scope_trigger_mention(state), to: AgentSubStates, as: :trigger_mention
 
+  # ── Delegated to AgentSession ──────────────────────────────────────────────
+
+  defdelegate open_code_block(state, language, content), to: AgentSession
+
   # ── Private helpers ─────────────────────────────────────────────────────────
-
-  @spec restart_session(state(), String.t()) :: state()
-  defp restart_session(state, message) do
-    if state.agent.session do
-      try do
-        GenServer.stop(state.agent.session, :normal, 1000)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
-    state = update_agent(state, &AgentState.clear_session/1)
-    state = %{state | status_msg: message}
-    if AgentState.visible?(state.agent), do: start_agent_session(state), else: state
-  end
-
-  @spec start_agent_session(state()) :: state()
-  defp start_agent_session(state) do
-    opts = [
-      thinking_level: state.agent.panel.thinking_level,
-      provider_opts: [
-        provider: state.agent.panel.provider_name,
-        model: state.agent.panel.model_name
-      ]
-    ]
-
-    case start_and_subscribe(opts) do
-      {:ok, pid} ->
-        state =
-          if state.agent.buffer == nil do
-            buf = AgentBufferSync.start_buffer()
-            update_agent(state, &AgentState.set_buffer(&1, buf))
-          else
-            state
-          end
-
-        state = update_agent(state, &AgentState.set_session(&1, pid))
-
-        # Record the session pid on the Tab struct for event routing.
-        case state do
-          %{tab_bar: %TabBar{active_id: id}} ->
-            EditorState.set_tab_session(state, id, pid)
-
-          _ ->
-            state
-        end
-
-      {:error, reason} ->
-        require Logger
-        msg = format_session_error(reason)
-        Logger.error("[Agent] #{msg}")
-        Minga.Editor.log_to_messages("[Agent] #{msg}")
-        update_agent(state, &AgentState.set_error(&1, msg))
-    end
-  end
-
-  @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
-  defp start_and_subscribe(opts) do
-    case Minga.Agent.Supervisor.start_session(opts) do
-      {:ok, pid} ->
-        try do
-          Session.subscribe(pid)
-          {:ok, pid}
-        catch
-          :exit, reason ->
-            # Session died before we could subscribe (e.g. provider binary missing).
-            # Clean up the child so the supervisor doesn't hold a dead reference.
-            Minga.Agent.Supervisor.stop_session(pid)
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @doc """
-  Opens a code block from an agent chat message as a scratch buffer.
-
-  Creates a new buffer with the code block content, sets its filetype
-  based on the language tag, and displays it in the preview pane. The
-  buffer is named `*Agent: {language}*` and is not associated with a
-  file on disk.
-  """
-  @spec open_code_block(state(), String.t(), String.t()) :: state()
-  def open_code_block(state, language, content) do
-    name = buffer_name_for_language(language)
-    filetype = filetype_from_language(language)
-
-    {:ok, buf} =
-      BufferServer.start_link(
-        content: content,
-        buffer_name: name,
-        filetype: filetype
-      )
-
-    # Set as active buffer so it shows in the file viewer panel
-    state = put_in(state.buffers.active, buf)
-
-    # Show a system message about the opened block
-    if state.agent.session do
-      Session.add_system_message(
-        state.agent.session,
-        "Opened #{if(language == "", do: "text", else: language)} code block in buffer"
-      )
-    end
-
-    state
-  end
-
-  @spec buffer_name_for_language(String.t()) :: String.t()
-  defp buffer_name_for_language(""), do: "*Agent: text*"
-  defp buffer_name_for_language(lang), do: "*Agent: #{lang}*"
-
-  @spec filetype_from_language(String.t()) :: atom() | nil
-  defp filetype_from_language(""), do: nil
-
-  defp filetype_from_language(lang) do
-    # Map common language tags to Minga filetypes
-    mapping = %{
-      "elixir" => :elixir,
-      "ex" => :elixir,
-      "exs" => :elixir,
-      "javascript" => :javascript,
-      "js" => :javascript,
-      "typescript" => :typescript,
-      "ts" => :typescript,
-      "python" => :python,
-      "py" => :python,
-      "ruby" => :ruby,
-      "rb" => :ruby,
-      "rust" => :rust,
-      "rs" => :rust,
-      "go" => :go,
-      "golang" => :go,
-      "zig" => :zig,
-      "c" => :c,
-      "cpp" => :cpp,
-      "c++" => :cpp,
-      "java" => :java,
-      "json" => :json,
-      "yaml" => :yaml,
-      "yml" => :yaml,
-      "toml" => :toml,
-      "html" => :html,
-      "css" => :css,
-      "lua" => :lua,
-      "bash" => :bash,
-      "sh" => :bash,
-      "shell" => :bash,
-      "zsh" => :bash,
-      "sql" => :sql,
-      "markdown" => :markdown,
-      "md" => :markdown,
-      "xml" => :xml,
-      "dockerfile" => :dockerfile,
-      "docker" => :dockerfile,
-      "makefile" => :makefile,
-      "make" => :makefile
-    }
-
-    Map.get(mapping, String.downcase(lang))
-  end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do
@@ -1114,11 +957,6 @@ defmodule Minga.Editor.Commands.Agent do
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
   end
-
-  @spec format_session_error(term()) :: String.t()
-  defp format_session_error({:pi_not_found, msg}) when is_binary(msg), do: msg
-  defp format_session_error({:noproc, _}), do: "Agent supervisor not running"
-  defp format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   @spec panel_height(state()) :: non_neg_integer()
   defp panel_height(state) do
