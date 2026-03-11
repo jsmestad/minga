@@ -14,7 +14,6 @@ defmodule Minga.Editor do
   use GenServer
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.DiffReview
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
@@ -24,6 +23,7 @@ defmodule Minga.Editor do
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionTrigger
@@ -59,7 +59,6 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
@@ -519,7 +518,7 @@ defmodule Minga.Editor do
         {:noreply, state}
 
       {:background, tab} ->
-        state = handle_background_agent_event(state, tab, event)
+        state = BackgroundEvents.handle(state, tab, event)
         {:noreply, state}
 
       :not_found ->
@@ -777,197 +776,11 @@ defmodule Minga.Editor do
   # These extract the active-tab logic from handle_info clauses that
   # need non-trivial processing (multi-branch, sequential updates).
 
-  # Handles agent events for background tabs by updating the stored tab
-  # context. The surface isn't live for background tabs, so we update
-  # the agent/agentic fields in the tab's context map directly.
-  @spec handle_background_agent_event(state(), Tab.t(), term()) :: state()
-  defp handle_background_agent_event(state, tab, {:status_changed, status}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.set_status(&1, status))
+  # Background agent event handling extracted to BackgroundEvents module.
+  # Active-tab agent event handling lives in AgentView.handle_event/2.
 
-    schedule_render(state, 16)
-  end
-
-  defp handle_background_agent_event(state, tab, {:text_delta, _delta}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:thinking_delta, _delta}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, :messages_changed) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-
-    maybe_update_background_tab_label(
-      state,
-      tab,
-      Map.get(tab.context, :agent, %AgentState{}).session
-    )
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "shell", args}) do
-    command = Map.get(args, "command", "")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_shell(&1, command))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_update, _id, "shell", partial}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.update_shell_output(&1, partial))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_update, _id, _name, _partial}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "shell", result, status}) do
-    shell_status = if status == :error, do: :error, else: :done
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.finish_shell(&1, result, shell_status))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "read_file", args}) do
-    path = Map.get(args, "path", "")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_file(&1, path, ""))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "read_file", result, _status}) do
-    update_bg_file_preview(state, tab.id, result)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_started, "list_directory", args}) do
-    path = Map.get(args, "path", ".")
-
-    EditorState.update_background_agentic(state, tab.id, fn vs ->
-      ViewState.update_preview(vs, &Preview.set_directory(&1, path, []))
-    end)
-  end
-
-  defp handle_background_agent_event(state, tab, {:tool_ended, "list_directory", result, _status}) do
-    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
-    update_bg_directory_preview(state, tab.id, entries)
-  end
-
-  defp handle_background_agent_event(state, _tab, {:tool_started, _name, _args}), do: state
-
-  defp handle_background_agent_event(state, _tab, {:tool_ended, _name, _result, _status}),
-    do: state
-
-  defp handle_background_agent_event(
-         state,
-         tab,
-         {:file_changed, path, before_content, after_content}
-       ) do
-    update_bg_file_changed(state, tab.id, path, before_content, after_content)
-  end
-
-  defp handle_background_agent_event(state, tab, {:approval_pending, approval}) do
-    cached = Map.take(approval, [:tool_call_id, :name, :args])
-
-    EditorState.update_background_agent(
-      state,
-      tab.id,
-      &AgentState.set_pending_approval(&1, cached)
-    )
-  end
-
-  defp handle_background_agent_event(state, tab, {:approval_resolved, _decision}) do
-    EditorState.update_background_agent(state, tab.id, &AgentState.clear_pending_approval/1)
-  end
-
-  defp handle_background_agent_event(state, tab, {:error, message}) do
-    state =
-      EditorState.update_background_agent(state, tab.id, &AgentState.set_error(&1, message))
-
-    log_message(state, "Agent error (tab #{tab.id}): #{message}")
-  end
-
-  defp handle_background_agent_event(state, _tab, _event), do: state
-
-  # Active-tab agent event helpers removed in Phase 3.
-  # handle_status_changed_active and handle_file_changed_active
-  # logic now lives in AgentView.handle_event/2.
-
-  # ── Background tab preview helpers ─────────────────────────────────────────
-  #
-  # These update a background tab's ViewState preview without nesting
-  # a case inside the update_background_agentic anonymous function.
-
-  @spec update_bg_file_preview(state(), Tab.id(), String.t()) :: state()
-  defp update_bg_file_preview(state, tab_id, result) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      case vs.preview.content do
-        {:file, path, _} -> ViewState.update_preview(vs, &Preview.set_file(&1, path, result))
-        _ -> vs
-      end
-    end)
-  end
-
-  @spec update_bg_directory_preview(state(), Tab.id(), [String.t()]) :: state()
-  defp update_bg_directory_preview(state, tab_id, entries) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      case vs.preview.content do
-        {:directory, path, _} ->
-          ViewState.update_preview(vs, &Preview.set_directory(&1, path, entries))
-
-        _ ->
-          vs
-      end
-    end)
-  end
-
-  @spec update_bg_file_changed(state(), Tab.id(), String.t(), String.t(), String.t()) :: state()
-  defp update_bg_file_changed(state, tab_id, path, before_content, after_content) do
-    EditorState.update_background_agentic(state, tab_id, fn vs ->
-      vs = ViewState.record_baseline(vs, path, before_content)
-      baseline = ViewState.get_baseline(vs, path)
-
-      case DiffReview.new(path, baseline, after_content) do
-        nil ->
-          vs
-
-        review ->
-          vs = ViewState.update_preview(vs, &Preview.set_diff(&1, review))
-          ViewState.set_focus(vs, :file_viewer)
-      end
-    end)
-  end
-
-  @spec maybe_update_background_tab_label(state(), Tab.t(), pid()) :: state()
-  defp maybe_update_background_tab_label(state, tab, session_pid) do
-    if default_agent_label?(tab.label) do
-      messages =
-        try do
-          AgentSession.messages(session_pid)
-        catch
-          :exit, _ -> []
-        end
-
-      case first_user_message(messages) do
-        nil ->
-          state
-
-        text ->
-          label = truncate_label(text, 30)
-          %{state | tab_bar: TabBar.update_label(state.tab_bar, tab.id, label)}
-      end
-    else
-      state
-    end
-  end
+  # Background tab preview helpers and tab label helpers extracted to
+  # Minga.Editor.BackgroundEvents module.
 
   # If the agentic view was activated during init, start the agent session
   # now that the port is ready. Also loads auto-context if configured.
