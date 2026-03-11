@@ -28,48 +28,34 @@ defmodule Minga.Editor.RenderPipeline do
   default level (`:info`), these calls are suppressed.
   """
 
-  alias Minga.Agent.ChatRenderer
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.Session
   alias Minga.Agent.View.Renderer, as: ViewRenderer
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
-  alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.Layout
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
-  alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Caps
-  alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.Renderer.SearchHighlight
+  alias Minga.Editor.RenderPipeline.ChromeHelpers
+  alias Minga.Editor.RenderPipeline.ComposeHelpers
+  alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Editor.WindowTree
-  alias Minga.Editor.WrapMap
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.Scroll
-  alias Minga.Theme
-  alias Minga.WhichKey
 
   # Agent input area = 3 rows (border + text + padding); cursor goes on the text row.
-  @agent_input_height 3
 
   # ── Stage result types ─────────────────────────────────────────────────────
 
@@ -223,27 +209,27 @@ defmodule Minga.Editor.RenderPipeline do
 
     debug_layout(state, layout)
 
-    if state.agentic.active do
-      run_agentic_pipeline(state, layout)
-    else
-      # Delegate to the active surface for the windows render path.
-      # The surface calls run_windows_pipeline/2 internally via the bridge.
-      # When no surface is set (shouldn't happen for file tabs, but
-      # defensive), fall back to the direct call.
-      run_windows_pipeline(state, layout)
-    end
+    dispatch_to_surface(state, layout)
+  end
+
+  # Dispatches rendering to the appropriate pipeline based on the active
+  # surface module. AgentView uses the agentic pipeline; BufferView (and
+  # any unknown/nil surface) uses the windows pipeline.
+  @spec dispatch_to_surface(state(), Layout.t()) :: state()
+  defp dispatch_to_surface(%{surface_module: Minga.Surface.AgentView} = state, layout) do
+    run_agentic_pipeline(state, layout)
+  end
+
+  defp dispatch_to_surface(state, layout) do
+    run_windows_pipeline(state, layout)
   end
 
   @doc """
   Runs the windows render pipeline stages: scroll, content, chrome,
   compose, and emit.
 
-  This is the core rendering logic for the buffer view. Called by
-  `BufferView.render/2` through the bridge, and directly by the
-  pipeline when no surface is set.
-
-  Public so that `BufferView` can call it during Phase 1 while the
-  rendering code still operates on `EditorState`.
+  Core rendering logic for the buffer view. Called directly by the
+  pipeline dispatcher and by `BufferView.render/2` through the bridge.
   """
   @spec run_windows_pipeline(state(), Layout.t()) :: state()
   def run_windows_pipeline(state, layout) do
@@ -546,7 +532,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Build per-frame render context
     render_ctx =
-      build_render_ctx(state, window, %{
+      ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: cursor,
         lines: lines,
@@ -561,7 +547,7 @@ defmodule Minga.Editor.RenderPipeline do
     # Compute context fingerprint and check for context changes.
     # If any context input (visual selection, search, highlights, signs,
     # horizontal scroll, active status) changed, all lines are dirty.
-    ctx_fp = context_fingerprint(render_ctx, is_active)
+    ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
     # Render lines with dirty-aware loop
@@ -580,11 +566,10 @@ defmodule Minga.Editor.RenderPipeline do
 
     {gutter_draws, line_draws, rows_used, window} =
       if wrap_on do
-        # Wrapped mode: always full render (wrap maps change unpredictably)
-        {g, l, r} = render_lines_wrapped(lines, visible_rows, line_opts)
+        {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, line_opts)
         {g, l, r, window}
       else
-        render_lines_nowrap(lines, line_opts)
+        ContentHelpers.render_lines_nowrap(lines, line_opts)
       end
 
     # Tilde lines for empty space below content
@@ -646,28 +631,6 @@ defmodule Minga.Editor.RenderPipeline do
   # Builds a fingerprint from the render context that captures all inputs
   # affecting every visible line. Used to detect context changes between
   # frames (visual selection, search, highlights, signs, scroll, etc.).
-  @spec context_fingerprint(Context.t(), boolean()) :: Window.context_fingerprint()
-  defp context_fingerprint(%Context{} = ctx, is_active) do
-    # Highlight identity: use the version counter which increments each
-    # time tree-sitter sends new spans. Comparing the full spans tuple
-    # would be expensive; the version is a cheap proxy.
-    hl_id =
-      case ctx.highlight do
-        nil -> nil
-        hl -> hl.version
-      end
-
-    {
-      ctx.visual_selection,
-      ctx.search_matches,
-      hl_id,
-      ctx.diagnostic_signs,
-      ctx.git_signs,
-      ctx.viewport.left,
-      is_active,
-      ctx.confirm_match
-    }
-  end
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
 
@@ -687,14 +650,14 @@ defmodule Minga.Editor.RenderPipeline do
     # Modeline per window
     {modeline_draws, modeline_click_regions} =
       Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
-        {draws, regions} = render_window_modeline(state, scroll)
+        {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
         {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
       end)
 
     # Separators (vertical split borders)
     separator_draws =
       if EditorState.split?(state) do
-        render_separators(
+        ChromeHelpers.render_separators(
           state.windows.tree,
           layout.editor_area,
           elem(layout.editor_area, 3),
@@ -708,7 +671,7 @@ defmodule Minga.Editor.RenderPipeline do
     tree_draws = TreeRenderer.render(state)
 
     # Agent panel sidebar
-    agent_draws = render_agent_panel_from_layout(state, layout)
+    agent_draws = ChromeHelpers.render_agent_panel_from_layout(state, layout)
 
     # Minibuffer
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
@@ -717,7 +680,9 @@ defmodule Minga.Editor.RenderPipeline do
     # Overlays
     render_overlays_flag = Caps.render_overlays?(state.capabilities)
     {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
-    whichkey_draws = if render_overlays_flag, do: render_whichkey(state, full_viewport), else: []
+
+    whichkey_draws =
+      if render_overlays_flag, do: ChromeHelpers.render_whichkey(state, full_viewport), else: []
 
     completion_draws =
       case cursor_info do
@@ -746,7 +711,7 @@ defmodule Minga.Editor.RenderPipeline do
       |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
     # Tab bar
-    {tab_bar_draws, tab_bar_regions} = render_tab_bar(state, layout)
+    {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
 
     # Region definitions
     regions = Regions.define_regions(layout)
@@ -779,7 +744,10 @@ defmodule Minga.Editor.RenderPipeline do
     minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     render_overlays_flag = Caps.render_overlays?(state.capabilities)
-    whichkey_draws = if render_overlays_flag, do: render_whichkey(state, full_viewport), else: []
+
+    whichkey_draws =
+      if render_overlays_flag, do: ChromeHelpers.render_whichkey(state, full_viewport), else: []
+
     {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
 
     overlays =
@@ -790,7 +758,7 @@ defmodule Minga.Editor.RenderPipeline do
       |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
     # Tab bar
-    {tab_bar_draws, tab_bar_regions} = render_tab_bar(state, layout)
+    {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
 
     regions = Regions.define_regions(layout)
 
@@ -823,7 +791,7 @@ defmodule Minga.Editor.RenderPipeline do
     # Inject modeline draws into WindowFrames + apply dimming
     window_frames =
       Enum.map(window_frames, fn wf ->
-        inject_modeline(wf, chrome.modeline_draws)
+        ComposeHelpers.inject_modeline(wf, chrome.modeline_draws)
       end)
 
     # Cursor shape
@@ -836,17 +804,17 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Cursor position (picker overrides mode overrides buffer position)
     {minibuffer_row, _, _, _} = layout.minibuffer
-    picker_cursor = find_picker_cursor(chrome.overlays)
+    picker_cursor = ComposeHelpers.find_picker_cursor(chrome.overlays)
 
     cursor =
       case picker_cursor do
         {row, col} -> {row, col}
-        nil -> resolve_cursor(state, cursor_info, minibuffer_row)
+        nil -> ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
       end
 
     # Agent panel input can steal the cursor
     {cursor, cursor_shape} =
-      agent_cursor_override_from_layout(state, cursor, cursor_shape, layout)
+      ComposeHelpers.agent_cursor_override_from_layout(state, cursor, cursor_shape, layout)
 
     %Frame{
       cursor: cursor,
@@ -869,13 +837,13 @@ defmodule Minga.Editor.RenderPipeline do
   def compose_agentic(panel_draws, chrome, state) do
     # Cursor placement
     {cursor_row, cursor_col} = ViewRenderer.cursor_position(state)
-    picker_cursor = find_picker_cursor(chrome.overlays)
+    picker_cursor = ComposeHelpers.find_picker_cursor(chrome.overlays)
 
     cursor_shape =
       if state.picker_ui.picker do
         :beam
       else
-        input_cursor_shape(state.agent.panel)
+        ChromeHelpers.input_cursor_shape(state.agent.panel)
       end
 
     cursor =
@@ -992,13 +960,6 @@ defmodule Minga.Editor.RenderPipeline do
     :exit, _ -> false
   end
 
-  @spec wrap_option(pid(), atom()) :: boolean()
-  defp wrap_option(buf, name) do
-    BufferServer.get_option(buf, name)
-  catch
-    :exit, _ -> true
-  end
-
   @spec gutter_dimensions(state(), pid(), atom(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
   defp gutter_dimensions(state, buf, line_number_style, line_count) do
@@ -1022,589 +983,5 @@ defmodule Minga.Editor.RenderPipeline do
     else
       ""
     end
-  end
-
-  # ── Private helpers: content ───────────────────────────────────────────────
-
-  @spec build_render_ctx(state(), Window.t(), map()) :: Context.t()
-  defp build_render_ctx(state, window, params) do
-    %{
-      viewport: viewport,
-      cursor: cursor,
-      lines: lines,
-      first_line: first_line,
-      preview_matches: preview_matches,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      has_sign_column: has_sign_column,
-      is_active: is_active
-    } = params
-
-    visual_selection =
-      if is_active do
-        visual_selection_grapheme_bounds(state, cursor, lines, first_line)
-      else
-        nil
-      end
-
-    search_matches =
-      case preview_matches do
-        [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
-        _ -> preview_matches
-      end
-
-    %Context{
-      viewport: viewport,
-      visual_selection: visual_selection,
-      search_matches: search_matches,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      confirm_match: if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil),
-      highlight: window_highlight(state, window),
-      has_sign_column: has_sign_column,
-      diagnostic_signs: diagnostic_signs_for_window(state, window),
-      git_signs: git_signs_for_window(state, window),
-      search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git
-    }
-  end
-
-  @typep line_render_opts :: %{
-           first_line: non_neg_integer(),
-           cursor_line: non_neg_integer(),
-           ctx: Context.t(),
-           ln_style: atom(),
-           gutter_w: non_neg_integer(),
-           first_byte_off: non_neg_integer(),
-           row_off: non_neg_integer(),
-           col_off: non_neg_integer(),
-           window: Window.t(),
-           buffer: pid()
-         }
-
-  @spec render_lines_nowrap([String.t()], line_render_opts()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
-  defp render_lines_nowrap(lines, opts) do
-    %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: ctx,
-      ln_style: ln_style,
-      gutter_w: gutter_w,
-      first_byte_off: first_byte_off,
-      row_off: row_off,
-      col_off: col_off,
-      window: window
-    } = opts
-
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-    max_rows = length(lines)
-
-    {gutters, contents_rev, _byte_off, window} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce(
-        {[], [], first_byte_off, window},
-        fn {line_text, screen_row}, {g, c, byte_off, win} ->
-          buf_line = first_line + screen_row
-          next_byte_off = byte_off + byte_size(line_text) + 1
-
-          if Window.dirty?(win, buf_line) do
-            # Dirty line: render fresh, cache the result
-            {g_cmds, c_cmds, _rows} =
-              BufferLine.render(%{
-                line_text: line_text,
-                buf_line: buf_line,
-                cursor_line: cursor_line,
-                byte_offset: byte_off,
-                screen_row: screen_row,
-                ctx: ctx,
-                ln_style: ln_style,
-                gutter_w: gutter_w,
-                sign_w: sign_w,
-                wrap_entry: nil,
-                max_rows: max_rows,
-                row_offset: row_off,
-                col_offset: col_off
-              })
-
-            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
-            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
-          else
-            # Clean line: reuse cached draws, skip rendering
-            g_cmds = Map.get(win.cached_gutter, buf_line, [])
-            c_cmds = Map.get(win.cached_content, buf_line, [])
-            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
-          end
-        end
-      )
-
-    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines), window}
-  end
-
-  @spec render_lines_wrapped([String.t()], pos_integer(), line_render_opts()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer()}
-  defp render_lines_wrapped(lines, max_rows, opts) do
-    %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: ctx,
-      ln_style: ln_style,
-      gutter_w: gutter_w,
-      first_byte_off: first_byte_off,
-      row_off: row_off,
-      col_off: col_off
-    } = opts
-
-    breakindent = wrap_option(opts.buffer, :breakindent)
-    linebreak = wrap_option(opts.buffer, :linebreak)
-
-    wrap_map =
-      WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
-
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    {gutters, contents, screen_row, _byte_off} =
-      lines
-      |> Enum.with_index()
-      |> Enum.zip(wrap_map)
-      |> Enum.reduce_while(
-        {[], [], 0, first_byte_off},
-        fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
-          {g2, c2, rows_used} =
-            BufferLine.render(%{
-              line_text: line_text,
-              buf_line: first_line + line_idx,
-              cursor_line: cursor_line,
-              byte_offset: byte_off,
-              screen_row: sr,
-              ctx: ctx,
-              ln_style: ln_style,
-              gutter_w: gutter_w,
-              sign_w: sign_w,
-              wrap_entry: visual_rows,
-              max_rows: max_rows,
-              row_offset: row_off,
-              col_offset: col_off
-            })
-
-          sr2 = sr + rows_used
-          next_byte_off = byte_off + byte_size(line_text) + 1
-
-          if sr2 >= max_rows do
-            {:halt, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
-          else
-            {:cont, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
-          end
-        end
-      )
-
-    {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
-  end
-
-  @spec prepend_all([DisplayList.draw()], [DisplayList.draw()]) :: [DisplayList.draw()]
-  defp prepend_all(acc, []), do: acc
-  defp prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
-
-  @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
-  defp window_highlight(state, window) do
-    hl =
-      if window.buffer == state.buffers.active do
-        state.highlight.current
-      else
-        Map.get(state.highlight.cache, window.buffer, Minga.Highlight.from_theme(state.theme))
-      end
-
-    if hl.capture_names != [], do: hl, else: nil
-  end
-
-  @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  defp git_signs_for_window(%{git_buffers: git_buffers}, %{buffer: buf}) when is_pid(buf) do
-    case Map.get(git_buffers, buf) do
-      nil -> %{}
-      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
-    end
-  end
-
-  @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
-      nil -> %{}
-      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
-    end
-  end
-
-  # ── Private helpers: visual selection ──────────────────────────────────────
-
-  @typedoc """
-  Represents the bounds of a visual selection for rendering.
-
-  * `nil` — no active selection
-  * `{:char, start_pos, end_pos}` — characterwise selection
-  * `{:line, start_line, end_line}` — linewise selection
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
-
-  @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
-  defp visual_selection_bounds(%{mode: :visual, mode_state: %VisualState{} = ms}, cursor) do
-    anchor = ms.visual_anchor
-    visual_type = ms.visual_type
-
-    case visual_type do
-      :char ->
-        {start_pos, end_pos} = sort_positions(anchor, cursor)
-        {:char, start_pos, end_pos}
-
-      :line ->
-        {anchor_line, _} = anchor
-        {cursor_line, _} = cursor
-        {:line, min(anchor_line, cursor_line), max(anchor_line, cursor_line)}
-    end
-  end
-
-  defp visual_selection_bounds(_state, _cursor), do: nil
-
-  @spec visual_selection_grapheme_bounds(
-          state(),
-          Document.position(),
-          [String.t()],
-          non_neg_integer()
-        ) :: visual_selection()
-  defp visual_selection_grapheme_bounds(state, cursor, lines, first_line) do
-    case visual_selection_bounds(state, cursor) do
-      nil ->
-        nil
-
-      {:line, _, _} = sel ->
-        sel
-
-      {:char, {sl, sc}, {el, ec}} ->
-        {
-          :char,
-          {sl, byte_col_to_display(lines, sl, sc, first_line)},
-          {el, byte_col_to_display_end(lines, el, ec, first_line)}
-        }
-    end
-  end
-
-  @spec byte_col_to_display(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp byte_col_to_display(lines, line, byte_col, first_line) do
-    line_text = cursor_line_text(lines, line, first_line)
-    Unicode.display_col(line_text, byte_col)
-  end
-
-  @spec byte_col_to_display_end(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp byte_col_to_display_end(lines, line, byte_col, first_line) do
-    line_text = cursor_line_text(lines, line, first_line)
-    next_byte = Unicode.next_grapheme_byte_offset(line_text, byte_col)
-    Unicode.display_col(line_text, next_byte)
-  end
-
-  @spec sort_positions(Document.position(), Document.position()) ::
-          {Document.position(), Document.position()}
-  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
-    if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
-  end
-
-  # ── Private helpers: chrome ────────────────────────────────────────────────
-
-  @spec render_window_modeline(state(), WindowScroll.t()) ::
-          {[DisplayList.draw()], [Minga.Editor.Modeline.click_region()]}
-  @spec render_tab_bar(state(), Layout.t()) ::
-          {[DisplayList.draw()], [TabBarRenderer.click_region()]}
-  defp render_tab_bar(%{tab_bar: nil}, _layout), do: {[], []}
-
-  defp render_tab_bar(state, layout) do
-    {tab_row, _col, tab_width, _h} = layout.tab_bar
-    TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme)
-  end
-
-  defp render_window_modeline(state, %WindowScroll{win_layout: %{modeline: {_, _, _, 0}}}) do
-    _ = state
-    {[], []}
-  end
-
-  defp render_window_modeline(state, scroll) do
-    %WindowScroll{
-      win_layout: win_layout,
-      is_active: is_active,
-      snapshot: snapshot,
-      cursor_line: cursor_line,
-      cursor_col: cursor_col
-    } = scroll
-
-    {modeline_row, _mc, modeline_width, _mh} = win_layout.modeline
-    {_row_off, col_off, _cw, _ch} = win_layout.content
-    file_name = snapshot_display_name(snapshot)
-    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
-    filetype = Map.get(snapshot, :filetype, :text)
-    line_count = snapshot.line_count
-    buf_count = length(state.buffers.list)
-    buf_index = state.buffers.active_index + 1
-
-    Modeline.render(
-      modeline_row,
-      modeline_width,
-      %{
-        mode: if(is_active, do: state.mode, else: :normal),
-        mode_state: if(is_active, do: state.mode_state, else: nil),
-        file_name: file_name,
-        filetype: filetype,
-        dirty_marker: dirty_marker,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        line_count: line_count,
-        buf_index: buf_index,
-        buf_count: buf_count,
-        macro_recording:
-          if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
-        agent_status: if(is_active, do: state.agent.status, else: nil),
-        agent_theme_colors:
-          if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
-      },
-      state.theme,
-      col_off
-    )
-  end
-
-  @spec render_separators(WindowTree.t(), WindowTree.rect(), pos_integer(), Theme.t()) ::
-          [DisplayList.draw()]
-  defp render_separators(tree, screen_rect, _total_rows, theme) do
-    separators = collect_separators(tree, screen_rect)
-
-    for {col, start_row, end_row} <- separators, row <- start_row..end_row do
-      DisplayList.draw(row, col, "│", fg: theme.editor.split_border_fg)
-    end
-  end
-
-  @typep separator_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
-
-  @spec collect_separators(WindowTree.t(), WindowTree.rect()) :: [separator_span()]
-  defp collect_separators({:leaf, _}, _rect), do: []
-
-  defp collect_separators(
-         {:split, :vertical, left, right, size},
-         {row, col, width, height}
-       ) do
-    usable = width - 1
-    left_width = WindowTree.clamp_size(size, usable)
-    right_width = max(usable - left_width, 1)
-    separator_col = col + left_width
-
-    [{separator_col, row, row + height - 1}] ++
-      collect_separators(left, {row, col, left_width, height}) ++
-      collect_separators(right, {row, separator_col + 1, right_width, height})
-  end
-
-  defp collect_separators(
-         {:split, :horizontal, top, bottom, size},
-         {row, col, width, height}
-       ) do
-    top_height = WindowTree.clamp_size(size, height)
-    bottom_height = max(height - top_height, 1)
-
-    collect_separators(top, {row, col, width, top_height}) ++
-      collect_separators(bottom, {row + top_height, col, width, bottom_height})
-  end
-
-  @spec render_whichkey(state(), Viewport.t()) :: [DisplayList.draw()]
-  defp render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport)
-       when is_map(node) do
-    bindings = WhichKey.bindings_from_node(node)
-    lines = WhichKey.render_popup(bindings)
-
-    popup_row = max(0, viewport.rows - 3 - length(lines))
-
-    border =
-      DisplayList.draw(popup_row, 0, String.duplicate("─", viewport.cols),
-        fg: theme.popup.border_fg
-      )
-
-    content_draws =
-      lines
-      |> Enum.with_index(popup_row + 1)
-      |> Enum.map(fn {line_text, row} ->
-        padded = String.pad_trailing(line_text, viewport.cols)
-        DisplayList.draw(row, 0, padded, fg: theme.popup.fg, bg: theme.popup.bg)
-      end)
-
-    [border | content_draws]
-  end
-
-  defp render_whichkey(_state, _viewport), do: []
-
-  @spec snapshot_display_name(map()) :: String.t()
-  defp snapshot_display_name(%{name: name} = snapshot) when is_binary(name) do
-    ro = if Map.get(snapshot, :read_only, false), do: " [RO]", else: ""
-    name <> ro
-  end
-
-  defp snapshot_display_name(snapshot) do
-    base =
-      case snapshot.file_path do
-        nil -> "[scratch]"
-        path -> Path.basename(path)
-      end
-
-    ro = if Map.get(snapshot, :read_only, false), do: " [RO]", else: ""
-    base <> ro
-  end
-
-  # ── Private helpers: compose ───────────────────────────────────────────────
-
-  # Merges modeline draws into a WindowFrame, applying grayscale dimming
-  # for inactive windows (cursor == nil means inactive).
-  @spec inject_modeline(WindowFrame.t(), %{non_neg_integer() => [DisplayList.draw()]}) ::
-          WindowFrame.t()
-  defp inject_modeline(wf, modeline_map) do
-    is_active = wf.cursor != nil
-    all_draws = Enum.flat_map(modeline_map, fn {_id, draws} -> draws end)
-
-    dimmed =
-      if is_active do
-        all_draws
-      else
-        DisplayList.grayscale_draws(all_draws)
-      end
-
-    %{wf | modeline: DisplayList.draws_to_layer(dimmed)}
-  end
-
-  @spec resolve_cursor(
-          state(),
-          {non_neg_integer(), non_neg_integer()} | nil,
-          non_neg_integer()
-        ) :: {non_neg_integer(), non_neg_integer()}
-  defp resolve_cursor(
-         %{mode: :search, mode_state: mode_state},
-         _cursor_info,
-         minibuffer_row
-       ) do
-    search_col = Unicode.display_width(mode_state.input) + 1
-    {minibuffer_row, search_col}
-  end
-
-  defp resolve_cursor(
-         %{mode: :command, mode_state: mode_state},
-         _cursor_info,
-         minibuffer_row
-       ) do
-    cmd_col = Unicode.display_width(mode_state.input) + 1
-    {minibuffer_row, cmd_col}
-  end
-
-  defp resolve_cursor(
-         %{mode: :eval, mode_state: mode_state},
-         _cursor_info,
-         minibuffer_row
-       ) do
-    eval_col = Unicode.display_width(mode_state.input) + 6
-    {minibuffer_row, eval_col}
-  end
-
-  defp resolve_cursor(_state, {row, col}, _minibuffer_row), do: {row, col}
-  defp resolve_cursor(_state, nil, _minibuffer_row), do: {0, 0}
-
-  @spec find_picker_cursor([Overlay.t()]) :: {non_neg_integer(), non_neg_integer()} | nil
-  defp find_picker_cursor(overlays) do
-    Enum.find_value(overlays, fn %Overlay{cursor: c} -> c end)
-  end
-
-  @spec agent_cursor_override_from_layout(
-          state(),
-          {non_neg_integer(), non_neg_integer()},
-          atom(),
-          Layout.t()
-        ) ::
-          {{non_neg_integer(), non_neg_integer()}, atom()}
-  defp agent_cursor_override_from_layout(
-         %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
-         _cursor,
-         _shape,
-         %{agent_panel: {row, col, _w, h}} = _layout
-       )
-       when h > 0 do
-    panel = state.agent.panel
-    {cursor_line, cursor_col} = panel.input.cursor
-    input_row = row + h - @agent_input_height + 1 + cursor_line
-    input_col = col + 2 + cursor_col
-
-    {{input_row, input_col}, input_cursor_shape(panel)}
-  end
-
-  defp agent_cursor_override_from_layout(_state, cursor, shape, _layout) do
-    {cursor, shape}
-  end
-
-  # ── Private helpers: agent panel ───────────────────────────────────────────
-
-  # Returns :beam for insert mode, :block for normal/visual/operator-pending.
-  # Falls back to :beam for non-PanelState maps (tests) or unfocused state.
-  @spec input_cursor_shape(map()) :: Protocol.cursor_shape()
-  defp input_cursor_shape(%PanelState{input_focused: true} = panel) do
-    if PanelState.input_mode(panel) == :insert, do: :beam, else: :block
-  end
-
-  defp input_cursor_shape(_panel), do: :block
-
-  @spec render_agent_panel_from_layout(state(), Layout.t()) :: [DisplayList.draw()]
-  defp render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []
-
-  defp render_agent_panel_from_layout(state, %{agent_panel: rect}) do
-    agent = state.agent
-
-    messages =
-      if agent.session do
-        try do
-          Session.messages(agent.session)
-        catch
-          :exit, _ -> []
-        end
-      else
-        []
-      end
-
-    usage =
-      if agent.session do
-        try do
-          Session.usage(agent.session)
-        catch
-          :exit, _ -> %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
-        end
-      else
-        %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
-      end
-
-    panel_state = %{
-      messages: messages,
-      status: agent.status || :idle,
-      input: agent.panel.input,
-      scroll: agent.panel.scroll,
-      spinner_frame: agent.panel.spinner_frame,
-      usage: usage,
-      model_name: agent.panel.model_name,
-      thinking_level: agent.panel.thinking_level,
-      display_start_index: agent.panel.display_start_index,
-      error_message: agent.error,
-      pending_approval: agent.pending_approval,
-      mention_completion: agent.panel.mention_completion
-    }
-
-    ChatRenderer.render(rect, panel_state, state.theme)
   end
 end

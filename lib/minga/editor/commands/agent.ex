@@ -7,9 +7,7 @@ defmodule Minga.Editor.Commands.Agent do
   `state → state` transformations.
   """
 
-  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatRenderer
-  alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
@@ -19,9 +17,10 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
+  alias Minga.Editor.Commands.AgentSession
+  alias Minga.Editor.Commands.AgentSubStates
   alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.Layout
   alias Minga.Editor.PickerUI
@@ -31,14 +30,10 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
-  alias Minga.Git.Diff
-  alias Minga.Input.TextField
   alias Minga.Input.Vim
   alias Minga.Surface.AgentView
   alias Minga.Surface.AgentView.Bridge, as: AVBridge
   alias Minga.Surface.AgentView.State, as: AVState
-
-  import Bitwise
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -54,7 +49,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     state =
       if state.agent.panel.visible and state.agent.session == nil do
-        start_agent_session(state)
+        AgentSession.start_agent_session(state)
       else
         state
       end
@@ -79,20 +74,18 @@ defmodule Minga.Editor.Commands.Agent do
   context. On deactivate: switches back to the most recent file tab.
   """
   @spec toggle_agentic_view(state()) :: state()
-  def toggle_agentic_view(%{agentic: %{active: true}} = state) do
+  def toggle_agentic_view(%{surface_module: Minga.Surface.AgentView} = state) do
     deactivate_agentic_view(state)
   end
 
-  def toggle_agentic_view(%{agentic: %{active: false}} = state) do
+  def toggle_agentic_view(state) do
     activate_agentic_view(state)
   end
 
   @spec deactivate_agentic_view(state()) :: state()
   defp deactivate_agentic_view(state) do
-    # Mark the agentic view as inactive before snapshotting, so the
-    # saved context reflects "agent panel not visible".
-    state = %{state | agentic: %{state.agentic | active: false}}
-
+    # switch_tab handles deactivation: sync_from_editor -> deactivate_surface
+    # -> snapshot. The surface's deactivate callback sets active: false.
     case find_file_tab(state) do
       nil ->
         # No file tab yet (e.g., cold boot into agent mode). Create one
@@ -163,25 +156,24 @@ defmodule Minga.Editor.Commands.Agent do
   # Switches to an existing agent tab, re-activating its agentic view.
   @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
   defp switch_to_existing_agent_tab(state, agent_tab) do
-    # The agent tab's context has agentic.active == false (set during
-    # deactivation). Patch it to active before switching.
+    # The agent tab's stored surface state has agentic.active == false
+    # (set during deactivation). Patch it to active before switching.
     ctx = agent_tab.context
 
-    updated_agentic =
-      Map.get(ctx, :agentic, ViewState.new())
-      |> Map.put(:active, true)
-      |> Map.put(:focus, :chat)
-
-    ctx = Map.put(ctx, :agentic, updated_agentic)
-
-    # Also update the surface_state if present
     ctx =
       case Map.get(ctx, :surface_state) do
-        %AVState{} = av ->
+        %AVState{agentic: agentic} = av ->
+          updated_agentic = %{agentic | active: true, focus: :chat}
           Map.put(ctx, :surface_state, %{av | agentic: updated_agentic})
 
         _ ->
-          ctx
+          # Legacy context without surface_state: patch agentic directly
+          updated_agentic =
+            Map.get(ctx, :agentic, ViewState.new())
+            |> Map.put(:active, true)
+            |> Map.put(:focus, :chat)
+
+          Map.put(ctx, :agentic, updated_agentic)
       end
 
     tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
@@ -201,13 +193,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: agent, agentic: agentic, keymap_scope: :agent}
 
     %{
-      agentic: agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
@@ -257,7 +247,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
     if state.agent.session == nil do
-      start_agent_session(state)
+      AgentSession.start_agent_session(state)
     else
       state
     end
@@ -363,7 +353,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
   def ensure_agent_session(%{agent: %{session: nil}} = state) do
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   def ensure_agent_session(state), do: state
@@ -391,13 +381,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: fresh_agent, agentic: fresh_agentic, keymap_scope: :agent}
 
     agent_context = %{
-      agentic: fresh_agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: fresh_agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
@@ -407,12 +395,12 @@ defmodule Minga.Editor.Commands.Agent do
     tb = TabBar.update_context(tb, agent_tab.id, agent_context)
     state = %{state | tab_bar: tb}
     state = EditorState.restore_tab_context(state, agent_context)
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   # Fallback for bare maps or states without a tab bar (tests, slash commands).
   def new_agent_session(state) do
-    start_agent_session(state)
+    AgentSession.start_agent_session(state)
   end
 
   @doc "Switches to an existing session by pid."
@@ -453,43 +441,40 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls the chat panel up by half the panel height."
   @spec scroll_chat_up(state()) :: state()
-  def scroll_chat_up(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_up(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_up(state)
+  end
+
+  defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_up(&1, amount))
   end
 
   @doc "Scrolls the chat panel down by half the panel height."
   @spec scroll_chat_down(state()) :: state()
-  def scroll_chat_down(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_down(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_down(state)
+  end
+
+  defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_down(&1, amount))
   end
 
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
-  def input_char(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state, _char),
-    do: state
-
   def input_char(state, char) do
-    update_agent(state, &AgentState.insert_char(&1, char))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
   @spec input_paste(state(), String.t()) :: state()
-  def input_paste(
-        %{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state,
-        _text
-      ),
-      do: state
-
   def input_paste(state, text) do
-    update_agent(state, &AgentState.insert_paste(&1, text))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
@@ -500,11 +485,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
-  def input_backspace(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def input_backspace(state) do
-    update_agent(state, &AgentState.delete_char/1)
+    if no_agent_ui?(state), do: state, else: update_agent(state, &AgentState.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
@@ -532,14 +514,14 @@ defmodule Minga.Editor.Commands.Agent do
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do
     state = update_agent(state, &AgentState.set_provider_name(&1, provider))
-    restart_session(state, "Provider: #{provider}")
+    AgentSession.restart_session(state, "Provider: #{provider}")
   end
 
   @doc "Sets the agent model and restarts the session."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
     state = update_agent(state, &AgentState.set_model_name(&1, model))
-    restart_session(state, "Model: #{model}")
+    AgentSession.restart_session(state, "Model: #{model}")
   end
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
@@ -718,7 +700,10 @@ defmodule Minga.Editor.Commands.Agent do
         text = Message.text(msg)
         blocks = Markdown.extract_code_blocks(text)
         block = code_block_at_scroll(state, blocks)
-        if block, do: open_code_block(state, block.language, block.content), else: state
+
+        if block,
+          do: AgentSession.open_code_block(state, block.language, block.content),
+          else: state
 
       {_idx, _msg, _other_type} ->
         state
@@ -787,30 +772,14 @@ defmodule Minga.Editor.Commands.Agent do
 
   # ── Search ─────────────────────────────────────────────────────────────────
 
-  @doc "Starts search mode in the chat."
   @spec scope_start_search(state()) :: state()
-  def scope_start_search(state) do
-    scroll = state.agent.panel.scroll.offset
-    update_agentic(state, &ViewState.start_search(&1, scroll))
-  end
+  defdelegate scope_start_search(state), to: AgentSubStates, as: :start_search
 
-  @doc "Jumps to the next search match."
   @spec scope_next_search_match(state()) :: state()
-  def scope_next_search_match(%{agentic: %{search: %{input_active: true}}} = state), do: state
+  defdelegate scope_next_search_match(state), to: AgentSubStates, as: :next_match
 
-  def scope_next_search_match(state) do
-    state = update_agentic(state, &ViewState.next_search_match/1)
-    scroll_to_current_match(state)
-  end
-
-  @doc "Jumps to the previous search match."
   @spec scope_prev_search_match(state()) :: state()
-  def scope_prev_search_match(%{agentic: %{search: %{input_active: true}}} = state), do: state
-
-  def scope_prev_search_match(state) do
-    state = update_agentic(state, &ViewState.prev_search_match/1)
-    scroll_to_current_match(state)
-  end
+  defdelegate scope_prev_search_match(state), to: AgentSubStates, as: :prev_match
 
   # ── Session ────────────────────────────────────────────────────────────────
 
@@ -918,374 +887,55 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
-  # ── Search input handling (sub-state within agent scope) ───────────────────
+  # Search input handling delegated to AgentSubStates.
 
-  @doc "Handles a key during active search input."
   @spec handle_search_key(state(), non_neg_integer()) :: state()
-  def handle_search_key(state, 13) do
-    # Enter: confirm search
-    update_agentic(state, &ViewState.confirm_search/1)
-  end
+  defdelegate handle_search_key(state, cp), to: AgentSubStates
 
-  def handle_search_key(state, 27) do
-    # Escape: cancel search, restore scroll
-    saved = ViewState.search_saved_scroll(state.agentic)
-    state = update_agentic(state, &ViewState.cancel_search/1)
-    if saved, do: update_agent(state, &AgentState.set_scroll(&1, saved)), else: state
-  end
+  # Mention completion handling delegated to AgentSubStates.
 
-  def handle_search_key(state, 127) do
-    # Backspace
-    query = ViewState.search_query(state.agentic) || ""
-
-    if query == "" do
-      handle_search_key(state, 27)
-    else
-      new_query = String.slice(query, 0..-2//1)
-      state = update_agentic(state, &ViewState.update_search_query(&1, new_query))
-      run_search(state, new_query)
-    end
-  end
-
-  def handle_search_key(state, cp) when cp >= 32 and cp <= 126 do
-    char = <<cp::utf8>>
-    query = (ViewState.search_query(state.agentic) || "") <> char
-    state = update_agentic(state, &ViewState.update_search_query(&1, query))
-    run_search(state, query)
-  end
-
-  def handle_search_key(state, _cp), do: state
-
-  # ── Mention completion handling (sub-state within agent scope) ─────────────
-
-  @doc "Handles a key during active mention completion."
   @spec handle_mention_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  def handle_mention_key(state, 9, mods) do
-    if band(mods, 0x01) != 0 do
-      # Shift+Tab: prev candidate
-      update_panel(state, fn p ->
-        comp = FileMention.select_prev(p.mention_completion)
-        %{p | mention_completion: comp}
-      end)
-    else
-      # Tab: next candidate
-      update_panel(state, fn p ->
-        comp = FileMention.select_next(p.mention_completion)
-        %{p | mention_completion: comp}
-      end)
-    end
-  end
-
-  def handle_mention_key(state, 13, _mods) do
-    # Enter: accept selection
-    accept_mention_completion(state)
-  end
-
-  def handle_mention_key(state, 27, _mods) do
-    # Escape: cancel
-    update_panel(state, fn p -> %{p | mention_completion: nil} end)
-  end
-
-  def handle_mention_key(state, 127, _mods) do
-    # Backspace
-    comp = state.agent.panel.mention_completion
-
-    if comp.prefix == "" do
-      state = input_backspace(state)
-      update_panel(state, fn p -> %{p | mention_completion: nil} end)
-    else
-      state = input_backspace(state)
-      new_prefix = String.slice(comp.prefix, 0..-2//1)
-
-      update_panel(state, fn p ->
-        %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
-      end)
-    end
-  end
-
-  def handle_mention_key(state, cp, mods)
-      when cp >= 32 and band(mods, 0x02) == 0 and band(mods, 0x04) == 0 do
-    mention_insert_char(state, <<cp::utf8>>)
-  end
-
-  def handle_mention_key(state, _cp_with_mods, _mods) when is_map(state), do: state
-
-  @spec mention_insert_char(state(), String.t()) :: state()
-  defp mention_insert_char(state, " ") do
-    state = update_panel(state, fn p -> %{p | mention_completion: nil} end)
-    input_char(state, " ")
-  end
-
-  defp mention_insert_char(state, char) do
-    state = input_char(state, char)
-    comp = state.agent.panel.mention_completion
-    new_prefix = comp.prefix <> char
-
-    update_panel(state, fn p ->
-      %{p | mention_completion: FileMention.update_prefix(comp, new_prefix)}
-    end)
-  end
+  defdelegate handle_mention_key(state, cp, mods), to: AgentSubStates
 
   # ── Diff review commands ───────────────────────────────────────────────────
 
-  @doc "Accepts the current diff hunk during review."
   @spec scope_accept_hunk(state()) :: state()
-  def scope_accept_hunk(%{agentic: %{preview: %Preview{content: {:diff, _review}}}} = state) do
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_current(r) end))
+  defdelegate scope_accept_hunk(state), to: AgentSubStates, as: :accept_hunk
 
-    maybe_finish_review(state)
-  end
-
-  def scope_accept_hunk(state), do: state
-
-  @doc "Rejects the current diff hunk during review."
   @spec scope_reject_hunk(state()) :: state()
-  def scope_reject_hunk(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    hunk = DiffReview.current_hunk(review)
+  defdelegate scope_reject_hunk(state), to: AgentSubStates, as: :reject_hunk
 
-    if hunk do
-      revert_hunk_on_disk(review.path, hunk)
-    end
-
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_current(r) end))
-
-    maybe_finish_review(state)
-  end
-
-  def scope_reject_hunk(state), do: state
-
-  @doc "Accepts all remaining diff hunks."
   @spec scope_accept_all_hunks(state()) :: state()
-  def scope_accept_all_hunks(%{agentic: %{preview: %Preview{content: {:diff, _}}}} = state) do
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
+  defdelegate scope_accept_all_hunks(state), to: AgentSubStates, as: :accept_all_hunks
 
-    maybe_finish_review(state)
-  end
-
-  def scope_accept_all_hunks(state), do: state
-
-  @doc "Rejects all remaining diff hunks."
   @spec scope_reject_all_hunks(state()) :: state()
-  def scope_reject_all_hunks(%{agentic: %{preview: %Preview{content: {:diff, review}}}} = state) do
-    unresolved_hunks =
-      review.hunks
-      |> Enum.with_index()
-      |> Enum.reject(fn {_hunk, idx} -> Map.has_key?(review.resolutions, idx) end)
-      |> Enum.map(fn {hunk, _idx} -> hunk end)
-      |> Enum.reverse()
-
-    revert_hunks_on_disk(review.path, unresolved_hunks)
-
-    state =
-      update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.reject_all(r) end))
-
-    maybe_finish_review(state)
-  end
-
-  def scope_reject_all_hunks(state), do: state
+  defdelegate scope_reject_all_hunks(state), to: AgentSubStates, as: :reject_all_hunks
 
   # ── Tool approval commands ─────────────────────────────────────────────────
 
-  @doc "Approves the pending tool execution."
   @spec scope_approve_tool(state()) :: state()
-  def scope_approve_tool(%{agent: %{session: session, pending_approval: approval}} = state)
-      when is_pid(session) and is_map(approval) do
-    Session.respond_to_approval(session, :approve)
-    update_agent(state, &AgentState.clear_pending_approval/1)
-  end
+  defdelegate scope_approve_tool(state), to: AgentSubStates, as: :approve_tool
 
-  def scope_approve_tool(state), do: state
-
-  @doc "Denies the pending tool execution."
   @spec scope_deny_tool(state()) :: state()
-  def scope_deny_tool(%{agent: %{session: session, pending_approval: approval}} = state)
-      when is_pid(session) and is_map(approval) do
-    Session.respond_to_approval(session, :reject)
-    update_agent(state, &AgentState.clear_pending_approval/1)
-  end
-
-  def scope_deny_tool(state), do: state
+  defdelegate scope_deny_tool(state), to: AgentSubStates, as: :deny_tool
 
   # ── @-mention trigger ─────────────────────────────────────────────────────
 
-  @doc "Triggers @-mention file completion."
   @spec scope_trigger_mention(state()) :: state()
-  def scope_trigger_mention(state) do
-    if should_trigger_mention?(state) do
-      state = input_char(state, "@")
-      start_mention_completion(state)
-    else
-      input_char(state, "@")
-    end
-  end
+  defdelegate scope_trigger_mention(state), to: AgentSubStates, as: :trigger_mention
+
+  # ── Delegated to AgentSession ──────────────────────────────────────────────
+
+  defdelegate open_code_block(state, language, content), to: AgentSession
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
-  @spec restart_session(state(), String.t()) :: state()
-  defp restart_session(state, message) do
-    if state.agent.session do
-      try do
-        GenServer.stop(state.agent.session, :normal, 1000)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
-    state = update_agent(state, &AgentState.clear_session/1)
-    state = %{state | status_msg: message}
-    if AgentState.visible?(state.agent), do: start_agent_session(state), else: state
-  end
-
-  @spec start_agent_session(state()) :: state()
-  defp start_agent_session(state) do
-    opts = [
-      thinking_level: state.agent.panel.thinking_level,
-      provider_opts: [
-        provider: state.agent.panel.provider_name,
-        model: state.agent.panel.model_name
-      ]
-    ]
-
-    case start_and_subscribe(opts) do
-      {:ok, pid} ->
-        state =
-          if state.agent.buffer == nil do
-            buf = AgentBufferSync.start_buffer()
-            update_agent(state, &AgentState.set_buffer(&1, buf))
-          else
-            state
-          end
-
-        state = update_agent(state, &AgentState.set_session(&1, pid))
-
-        # Record the session pid on the Tab struct for event routing.
-        case state do
-          %{tab_bar: %TabBar{active_id: id}} ->
-            EditorState.set_tab_session(state, id, pid)
-
-          _ ->
-            state
-        end
-
-      {:error, reason} ->
-        require Logger
-        msg = format_session_error(reason)
-        Logger.error("[Agent] #{msg}")
-        Minga.Editor.log_to_messages("[Agent] #{msg}")
-        update_agent(state, &AgentState.set_error(&1, msg))
-    end
-  end
-
-  @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
-  defp start_and_subscribe(opts) do
-    case Minga.Agent.Supervisor.start_session(opts) do
-      {:ok, pid} ->
-        try do
-          Session.subscribe(pid)
-          {:ok, pid}
-        catch
-          :exit, reason ->
-            # Session died before we could subscribe (e.g. provider binary missing).
-            # Clean up the child so the supervisor doesn't hold a dead reference.
-            Minga.Agent.Supervisor.stop_session(pid)
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @doc """
-  Opens a code block from an agent chat message as a scratch buffer.
-
-  Creates a new buffer with the code block content, sets its filetype
-  based on the language tag, and displays it in the preview pane. The
-  buffer is named `*Agent: {language}*` and is not associated with a
-  file on disk.
-  """
-  @spec open_code_block(state(), String.t(), String.t()) :: state()
-  def open_code_block(state, language, content) do
-    name = buffer_name_for_language(language)
-    filetype = filetype_from_language(language)
-
-    {:ok, buf} =
-      BufferServer.start_link(
-        content: content,
-        buffer_name: name,
-        filetype: filetype
-      )
-
-    # Set as active buffer so it shows in the file viewer panel
-    state = put_in(state.buffers.active, buf)
-
-    # Show a system message about the opened block
-    if state.agent.session do
-      Session.add_system_message(
-        state.agent.session,
-        "Opened #{if(language == "", do: "text", else: language)} code block in buffer"
-      )
-    end
-
-    state
-  end
-
-  @spec buffer_name_for_language(String.t()) :: String.t()
-  defp buffer_name_for_language(""), do: "*Agent: text*"
-  defp buffer_name_for_language(lang), do: "*Agent: #{lang}*"
-
-  @spec filetype_from_language(String.t()) :: atom() | nil
-  defp filetype_from_language(""), do: nil
-
-  defp filetype_from_language(lang) do
-    # Map common language tags to Minga filetypes
-    mapping = %{
-      "elixir" => :elixir,
-      "ex" => :elixir,
-      "exs" => :elixir,
-      "javascript" => :javascript,
-      "js" => :javascript,
-      "typescript" => :typescript,
-      "ts" => :typescript,
-      "python" => :python,
-      "py" => :python,
-      "ruby" => :ruby,
-      "rb" => :ruby,
-      "rust" => :rust,
-      "rs" => :rust,
-      "go" => :go,
-      "golang" => :go,
-      "zig" => :zig,
-      "c" => :c,
-      "cpp" => :cpp,
-      "c++" => :cpp,
-      "java" => :java,
-      "json" => :json,
-      "yaml" => :yaml,
-      "yml" => :yaml,
-      "toml" => :toml,
-      "html" => :html,
-      "css" => :css,
-      "lua" => :lua,
-      "bash" => :bash,
-      "sh" => :bash,
-      "shell" => :bash,
-      "zsh" => :bash,
-      "sql" => :sql,
-      "markdown" => :markdown,
-      "md" => :markdown,
-      "xml" => :xml,
-      "dockerfile" => :dockerfile,
-      "docker" => :dockerfile,
-      "makefile" => :makefile,
-      "make" => :makefile
-    }
-
-    Map.get(mapping, String.downcase(lang))
-  end
+  # Returns true when neither the full-screen agent view nor the side panel
+  # is visible, meaning agent input/scroll commands should be no-ops.
+  @spec no_agent_ui?(state()) :: boolean()
+  defp no_agent_ui?(%{surface_module: AgentView}), do: false
+  defp no_agent_ui?(%{agent: %{panel: %{visible: true}}}), do: false
+  defp no_agent_ui?(_state), do: true
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do
@@ -1301,16 +951,6 @@ defmodule Minga.Editor.Commands.Agent do
   defp update_preview(state, fun) do
     %{state | agentic: ViewState.update_preview(state.agentic, fun)}
   end
-
-  @spec update_panel(state(), (PanelState.t() -> PanelState.t())) :: state()
-  defp update_panel(state, fun) do
-    update_agent(state, fn agent -> %{agent | panel: fun.(agent.panel)} end)
-  end
-
-  @spec format_session_error(term()) :: String.t()
-  defp format_session_error({:pi_not_found, msg}) when is_binary(msg), do: msg
-  defp format_session_error({:noproc, _}), do: "Agent supervisor not running"
-  defp format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   @spec panel_height(state()) :: non_neg_integer()
   defp panel_height(state) do
@@ -1461,154 +1101,5 @@ defmodule Minga.Editor.Commands.Agent do
     Session.messages(session)
   catch
     :exit, _ -> []
-  end
-
-  @spec run_search(state(), String.t()) :: state()
-  defp run_search(state, query) do
-    messages = if state.agent.session, do: safe_messages(state.agent.session), else: []
-    matches = ChatSearch.find_matches(messages, query)
-    state = update_agentic(state, &ViewState.set_search_matches(&1, matches))
-    if matches != [], do: scroll_to_current_match(state), else: state
-  end
-
-  @spec scroll_to_current_match(state()) :: state()
-  defp scroll_to_current_match(%{agentic: %{search: nil}} = state), do: state
-
-  defp scroll_to_current_match(%{agentic: %{search: search}} = state) do
-    case Enum.at(search.matches, search.current) do
-      nil -> state
-      match -> scroll_to_message(state, ChatSearch.match_message_index(match))
-    end
-  end
-
-  @spec scroll_to_message(state(), non_neg_integer()) :: state()
-  defp scroll_to_message(state, msg_idx) do
-    messages = if state.agent.session, do: safe_messages(state.agent.session), else: []
-
-    line_map =
-      ChatRenderer.line_message_map(
-        messages,
-        state.viewport.cols,
-        state.theme,
-        state.agent.panel.display_start_index
-      )
-
-    case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
-      nil ->
-        state
-
-      line_idx ->
-        # scroll_offset is lines from top; set_scroll also disengages auto_scroll
-        update_agent(state, &AgentState.set_scroll(&1, line_idx))
-    end
-  end
-
-  @spec maybe_finish_review(state()) :: state()
-  defp maybe_finish_review(state) do
-    case Preview.diff_review(state.agentic.preview) do
-      %DiffReview{} = review ->
-        if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
-
-      nil ->
-        state
-    end
-  end
-
-  @spec revert_hunk_on_disk(String.t(), map()) :: :ok
-  defp revert_hunk_on_disk(path, hunk) do
-    case File.read(path) do
-      {:ok, content} ->
-        current_lines = String.split(content, "\n")
-        reverted = Diff.revert_hunk(current_lines, hunk)
-        File.write(path, Enum.join(reverted, "\n"))
-
-      {:error, _} ->
-        :ok
-    end
-  end
-
-  @spec revert_hunks_on_disk(String.t(), [map()]) :: :ok
-  defp revert_hunks_on_disk(path, hunks) do
-    case File.read(path) do
-      {:ok, content} ->
-        current_lines = String.split(content, "\n")
-
-        reverted =
-          Enum.reduce(hunks, current_lines, fn hunk, lines ->
-            Diff.revert_hunk(lines, hunk)
-          end)
-
-        File.write(path, Enum.join(reverted, "\n"))
-
-      {:error, _} ->
-        :ok
-    end
-  end
-
-  @spec should_trigger_mention?(state()) :: boolean()
-  defp should_trigger_mention?(state) do
-    panel = state.agent.panel
-    {line, col} = panel.input.cursor
-    current_line = Enum.at(panel.input.lines, line, "")
-    col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
-  end
-
-  @spec start_mention_completion(state()) :: state()
-  defp start_mention_completion(state) do
-    files = list_project_files()
-    {line, col} = state.agent.panel.input.cursor
-    completion = FileMention.new_completion(files, line, col - 1)
-    update_panel(state, fn p -> %{p | mention_completion: completion} end)
-  end
-
-  @spec accept_mention_completion(state()) :: state()
-  defp accept_mention_completion(state) do
-    comp = state.agent.panel.mention_completion
-
-    case FileMention.selected_path(comp) do
-      nil ->
-        update_panel(state, fn p -> %{p | mention_completion: nil} end)
-
-      path ->
-        panel = state.agent.panel
-        {line, _col} = panel.input.cursor
-        current = Enum.at(panel.input.lines, line)
-        anchor_col = comp.anchor_col
-
-        before = String.slice(current, 0, anchor_col)
-
-        after_prefix =
-          String.slice(
-            current,
-            anchor_col + 1 + String.length(comp.prefix),
-            String.length(current)
-          )
-
-        new_line = before <> "@" <> path <> " " <> after_prefix
-        new_col = anchor_col + 1 + String.length(path) + 1
-        new_lines = List.replace_at(panel.input.lines, line, new_line)
-
-        update_panel(state, fn p ->
-          %{p | input: TextField.from_parts(new_lines, {line, new_col}), mention_completion: nil}
-        end)
-    end
-  end
-
-  @spec list_project_files() :: [String.t()]
-  defp list_project_files do
-    root =
-      try do
-        case Minga.Project.root() do
-          nil -> File.cwd!()
-          r -> r
-        end
-      catch
-        :exit, _ -> File.cwd!()
-      end
-
-    case Minga.FileFind.list_files(root) do
-      {:ok, paths} -> paths
-      {:error, _} -> []
-    end
   end
 end

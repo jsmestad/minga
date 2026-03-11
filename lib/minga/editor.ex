@@ -14,36 +14,33 @@ defmodule Minga.Editor do
   use GenServer
 
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Config.Advice, as: ConfigAdvice
-  alias Minga.Config.Loader, as: ConfigLoader
-  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.BufferLifecycle
-  alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
+  alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
+  alias Minga.Editor.KeyDispatch
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
-  alias Minga.Editor.MacroReplay
-  alias Minga.Editor.ModeTransitions
+  alias Minga.Editor.MessageLog
   alias Minga.Editor.Renderer
+  alias Minga.Editor.Startup
+  alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Editor.WindowTree
   alias Minga.FileTree
 
   alias Minga.Input
   alias Minga.Mode
 
   alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol
 
   alias Minga.Project
 
@@ -58,8 +55,6 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Tab
-  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -98,95 +93,11 @@ defmodule Minga.Editor do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    port_manager = Keyword.get(opts, :port_manager, PortManager)
-    _file_watcher = Keyword.get(opts, :file_watcher)
-    width = Keyword.get(opts, :width, 80)
-    height = Keyword.get(opts, :height, 24)
-    buffer = Keyword.get(opts, :buffer)
-
-    unless is_nil(port_manager) do
-      try do
-        PortManager.subscribe(port_manager)
-      catch
-        :exit, _ -> Logger.warning("Could not subscribe to port manager")
-      end
-    end
-
-    subscribe_to_parser(Keyword.get(opts, :parser_manager))
-
-    # Register initial buffer with file watcher
-    FileWatcherHelpers.maybe_watch_buffer(buffer)
-
-    buffers = if buffer, do: [buffer], else: []
-
-    # Start special buffers (stored separately, not in buffer list)
-    {messages_buf, scratch_buf} = start_special_buffers()
-
-    # When no file is open, show scratch as the active buffer
-    {active_buf, buffers} =
-      case {buffer, scratch_buf} do
-        {nil, pid} when is_pid(pid) -> {pid, []}
-        {pid, _} when is_pid(pid) -> {pid, buffers}
-        _ -> {nil, buffers}
-      end
-
-    active_idx = if active_buf && buffers != [], do: 0, else: 0
-
-    viewport = Viewport.new(height, width)
-
-    # Initialize the window tree with a single window
-    initial_window_id = 1
-
-    alias Minga.Editor.State.Buffers
-    alias Minga.Editor.State.Windows
-
-    initial_window =
-      if active_buf do
-        Window.new(initial_window_id, active_buf, height, width)
-      else
-        nil
-      end
-
-    windows =
-      if initial_window, do: %{initial_window_id => initial_window}, else: %{}
-
-    {keymap_scope, agentic_state, effective_tree} =
-      startup_view_state(port_manager, initial_window_id)
-
-    state = %EditorState{
-      buffers: %Buffers{
-        active: active_buf,
-        list: buffers,
-        active_index: active_idx,
-        messages: messages_buf,
-        scratch: scratch_buf
-      },
-      port_manager: port_manager,
-      viewport: viewport,
-      mode: :normal,
-      mode_state: Mode.initial_state(),
-      windows: %Windows{
-        tree: effective_tree,
-        map: windows,
-        active: initial_window_id,
-        next_id: initial_window_id + 1
-      },
-      keymap_scope: keymap_scope,
-      agentic: agentic_state,
-      focus_stack: Minga.Input.default_stack()
-    }
-
-    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
-
-    # Initialize the active surface. File tabs use BufferView; agent tabs
-    # will use AgentView (Phase 2). The surface state is extracted from
-    # EditorState via the bridge and kept in sync on every operation.
+    state = Startup.build_initial_state(opts)
     state = init_surface(state)
 
-    # Redirect Logger and stderr to a log file when running with a real TUI.
-    # In headless tests the port_manager is a pid (HeadlessPort), not the
-    # registered PortManager atom, so we skip the redirect to keep ExUnit clean.
-    tui_active? = port_manager == PortManager
+    # Logger redirect and startup messages
+    tui_active? = state.port_manager == PortManager
 
     state =
       if tui_active? do
@@ -197,10 +108,7 @@ defmodule Minga.Editor do
         log_message(state, "Editor started")
       end
 
-    # Apply user config options
-    state = apply_config_options(state)
-
-    # Subscribe to diagnostic changes for re-rendering gutter signs
+    state = Startup.apply_config_options(state)
     Minga.Diagnostics.subscribe()
 
     {:ok, state}
@@ -299,9 +207,9 @@ defmodule Minga.Editor do
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
-    caps = fetch_capabilities(state.port_manager)
+    caps = Startup.fetch_capabilities(state.port_manager)
     new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
-    send_font_config(new_state)
+    Startup.send_font_config(new_state)
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
@@ -404,46 +312,22 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:highlight_names, names}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state = HighlightSync.handle_names(state, names)
-    {:noreply, new_state}
+    {:noreply, HighlightEvents.handle_names(state, names)}
   end
 
   def handle_info({tag, {:injection_ranges, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state =
-      if state.buffers.active do
-        %{state | injection_ranges: Map.put(state.injection_ranges, state.buffers.active, ranges)}
-      else
-        state
-      end
-
-    {:noreply, new_state}
+    {:noreply, HighlightEvents.handle_injection_ranges(state, ranges)}
   end
 
   def handle_info({tag, {:language_at_response, _request_id, _language}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    # Reserved for future use (synchronous language queries)
     {:noreply, state}
   end
 
   def handle_info({tag, {:highlight_spans, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state = HighlightSync.handle_spans(state, version, spans)
-
-    # Cache the updated highlights for this buffer
-    new_state =
-      if new_state.buffers.active do
-        hl = new_state.highlight
-
-        %{
-          new_state
-          | highlight: %{hl | cache: Map.put(hl.cache, new_state.buffers.active, hl.current)}
-        }
-      else
-        new_state
-      end
-
-    new_state = Renderer.render(new_state)
+    new_state = HighlightEvents.handle_spans(state, version, spans)
     {:noreply, sync_surface_from_editor(new_state)}
   end
 
@@ -453,7 +337,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:log_message, level, text}}, state) do
-    prefix = frontend_log_prefix(state)
+    prefix = MessageLog.frontend_prefix(state)
     new_state = log_message(state, "[#{prefix}/#{level}] #{text}")
     {:noreply, new_state}
   end
@@ -547,31 +431,16 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # Determines the initial keymap scope, agentic view state, and window
-  # tree based on config and CLI flags. In headless test mode (port_manager
-  # is a pid, not the PortManager atom), always uses editor mode.
-  @spec startup_view_state(GenServer.server(), pos_integer()) ::
-          {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
-  # ── Surface lifecycle ──────────────────────────────────────────────────────
+  # Tab bar, view state, capabilities, parser subscription helpers
 
-  alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.Bridge, as: AVBridge
-  alias Minga.Surface.AgentView.State, as: AVState
-  alias Minga.Surface.BufferView
-  alias Minga.Surface.BufferView.Bridge, as: BVBridge
-  alias Minga.Surface.BufferView.State, as: BVState
+  # ── Surface lifecycle ──────────────────────────────────────────────────────
 
   @doc """
   Applies a list of surface effects to the editor state.
 
   Surfaces return `{new_state, [effect()]}` from their callbacks.
-  The Editor interprets each effect without knowing the surface's
-  internal logic. This keeps surfaces testable as pure
-  `state -> {state, effects}` functions.
-
-  During Phase 1, most surfaces return empty effect lists. This
-  infrastructure is ready for when surfaces start producing effects
-  in later phases.
+  The Editor interprets each effect. This keeps surfaces testable as
+  pure `state -> {state, effects}` functions.
   """
   @spec apply_effects(EditorState.t(), [Minga.Surface.effect()]) :: EditorState.t()
   def apply_effects(state, []), do: state
@@ -582,17 +451,11 @@ defmodule Minga.Editor do
   end
 
   @spec apply_effect(EditorState.t(), Minga.Surface.effect()) :: EditorState.t()
-  defp apply_effect(state, :render) do
-    schedule_render(state, 16)
-  end
+  defp apply_effect(state, :render), do: schedule_render(state, 16)
+  defp apply_effect(state, {:set_status, msg}) when is_binary(msg), do: %{state | status_msg: msg}
 
-  defp apply_effect(state, {:set_status, msg}) when is_binary(msg) do
-    %{state | status_msg: msg}
-  end
-
-  defp apply_effect(state, {:open_file, path}) when is_binary(path) do
-    Commands.execute(state, {:edit_file, path})
-  end
+  defp apply_effect(state, {:open_file, path}) when is_binary(path),
+    do: Commands.execute(state, {:edit_file, path})
 
   defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
     case Enum.find_index(state.buffers.list, &(&1 == pid)) do
@@ -601,198 +464,45 @@ defmodule Minga.Editor do
     end
   end
 
-  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod) do
-    %{state | focus_stack: [mod | state.focus_stack]}
-  end
+  defp apply_effect(state, {:push_overlay, mod}) when is_atom(mod),
+    do: %{state | focus_stack: [mod | state.focus_stack]}
 
-  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod) do
-    %{state | focus_stack: List.delete(state.focus_stack, mod)}
-  end
+  defp apply_effect(state, {:pop_overlay, mod}) when is_atom(mod),
+    do: %{state | focus_stack: List.delete(state.focus_stack, mod)}
 
-  defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms) do
-    schedule_render(state, delay_ms)
-  end
+  defp apply_effect(state, {:render, delay_ms}) when is_integer(delay_ms),
+    do: schedule_render(state, delay_ms)
 
-  defp apply_effect(state, {:log_message, msg}) when is_binary(msg) do
-    log_message(state, msg)
-  end
+  defp apply_effect(state, {:log_message, msg}) when is_binary(msg), do: log_message(state, msg)
+  defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
 
-  defp apply_effect(state, :sync_agent_buffer) do
-    AgentLifecycle.sync_buffer(state)
-  end
-
-  defp apply_effect(state, {:update_tab_label, _label}) do
-    AgentLifecycle.maybe_update_tab_label(state)
-  end
+  defp apply_effect(state, {:update_tab_label, _label}),
+    do: AgentLifecycle.maybe_update_tab_label(state)
 
   @doc false
-  @spec init_surface(EditorState.t()) :: EditorState.t()
-  defp init_surface(%EditorState{keymap_scope: :agent} = state) do
-    av_state = AVBridge.from_editor_state(state)
-    %{state | surface_module: AgentView, surface_state: av_state}
-  end
+  defdelegate init_surface(state), to: SurfaceSync
 
-  defp init_surface(%EditorState{} = state) do
-    bv_state = BVBridge.from_editor_state(state)
-    %{state | surface_module: BufferView, surface_state: bv_state}
-  end
-
-  @doc """
-  Updates the surface state from the current EditorState fields.
-
-  Call this after any operation that modifies EditorState fields that
-  are also owned by the surface (buffers, windows, mode, etc.) to keep
-  the surface state in sync.
-  """
   @spec sync_surface_from_editor(EditorState.t()) :: EditorState.t()
-  def sync_surface_from_editor(%EditorState{surface_module: BufferView} = state) do
-    %{state | surface_state: BVBridge.from_editor_state(state)}
-  end
+  defdelegate sync_surface_from_editor(state), to: SurfaceSync, as: :sync_from_editor
 
-  def sync_surface_from_editor(%EditorState{surface_module: AgentView} = state) do
-    %{state | surface_state: AVBridge.from_editor_state(state)}
-  end
-
-  def sync_surface_from_editor(state), do: state
-
-  @doc """
-  Updates EditorState fields from the current surface state.
-
-  Call this after a surface callback returns updated state to write
-  the changes back to EditorState.
-  """
   @spec sync_editor_from_surface(EditorState.t()) :: EditorState.t()
-  def sync_editor_from_surface(
-        %EditorState{surface_module: BufferView, surface_state: %BVState{} = bv} = state
-      ) do
-    BVBridge.to_editor_state(state, bv)
-  end
+  defdelegate sync_editor_from_surface(state), to: SurfaceSync, as: :sync_to_editor
 
-  def sync_editor_from_surface(
-        %EditorState{surface_module: AgentView, surface_state: %AVState{} = av} = state
-      ) do
-    AVBridge.to_editor_state(state, av)
-  end
-
-  def sync_editor_from_surface(state), do: state
-
-  @doc """
-  Dispatches an event through the active surface's handle_event callback.
-
-  Syncs the surface state from EditorState, calls handle_event, writes
-  back the updated surface state, and applies any effects. Used to
-  route agent events through AgentView.
-  """
   @spec dispatch_surface_event(EditorState.t(), term()) :: EditorState.t()
-  def dispatch_surface_event(%EditorState{surface_module: mod} = state, event)
-      when mod != nil do
-    state = sync_surface_from_editor(state)
-    {new_surface_state, effects} = mod.handle_event(state.surface_state, event)
-    state = %{state | surface_state: new_surface_state}
-    state = sync_editor_from_surface(state)
+  def dispatch_surface_event(state, event) do
+    {state, effects} = SurfaceSync.dispatch_event(state, event)
     apply_effects(state, effects)
   end
 
-  def dispatch_surface_event(state, _event), do: state
-
-  @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
-  defp initial_tab_bar(_active_buf, :agent) do
-    # Boot into agent mode: only the agent tab. A file tab is created
-    # on demand when the user first switches to editor mode.
-    TabBar.new(Tab.new_agent(1, "Agent"))
-  end
-
-  defp initial_tab_bar(active_buf, _scope) do
-    file_label =
-      if active_buf && Process.alive?(active_buf) do
-        Commands.Helpers.buffer_display_name(active_buf)
-      else
-        "*scratch*"
-      end
-
-    TabBar.new(Tab.new_file(1, file_label))
-  end
-
-  defp startup_view_state(port_manager, window_id) do
-    tui_mode? = port_manager == PortManager
-    cli_flags = Minga.CLI.startup_flags()
-
-    want_agent? =
-      tui_mode? and
-        not cli_flags.force_editor and
-        safe_get_option(:startup_view, :agent) == :agent
-
-    if want_agent? do
-      # Agentic view: set state immediately, hide window tree so the
-      # agent panel takes the full screen. The agent session starts
-      # later when :ready arrives and the port is connected.
-      av = %ViewState{ViewState.new() | active: true, focus: :chat}
-      {:agent, av, nil}
-    else
-      {:editor, ViewState.new(), WindowTree.new(window_id)}
-    end
-  end
-
-  # Reads a config option, returning the fallback if the Options Agent
-  # isn't running (e.g., during headless tests that don't start the full
-  # supervision tree).
-  @spec safe_get_option(ConfigOptions.option_name(), term()) :: term()
-  defp safe_get_option(name, fallback) do
-    ConfigOptions.get(name)
-  rescue
-    _ -> fallback
-  end
-
-  @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
-  defp fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
-
-  defp fetch_capabilities(port_manager) do
-    PortManager.capabilities(port_manager)
-  rescue
-    _ -> %Minga.Port.Capabilities{}
-  end
-
-  @spec subscribe_to_parser(GenServer.server() | nil) :: :ok
-  defp subscribe_to_parser(nil) do
-    Minga.Parser.Manager.subscribe()
-  catch
-    :exit, _ -> :ok
-  end
-
-  defp subscribe_to_parser(parser_manager) do
-    Minga.Parser.Manager.subscribe(parser_manager)
-  catch
-    :exit, _ -> Logger.warning("Could not subscribe to parser manager")
-  end
+  # Tab bar, view state, capabilities, parser subscription helpers
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
-  # tab labels) extracted to Minga.Editor.AgentLifecycle.
-  # Background agent event handling extracted to Minga.Editor.BackgroundEvents.
-  # Active-tab agent event handling lives in AgentView.handle_event/2.
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
-    buffer_pid = state.buffers.active
-
-    case buffer_pid do
-      nil ->
-        {:noreply, state}
-
-      _ ->
-        {new_bridge, completion} =
-          CompletionTrigger.handle_response(state.completion_trigger, ref, result, buffer_pid)
-
-        new_state = %{state | completion_trigger: new_bridge}
-
-        new_state =
-          case completion do
-            nil -> new_state
-            %Completion{} -> %{new_state | completion: completion}
-          end
-
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-    end
+    new_state = CompletionHandling.handle_response(state, ref, result)
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
   end
 
   # ── Render scheduling ────────────────────────────────────────────────────────
@@ -811,165 +521,25 @@ defmodule Minga.Editor do
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
 
-  # All keys go through the Mode FSM.
-  # Called by Minga.Input.ModeFSM handler.
   @doc false
   @spec do_handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  def do_handle_key(state, codepoint, modifiers) do
-    key = {codepoint, modifiers}
-    old_mode = state.mode
-    {new_mode, commands, new_mode_state} = Mode.process(old_mode, key, state.mode_state)
+  defdelegate do_handle_key(state, codepoint, modifiers), to: KeyDispatch, as: :handle_key
 
-    # ── Change recording ─────────────────────────────────────────────────
-    # Record keys for dot repeat, unless we're currently replaying.
-    state = ChangeTracking.maybe_record_change(state, old_mode, new_mode, commands, key)
-
-    # ── Macro recording ──────────────────────────────────────────────────
-    # Record keys into macro register if actively recording (and not replaying).
-    state = MacroReplay.maybe_record_key(state, key, commands)
-
-    # Guard: block insert/replace transitions on read-only buffers.
-    {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and state.buffers.active != nil and
-           BufferServer.read_only?(state.buffers.active) do
-        {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
-      else
-        {new_mode, commands, new_mode_state, state}
-      end
-
-    # When transitioning INTO visual or command mode, adjust mode_state.
-    new_mode_state =
-      ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
-
-    base_state = %{state | mode: new_mode, mode_state: new_mode_state}
-
-    # Fire mode change hook and break undo coalescing so the next edit
-    # in the new mode starts a fresh undo entry.
-    if old_mode != new_mode do
-      if base_state.buffers.active,
-        do: BufferServer.break_undo_coalescing(base_state.buffers.active)
-
-      fire_hook(:on_mode_change, [old_mode, new_mode])
-    end
-
-    after_commands =
-      Enum.reduce(commands, base_state, fn cmd, acc ->
-        dispatch_command(acc, cmd)
-      end)
-
-    # After commands have executed (they may need the old mode_state, e.g.
-    # VisualState for delete_visual_selection), clean up the mode_state
-    # if we've transitioned back to Normal from a different mode.
-    # Skip cleanup if a command changed the mode to something other than
-    # what the FSM transition requested (e.g. substitute confirm, search prompt).
-    after_commands =
-      if new_mode == :normal and old_mode != :normal and after_commands.mode == :normal do
-        case after_commands.mode_state do
-          %Mode.State{} -> after_commands
-          _ -> %{after_commands | mode_state: Mode.initial_state()}
-        end
-      else
-        after_commands
-      end
-
-    after_commands
-  end
-
-  # Change recording, mode transition, and dot repeat extracted to
-  # Minga.Editor.ChangeTracking and Minga.Editor.ModeTransitions.
-
-  # ── Command execution ────────────────────────────────────────────────────────
-
-  # Detect active buffer change: save old highlights to cache, restore or setup new.
   @doc false
   @spec do_maybe_reset_highlight(state(), pid() | nil) :: state()
-  def do_maybe_reset_highlight(state, old_buffer) do
-    new_buffer = state.buffers.active
+  defdelegate do_maybe_reset_highlight(state, old_buffer),
+    to: HighlightEvents,
+    as: :maybe_reset_highlight
 
-    if new_buffer != old_buffer and new_buffer != nil do
-      # Save current highlights for the old buffer
-      hl = state.highlight
-
-      cache =
-        if old_buffer != nil and hl.current.capture_names != [] do
-          Map.put(hl.cache, old_buffer, hl.current)
-        else
-          hl.cache
-        end
-
-      # Restore cached highlights for the new buffer, or setup fresh
-      case Map.get(cache, new_buffer) do
-        nil ->
-          send(self(), :setup_highlight)
-
-          %{
-            state
-            | highlight: %{hl | current: Minga.Highlight.from_theme(state.theme), cache: cache}
-          }
-
-        cached ->
-          %{state | highlight: %{hl | current: cached, cache: cache}}
-      end
-    else
-      state
-    end
-  end
-
-  # Re-parse buffer for syntax highlighting after content-mutating keys.
-  # Compares the buffer's mutation version before/after key handling to detect
-  # any content change — covers insert mode, normal-mode operators (dd, p, x,
-  # >>, <<, etc.), undo/redo, and any other mutation path.
   @doc false
   @spec do_maybe_reparse(state(), non_neg_integer()) :: state()
-  def do_maybe_reparse(state, version_before) do
-    content_changed = buffer_version(state) != version_before
-
-    state =
-      if content_changed do
-        state
-        |> BufferLifecycle.lsp_buffer_changed()
-        |> BufferLifecycle.git_buffer_changed()
-      else
-        state
-      end
-
-    if content_changed and state.highlight.current.capture_names != [] do
-      HighlightSync.request_reparse(state)
-    else
-      state
-    end
-  end
-
-  @spec buffer_version(state()) :: non_neg_integer()
-  defp buffer_version(%{buffers: %{active: nil}}), do: 0
-  defp buffer_version(%{buffers: %{active: buf}}), do: BufferServer.version(buf)
+  defdelegate do_maybe_reparse(state, version_before),
+    to: HighlightEvents,
+    as: :maybe_reparse
 
   @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
-  def dispatch_command(state, cmd) do
-    old_buffer = state.buffers.active
-    cmd_name = command_name(cmd)
-
-    execute = fn s ->
-      case Commands.execute(s, cmd) do
-        {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
-        {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
-        s2 -> s2
-      end
-    end
-
-    result = ConfigAdvice.wrap(cmd_name, execute).(state)
-
-    BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
-  end
-
-  # Extracts the command name atom from a command (which may be an atom or tuple).
-  @spec command_name(Mode.command()) :: atom()
-  defp command_name(cmd) when is_atom(cmd), do: cmd
-  defp command_name(cmd) when is_tuple(cmd), do: elem(cmd, 0)
-  defp command_name(cmd) when is_list(cmd), do: :multi
-  defp command_name(_cmd), do: :unknown
+  defdelegate dispatch_command(state, cmd), to: KeyDispatch
 
   # ── Project detection ───────────────────────────────────────────────────────
 
@@ -1013,10 +583,6 @@ defmodule Minga.Editor do
     log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 
-  # File watcher helpers extracted to Minga.Editor.FileWatcherHelpers.
-
-  # Macro recording and replay extracted to Minga.Editor.MacroReplay.
-
   # ── File tree helpers ───────────────────────────────────────────────────
 
   @doc false
@@ -1033,79 +599,8 @@ defmodule Minga.Editor do
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
 
-  # ── Special buffers ──────────────────────────────────────────────────────
-
-  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
-  defp start_special_buffers do
-    messages_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: "",
-              buffer_name: "*Messages*",
-              read_only: true,
-              unlisted: true,
-              persistent: true}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
-
-    scratch_filetype = ConfigOptions.get(:scratch_filetype)
-
-    scratch_content =
-      "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
-
-    scratch_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: scratch_content,
-              buffer_name: "*scratch*",
-              unlisted: true,
-              persistent: true,
-              filetype: scratch_filetype}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
-
-    {messages_buf, scratch_buf}
-  end
-
-  # ── Message logging ──────────────────────────────────────────────────────
-
-  @max_messages_lines 1000
-
-  @doc false
   @spec log_message(state(), String.t()) :: state()
-  defp log_message(%{buffers: %{messages: nil}} = state, _text), do: state
-
-  defp log_message(%{buffers: %{messages: buf}} = state, text) do
-    time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    BufferServer.append(buf, "[#{time}] #{text}\n")
-
-    # Trim to max lines
-    line_count = BufferServer.line_count(buf)
-
-    if line_count > @max_messages_lines do
-      excess = line_count - @max_messages_lines
-      # Read remaining content and replace
-      content = BufferServer.content(buf)
-      lines = String.split(content, "\n")
-      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-      # Direct state manipulation to bypass read-only for trim
-      :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
-      end)
-    end
-
-    state
-  end
-
-  @spec frontend_log_prefix(state()) :: String.t()
-  defp frontend_log_prefix(%{capabilities: %{frontend_type: :native_gui}}), do: "GUI"
-  defp frontend_log_prefix(_state), do: "ZIG"
+  defp log_message(state, text), do: MessageLog.log(state, text)
 
   # ── Window resize ────────────────────────────────────────────────────────
 
@@ -1124,8 +619,6 @@ defmodule Minga.Editor do
     end)
   end
 
-  # LSP and Git buffer lifecycle extracted to Minga.Editor.BufferLifecycle.
-
   # ── Config options ──────────────────────────────────────────────────────
 
   alias Minga.Config.Hooks, as: ConfigHooks
@@ -1137,74 +630,18 @@ defmodule Minga.Editor do
     :exit, _ -> :ok
   end
 
-  @spec apply_config_options(state()) :: state()
-  defp apply_config_options(state) do
-    state =
-      try do
-        theme_name = ConfigOptions.get(:theme)
-        theme = Minga.Theme.get!(theme_name)
-
-        %{state | theme: theme}
-      catch
-        :exit, _ -> state
-      end
-
-    # Show config load error as status message
-    try do
-      case ConfigLoader.load_error() do
-        nil -> state
-        error -> %{state | status_msg: error}
-      end
-    catch
-      :exit, _ -> state
-    end
-  end
-
-  # Sends font configuration to the frontend via the port protocol.
-  # Called on ready and after config reload. The TUI ignores this command.
-  @spec send_font_config(state()) :: :ok
-  defp send_font_config(%{port_manager: nil}), do: :ok
-
-  defp send_font_config(%{port_manager: port}) do
-    family = ConfigOptions.get(:font_family)
-    size = ConfigOptions.get(:font_size)
-    ligatures = ConfigOptions.get(:font_ligatures)
-    weight = ConfigOptions.get(:font_weight)
-    cmd = Protocol.encode_set_font(family, size, ligatures, weight)
-    Minga.Port.Manager.send_commands(port, [cmd])
-  rescue
-    _ -> :ok
-  catch
-    :exit, _ -> :ok
-  end
-
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 
   @doc false
   @spec do_accept_completion(state(), Completion.t()) :: state()
-  def do_accept_completion(state, completion) do
-    case Completion.accept(completion) do
-      nil ->
-        do_dismiss_completion(state)
-
-      {:insert_text, text} ->
-        state |> accept_completion_text(completion, text) |> do_dismiss_completion()
-
-      {:text_edit, edit} ->
-        state |> apply_completion_text_edit(edit) |> do_dismiss_completion()
-    end
-  end
+  defdelegate do_accept_completion(state, completion), to: CompletionHandling, as: :accept
 
   @doc false
   @spec do_maybe_handle_completion(state(), atom(), non_neg_integer(), non_neg_integer()) ::
           state()
-  def do_maybe_handle_completion(state, old_mode, codepoint, modifiers) do
-    if state.mode == :insert and old_mode == :insert do
-      maybe_update_completion(state, codepoint, modifiers)
-    else
-      do_dismiss_completion(state)
-    end
-  end
+  defdelegate do_maybe_handle_completion(state, old_mode, codepoint, modifiers),
+    to: CompletionHandling,
+    as: :maybe_handle
 
   @doc false
   @spec do_render(state()) :: state()
@@ -1212,121 +649,7 @@ defmodule Minga.Editor do
     Renderer.render(state)
   end
 
-  @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
-  defp accept_completion_text(%{buffers: %{active: buf}} = state, completion, text)
-       when is_pid(buf) do
-    # Replace the text typed since the trigger position with the completion text
-    # in a single apply_text_edit call (no N+2 round-trips).
-    {trigger_line, trigger_col} = completion.trigger_position
-    {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
-
-    if cursor_line == trigger_line and cursor_col > trigger_col do
-      BufferServer.apply_text_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
-    else
-      BufferServer.insert_text(buf, text)
-    end
-
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
-  end
-
-  defp accept_completion_text(state, _completion, _text), do: state
-
-  @spec apply_completion_text_edit(state(), Completion.text_edit()) :: state()
-  defp apply_completion_text_edit(%{buffers: %{active: buf}} = state, edit) when is_pid(buf) do
-    BufferServer.apply_text_edit(
-      buf,
-      edit.range.start_line,
-      edit.range.start_col,
-      edit.range.end_line,
-      edit.range.end_col,
-      edit.new_text
-    )
-
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
-  end
-
-  defp apply_completion_text_edit(state, _edit), do: state
-
-  @spec maybe_update_completion(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_update_completion(state, codepoint, _mods) do
-    buf = state.buffers.active
-    if buf == nil, do: state, else: do_update_completion(state, buf, codepoint)
-  end
-
-  @spec do_update_completion(state(), pid(), non_neg_integer()) :: state()
-  defp do_update_completion(state, buf, codepoint) do
-    # If we have active completion, update the filter
-    state = update_completion_filter(state, buf)
-
-    # Try to trigger new completion if we just typed a character
-    maybe_trigger_completion(state, buf, codepoint)
-  end
-
-  @spec update_completion_filter(state(), pid()) :: state()
-  defp update_completion_filter(%{completion: nil} = state, _buf), do: state
-
-  defp update_completion_filter(%{completion: %Completion{} = completion} = state, buf) do
-    prefix = completion_prefix(buf, completion.trigger_position)
-    apply_completion_filter(state, completion, prefix)
-  end
-
-  @spec apply_completion_filter(state(), Completion.t(), String.t() | nil) :: state()
-  defp apply_completion_filter(state, _completion, nil), do: do_dismiss_completion(state)
-  defp apply_completion_filter(state, _completion, ""), do: do_dismiss_completion(state)
-
-  defp apply_completion_filter(state, completion, prefix) do
-    filtered = Completion.filter(completion, prefix)
-
-    if Completion.active?(filtered) do
-      %{state | completion: filtered}
-    else
-      do_dismiss_completion(state)
-    end
-  end
-
-  @spec maybe_trigger_completion(state(), pid(), non_neg_integer()) :: state()
-  defp maybe_trigger_completion(state, buf, codepoint) do
-    case codepoint_to_char(codepoint) do
-      nil ->
-        state
-
-      char ->
-        {new_bridge, _comp} =
-          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf, state.lsp)
-
-        %{state | completion_trigger: new_bridge}
-    end
-  end
-
   @doc false
   @spec do_dismiss_completion(state()) :: state()
-  def do_dismiss_completion(state) do
-    new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
-    %{state | completion: nil, completion_trigger: new_bridge}
-  end
-
-  @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
-  defp completion_prefix(buf, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
-
-    if cursor_line == trigger_line and cursor_col >= trigger_col do
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> nil
-        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
-      end
-    else
-      nil
-    end
-  end
-
-  @spec codepoint_to_char(non_neg_integer()) :: String.t() | nil
-  defp codepoint_to_char(cp) when cp >= 32 and cp <= 0x10FFFF do
-    <<cp::utf8>>
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp codepoint_to_char(_), do: nil
+  defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
 end
