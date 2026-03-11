@@ -209,27 +209,27 @@ defmodule Minga.Editor.RenderPipeline do
 
     debug_layout(state, layout)
 
-    if state.agentic.active do
-      run_agentic_pipeline(state, layout)
-    else
-      # Delegate to the active surface for the windows render path.
-      # The surface calls run_windows_pipeline/2 internally via the bridge.
-      # When no surface is set (shouldn't happen for file tabs, but
-      # defensive), fall back to the direct call.
-      run_windows_pipeline(state, layout)
-    end
+    dispatch_to_surface(state, layout)
+  end
+
+  # Dispatches rendering to the appropriate pipeline based on the active
+  # surface module. AgentView uses the agentic pipeline; BufferView (and
+  # any unknown/nil surface) uses the windows pipeline.
+  @spec dispatch_to_surface(state(), Layout.t()) :: state()
+  defp dispatch_to_surface(%{surface_module: Minga.Surface.AgentView} = state, layout) do
+    run_agentic_pipeline(state, layout)
+  end
+
+  defp dispatch_to_surface(state, layout) do
+    run_windows_pipeline(state, layout)
   end
 
   @doc """
   Runs the windows render pipeline stages: scroll, content, chrome,
   compose, and emit.
 
-  This is the core rendering logic for the buffer view. Called by
-  `BufferView.render/2` through the bridge, and directly by the
-  pipeline when no surface is set.
-
-  Public so that `BufferView` can call it during Phase 1 while the
-  rendering code still operates on `EditorState`.
+  Core rendering logic for the buffer view. Called directly by the
+  pipeline dispatcher and by `BufferView.render/2` through the bridge.
   """
   @spec run_windows_pipeline(state(), Layout.t()) :: state()
   def run_windows_pipeline(state, layout) do

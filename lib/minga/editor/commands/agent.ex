@@ -74,20 +74,18 @@ defmodule Minga.Editor.Commands.Agent do
   context. On deactivate: switches back to the most recent file tab.
   """
   @spec toggle_agentic_view(state()) :: state()
-  def toggle_agentic_view(%{agentic: %{active: true}} = state) do
+  def toggle_agentic_view(%{surface_module: Minga.Surface.AgentView} = state) do
     deactivate_agentic_view(state)
   end
 
-  def toggle_agentic_view(%{agentic: %{active: false}} = state) do
+  def toggle_agentic_view(state) do
     activate_agentic_view(state)
   end
 
   @spec deactivate_agentic_view(state()) :: state()
   defp deactivate_agentic_view(state) do
-    # Mark the agentic view as inactive before snapshotting, so the
-    # saved context reflects "agent panel not visible".
-    state = %{state | agentic: %{state.agentic | active: false}}
-
+    # switch_tab handles deactivation: sync_from_editor -> deactivate_surface
+    # -> snapshot. The surface's deactivate callback sets active: false.
     case find_file_tab(state) do
       nil ->
         # No file tab yet (e.g., cold boot into agent mode). Create one
@@ -158,25 +156,24 @@ defmodule Minga.Editor.Commands.Agent do
   # Switches to an existing agent tab, re-activating its agentic view.
   @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
   defp switch_to_existing_agent_tab(state, agent_tab) do
-    # The agent tab's context has agentic.active == false (set during
-    # deactivation). Patch it to active before switching.
+    # The agent tab's stored surface state has agentic.active == false
+    # (set during deactivation). Patch it to active before switching.
     ctx = agent_tab.context
 
-    updated_agentic =
-      Map.get(ctx, :agentic, ViewState.new())
-      |> Map.put(:active, true)
-      |> Map.put(:focus, :chat)
-
-    ctx = Map.put(ctx, :agentic, updated_agentic)
-
-    # Also update the surface_state if present
     ctx =
       case Map.get(ctx, :surface_state) do
-        %AVState{} = av ->
+        %AVState{agentic: agentic} = av ->
+          updated_agentic = %{agentic | active: true, focus: :chat}
           Map.put(ctx, :surface_state, %{av | agentic: updated_agentic})
 
         _ ->
-          ctx
+          # Legacy context without surface_state: patch agentic directly
+          updated_agentic =
+            Map.get(ctx, :agentic, ViewState.new())
+            |> Map.put(:active, true)
+            |> Map.put(:focus, :chat)
+
+          Map.put(ctx, :agentic, updated_agentic)
       end
 
     tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
@@ -196,13 +193,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: agent, agentic: agentic, keymap_scope: :agent}
 
     %{
-      agentic: agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
@@ -386,13 +381,11 @@ defmodule Minga.Editor.Commands.Agent do
     temp_state = %{state | agent: fresh_agent, agentic: fresh_agentic, keymap_scope: :agent}
 
     agent_context = %{
-      agentic: fresh_agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: fresh_agent,
       active_buffer: state.buffers.active,
       active_buffer_index: state.buffers.active_index,
       surface_module: AgentView,
@@ -448,43 +441,40 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls the chat panel up by half the panel height."
   @spec scroll_chat_up(state()) :: state()
-  def scroll_chat_up(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_up(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_up(state)
+  end
+
+  defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_up(&1, amount))
   end
 
   @doc "Scrolls the chat panel down by half the panel height."
   @spec scroll_chat_down(state()) :: state()
-  def scroll_chat_down(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_down(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_down(state)
+  end
+
+  defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_down(&1, amount))
   end
 
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
-  def input_char(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state, _char),
-    do: state
-
   def input_char(state, char) do
-    update_agent(state, &AgentState.insert_char(&1, char))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
   @spec input_paste(state(), String.t()) :: state()
-  def input_paste(
-        %{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state,
-        _text
-      ),
-      do: state
-
   def input_paste(state, text) do
-    update_agent(state, &AgentState.insert_paste(&1, text))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
@@ -495,11 +485,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
-  def input_backspace(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def input_backspace(state) do
-    update_agent(state, &AgentState.delete_char/1)
+    if no_agent_ui?(state), do: state, else: update_agent(state, &AgentState.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
@@ -942,6 +929,13 @@ defmodule Minga.Editor.Commands.Agent do
   defdelegate open_code_block(state, language, content), to: AgentSession
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  # Returns true when neither the full-screen agent view nor the side panel
+  # is visible, meaning agent input/scroll commands should be no-ops.
+  @spec no_agent_ui?(state()) :: boolean()
+  defp no_agent_ui?(%{surface_module: AgentView}), do: false
+  defp no_agent_ui?(%{agent: %{panel: %{visible: true}}}), do: false
+  defp no_agent_ui?(_state), do: true
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do

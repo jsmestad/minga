@@ -91,4 +91,10 @@ defmodule Minga.Surface do
 
   @doc "Called when this surface is backgrounded (another tab activated)."
   @callback deactivate(state()) :: state()
+
+  @doc "Creates surface state from the current EditorState (bridge: editor -> surface)."
+  @callback from_editor_state(Minga.Editor.State.t()) :: state()
+
+  @doc "Writes surface state back onto EditorState (bridge: surface -> editor)."
+  @callback to_editor_state(Minga.Editor.State.t(), state()) :: Minga.Editor.State.t()
 end
