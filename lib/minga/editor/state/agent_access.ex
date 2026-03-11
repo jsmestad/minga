@@ -15,6 +15,7 @@ defmodule Minga.Editor.State.AgentAccess do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.TabBar
   alias Minga.Surface.AgentView.State, as: AVState
 
   @doc "Returns the agent state from the active surface or EditorState."
@@ -28,6 +29,36 @@ defmodule Minga.Editor.State.AgentAccess do
   def agentic(%EditorState{surface_state: %AVState{agentic: a}}), do: a
   def agentic(%EditorState{agentic: a}), do: a
   def agentic(%{agentic: a}), do: a
+
+  @doc """
+  Returns the agent state from the nearest agent tab's stored surface_state.
+
+  Used when the active surface is BufferView (editor scope with side panel)
+  and agent state isn't on the live EditorState. Falls back to a default
+  AgentState if no agent tab exists.
+  """
+  @spec agent_from_tab(EditorState.t()) :: AgentState.t()
+  def agent_from_tab(%EditorState{tab_bar: %TabBar{} = tb}) do
+    case TabBar.find_by_kind(tb, :agent) do
+      %{context: %{surface_state: %AVState{agent: a}}} -> a
+      _ -> %AgentState{}
+    end
+  end
+
+  def agent_from_tab(_), do: %AgentState{}
+
+  @doc """
+  Returns the agentic view state from the nearest agent tab's stored surface_state.
+  """
+  @spec agentic_from_tab(EditorState.t()) :: ViewState.t()
+  def agentic_from_tab(%EditorState{tab_bar: %TabBar{} = tb}) do
+    case TabBar.find_by_kind(tb, :agent) do
+      %{context: %{surface_state: %AVState{agentic: a}}} -> a
+      _ -> ViewState.new()
+    end
+  end
+
+  def agentic_from_tab(_), do: ViewState.new()
 
   @doc "Updates agent state on both EditorState and surface_state."
   @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
