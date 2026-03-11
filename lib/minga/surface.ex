@@ -43,11 +43,15 @@ defmodule Minga.Surface do
   """
   @type effect ::
           :render
+          | {:render, delay_ms :: pos_integer()}
           | {:open_file, String.t()}
           | {:switch_buffer, pid()}
           | {:set_status, String.t()}
           | {:push_overlay, module()}
           | {:pop_overlay, module()}
+          | {:log_message, String.t()}
+          | :sync_agent_buffer
+          | {:update_tab_label, String.t()}
 
   @doc "Returns the keymap scope name for this surface."
   @callback scope() :: Minga.Keymap.Scope.scope_name()

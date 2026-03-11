@@ -19,9 +19,13 @@ defmodule Minga.Surface.AgentView do
 
   @behaviour Minga.Surface
 
+  alias Minga.Agent.DiffReview
+  alias Minga.Agent.View.Preview
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
   alias Minga.Mode
@@ -126,15 +130,178 @@ defmodule Minga.Surface.AgentView do
   @doc """
   Handles domain-specific events for the agent view.
 
-  Events include agent_event messages (status_changed, text_delta,
-  tool_started, etc.). During Phase 2, these are still handled by
-  `Editor.handle_info` clauses and the bridge syncs the state
-  changes back to the surface.
+  Processes agent_event messages (status_changed, text_delta,
+  tool_started, etc.) and returns updated state with effects.
   """
   @impl Minga.Surface
   @spec handle_event(AVState.t(), term()) :: {AVState.t(), [Minga.Surface.effect()]}
-  def handle_event(%AVState{} = av_state, _event) do
-    {av_state, []}
+
+  def handle_event(%AVState{} = av, {:status_changed, status}) do
+    av = update_agent(av, &AgentState.set_status(&1, status))
+
+    {av, effects} =
+      case status do
+        :error ->
+          {av, [{:log_message, "Agent: error"}]}
+
+        :thinking ->
+          {update_agent(av, &AgentState.engage_auto_scroll/1), []}
+
+        _ ->
+          {av, []}
+      end
+
+    av =
+      case status do
+        s when s in [:thinking, :tool_executing] ->
+          update_agent(av, &AgentState.start_spinner_timer/1)
+
+        _ ->
+          update_agent(av, &AgentState.stop_spinner_timer/1)
+      end
+
+    {av, [:render | effects]}
+  end
+
+  def handle_event(%AVState{} = av, {:text_delta, _delta}) do
+    av = update_agent(av, &AgentState.maybe_auto_scroll/1)
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:thinking_delta, _delta}) do
+    av = update_agent(av, &AgentState.maybe_auto_scroll/1)
+    {av, [{:render, 50}]}
+  end
+
+  def handle_event(%AVState{} = av, :messages_changed) do
+    av = update_agent(av, &AgentState.maybe_auto_scroll/1)
+    {av, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_started, "shell", args}) do
+    command = Map.get(args, "command", "")
+    av = update_preview(av, &Preview.set_shell(&1, command))
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_update, _id, "shell", partial}) do
+    av = update_agent(av, &AgentState.maybe_auto_scroll/1)
+    av = update_preview(av, &Preview.update_shell_output(&1, partial))
+    {av, [{:render, 50}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_update, _id, _name, _partial}) do
+    av = update_agent(av, &AgentState.maybe_auto_scroll/1)
+    {av, [{:render, 50}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_ended, "shell", result, status}) do
+    shell_status = if status == :error, do: :error, else: :done
+    av = update_preview(av, &Preview.finish_shell(&1, result, shell_status))
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_started, "read_file", args}) do
+    path = Map.get(args, "path", "")
+    av = update_preview(av, &Preview.set_file(&1, path, ""))
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_ended, "read_file", result, _status}) do
+    case av.agentic.preview.content do
+      {:file, path, _} ->
+        av = update_preview(av, &Preview.set_file(&1, path, result))
+        {av, [{:render, 16}]}
+
+      _ ->
+        {av, []}
+    end
+  end
+
+  def handle_event(%AVState{} = av, {:tool_started, "list_directory", args}) do
+    path = Map.get(args, "path", ".")
+    av = update_preview(av, &Preview.set_directory(&1, path, []))
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_ended, "list_directory", result, _status}) do
+    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+
+    case av.agentic.preview.content do
+      {:directory, path, _} ->
+        av = update_preview(av, &Preview.set_directory(&1, path, entries))
+        {av, [{:render, 16}]}
+
+      _ ->
+        {av, []}
+    end
+  end
+
+  def handle_event(%AVState{} = av, {:tool_started, _name, _args}) do
+    {av, []}
+  end
+
+  def handle_event(%AVState{} = av, {:tool_ended, _name, _result, _status}) do
+    {av, []}
+  end
+
+  def handle_event(%AVState{} = av, {:file_changed, path, before_content, after_content}) do
+    av = %{av | agentic: ViewState.record_baseline(av.agentic, path, before_content)}
+    baseline = ViewState.get_baseline(av.agentic, path)
+
+    existing_review = existing_diff_for_path(av, path)
+
+    review =
+      case existing_review do
+        nil -> DiffReview.new(path, baseline, after_content)
+        existing -> DiffReview.update_after(existing, after_content)
+      end
+
+    case review do
+      nil ->
+        {av, [{:render, 16}]}
+
+      _ ->
+        av = update_preview(av, &Preview.set_diff(&1, review))
+        av = %{av | agentic: ViewState.set_focus(av.agentic, :file_viewer)}
+        {av, [:render]}
+    end
+  end
+
+  def handle_event(%AVState{} = av, {:approval_pending, approval}) do
+    cached = Map.take(approval, [:tool_call_id, :name, :args])
+    av = update_agent(av, &AgentState.set_pending_approval(&1, cached))
+    {av, [:render]}
+  end
+
+  def handle_event(%AVState{} = av, {:approval_resolved, _decision}) do
+    av = update_agent(av, &AgentState.clear_pending_approval/1)
+    {av, [{:render, 16}]}
+  end
+
+  def handle_event(%AVState{} = av, {:error, message}) do
+    av = update_agent(av, &AgentState.set_error(&1, message))
+    {av, [:render, {:log_message, "Agent error: #{message}"}]}
+  end
+
+  def handle_event(%AVState{} = av, :spinner_tick) do
+    if AgentState.busy?(av.agent) do
+      av = update_agent(av, &AgentState.tick_spinner/1)
+      {av, [{:render, 16}]}
+    else
+      av = update_agent(av, &AgentState.stop_spinner_timer/1)
+      {av, []}
+    end
+  end
+
+  def handle_event(%AVState{} = av, :dismiss_toast) do
+    av = %{av | agentic: ViewState.dismiss_toast(av.agentic)}
+    effects = if ViewState.toast_visible?(av.agentic), do: [{:render, 16}], else: [{:render, 16}]
+    {av, effects}
+  end
+
+  def handle_event(%AVState{} = av, _unknown) do
+    {av, []}
   end
 
   @doc """
@@ -219,6 +386,24 @@ defmodule Minga.Surface.AgentView do
     else
       {:cont, state}
     end
+  end
+
+  @spec existing_diff_for_path(AVState.t(), String.t()) :: DiffReview.t() | nil
+  defp existing_diff_for_path(%AVState{agentic: agentic}, path) do
+    case Preview.diff_review(agentic.preview) do
+      %DiffReview{path: ^path} = review -> review
+      _ -> nil
+    end
+  end
+
+  @spec update_agent(AVState.t(), (AgentState.t() -> AgentState.t())) :: AVState.t()
+  defp update_agent(%AVState{} = av, fun) do
+    %{av | agent: fun.(av.agent)}
+  end
+
+  @spec update_preview(AVState.t(), (Preview.t() -> Preview.t())) :: AVState.t()
+  defp update_preview(%AVState{} = av, fun) do
+    %{av | agentic: ViewState.update_preview(av.agentic, fun)}
   end
 
   # Builds an EditorState from the AgentView state and its shared context.
