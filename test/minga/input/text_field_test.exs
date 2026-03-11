@@ -397,4 +397,105 @@ defmodule Minga.Input.TextFieldTest do
       assert tf.cursor == {1, 5}
     end
   end
+
+  describe "get_range/3" do
+    test "extracts text within a single line" do
+      tf = TextField.new("hello world")
+      assert TextField.get_range(tf, {0, 0}, {0, 5}) == "hello"
+    end
+
+    test "extracts text across lines" do
+      tf = TextField.new("hello\nworld")
+      assert TextField.get_range(tf, {0, 3}, {1, 2}) == "lo\nwo"
+    end
+
+    test "handles reversed positions" do
+      tf = TextField.new("hello world")
+      assert TextField.get_range(tf, {0, 5}, {0, 0}) == "hello"
+    end
+
+    test "returns empty string for same position" do
+      tf = TextField.new("hello")
+      assert TextField.get_range(tf, {0, 2}, {0, 2}) == ""
+    end
+  end
+
+  describe "delete_range/3" do
+    test "deletes within a single line" do
+      tf = TextField.new("hello world")
+      {tf, deleted} = TextField.delete_range(tf, {0, 0}, {0, 5})
+      assert deleted == "hello"
+      assert TextField.content(tf) == " world"
+      assert tf.cursor == {0, 0}
+    end
+
+    test "deletes across lines" do
+      tf = TextField.new("hello\nworld\nfoo")
+      {tf, deleted} = TextField.delete_range(tf, {0, 3}, {1, 3})
+      assert deleted == "lo\nwor"
+      assert TextField.content(tf) == "helld\nfoo"
+      assert tf.cursor == {0, 3}
+    end
+
+    test "deletes entire content" do
+      tf = TextField.new("hello")
+      {tf, deleted} = TextField.delete_range(tf, {0, 0}, {0, 5})
+      assert deleted == "hello"
+      assert TextField.content(tf) == ""
+      assert tf.cursor == {0, 0}
+    end
+  end
+
+  describe "delete_line/2" do
+    test "deletes a middle line" do
+      tf = TextField.new("one\ntwo\nthree")
+      {tf, deleted} = TextField.delete_line(tf, 1)
+      assert deleted == "two"
+      assert tf.lines == ["one", "three"]
+      assert tf.cursor == {1, 0}
+    end
+
+    test "deletes the last line" do
+      tf = TextField.new("one\ntwo")
+      {tf, deleted} = TextField.delete_line(tf, 1)
+      assert deleted == "two"
+      assert tf.lines == ["one"]
+      assert tf.cursor == {0, 0}
+    end
+
+    test "clears the only line" do
+      tf = TextField.new("hello")
+      {tf, deleted} = TextField.delete_line(tf, 0)
+      assert deleted == "hello"
+      assert tf.lines == [""]
+      assert tf.cursor == {0, 0}
+    end
+
+    test "out of range returns unchanged" do
+      tf = TextField.new("hello")
+      {tf2, deleted} = TextField.delete_line(tf, 5)
+      assert deleted == ""
+      assert tf2 == tf
+    end
+  end
+
+  describe "replace_range/4" do
+    test "replaces within a single line" do
+      tf = TextField.new("hello world")
+      tf = TextField.replace_range(tf, {0, 0}, {0, 5}, "goodbye")
+      assert TextField.content(tf) == "goodbye world"
+    end
+
+    test "replaces across lines with single line" do
+      tf = TextField.new("hello\nworld")
+      tf = TextField.replace_range(tf, {0, 3}, {1, 3}, "XY")
+      assert TextField.content(tf) == "helXYld"
+    end
+
+    test "replaces with multi-line text" do
+      tf = TextField.new("hello world")
+      tf = TextField.replace_range(tf, {0, 5}, {0, 5}, "\nnew\n")
+      assert TextField.content(tf) == "hello\nnew\n world"
+    end
+  end
 end

@@ -207,8 +207,8 @@ defmodule Minga.Input.Scoped do
     end
   end
 
-  defp handle_agent_key(%{agent: %{panel: %{input_focused: true}}} = state, cp, mods) do
-    resolve_agent_key(state, :insert, cp, mods)
+  defp handle_agent_key(%{agent: %{panel: %{input_focused: true, input_mode: mode}}} = state, cp, mods) do
+    resolve_agent_key(state, vim_state_for_input_mode(mode), cp, mods)
   end
 
   defp handle_agent_key(state, cp, mods) do
@@ -286,6 +286,15 @@ defmodule Minga.Input.Scoped do
         end
     end
   end
+
+  # Maps input_mode to the scope vim_state used for trie lookup.
+  # Visual and operator-pending use the input_normal bindings.
+  @spec vim_state_for_input_mode(PanelState.input_mode()) :: Scope.vim_state()
+  defp vim_state_for_input_mode(:insert), do: :insert
+  defp vim_state_for_input_mode(:normal), do: :input_normal
+  defp vim_state_for_input_mode(:visual), do: :input_normal
+  defp vim_state_for_input_mode(:visual_line), do: :input_normal
+  defp vim_state_for_input_mode(:operator_pending), do: :input_normal
 
   # ── Agent self-insert (insert mode, printable chars) ───────────────────────
 

@@ -115,8 +115,8 @@ defmodule Minga.Keymap.ScopeTest do
       assert {:command, :agent_toggle_help} = Scope.resolve_key(:agent, :normal, {??, 0})
     end
 
-    test "ESC resolves to agent_unfocus_input in insert mode" do
-      assert {:command, :agent_unfocus_input} = Scope.resolve_key(:agent, :insert, {27, 0})
+    test "ESC resolves to agent_input_to_normal in insert mode" do
+      assert {:command, :agent_input_to_normal} = Scope.resolve_key(:agent, :insert, {27, 0})
     end
 
     test "Enter resolves to agent_submit_or_newline in insert mode" do

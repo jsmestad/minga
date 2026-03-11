@@ -21,6 +21,12 @@ defmodule Minga.Agent.PanelState do
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
   @type paste_block :: %{text: String.t(), expanded: boolean()}
 
+  @typedoc "Vim mode for the input field when focused."
+  @type input_mode :: :insert | :normal | :visual | :visual_line | :operator_pending
+
+  @typedoc "Pending operator waiting for a motion (e.g., after pressing `d`)."
+  @type pending_operator :: :delete | :change | :yank | nil
+
   @typedoc "Agent panel UI state."
   @type t :: %__MODULE__{
           visible: boolean(),
@@ -33,6 +39,10 @@ defmodule Minga.Agent.PanelState do
           model_name: String.t(),
           thinking_level: thinking_level(),
           input_focused: boolean(),
+          input_mode: input_mode(),
+          pending_operator: pending_operator(),
+          visual_anchor: TextField.cursor() | nil,
+          input_register: String.t(),
           display_start_index: non_neg_integer(),
           mention_completion: Minga.Agent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()]
@@ -58,6 +68,10 @@ defmodule Minga.Agent.PanelState do
             model_name: "claude-sonnet-4",
             thinking_level: "medium",
             input_focused: false,
+            input_mode: :insert,
+            pending_operator: nil,
+            visual_anchor: nil,
+            input_register: "",
             display_start_index: 0,
             mention_completion: nil,
             pasted_blocks: []
@@ -304,10 +318,44 @@ defmodule Minga.Agent.PanelState do
     %{state | scroll: Scroll.pin_to_bottom(state.scroll)}
   end
 
-  @doc "Sets the input focus state."
+  @doc "Sets the input focus state. Entering focus starts in insert mode; leaving clears vim state."
   @spec set_input_focused(t(), boolean()) :: t()
-  def set_input_focused(%__MODULE__{} = state, focused) do
-    %{state | input_focused: focused}
+  def set_input_focused(%__MODULE__{} = state, true) do
+    %{state | input_focused: true, input_mode: :insert, pending_operator: nil, visual_anchor: nil}
+  end
+
+  def set_input_focused(%__MODULE__{} = state, false) do
+    %{state | input_focused: false, input_mode: :insert, pending_operator: nil, visual_anchor: nil}
+  end
+
+  @doc "Switches the input vim mode. Resets operator/visual state on mode change."
+  @spec set_input_mode(t(), input_mode()) :: t()
+  def set_input_mode(%__MODULE__{} = state, :normal) do
+    %{state | input_mode: :normal, pending_operator: nil, visual_anchor: nil}
+  end
+
+  def set_input_mode(%__MODULE__{} = state, :insert) do
+    %{state | input_mode: :insert, pending_operator: nil, visual_anchor: nil}
+  end
+
+  def set_input_mode(%__MODULE__{} = state, :visual) do
+    {line, col} = state.input.cursor
+    %{state | input_mode: :visual, pending_operator: nil, visual_anchor: {line, col}}
+  end
+
+  def set_input_mode(%__MODULE__{} = state, :visual_line) do
+    {line, _} = state.input.cursor
+    %{state | input_mode: :visual_line, pending_operator: nil, visual_anchor: {line, 0}}
+  end
+
+  def set_input_mode(%__MODULE__{} = state, :operator_pending) do
+    %{state | input_mode: :operator_pending}
+  end
+
+  @doc "Sets the pending operator for operator-pending mode."
+  @spec set_pending_operator(t(), pending_operator()) :: t()
+  def set_pending_operator(%__MODULE__{} = state, op) do
+    %{state | pending_operator: op, input_mode: :operator_pending}
   end
 
   @doc "Returns the number of input lines."

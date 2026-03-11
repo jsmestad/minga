@@ -39,7 +39,7 @@ defmodule Minga.Keymap.Scope do
   @type scope_name :: :editor | :agent | :file_tree
 
   @typedoc "Vim state relevant to scope resolution."
-  @type vim_state :: :normal | :insert
+  @type vim_state :: :normal | :insert | :input_normal
 
   @typedoc "A single help binding: `{key_string, description}`."
   @type help_binding :: {String.t(), String.t()}
