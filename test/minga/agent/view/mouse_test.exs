@@ -7,8 +7,10 @@ defmodule Minga.Agent.View.MouseTest do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Mouse, as: MouseState
   alias Minga.Editor.Viewport
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # Build a minimal editor state that looks like an active agentic view.
   defp agentic_state(opts \\ []) do
@@ -21,16 +23,20 @@ defmodule Minga.Agent.View.MouseTest do
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
-      agentic: %ViewState{
-        active: true,
-        focus: focus,
-        chat_width_pct: chat_width_pct
-      },
-      agent: %AgentState{
-        panel: %PanelState{
-          visible: false,
-          input_focused: input_focused
-        }
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agentic: %ViewState{
+          active: true,
+          focus: focus,
+          chat_width_pct: chat_width_pct
+        },
+        agent: %AgentState{
+          panel: %PanelState{
+            visible: false,
+            input_focused: input_focused
+          }
+        },
+        context: nil
       },
       mouse: %MouseState{},
       buffers: %{active: nil, list: [], active_index: 0}
@@ -72,13 +78,13 @@ defmodule Minga.Agent.View.MouseTest do
     test "clicking chat panel focuses it" do
       state = agentic_state(focus: :file_viewer)
       new_state = handled!(Mouse.handle(state, 5, 10, :left, 0, :press, 1))
-      assert new_state.agentic.focus == :chat
+      assert AgentAccess.agentic(new_state).focus == :chat
     end
 
     test "clicking file viewer panel focuses it" do
       state = agentic_state(focus: :chat)
       new_state = handled!(Mouse.handle(state, 5, 50, :left, 0, :press, 1))
-      assert new_state.agentic.focus == :file_viewer
+      assert AgentAccess.agentic(new_state).focus == :file_viewer
     end
 
     test "clicking input area in left column focuses input" do
@@ -86,7 +92,7 @@ defmodule Minga.Agent.View.MouseTest do
       # With rows=30: modeline at 28, panel_height=26, input_height=3,
       # chat_height=23, input_row = 2 + 23 = 25. Click within left column.
       new_state = handled!(Mouse.handle(state, 25, 10, :left, 0, :press, 1))
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "clicking right column at input row height does NOT focus input" do
@@ -94,14 +100,14 @@ defmodule Minga.Agent.View.MouseTest do
       # Same row 25, but in the right column (col 50 with 50% split of 80 cols)
       # sep_col = 40, so col 50 is in the file_viewer region.
       new_state = handled!(Mouse.handle(state, 25, 50, :left, 0, :press, 1))
-      assert new_state.agent.panel.input_focused == false
-      assert new_state.agentic.focus == :file_viewer
+      assert AgentAccess.input_focused?(new_state) == false
+      assert AgentAccess.agentic(new_state).focus == :file_viewer
     end
 
     test "clicking chat unfocuses input" do
       state = agentic_state(input_focused: true)
       new_state = handled!(Mouse.handle(state, 5, 10, :left, 0, :press, 1))
-      assert new_state.agent.panel.input_focused == false
+      assert AgentAccess.input_focused?(new_state) == false
     end
   end
 
@@ -118,7 +124,7 @@ defmodule Minga.Agent.View.MouseTest do
       state = handled!(Mouse.handle(state, 5, 40, :left, 0, :press, 1))
       # Drag to col 60 (75% of 80)
       new_state = handled!(Mouse.handle(state, 5, 60, :left, 0, :drag, 1))
-      assert new_state.agentic.chat_width_pct == 75
+      assert AgentAccess.agentic(new_state).chat_width_pct == 75
     end
 
     test "separator drag clamps to 30-80% range" do
@@ -126,7 +132,7 @@ defmodule Minga.Agent.View.MouseTest do
       state = handled!(Mouse.handle(state, 5, 40, :left, 0, :press, 1))
       # Try to drag to col 5 (6.25%) - should clamp to 30%
       new_state = handled!(Mouse.handle(state, 5, 5, :left, 0, :drag, 1))
-      assert new_state.agentic.chat_width_pct == 30
+      assert AgentAccess.agentic(new_state).chat_width_pct == 30
     end
 
     test "releasing after drag stops resize" do

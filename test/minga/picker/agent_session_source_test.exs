@@ -12,6 +12,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Picker.AgentSessionSource
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   describe "title/0" do
     test "returns Sessions" do
@@ -159,17 +160,24 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
+    agent = %AgentState{session: session_pid, status: :idle, panel: PanelState.new()}
+    agentic = %ViewState{active: true, focus: :chat}
+
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
       tab_bar: tb,
       buffers: %Buffers{},
-      agentic: %ViewState{active: true, focus: :chat},
       windows: %Windows{},
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :agent,
-      agent: %AgentState{session: session_pid, status: :idle, panel: PanelState.new()},
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       file_tree: nil
     }
   end
@@ -183,17 +191,24 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # First agent tab is active
     tb = TabBar.switch_to(tb, tab1.id)
 
+    agent = %AgentState{session: session1, status: :idle, panel: PanelState.new()}
+    agentic = %ViewState{active: true, focus: :chat}
+
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
       tab_bar: tb,
       buffers: %Buffers{},
-      agentic: %ViewState{active: true, focus: :chat},
       windows: %Windows{},
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :agent,
-      agent: %AgentState{session: session1, status: :idle, panel: PanelState.new()},
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       file_tree: nil
     }
   end
@@ -219,17 +234,24 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # File tab (1) is active
     tb = TabBar.switch_to(tb, 1)
 
+    agent = %AgentState{panel: PanelState.new()}
+    agentic = %ViewState{}
+
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
       tab_bar: tb,
       buffers: %Buffers{},
-      agentic: %ViewState{},
       windows: %Windows{},
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :editor,
-      agent: %AgentState{panel: PanelState.new()},
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       file_tree: nil
     }
   end

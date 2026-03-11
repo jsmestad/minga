@@ -3,12 +3,15 @@ defmodule Minga.Input.AgentPanelNavTest do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -36,16 +39,25 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     panel = %{PanelState.new() | visible: true, input_focused: false}
 
+    agent = %AgentState{
+      panel: panel,
+      buffer: buf,
+      session: nil,
+      status: :idle,
+      error: nil,
+      spinner_timer: nil
+    }
+
+    agentic = %ViewState{}
+
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      agent: %AgentState{
-        panel: panel,
-        buffer: buf,
-        session: nil,
-        status: :idle,
-        error: nil,
-        spinner_timer: nil
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
       },
       buffers: %{active: nil, list: [], recent: []},
       mode: :normal,
@@ -64,7 +76,7 @@ defmodule Minga.Input.AgentPanelNavTest do
   describe "agent panel navigation mode (via Scoped)" do
     test "k moves cursor up in agent buffer" do
       state = make_state()
-      buf = state.agent.buffer
+      buf = AgentAccess.agent(state).buffer
 
       # Cursor starts at end (auto-scroll from sync)
       {start_line, _} = BufferServer.cursor(buf)
@@ -80,18 +92,18 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       {:handled, new_state} = walk_surface_handlers(state, ?i, 0)
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "passthrough when panel not visible" do
       state = make_state()
-      state = put_in(state.agent.panel.visible, false)
+      state = AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.visible, false) end)
       {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
 
     test "passthrough when no buffer" do
       state = make_state()
-      state = put_in(state.agent.buffer, nil)
+      state = AgentAccess.update_agent(state, fn agent -> %{agent | buffer: nil} end)
       {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
 
@@ -101,12 +113,12 @@ defmodule Minga.Input.AgentPanelNavTest do
       {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
       # toggle_panel on a non-input-focused panel will focus input
       # (the first toggle re-focuses, second one closes)
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "j moves cursor down in agent buffer" do
       state = make_state()
-      buf = state.agent.buffer
+      buf = AgentAccess.agent(state).buffer
 
       # Move cursor to top first
       {_, _} = BufferServer.cursor(buf)
@@ -126,24 +138,30 @@ defmodule Minga.Input.AgentPanelNavTest do
   describe "agent panel input mode (via Scoped)" do
     test "Escape switches to input normal mode" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert new_state.agent.panel.input_focused == true
-      assert PanelState.input_mode(new_state.agent.panel) == :normal
+      assert AgentAccess.input_focused?(new_state) == true
+      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
     end
 
     test "input mode intercepts printable chars" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
-      assert PanelState.input_text(new_state.agent.panel) =~ "a"
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "a"
     end
 
     test "Ctrl+D scrolls chat while in input mode" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?d, 0x02)
       # Doesn't crash; scroll may or may not change depending on content
@@ -151,32 +169,40 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     test "Ctrl+U scrolls chat up while in input mode" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?u, 0x02)
     end
 
     test "Enter submits prompt (empty is no-op)" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, 13, 0)
       # Empty prompt is a no-op
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "Shift+Enter inserts newline" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
-      assert length(new_state.agent.panel.input.lines) > 1
+      assert length(AgentAccess.panel(new_state).input.lines) > 1
     end
 
     test "Backspace on empty input is safe" do
       state = make_state()
-      state = put_in(state.agent.panel.input_focused, true)
+
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, 127, 0)
     end

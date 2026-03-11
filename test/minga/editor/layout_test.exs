@@ -2,13 +2,18 @@ defmodule Minga.Editor.LayoutTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.FileTree
   alias Minga.Mode
+  alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,7 +46,22 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   defp with_agent_panel(state) do
-    put_in(state.agent.panel.visible, true)
+    default_panel = %AgentState{} |> Map.get(:panel)
+    agent = %AgentState{panel: %{default_panel | visible: true}}
+    av = %AgentViewState{agent: agent, agentic: ViewState.new()}
+    agent_ctx = %{surface_module: AgentView, surface_state: av, keymap_scope: :agent}
+
+    # Ensure a file tab exists and is active, then add a background agent tab.
+    # TabBar.new/1 requires an initial Tab; we start with a file tab.
+    file_tab = %Minga.Editor.State.Tab{id: 1, kind: :file, label: "scratch"}
+    tb = state.tab_bar || TabBar.new(file_tab)
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+    tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
+
+    # Keep the file tab active
+    tb = TabBar.switch_to(tb, file_tab.id)
+
+    %{state | tab_bar: tb}
   end
 
   defp with_vsplit(state) do

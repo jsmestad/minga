@@ -276,11 +276,18 @@ defmodule Minga.Editor.RenderPipeline do
     # Cache scroll metrics in PanelState. This runs every frame, so the
     # cache is always fresh when the next scroll command executes.
     state =
-      update_in(
-        state,
-        [Access.key!(:agent), Access.key!(:panel), Access.key!(:scroll)],
-        &Scroll.update_metrics(&1, scroll_metrics.total_lines, scroll_metrics.visible_height)
-      )
+      AgentAccess.update_agent(state, fn agent ->
+        panel = agent.panel
+
+        scroll =
+          Scroll.update_metrics(
+            panel.scroll,
+            scroll_metrics.total_lines,
+            scroll_metrics.visible_height
+          )
+
+        %{agent | panel: %{panel | scroll: scroll}}
+      end)
 
     chrome = timed(:chrome, fn -> build_chrome_agentic(state, layout) end)
 

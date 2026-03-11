@@ -4,6 +4,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.{Tab, TabBar}
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
@@ -53,12 +54,15 @@ defmodule Minga.Editor.State.EventRoutingTest do
       viewport: Viewport.new(24, 80),
       tab_bar: tb,
       buffers: %EditorState.Buffers{list: [], active: nil, active_index: 0},
-      agentic: %ViewState{active: true, focus: :chat},
       windows: %Windows{},
       mode: :normal,
       mode_state: %{},
       keymap_scope: :agent,
-      agent: %AgentState{session: session1, status: :idle},
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: %AgentState{session: session1, status: :idle},
+        agentic: %ViewState{active: true, focus: :chat}
+      },
       file_tree: nil
     }
 
@@ -94,12 +98,15 @@ defmodule Minga.Editor.State.EventRoutingTest do
         viewport: Viewport.new(24, 80),
         tab_bar: nil,
         buffers: %EditorState.Buffers{},
-        agentic: %ViewState{},
         windows: %Windows{},
         mode: :normal,
         mode_state: %{},
         keymap_scope: :editor,
-        agent: %AgentState{},
+        surface_module: Minga.Surface.AgentView,
+        surface_state: %AgentViewState{
+          agent: %AgentState{},
+          agentic: %ViewState{}
+        },
         file_tree: nil
       }
 
@@ -124,7 +131,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
       state =
         EditorState.update_background_agent(state, tab_id, &AgentState.set_status(&1, :thinking))
 
-      assert state.agent.status == :idle
+      assert AgentAccess.agent(state).status == :idle
     end
   end
 

@@ -3,16 +3,19 @@ defmodule Minga.Input.FileTreeNavTest do
 
   @moduletag :tmp_dir
 
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Input.FileTreeHandler
   alias Minga.Mode
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -33,6 +36,9 @@ defmodule Minga.Input.FileTreeNavTest do
     tree = FileTree.new(tmp_dir)
     buf = BufferSync.start_buffer(tree)
 
+    agent = %AgentState{}
+    agentic = %ViewState{}
+
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
@@ -44,7 +50,12 @@ defmodule Minga.Input.FileTreeNavTest do
       marks: %{},
       change_recorder: ChangeRecorder.new(),
       macro_recorder: MacroRecorder.new(),
-      agent: %Minga.Editor.State.Agent{},
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       completion: nil,
       keymap_scope: :file_tree,
       focus_stack: [Scoped, Minga.Input.ModeFSM]

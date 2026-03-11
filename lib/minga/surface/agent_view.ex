@@ -417,9 +417,9 @@ defmodule Minga.Surface.AgentView do
   @spec reconstruct_editor_state(AgentViewState.t()) :: EditorState.t()
   defp reconstruct_editor_state(%AgentViewState{context: %Context{} = ctx} = av) do
     %EditorState{
-      # Agent-view owned fields
-      agent: av.agent,
-      agentic: av.agentic,
+      # Agent-view state is carried as surface_state so AgentAccess can find it
+      surface_module: Minga.Surface.AgentView,
+      surface_state: av,
       # Shared context fields
       port_manager: ctx.port_manager,
       theme: ctx.theme,

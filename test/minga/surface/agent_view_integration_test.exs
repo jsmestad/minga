@@ -15,6 +15,7 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -33,39 +34,40 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
 
     tab_bar = TabBar.new(Tab.new_file(1, "test.ex"))
 
+    windows = %Windows{
+      tree: nil,
+      map: %{1 => Window.new(1, buf, 24, 80)},
+      active: 1,
+      next_id: 2
+    }
+
+    # Create a base EditorState for the bridge (without agent/agentic in constructor)
+    base_for_bridge = %EditorState{
+      port_manager: nil,
+      viewport: Viewport.new(24, 80),
+      mode: :normal,
+      mode_state: Mode.initial_state(),
+      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+      windows: windows,
+      surface_module: BufferView,
+      surface_state: %AgentViewState{
+        agent: %AgentState{},
+        agentic: %ViewState{},
+        context: nil
+      }
+    }
+
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
       mode: :normal,
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-      windows: %Windows{
-        tree: nil,
-        map: %{1 => Window.new(1, buf, 24, 80)},
-        active: 1,
-        next_id: 2
-      },
-      agent: %AgentState{},
-      agentic: %ViewState{},
+      windows: windows,
       tab_bar: tab_bar,
       focus_stack: Input.default_stack(),
       surface_module: BufferView,
-      surface_state:
-        BVBridge.from_editor_state(%EditorState{
-          port_manager: nil,
-          viewport: Viewport.new(24, 80),
-          mode: :normal,
-          mode_state: Mode.initial_state(),
-          buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-          windows: %Windows{
-            tree: nil,
-            map: %{1 => Window.new(1, buf, 24, 80)},
-            active: 1,
-            next_id: 2
-          },
-          agent: %AgentState{},
-          agentic: %ViewState{}
-        })
+      surface_state: BVBridge.from_editor_state(base_for_bridge)
     }
   end
 
@@ -126,7 +128,7 @@ defmodule Minga.Surface.AgentViewIntegrationTest do
 
       # Modify agent state
       modified = AgentCommands.input_char(with_agent, "x")
-      assert PanelState.input_text(modified.agent.panel) == "x"
+      assert PanelState.input_text(AgentAccess.panel(modified)) == "x"
 
       # Switch to file tab
       file_tabs = TabBar.filter_by_kind(modified.tab_bar, :file)

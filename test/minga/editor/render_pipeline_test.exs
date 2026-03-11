@@ -8,7 +8,6 @@ defmodule Minga.Editor.RenderPipelineTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, WindowFrame}
@@ -16,7 +15,7 @@ defmodule Minga.Editor.RenderPipelineTest do
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.RenderPipeline.{Chrome, WindowScroll}
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.{Agent, Buffers, Highlighting, Windows}
+  alias Minga.Editor.State.{Buffers, Highlighting, Windows}
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -48,30 +47,8 @@ defmodule Minga.Editor.RenderPipelineTest do
         next_id: win_id + 1
       },
       focus_stack: Input.default_stack(),
-      agent: %Agent{
-        session: nil,
-        status: nil,
-        panel: %Minga.Agent.PanelState{
-          visible: false,
-          input_focused: false,
-          scroll: Minga.Scroll.new(),
-          spinner_frame: 0,
-          provider_name: "anthropic",
-          model_name: "claude-sonnet-4",
-          thinking_level: "medium"
-        },
-        error: nil,
-        spinner_timer: nil,
-        buffer: nil
-      },
-      agentic: %Minga.Agent.View.State{
-        active: false,
-        focus: :chat,
-        preview: Preview.new(),
-        saved_windows: nil,
-        pending_prefix: nil,
-        saved_file_tree: nil
-      },
+      surface_module: Minga.Surface.BufferView,
+      surface_state: nil,
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
     }

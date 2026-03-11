@@ -1,17 +1,15 @@
 defmodule Minga.Surface.AgentView.Bridge do
   @moduledoc """
-  Temporary bridge between `EditorState` and `AgentView.State`.
+  Bridge between `EditorState` and `AgentView.State`.
 
-  During Phase 2 of the Surface extraction, the Editor still owns the
-  `agent` and `agentic` fields on EditorState. This module copies them
-  into an `AgentView.State` struct before each surface call and writes
-  the results back afterward.
-
-  This dual-ownership is scaffolding that goes away when EditorState
-  shrinks and surfaces own their state directly.
+  Builds an `AgentView.State` from the current `EditorState` for surface
+  callbacks, and writes context changes back afterward. Agent-specific
+  fields (`agent`, `agentic`) are read from `AgentAccess` (which checks
+  `surface_state` first, then falls back to background tabs).
   """
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.Context
 
@@ -21,8 +19,8 @@ defmodule Minga.Surface.AgentView.Bridge do
   @spec from_editor_state(EditorState.t()) :: AgentViewState.t()
   def from_editor_state(%EditorState{} = es) do
     %AgentViewState{
-      agent: es.agent,
-      agentic: es.agentic,
+      agent: AgentAccess.agent(es),
+      agentic: AgentAccess.agentic(es),
       context: Context.from_editor_state(es)
     }
   end
@@ -30,17 +28,12 @@ defmodule Minga.Surface.AgentView.Bridge do
   @doc """
   Writes `AgentView.State` fields back onto the `EditorState`.
 
-  Only overwrites the fields that AgentView owns (agent, agentic).
-  Buffer-related fields, shared infrastructure, and transient fields
-  are untouched.
+  Updates the `surface_state` with the new AgentViewState and writes any
+  context changes (layout cache, click regions) back to EditorState.
   """
   @spec to_editor_state(EditorState.t(), AgentViewState.t()) :: EditorState.t()
   def to_editor_state(%EditorState{} = es, %AgentViewState{} = av) do
-    es = %{
-      es
-      | agent: av.agent,
-        agentic: av.agentic
-    }
+    es = %{es | surface_state: av}
 
     if av.context do
       Context.to_editor_state(es, av.context)

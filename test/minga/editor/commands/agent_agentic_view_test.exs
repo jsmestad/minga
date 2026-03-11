@@ -8,14 +8,15 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.BufferView
 
   defp base_state(opts \\ []) do
@@ -55,6 +56,8 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
 
+    av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
+
     state = %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
@@ -62,30 +65,20 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
-      agent: agent,
-      agentic: agentic,
+      surface_module: Minga.Surface.BufferView,
+      surface_state: nil,
       tab_bar: tb
     }
 
     if active do
       # Build agent tab with proper surface state so switch_tab
       # restores it correctly (with surface_module set).
-      av_state =
-        AgentView.from_editor_state(%{
-          state
-          | agentic: %{agentic | active: true, focus: :chat},
-            keymap_scope: :agent
-        })
+      active_av = %{av_state | agentic: %{agentic | active: true, focus: :chat}}
 
       agent_ctx = %{
-        windows: %Windows{},
-        mode: :normal,
-        mode_state: Mode.initial_state(),
         keymap_scope: :agent,
-        active_buffer: buf,
-        active_buffer_index: 0,
         surface_module: AgentView,
-        surface_state: av_state
+        surface_state: active_av
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
@@ -96,7 +89,17 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       state = %{state | tab_bar: tb}
       EditorState.switch_tab(state, at.id)
     else
-      state
+      # If agent state has a session or non-default state, store it in
+      # a background agent tab so AgentAccess can find it.
+      if agent.session != nil do
+        {tb, at} = TabBar.add(tb, :agent, "Agent")
+        agent_ctx = %{keymap_scope: :agent, surface_module: AgentView, surface_state: av_state}
+        tb = TabBar.update_context(tb, at.id, agent_ctx)
+        tb = TabBar.switch_to(tb, file_tab.id)
+        %{state | tab_bar: tb}
+      else
+        state
+      end
     end
   end
 
@@ -123,9 +126,12 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
     test "resets agentic.focus to :chat" do
       state = base_state()
-      state = put_in(state.agentic.focus, :file_viewer)
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic -> %{agentic | focus: :file_viewer} end)
+
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.agentic.focus == :chat
+      assert AgentAccess.agentic(new_state).focus == :chat
     end
 
     test "clears any split tree from the windows struct" do
@@ -148,8 +154,8 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
       # When pi isn't installed, the session start fails gracefully
       # and sets an error instead of crashing.
-      if new_state.agent.session == nil do
-        assert new_state.agent.error != nil
+      if AgentAccess.session(new_state) == nil do
+        assert AgentAccess.agent(new_state).error != nil
       end
     end
 
@@ -157,7 +163,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       fake_session = spawn(fn -> :timer.sleep(1000) end)
       state = base_state(session: fake_session)
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.agent.session == fake_session
+      assert AgentAccess.session(new_state) == fake_session
       assert agent_surface_active?(new_state)
     end
 
@@ -191,7 +197,10 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
     test "resets keymap_scope to :editor" do
       state = base_state(active: true)
-      state = put_in(state.agentic.focus, :file_viewer)
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic -> %{agentic | focus: :file_viewer} end)
+
       new_state = AgentCommands.toggle_agentic_view(state)
       assert new_state.keymap_scope == :editor
     end

@@ -10,6 +10,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Tab
@@ -21,6 +22,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Input.FileTreeHandler
   alias Minga.Input.Scoped
   alias Minga.Mode
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
@@ -70,10 +72,13 @@ defmodule Minga.Input.ScopedTest do
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-      agent: agent,
-      agentic: agentic,
-      tab_bar: tab_bar,
-      surface_module: surface_module
+      surface_module: surface_module,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
+      tab_bar: tab_bar
     }
   end
 
@@ -110,12 +115,12 @@ defmodule Minga.Input.ScopedTest do
 
     test "q on unfocused panel re-focuses input (toggle_panel behavior)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "i focuses the input", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?i, 0)
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "j delegates to mode FSM with agent buffer", %{state: state, agent_buf: agent_buf} do
@@ -128,7 +133,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC closes the panel", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       # toggle_panel on a non-input-focused visible panel re-focuses input
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "passthrough when panel not visible" do
@@ -159,13 +164,13 @@ defmodule Minga.Input.ScopedTest do
 
     test "printable chars go to input", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
-      assert PanelState.input_text(new_state.agent.panel) =~ "x"
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "x"
     end
 
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert new_state.agent.panel.input_focused
-      assert PanelState.input_mode(new_state.agent.panel) == :normal
+      assert AgentAccess.input_focused?(new_state)
+      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
     end
 
     test "Backspace on empty input is safe", %{state: state} do
@@ -182,17 +187,17 @@ defmodule Minga.Input.ScopedTest do
 
     test "Enter on empty prompt is no-op", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0)
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "Shift+Enter inserts newline", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
-      assert length(new_state.agent.panel.input.lines) > 1
+      assert length(AgentAccess.panel(new_state).input.lines) > 1
     end
 
     test "Alt+Enter inserts newline", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x04)
-      assert length(new_state.agent.panel.input.lines) > 1
+      assert length(AgentAccess.panel(new_state).input.lines) > 1
     end
   end
 
@@ -208,7 +213,7 @@ defmodule Minga.Input.ScopedTest do
     test "j scrolls down", %{state: state} do
       assert {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
 
-      assert new_state.agent.panel.scroll.offset != state.agent.panel.scroll.offset or
+      assert AgentAccess.panel(new_state).scroll.offset != AgentAccess.panel(state).scroll.offset or
                new_state == state
     end
 
@@ -230,17 +235,17 @@ defmodule Minga.Input.ScopedTest do
 
     test "? toggles help", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ??, 0)
-      assert new_state.agentic.help_visible
+      assert AgentAccess.agentic(new_state).help_visible
     end
 
     test "Tab switches focus", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert new_state.agentic.focus == :file_viewer
+      assert AgentAccess.agentic(new_state).focus == :file_viewer
     end
 
     test "i focuses input", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?i, 0)
-      assert new_state.agent.panel.input_focused
+      assert AgentAccess.input_focused?(new_state)
     end
 
     test "SPC passes through for leader key", %{state: state} do
@@ -255,22 +260,22 @@ defmodule Minga.Input.ScopedTest do
 
     test "g starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?g, 0)
-      assert new_state.agentic.pending_prefix != nil
+      assert AgentAccess.agentic(new_state).pending_prefix != nil
     end
 
     test "z starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?z, 0)
-      assert new_state.agentic.pending_prefix != nil
+      assert AgentAccess.agentic(new_state).pending_prefix != nil
     end
 
     test "] starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?], 0)
-      assert new_state.agentic.pending_prefix != nil
+      assert AgentAccess.agentic(new_state).pending_prefix != nil
     end
 
     test "[ starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?[, 0)
-      assert new_state.agentic.pending_prefix != nil
+      assert AgentAccess.agentic(new_state).pending_prefix != nil
     end
 
     test "gg scrolls to top via prefix", %{state: state} do
@@ -280,21 +285,25 @@ defmodule Minga.Input.ScopedTest do
 
     test "/ starts search", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?/, 0)
-      assert ViewState.searching?(new_state.agentic)
+      assert ViewState.searching?(AgentAccess.agentic(new_state))
     end
 
     test "panel resize keys work", %{state: state} do
       {:handled, grow} = Scoped.handle_key(state, ?}, 0)
-      assert grow.agentic.chat_width_pct > state.agentic.chat_width_pct
+      assert AgentAccess.agentic(grow).chat_width_pct > AgentAccess.agentic(state).chat_width_pct
 
       {:handled, shrink} = Scoped.handle_key(state, ?{, 0)
-      assert shrink.agentic.chat_width_pct < state.agentic.chat_width_pct
+
+      assert AgentAccess.agentic(shrink).chat_width_pct <
+               AgentAccess.agentic(state).chat_width_pct
     end
 
     test "= resets panel split", %{state: state} do
       {:handled, resized} = Scoped.handle_key(state, ?}, 0)
       {:handled, reset} = Scoped.handle_key(resized, ?=, 0)
-      assert reset.agentic.chat_width_pct == state.agentic.chat_width_pct
+
+      assert AgentAccess.agentic(reset).chat_width_pct ==
+               AgentAccess.agentic(state).chat_width_pct
     end
 
     test "Ctrl+D scrolls half page down", %{state: state} do
@@ -306,9 +315,9 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "ESC dismisses help when visible", %{state: state} do
-      state = %{state | agentic: %{state.agentic | help_visible: true}}
+      state = AgentAccess.update_agentic(state, fn agentic -> %{agentic | help_visible: true} end)
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      refute new_state.agentic.help_visible
+      refute AgentAccess.agentic(new_state).help_visible
     end
 
     test "unbound key is swallowed in normal mode", %{state: state} do
@@ -324,13 +333,13 @@ defmodule Minga.Input.ScopedTest do
 
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      assert new_state.agent.panel.input_focused
-      assert PanelState.input_mode(new_state.agent.panel) == :normal
+      assert AgentAccess.input_focused?(new_state)
+      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
     end
 
     test "printable char self-inserts", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?x, 0)
-      assert PanelState.input_text(new_state.agent.panel) =~ "x"
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "x"
     end
 
     test "Backspace deletes from input", %{state: state} do
@@ -345,7 +354,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "SPC types a space when input is focused (not leader key)", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?\s, 0)
-      assert PanelState.input_text(new_state.agent.panel) =~ " "
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ " "
     end
   end
 
@@ -353,29 +362,34 @@ defmodule Minga.Input.ScopedTest do
     test "search input captures printable chars" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
       {:handled, searching} = Scoped.handle_key(state, ?/, 0)
-      assert ViewState.searching?(searching.agentic)
+      assert ViewState.searching?(AgentAccess.agentic(searching))
 
       # Type a search char (goes through AgentSearch handler now)
       {:handled, with_char} = walk_surface_handlers(searching, ?h, 0)
-      assert ViewState.search_query(with_char.agentic) == "h"
+      assert ViewState.search_query(AgentAccess.agentic(with_char)) == "h"
     end
 
     test "ESC cancels search" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
       {:handled, searching} = Scoped.handle_key(state, ?/, 0)
       {:handled, cancelled} = walk_surface_handlers(searching, 27, 0)
-      refute ViewState.searching?(cancelled.agentic)
+      refute ViewState.searching?(AgentAccess.agentic(cancelled))
     end
   end
 
   describe "agent scope — toast dismiss" do
     test "any key dismisses toast then processes normally" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
-      state = %{state | agentic: ViewState.push_toast(state.agentic, "test", :info)}
-      assert ViewState.toast_visible?(state.agentic)
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          ViewState.push_toast(agentic, "test", :info)
+        end)
+
+      assert ViewState.toast_visible?(AgentAccess.agentic(state))
 
       {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
-      refute ViewState.toast_visible?(new_state.agentic)
+      refute ViewState.toast_visible?(AgentAccess.agentic(new_state))
     end
   end
 
@@ -388,7 +402,7 @@ defmodule Minga.Input.ScopedTest do
     test "Tab switches back to chat from viewer" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert new_state.agentic.focus == :chat
+      assert AgentAccess.agentic(new_state).focus == :chat
     end
   end
 
@@ -482,7 +496,7 @@ defmodule Minga.Input.ScopedTest do
     test "SPC self-inserts in agent insert mode" do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
       {:handled, new_state} = walk_surface_handlers(state, ?\s, 0)
-      assert PanelState.input_text(new_state.agent.panel) =~ " "
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ " "
     end
 
     test "leader node pending passes through in agent scope" do
@@ -511,7 +525,9 @@ defmodule Minga.Input.ScopedTest do
         args: %{"path" => "/tmp/test.txt"}
       }
 
-      state = put_in(state.agent.pending_approval, approval)
+      state =
+        AgentAccess.update_agent(state, fn agent -> %{agent | pending_approval: approval} end)
+
       {:ok, state: state}
     end
 
@@ -532,15 +548,17 @@ defmodule Minga.Input.ScopedTest do
     test "unrelated key is swallowed during approval", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?x, 0)
       # The key is swallowed, pending_approval stays
-      assert new_state.agent.pending_approval != nil
+      assert AgentAccess.agent(new_state).pending_approval != nil
     end
 
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused, approval keys should not be intercepted
-      state = put_in(state.agent.panel.input_focused, true)
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
+
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)
       # Should have typed 'y' into input, not approved
-      assert PanelState.input_text(new_state.agent.panel) =~ "y"
+      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "y"
     end
   end
 
@@ -551,10 +569,10 @@ defmodule Minga.Input.ScopedTest do
       # Set up a diff review preview
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
-      state = %{
-        state
-        | agentic: %{state.agentic | preview: %Preview{content: {:diff, review}}}
-      }
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          %{agentic | preview: %Preview{content: {:diff, review}}}
+        end)
 
       {:ok, state: state}
     end
@@ -584,10 +602,10 @@ defmodule Minga.Input.ScopedTest do
 
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
-      state = %{
-        state
-        | agentic: %{state.agentic | preview: %Preview{content: {:diff, review}}}
-      }
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          %{agentic | preview: %Preview{content: {:diff, review}}}
+        end)
 
       # In :chat focus, y should resolve through the scope trie, not diff review
       {:handled, _new_state} = walk_surface_handlers(state, ?y, 0)
@@ -607,36 +625,43 @@ defmodule Minga.Input.ScopedTest do
         anchor_col: 0
       }
 
-      state = put_in(state.agent.panel.mention_completion, completion)
+      state =
+        AgentAccess.update_agent(state, fn agent ->
+          put_in(agent.panel.mention_completion, completion)
+        end)
+
       {:ok, state: state}
     end
 
     test "Tab moves to next candidate", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 9, 0)
-      assert new_state.agent.panel.mention_completion.selected == 1
+      assert AgentAccess.panel(new_state).mention_completion.selected == 1
     end
 
     test "Enter accepts the selected candidate", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0)
-      assert new_state.agent.panel.mention_completion == nil
+      assert AgentAccess.panel(new_state).mention_completion == nil
     end
 
     test "Escape cancels mention completion", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert new_state.agent.panel.mention_completion == nil
+      assert AgentAccess.panel(new_state).mention_completion == nil
     end
 
     test "printable char narrows candidates", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, ?t, 0)
-      comp = new_state.agent.panel.mention_completion
+      comp = AgentAccess.panel(new_state).mention_completion
 
       if comp != nil do
-        assert length(comp.candidates) <= length(state.agent.panel.mention_completion.candidates)
+        assert length(comp.candidates) <=
+                 length(AgentAccess.panel(state).mention_completion.candidates)
       end
     end
 
     test "mention only intercepts in insert mode", %{state: state} do
-      state = put_in(state.agent.panel.input_focused, false)
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, false) end)
+
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
     end
   end
@@ -662,13 +687,17 @@ defmodule Minga.Input.ScopedTest do
         anchor_col: 0
       }
 
-      state = put_in(state.agent.panel.mention_completion, completion)
+      state =
+        AgentAccess.update_agent(state, fn agent ->
+          put_in(agent.panel.mention_completion, completion)
+        end)
+
       {:ok, state: state}
     end
 
     test "mention completion intercepts keys in editor panel too", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
-      assert new_state.agent.panel.mention_completion == nil
+      assert AgentAccess.panel(new_state).mention_completion == nil
     end
   end
 

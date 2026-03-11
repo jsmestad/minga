@@ -33,8 +33,6 @@ defmodule Minga.Surface.Context do
           whichkey: term(),
           modeline_click_regions: list(),
           tab_bar_click_regions: list(),
-          agent: term(),
-          agentic: term(),
           buffers: term(),
           viewport: term(),
           mode: atom(),
@@ -55,8 +53,6 @@ defmodule Minga.Surface.Context do
             whichkey: nil,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
-            agent: nil,
-            agentic: nil,
             buffers: nil,
             viewport: nil,
             mode: nil,
@@ -83,11 +79,6 @@ defmodule Minga.Surface.Context do
       whichkey: es.whichkey,
       modeline_click_regions: es.modeline_click_regions,
       tab_bar_click_regions: es.tab_bar_click_regions,
-      # Agent state is carried in context during Phase 1 so that
-      # Input.Scoped's agent-panel branches work correctly when
-      # the surface reconstructs an EditorState for dispatch.
-      agent: es.agent,
-      agentic: es.agentic,
       # Buffer/vim fields carried in context so AgentView can
       # reconstruct a complete EditorState (agent commands
       # reference buffers.active and mode state).

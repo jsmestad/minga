@@ -4,6 +4,7 @@ defmodule Minga.Editor.State.SnapshotTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -121,7 +122,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert restored.keymap_scope == :agent
       assert restored.surface_module == Minga.Surface.AgentView
       # Agent state is synced back from the surface state
-      assert restored.agent.status == :thinking
+      assert AgentAccess.agent(restored).status == :thinking
     end
 
     test "restores legacy editor context with mode and buffer (no surface_state)" do
