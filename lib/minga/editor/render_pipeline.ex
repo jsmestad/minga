@@ -32,26 +32,22 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.Renderer, as: ViewRenderer
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
-  alias Minga.Diagnostics
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
-  alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Caps
-  alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.Renderer.SearchHighlight
+  alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Title
@@ -59,9 +55,6 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Editor.WrapMap
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Mode.VisualState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.Scroll
@@ -546,7 +539,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Build per-frame render context
     render_ctx =
-      build_render_ctx(state, window, %{
+      ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: cursor,
         lines: lines,
@@ -561,7 +554,7 @@ defmodule Minga.Editor.RenderPipeline do
     # Compute context fingerprint and check for context changes.
     # If any context input (visual selection, search, highlights, signs,
     # horizontal scroll, active status) changed, all lines are dirty.
-    ctx_fp = context_fingerprint(render_ctx, is_active)
+    ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 
     # Render lines with dirty-aware loop
@@ -580,11 +573,10 @@ defmodule Minga.Editor.RenderPipeline do
 
     {gutter_draws, line_draws, rows_used, window} =
       if wrap_on do
-        # Wrapped mode: always full render (wrap maps change unpredictably)
-        {g, l, r} = render_lines_wrapped(lines, visible_rows, line_opts)
+        {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, line_opts)
         {g, l, r, window}
       else
-        render_lines_nowrap(lines, line_opts)
+        ContentHelpers.render_lines_nowrap(lines, line_opts)
       end
 
     # Tilde lines for empty space below content
@@ -646,28 +638,7 @@ defmodule Minga.Editor.RenderPipeline do
   # Builds a fingerprint from the render context that captures all inputs
   # affecting every visible line. Used to detect context changes between
   # frames (visual selection, search, highlights, signs, scroll, etc.).
-  @spec context_fingerprint(Context.t(), boolean()) :: Window.context_fingerprint()
-  defp context_fingerprint(%Context{} = ctx, is_active) do
-    # Highlight identity: use the version counter which increments each
-    # time tree-sitter sends new spans. Comparing the full spans tuple
-    # would be expensive; the version is a cheap proxy.
-    hl_id =
-      case ctx.highlight do
-        nil -> nil
-        hl -> hl.version
-      end
-
-    {
-      ctx.visual_selection,
-      ctx.search_matches,
-      hl_id,
-      ctx.diagnostic_signs,
-      ctx.git_signs,
-      ctx.viewport.left,
-      is_active,
-      ctx.confirm_match
-    }
-  end
+  # context_fingerprint moved to ContentHelpers
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
 
@@ -992,13 +963,6 @@ defmodule Minga.Editor.RenderPipeline do
     :exit, _ -> false
   end
 
-  @spec wrap_option(pid(), atom()) :: boolean()
-  defp wrap_option(buf, name) do
-    BufferServer.get_option(buf, name)
-  catch
-    :exit, _ -> true
-  end
-
   @spec gutter_dimensions(state(), pid(), atom(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
   defp gutter_dimensions(state, buf, line_number_style, line_count) do
@@ -1022,303 +986,6 @@ defmodule Minga.Editor.RenderPipeline do
     else
       ""
     end
-  end
-
-  # ── Private helpers: content ───────────────────────────────────────────────
-
-  @spec build_render_ctx(state(), Window.t(), map()) :: Context.t()
-  defp build_render_ctx(state, window, params) do
-    %{
-      viewport: viewport,
-      cursor: cursor,
-      lines: lines,
-      first_line: first_line,
-      preview_matches: preview_matches,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      has_sign_column: has_sign_column,
-      is_active: is_active
-    } = params
-
-    visual_selection =
-      if is_active do
-        visual_selection_grapheme_bounds(state, cursor, lines, first_line)
-      else
-        nil
-      end
-
-    search_matches =
-      case preview_matches do
-        [] -> SearchHighlight.search_matches_for_lines(state, lines, first_line)
-        _ -> preview_matches
-      end
-
-    %Context{
-      viewport: viewport,
-      visual_selection: visual_selection,
-      search_matches: search_matches,
-      gutter_w: gutter_w,
-      content_w: content_w,
-      confirm_match: if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil),
-      highlight: window_highlight(state, window),
-      has_sign_column: has_sign_column,
-      diagnostic_signs: diagnostic_signs_for_window(state, window),
-      git_signs: git_signs_for_window(state, window),
-      search_colors: state.theme.search,
-      gutter_colors: state.theme.gutter,
-      git_colors: state.theme.git
-    }
-  end
-
-  @typep line_render_opts :: %{
-           first_line: non_neg_integer(),
-           cursor_line: non_neg_integer(),
-           ctx: Context.t(),
-           ln_style: atom(),
-           gutter_w: non_neg_integer(),
-           first_byte_off: non_neg_integer(),
-           row_off: non_neg_integer(),
-           col_off: non_neg_integer(),
-           window: Window.t(),
-           buffer: pid()
-         }
-
-  @spec render_lines_nowrap([String.t()], line_render_opts()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
-  defp render_lines_nowrap(lines, opts) do
-    %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: ctx,
-      ln_style: ln_style,
-      gutter_w: gutter_w,
-      first_byte_off: first_byte_off,
-      row_off: row_off,
-      col_off: col_off,
-      window: window
-    } = opts
-
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-    max_rows = length(lines)
-
-    {gutters, contents_rev, _byte_off, window} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce(
-        {[], [], first_byte_off, window},
-        fn {line_text, screen_row}, {g, c, byte_off, win} ->
-          buf_line = first_line + screen_row
-          next_byte_off = byte_off + byte_size(line_text) + 1
-
-          if Window.dirty?(win, buf_line) do
-            # Dirty line: render fresh, cache the result
-            {g_cmds, c_cmds, _rows} =
-              BufferLine.render(%{
-                line_text: line_text,
-                buf_line: buf_line,
-                cursor_line: cursor_line,
-                byte_offset: byte_off,
-                screen_row: screen_row,
-                ctx: ctx,
-                ln_style: ln_style,
-                gutter_w: gutter_w,
-                sign_w: sign_w,
-                wrap_entry: nil,
-                max_rows: max_rows,
-                row_offset: row_off,
-                col_offset: col_off
-              })
-
-            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
-            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
-          else
-            # Clean line: reuse cached draws, skip rendering
-            g_cmds = Map.get(win.cached_gutter, buf_line, [])
-            c_cmds = Map.get(win.cached_content, buf_line, [])
-            {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
-          end
-        end
-      )
-
-    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines), window}
-  end
-
-  @spec render_lines_wrapped([String.t()], pos_integer(), line_render_opts()) ::
-          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer()}
-  defp render_lines_wrapped(lines, max_rows, opts) do
-    %{
-      first_line: first_line,
-      cursor_line: cursor_line,
-      ctx: ctx,
-      ln_style: ln_style,
-      gutter_w: gutter_w,
-      first_byte_off: first_byte_off,
-      row_off: row_off,
-      col_off: col_off
-    } = opts
-
-    breakindent = wrap_option(opts.buffer, :breakindent)
-    linebreak = wrap_option(opts.buffer, :linebreak)
-
-    wrap_map =
-      WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
-
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    {gutters, contents, screen_row, _byte_off} =
-      lines
-      |> Enum.with_index()
-      |> Enum.zip(wrap_map)
-      |> Enum.reduce_while(
-        {[], [], 0, first_byte_off},
-        fn {{line_text, line_idx}, visual_rows}, {g, c, sr, byte_off} ->
-          {g2, c2, rows_used} =
-            BufferLine.render(%{
-              line_text: line_text,
-              buf_line: first_line + line_idx,
-              cursor_line: cursor_line,
-              byte_offset: byte_off,
-              screen_row: sr,
-              ctx: ctx,
-              ln_style: ln_style,
-              gutter_w: gutter_w,
-              sign_w: sign_w,
-              wrap_entry: visual_rows,
-              max_rows: max_rows,
-              row_offset: row_off,
-              col_offset: col_off
-            })
-
-          sr2 = sr + rows_used
-          next_byte_off = byte_off + byte_size(line_text) + 1
-
-          if sr2 >= max_rows do
-            {:halt, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
-          else
-            {:cont, {g2 ++ g, prepend_all(c, c2), sr2, next_byte_off}}
-          end
-        end
-      )
-
-    {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
-  end
-
-  @spec prepend_all([DisplayList.draw()], [DisplayList.draw()]) :: [DisplayList.draw()]
-  defp prepend_all(acc, []), do: acc
-  defp prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
-
-  @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
-  defp window_highlight(state, window) do
-    hl =
-      if window.buffer == state.buffers.active do
-        state.highlight.current
-      else
-        Map.get(state.highlight.cache, window.buffer, Minga.Highlight.from_theme(state.theme))
-      end
-
-    if hl.capture_names != [], do: hl, else: nil
-  end
-
-  @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  defp git_signs_for_window(%{git_buffers: git_buffers}, %{buffer: buf}) when is_pid(buf) do
-    case Map.get(git_buffers, buf) do
-      nil -> %{}
-      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
-    end
-  end
-
-  @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  defp diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
-      nil -> %{}
-      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
-    end
-  end
-
-  # ── Private helpers: visual selection ──────────────────────────────────────
-
-  @typedoc """
-  Represents the bounds of a visual selection for rendering.
-
-  * `nil` — no active selection
-  * `{:char, start_pos, end_pos}` — characterwise selection
-  * `{:line, start_line, end_line}` — linewise selection
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
-
-  @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
-  defp visual_selection_bounds(%{mode: :visual, mode_state: %VisualState{} = ms}, cursor) do
-    anchor = ms.visual_anchor
-    visual_type = ms.visual_type
-
-    case visual_type do
-      :char ->
-        {start_pos, end_pos} = sort_positions(anchor, cursor)
-        {:char, start_pos, end_pos}
-
-      :line ->
-        {anchor_line, _} = anchor
-        {cursor_line, _} = cursor
-        {:line, min(anchor_line, cursor_line), max(anchor_line, cursor_line)}
-    end
-  end
-
-  defp visual_selection_bounds(_state, _cursor), do: nil
-
-  @spec visual_selection_grapheme_bounds(
-          state(),
-          Document.position(),
-          [String.t()],
-          non_neg_integer()
-        ) :: visual_selection()
-  defp visual_selection_grapheme_bounds(state, cursor, lines, first_line) do
-    case visual_selection_bounds(state, cursor) do
-      nil ->
-        nil
-
-      {:line, _, _} = sel ->
-        sel
-
-      {:char, {sl, sc}, {el, ec}} ->
-        {
-          :char,
-          {sl, byte_col_to_display(lines, sl, sc, first_line)},
-          {el, byte_col_to_display_end(lines, el, ec, first_line)}
-        }
-    end
-  end
-
-  @spec byte_col_to_display(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp byte_col_to_display(lines, line, byte_col, first_line) do
-    line_text = cursor_line_text(lines, line, first_line)
-    Unicode.display_col(line_text, byte_col)
-  end
-
-  @spec byte_col_to_display_end(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp byte_col_to_display_end(lines, line, byte_col, first_line) do
-    line_text = cursor_line_text(lines, line, first_line)
-    next_byte = Unicode.next_grapheme_byte_offset(line_text, byte_col)
-    Unicode.display_col(line_text, next_byte)
-  end
-
-  @spec sort_positions(Document.position(), Document.position()) ::
-          {Document.position(), Document.position()}
-  defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
-    if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
   # ── Private helpers: chrome ────────────────────────────────────────────────
