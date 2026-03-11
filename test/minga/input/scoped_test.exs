@@ -176,12 +176,12 @@ defmodule Minga.Input.ScopedTest do
 
     test "Shift+Enter inserts newline", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 13, 0x01)
-      assert length(new_state.agent.panel.input_lines) > 1
+      assert length(new_state.agent.panel.input.lines) > 1
     end
 
     test "Alt+Enter inserts newline", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 13, 0x04)
-      assert length(new_state.agent.panel.input_lines) > 1
+      assert length(new_state.agent.panel.input.lines) > 1
     end
   end
 

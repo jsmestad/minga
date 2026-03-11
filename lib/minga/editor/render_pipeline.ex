@@ -1517,7 +1517,7 @@ defmodule Minga.Editor.RenderPipeline do
        )
        when h > 0 do
     panel = state.agent.panel
-    {cursor_line, cursor_col} = panel.input_cursor
+    {cursor_line, cursor_col} = panel.input.cursor
     input_row = row + h - @agent_input_height + 1 + cursor_line
     input_col = col + 2 + cursor_col
     {{input_row, input_col}, :beam}
@@ -1560,8 +1560,7 @@ defmodule Minga.Editor.RenderPipeline do
     panel_state = %{
       messages: messages,
       status: agent.status || :idle,
-      input_lines: agent.panel.input_lines,
-      input_cursor: agent.panel.input_cursor,
+      input: agent.panel.input,
       scroll: agent.panel.scroll,
       spinner_frame: agent.panel.spinner_frame,
       usage: usage,

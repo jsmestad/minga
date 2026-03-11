@@ -158,7 +158,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = Scoped.handle_key(state, 13, 0x01)
       # Should have a newline in the input
-      assert length(new_state.agent.panel.input_lines) > 1
+      assert length(new_state.agent.panel.input.lines) > 1
     end
 
     test "Backspace on empty input is safe" do

@@ -25,8 +25,7 @@ defmodule Minga.Agent.ChatRenderer do
   @type panel_state :: %{
           messages: [Message.t()],
           status: :idle | :thinking | :tool_executing | :error,
-          input_lines: [String.t()],
-          input_cursor: {non_neg_integer(), non_neg_integer()},
+          input: Minga.Input.TextField.t(),
           scroll: Minga.Scroll.t(),
           spinner_frame: non_neg_integer(),
           usage: map(),
@@ -296,7 +295,7 @@ defmodule Minga.Agent.ChatRenderer do
 
     blank = String.duplicate(" ", width)
 
-    is_empty = panel.input_lines == [""]
+    is_empty = panel.input.lines == [""]
 
     if is_empty do
       # Placeholder
@@ -315,8 +314,8 @@ defmodule Minga.Agent.ChatRenderer do
       input_row = row + 1
       cmds = [DisplayList.draw(input_row, col, blank, bg: at.input_bg) | cmds]
 
-      first_line = "  " <> (List.first(panel.input_lines) || "")
-      line_count = length(panel.input_lines)
+      first_line = "  " <> (List.first(panel.input.lines) || "")
+      line_count = length(panel.input.lines)
       indicator = if line_count > 1, do: " [#{line_count}L]", else: ""
       display = String.slice(first_line <> indicator, 0, width)
 
