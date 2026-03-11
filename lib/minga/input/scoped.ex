@@ -214,7 +214,7 @@ defmodule Minga.Input.Scoped do
     if mode == :insert do
       resolve_agent_key(state, :insert, cp, mods)
     else
-      dispatch_vim_key(state, cp, mods)
+      {:handled, dispatch_vim_key(state, cp, mods)}
     end
   end
 
@@ -297,22 +297,26 @@ defmodule Minga.Input.Scoped do
   # Routes a key through Vim.handle_key for non-insert input modes.
   # If the Vim module handles the key, update panel state.
   # If not, fall through to the scope trie for meta keys (Escape, Ctrl+C, etc.).
+  # Returns a bare EditorState (callers wrap in {:handled, _} as needed).
+  # Returns a bare EditorState. Both callers handle wrapping themselves:
+  # - handle_panel_input (editor scope): caller wraps in {:handled, _}
+  # - handle_agent_key (agent scope): caller wraps in {:handled, _}
   @spec dispatch_vim_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()}
+          EditorState.t()
   defp dispatch_vim_key(state, cp, mods) do
     panel = state.agent.panel
 
     case Vim.handle_key(panel.vim, panel.input, cp, mods) do
       {:handled, new_vim, new_tf} ->
         new_panel = %{panel | vim: new_vim, input: new_tf}
-        {:handled, %{state | agent: %{state.agent | panel: new_panel}}}
+        %{state | agent: %{state.agent | panel: new_panel}}
 
       :not_handled ->
         # Fall through to scope trie for meta keys
         {:handled, new_state} =
           resolve_scope_key(state, :agent, :input_normal, {cp, mods}, cp, mods)
 
-        {:handled, new_state}
+        new_state
     end
   end
 
