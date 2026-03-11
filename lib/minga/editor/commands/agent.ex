@@ -34,6 +34,9 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Git.Diff
   alias Minga.Input.TextField
   alias Minga.Input.Vim
+  alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.Bridge, as: AVBridge
+  alias Minga.Surface.AgentView.State, as: AVState
 
   import Bitwise
 
@@ -169,8 +172,19 @@ defmodule Minga.Editor.Commands.Agent do
       |> Map.put(:active, true)
       |> Map.put(:focus, :chat)
 
-    tb =
-      TabBar.update_context(state.tab_bar, agent_tab.id, Map.put(ctx, :agentic, updated_agentic))
+    ctx = Map.put(ctx, :agentic, updated_agentic)
+
+    # Also update the surface_state if present
+    ctx =
+      case Map.get(ctx, :surface_state) do
+        %AVState{} = av ->
+          Map.put(ctx, :surface_state, %{av | agentic: updated_agentic})
+
+        _ ->
+          ctx
+      end
+
+    tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
 
     state = %{state | tab_bar: tb}
     state = EditorState.switch_tab(state, agent_tab.id)
@@ -179,16 +193,25 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec new_agent_context(state()) :: Tab.context()
   defp new_agent_context(state) do
+    agent = state.agent
+    agentic = %{ViewState.new() | active: true, focus: :chat}
+
+    # Build an AVState for the surface by creating a temporary
+    # EditorState with the agent context applied.
+    temp_state = %{state | agent: agent, agentic: agentic, keymap_scope: :agent}
+
     %{
-      agentic: %{ViewState.new() | active: true, focus: :chat},
+      agentic: agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: state.agent,
+      agent: agent,
       active_buffer: state.buffers.active,
-      active_buffer_index: state.buffers.active_index
+      active_buffer_index: state.buffers.active_index,
+      surface_module: AgentView,
+      surface_state: AVBridge.from_editor_state(temp_state)
     }
   end
 
@@ -362,16 +385,23 @@ defmodule Minga.Editor.Commands.Agent do
     {tb, agent_tab} = TabBar.add(tb, :agent, "New Agent")
 
     # Fresh agent state for the new tab.
+    fresh_agent = %AgentState{}
+    fresh_agentic = %{ViewState.new() | active: true, focus: :chat}
+
+    temp_state = %{state | agent: fresh_agent, agentic: fresh_agentic, keymap_scope: :agent}
+
     agent_context = %{
-      agentic: %{ViewState.new() | active: true, focus: :chat},
+      agentic: fresh_agentic,
       windows: %Windows{},
       file_tree: FileTreeState.close(state.file_tree),
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       keymap_scope: :agent,
-      agent: %AgentState{},
+      agent: fresh_agent,
       active_buffer: state.buffers.active,
-      active_buffer_index: state.buffers.active_index
+      active_buffer_index: state.buffers.active_index,
+      surface_module: AgentView,
+      surface_state: AVBridge.from_editor_state(temp_state)
     }
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_context)

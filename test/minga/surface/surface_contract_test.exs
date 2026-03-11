@@ -249,6 +249,187 @@ defmodule Minga.Surface.ContractTest do
     end
   end
 
+  # ══════════════════════════════════════════════════════════════════════════
+  # AgentView contract tests
+  # ══════════════════════════════════════════════════════════════════════════
+
+  alias Minga.Agent.PanelState
+  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.Bridge, as: AVBridge
+  alias Minga.Surface.AgentView.State, as: AVState
+
+  defp build_av_state do
+    %AVState{
+      agent: %AgentState{},
+      agentic: %ViewState{}
+    }
+  end
+
+  describe "AgentView.scope/0" do
+    test "returns :agent" do
+      assert AgentView.scope() == :agent
+    end
+  end
+
+  describe "AgentView.handle_key/3" do
+    test "returns a {state, effects} tuple without context" do
+      av = build_av_state()
+      {new_state, effects} = AgentView.handle_key(av, ?j, 0)
+
+      assert %AVState{} = new_state
+      assert is_list(effects)
+    end
+
+    test "effects list contains only valid effect types" do
+      av = build_av_state()
+      {_state, effects} = AgentView.handle_key(av, ?j, 0)
+
+      for effect <- effects do
+        assert valid_effect?(effect),
+               "Expected a valid effect, got: #{inspect(effect)}"
+      end
+    end
+  end
+
+  describe "AgentView.handle_mouse/7" do
+    test "returns a {state, effects} tuple" do
+      av = build_av_state()
+      {new_state, effects} = AgentView.handle_mouse(av, 5, 10, :left, 0, :press, 1)
+
+      assert %AVState{} = new_state
+      assert is_list(effects)
+    end
+  end
+
+  describe "AgentView.render/2" do
+    test "returns a {state, draws} tuple without context" do
+      av = build_av_state()
+      rect = {0, 0, 80, 24}
+      {new_state, draws} = AgentView.render(av, rect)
+
+      assert %AVState{} = new_state
+      assert is_list(draws)
+    end
+  end
+
+  describe "AgentView.handle_event/2" do
+    test "returns a {state, effects} tuple for unknown events" do
+      av = build_av_state()
+      {new_state, effects} = AgentView.handle_event(av, {:unknown_event, :data})
+
+      assert %AVState{} = new_state
+      assert is_list(effects)
+    end
+  end
+
+  describe "AgentView.cursor/1" do
+    test "returns {row, col, shape} tuple" do
+      av = build_av_state()
+      {row, col, shape} = AgentView.cursor(av)
+
+      assert is_integer(row) and row >= 0
+      assert is_integer(col) and col >= 0
+      assert is_atom(shape)
+    end
+
+    test "cursor is hidden when input is not focused" do
+      av = build_av_state()
+      {_row, _col, shape} = AgentView.cursor(av)
+      assert shape == :hidden
+    end
+
+    test "cursor is beam when input is focused" do
+      av = %{
+        build_av_state()
+        | agent: %AgentState{
+            panel: %{PanelState.new() | input_focused: true}
+          }
+      }
+
+      {_row, _col, shape} = AgentView.cursor(av)
+      assert shape == :beam
+    end
+  end
+
+  describe "AgentView.activate/1 and deactivate/1" do
+    test "activate sets agentic.active to true" do
+      av = build_av_state()
+      activated = AgentView.activate(av)
+      assert activated.agentic.active == true
+    end
+
+    test "deactivate sets agentic.active to false" do
+      av = %{build_av_state() | agentic: %{ViewState.new() | active: true}}
+      deactivated = AgentView.deactivate(av)
+      assert deactivated.agentic.active == false
+    end
+
+    test "round-trip preserves agent state" do
+      av = %{build_av_state() | agentic: %{ViewState.new() | active: true}}
+      deactivated = AgentView.deactivate(av)
+      reactivated = AgentView.activate(deactivated)
+
+      assert reactivated.agentic.active == true
+      assert reactivated.agent == av.agent
+    end
+  end
+
+  describe "AgentView bridge round-trip" do
+    test "from_editor_state produces a valid AgentView.State" do
+      es = %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        mode: :normal,
+        mode_state: Mode.initial_state()
+      }
+
+      av = AVBridge.from_editor_state(es)
+      assert %AVState{} = av
+      assert %AgentState{} = av.agent
+      assert %ViewState{} = av.agentic
+    end
+
+    test "to_editor_state writes back agent and agentic fields" do
+      es = %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        mode: :normal,
+        mode_state: Mode.initial_state()
+      }
+
+      av = AVBridge.from_editor_state(es)
+
+      # Mutate agent status
+      av = %{av | agent: %{av.agent | status: :thinking}}
+
+      es2 = AVBridge.to_editor_state(es, av)
+      assert es2.agent.status == :thinking
+    end
+
+    test "round-trip does not modify non-agent fields" do
+      theme = Theme.get!(:doom_one)
+
+      es = %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        mode: :normal,
+        mode_state: Mode.initial_state(),
+        theme: theme,
+        status_msg: "hello"
+      }
+
+      av = AVBridge.from_editor_state(es)
+      es2 = AVBridge.to_editor_state(es, av)
+
+      assert es2.theme == theme
+      assert es2.status_msg == "hello"
+      assert es2.mode == :normal
+      assert es2.buffers == es.buffers
+    end
+  end
+
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp valid_effect?(:render), do: true
