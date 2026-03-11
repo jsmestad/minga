@@ -215,44 +215,8 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:agent_self_insert, char}),
     do: AgentCommands.scope_self_insert(state, char)
 
-  # Input mode transitions
+  # Input mode transition (insert → normal on Escape)
   def execute(state, :agent_input_to_normal), do: AgentCommands.input_to_normal(state)
-  def execute(state, :agent_input_to_insert), do: AgentCommands.input_to_insert(state)
-  def execute(state, :agent_input_to_insert_after), do: AgentCommands.input_to_insert_after(state)
-  def execute(state, :agent_input_to_insert_eol), do: AgentCommands.input_to_insert_eol(state)
-  def execute(state, :agent_input_to_insert_bol), do: AgentCommands.input_to_insert_bol(state)
-  def execute(state, :agent_input_open_below), do: AgentCommands.input_open_below(state)
-  def execute(state, :agent_input_open_above), do: AgentCommands.input_open_above(state)
-
-  # Input normal mode: motions
-  def execute(state, :agent_input_move_left), do: AgentCommands.input_motion(state, :left)
-  def execute(state, :agent_input_move_right), do: AgentCommands.input_motion(state, :right)
-  def execute(state, :agent_input_move_down), do: AgentCommands.input_motion(state, :down)
-  def execute(state, :agent_input_move_up), do: AgentCommands.input_motion(state, :up)
-  def execute(state, :agent_input_word_forward), do: AgentCommands.input_motion(state, :word_forward)
-  def execute(state, :agent_input_word_backward), do: AgentCommands.input_motion(state, :word_backward)
-  def execute(state, :agent_input_word_end), do: AgentCommands.input_motion(state, :word_end)
-  def execute(state, :agent_input_line_start), do: AgentCommands.input_motion(state, :line_start)
-  def execute(state, :agent_input_line_end), do: AgentCommands.input_motion(state, :line_end)
-  def execute(state, :agent_input_first_non_blank), do: AgentCommands.input_motion(state, :first_non_blank)
-
-  # Input normal mode: operators
-  def execute(state, :agent_input_delete_char), do: AgentCommands.input_delete_char(state)
-  def execute(state, :agent_input_delete_char_before), do: AgentCommands.input_delete_char_before(state)
-  def execute(state, :agent_input_delete_to_eol), do: AgentCommands.input_delete_to_eol(state)
-  def execute(state, :agent_input_change_to_eol), do: AgentCommands.input_change_to_eol(state)
-  def execute(state, :agent_input_delete_line), do: AgentCommands.input_delete_line(state)
-  def execute(state, :agent_input_delete_word), do: AgentCommands.input_delete_word(state)
-  def execute(state, :agent_input_delete_to_bol), do: AgentCommands.input_delete_to_bol(state)
-  def execute(state, :agent_input_change_line), do: AgentCommands.input_change_line(state)
-  def execute(state, :agent_input_change_word), do: AgentCommands.input_change_word(state)
-  def execute(state, :agent_input_yank_line), do: AgentCommands.input_yank_line(state)
-  def execute(state, :agent_input_yank_word), do: AgentCommands.input_yank_word(state)
-  def execute(state, :agent_input_paste_after), do: AgentCommands.input_paste_after(state)
-  def execute(state, :agent_input_paste_before), do: AgentCommands.input_paste_before(state)
-  def execute(state, :agent_input_undo), do: AgentCommands.input_undo(state)
-  def execute(state, :agent_input_visual), do: AgentCommands.input_visual(state)
-  def execute(state, :agent_input_visual_line), do: AgentCommands.input_visual_line(state)
 
   def execute(state, :agent_accept_hunk), do: AgentCommands.scope_accept_hunk(state)
   def execute(state, :agent_reject_hunk), do: AgentCommands.scope_reject_hunk(state)

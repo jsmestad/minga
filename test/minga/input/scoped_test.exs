@@ -155,7 +155,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.agent.panel.input_focused
-      assert new_state.agent.panel.input_mode == :normal
+      assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
 
     test "Backspace on empty input is safe", %{state: state} do
@@ -315,7 +315,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.agent.panel.input_focused
-      assert new_state.agent.panel.input_mode == :normal
+      assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
 
     test "printable char self-inserts", %{state: state} do

@@ -167,53 +167,22 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
   end
 
-  # ── Input normal mode bindings (vim editing on the prompt text) ──────────
+  # ── Input normal mode meta keys ──────────────────────────────────────────
+  #
+  # Vim editing keys (motions, operators, text objects, counts, visual mode)
+  # are handled by Minga.Input.Vim.handle_key/4 before reaching the trie.
+  # This trie only contains meta keys that the Vim module passes through.
 
   @spec input_normal_trie() :: Bindings.node_t()
   defp input_normal_trie do
     Bindings.new()
-    # Mode transitions
-    |> Bindings.bind([{?i, 0}], :agent_input_to_insert, "Insert mode")
-    |> Bindings.bind([{?a, 0}], :agent_input_to_insert_after, "Insert after cursor")
-    |> Bindings.bind([{?A, 0}], :agent_input_to_insert_eol, "Insert at end of line")
-    |> Bindings.bind([{?I, 0}], :agent_input_to_insert_bol, "Insert at start of line")
-    |> Bindings.bind([{?o, 0}], :agent_input_open_below, "Open line below")
-    |> Bindings.bind([{?O, 0}], :agent_input_open_above, "Open line above")
     |> Bindings.bind([{@escape, 0}], :agent_unfocus_input, "Back to chat nav")
-    # Motions
-    |> Bindings.bind([{?h, 0}], :agent_input_move_left, "Move left")
-    |> Bindings.bind([{?l, 0}], :agent_input_move_right, "Move right")
-    |> Bindings.bind([{?j, 0}], :agent_input_move_down, "Move down")
-    |> Bindings.bind([{?k, 0}], :agent_input_move_up, "Move up")
-    |> Bindings.bind([{?w, 0}], :agent_input_word_forward, "Word forward")
-    |> Bindings.bind([{?b, 0}], :agent_input_word_backward, "Word backward")
-    |> Bindings.bind([{?e, 0}], :agent_input_word_end, "Word end")
-    |> Bindings.bind([{?0, 0}], :agent_input_line_start, "Line start")
-    |> Bindings.bind([{?$, 0}], :agent_input_line_end, "Line end")
-    |> Bindings.bind([{?^, 0}], :agent_input_first_non_blank, "First non-blank")
-    # Single-key operators
-    |> Bindings.bind([{?x, 0}], :agent_input_delete_char, "Delete char")
-    |> Bindings.bind([{?X, 0}], :agent_input_delete_char_before, "Delete char before")
-    |> Bindings.bind([{?D, 0}], :agent_input_delete_to_eol, "Delete to end of line")
-    |> Bindings.bind([{?C, 0}], :agent_input_change_to_eol, "Change to end of line")
-    # Operator prefixes (d, c, y → operator-pending)
-    |> Bindings.bind([{?d, 0}, {?d, 0}], :agent_input_delete_line, "Delete line")
-    |> Bindings.bind([{?d, 0}, {?w, 0}], :agent_input_delete_word, "Delete word")
-    |> Bindings.bind([{?d, 0}, {?$, 0}], :agent_input_delete_to_eol, "Delete to end of line")
-    |> Bindings.bind([{?d, 0}, {?0, 0}], :agent_input_delete_to_bol, "Delete to start of line")
-    |> Bindings.bind([{?c, 0}, {?c, 0}], :agent_input_change_line, "Change line")
-    |> Bindings.bind([{?c, 0}, {?w, 0}], :agent_input_change_word, "Change word")
-    |> Bindings.bind([{?c, 0}, {?$, 0}], :agent_input_change_to_eol, "Change to end of line")
-    |> Bindings.bind([{?y, 0}, {?y, 0}], :agent_input_yank_line, "Yank line")
-    |> Bindings.bind([{?y, 0}, {?w, 0}], :agent_input_yank_word, "Yank word")
-    # Paste
-    |> Bindings.bind([{?p, 0}], :agent_input_paste_after, "Paste after")
-    |> Bindings.bind([{?P, 0}], :agent_input_paste_before, "Paste before")
-    # Undo (Ctrl+Z works in both modes too)
-    |> Bindings.bind([{?u, 0}], :agent_input_undo, "Undo")
-    # Visual mode
-    |> Bindings.bind([{?v, 0}], :agent_input_visual, "Visual mode")
-    |> Bindings.bind([{?V, 0}], :agent_input_visual_line, "Visual line mode")
+    |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
+    |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down")
+    |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up")
+    |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat")
+    |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
+    |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus and quit")
   end
 
   # ── Shared bindings (both normal and insert) ───────────────────────────────

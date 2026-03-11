@@ -35,6 +35,7 @@ defmodule Minga.Input.Scoped do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.FileTree
+  alias Minga.Input.Vim
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
 
@@ -207,8 +208,14 @@ defmodule Minga.Input.Scoped do
     end
   end
 
-  defp handle_agent_key(%{agent: %{panel: %{input_focused: true, input_mode: mode}}} = state, cp, mods) do
-    resolve_agent_key(state, vim_state_for_input_mode(mode), cp, mods)
+  defp handle_agent_key(%{agent: %{panel: %{input_focused: true} = panel}} = state, cp, mods) do
+    mode = PanelState.input_mode(panel)
+
+    if mode == :insert do
+      resolve_agent_key(state, :insert, cp, mods)
+    else
+      dispatch_vim_key(state, cp, mods)
+    end
   end
 
   defp handle_agent_key(state, cp, mods) do
@@ -287,14 +294,27 @@ defmodule Minga.Input.Scoped do
     end
   end
 
-  # Maps input_mode to the scope vim_state used for trie lookup.
-  # Visual and operator-pending use the input_normal bindings.
-  @spec vim_state_for_input_mode(PanelState.input_mode()) :: Scope.vim_state()
-  defp vim_state_for_input_mode(:insert), do: :insert
-  defp vim_state_for_input_mode(:normal), do: :input_normal
-  defp vim_state_for_input_mode(:visual), do: :input_normal
-  defp vim_state_for_input_mode(:visual_line), do: :input_normal
-  defp vim_state_for_input_mode(:operator_pending), do: :input_normal
+  # Routes a key through Vim.handle_key for non-insert input modes.
+  # If the Vim module handles the key, update panel state.
+  # If not, fall through to the scope trie for meta keys (Escape, Ctrl+C, etc.).
+  @spec dispatch_vim_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, EditorState.t()}
+  defp dispatch_vim_key(state, cp, mods) do
+    panel = state.agent.panel
+
+    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
+      {:handled, new_vim, new_tf} ->
+        new_panel = %{panel | vim: new_vim, input: new_tf}
+        {:handled, %{state | agent: %{state.agent | panel: new_panel}}}
+
+      :not_handled ->
+        # Fall through to scope trie for meta keys
+        {:handled, new_state} =
+          resolve_scope_key(state, :agent, :input_normal, {cp, mods}, cp, mods)
+
+        {:handled, new_state}
+    end
+  end
 
   # ── Agent self-insert (insert mode, printable chars) ───────────────────────
 
@@ -379,30 +399,29 @@ defmodule Minga.Input.Scoped do
     AgentCommands.handle_mention_key(state, cp, mods)
   end
 
-  # Input normal mode (and visual, operator-pending): delegate to scope trie
-  # so vim keybindings work in the side panel the same as in the full agent view.
-  defp handle_panel_input(
-         %{agent: %{panel: %{input_mode: mode}}} = state,
-         cp,
-         mods
-       )
-       when mode != :insert do
-    vim_state = vim_state_for_input_mode(mode)
+  # Non-insert modes (normal, visual, operator-pending): route through the
+  # Vim grammar module. If Vim doesn't handle it, fall through to scope trie
+  # for meta keys (Escape/unfocus, Ctrl+C/submit, etc.).
+  defp handle_panel_input(%{agent: %{panel: panel}} = state, cp, mods) do
+    mode = PanelState.input_mode(panel)
 
-    {:handled, new_state} = resolve_scope_key(state, :agent, vim_state, {cp, mods}, cp, mods)
-    new_state
+    if mode == :insert do
+      handle_panel_insert(state, cp, mods)
+    else
+      dispatch_vim_key(state, cp, mods)
+    end
   end
 
   # ── Regular input (insert mode) ────────────────────────────────────────
 
   # Ctrl+Q: unfocus first, then forward the quit key
-  defp handle_panel_input(state, ?q, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?q, mods) when band(mods, @ctrl) != 0 do
     send(self(), {:minga_input, {:key_press, ?q, mods}})
     update_agent(state, &AgentState.focus_input(&1, false))
   end
 
   # Ctrl+S: save current buffer
-  defp handle_panel_input(state, ?s, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?s, mods) when band(mods, @ctrl) != 0 do
     if state.buffers.active do
       case BufferServer.save(state.buffers.active) do
         :ok -> :ok
@@ -415,7 +434,7 @@ defmodule Minga.Input.Scoped do
   end
 
   # Ctrl+C: submit prompt if input has text, abort if agent is active
-  defp handle_panel_input(state, ?c, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?c, mods) when band(mods, @ctrl) != 0 do
     if PanelState.input_text(state.agent.panel) == "" do
       if state.agent.status in [:thinking, :tool_executing] do
         AgentCommands.abort_agent(state)
@@ -428,55 +447,55 @@ defmodule Minga.Input.Scoped do
   end
 
   # Ctrl+D: scroll chat down
-  defp handle_panel_input(state, ?d, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?d, mods) when band(mods, @ctrl) != 0 do
     AgentCommands.scroll_chat_down(state)
   end
 
   # Ctrl+U: scroll chat up
-  defp handle_panel_input(state, ?u, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?u, mods) when band(mods, @ctrl) != 0 do
     AgentCommands.scroll_chat_up(state)
   end
 
   # Ctrl+L: clear chat display
-  defp handle_panel_input(state, ?l, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?l, mods) when band(mods, @ctrl) != 0 do
     AgentCommands.clear_chat_display(state)
   end
 
   # Escape: unfocus the input
-  defp handle_panel_input(state, 27, _mods) do
+  defp handle_panel_insert(state, 27, _mods) do
     AgentCommands.input_to_normal(state)
   end
 
   # Backspace
-  defp handle_panel_input(state, 127, _mods) do
+  defp handle_panel_insert(state, 127, _mods) do
     AgentCommands.input_backspace(state)
   end
 
   # Insert newline: all the ways Shift+Enter arrives across terminals.
   # See agent.ex keymap/1 comments for the full explanation.
-  defp handle_panel_input(state, 13, mods) when band(mods, @shift) != 0 do
+  defp handle_panel_insert(state, 13, mods) when band(mods, @shift) != 0 do
     update_agent(state, &AgentState.insert_newline/1)
   end
 
-  defp handle_panel_input(state, ?j, mods) when band(mods, @ctrl) != 0 do
+  defp handle_panel_insert(state, ?j, mods) when band(mods, @ctrl) != 0 do
     update_agent(state, &AgentState.insert_newline/1)
   end
 
-  defp handle_panel_input(state, 0x0A, _mods) do
+  defp handle_panel_insert(state, 0x0A, _mods) do
     update_agent(state, &AgentState.insert_newline/1)
   end
 
-  defp handle_panel_input(state, 13, mods) when band(mods, @alt) != 0 do
+  defp handle_panel_insert(state, 13, mods) when band(mods, @alt) != 0 do
     update_agent(state, &AgentState.insert_newline/1)
   end
 
   # Enter: submit prompt
-  defp handle_panel_input(state, 13, _mods) do
+  defp handle_panel_insert(state, 13, _mods) do
     AgentCommands.submit_prompt(state)
   end
 
   # Up arrow: move cursor up or recall history
-  defp handle_panel_input(state, cp, _mods) when cp == 0xF700 do
+  defp handle_panel_insert(state, cp, _mods) when cp == 0xF700 do
     case AgentState.move_cursor_up(state.agent) do
       :at_top -> update_agent(state, &AgentState.history_prev/1)
       agent -> %{state | agent: agent}
@@ -484,7 +503,7 @@ defmodule Minga.Input.Scoped do
   end
 
   # Down arrow: move cursor down or forward history
-  defp handle_panel_input(state, cp, _mods) when cp == 0xF701 do
+  defp handle_panel_insert(state, cp, _mods) when cp == 0xF701 do
     case AgentState.move_cursor_down(state.agent) do
       :at_bottom -> update_agent(state, &AgentState.history_next/1)
       agent -> %{state | agent: agent}
@@ -492,14 +511,14 @@ defmodule Minga.Input.Scoped do
   end
 
   # Legacy arrow encodings (escape sequences from Zig TUI)
-  defp handle_panel_input(state, 0x415B1B, _mods) do
+  defp handle_panel_insert(state, 0x415B1B, _mods) do
     case AgentState.move_cursor_up(state.agent) do
       :at_top -> update_agent(state, &AgentState.history_prev/1)
       agent -> %{state | agent: agent}
     end
   end
 
-  defp handle_panel_input(state, 0x425B1B, _mods) do
+  defp handle_panel_insert(state, 0x425B1B, _mods) do
     case AgentState.move_cursor_down(state.agent) do
       :at_bottom -> update_agent(state, &AgentState.history_next/1)
       agent -> %{state | agent: agent}
@@ -507,19 +526,19 @@ defmodule Minga.Input.Scoped do
   end
 
   # @ at start of line or after whitespace: trigger mention completion
-  defp handle_panel_input(state, ?@, mods)
+  defp handle_panel_insert(state, ?@, mods)
        when band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
     AgentCommands.scope_trigger_mention(state)
   end
 
   # Printable characters (no Ctrl/Alt)
-  defp handle_panel_input(state, cp, mods)
+  defp handle_panel_insert(state, cp, mods)
        when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
     AgentCommands.input_char(state, <<cp::utf8>>)
   end
 
   # Everything else: silently swallow
-  defp handle_panel_input(state, _cp, _mods), do: state
+  defp handle_panel_insert(state, _cp, _mods), do: state
 
   # ── Panel navigation mode ─────────────────────────────────────────────────
 

@@ -118,7 +118,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert new_state.agent.panel.input_focused == true
-      assert new_state.agent.panel.input_mode == :normal
+      assert PanelState.input_mode(new_state.agent.panel) == :normal
     end
 
     test "input mode intercepts printable chars" do

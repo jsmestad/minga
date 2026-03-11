@@ -363,7 +363,10 @@ defmodule Minga.Input.TextField do
     from_byte = position_to_byte_offset(tf, from)
     to_byte = position_to_byte_offset(tf, to)
     deleted = binary_part(text, from_byte, max(to_byte - from_byte, 0))
-    new_text = binary_part(text, 0, from_byte) <> binary_part(text, to_byte, byte_size(text) - to_byte)
+
+    new_text =
+      binary_part(text, 0, from_byte) <> binary_part(text, to_byte, byte_size(text) - to_byte)
+
     new_tf = new(new_text) |> set_cursor(from)
     {new_tf, deleted}
   end
