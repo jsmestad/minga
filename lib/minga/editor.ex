@@ -17,11 +17,9 @@ defmodule Minga.Editor do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.BufferLifecycle
-  alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
@@ -29,10 +27,9 @@ defmodule Minga.Editor do
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
+  alias Minga.Editor.KeyDispatch
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
-  alias Minga.Editor.MacroReplay
-  alias Minga.Editor.ModeTransitions
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
@@ -697,74 +694,9 @@ defmodule Minga.Editor do
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
 
-  # All keys go through the Mode FSM.
-  # Called by Minga.Input.ModeFSM handler.
   @doc false
   @spec do_handle_key(state(), non_neg_integer(), non_neg_integer()) :: state()
-  def do_handle_key(state, codepoint, modifiers) do
-    key = {codepoint, modifiers}
-    old_mode = state.mode
-    {new_mode, commands, new_mode_state} = Mode.process(old_mode, key, state.mode_state)
-
-    # ── Change recording ─────────────────────────────────────────────────
-    # Record keys for dot repeat, unless we're currently replaying.
-    state = ChangeTracking.maybe_record_change(state, old_mode, new_mode, commands, key)
-
-    # ── Macro recording ──────────────────────────────────────────────────
-    # Record keys into macro register if actively recording (and not replaying).
-    state = MacroReplay.maybe_record_key(state, key, commands)
-
-    # Guard: block insert/replace transitions on read-only buffers.
-    {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and state.buffers.active != nil and
-           BufferServer.read_only?(state.buffers.active) do
-        {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
-      else
-        {new_mode, commands, new_mode_state, state}
-      end
-
-    # When transitioning INTO visual or command mode, adjust mode_state.
-    new_mode_state =
-      ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
-
-    base_state = %{state | mode: new_mode, mode_state: new_mode_state}
-
-    # Fire mode change hook and break undo coalescing so the next edit
-    # in the new mode starts a fresh undo entry.
-    if old_mode != new_mode do
-      if base_state.buffers.active,
-        do: BufferServer.break_undo_coalescing(base_state.buffers.active)
-
-      fire_hook(:on_mode_change, [old_mode, new_mode])
-    end
-
-    after_commands =
-      Enum.reduce(commands, base_state, fn cmd, acc ->
-        dispatch_command(acc, cmd)
-      end)
-
-    # After commands have executed (they may need the old mode_state, e.g.
-    # VisualState for delete_visual_selection), clean up the mode_state
-    # if we've transitioned back to Normal from a different mode.
-    # Skip cleanup if a command changed the mode to something other than
-    # what the FSM transition requested (e.g. substitute confirm, search prompt).
-    after_commands =
-      if new_mode == :normal and old_mode != :normal and after_commands.mode == :normal do
-        case after_commands.mode_state do
-          %Mode.State{} -> after_commands
-          _ -> %{after_commands | mode_state: Mode.initial_state()}
-        end
-      else
-        after_commands
-      end
-
-    after_commands
-  end
-
-  # Change recording, mode transition, and dot repeat extracted to
-  # Minga.Editor.ChangeTracking and Minga.Editor.ModeTransitions.
-
-  # ── Command execution ────────────────────────────────────────────────────────
+  defdelegate do_handle_key(state, codepoint, modifiers), to: KeyDispatch, as: :handle_key
 
   @doc false
   @spec do_maybe_reset_highlight(state(), pid() | nil) :: state()
@@ -780,30 +712,7 @@ defmodule Minga.Editor do
 
   @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
-  def dispatch_command(state, cmd) do
-    old_buffer = state.buffers.active
-    cmd_name = command_name(cmd)
-
-    execute = fn s ->
-      case Commands.execute(s, cmd) do
-        {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
-        {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
-        s2 -> s2
-      end
-    end
-
-    result = ConfigAdvice.wrap(cmd_name, execute).(state)
-
-    BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
-  end
-
-  # Extracts the command name atom from a command (which may be an atom or tuple).
-  @spec command_name(Mode.command()) :: atom()
-  defp command_name(cmd) when is_atom(cmd), do: cmd
-  defp command_name(cmd) when is_tuple(cmd), do: elem(cmd, 0)
-  defp command_name(cmd) when is_list(cmd), do: :multi
-  defp command_name(_cmd), do: :unknown
+  defdelegate dispatch_command(state, cmd), to: KeyDispatch
 
   # ── Project detection ───────────────────────────────────────────────────────
 
