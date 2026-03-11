@@ -13,9 +13,6 @@ defmodule Minga.Editor do
 
   use GenServer
 
-  alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.Session, as: AgentSession
-  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
@@ -23,6 +20,7 @@ defmodule Minga.Editor do
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.Commands
@@ -233,7 +231,7 @@ defmodule Minga.Editor do
         new_state = lsp_buffer_opened(new_state, pid)
         new_state = git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
-        new_state = maybe_set_auto_context(new_state, file_path, pid)
+        new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
 
@@ -308,7 +306,7 @@ defmodule Minga.Editor do
     send(self(), :setup_highlight)
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
-    new_state = maybe_start_agent_session(new_state)
+    new_state = AgentLifecycle.maybe_start_session(new_state)
     {:noreply, sync_surface_from_editor(new_state)}
   end
 
@@ -619,11 +617,11 @@ defmodule Minga.Editor do
   end
 
   defp apply_effect(state, :sync_agent_buffer) do
-    sync_agent_buffer(state)
+    AgentLifecycle.sync_buffer(state)
   end
 
   defp apply_effect(state, {:update_tab_label, _label}) do
-    maybe_update_agent_tab_label(state)
+    AgentLifecycle.maybe_update_tab_label(state)
   end
 
   @doc false
@@ -766,167 +764,10 @@ defmodule Minga.Editor do
     :exit, _ -> Logger.warning("Could not subscribe to parser manager")
   end
 
-  @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
-  defp update_preview(state, fun) do
-    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
-  end
-
-  # ── Active-tab agent event helpers ─────────────────────────────────────────
-  #
-  # These extract the active-tab logic from handle_info clauses that
-  # need non-trivial processing (multi-branch, sequential updates).
-
-  # Background agent event handling extracted to BackgroundEvents module.
+  # Agent lifecycle helpers (session startup, auto-context, buffer sync,
+  # tab labels) extracted to Minga.Editor.AgentLifecycle.
+  # Background agent event handling extracted to Minga.Editor.BackgroundEvents.
   # Active-tab agent event handling lives in AgentView.handle_event/2.
-
-  # Background tab preview helpers and tab label helpers extracted to
-  # Minga.Editor.BackgroundEvents module.
-
-  # If the agentic view was activated during init, start the agent session
-  # now that the port is ready. Also loads auto-context if configured.
-  @spec maybe_start_agent_session(state()) :: state()
-  defp maybe_start_agent_session(%{agentic: %{active: true}, agent: %{session: nil}} = state) do
-    state = Commands.Agent.ensure_agent_session(state)
-    cli_flags = Minga.CLI.startup_flags()
-    maybe_load_auto_context(state, cli_flags)
-  rescue
-    e ->
-      Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
-      state
-  end
-
-  defp maybe_start_agent_session(state), do: state
-
-  # Loads the active buffer's file into the agentic preview pane when
-  # agent_auto_context is enabled and a file buffer is open. Called once
-  # during startup after the agentic view activates.
-  @spec maybe_load_auto_context(state(), Minga.CLI.flags()) :: state()
-  defp maybe_load_auto_context(state, %{no_context: true}), do: state
-
-  defp maybe_load_auto_context(state, _flags) do
-    auto_context = ConfigOptions.get(:agent_auto_context)
-    active_buf = state.buffers.active
-
-    if auto_context and active_buf do
-      load_buffer_as_preview(state, active_buf)
-    else
-      state
-    end
-  end
-
-  # Sets a file's content as the agentic preview pane if the view is active
-  # and the preview is still empty. Used both at startup (via
-  # maybe_load_auto_context) and when a file is opened while the agentic
-  # view is already active (via maybe_set_auto_context).
-  @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
-  defp maybe_set_auto_context(state, file_path, buffer_pid) do
-    cli_flags = Minga.CLI.startup_flags()
-    auto_context = ConfigOptions.get(:agent_auto_context)
-    agentic_active = state.agentic.active
-    preview_empty = state.agentic.preview.content == :empty
-
-    if agentic_active and preview_empty and auto_context and not cli_flags.no_context do
-      content = BufferServer.content(buffer_pid)
-      update_preview(state, &Preview.set_file(&1, file_path, content))
-    else
-      state
-    end
-  end
-
-  @spec load_buffer_as_preview(state(), pid()) :: state()
-  defp load_buffer_as_preview(state, buffer_pid) do
-    case BufferServer.file_path(buffer_pid) do
-      nil ->
-        state
-
-      path ->
-        content = BufferServer.content(buffer_pid)
-        update_preview(state, &Preview.set_file(&1, path, content))
-    end
-  end
-
-  @spec sync_agent_buffer(state()) :: state()
-  defp sync_agent_buffer(%{agent: %{buffer: buf, session: session}} = state)
-       when is_pid(buf) and is_pid(session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
-
-    AgentBufferSync.sync(buf, messages)
-    state
-  end
-
-  defp sync_agent_buffer(state), do: state
-
-  # Updates the active agent tab's label to the first user prompt (truncated).
-  # Only updates if the current label is the default "New Agent" or "minga".
-  @spec maybe_update_agent_tab_label(EditorState.t()) :: EditorState.t()
-  defp maybe_update_agent_tab_label(
-         %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
-       )
-       when is_pid(session) do
-    case TabBar.active(tb) do
-      %{kind: :agent, label: label} when is_binary(label) ->
-        if default_agent_label?(label) do
-          update_agent_tab_from_session(state, tb, active_id, session)
-        else
-          state
-        end
-
-      _other ->
-        state
-    end
-  end
-
-  defp maybe_update_agent_tab_label(state), do: state
-
-  @spec update_agent_tab_from_session(EditorState.t(), TabBar.t(), Tab.id(), pid()) ::
-          EditorState.t()
-  defp update_agent_tab_from_session(state, tb, active_id, session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
-
-    case first_user_message(messages) do
-      nil ->
-        state
-
-      text ->
-        label = truncate_label(text, 30)
-        %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
-    end
-  end
-
-  @spec default_agent_label?(String.t()) :: boolean()
-  defp default_agent_label?("New Agent"), do: true
-  defp default_agent_label?("minga"), do: true
-  defp default_agent_label?(_), do: false
-
-  @spec first_user_message([term()]) :: String.t() | nil
-  defp first_user_message(messages) do
-    Enum.find_value(messages, fn
-      {:user, text} -> text
-      _ -> nil
-    end)
-  end
-
-  @spec truncate_label(String.t(), pos_integer()) :: String.t()
-  defp truncate_label(text, max) do
-    # Take first line, trim, truncate
-    line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
-
-    if String.length(line) > max do
-      String.slice(line, 0, max - 1) <> "\u{2026}"
-    else
-      line
-    end
-  end
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
