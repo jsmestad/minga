@@ -882,6 +882,9 @@ defmodule Minga.Editor do
           {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
   # ── Surface lifecycle ──────────────────────────────────────────────────────
 
+  alias Minga.Surface.AgentView
+  alias Minga.Surface.AgentView.Bridge, as: AVBridge
+  alias Minga.Surface.AgentView.State, as: AVState
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.Bridge, as: BVBridge
   alias Minga.Surface.BufferView.State, as: BVState
@@ -937,8 +940,8 @@ defmodule Minga.Editor do
   @doc false
   @spec init_surface(EditorState.t()) :: EditorState.t()
   defp init_surface(%EditorState{keymap_scope: :agent} = state) do
-    # Agent tabs will get AgentView in Phase 2. For now, no surface.
-    state
+    av_state = AVBridge.from_editor_state(state)
+    %{state | surface_module: AgentView, surface_state: av_state}
   end
 
   defp init_surface(%EditorState{} = state) do
@@ -958,6 +961,10 @@ defmodule Minga.Editor do
     %{state | surface_state: BVBridge.from_editor_state(state)}
   end
 
+  def sync_surface_from_editor(%EditorState{surface_module: AgentView} = state) do
+    %{state | surface_state: AVBridge.from_editor_state(state)}
+  end
+
   def sync_surface_from_editor(state), do: state
 
   @doc """
@@ -971,6 +978,12 @@ defmodule Minga.Editor do
         %EditorState{surface_module: BufferView, surface_state: %BVState{} = bv} = state
       ) do
     BVBridge.to_editor_state(state, bv)
+  end
+
+  def sync_editor_from_surface(
+        %EditorState{surface_module: AgentView, surface_state: %AVState{} = av} = state
+      ) do
+    AVBridge.to_editor_state(state, av)
   end
 
   def sync_editor_from_surface(state), do: state

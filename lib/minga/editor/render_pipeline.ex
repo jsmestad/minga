@@ -224,7 +224,7 @@ defmodule Minga.Editor.RenderPipeline do
     debug_layout(state, layout)
 
     if state.agentic.active do
-      run_agentic(state, layout)
+      run_agentic_pipeline(state, layout)
     else
       # Delegate to the active surface for the windows render path.
       # The surface calls run_windows_pipeline/2 internally via the bridge.
@@ -271,8 +271,15 @@ defmodule Minga.Editor.RenderPipeline do
     state
   end
 
-  @spec run_agentic(state(), Layout.t()) :: state()
-  defp run_agentic(state, layout) do
+  @doc """
+  Runs the agentic render pipeline stages.
+
+  Public entry point for `AgentView.render/2`. Handles content rendering
+  via `ViewRenderer`, agentic chrome (tab bar, modeline), composition,
+  and emit.
+  """
+  @spec run_agentic_pipeline(state(), Layout.t()) :: state()
+  def run_agentic_pipeline(state, layout) do
     # Agentic path: Content is the ViewRenderer, Chrome is minimal.
     # The renderer returns scroll metrics alongside draw commands so
     # PanelState.scroll_up/down can resolve auto_scroll→manual transitions
