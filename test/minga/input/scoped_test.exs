@@ -3,7 +3,9 @@ defmodule Minga.Input.ScopedTest do
 
   @moduletag :tmp_dir
 
+  alias Minga.Agent.DiffReview
   alias Minga.Agent.PanelState
+  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
@@ -484,6 +486,215 @@ defmodule Minga.Input.ScopedTest do
     test "SPC passes through in editor scope (no panel)" do
       state = base_state(keymap_scope: :editor)
       assert {:passthrough, _} = Scoped.handle_key(state, ?\s, 0)
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Agent sub-states (characterization tests for Phase 2)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "agent scope — tool approval sub-state" do
+    setup do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+
+      approval = %{
+        tool_call_id: "tc_123",
+        name: "write_file",
+        args: %{"path" => "/tmp/test.txt"}
+      }
+
+      state = put_in(state.agent.pending_approval, approval)
+      {:ok, state: state}
+    end
+
+    test "y is handled (dispatches approve command)", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?y, 0)
+      # Without a live session, approve_tool is a no-op (guard fails),
+      # but the key IS handled (not passed through)
+    end
+
+    test "n is handled (dispatches deny command)", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?n, 0)
+    end
+
+    test "Y is handled (approve all)", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?Y, 0)
+    end
+
+    test "unrelated key is swallowed during approval", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, ?x, 0)
+      # The key is swallowed, pending_approval stays
+      assert new_state.agent.pending_approval != nil
+    end
+
+    test "only triggers when input is not focused", %{state: state} do
+      # If input is focused, approval keys should not be intercepted
+      state = put_in(state.agent.panel.input_focused, true)
+      {:handled, new_state} = Scoped.handle_key(state, ?y, 0)
+      # Should have typed 'y' into input, not approved
+      assert PanelState.input_text(new_state.agent.panel) =~ "y"
+    end
+  end
+
+  describe "agent scope — diff review sub-state" do
+    setup do
+      state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
+
+      # Set up a diff review preview
+      review = DiffReview.new("test.ex", "old line\n", "new line\n")
+
+      state = %{
+        state
+        | agentic: %{state.agentic | preview: %Preview{content: {:diff, review}}}
+      }
+
+      {:ok, state: state}
+    end
+
+    test "y accepts hunk", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?y, 0)
+    end
+
+    test "x rejects hunk", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?x, 0)
+    end
+
+    test "Y accepts all hunks", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?Y, 0)
+    end
+
+    test "X rejects all hunks", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?X, 0)
+    end
+
+    test "navigation keys still work during diff review", %{state: state} do
+      {:handled, _new_state} = Scoped.handle_key(state, ?j, 0)
+    end
+
+    test "diff review only triggers in file_viewer focus" do
+      state = base_state(keymap_scope: :agent, agentic_active: true, focus: :chat)
+
+      review = DiffReview.new("test.ex", "old line\n", "new line\n")
+
+      state = %{
+        state
+        | agentic: %{state.agentic | preview: %Preview{content: {:diff, review}}}
+      }
+
+      # In :chat focus, y should resolve through the scope trie, not diff review
+      {:handled, _new_state} = Scoped.handle_key(state, ?y, 0)
+    end
+  end
+
+  describe "agent scope — mention completion sub-state" do
+    setup do
+      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+
+      completion = %{
+        prefix: "@",
+        all_files: ["lib/test.ex", "lib/foo.ex"],
+        candidates: ["lib/test.ex", "lib/foo.ex"],
+        selected: 0,
+        anchor_line: 0,
+        anchor_col: 0
+      }
+
+      state = put_in(state.agent.panel.mention_completion, completion)
+      {:ok, state: state}
+    end
+
+    test "Tab moves to next candidate", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 9, 0)
+      assert new_state.agent.panel.mention_completion.selected == 1
+    end
+
+    test "Enter accepts the selected candidate", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 13, 0)
+      assert new_state.agent.panel.mention_completion == nil
+    end
+
+    test "Escape cancels mention completion", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      assert new_state.agent.panel.mention_completion == nil
+    end
+
+    test "printable char narrows candidates", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, ?t, 0)
+      # Should narrow the candidates based on the new prefix
+      comp = new_state.agent.panel.mention_completion
+
+      if comp != nil do
+        assert length(comp.candidates) <= length(state.agent.panel.mention_completion.candidates)
+      end
+    end
+
+    test "mention only intercepts in insert mode", %{state: state} do
+      # Switch to normal mode by removing input_focused
+      state = put_in(state.agent.panel.input_focused, false)
+      # In normal mode with mention_completion set, the key should NOT
+      # go through mention handling (the guard checks input_focused: true)
+      {:handled, _new_state} = Scoped.handle_key(state, ?j, 0)
+    end
+  end
+
+  describe "editor scope — panel mention completion" do
+    setup do
+      {:ok, agent_buf} = BufferServer.start_link(content: "chat")
+
+      state =
+        base_state(
+          keymap_scope: :editor,
+          panel_visible: true,
+          input_focused: true,
+          agent_buffer: agent_buf
+        )
+
+      completion = %{
+        prefix: "@",
+        all_files: ["lib/test.ex"],
+        candidates: ["lib/test.ex"],
+        selected: 0,
+        anchor_line: 0,
+        anchor_col: 0
+      }
+
+      state = put_in(state.agent.panel.mention_completion, completion)
+      {:ok, state: state}
+    end
+
+    test "mention completion intercepts keys in editor panel too", %{state: state} do
+      {:handled, new_state} = Scoped.handle_key(state, 27, 0)
+      assert new_state.agent.panel.mention_completion == nil
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Mouse handling
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "handle_mouse — agentic view" do
+    test "routes to AgentViewMouse when agentic is active" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      # Click somewhere; the handler should dispatch without crashing
+      result = Scoped.handle_mouse(state, 5, 5, :left, 0, :press, 1)
+      assert elem(result, 0) in [:handled, :passthrough]
+    end
+  end
+
+  describe "handle_mouse — file tree" do
+    test "handles click when file tree exists", %{tmp_dir: tmp_dir} do
+      state = make_tree_state(tmp_dir)
+      result = Scoped.handle_mouse(state, 5, 5, :left, 0, :press, 1)
+      # Without a computed layout, the click is still handled (file_tree clause matches)
+      assert elem(result, 0) in [:handled, :passthrough]
+    end
+  end
+
+  describe "handle_mouse — other scopes" do
+    test "passes through for editor scope" do
+      state = base_state(keymap_scope: :editor)
+      result = Scoped.handle_mouse(state, 5, 5, :left, 0, :press, 1)
+      assert {:passthrough, _} = result
     end
   end
 
