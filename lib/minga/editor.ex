@@ -14,7 +14,6 @@ defmodule Minga.Editor do
   use GenServer
 
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Editor.AgentLifecycle
@@ -30,6 +29,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.KeyDispatch
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
+  alias Minga.Editor.MessageLog
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
   alias Minga.Editor.SurfaceSync
@@ -93,95 +93,11 @@ defmodule Minga.Editor do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    port_manager = Keyword.get(opts, :port_manager, PortManager)
-    _file_watcher = Keyword.get(opts, :file_watcher)
-    width = Keyword.get(opts, :width, 80)
-    height = Keyword.get(opts, :height, 24)
-    buffer = Keyword.get(opts, :buffer)
-
-    unless is_nil(port_manager) do
-      try do
-        PortManager.subscribe(port_manager)
-      catch
-        :exit, _ -> Logger.warning("Could not subscribe to port manager")
-      end
-    end
-
-    Startup.subscribe_to_parser(Keyword.get(opts, :parser_manager))
-
-    # Register initial buffer with file watcher
-    FileWatcherHelpers.maybe_watch_buffer(buffer)
-
-    buffers = if buffer, do: [buffer], else: []
-
-    # Start special buffers (stored separately, not in buffer list)
-    {messages_buf, scratch_buf} = Startup.start_special_buffers()
-
-    # When no file is open, show scratch as the active buffer
-    {active_buf, buffers} =
-      case {buffer, scratch_buf} do
-        {nil, pid} when is_pid(pid) -> {pid, []}
-        {pid, _} when is_pid(pid) -> {pid, buffers}
-        _ -> {nil, buffers}
-      end
-
-    active_idx = if active_buf && buffers != [], do: 0, else: 0
-
-    viewport = Viewport.new(height, width)
-
-    # Initialize the window tree with a single window
-    initial_window_id = 1
-
-    alias Minga.Editor.State.Buffers
-    alias Minga.Editor.State.Windows
-
-    initial_window =
-      if active_buf do
-        Window.new(initial_window_id, active_buf, height, width)
-      else
-        nil
-      end
-
-    windows =
-      if initial_window, do: %{initial_window_id => initial_window}, else: %{}
-
-    {keymap_scope, agentic_state, effective_tree} =
-      Startup.startup_view_state(port_manager, initial_window_id)
-
-    state = %EditorState{
-      buffers: %Buffers{
-        active: active_buf,
-        list: buffers,
-        active_index: active_idx,
-        messages: messages_buf,
-        scratch: scratch_buf
-      },
-      port_manager: port_manager,
-      viewport: viewport,
-      mode: :normal,
-      mode_state: Mode.initial_state(),
-      windows: %Windows{
-        tree: effective_tree,
-        map: windows,
-        active: initial_window_id,
-        next_id: initial_window_id + 1
-      },
-      keymap_scope: keymap_scope,
-      agentic: agentic_state,
-      focus_stack: Minga.Input.default_stack()
-    }
-
-    state = %{state | tab_bar: Startup.initial_tab_bar(active_buf, keymap_scope)}
-
-    # Initialize the active surface. File tabs use BufferView; agent tabs
-    # will use AgentView (Phase 2). The surface state is extracted from
-    # EditorState via the bridge and kept in sync on every operation.
+    state = Startup.build_initial_state(opts)
     state = init_surface(state)
 
-    # Redirect Logger and stderr to a log file when running with a real TUI.
-    # In headless tests the port_manager is a pid (HeadlessPort), not the
-    # registered PortManager atom, so we skip the redirect to keep ExUnit clean.
-    tui_active? = port_manager == PortManager
+    # Logger redirect and startup messages
+    tui_active? = state.port_manager == PortManager
 
     state =
       if tui_active? do
@@ -192,10 +108,7 @@ defmodule Minga.Editor do
         log_message(state, "Editor started")
       end
 
-    # Apply user config options
     state = Startup.apply_config_options(state)
-
-    # Subscribe to diagnostic changes for re-rendering gutter signs
     Minga.Diagnostics.subscribe()
 
     {:ok, state}
@@ -424,7 +337,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:log_message, level, text}}, state) do
-    prefix = frontend_log_prefix(state)
+    prefix = MessageLog.frontend_prefix(state)
     new_state = log_message(state, "[#{prefix}/#{level}] #{text}")
     {:noreply, new_state}
   end
@@ -699,39 +612,10 @@ defmodule Minga.Editor do
 
   # Special buffers extracted to Minga.Editor.Startup.
 
-  # ── Message logging ──────────────────────────────────────────────────────
+  # Message logging delegated to Minga.Editor.MessageLog.
 
-  @max_messages_lines 1000
-
-  @doc false
   @spec log_message(state(), String.t()) :: state()
-  defp log_message(%{buffers: %{messages: nil}} = state, _text), do: state
-
-  defp log_message(%{buffers: %{messages: buf}} = state, text) do
-    time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    BufferServer.append(buf, "[#{time}] #{text}\n")
-
-    # Trim to max lines
-    line_count = BufferServer.line_count(buf)
-
-    if line_count > @max_messages_lines do
-      excess = line_count - @max_messages_lines
-      # Read remaining content and replace
-      content = BufferServer.content(buf)
-      lines = String.split(content, "\n")
-      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-      # Direct state manipulation to bypass read-only for trim
-      :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
-      end)
-    end
-
-    state
-  end
-
-  @spec frontend_log_prefix(state()) :: String.t()
-  defp frontend_log_prefix(%{capabilities: %{frontend_type: :native_gui}}), do: "GUI"
-  defp frontend_log_prefix(_state), do: "ZIG"
+  defp log_message(state, text), do: MessageLog.log(state, text)
 
   # ── Window resize ────────────────────────────────────────────────────────
 

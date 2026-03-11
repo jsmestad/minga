@@ -11,12 +11,90 @@ defmodule Minga.Editor.Startup do
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
+  alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Windows
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
 
   require Logger
+
+  @doc """
+  Builds the complete initial EditorState from startup opts.
+
+  Subscribes to port manager and parser, starts special buffers,
+  initializes windows, and determines the initial view (agent vs editor).
+  """
+  @spec build_initial_state(keyword()) :: EditorState.t()
+  def build_initial_state(opts) do
+    port_manager = Keyword.get(opts, :port_manager, PortManager)
+    width = Keyword.get(opts, :width, 80)
+    height = Keyword.get(opts, :height, 24)
+    buffer = Keyword.get(opts, :buffer)
+
+    subscribe_port(port_manager)
+    subscribe_to_parser(Keyword.get(opts, :parser_manager))
+    FileWatcherHelpers.maybe_watch_buffer(buffer)
+
+    {messages_buf, scratch_buf} = start_special_buffers()
+
+    {active_buf, buffers} =
+      case {buffer, scratch_buf} do
+        {nil, pid} when is_pid(pid) -> {pid, []}
+        {pid, _} when is_pid(pid) -> {pid, [pid]}
+        _ -> {nil, []}
+      end
+
+    initial_window_id = 1
+
+    initial_window =
+      if active_buf, do: Window.new(initial_window_id, active_buf, height, width), else: nil
+
+    windows = if initial_window, do: %{initial_window_id => initial_window}, else: %{}
+
+    {keymap_scope, agentic_state, effective_tree} =
+      startup_view_state(port_manager, initial_window_id)
+
+    state = %EditorState{
+      buffers: %Buffers{
+        active: active_buf,
+        list: buffers,
+        active_index: 0,
+        messages: messages_buf,
+        scratch: scratch_buf
+      },
+      port_manager: port_manager,
+      viewport: Viewport.new(height, width),
+      mode: :normal,
+      mode_state: Mode.initial_state(),
+      windows: %Windows{
+        tree: effective_tree,
+        map: windows,
+        active: initial_window_id,
+        next_id: initial_window_id + 1
+      },
+      keymap_scope: keymap_scope,
+      agentic: agentic_state,
+      focus_stack: Minga.Input.default_stack()
+    }
+
+    %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+  end
+
+  @spec subscribe_port(GenServer.server() | nil) :: :ok
+  defp subscribe_port(nil), do: :ok
+
+  defp subscribe_port(port_manager) do
+    PortManager.subscribe(port_manager)
+  catch
+    :exit, _ -> Logger.warning("Could not subscribe to port manager")
+  end
 
   @doc """
   Builds the initial tab bar based on the active buffer and keymap scope.
