@@ -18,32 +18,31 @@ defmodule Minga.Editor do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Config.Advice, as: ConfigAdvice
-  alias Minga.Config.Loader, as: ConfigLoader
-  alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
+  alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.MacroReplay
   alias Minga.Editor.ModeTransitions
   alias Minga.Editor.Renderer
+  alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Editor.WindowTree
   alias Minga.FileTree
 
   alias Minga.Input
   alias Minga.Mode
 
   alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol
 
   alias Minga.Project
 
@@ -58,8 +57,6 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Tab
-  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -112,7 +109,7 @@ defmodule Minga.Editor do
       end
     end
 
-    subscribe_to_parser(Keyword.get(opts, :parser_manager))
+    Startup.subscribe_to_parser(Keyword.get(opts, :parser_manager))
 
     # Register initial buffer with file watcher
     FileWatcherHelpers.maybe_watch_buffer(buffer)
@@ -120,7 +117,7 @@ defmodule Minga.Editor do
     buffers = if buffer, do: [buffer], else: []
 
     # Start special buffers (stored separately, not in buffer list)
-    {messages_buf, scratch_buf} = start_special_buffers()
+    {messages_buf, scratch_buf} = Startup.start_special_buffers()
 
     # When no file is open, show scratch as the active buffer
     {active_buf, buffers} =
@@ -151,7 +148,7 @@ defmodule Minga.Editor do
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
     {keymap_scope, agentic_state, effective_tree} =
-      startup_view_state(port_manager, initial_window_id)
+      Startup.startup_view_state(port_manager, initial_window_id)
 
     state = %EditorState{
       buffers: %Buffers{
@@ -176,7 +173,7 @@ defmodule Minga.Editor do
       focus_stack: Minga.Input.default_stack()
     }
 
-    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+    state = %{state | tab_bar: Startup.initial_tab_bar(active_buf, keymap_scope)}
 
     # Initialize the active surface. File tabs use BufferView; agent tabs
     # will use AgentView (Phase 2). The surface state is extracted from
@@ -198,7 +195,7 @@ defmodule Minga.Editor do
       end
 
     # Apply user config options
-    state = apply_config_options(state)
+    state = Startup.apply_config_options(state)
 
     # Subscribe to diagnostic changes for re-rendering gutter signs
     Minga.Diagnostics.subscribe()
@@ -299,9 +296,9 @@ defmodule Minga.Editor do
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
-    caps = fetch_capabilities(state.port_manager)
+    caps = Startup.fetch_capabilities(state.port_manager)
     new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
-    send_font_config(new_state)
+    Startup.send_font_config(new_state)
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
@@ -404,46 +401,22 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:highlight_names, names}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state = HighlightSync.handle_names(state, names)
-    {:noreply, new_state}
+    {:noreply, HighlightEvents.handle_names(state, names)}
   end
 
   def handle_info({tag, {:injection_ranges, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state =
-      if state.buffers.active do
-        %{state | injection_ranges: Map.put(state.injection_ranges, state.buffers.active, ranges)}
-      else
-        state
-      end
-
-    {:noreply, new_state}
+    {:noreply, HighlightEvents.handle_injection_ranges(state, ranges)}
   end
 
   def handle_info({tag, {:language_at_response, _request_id, _language}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    # Reserved for future use (synchronous language queries)
     {:noreply, state}
   end
 
   def handle_info({tag, {:highlight_spans, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state = HighlightSync.handle_spans(state, version, spans)
-
-    # Cache the updated highlights for this buffer
-    new_state =
-      if new_state.buffers.active do
-        hl = new_state.highlight
-
-        %{
-          new_state
-          | highlight: %{hl | cache: Map.put(hl.cache, new_state.buffers.active, hl.current)}
-        }
-      else
-        new_state
-      end
-
-    new_state = Renderer.render(new_state)
+    new_state = HighlightEvents.handle_spans(state, version, spans)
     {:noreply, sync_surface_from_editor(new_state)}
   end
 
@@ -547,11 +520,9 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # Determines the initial keymap scope, agentic view state, and window
-  # tree based on config and CLI flags. In headless test mode (port_manager
-  # is a pid, not the PortManager atom), always uses editor mode.
-  @spec startup_view_state(GenServer.server(), pos_integer()) ::
-          {Minga.Keymap.Scope.scope_name(), ViewState.t(), WindowTree.t() | nil}
+  # Tab bar, view state, capabilities, parser subscription helpers
+  # extracted to Minga.Editor.Startup.
+
   # ── Surface lifecycle ──────────────────────────────────────────────────────
 
   alias Minga.Surface.AgentView
@@ -695,75 +666,8 @@ defmodule Minga.Editor do
 
   def dispatch_surface_event(state, _event), do: state
 
-  @spec initial_tab_bar(pid() | nil, atom()) :: TabBar.t()
-  defp initial_tab_bar(_active_buf, :agent) do
-    # Boot into agent mode: only the agent tab. A file tab is created
-    # on demand when the user first switches to editor mode.
-    TabBar.new(Tab.new_agent(1, "Agent"))
-  end
-
-  defp initial_tab_bar(active_buf, _scope) do
-    file_label =
-      if active_buf && Process.alive?(active_buf) do
-        Commands.Helpers.buffer_display_name(active_buf)
-      else
-        "*scratch*"
-      end
-
-    TabBar.new(Tab.new_file(1, file_label))
-  end
-
-  defp startup_view_state(port_manager, window_id) do
-    tui_mode? = port_manager == PortManager
-    cli_flags = Minga.CLI.startup_flags()
-
-    want_agent? =
-      tui_mode? and
-        not cli_flags.force_editor and
-        safe_get_option(:startup_view, :agent) == :agent
-
-    if want_agent? do
-      # Agentic view: set state immediately, hide window tree so the
-      # agent panel takes the full screen. The agent session starts
-      # later when :ready arrives and the port is connected.
-      av = %ViewState{ViewState.new() | active: true, focus: :chat}
-      {:agent, av, nil}
-    else
-      {:editor, ViewState.new(), WindowTree.new(window_id)}
-    end
-  end
-
-  # Reads a config option, returning the fallback if the Options Agent
-  # isn't running (e.g., during headless tests that don't start the full
-  # supervision tree).
-  @spec safe_get_option(ConfigOptions.option_name(), term()) :: term()
-  defp safe_get_option(name, fallback) do
-    ConfigOptions.get(name)
-  rescue
-    _ -> fallback
-  end
-
-  @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
-  defp fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
-
-  defp fetch_capabilities(port_manager) do
-    PortManager.capabilities(port_manager)
-  rescue
-    _ -> %Minga.Port.Capabilities{}
-  end
-
-  @spec subscribe_to_parser(GenServer.server() | nil) :: :ok
-  defp subscribe_to_parser(nil) do
-    Minga.Parser.Manager.subscribe()
-  catch
-    :exit, _ -> :ok
-  end
-
-  defp subscribe_to_parser(parser_manager) do
-    Minga.Parser.Manager.subscribe(parser_manager)
-  catch
-    :exit, _ -> Logger.warning("Could not subscribe to parser manager")
-  end
+  # Tab bar, view state, capabilities, parser subscription helpers
+  # extracted to Minga.Editor.Startup.
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
   # tab labels) extracted to Minga.Editor.AgentLifecycle.
@@ -772,27 +676,9 @@ defmodule Minga.Editor do
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
-    buffer_pid = state.buffers.active
-
-    case buffer_pid do
-      nil ->
-        {:noreply, state}
-
-      _ ->
-        {new_bridge, completion} =
-          CompletionTrigger.handle_response(state.completion_trigger, ref, result, buffer_pid)
-
-        new_state = %{state | completion_trigger: new_bridge}
-
-        new_state =
-          case completion do
-            nil -> new_state
-            %Completion{} -> %{new_state | completion: completion}
-          end
-
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-    end
+    new_state = CompletionHandling.handle_response(state, ref, result)
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
   end
 
   # ── Render scheduling ────────────────────────────────────────────────────────
@@ -880,69 +766,17 @@ defmodule Minga.Editor do
 
   # ── Command execution ────────────────────────────────────────────────────────
 
-  # Detect active buffer change: save old highlights to cache, restore or setup new.
   @doc false
   @spec do_maybe_reset_highlight(state(), pid() | nil) :: state()
-  def do_maybe_reset_highlight(state, old_buffer) do
-    new_buffer = state.buffers.active
+  defdelegate do_maybe_reset_highlight(state, old_buffer),
+    to: HighlightEvents,
+    as: :maybe_reset_highlight
 
-    if new_buffer != old_buffer and new_buffer != nil do
-      # Save current highlights for the old buffer
-      hl = state.highlight
-
-      cache =
-        if old_buffer != nil and hl.current.capture_names != [] do
-          Map.put(hl.cache, old_buffer, hl.current)
-        else
-          hl.cache
-        end
-
-      # Restore cached highlights for the new buffer, or setup fresh
-      case Map.get(cache, new_buffer) do
-        nil ->
-          send(self(), :setup_highlight)
-
-          %{
-            state
-            | highlight: %{hl | current: Minga.Highlight.from_theme(state.theme), cache: cache}
-          }
-
-        cached ->
-          %{state | highlight: %{hl | current: cached, cache: cache}}
-      end
-    else
-      state
-    end
-  end
-
-  # Re-parse buffer for syntax highlighting after content-mutating keys.
-  # Compares the buffer's mutation version before/after key handling to detect
-  # any content change — covers insert mode, normal-mode operators (dd, p, x,
-  # >>, <<, etc.), undo/redo, and any other mutation path.
   @doc false
   @spec do_maybe_reparse(state(), non_neg_integer()) :: state()
-  def do_maybe_reparse(state, version_before) do
-    content_changed = buffer_version(state) != version_before
-
-    state =
-      if content_changed do
-        state
-        |> BufferLifecycle.lsp_buffer_changed()
-        |> BufferLifecycle.git_buffer_changed()
-      else
-        state
-      end
-
-    if content_changed and state.highlight.current.capture_names != [] do
-      HighlightSync.request_reparse(state)
-    else
-      state
-    end
-  end
-
-  @spec buffer_version(state()) :: non_neg_integer()
-  defp buffer_version(%{buffers: %{active: nil}}), do: 0
-  defp buffer_version(%{buffers: %{active: buf}}), do: BufferServer.version(buf)
+  defdelegate do_maybe_reparse(state, version_before),
+    to: HighlightEvents,
+    as: :maybe_reparse
 
   @doc false
   @spec dispatch_command(state(), Mode.command()) :: state()
@@ -1033,45 +867,7 @@ defmodule Minga.Editor do
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
 
-  # ── Special buffers ──────────────────────────────────────────────────────
-
-  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
-  defp start_special_buffers do
-    messages_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: "",
-              buffer_name: "*Messages*",
-              read_only: true,
-              unlisted: true,
-              persistent: true}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
-
-    scratch_filetype = ConfigOptions.get(:scratch_filetype)
-
-    scratch_content =
-      "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
-
-    scratch_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: scratch_content,
-              buffer_name: "*scratch*",
-              unlisted: true,
-              persistent: true,
-              filetype: scratch_filetype}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
-
-    {messages_buf, scratch_buf}
-  end
+  # Special buffers extracted to Minga.Editor.Startup.
 
   # ── Message logging ──────────────────────────────────────────────────────
 
@@ -1137,74 +933,20 @@ defmodule Minga.Editor do
     :exit, _ -> :ok
   end
 
-  @spec apply_config_options(state()) :: state()
-  defp apply_config_options(state) do
-    state =
-      try do
-        theme_name = ConfigOptions.get(:theme)
-        theme = Minga.Theme.get!(theme_name)
-
-        %{state | theme: theme}
-      catch
-        :exit, _ -> state
-      end
-
-    # Show config load error as status message
-    try do
-      case ConfigLoader.load_error() do
-        nil -> state
-        error -> %{state | status_msg: error}
-      end
-    catch
-      :exit, _ -> state
-    end
-  end
-
-  # Sends font configuration to the frontend via the port protocol.
-  # Called on ready and after config reload. The TUI ignores this command.
-  @spec send_font_config(state()) :: :ok
-  defp send_font_config(%{port_manager: nil}), do: :ok
-
-  defp send_font_config(%{port_manager: port}) do
-    family = ConfigOptions.get(:font_family)
-    size = ConfigOptions.get(:font_size)
-    ligatures = ConfigOptions.get(:font_ligatures)
-    weight = ConfigOptions.get(:font_weight)
-    cmd = Protocol.encode_set_font(family, size, ligatures, weight)
-    Minga.Port.Manager.send_commands(port, [cmd])
-  rescue
-    _ -> :ok
-  catch
-    :exit, _ -> :ok
-  end
+  # apply_config_options and send_font_config extracted to Minga.Editor.Startup.
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 
   @doc false
   @spec do_accept_completion(state(), Completion.t()) :: state()
-  def do_accept_completion(state, completion) do
-    case Completion.accept(completion) do
-      nil ->
-        do_dismiss_completion(state)
-
-      {:insert_text, text} ->
-        state |> accept_completion_text(completion, text) |> do_dismiss_completion()
-
-      {:text_edit, edit} ->
-        state |> apply_completion_text_edit(edit) |> do_dismiss_completion()
-    end
-  end
+  defdelegate do_accept_completion(state, completion), to: CompletionHandling, as: :accept
 
   @doc false
   @spec do_maybe_handle_completion(state(), atom(), non_neg_integer(), non_neg_integer()) ::
           state()
-  def do_maybe_handle_completion(state, old_mode, codepoint, modifiers) do
-    if state.mode == :insert and old_mode == :insert do
-      maybe_update_completion(state, codepoint, modifiers)
-    else
-      do_dismiss_completion(state)
-    end
-  end
+  defdelegate do_maybe_handle_completion(state, old_mode, codepoint, modifiers),
+    to: CompletionHandling,
+    as: :maybe_handle
 
   @doc false
   @spec do_render(state()) :: state()
@@ -1212,121 +954,7 @@ defmodule Minga.Editor do
     Renderer.render(state)
   end
 
-  @spec accept_completion_text(state(), Completion.t(), String.t()) :: state()
-  defp accept_completion_text(%{buffers: %{active: buf}} = state, completion, text)
-       when is_pid(buf) do
-    # Replace the text typed since the trigger position with the completion text
-    # in a single apply_text_edit call (no N+2 round-trips).
-    {trigger_line, trigger_col} = completion.trigger_position
-    {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
-
-    if cursor_line == trigger_line and cursor_col > trigger_col do
-      BufferServer.apply_text_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
-    else
-      BufferServer.insert_text(buf, text)
-    end
-
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
-  end
-
-  defp accept_completion_text(state, _completion, _text), do: state
-
-  @spec apply_completion_text_edit(state(), Completion.text_edit()) :: state()
-  defp apply_completion_text_edit(%{buffers: %{active: buf}} = state, edit) when is_pid(buf) do
-    BufferServer.apply_text_edit(
-      buf,
-      edit.range.start_line,
-      edit.range.start_col,
-      edit.range.end_line,
-      edit.range.end_col,
-      edit.new_text
-    )
-
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
-  end
-
-  defp apply_completion_text_edit(state, _edit), do: state
-
-  @spec maybe_update_completion(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_update_completion(state, codepoint, _mods) do
-    buf = state.buffers.active
-    if buf == nil, do: state, else: do_update_completion(state, buf, codepoint)
-  end
-
-  @spec do_update_completion(state(), pid(), non_neg_integer()) :: state()
-  defp do_update_completion(state, buf, codepoint) do
-    # If we have active completion, update the filter
-    state = update_completion_filter(state, buf)
-
-    # Try to trigger new completion if we just typed a character
-    maybe_trigger_completion(state, buf, codepoint)
-  end
-
-  @spec update_completion_filter(state(), pid()) :: state()
-  defp update_completion_filter(%{completion: nil} = state, _buf), do: state
-
-  defp update_completion_filter(%{completion: %Completion{} = completion} = state, buf) do
-    prefix = completion_prefix(buf, completion.trigger_position)
-    apply_completion_filter(state, completion, prefix)
-  end
-
-  @spec apply_completion_filter(state(), Completion.t(), String.t() | nil) :: state()
-  defp apply_completion_filter(state, _completion, nil), do: do_dismiss_completion(state)
-  defp apply_completion_filter(state, _completion, ""), do: do_dismiss_completion(state)
-
-  defp apply_completion_filter(state, completion, prefix) do
-    filtered = Completion.filter(completion, prefix)
-
-    if Completion.active?(filtered) do
-      %{state | completion: filtered}
-    else
-      do_dismiss_completion(state)
-    end
-  end
-
-  @spec maybe_trigger_completion(state(), pid(), non_neg_integer()) :: state()
-  defp maybe_trigger_completion(state, buf, codepoint) do
-    case codepoint_to_char(codepoint) do
-      nil ->
-        state
-
-      char ->
-        {new_bridge, _comp} =
-          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf, state.lsp)
-
-        %{state | completion_trigger: new_bridge}
-    end
-  end
-
   @doc false
   @spec do_dismiss_completion(state()) :: state()
-  def do_dismiss_completion(state) do
-    new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
-    %{state | completion: nil, completion_trigger: new_bridge}
-  end
-
-  @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
-  defp completion_prefix(buf, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
-
-    if cursor_line == trigger_line and cursor_col >= trigger_col do
-      lines = String.split(content, "\n")
-
-      case Enum.at(lines, cursor_line) do
-        nil -> nil
-        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
-      end
-    else
-      nil
-    end
-  end
-
-  @spec codepoint_to_char(non_neg_integer()) :: String.t() | nil
-  defp codepoint_to_char(cp) when cp >= 32 and cp <= 0x10FFFF do
-    <<cp::utf8>>
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp codepoint_to_char(_), do: nil
+  defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
 end
