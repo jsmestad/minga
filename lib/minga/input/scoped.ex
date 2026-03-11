@@ -26,7 +26,6 @@ defmodule Minga.Input.Scoped do
 
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Mouse, as: AgentViewMouse
-  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
@@ -150,46 +149,9 @@ defmodule Minga.Input.Scoped do
     {:passthrough, state}
   end
 
-  # Sub-state: search input active
-  defp handle_agent_key(
-         %{agentic: %{search: %{input_active: true}}} = state,
-         cp,
-         _mods
-       ) do
-    {:handled, AgentCommands.handle_search_key(state, cp)}
-  end
-
-  # Sub-state: mention completion active (insert mode only)
-  defp handle_agent_key(
-         %{agent: %{panel: %{input_focused: true, mention_completion: comp}}} = state,
-         cp,
-         mods
-       )
-       when comp != nil do
-    {:handled, AgentCommands.handle_mention_key(state, cp, mods)}
-  end
-
-  # Sub-state: tool approval pending (y/n/Y/N)
-  defp handle_agent_key(
-         %{agent: %{pending_approval: approval, panel: %{input_focused: false}}} = state,
-         cp,
-         _mods
-       )
-       when is_map(approval) do
-    handle_approval_key(state, cp)
-  end
-
-  # Sub-state: diff review active in file_viewer focus (y/x/Y/X)
-  defp handle_agent_key(
-         %{
-           agentic: %{focus: :file_viewer, preview: %Preview{content: {:diff, _}}},
-           agent: %{panel: %{input_focused: false}}
-         } = state,
-         cp,
-         _mods
-       ) do
-    handle_diff_review_key(state, cp)
-  end
+  # Sub-state handlers (search, mention, approval, diff review) are now
+  # separate Input.Handler modules in the surface handler list. They run
+  # before Scoped in the focus stack walk. See Input.surface_handlers/0.
 
   # Normal dispatch: determine vim state and resolve through scope
   # Tab on a paste placeholder line: toggle expand/collapse
@@ -341,49 +303,8 @@ defmodule Minga.Input.Scoped do
     {:handled, Commands.execute(state, {:agent_self_insert, char})}
   end
 
-  # ── Tool approval sub-state ────────────────────────────────────────────────
-
-  @spec handle_approval_key(EditorState.t(), non_neg_integer()) ::
-          {:handled, EditorState.t()}
-  defp handle_approval_key(state, ?y) do
-    {:handled, Commands.execute(state, :agent_approve_tool)}
-  end
-
-  defp handle_approval_key(state, ?n) do
-    {:handled, Commands.execute(state, :agent_deny_tool)}
-  end
-
-  defp handle_approval_key(state, ?Y) do
-    # Y = approve all (auto-approve future calls of this type)
-    {:handled, Commands.execute(state, :agent_approve_tool)}
-  end
-
-  defp handle_approval_key(state, _cp), do: {:handled, state}
-
-  # ── Diff review sub-state ──────────────────────────────────────────────────
-
-  @spec handle_diff_review_key(EditorState.t(), non_neg_integer()) ::
-          {:handled, EditorState.t()}
-  defp handle_diff_review_key(state, ?y) do
-    {:handled, Commands.execute(state, :agent_accept_hunk)}
-  end
-
-  defp handle_diff_review_key(state, ?x) do
-    {:handled, Commands.execute(state, :agent_reject_hunk)}
-  end
-
-  defp handle_diff_review_key(state, ?Y) do
-    {:handled, Commands.execute(state, :agent_accept_all_hunks)}
-  end
-
-  defp handle_diff_review_key(state, ?X) do
-    {:handled, Commands.execute(state, :agent_reject_all_hunks)}
-  end
-
-  # Navigation keys still work during diff review
-  defp handle_diff_review_key(state, cp) do
-    resolve_scope_key(state, :agent, :normal, {cp, 0}, cp, 0)
-  end
+  # Tool approval and diff review sub-state handlers moved to
+  # Minga.Input.ToolApproval and Minga.Input.DiffReview modules.
 
   # ══════════════════════════════════════════════════════════════════════════
   # Agent side panel (editor scope, panel visible)
@@ -401,15 +322,8 @@ defmodule Minga.Input.Scoped do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
 
-  # ── Mention completion active ──────────────────────────────────────────
-
-  defp handle_panel_input(
-         %{agent: %{panel: %{mention_completion: %{} = _comp}}} = state,
-         cp,
-         mods
-       ) do
-    AgentCommands.handle_mention_key(state, cp, mods)
-  end
+  # Mention completion is now handled by Minga.Input.MentionCompletion
+  # in the surface handler list, before Scoped.
 
   # All modes: try Vim first (handles arrow keys in insert, all keys in
   # normal/visual/operator-pending). Falls through to surface-specific
