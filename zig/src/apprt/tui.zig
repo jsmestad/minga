@@ -199,13 +199,13 @@ pub const TuiRuntime = struct {
         // paste_start / key_press* / paste_end instead of bare key_press.
         try self.vx.setBracketedPaste(self.tty.writer(), true);
 
-        // Query terminal capabilities (Kitty keyboard protocol, RGB color,
-        // Unicode width, graphics support, etc.). We use the non-blocking
-        // queryTerminalSend() because we run a custom event loop. The
-        // terminal's responses arrive as cap_* events; when cap_da1 fires
-        // (the final response), we call enableDetectedFeatures() to activate
-        // everything the terminal supports.
-        try self.vx.queryTerminalSend(self.tty.writer());
+        // NOTE: terminal capability queries (queryTerminalSend) are deferred
+        // to run() because init() returns self by value. The tty writer holds
+        // a pointer to tty_write_buf; after the move, that pointer is stale.
+        // Any tty writes in init() work because they flush immediately, but
+        // the cap_da1 handler (which enables detected features) runs later in
+        // the event loop when the old pointer is invalid. Querying in run()
+        // (after pointer fixup) avoids this.
 
         // Paste buffer uses the runtime allocator for dynamic accumulation.
         self.paste_buf = .empty;
@@ -223,10 +223,22 @@ pub const TuiRuntime = struct {
     /// Run the event loop. Blocks until quit signal or stdin EOF.
     pub fn run(self: *TuiRuntime) !void {
         // Fix up internal pointers after the struct has been moved to its
-        // final location on the caller's stack.
+        // final location on the caller's stack. init() returns by value, so
+        // any stored pointers to self's fields (especially tty_write_buf)
+        // are stale. We must reinitialize them here where self is stable.
+        const tty_file = std.fs.File{ .handle = self.tty.fd };
+        self.tty.tty_writer = .initStreaming(tty_file, &self.tty_write_buf);
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
+
+        // Query terminal capabilities (Kitty keyboard protocol, RGB color,
+        // Unicode width, graphics support, etc.). This must happen in run(),
+        // not init(), because the tty writer's buffer pointer is only valid
+        // after the fixup above. The terminal's responses arrive as cap_*
+        // events; when cap_da1 fires (the final response), we call
+        // enableDetectedFeatures() to activate Kitty keyboard, etc.
+        try self.vx.queryTerminalSend(self.tty.writer());
 
         // Stdout (Port protocol channel).
         var stdout_buf: [4096]u8 = undefined;
