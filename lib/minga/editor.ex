@@ -22,6 +22,7 @@ defmodule Minga.Editor do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BackgroundEvents
+  alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionTrigger
@@ -38,7 +39,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
 
-  alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Input
   alias Minga.Mode
 
@@ -229,8 +229,8 @@ defmodule Minga.Editor do
         maybe_record_file(file_path)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
-        new_state = lsp_buffer_opened(new_state, pid)
-        new_state = git_buffer_opened(new_state, pid)
+        new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
+        new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
         fire_hook(:after_open, [pid, file_path])
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
@@ -927,8 +927,8 @@ defmodule Minga.Editor do
     state =
       if content_changed do
         state
-        |> lsp_buffer_changed()
-        |> git_buffer_changed()
+        |> BufferLifecycle.lsp_buffer_changed()
+        |> BufferLifecycle.git_buffer_changed()
       else
         state
       end
@@ -961,7 +961,7 @@ defmodule Minga.Editor do
 
     result = ConfigAdvice.wrap(cmd_name, execute).(state)
 
-    lsp_after_command(result, cmd, old_buffer)
+    BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
   end
 
   # Extracts the command name atom from a command (which may be an atom or tuple).
@@ -1027,8 +1027,8 @@ defmodule Minga.Editor do
     maybe_record_file(path)
     new_state = Commands.add_buffer(state, pid)
     new_state = log_message(new_state, "Opened: #{path}")
-    new_state = lsp_buffer_opened(new_state, pid)
-    new_state = git_buffer_opened(new_state, pid)
+    new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
+    new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
     fire_hook(:after_open, [pid, path])
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
@@ -1124,115 +1124,7 @@ defmodule Minga.Editor do
     end)
   end
 
-  # ── LSP lifecycle helpers ────────────────────────────────────────────────
-
-  @spec lsp_buffer_opened(state(), pid()) :: state()
-  defp lsp_buffer_opened(state, buffer_pid) do
-    new_lsp = DocumentSync.on_buffer_open(state.lsp, buffer_pid)
-    %{state | lsp: new_lsp}
-  end
-
-  @spec lsp_buffer_changed(state()) :: state()
-  defp lsp_buffer_changed(%{buffers: %{active: nil}} = state), do: state
-
-  defp lsp_buffer_changed(%{buffers: %{active: buf}} = state) do
-    new_lsp = DocumentSync.on_buffer_change(state.lsp, buf)
-    %{state | lsp: new_lsp}
-  end
-
-  @spec lsp_after_command(state(), Mode.command(), pid() | nil) :: state()
-  defp lsp_after_command(state, cmd, old_buffer) do
-    state
-    |> lsp_after_save(cmd)
-    |> lsp_after_kill(cmd, old_buffer)
-  end
-
-  @spec lsp_after_save(state(), Mode.command()) :: state()
-  defp lsp_after_save(%{buffers: %{active: buf}} = state, cmd) when is_pid(buf) do
-    if cmd in [
-         :save,
-         :force_save,
-         {:execute_ex_command, {:save, []}},
-         {:execute_ex_command, {:save_quit, []}}
-       ] do
-      # Fire after_save hooks
-      path = BufferServer.file_path(buf)
-      if path, do: fire_hook(:after_save, [buf, path])
-
-      new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
-      %{state | lsp: new_lsp}
-    else
-      state
-    end
-  end
-
-  defp lsp_after_save(state, _cmd), do: state
-
-  @spec lsp_after_kill(state(), Mode.command(), pid() | nil) :: state()
-  defp lsp_after_kill(state, cmd, old_buffer)
-       when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
-    # The old buffer was closed — notify LSP if it changed
-    if state.buffers.active != old_buffer do
-      new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
-      %{state | lsp: new_lsp}
-    else
-      state
-    end
-  end
-
-  defp lsp_after_kill(state, _cmd, _old_buffer), do: state
-
-  # ── Git buffer lifecycle ───────────────────────────────────────────────
-
-  @spec git_buffer_opened(state(), pid()) :: state()
-  defp git_buffer_opened(state, buffer_pid) do
-    with path when is_binary(path) <- BufferServer.file_path(buffer_pid),
-         {:ok, git_root} <- Minga.Git.root_for(path) do
-      start_git_buffer(state, buffer_pid, git_root, path)
-    else
-      _ -> state
-    end
-  end
-
-  @spec start_git_buffer(state(), pid(), String.t(), String.t()) :: state()
-  defp start_git_buffer(state, buffer_pid, git_root, path) do
-    {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-
-    case DynamicSupervisor.start_child(
-           Minga.Buffer.Supervisor,
-           {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
-         ) do
-      {:ok, git_pid} ->
-        rel_path = Path.relative_to(path, git_root)
-
-        log_message(state, "Git: tracking #{rel_path}")
-        |> then(&%{&1 | git_buffers: Map.put(&1.git_buffers, buffer_pid, git_pid)})
-
-      {:error, reason} ->
-        Logger.warning("Failed to start git buffer: #{inspect(reason)}")
-        state
-    end
-  end
-
-  @spec git_buffer_changed(state()) :: state()
-  defp git_buffer_changed(%{buffers: %{active: nil}} = state), do: state
-
-  defp git_buffer_changed(%{buffers: %{active: buf}} = state) do
-    case Map.get(state.git_buffers, buf) do
-      nil -> state
-      git_pid -> git_buffer_update(state, buf, git_pid)
-    end
-  end
-
-  @spec git_buffer_update(state(), pid(), pid()) :: state()
-  defp git_buffer_update(state, buf, git_pid) do
-    if Process.alive?(git_pid) do
-      {content, _cursor} = BufferServer.content_and_cursor(buf)
-      GitBuffer.update(git_pid, content)
-    end
-
-    state
-  end
+  # LSP and Git buffer lifecycle extracted to Minga.Editor.BufferLifecycle.
 
   # ── Config options ──────────────────────────────────────────────────────
 
@@ -1334,7 +1226,7 @@ defmodule Minga.Editor do
       BufferServer.insert_text(buf, text)
     end
 
-    state |> lsp_buffer_changed() |> git_buffer_changed()
+    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
   end
 
   defp accept_completion_text(state, _completion, _text), do: state
@@ -1350,7 +1242,7 @@ defmodule Minga.Editor do
       edit.new_text
     )
 
-    state |> lsp_buffer_changed() |> git_buffer_changed()
+    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
   end
 
   defp apply_completion_text_edit(state, _edit), do: state
