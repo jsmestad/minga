@@ -33,6 +33,7 @@ defmodule Minga.Input.Scoped do
   alias Minga.Input.Vim
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
+  alias Minga.Surface.AgentView
 
   @ctrl Protocol.mod_ctrl()
   @alt Protocol.mod_alt()
@@ -56,11 +57,11 @@ defmodule Minga.Input.Scoped do
   # ── Agent scope ──────────────────────────────────────────────────────────
 
   # Agent scope: dispatch through scope resolution
-  def handle_key(%{keymap_scope: :agent, agentic: %{active: true}} = state, cp, mods) do
+  def handle_key(%{keymap_scope: :agent, surface_module: AgentView} = state, cp, mods) do
     handle_agent_key(state, cp, mods)
   end
 
-  # Agent scope but agentic view not active (race condition guard): passthrough
+  # Agent scope but surface not AgentView (race condition guard): passthrough
   def handle_key(%{keymap_scope: :agent} = state, _cp, _mods) do
     {:passthrough, state}
   end

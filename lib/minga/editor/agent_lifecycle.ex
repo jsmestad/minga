@@ -20,6 +20,7 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Surface.AgentView
 
   require Logger
 
@@ -31,7 +32,7 @@ defmodule Minga.Editor.AgentLifecycle do
   Also loads auto-context if configured. Called once the port is ready.
   """
   @spec maybe_start_session(state()) :: state()
-  def maybe_start_session(%{agentic: %{active: true}, agent: %{session: nil}} = state) do
+  def maybe_start_session(%{surface_module: AgentView, agent: %{session: nil}} = state) do
     state = Commands.Agent.ensure_agent_session(state)
     cli_flags = Minga.CLI.startup_flags()
     maybe_load_auto_context(state, cli_flags)
@@ -52,7 +53,7 @@ defmodule Minga.Editor.AgentLifecycle do
   def maybe_set_auto_context(state, file_path, buffer_pid) do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
-    agent_surface_active = state.surface_module == Minga.Surface.AgentView
+    agent_surface_active = state.surface_module == AgentView
     preview_empty = state.agentic.preview.content == :empty
 
     if agent_surface_active and preview_empty and auto_context and not cli_flags.no_context do

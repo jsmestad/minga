@@ -441,43 +441,40 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Scrolls the chat panel up by half the panel height."
   @spec scroll_chat_up(state()) :: state()
-  def scroll_chat_up(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_up(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_up(state)
+  end
+
+  defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_up(&1, amount))
   end
 
   @doc "Scrolls the chat panel down by half the panel height."
   @spec scroll_chat_down(state()) :: state()
-  def scroll_chat_down(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def scroll_chat_down(state) do
+    if no_agent_ui?(state), do: state, else: do_scroll_chat_down(state)
+  end
+
+  defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
     update_agent(state, &AgentState.scroll_down(&1, amount))
   end
 
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
-  def input_char(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state, _char),
-    do: state
-
   def input_char(state, char) do
-    update_agent(state, &AgentState.insert_char(&1, char))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
   @spec input_paste(state(), String.t()) :: state()
-  def input_paste(
-        %{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state,
-        _text
-      ),
-      do: state
-
   def input_paste(state, text) do
-    update_agent(state, &AgentState.insert_paste(&1, text))
+    if no_agent_ui?(state),
+      do: state,
+      else: update_agent(state, &AgentState.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
@@ -488,11 +485,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
-  def input_backspace(%{agentic: %{active: false}, agent: %{panel: %{visible: false}}} = state),
-    do: state
-
   def input_backspace(state) do
-    update_agent(state, &AgentState.delete_char/1)
+    if no_agent_ui?(state), do: state, else: update_agent(state, &AgentState.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
@@ -935,6 +929,13 @@ defmodule Minga.Editor.Commands.Agent do
   defdelegate open_code_block(state, language, content), to: AgentSession
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  # Returns true when neither the full-screen agent view nor the side panel
+  # is visible, meaning agent input/scroll commands should be no-ops.
+  @spec no_agent_ui?(state()) :: boolean()
+  defp no_agent_ui?(%{surface_module: AgentView}), do: false
+  defp no_agent_ui?(%{agent: %{panel: %{visible: true}}}), do: false
+  defp no_agent_ui?(_state), do: true
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do
