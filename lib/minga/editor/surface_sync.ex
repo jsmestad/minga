@@ -7,17 +7,14 @@ defmodule Minga.Editor.SurfaceSync do
   creating surface state from EditorState, syncing changes in both
   directions, and dispatching events through the active surface.
 
-  Extracted from `Minga.Editor` to reduce GenServer module size.
+  All sync operations dispatch through the Surface behaviour's
+  `from_editor_state/1` and `to_editor_state/2` callbacks, making this
+  module generic: adding a new surface implementation requires no changes here.
   """
 
   alias Minga.Editor.State, as: EditorState
-
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.Bridge, as: AVBridge
-  alias Minga.Surface.AgentView.State, as: AVState
   alias Minga.Surface.BufferView
-  alias Minga.Surface.BufferView.Bridge, as: BVBridge
-  alias Minga.Surface.BufferView.State, as: BVState
 
   @doc """
   Initializes the surface for the current keymap scope.
@@ -26,13 +23,13 @@ defmodule Minga.Editor.SurfaceSync do
   """
   @spec init_surface(EditorState.t()) :: EditorState.t()
   def init_surface(%EditorState{keymap_scope: :agent} = state) do
-    av_state = AVBridge.from_editor_state(state)
-    %{state | surface_module: AgentView, surface_state: av_state}
+    surface_state = AgentView.from_editor_state(state)
+    %{state | surface_module: AgentView, surface_state: surface_state}
   end
 
   def init_surface(%EditorState{} = state) do
-    bv_state = BVBridge.from_editor_state(state)
-    %{state | surface_module: BufferView, surface_state: bv_state}
+    surface_state = BufferView.from_editor_state(state)
+    %{state | surface_module: BufferView, surface_state: surface_state}
   end
 
   @doc """
@@ -43,12 +40,8 @@ defmodule Minga.Editor.SurfaceSync do
   the surface state in sync.
   """
   @spec sync_from_editor(EditorState.t()) :: EditorState.t()
-  def sync_from_editor(%EditorState{surface_module: BufferView} = state) do
-    %{state | surface_state: BVBridge.from_editor_state(state)}
-  end
-
-  def sync_from_editor(%EditorState{surface_module: AgentView} = state) do
-    %{state | surface_state: AVBridge.from_editor_state(state)}
+  def sync_from_editor(%EditorState{surface_module: mod} = state) when mod != nil do
+    %{state | surface_state: mod.from_editor_state(state)}
   end
 
   def sync_from_editor(state), do: state
@@ -60,16 +53,9 @@ defmodule Minga.Editor.SurfaceSync do
   the changes back to EditorState.
   """
   @spec sync_to_editor(EditorState.t()) :: EditorState.t()
-  def sync_to_editor(
-        %EditorState{surface_module: BufferView, surface_state: %BVState{} = bv} = state
-      ) do
-    BVBridge.to_editor_state(state, bv)
-  end
-
-  def sync_to_editor(
-        %EditorState{surface_module: AgentView, surface_state: %AVState{} = av} = state
-      ) do
-    AVBridge.to_editor_state(state, av)
+  def sync_to_editor(%EditorState{surface_module: mod, surface_state: ss} = state)
+      when mod != nil and ss != nil do
+    mod.to_editor_state(state, ss)
   end
 
   def sync_to_editor(state), do: state

@@ -341,9 +341,11 @@ defmodule Minga.Surface.AgentView do
 
   # ── Bridge helpers ─────────────────────────────────────────────────────────
 
+  @impl Minga.Surface
   @spec from_editor_state(EditorState.t()) :: AVState.t()
   defdelegate from_editor_state(editor_state), to: Bridge
 
+  @impl Minga.Surface
   @spec to_editor_state(EditorState.t(), AVState.t()) :: EditorState.t()
   defdelegate to_editor_state(editor_state, av_state), to: Bridge
 

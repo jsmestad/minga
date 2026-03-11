@@ -41,17 +41,39 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert ctx.active_buffer == buf
       assert ctx.active_buffer_index == 0
       assert %Windows{} = ctx.windows
-      assert %AgentState{} = ctx.agent
+      # agent/agentic are no longer stored directly in the context;
+      # they live inside surface_state
+      assert ctx.surface_module != nil
+      assert ctx.surface_state != nil
+      refute Map.has_key?(ctx, :agent)
+      refute Map.has_key?(ctx, :agentic)
     end
   end
 
   describe "restore_tab_context/2" do
-    test "restores per-tab fields from a context" do
+    test "restores per-tab fields from a context with surface state" do
       {:ok, buf_a} = BufferServer.start_link(content: "a")
       {:ok, buf_b} = BufferServer.start_link(content: "b")
 
       state = make_state(buffer: buf_a)
 
+      # Build a proper context via snapshot round-trip
+      state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :agent)
+      ctx = EditorState.snapshot_tab_context(state_b)
+
+      restored = EditorState.restore_tab_context(state, ctx)
+      assert restored.mode == :insert
+      assert restored.keymap_scope == :agent
+      assert restored.buffers.active == buf_b
+    end
+
+    test "restores legacy context with agent field (no surface_state)" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      state = make_state(buffer: buf_a)
+
+      # Legacy context: has agent but no surface_state
       ctx = %{
         mode: :insert,
         mode_state: :some_state,
@@ -89,15 +111,9 @@ defmodule Minga.Editor.State.SnapshotTest do
       # Add a second tab with a stored context
       {tb, tab_b} = TabBar.add(tb, :file, "b.ex")
 
-      tab_b_context = %{
-        mode: :insert,
-        mode_state: :insert_state,
-        keymap_scope: :editor,
-        active_buffer: buf_b,
-        active_buffer_index: 0,
-        windows: %Windows{},
-        agent: %AgentState{}
-      }
+      # Build a proper context via snapshot for tab b
+      state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
+      tab_b_context = EditorState.snapshot_tab_context(state_b)
 
       tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
 
