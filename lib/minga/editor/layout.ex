@@ -24,6 +24,7 @@ defmodule Minga.Editor.Layout do
   """
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
@@ -274,21 +275,18 @@ defmodule Minga.Editor.Layout do
 
   @spec agent_panel_layout(EditorState.t(), non_neg_integer(), non_neg_integer(), pos_integer()) ::
           {rect() | nil, non_neg_integer()}
-  defp agent_panel_layout(
-         %{agent: %{panel: %{visible: true}}} = state,
-         remaining_height,
-         editor_col,
-         editor_width
-       ) do
-    panel_height = div(state.viewport.rows * 35, 100)
-    editor_height = remaining_height - panel_height
-    agent_row = @content_start + editor_height
-    agent_rect = {agent_row, editor_col, editor_width, panel_height}
-    {agent_rect, editor_height}
-  end
+  defp agent_panel_layout(state, remaining_height, editor_col, editor_width) do
+    panel = AgentAccess.panel(state)
 
-  defp agent_panel_layout(_state, remaining_height, _editor_col, _editor_width) do
-    {nil, remaining_height}
+    if panel.visible do
+      panel_height = div(state.viewport.rows * 35, 100)
+      editor_height = remaining_height - panel_height
+      agent_row = @content_start + editor_height
+      agent_rect = {agent_row, editor_col, editor_width, panel_height}
+      {agent_rect, editor_height}
+    else
+      {nil, remaining_height}
+    end
   end
 
   # ── Window layouts ─────────────────────────────────────────────────────────

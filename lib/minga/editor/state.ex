@@ -28,6 +28,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Highlighting
@@ -325,7 +326,8 @@ defmodule Minga.Editor.State do
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
     # Leave agentic view: reset to editor scope with BufferView surface.
-    state = %{state | agentic: %ViewState{}, keymap_scope: :editor, tab_bar: tb}
+    state = AgentAccess.update_agentic(state, fn _ -> %ViewState{} end)
+    state = %{state | keymap_scope: :editor, tab_bar: tb}
     state = SurfaceSync.init_surface(state)
     state = sync_active_window_buffer(state)
 
@@ -780,26 +782,27 @@ defmodule Minga.Editor.State do
   @spec route_agent_event(t(), pid()) :: route_result()
   def route_agent_event(%__MODULE__{tab_bar: nil}, _session_pid), do: :not_found
 
-  def route_agent_event(%__MODULE__{agent: %{session: sid}, tab_bar: tb}, session_pid)
-      when sid == session_pid do
-    {:active, TabBar.active(tb)}
-  end
-
-  def route_agent_event(%__MODULE__{tab_bar: tb}, session_pid) do
-    find_session_in_tabs(tb, session_pid)
+  def route_agent_event(%__MODULE__{tab_bar: tb} = state, session_pid) do
+    if AgentAccess.session(state) == session_pid do
+      {:active, TabBar.active(tb)}
+    else
+      find_session_in_tabs(tb, session_pid)
+    end
   end
 
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
   @spec stop_outgoing_spinner(t()) :: t()
-  defp stop_outgoing_spinner(%__MODULE__{agent: %AgentState{} = agent} = state) do
-    %{state | agent: AgentState.stop_spinner_timer(agent)}
+  defp stop_outgoing_spinner(%__MODULE__{} = state) do
+    AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
   end
 
   @spec maybe_restart_incoming_spinner(t()) :: t()
-  defp maybe_restart_incoming_spinner(%__MODULE__{agent: %AgentState{} = agent} = state) do
+  defp maybe_restart_incoming_spinner(%__MODULE__{} = state) do
+    agent = AgentAccess.agent(state)
+
     if AgentState.busy?(agent) and agent.spinner_timer == nil do
-      %{state | agent: AgentState.start_spinner_timer(agent)}
+      AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
     else
       state
     end

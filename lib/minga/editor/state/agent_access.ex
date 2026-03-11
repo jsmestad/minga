@@ -23,12 +23,14 @@ defmodule Minga.Editor.State.AgentAccess do
   def agent(%EditorState{surface_state: %AVState{agent: a}}), do: a
   def agent(%EditorState{agent: a}), do: a
   def agent(%{agent: a}), do: a
+  def agent(_), do: %AgentState{}
 
   @doc "Returns the agentic view state from the active surface or EditorState."
   @spec agentic(EditorState.t() | map()) :: ViewState.t()
   def agentic(%EditorState{surface_state: %AVState{agentic: a}}), do: a
   def agentic(%EditorState{agentic: a}), do: a
   def agentic(%{agentic: a}), do: a
+  def agentic(_), do: ViewState.new()
 
   @doc """
   Returns the agent state from the nearest agent tab's stored surface_state.

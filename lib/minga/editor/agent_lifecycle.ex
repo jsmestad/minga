@@ -33,10 +33,16 @@ defmodule Minga.Editor.AgentLifecycle do
   Also loads auto-context if configured. Called once the port is ready.
   """
   @spec maybe_start_session(state()) :: state()
-  def maybe_start_session(%{surface_module: AgentView, agent: %{session: nil}} = state) do
-    state = Commands.Agent.ensure_agent_session(state)
-    cli_flags = Minga.CLI.startup_flags()
-    maybe_load_auto_context(state, cli_flags)
+  def maybe_start_session(%{surface_module: AgentView} = state) do
+    agent = AgentAccess.agent(state)
+
+    if agent.session == nil do
+      state = Commands.Agent.ensure_agent_session(state)
+      cli_flags = Minga.CLI.startup_flags()
+      maybe_load_auto_context(state, cli_flags)
+    else
+      state
+    end
   rescue
     e ->
       Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
@@ -71,20 +77,23 @@ defmodule Minga.Editor.AgentLifecycle do
   Called as a surface effect when the agent view receives new messages.
   """
   @spec sync_buffer(state()) :: state()
-  def sync_buffer(%{agent: %{buffer: buf, session: session}} = state)
-      when is_pid(buf) and is_pid(session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
+  def sync_buffer(state) do
+    agent = AgentAccess.agent(state)
 
-    AgentBufferSync.sync(buf, messages)
-    state
+    if is_pid(agent.buffer) and is_pid(agent.session) do
+      messages =
+        try do
+          AgentSession.messages(agent.session)
+        catch
+          :exit, _ -> []
+        end
+
+      AgentBufferSync.sync(agent.buffer, messages)
+      state
+    else
+      state
+    end
   end
-
-  def sync_buffer(state), do: state
 
   @doc """
   Updates the active agent tab's label to the first user prompt (truncated).
@@ -92,24 +101,17 @@ defmodule Minga.Editor.AgentLifecycle do
   Only updates if the current label is the default "New Agent" or "minga".
   """
   @spec maybe_update_tab_label(state()) :: state()
-  def maybe_update_tab_label(
-        %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
-      )
-      when is_pid(session) do
-    case TabBar.active(tb) do
-      %{kind: :agent, label: label} when is_binary(label) ->
-        if default_agent_label?(label) do
-          update_tab_from_session(state, tb, active_id, session)
-        else
-          state
-        end
+  def maybe_update_tab_label(%{tab_bar: %{active_id: active_id} = tb} = state) do
+    session = AgentAccess.session(state)
 
-      _other ->
-        state
+    with true <- is_pid(session),
+         %{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tb),
+         true <- default_agent_label?(label) do
+      update_tab_from_session(state, tb, active_id, session)
+    else
+      _ -> state
     end
   end
-
-  def maybe_update_tab_label(state), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────
 

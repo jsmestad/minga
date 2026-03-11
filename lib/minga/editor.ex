@@ -561,26 +561,24 @@ defmodule Minga.Editor do
   # ── Paste event routing ───────────────────────────────────────────────────
 
   @spec handle_paste_event(state(), String.t()) :: state()
-  defp handle_paste_event(state, text)
-
-  # Agent input is focused (split panel or full-screen agentic view): route paste to agent input
-  defp handle_paste_event(
-         %{agent: %{panel: %{input_focused: true}}} = state,
-         text
-       ) do
-    Commands.Agent.input_paste(state, text)
+  defp handle_paste_event(state, text) do
+    if AgentAccess.input_focused?(state) do
+      # Agent input is focused (split panel or full-screen agentic view)
+      Commands.Agent.input_paste(state, text)
+    else
+      handle_paste_event_editor(state, text)
+    end
   end
 
-  # Insert mode in editor: insert text into the active buffer via bulk edit
-  defp handle_paste_event(%{mode: :insert, buffers: %{active: buf}} = state, text)
+  @spec handle_paste_event_editor(state(), String.t()) :: state()
+  defp handle_paste_event_editor(%{mode: :insert, buffers: %{active: buf}} = state, text)
        when is_pid(buf) do
     {line, col} = BufferServer.cursor(buf)
     BufferServer.apply_text_edit(buf, line, col, line, col, text)
     state
   end
 
-  # Not in a paste-accepting context: log and ignore
-  defp handle_paste_event(state, _text) do
+  defp handle_paste_event_editor(state, _text) do
     log_message(state, "Paste ignored (not in insert mode or agent input)")
   end
 

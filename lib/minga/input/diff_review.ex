@@ -13,24 +13,23 @@ defmodule Minga.Input.DiffReview do
   alias Minga.Agent.View.Preview
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Keymap.Scope
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  def handle_key(
-        %{
-          agentic: %{focus: :file_viewer, preview: %Preview{content: {:diff, _}}},
-          agent: %{panel: %{input_focused: false}}
-        } = state,
-        cp,
-        _mods
-      ) do
-    dispatch_diff_key(state, cp)
-  end
+  def handle_key(state, cp, _mods) do
+    agentic = AgentAccess.agentic(state)
+    panel = AgentAccess.panel(state)
 
-  def handle_key(state, _cp, _mods) do
-    {:passthrough, state}
+    if agentic.focus == :file_viewer and
+         match?(%Preview{content: {:diff, _}}, agentic.preview) and
+         not panel.input_focused do
+      dispatch_diff_key(state, cp)
+    else
+      {:passthrough, state}
+    end
   end
 
   @spec dispatch_diff_key(EditorState.t(), non_neg_integer()) ::
