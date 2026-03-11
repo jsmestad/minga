@@ -853,7 +853,7 @@ defmodule Minga.Editor.RenderPipeline do
       if state.picker_ui.picker do
         :beam
       else
-        if state.agent.panel.input_focused, do: :beam, else: :block
+        input_cursor_shape(state.agent.panel)
       end
 
     cursor =
@@ -1522,13 +1522,7 @@ defmodule Minga.Editor.RenderPipeline do
     input_row = row + h - @agent_input_height + 1 + cursor_line
     input_col = col + 2 + cursor_col
 
-    shape =
-      case panel do
-        %PanelState{} -> if PanelState.input_mode(panel) == :insert, do: :beam, else: :block
-        _ -> :beam
-      end
-
-    {{input_row, input_col}, shape}
+    {{input_row, input_col}, input_cursor_shape(panel)}
   end
 
   defp agent_cursor_override_from_layout(_state, cursor, shape, _layout) do
@@ -1536,6 +1530,15 @@ defmodule Minga.Editor.RenderPipeline do
   end
 
   # ── Private helpers: agent panel ───────────────────────────────────────────
+
+  # Returns :beam for insert mode, :block for normal/visual/operator-pending.
+  # Falls back to :beam for non-PanelState maps (tests) or unfocused state.
+  @spec input_cursor_shape(map()) :: Protocol.cursor_shape()
+  defp input_cursor_shape(%PanelState{input_focused: true} = panel) do
+    if PanelState.input_mode(panel) == :insert, do: :beam, else: :block
+  end
+
+  defp input_cursor_shape(_panel), do: :block
 
   @spec render_agent_panel_from_layout(state(), Layout.t()) :: [DisplayList.draw()]
   defp render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []

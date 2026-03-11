@@ -581,7 +581,11 @@ defmodule Minga.Input.Vim do
   defp motion_fn(?{), do: &Motion.paragraph_backward/2
   defp motion_fn(?}), do: &Motion.paragraph_forward/2
   defp motion_fn(?%), do: &Motion.match_bracket/2
-  # Arrow keys (macOS private-use codepoints)
+  # Arrow keys: Kitty protocol (57_350-57_353) and macOS private-use (0xF700-0xF703)
+  defp motion_fn(57_352), do: &move_up/2
+  defp motion_fn(57_353), do: &move_down/2
+  defp motion_fn(57_350), do: &move_left/2
+  defp motion_fn(57_351), do: &move_right/2
   defp motion_fn(0xF700), do: &move_up/2
   defp motion_fn(0xF701), do: &move_down/2
   defp motion_fn(0xF702), do: &move_left/2
@@ -647,6 +651,10 @@ defmodule Minga.Input.Vim do
   defp motion_type(?{), do: :exclusive
   defp motion_type(?}), do: :exclusive
   defp motion_type(?%), do: :inclusive
+  defp motion_type(57_352), do: :linewise
+  defp motion_type(57_353), do: :linewise
+  defp motion_type(57_350), do: :exclusive
+  defp motion_type(57_351), do: :exclusive
   defp motion_type(0xF700), do: :linewise
   defp motion_type(0xF701), do: :linewise
   defp motion_type(0xF702), do: :exclusive
