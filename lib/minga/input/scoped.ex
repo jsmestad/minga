@@ -379,7 +379,21 @@ defmodule Minga.Input.Scoped do
     AgentCommands.handle_mention_key(state, cp, mods)
   end
 
-  # ── Regular input ──────────────────────────────────────────────────────
+  # Input normal mode (and visual, operator-pending): delegate to scope trie
+  # so vim keybindings work in the side panel the same as in the full agent view.
+  defp handle_panel_input(
+         %{agent: %{panel: %{input_mode: mode}}} = state,
+         cp,
+         mods
+       )
+       when mode != :insert do
+    vim_state = vim_state_for_input_mode(mode)
+
+    {:handled, new_state} = resolve_scope_key(state, :agent, vim_state, {cp, mods}, cp, mods)
+    new_state
+  end
+
+  # ── Regular input (insert mode) ────────────────────────────────────────
 
   # Ctrl+Q: unfocus first, then forward the quit key
   defp handle_panel_input(state, ?q, mods) when band(mods, @ctrl) != 0 do
@@ -430,7 +444,7 @@ defmodule Minga.Input.Scoped do
 
   # Escape: unfocus the input
   defp handle_panel_input(state, 27, _mods) do
-    update_agent(state, &AgentState.focus_input(&1, false))
+    AgentCommands.input_to_normal(state)
   end
 
   # Backspace
