@@ -1,7 +1,7 @@
 # Surface Extraction Refactor
 
-**Status:** Phase 1-4 complete
-**Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 landed)
+**Status:** Phase 1-4 complete + post-phase decomposition
+**Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 landed), 2026-03-11 (post-phase extractions)
 
 The Editor GenServer has become a God Object. It fuses orchestration, state ownership, event routing, and view-specific logic into a single 2,235-line process. Every new feature requires changes in two places (editor path and agent path) because the agentic view was bolted onto the Editor as "just another mode" instead of being built as a peer.
 
