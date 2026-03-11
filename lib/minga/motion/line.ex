@@ -1,13 +1,15 @@
 defmodule Minga.Motion.Line do
   @moduledoc """
   Line-level cursor motion functions: start, end, and first-non-blank.
+
+  Accepts any text container that implements `Minga.Text.Readable`.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Unicode
+  alias Minga.Text.Readable
 
   @typedoc "A zero-indexed {line, col} cursor position."
-  @type position :: Document.position()
+  @type position :: {non_neg_integer(), non_neg_integer()}
 
   @doc """
   Move to the first column of the current line (Vim's `0`).
@@ -18,8 +20,8 @@ defmodule Minga.Motion.Line do
       iex> Minga.Motion.Line.line_start(buf, {0, 4})
       {0, 0}
   """
-  @spec line_start(Document.t(), position()) :: position()
-  def line_start(%Document{}, {line, _col}), do: {line, 0}
+  @spec line_start(Readable.t(), position()) :: position()
+  def line_start(_buf, {line, _col}), do: {line, 0}
 
   @doc """
   Move to the last column of the current line (Vim's `$`).
@@ -31,9 +33,9 @@ defmodule Minga.Motion.Line do
       iex> Minga.Motion.Line.line_end(buf, {0, 0})
       {0, 4}
   """
-  @spec line_end(Document.t(), position()) :: position()
-  def line_end(%Document{} = buf, {line, _col}) do
-    case Document.line_at(buf, line) do
+  @spec line_end(Readable.t(), position()) :: position()
+  def line_end(buf, {line, _col}) do
+    case Readable.line_at(buf, line) do
       nil -> {line, 0}
       "" -> {line, 0}
       text -> {line, Unicode.last_grapheme_byte_offset(text)}
@@ -50,9 +52,9 @@ defmodule Minga.Motion.Line do
       iex> Minga.Motion.Line.first_non_blank(buf, {0, 0})
       {0, 2}
   """
-  @spec first_non_blank(Document.t(), position()) :: position()
-  def first_non_blank(%Document{} = buf, {line, _col}) do
-    case Document.line_at(buf, line) do
+  @spec first_non_blank(Readable.t(), position()) :: position()
+  def first_non_blank(buf, {line, _col}) do
+    case Readable.line_at(buf, line) do
       nil ->
         {line, 0}
 

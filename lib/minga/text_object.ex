@@ -2,7 +2,7 @@ defmodule Minga.TextObject do
   @moduledoc """
   Text object selection for Vim operator-pending mode.
 
-  Each function takes a `Document.t()` and a cursor `position()` and returns
+  Each function takes a `Readable.t()` and a cursor `position()` and returns
   a `{start_pos, end_pos}` range (both positions inclusive), or `nil` when no
   matching text object exists around the cursor.
 
@@ -31,12 +31,12 @@ defmodule Minga.TextObject do
   Delimiter search spans multiple lines.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Unicode
   alias Minga.Motion.Helpers
+  alias Minga.Text.Readable
 
   @typedoc "A zero-indexed `{line, byte_col}` position."
-  @type position :: Document.position()
+  @type position :: {non_neg_integer(), non_neg_integer()}
 
   @typedoc "An inclusive `{start_pos, end_pos}` range, or `nil` when not found."
   @type range :: {position(), position()} | nil
@@ -49,9 +49,9 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `iw` motion in operator-pending mode.
   """
-  @spec inner_word(Document.t(), position()) :: {position(), position()}
+  @spec inner_word(Readable.t(), position()) :: {position(), position()}
   def inner_word(buffer, {line, col}) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     len = tuple_size(graphemes)
 
@@ -79,9 +79,9 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `aw` motion in operator-pending mode.
   """
-  @spec a_word(Document.t(), position()) :: {position(), position()}
+  @spec a_word(Readable.t(), position()) :: {position(), position()}
   def a_word(buffer, {line, col}) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     len = tuple_size(graphemes)
 
@@ -129,9 +129,9 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `i"` / `i'` motions.
   """
-  @spec inner_quotes(Document.t(), position(), String.t()) :: range()
+  @spec inner_quotes(Readable.t(), position(), String.t()) :: range()
   def inner_quotes(buffer, {line, col}, quote_char) when is_binary(quote_char) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
@@ -159,9 +159,9 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `a"` / `a'` motions.
   """
-  @spec a_quotes(Document.t(), position(), String.t()) :: range()
+  @spec a_quotes(Readable.t(), position(), String.t()) :: range()
   def a_quotes(buffer, {line, col}, quote_char) when is_binary(quote_char) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
     g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
@@ -187,7 +187,7 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `i(`, `i{`, `i[`, etc.
   """
-  @spec inner_parens(Document.t(), position(), String.t(), String.t()) :: range()
+  @spec inner_parens(Readable.t(), position(), String.t(), String.t()) :: range()
   def inner_parens(buffer, position, open_char, close_char)
       when is_binary(open_char) and is_binary(close_char) do
     case find_delimited_pair(buffer, position, open_char, close_char) do
@@ -216,7 +216,7 @@ defmodule Minga.TextObject do
 
   Corresponds to Vim's `a(`, `a{`, `a[`, etc.
   """
-  @spec a_parens(Document.t(), position(), String.t(), String.t()) :: range()
+  @spec a_parens(Readable.t(), position(), String.t(), String.t()) :: range()
   def a_parens(buffer, position, open_char, close_char)
       when is_binary(open_char) and is_binary(close_char) do
     case find_delimited_pair(buffer, position, open_char, close_char) do
@@ -314,10 +314,10 @@ defmodule Minga.TextObject do
 
   # ── Private — paren helpers ───────────────────────────────────────────────────
 
-  @spec find_delimited_pair(Document.t(), position(), String.t(), String.t()) ::
+  @spec find_delimited_pair(Readable.t(), position(), String.t(), String.t()) ::
           {position(), position()} | nil
   defp find_delimited_pair(buffer, {line, col}, open_char, close_char) do
-    content = Document.content(buffer)
+    content = Readable.content(buffer)
     all_lines = :binary.split(content, "\n", [:global])
     flat = flatten_with_byte_positions(all_lines)
 
@@ -457,9 +457,9 @@ defmodule Minga.TextObject do
   end
 
   # Advances a position by one grapheme (byte-aware).
-  @spec advance_position(Document.t(), position()) :: position() | nil
+  @spec advance_position(Readable.t(), position()) :: position() | nil
   defp advance_position(buffer, {line, col}) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     next_byte = Unicode.next_grapheme_byte_offset(text, col)
 
     if next_byte > col and next_byte < byte_size(text) do
@@ -467,7 +467,7 @@ defmodule Minga.TextObject do
     else
       next_line = line + 1
 
-      case Document.line_at(buffer, next_line) do
+      case Readable.line_at(buffer, next_line) do
         nil -> nil
         _ -> {next_line, 0}
       end
@@ -475,11 +475,11 @@ defmodule Minga.TextObject do
   end
 
   # Retreats a position by one grapheme (byte-aware).
-  @spec retreat_position(Document.t(), position()) :: position() | nil
+  @spec retreat_position(Readable.t(), position()) :: position() | nil
   defp retreat_position(_buffer, {0, 0}), do: nil
 
   defp retreat_position(buffer, {line, 0}) when line > 0 do
-    prev_text = Document.line_at(buffer, line - 1) || ""
+    prev_text = Readable.line_at(buffer, line - 1) || ""
 
     if byte_size(prev_text) > 0 do
       {line - 1, Unicode.last_grapheme_byte_offset(prev_text)}
@@ -489,7 +489,7 @@ defmodule Minga.TextObject do
   end
 
   defp retreat_position(buffer, {line, col}) do
-    text = Document.line_at(buffer, line) || ""
+    text = Readable.line_at(buffer, line) || ""
     {line, Unicode.prev_grapheme_byte_offset(text, col)}
   end
 end

@@ -80,7 +80,7 @@ defmodule Minga.Input.TextField do
 
   @doc "Returns the full text by joining lines with newlines."
   @spec text(t()) :: String.t()
-  def text(%__MODULE__{lines: lines}), do: Enum.join(lines, "\n")
+  def text(%__MODULE__{} = tf), do: content(tf)
 
   @doc "Returns the number of logical lines."
   @spec line_count(t()) :: pos_integer()
@@ -332,8 +332,56 @@ defmodule Minga.Input.TextField do
     %{tf | cursor: {line, col}}
   end
 
+  # ── Read access (used by Minga.Text.Readable protocol) ──────────────────
+
+  @doc "Returns the full text content as a single string."
+  @spec content(t()) :: String.t()
+  def content(%__MODULE__{lines: lines}), do: Enum.join(lines, "\n")
+
+  @doc "Returns the line at the given 0-based index, or nil if out of range."
+  @spec line_at(t(), non_neg_integer()) :: String.t() | nil
+  def line_at(%__MODULE__{lines: lines}, index) when is_integer(index) and index >= 0 do
+    Enum.at(lines, index)
+  end
+
+  def line_at(%__MODULE__{}, _index), do: nil
+
+  @doc """
+  Converts a byte offset from the start of content to a `{line, col}` position.
+
+  Walks through the text byte by byte, incrementing line on newlines.
+  """
+  @spec offset_to_position(t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  def offset_to_position(%__MODULE__{} = tf, offset) when is_integer(offset) and offset >= 0 do
+    do_offset_to_position(content(tf), offset, 0, 0)
+  end
+
   # ── Private ───────────────────────────────────────────────────────────────
+
+  @spec do_offset_to_position(String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp do_offset_to_position(_text, 0, line, col), do: {line, col}
+  defp do_offset_to_position("", _offset, line, col), do: {line, col}
+
+  defp do_offset_to_position(<<"\n", rest::binary>>, offset, line, _col) do
+    do_offset_to_position(rest, offset - 1, line + 1, 0)
+  end
+
+  defp do_offset_to_position(<<_byte, rest::binary>>, offset, line, col) do
+    do_offset_to_position(rest, offset - 1, line, col + 1)
+  end
 
   @spec clamp(integer(), integer(), integer()) :: integer()
   defp clamp(value, min_val, max_val), do: max(min_val, min(value, max_val))
+end
+
+defimpl Minga.Text.Readable, for: Minga.Input.TextField do
+  @moduledoc false
+
+  alias Minga.Input.TextField
+
+  def content(tf), do: TextField.content(tf)
+  def line_at(tf, n), do: TextField.line_at(tf, n)
+  def line_count(tf), do: TextField.line_count(tf)
+  def offset_to_position(tf, offset), do: TextField.offset_to_position(tf, offset)
 end

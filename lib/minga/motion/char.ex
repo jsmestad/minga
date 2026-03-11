@@ -6,12 +6,12 @@ defmodule Minga.Motion.Char do
   track byte offsets while scanning graphemes.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Unicode
   alias Minga.Motion.Helpers
+  alias Minga.Text.Readable
 
   @typedoc "A zero-indexed {line, byte_col} cursor position."
-  @type position :: Document.position()
+  @type position :: {non_neg_integer(), non_neg_integer()}
 
   @bracket_pairs %{
     "(" => {"(", ")", :forward},
@@ -36,9 +36,9 @@ defmodule Minga.Motion.Char do
       iex> Minga.Motion.Char.find_char_forward(buf, {0, 0}, "o")
       {0, 4}
   """
-  @spec find_char_forward(Document.t(), position(), String.t()) :: position()
-  def find_char_forward(%Document{} = buf, {line, col}, char) do
-    case Document.line_at(buf, line) do
+  @spec find_char_forward(Readable.t(), position(), String.t()) :: position()
+  def find_char_forward(buf, {line, col}, char) do
+    case Readable.line_at(buf, line) do
       nil ->
         {line, col}
 
@@ -61,9 +61,9 @@ defmodule Minga.Motion.Char do
       iex> Minga.Motion.Char.find_char_backward(buf, {0, 7}, "o")
       {0, 4}
   """
-  @spec find_char_backward(Document.t(), position(), String.t()) :: position()
-  def find_char_backward(%Document{} = buf, {line, col}, char) do
-    case Document.line_at(buf, line) do
+  @spec find_char_backward(Readable.t(), position(), String.t()) :: position()
+  def find_char_backward(buf, {line, col}, char) do
+    case Readable.line_at(buf, line) do
       nil ->
         {line, col}
 
@@ -85,15 +85,15 @@ defmodule Minga.Motion.Char do
       iex> Minga.Motion.Char.till_char_forward(buf, {0, 0}, "o")
       {0, 3}
   """
-  @spec till_char_forward(Document.t(), position(), String.t()) :: position()
-  def till_char_forward(%Document{} = buf, {line, col}, char) do
+  @spec till_char_forward(Readable.t(), position(), String.t()) :: position()
+  def till_char_forward(buf, {line, col}, char) do
     case find_char_forward(buf, {line, col}, char) do
       {^line, ^col} ->
         {line, col}
 
       {^line, found_col} ->
         # Move to the grapheme before found_col
-        line_text = Document.line_at(buf, line) || ""
+        line_text = Readable.line_at(buf, line) || ""
         prev_byte = Unicode.prev_grapheme_byte_offset(line_text, found_col)
         {line, max(col, prev_byte)}
     end
@@ -109,15 +109,15 @@ defmodule Minga.Motion.Char do
       iex> Minga.Motion.Char.till_char_backward(buf, {0, 7}, "o")
       {0, 5}
   """
-  @spec till_char_backward(Document.t(), position(), String.t()) :: position()
-  def till_char_backward(%Document{} = buf, {line, col}, char) do
+  @spec till_char_backward(Readable.t(), position(), String.t()) :: position()
+  def till_char_backward(buf, {line, col}, char) do
     case find_char_backward(buf, {line, col}, char) do
       {^line, ^col} ->
         {line, col}
 
       {^line, found_col} ->
         # Move to the grapheme after found_col
-        line_text = Document.line_at(buf, line) || ""
+        line_text = Readable.line_at(buf, line) || ""
         next_byte = Unicode.next_grapheme_byte_offset(line_text, found_col)
         {line, min(col, next_byte)}
     end
@@ -136,9 +136,9 @@ defmodule Minga.Motion.Char do
       iex> Minga.Motion.Char.match_bracket(buf, {0, 0})
       {0, 6}
   """
-  @spec match_bracket(Document.t(), position()) :: position()
-  def match_bracket(%Document{} = buf, {line, col} = pos) do
-    current_line_text = Document.line_at(buf, line) || ""
+  @spec match_bracket(Readable.t(), position()) :: position()
+  def match_bracket(buf, {line, col} = pos) do
+    current_line_text = Readable.line_at(buf, line) || ""
     {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(current_line_text)
     g_col = Helpers.byte_offset_to_grapheme_index(byte_offsets, col)
 
@@ -148,7 +148,7 @@ defmodule Minga.Motion.Char do
     end
   end
 
-  @spec do_match_bracket(Document.t(), position(), tuple(), tuple(), non_neg_integer()) ::
+  @spec do_match_bracket(Readable.t(), position(), tuple(), tuple(), non_neg_integer()) ::
           position()
   defp do_match_bracket(buf, {line, col} = pos, line_graphemes, line_byte_offsets, bracket_g_idx) do
     bracket_char = elem(line_graphemes, bracket_g_idx)
@@ -158,7 +158,7 @@ defmodule Minga.Motion.Char do
         pos
 
       {open, close, direction} ->
-        text = Document.content(buf)
+        text = Readable.content(buf)
         {graphemes, byte_offsets} = Helpers.graphemes_with_byte_offsets(text)
         all_lines = :binary.split(text, "\n", [:global])
         g_col = Helpers.byte_offset_to_grapheme_index(line_byte_offsets, col)
@@ -174,7 +174,7 @@ defmodule Minga.Motion.Char do
             match_byte =
               Helpers.grapheme_index_to_byte_offset(byte_offsets, match_g_idx, byte_size(text))
 
-            Document.offset_to_position(buf, match_byte)
+            Readable.offset_to_position(buf, match_byte)
         end
     end
   end
