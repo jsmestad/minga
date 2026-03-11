@@ -39,6 +39,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Input.TextField
   alias Minga.Input.Vim
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.Keymap.Scope
@@ -960,6 +961,8 @@ defmodule Minga.Agent.View.Renderer do
         # Build flat list of visual lines tagged with logical line index
         visual_lines = InputWrap.wrap_lines(panel.input.lines, inner_width)
 
+        sel_range = vim_visual_range(panel)
+
         chrome = %{
           inner_width: inner_width,
           width: width,
@@ -981,7 +984,7 @@ defmodule Minga.Agent.View.Renderer do
           {display_text, fg_color} =
             visual_row_display(vl, line_text, inner_width, panel, at)
 
-          render_input_row(r, display_text, fg_color, chrome)
+          render_input_row(r, display_text, fg_color, chrome, logical_idx, vl, sel_range)
         end)
       end
 
@@ -1033,20 +1036,79 @@ defmodule Minga.Agent.View.Renderer do
     end
   end
 
-  # Renders a single content row inside the input box with borders and padding.
-  @spec render_input_row(non_neg_integer(), String.t(), Theme.color(), map()) ::
-          [DisplayList.draw()]
-  defp render_input_row(row, display_text, fg_color, chrome) do
+  # Renders a single content row inside the input box with borders, padding,
+  # and optional visual selection highlighting.
+  @spec render_input_row(
+          non_neg_integer(),
+          String.t(),
+          Theme.color(),
+          map(),
+          non_neg_integer(),
+          InputWrap.visual_line(),
+          {TextField.cursor(), TextField.cursor()} | nil
+        ) :: [DisplayList.draw()]
+  defp render_input_row(row, display_text, fg_color, chrome, logical_idx, vl, sel_range) do
     padded = String.pad_trailing(display_text, chrome.inner_width)
     inner = chrome.left_pad <> padded <> chrome.right_pad
     fill = String.pad_trailing(inner, max(chrome.width - 2, 0))
+    text_col = 1 + chrome.pad_left
 
-    [
+    base = [
       DisplayList.draw(row, 0, "│" <> fill <> "│", bg: chrome.input_bg),
       DisplayList.draw(row, 0, "│", chrome.border_style),
       DisplayList.draw(row, chrome.width - 1, "│", chrome.border_style),
-      DisplayList.draw(row, 1 + chrome.pad_left, padded, fg: fg_color, bg: chrome.input_bg)
+      DisplayList.draw(row, text_col, padded, fg: fg_color, bg: chrome.input_bg)
     ]
+
+    case selection_slice(logical_idx, vl.col_offset, String.length(display_text), sel_range) do
+      nil ->
+        base
+
+      {sel_start, sel_len} ->
+        sel_text =
+          display_text
+          |> String.slice(sel_start, sel_len)
+          |> String.pad_trailing(sel_len)
+
+        base ++
+          [
+            DisplayList.draw(row, text_col + sel_start, sel_text,
+              fg: fg_color,
+              bg: chrome.input_bg,
+              reverse: true
+            )
+          ]
+    end
+  end
+
+  # Returns {start_col, length} of the selected portion within a visual line,
+  # or nil if no overlap. All coordinates are grapheme-based.
+  @spec selection_slice(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          {TextField.cursor(), TextField.cursor()} | nil
+        ) :: {non_neg_integer(), pos_integer()} | nil
+  defp selection_slice(_logical_idx, _col_offset, _text_len, nil), do: nil
+
+  defp selection_slice(logical_idx, _col_offset, _text_len, {{from_line, _}, {to_line, _}})
+       when logical_idx < from_line or logical_idx > to_line,
+       do: nil
+
+  defp selection_slice(
+         logical_idx,
+         col_offset,
+         text_len,
+         {{from_line, from_col}, {to_line, to_col}}
+       ) do
+    sel_start = if logical_idx == from_line, do: from_col, else: 0
+    sel_end = if logical_idx == to_line, do: to_col + 1, else: col_offset + text_len
+
+    # Clip to this visual line's column range
+    vis_start = max(sel_start - col_offset, 0)
+    vis_end = min(sel_end - col_offset, text_len)
+
+    if vis_end > vis_start, do: {vis_start, vis_end - vis_start}, else: nil
   end
 
   # Returns the display text and foreground color for a paste placeholder line.
@@ -1080,6 +1142,14 @@ defmodule Minga.Agent.View.Renderer do
   defp input_inner_width(box_width), do: max(box_width - 6, 1)
 
   # Returns a mode label for the input border (empty string in insert mode).
+  # Returns the visual selection range from Vim state, or nil.
+  @spec vim_visual_range(map()) ::
+          {TextField.cursor(), TextField.cursor()} | nil
+  defp vim_visual_range(%{vim: %Vim{} = vim, input: %TextField{} = tf}),
+    do: Vim.visual_range(vim, tf)
+
+  defp vim_visual_range(_panel), do: nil
+
   # Checks for Vim state on PanelState structs; returns "" for plain maps (tests).
   @spec input_mode_label(map()) :: String.t()
   defp input_mode_label(%{vim: %Vim{} = vim}) do
