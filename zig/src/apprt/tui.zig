@@ -186,6 +186,14 @@ pub const TuiRuntime = struct {
         // paste_start / key_press* / paste_end instead of bare key_press.
         try self.vx.setBracketedPaste(self.tty.writer(), true);
 
+        // Query terminal capabilities (Kitty keyboard protocol, RGB color,
+        // Unicode width, graphics support, etc.). We use the non-blocking
+        // queryTerminalSend() because we run a custom event loop. The
+        // terminal's responses arrive as cap_* events; when cap_da1 fires
+        // (the final response), we call enableDetectedFeatures() to activate
+        // everything the terminal supports.
+        try self.vx.queryTerminalSend(self.tty.writer());
+
         // Paste buffer uses the runtime allocator for dynamic accumulation.
         self.paste_buf = .empty;
 
@@ -536,8 +544,20 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             std.Thread.Futex.wake(&vx.query_futex, 10);
             vx.queries_done.store(true, .unordered);
 
-            // Terminal capability detection is complete. Send a
-            // capabilities_updated event with the actual detected caps.
+            // Terminal capability detection is complete. Enable all
+            // detected features (Kitty keyboard protocol, Unicode
+            // mode 2027, etc.). This is the custom-event-loop
+            // counterpart to the blocking queryTerminal() call.
+            try vx.enableDetectedFeatures(self.tty.writer());
+
+            std.log.info("terminal caps: kitty_kb={} rgb={} unicode={s} kitty_gfx={}", .{
+                vx.caps.kitty_keyboard,
+                vx.caps.rgb,
+                @tagName(vx.caps.unicode),
+                vx.caps.kitty_graphics,
+            });
+
+            // Send a capabilities_updated event with the actual detected caps.
             const caps = protocol.Capabilities{
                 .frontend_type = protocol.FRONTEND_TUI,
                 .color_depth = if (vx.caps.rgb) protocol.COLOR_RGB else protocol.COLOR_256,
