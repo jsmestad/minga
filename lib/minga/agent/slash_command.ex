@@ -9,6 +9,7 @@ defmodule Minga.Agent.SlashCommand do
   """
 
   alias Minga.Agent.Credentials
+  alias Minga.Agent.Instructions
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -34,6 +35,10 @@ defmodule Minga.Agent.SlashCommand do
     %{
       name: "auth",
       description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
+    },
+    %{
+      name: "instructions",
+      description: "Show which AGENTS.md instruction files are loaded"
     }
   ]
 
@@ -82,6 +87,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
+  defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
@@ -262,6 +268,25 @@ defmodule Minga.Agent.SlashCommand do
         "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
       )
     end
+  end
+
+  @spec do_instructions(state()) :: state()
+  defp do_instructions(state) do
+    root = detect_project_root()
+    summary = Instructions.summary(root)
+    emit_system_message(state, summary)
+  end
+
+  @spec detect_project_root() :: String.t()
+  defp detect_project_root do
+    case Minga.Project.root() do
+      nil -> File.cwd!()
+      root -> root
+    end
+  rescue
+    _ -> File.cwd!()
+  catch
+    :exit, _ -> File.cwd!()
   end
 
   @spec emit_system_message(state(), String.t()) :: state()

@@ -35,6 +35,7 @@ defmodule Minga.Agent.Providers.Native do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
+  alias Minga.Agent.Instructions
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Retry
@@ -600,7 +601,7 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec build_system_prompt(String.t()) :: String.t()
   defp build_system_prompt(project_root) do
-    agents_md = read_agents_md(project_root)
+    instructions = Instructions.assemble(project_root)
 
     """
     You are an AI coding assistant running inside Minga, a modal text editor. You help users by reading files, editing code, running shell commands, and writing new files.
@@ -626,18 +627,8 @@ defmodule Minga.Agent.Providers.Native do
 
     - Project root: #{project_root}
     - Current time: #{DateTime.utc_now() |> DateTime.to_iso8601()}
-    #{if agents_md, do: "\n## Project Instructions\n\n#{agents_md}", else: ""}
+    #{if instructions, do: "\n#{instructions}", else: ""}
     """
-  end
-
-  @spec read_agents_md(String.t()) :: String.t() | nil
-  defp read_agents_md(project_root) do
-    path = Path.join(project_root, "AGENTS.md")
-
-    case File.read(path) do
-      {:ok, content} -> content
-      {:error, _} -> nil
-    end
   end
 
   # Sets the provider's API key env var if it's stored in the credentials
