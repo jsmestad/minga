@@ -13,10 +13,9 @@ defmodule Minga.Surface do
   interprets the returned effects (trigger render, open file, switch buffer,
   etc.) without knowing the surface's internal logic.
 
-  Two implementations exist today:
+  One implementation exists today:
 
   * `Minga.Surface.BufferView` — file editing (vim modes, windows, file tree)
-  * `Minga.Surface.AgentView` — agentic chat (planned for Phase 2)
 
   ## Adding a new surface
 

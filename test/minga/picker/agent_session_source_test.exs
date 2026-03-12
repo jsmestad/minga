@@ -12,7 +12,6 @@ defmodule Minga.Picker.AgentSessionSourceTest do
   alias Minga.Editor.Viewport
   alias Minga.Mode
   alias Minga.Picker.AgentSessionSource
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   describe "title/0" do
     test "returns Sessions" do
@@ -172,12 +171,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :agent,
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       file_tree: nil
     }
   end
@@ -203,12 +198,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :agent,
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       file_tree: nil
     }
   end
@@ -246,12 +237,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       mode: :normal,
       mode_state: Mode.initial_state(),
       keymap_scope: :editor,
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       file_tree: nil
     }
   end
