@@ -52,7 +52,10 @@ defmodule Minga.Agent.SlashCommand do
     %{name: "export", description: "Export current session to a Markdown file"},
     %{name: "skills", description: "List all available skills"},
     %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
-    %{name: "summarize", description: "Generate a context artifact from this session for future use"}
+    %{
+      name: "summarize",
+      description: "Generate a context artifact from this session for future use"
+    }
   ]
 
   @doc "Returns the list of all registered slash commands."
