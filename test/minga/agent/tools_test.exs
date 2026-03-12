@@ -35,15 +35,16 @@ defmodule Minga.Agent.ToolsTest do
   end
 
   describe "all/1" do
-    test "returns a list of six tools", %{tmp_dir: dir} do
+    test "returns a list of seven tools", %{tmp_dir: dir} do
       tools = Tools.all(project_root: dir)
-      assert length(tools) == 6
+      assert length(tools) == 7
 
       names = Enum.map(tools, & &1.name)
       assert "read_file" in names
       assert "write_file" in names
       assert "edit_file" in names
       assert "list_directory" in names
+      assert "find" in names
       assert "grep" in names
       assert "shell" in names
     end
