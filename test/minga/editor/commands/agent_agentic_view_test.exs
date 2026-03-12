@@ -19,7 +19,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.Window.Content
   alias Minga.Input
   alias Minga.Mode
-  alias Minga.Surface.AgentView
   alias Minga.Surface.BufferView
 
   defp base_state(opts \\ []) do
@@ -90,7 +89,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       # Build agent tab with keymap scope
       agent_ctx = %{
         keymap_scope: :agent,
-        surface_module: AgentView
+        surface_module: Minga.Surface.BufferView
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
@@ -104,7 +103,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       # Always store an agent tab so AgentAccess can find it.
       # This ensures the agent buffer is accessible to toggle_agent_split.
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      agent_ctx = %{keymap_scope: :agent, surface_module: AgentView}
+      agent_ctx = %{keymap_scope: :agent, surface_module: Minga.Surface.BufferView}
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
       %{state | tab_bar: tb}
@@ -254,7 +253,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     end
 
     test "restores file tab context after closing agent tab" do
-      # Start with agent tab active (legacy full-screen AgentView)
+      # Start with agent tab active
       state = base_state(active: true)
       assert EditorState.active_tab_kind(state) == :agent
 

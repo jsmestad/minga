@@ -2,10 +2,8 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   @moduledoc """
   Characterization tests for Commands.Agent.
 
-  Pins current behavior for pure `state -> state` functions before
-  the Phase 2 Surface extraction. Each test documents what the function
-  does today so that moving it into AgentView in Phase 2 can't silently
-  change behavior.
+  Tests pure `state -> state` functions for agent-related commands.
+  Agent state now lives on EditorState (agent panel, session, status).
 
   Functions that require a live Agent.Session (submit_prompt, abort_agent,
   clear_chat_display, etc.) are tested via EditorCase integration tests
