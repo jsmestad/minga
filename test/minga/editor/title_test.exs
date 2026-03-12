@@ -2,7 +2,14 @@ defmodule Minga.Editor.TitleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Windows
   alias Minga.Editor.Title
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
+  alias Minga.Mode
 
   defp state_with(opts \\ []) do
     path = Keyword.get(opts, :path, "/home/user/project/lib/editor.ex")
@@ -86,6 +93,65 @@ defmodule Minga.Editor.TitleTest do
       state = %{buffers: %{active: nil}, mode: :normal}
       result = Title.format(state, "{filename} - Minga")
       assert result == "*scratch* - Minga"
+    end
+  end
+
+  describe "format/2 with EditorState (content-aware)" do
+    test "agent chat window shows Agent in title, not *scratch*" do
+      {:ok, agent_buf} = BufferServer.start_link(content: "")
+      {:ok, scratch_buf} = BufferServer.start_link(content: "scratch")
+      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        mode: :normal,
+        mode_state: Mode.initial_state(),
+        buffers: %Buffers{active: scratch_buf, list: []},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format(state, "{filename} ({directory}) - Minga")
+
+      assert String.contains?(result, "Agent")
+
+      refute String.contains?(result, "*scratch*"),
+             "agent-mode title must not show *scratch*"
+    end
+
+    test "buffer window shows filename in title" do
+      {:ok, buf} =
+        BufferServer.start_link(
+          content: "hello",
+          file_path: "/home/user/project/lib/editor.ex"
+        )
+
+      window = Window.new(1, buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        mode: :normal,
+        mode_state: Mode.initial_state(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format(state, "{filename} ({directory}) - Minga")
+
+      assert result == "editor.ex (lib) - Minga"
     end
   end
 end

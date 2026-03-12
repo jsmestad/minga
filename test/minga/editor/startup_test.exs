@@ -14,44 +14,76 @@ defmodule Minga.Editor.StartupTest do
   alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
 
-  describe "startup_view_state/2" do
-    test "returns :agent scope with real window tree when startup_view is :agent" do
-      # TUI mode (PortManager atom) with default flags -> agent mode
-      {scope, agentic, tree} = Startup.startup_view_state(PortManager, 1)
+  describe "startup_view_state/1" do
+    test "returns :agent scope when startup_view is :agent in TUI mode" do
+      {scope, agentic} = Startup.startup_view_state(PortManager)
 
       assert scope == :agent
       assert agentic.active == true
       assert agentic.focus == :chat
-      assert tree == WindowTree.new(1)
     end
 
     test "returns :editor scope when force_editor flag is set" do
       Application.put_env(:minga, :cli_startup_flags, %{force_editor: true, no_context: false})
 
-      {scope, agentic, tree} = Startup.startup_view_state(PortManager, 1)
+      {scope, agentic} = Startup.startup_view_state(PortManager)
 
       assert scope == :editor
       assert agentic.active == false
-      assert tree == WindowTree.new(1)
     after
       Application.delete_env(:minga, :cli_startup_flags)
     end
 
     test "returns :editor scope in headless mode (non-atom port_manager)" do
-      {scope, _agentic, tree} = Startup.startup_view_state(self(), 1)
+      {scope, _agentic} = Startup.startup_view_state(self())
 
       assert scope == :editor
-      assert tree == WindowTree.new(1)
     end
   end
 
-  describe "maybe_apply_agent_split/1 (the regression guard)" do
-    test "replaces initial window with full-screen agent chat window" do
-      # Build a minimal state that looks like what build_initial_state produces
-      # in agent mode: keymap_scope :agent, a scratch buffer window, real tree.
-      {:ok, scratch} = BufferServer.start_link(content: "scratch")
-      window = Window.new(1, scratch, 24, 80)
+  describe "build_initial_window/5" do
+    test "agent mode creates a full-screen agent_chat window" do
+      {window, update} = Startup.build_initial_window(:agent, 1, self(), 24, 80)
 
+      assert %Window{} = window
+      assert Content.agent_chat?(window.content)
+      refute Content.buffer?(window.content)
+      assert {:agent_buffer, pid} = update
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+
+    test "editor mode creates a buffer window" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+
+      {window, update} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
+
+      assert %Window{} = window
+      assert Content.buffer?(window.content)
+      refute Content.agent_chat?(window.content)
+      assert window.buffer == buf
+      assert update == :noop
+    end
+
+    test "editor mode with nil buffer returns nil window" do
+      {window, update} = Startup.build_initial_window(:editor, 1, nil, 24, 80)
+
+      assert window == nil
+      assert update == :noop
+    end
+  end
+
+  describe "startup creates correct window type (integration)" do
+    test "agent mode produces has_agent_chat? == true with single-leaf tree" do
+      # This is the regression guard. If this test fails, the agent
+      # session won't start because AgentLifecycle.maybe_start_session
+      # checks LayoutPreset.has_agent_chat? before starting.
+      {:ok, buf} = BufferServer.start_link(content: "scratch")
+
+      {window, {:agent_buffer, _agent_buf}} =
+        Startup.build_initial_window(:agent, 1, buf, 24, 80)
+
+      # Simulate what build_initial_state does with the window
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
@@ -67,33 +99,16 @@ defmodule Minga.Editor.StartupTest do
         focus_stack: Input.default_stack()
       }
 
-      result = Startup.maybe_apply_agent_split(state)
+      assert LayoutPreset.has_agent_chat?(state),
+             "agent startup must produce a state where has_agent_chat? is true"
 
-      # has_agent_chat? must be true so AgentLifecycle.maybe_start_session
-      # starts the agent session. This was the original regression.
-      assert LayoutPreset.has_agent_chat?(result),
-             "agent startup must create an agent_chat window so the session can start"
-
-      # The window tree is a single leaf (full-screen), not a split.
-      # The old full-screen agentic view had no scratch buffer visible.
-      assert {:leaf, 1} = result.windows.tree
-
-      # The single window should be an agent_chat window, not a buffer
-      agent_window = result.windows.map[1]
-      assert Content.agent_chat?(agent_window.content)
-      refute Content.buffer?(agent_window.content)
-
-      # Only one window in the map (no scratch buffer window)
-      assert map_size(result.windows.map) == 1
-
-      # The agent buffer should be stored in agent state
-      assert is_pid(result.agent.buffer)
-      assert Process.alive?(result.agent.buffer)
+      assert {:leaf, 1} = state.windows.tree
+      assert map_size(state.windows.map) == 1
     end
 
-    test "is a no-op when keymap_scope is :editor" do
-      {:ok, scratch} = BufferServer.start_link(content: "scratch")
-      window = Window.new(1, scratch, 24, 80)
+    test "editor mode produces has_agent_chat? == false" do
+      {:ok, buf} = BufferServer.start_link(content: "scratch")
+      {window, :noop} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
 
       state = %EditorState{
         port_manager: self(),
@@ -110,13 +125,8 @@ defmodule Minga.Editor.StartupTest do
         focus_stack: Input.default_stack()
       }
 
-      result = Startup.maybe_apply_agent_split(state)
-
-      refute LayoutPreset.has_agent_chat?(result)
-      assert result.windows.tree == WindowTree.new(1)
-      assert map_size(result.windows.map) == 1
-      # Window should still be the original buffer window
-      assert Content.buffer?(result.windows.map[1].content)
+      refute LayoutPreset.has_agent_chat?(state)
+      assert Content.buffer?(state.windows.map[1].content)
     end
   end
 end
