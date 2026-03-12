@@ -57,6 +57,8 @@ defmodule Minga.Config.OptionsTest do
                agent_max_retries: 3,
                agent_models: [],
                agent_prompt_cache: true,
+               agent_notifications: true,
+               agent_notify_on: [:approval, :complete, :error],
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                font_family: "Menlo",

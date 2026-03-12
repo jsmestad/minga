@@ -24,6 +24,7 @@ defmodule Minga.Agent.Session do
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Message
+  alias Minga.Agent.Notifier
   alias Minga.Agent.ProviderResolver
   alias Minga.Agent.SessionStore
 
@@ -593,6 +594,8 @@ defmodule Minga.Agent.Session do
   end
 
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
+    Notifier.notify(:complete, "Agent finished")
+
     state =
       if usage do
         log_turn_usage(usage, state)
@@ -647,6 +650,8 @@ defmodule Minga.Agent.Session do
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
+    Notifier.notify(:approval, "Approval needed: #{event.name}")
+
     approval = %{
       tool_call_id: event.tool_call_id,
       name: event.name,
@@ -703,6 +708,7 @@ defmodule Minga.Agent.Session do
   end
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
+    Notifier.notify(:error, message)
     state = set_status(state, :error)
     state = %{state | error_message: message}
     state = append_system_message(state, "Error: #{message}", :error)
