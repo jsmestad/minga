@@ -224,7 +224,7 @@ defmodule Minga.Agent.View.Renderer do
   @doc """
   Renders agent chat content within a bounded window rect.
 
-  Used when the agent chat is hosted in a window pane (Phase F) rather
+  Used when the agent chat is hosted in a window pane (window split) rather
   than as a full-screen surface. Renders chat messages in the top portion
   and the prompt input at the bottom, without title bar, modeline,
   separator, or file viewer.

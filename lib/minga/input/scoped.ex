@@ -57,8 +57,8 @@ defmodule Minga.Input.Scoped do
   # ── Agent scope ──────────────────────────────────────────────────────────
 
   # Agent scope: dispatch through scope resolution.
-  # Matches window-level agent
-  # chat content (Phase F: agent chat as a window pane within BufferView).
+  # Matches when in agent scope (window-level agent
+  # chat split pane or full agent view).
   def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
     handle_agent_key(state, cp, mods)
   end
