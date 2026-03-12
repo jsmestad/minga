@@ -1,29 +1,40 @@
 # Surface Extraction Refactor
 
-**Status:** Phase 1-4 complete + post-phase decomposition + Step 1-2 (agent fields) in progress
-**Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 landed), 2026-03-11 (post-phase extractions)
+**Status:** Agent state fully owned by surfaces. Bridge layer reduction in progress.
+**Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 + post-phase landed), 2026-03-11 (Steps 1-3 landed)
 
-## Current Migration Status (Step 2)
+## Current Migration Status
 
-PR #319 (`refactor/surface-owns-state-step1`) implements the first two steps of making surfaces truly own their state:
-
-### Step 1: Surface state authoritative for tab lifecycle (done)
+### Step 1: Surface state authoritative for tab lifecycle ✅ (#319)
 - Tab contexts store only `{surface_module, surface_state, keymap_scope}`
 - `snapshot_tab_context` / `restore_tab_context` sync through surface state
 - Legacy context auto-migration for backwards compatibility
 
-### Step 2: Agent fields routed through AgentAccess (done)
-- All 27+ files that read `state.agent` or `state.agentic` now go through `Minga.Editor.State.AgentAccess`
-- Zero direct reads remain outside the access layer, bridge modules, and struct definitions
-- `AgentAccess` provides surface-aware accessors: when AgentView is active, reads/writes go through `surface_state`; otherwise falls back to EditorState fields
-- Dual-write strategy keeps both locations in sync during migration
-- Safe fallbacks: `AgentAccess.agent/1` and `agentic/1` return defaults when called with bare maps or states lacking agent fields
+### Step 2: Agent fields routed through AgentAccess ✅ (#319)
+- All reads go through `Minga.Editor.State.AgentAccess`
+- Safe fallbacks when agent state doesn't exist
+
+### Step 3: Agent fields removed from EditorState ✅ (#320)
+- `agent` and `agentic` fields deleted from EditorState defstruct
+- AgentAccess reads from surface_state (active tab) or background tab context
+- Dual-write eliminated: writes go to surface_state only
+
+### Step 4: Background events unified ✅ (#321)
+- `BackgroundEvents` module deleted (249 lines)
+- Background events use `AgentView.handle_event/2` (same as active tabs)
+- `update_background_agent/3` and `update_background_agentic/3` deleted
+- `update_background_surface_state/3` added (atomic surface state replacement)
+
+### Step 5: Bridge round-trip reduction (in progress)
+- Event dispatch skips sync_from_editor/sync_to_editor (operates on surface_state directly)
+- Input.Router no longer imports or calls BufferView.Bridge
+- Remaining bridge calls: 21 (down from 53)
 
 ### Remaining work
-- **Remove `agent`/`agentic` fields from EditorState defstruct**: blocked on solving the "side panel without agent tab" edge case (toggle_panel from a file tab creates agent state before an agent tab exists)
-- **Buffer field migration**: ~221 refs across the codebase. The right approach is changing command signatures (Step 3), not wrapping reads in an access module
-- **Step 3**: Change `Input.Handler` callbacks to `handle_key(surface_state, editor_context, ...)`
-- **Step 4**: Route agent events directly to surfaces
+- **Buffer field migration**: ~221 refs across the codebase. The right approach is changing command signatures, not wrapping reads in an access module.
+- **Command signature changes**: `execute(EditorState.t(), command)` should become surface-specific
+- **Input handler signature changes**: handlers should receive surface state directly instead of EditorState
+- **Eliminate SurfaceSync**: replace sync_surface_from_editor calls with direct surface_state management
 
 ---
 
