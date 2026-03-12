@@ -161,6 +161,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, {:unsubscribe, self()})
   end
 
+  @doc "Manually triggers context compaction on the provider."
+  @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
+  def compact(session) do
+    GenServer.call(session, :compact, 30_000)
+  end
+
   @doc "Fetches available models from the provider."
   @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
@@ -398,6 +404,19 @@ defmodule Minga.Agent.Session do
 
   def handle_call({:unsubscribe, pid}, _from, state) do
     {:reply, :ok, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+  end
+
+  def handle_call(:compact, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:compact, _from, state) do
+    if function_exported?(state.provider_module, :compact, 1) do
+      result = state.provider_module.compact(state.provider)
+      {:reply, result, state}
+    else
+      {:reply, {:error, "Provider does not support compaction"}, state}
+    end
   end
 
   def handle_call(:get_available_models, _from, %{provider: nil} = state) do
