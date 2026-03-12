@@ -156,6 +156,85 @@ defmodule Minga.Editor.State do
   @spec active_buffer(t()) :: non_neg_integer()
   def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
 
+  # ── Active content context ───────────────────────────────────────────────────
+
+  @typedoc """
+  Display metadata derived from the active window's content type.
+
+  Used by title, modeline, and any other subsystem that needs to answer
+  "what is the user looking at?" without assuming a buffer is active.
+  """
+  @type content_context :: %{
+          type: :buffer | :agent,
+          display_name: String.t(),
+          directory: String.t(),
+          dirty: boolean(),
+          filetype: atom()
+        }
+
+  @doc """
+  Returns display metadata for the active window's content.
+
+  Buffer windows return file/buffer metadata. Agent chat windows return
+  agent-specific display info. Falls back to buffer metadata when the
+  active window is nil or unrecognized.
+  """
+  @spec active_content_context(t()) :: content_context()
+  def active_content_context(%__MODULE__{} = state) do
+    case active_window_struct(state) do
+      %Window{content: {:agent_chat, _}} ->
+        %{
+          type: :agent,
+          display_name: "Agent",
+          directory: project_directory(),
+          dirty: false,
+          filetype: :markdown
+        }
+
+      _ ->
+        buffer_content_context(state)
+    end
+  end
+
+  @spec buffer_content_context(t()) :: content_context()
+  defp buffer_content_context(%__MODULE__{buffers: %{active: buf}}) when is_pid(buf) do
+    path = BufferServer.file_path(buf)
+    name = BufferServer.buffer_name(buf)
+    dirty = BufferServer.dirty?(buf)
+    filetype = BufferServer.filetype(buf)
+
+    display_name = if path, do: Path.basename(path), else: name || "*scratch*"
+    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
+
+    %{
+      type: :buffer,
+      display_name: display_name,
+      directory: directory,
+      dirty: dirty,
+      filetype: filetype || :text
+    }
+  end
+
+  defp buffer_content_context(_state) do
+    %{
+      type: :buffer,
+      display_name: "*scratch*",
+      directory: "",
+      dirty: false,
+      filetype: :text
+    }
+  end
+
+  @spec project_directory() :: String.t()
+  defp project_directory do
+    case Minga.Project.root() do
+      nil -> ""
+      root -> Path.basename(root)
+    end
+  catch
+    :exit, _ -> ""
+  end
+
   # ── Window delegates ────────────────────────────────────────────────────────
   # Pure window-only logic lives in `Windows`. These delegators keep the
   # call-site API stable so callers pass the full editor state.

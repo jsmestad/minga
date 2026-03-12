@@ -13,7 +13,6 @@ defmodule Minga.Editor.Startup do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.FileWatcherHelpers
-  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -30,7 +29,13 @@ defmodule Minga.Editor.Startup do
   Builds the complete initial EditorState from startup opts.
 
   Subscribes to port manager and parser, starts special buffers,
-  initializes windows, and determines the initial view (agent vs editor).
+  determines the startup mode (agent vs editor), and creates the
+  correct window type in a single pass.
+
+  In agent mode the initial window is an agent chat window (full screen).
+  In editor mode it's a regular buffer window showing the scratch or
+  file buffer. The mode decision happens *before* window creation so
+  there's no create-then-replace dance.
   """
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
@@ -52,15 +57,16 @@ defmodule Minga.Editor.Startup do
         _ -> {nil, []}
       end
 
+    # Decide mode FIRST, then create the right window type.
+    {keymap_scope, _agentic_state} = startup_view_state(port_manager)
+
     initial_window_id = 1
 
-    initial_window =
-      if active_buf, do: Window.new(initial_window_id, active_buf, height, width), else: nil
+    {initial_window, agent_state_update} =
+      build_initial_window(keymap_scope, initial_window_id, active_buf, height, width)
 
-    windows = if initial_window, do: %{initial_window_id => initial_window}, else: %{}
-
-    {keymap_scope, _agentic_state, effective_tree} =
-      startup_view_state(port_manager, initial_window_id)
+    windows =
+      if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
     state = %EditorState{
       buffers: %Buffers{
@@ -75,7 +81,7 @@ defmodule Minga.Editor.Startup do
       mode: :normal,
       mode_state: Mode.initial_state(),
       windows: %Windows{
-        tree: effective_tree,
+        tree: WindowTree.new(initial_window_id),
         map: windows,
         active: initial_window_id,
         next_id: initial_window_id + 1
@@ -85,32 +91,46 @@ defmodule Minga.Editor.Startup do
     }
 
     state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
-    maybe_apply_agent_split(state)
-  end
 
-  @doc """
-  Creates the agent buffer and applies the agent split layout when
-  booting into agent mode.
+    # Store the agent buffer reference if one was created.
+    case agent_state_update do
+      {:agent_buffer, pid} ->
+        AgentAccess.update_agent(state, fn a -> %{a | buffer: pid} end)
 
-  This bridges the gap between `startup_view_state` (which decides
-  *whether* to use agent mode) and the window tree (which needs an
-  actual agent chat window for the render pipeline to find). Without
-  this step, `LayoutPreset.has_agent_chat?/1` returns false and the
-  agent session never starts.
-  """
-  @spec maybe_apply_agent_split(EditorState.t()) :: EditorState.t()
-  def maybe_apply_agent_split(%{keymap_scope: :agent} = state) do
-    agent_buf = AgentBufferSync.start_buffer()
-
-    if is_pid(agent_buf) do
-      state = AgentAccess.update_agent(state, fn a -> %{a | buffer: agent_buf} end)
-      LayoutPreset.apply(state, :agent_right, agent_buf)
-    else
-      state
+      :noop ->
+        state
     end
   end
 
-  def maybe_apply_agent_split(state), do: state
+  @doc """
+  Creates the initial window based on the startup mode.
+
+  In agent mode: starts the `*Agent*` buffer and creates an agent chat
+  window. In editor mode: creates a regular buffer window for the
+  scratch or file buffer.
+
+  Returns `{window | nil, agent_state_update}` where the update is
+  either `{:agent_buffer, pid}` or `:noop`.
+  """
+  @spec build_initial_window(atom(), Window.id(), pid() | nil, pos_integer(), pos_integer()) ::
+          {Window.t() | nil, {:agent_buffer, pid()} | :noop}
+  def build_initial_window(:agent, win_id, _active_buf, rows, cols) do
+    agent_buf = AgentBufferSync.start_buffer()
+
+    if is_pid(agent_buf) do
+      window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+      {window, {:agent_buffer, agent_buf}}
+    else
+      {nil, :noop}
+    end
+  end
+
+  def build_initial_window(_scope, win_id, active_buf, rows, cols) do
+    window =
+      if active_buf, do: Window.new(win_id, active_buf, rows, cols), else: nil
+
+    {window, :noop}
+  end
 
   @spec subscribe_port(GenServer.server() | nil) :: :ok
   defp subscribe_port(nil), do: :ok
@@ -143,13 +163,12 @@ defmodule Minga.Editor.Startup do
   @doc """
   Determines the initial view state based on CLI flags and config.
 
-  Returns `{keymap_scope, agentic_state, window_tree}`. Both agent and
-  editor modes get a real WindowTree; agent mode creates the split layout
-  in `maybe_apply_agent_split/1` after the state struct is built.
+  Returns `{keymap_scope, agentic_state}`. Called before window creation
+  so the correct window type can be built in a single pass.
   """
-  @spec startup_view_state(GenServer.server() | nil, pos_integer()) ::
-          {atom(), ViewState.t(), WindowTree.t()}
-  def startup_view_state(port_manager, window_id) do
+  @spec startup_view_state(GenServer.server() | nil) ::
+          {atom(), ViewState.t()}
+  def startup_view_state(port_manager) do
     tui_mode? = port_manager == PortManager
     cli_flags = Minga.CLI.startup_flags()
 
@@ -160,9 +179,9 @@ defmodule Minga.Editor.Startup do
 
     if want_agent? do
       av = %ViewState{ViewState.new() | active: true, focus: :chat}
-      {:agent, av, WindowTree.new(window_id)}
+      {:agent, av}
     else
-      {:editor, ViewState.new(), WindowTree.new(window_id)}
+      {:editor, ViewState.new()}
     end
   end
 
