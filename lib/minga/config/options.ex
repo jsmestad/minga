@@ -95,6 +95,7 @@ defmodule Minga.Config.Options do
           | :agent_auto_context
           | :agent_max_tokens
           | :agent_max_retries
+          | :agent_models
           | :agent_prompt_cache
           | :agent_system_prompt
           | :agent_append_system_prompt
@@ -161,6 +162,7 @@ defmodule Minga.Config.Options do
     {:agent_auto_context, :boolean, true},
     {:agent_max_tokens, :pos_integer, 16_384},
     {:agent_max_retries, :non_neg_integer, 3},
+    {:agent_models, :string_list, []},
     {:agent_prompt_cache, :boolean, true},
     {:agent_system_prompt, :string, ""},
     {:agent_append_system_prompt, :string, ""},

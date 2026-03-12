@@ -93,6 +93,7 @@ defmodule Minga.Command.Registry do
     {:agent_abort, "Stop AI agent"},
     {:agent_new_session, "New AI agent session"},
     {:agent_pick_model, "Pick AI agent model"},
+    {:agent_cycle_model, "Cycle AI agent model"},
     {:agent_cycle_thinking, "Cycle AI thinking level"}
   ]
 

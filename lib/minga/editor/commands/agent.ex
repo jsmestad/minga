@@ -498,6 +498,32 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
+  @doc "Cycles to the next model in the configured rotation."
+  @spec cycle_model(state()) :: state()
+  def cycle_model(state) do
+    if AgentAccess.session(state) == nil do
+      %{state | status_msg: "No agent session"}
+    else
+      case Session.cycle_model(AgentAccess.session(state)) do
+        {:ok, %{"model" => model, "index" => index, "total" => total}} ->
+          state = update_agent(state, &AgentState.set_model_name(&1, model))
+
+          Session.add_system_message(
+            AgentAccess.session(state),
+            "Model: #{model} [#{index}/#{total}]"
+          )
+
+          %{state | status_msg: "Model: #{model} [#{index}/#{total}]"}
+
+        {:error, reason} when is_binary(reason) ->
+          %{state | status_msg: reason}
+
+        {:error, reason} ->
+          %{state | status_msg: "Error: #{inspect(reason)}"}
+      end
+    end
+  end
+
   @doc "Sets the agent provider and restarts the session."
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do

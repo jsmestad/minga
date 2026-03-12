@@ -55,6 +55,7 @@ defmodule Minga.Config.OptionsTest do
                agent_auto_context: true,
                agent_max_tokens: 16_384,
                agent_max_retries: 3,
+               agent_models: [],
                agent_prompt_cache: true,
                agent_system_prompt: "",
                agent_append_system_prompt: "",

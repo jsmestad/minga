@@ -191,6 +191,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :cycle_thinking_level, 10_000)
   end
 
+  @doc "Cycles to the next model in the configured rotation."
+  @spec cycle_model(GenServer.server()) :: {:ok, map()} | {:error, term()}
+  def cycle_model(session) do
+    GenServer.call(session, :cycle_model, 10_000)
+  end
+
   @doc "Toggles the collapsed state of a tool call message."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
   def toggle_tool_collapse(session, message_index) do
@@ -454,6 +460,15 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:cycle_thinking_level, _from, state) do
     result = dispatch_optional(state.provider_module, :cycle_thinking_level, [state.provider])
+    {:reply, result, state}
+  end
+
+  def handle_call(:cycle_model, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call(:cycle_model, _from, state) do
+    result = dispatch_optional(state.provider_module, :cycle_model, [state.provider])
     {:reply, result, state}
   end
 

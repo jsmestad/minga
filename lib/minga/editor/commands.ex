@@ -162,6 +162,8 @@ defmodule Minga.Editor.Commands do
   def execute(state, :agent_session_history),
     do: PickerUI.open(state, Minga.Picker.SessionHistorySource)
 
+  def execute(state, :agent_cycle_model), do: AgentCommands.cycle_model(state)
+
   def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
 
   # ── Agent scope commands (dispatched via keymap scope resolution) ──────────

@@ -82,10 +82,14 @@ defmodule Minga.Agent.Provider do
   @doc "Cycles to the next thinking level and returns the new level."
   @callback cycle_thinking_level(provider()) :: {:ok, term()} | {:error, term()}
 
+  @doc "Cycles to the next model in the configured model rotation."
+  @callback cycle_model(provider()) :: {:ok, map()} | {:error, term()}
+
   @optional_callbacks [
     get_available_models: 1,
     get_commands: 1,
     set_thinking_level: 2,
-    cycle_thinking_level: 1
+    cycle_thinking_level: 1,
+    cycle_model: 1
   ]
 end
