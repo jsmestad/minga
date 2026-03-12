@@ -8,7 +8,7 @@
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
       plugins: [],
-      requires: [],
+      requires: ["lib/minga/credo/"],
       checks: %{
         enabled: [
           # ── Consistency ────────────────────────────────────────────────────
@@ -23,6 +23,11 @@
           {Credo.Check.Design.AliasUsage, [priority: :low, if_nested_deeper_than: 2]},
           {Credo.Check.Design.TagFIXME, []},
           {Credo.Check.Design.TagTODO, [exit_status: 0]},
+
+          # ── Domain boundaries ──────────────────────────────────────────────
+          {Minga.Credo.DomainBoundaryCheck, [exit_status: 0]},
+          {Minga.Credo.NoProcessSleepCheck, []},
+          {Minga.Credo.NoDirectLoggerCheck, [exit_status: 0]},
 
           # ── Readability ────────────────────────────────────────────────────
           {Credo.Check.Readability.AliasOrder, []},
@@ -40,7 +45,7 @@
           {Credo.Check.Readability.RedundantBlankLines, []},
           {Credo.Check.Readability.Semicolons, []},
           {Credo.Check.Readability.SpaceAfterCommas, []},
-          {Credo.Check.Readability.Specs, [priority: :low]},
+          {Credo.Check.Readability.Specs, [priority: :high]},
           {Credo.Check.Readability.StringSigils, []},
           {Credo.Check.Readability.TrailingBlankLine, []},
           {Credo.Check.Readability.TrailingWhiteSpace, []},
