@@ -34,9 +34,10 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Instructions
+  alias Minga.Agent.ModelCatalog
   alias Minga.Agent.ModelLimits
-  alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Retry
+  alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
   alias Minga.Config.Options
   alias ReqLLM.Context
@@ -127,6 +128,12 @@ defmodule Minga.Agent.Providers.Native do
   @spec cycle_thinking_level(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def cycle_thinking_level(pid) do
     GenServer.call(pid, :cycle_thinking_level)
+  end
+
+  @impl Minga.Agent.Provider
+  @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
+  def get_available_models(pid) do
+    GenServer.call(pid, :get_available_models, 10_000)
   end
 
   # ── GenServer callbacks ─────────────────────────────────────────────────────
@@ -262,6 +269,11 @@ defmodule Minga.Agent.Providers.Native do
 
     Minga.Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
     {:reply, {:ok, %{"level" => next_level}}, %{state | thinking_level: next_level}}
+  end
+
+  def handle_call(:get_available_models, _from, state) do
+    models = ModelCatalog.available_models(state.model)
+    {:reply, {:ok, models}, state}
   end
 
   @impl GenServer
