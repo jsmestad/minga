@@ -65,12 +65,7 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
-  @doc """
-  Toggles the agent chat view on or off.
-
-  Creates a split pane (file left, agent right) or removes it.
-  Delegates to `toggle_agent_split/1`.
-  """
+  @doc "Legacy alias for `toggle_agent_split/1`."
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(state), do: toggle_agent_split(state)
 
@@ -82,8 +77,7 @@ defmodule Minga.Editor.Commands.Agent do
   chat right). When an agent pane exists: removes it and restores
   the single-window layout.
 
-  Unlike `toggle_agentic_view`, this stays on the current tab. The
-  agent state lives in a background agent tab (created if needed).
+  The agent state lives in a background agent tab (created if needed).
   """
   @spec toggle_agent_split(state()) :: state()
   def toggle_agent_split(state) do
@@ -649,11 +643,11 @@ defmodule Minga.Editor.Commands.Agent do
     %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
   end
 
-  @doc "Unfocuses the input field and closes the agentic view."
+  @doc "Unfocuses the input field and closes the agent split pane."
   @spec scope_unfocus_and_quit(state()) :: state()
   def scope_unfocus_and_quit(state) do
     state = update_agent(state, &AgentState.focus_input(&1, false))
-    toggle_agentic_view(state)
+    toggle_agent_split(state)
   end
 
   # ── Input vim mode commands ──────────────────────────────────────────────
@@ -721,9 +715,9 @@ defmodule Minga.Editor.Commands.Agent do
 
   # ── Close / dismiss ────────────────────────────────────────────────────────
 
-  @doc "Closes the agentic view."
+  @doc "Closes the agent split pane."
   @spec scope_close(state()) :: state()
-  def scope_close(state), do: toggle_agentic_view(state)
+  def scope_close(state), do: toggle_agent_split(state)
 
   @doc "Dismisses active overlays or does nothing (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
@@ -858,7 +852,6 @@ defmodule Minga.Editor.Commands.Agent do
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
-  # Returns true when neither the full-screen agent view nor the side panel
   # Returns true when no agent UI is visible (panel or split pane),
   # meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()

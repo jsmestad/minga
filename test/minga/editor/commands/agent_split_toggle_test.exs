@@ -1,4 +1,4 @@
-defmodule Minga.Editor.Commands.AgentAgenticViewTest do
+defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync
@@ -108,7 +108,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   # Helper: checks whether the buffer view is active (keymap_scope :editor)
   defp buffer_surface_active?(state), do: state.keymap_scope == :editor
 
-  describe "toggle_agentic_view/1 — activating (split pane)" do
+  describe "toggle_agent_split/1 — activating" do
     test "creates an agent chat split pane" do
       state = base_state()
       new_state = AgentCommands.toggle_agentic_view(state)
@@ -204,7 +204,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     end
   end
 
-  describe "toggle_agentic_view/1 — deactivating" do
+  describe "toggle_agent_split/1 — deactivating" do
     test "switches to editor scope" do
       state = base_state()
       # First activate the agent split

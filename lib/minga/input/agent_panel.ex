@@ -17,10 +17,6 @@ defmodule Minga.Input.AgentPanel do
 
   @behaviour Minga.Input.Handler
 
-  import Bitwise
-
-  alias Minga.Agent.PanelState
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -28,11 +24,6 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentChatNav
   alias Minga.Keymap.Scope
-  alias Minga.Port.Protocol
-
-  @ctrl Protocol.mod_ctrl()
-  @alt Protocol.mod_alt()
-  @shift Protocol.mod_shift()
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -64,7 +55,24 @@ defmodule Minga.Input.AgentPanel do
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
     if state.mode == :insert do
-      handle_panel_insert(state, cp, mods)
+      # Resolve through the agent scope insert trie. This gives us the
+      # same keybindings as the split pane path (Enter, Shift+Enter,
+      # Backspace, Ctrl combos, @-mention, printable chars) without
+      # duplicating them as hardcoded function clauses.
+      key = {cp, mods}
+
+      case Scope.resolve_key(:agent, :insert, key) do
+        {:command, command} ->
+          Commands.execute(state, command)
+
+        {:prefix, _node} ->
+          # No prefix sequences in insert mode currently
+          state
+
+        :not_found ->
+          # Printable chars and @-mention trigger
+          handle_panel_self_insert(state, cp, mods)
+      end
     else
       # Normal, visual, operator-pending: route through Mode FSM
       # targeting the prompt buffer
@@ -72,118 +80,24 @@ defmodule Minga.Input.AgentPanel do
     end
   end
 
-  # ── Panel insert mode keys ─────────────────────────────────────────────
-
-  # Ctrl+Q: unfocus first, then forward the quit key
-  defp handle_panel_insert(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    send(self(), {:minga_input, {:key_press, ?q, mods}})
-    state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
-    %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
-  end
-
-  # Ctrl+S: save current buffer
-  defp handle_panel_insert(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buffers.active do
-      case BufferServer.save(state.buffers.active) do
-        :ok -> :ok
-        {:error, _reason} -> :ok
-      end
-    end
-
-    _ = mods
-    state
-  end
-
-  # Ctrl+C: submit prompt if input has text, abort if agent is active
-  defp handle_panel_insert(state, ?c, mods) when band(mods, @ctrl) != 0 do
-    if PanelState.prompt_text(AgentAccess.panel(state)) == "" do
-      if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
-        AgentCommands.abort_agent(state)
-      else
-        state
-      end
-    else
-      AgentCommands.submit_prompt(state)
-    end
-  end
-
-  # Ctrl+D: scroll chat down
-  defp handle_panel_insert(state, ?d, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.scroll_chat_down(state)
-  end
-
-  # Ctrl+U: scroll chat up
-  defp handle_panel_insert(state, ?u, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.scroll_chat_up(state)
-  end
-
-  # Ctrl+L: clear chat display
-  defp handle_panel_insert(state, ?l, mods) when band(mods, @ctrl) != 0 do
-    AgentCommands.clear_chat_display(state)
-  end
-
-  # Escape: switch to normal mode via Mode FSM
-  defp handle_panel_insert(state, 27, _mods) do
-    dispatch_prompt_via_mode_fsm(state, 27, 0)
-  end
-
-  # Backspace
-  defp handle_panel_insert(state, 127, _mods) do
-    AgentCommands.input_backspace(state)
-  end
-
-  # Insert newline: all the ways Shift+Enter arrives across terminals.
-  defp handle_panel_insert(state, 13, mods) when band(mods, @shift) != 0 do
-    AgentAccess.update_agent(state, &AgentState.insert_newline/1)
-  end
-
-  defp handle_panel_insert(state, ?j, mods) when band(mods, @ctrl) != 0 do
-    AgentAccess.update_agent(state, &AgentState.insert_newline/1)
-  end
-
-  defp handle_panel_insert(state, 0x0A, _mods) do
-    AgentAccess.update_agent(state, &AgentState.insert_newline/1)
-  end
-
-  defp handle_panel_insert(state, 13, mods) when band(mods, @alt) != 0 do
-    AgentAccess.update_agent(state, &AgentState.insert_newline/1)
-  end
-
-  # Enter: submit prompt
-  defp handle_panel_insert(state, 13, _mods) do
-    AgentCommands.submit_prompt(state)
-  end
-
-  # Up arrow: move cursor up or recall history
-  defp handle_panel_insert(state, cp, _mods) when cp in [0xF700, 57_352, 0x415B1B] do
-    case AgentState.move_cursor_up(AgentAccess.agent(state)) do
-      :at_top -> AgentAccess.update_agent(state, &AgentState.history_prev/1)
-      agent -> AgentAccess.update_agent(state, fn _ -> agent end)
-    end
-  end
-
-  # Down arrow: move cursor down or forward history
-  defp handle_panel_insert(state, cp, _mods) when cp in [0xF701, 57_353, 0x425B1B] do
-    case AgentState.move_cursor_down(AgentAccess.agent(state)) do
-      :at_bottom -> AgentAccess.update_agent(state, &AgentState.history_next/1)
-      agent -> AgentAccess.update_agent(state, fn _ -> agent end)
-    end
-  end
-
-  # @ trigger mention completion
-  defp handle_panel_insert(state, ?@, mods)
-       when band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+  @spec handle_panel_self_insert(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp handle_panel_self_insert(state, ?@, _mods) do
     AgentCommands.scope_trigger_mention(state)
   end
 
-  # Printable characters
-  defp handle_panel_insert(state, cp, mods)
-       when cp >= 32 and band(mods, @ctrl) == 0 and band(mods, @alt) == 0 do
+  defp handle_panel_self_insert(state, cp, _mods)
+       when cp >= 32 do
     AgentCommands.input_char(state, <<cp::utf8>>)
   end
 
-  # Swallow everything else
-  defp handle_panel_insert(state, _cp, _mods), do: state
+  defp handle_panel_self_insert(state, _cp, _mods), do: state
+
+  # Panel insert mode keys are resolved through the agent scope insert
+  # trie (see Minga.Keymap.Scope.Agent.insert_trie). This eliminates the
+  # 17 hardcoded function clauses that previously duplicated the trie
+  # bindings. Printable chars and @-mention fall through to
+  # handle_panel_self_insert above.
 
   # ── Panel navigation mode ──────────────────────────────────────────────
 

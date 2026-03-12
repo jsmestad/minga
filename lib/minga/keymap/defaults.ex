@@ -91,8 +91,8 @@ defmodule Minga.Keymap.Defaults do
     {[{?o, @none}, {?p, @none}], :toggle_file_tree, "Toggle file tree"},
 
     # ── AI agent ─────────────────────────────────────────────────────────────
-    {[{?a, @none}, {?a, @none}], :toggle_agentic_view, "Toggle agent view"},
-    {[{?a, @none}, {?t, @none}], :toggle_agentic_view, "Toggle agent view"},
+    {[{?a, @none}, {?a, @none}], :toggle_agentic_view, "Toggle agent split"},
+    {[{?a, @none}, {?t, @none}], :toggle_agentic_view, "Toggle agent split"},
     {[{?a, @none}, {?v, @none}], :toggle_agent_split, "Toggle agent split pane"},
     {[{?a, @none}, {?s, @none}], :agent_abort, "Stop agent"},
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},

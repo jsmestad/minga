@@ -20,7 +20,7 @@ defmodule Minga.Editor.Window.Content do
   | Tag | Reference | NavigableContent? | Editable? |
   |-----|-----------|-------------------|-----------|
   | `:buffer` | `pid()` (Buffer.Server) | Yes (via BufferSnapshot) | Yes |
-  | `:agent_chat` | `pid()` (Agent.Session) | Yes (future, Phase E) | No |
+  | `:agent_chat` | `pid()` (Agent.Session) | Yes | No |
   | `:agent_prompt` | `pid()` (Buffer.Server) | Yes (via BufferSnapshot) | Yes |
   | `:terminal` | `pid()` (future, #122) | Yes (future) | No |
   | `:browser` | `reference()` (future, #305) | Yes (future) | No |
