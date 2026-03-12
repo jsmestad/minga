@@ -788,7 +788,8 @@ defmodule Minga.Editor.State do
   - `{:active, tab}` — the event targets the currently active tab, so
     the caller should update `state.agent` / `state.agentic` directly.
   - `{:background, tab}` — the event targets a background tab. The caller
-    should use `update_background_agent/3` or `update_background_agentic/3`.
+    should run the event through the surface's `handle_event/2` and write
+    the result back via `update_background_surface_state/3`.
   - `:not_found` — no tab owns this session (stale event after tab close).
   """
   @type route_result :: {:active, Tab.t()} | {:background, Tab.t()} | :not_found
@@ -838,43 +839,17 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
-  Updates the `agent` field inside a background tab's stored surface state.
+  Replaces the entire surface_state in a background tab's stored context.
 
-  The function `fun` receives the tab's stored `%AgentState{}` and must
-  return a new `%AgentState{}`. Operates on the surface_state inside
-  the tab's context. Does nothing if the tab has no agent surface state.
+  Use this when you have a fully computed new surface state (e.g., after
+  running `AgentView.handle_event/2` on the stored state and writing
+  the result back to the tab).
   """
-  @spec update_background_agent(t(), Tab.id(), (AgentState.t() -> AgentState.t())) :: t()
-  def update_background_agent(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
-    alias Minga.Surface.AgentView.State, as: AgentViewState
-
-    update_background_surface(state, tb, tab_id, fn
-      %AgentViewState{agent: agent} = av -> %{av | agent: fun.(agent)}
-      other -> other
-    end)
-  end
-
-  @doc """
-  Updates the `agentic` (ViewState) field inside a background tab's stored surface state.
-  """
-  @spec update_background_agentic(t(), Tab.id(), (ViewState.t() -> ViewState.t())) :: t()
-  def update_background_agentic(%__MODULE__{tab_bar: tb} = state, tab_id, fun) do
-    alias Minga.Surface.AgentView.State, as: AgentViewState
-
-    update_background_surface(state, tb, tab_id, fn
-      %AgentViewState{agentic: agentic} = av -> %{av | agentic: fun.(agentic)}
-      other -> other
-    end)
-  end
-
-  # Updates the surface_state inside a background tab's context map.
-  @spec update_background_surface(t(), TabBar.t(), Tab.id(), (term() -> term())) :: t()
-  defp update_background_surface(state, tb, tab_id, fun) do
+  @spec update_background_surface_state(t(), Tab.id(), term()) :: t()
+  def update_background_surface_state(%__MODULE__{tab_bar: tb} = state, tab_id, new_surface_state) do
     case TabBar.get(tb, tab_id) do
-      %Tab{context: %{surface_state: ss}} when ss != nil ->
-        new_ss = fun.(ss)
-        ctx = TabBar.get(tb, tab_id).context
-        new_ctx = Map.put(ctx, :surface_state, new_ss)
+      %Tab{context: ctx} when is_map(ctx) ->
+        new_ctx = Map.put(ctx, :surface_state, new_surface_state)
         %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
 
       _ ->
