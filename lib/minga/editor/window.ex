@@ -32,6 +32,7 @@ defmodule Minga.Editor.Window do
   alias Minga.Buffer.Document
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window.Content
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
@@ -49,6 +50,7 @@ defmodule Minga.Editor.Window do
 
   @type t :: %__MODULE__{
           id: id(),
+          content: Content.t(),
           buffer: pid(),
           viewport: Viewport.t(),
           cursor: Document.position(),
@@ -63,9 +65,10 @@ defmodule Minga.Editor.Window do
           last_context_fingerprint: context_fingerprint()
         }
 
-  @enforce_keys [:id, :buffer, :viewport]
+  @enforce_keys [:id, :content, :buffer, :viewport]
   defstruct [
     :id,
+    :content,
     :buffer,
     :viewport,
     cursor: {0, 0},
@@ -80,13 +83,21 @@ defmodule Minga.Editor.Window do
     last_context_fingerprint: nil
   ]
 
-  @doc "Creates a new window with the given id, buffer, and viewport dimensions."
+  @doc """
+  Creates a new window with the given id, buffer, and viewport dimensions.
+
+  Sets both `content` (the polymorphic content reference) and `buffer`
+  (backward-compatible pid field). During the migration, callers access
+  `window.buffer` directly. Once all callers are updated to use
+  `Content.buffer_pid(window.content)`, the `buffer` field will be removed.
+  """
   @spec new(id(), pid(), pos_integer(), pos_integer()) :: t()
   def new(id, buffer, rows, cols)
       when is_integer(id) and id > 0 and is_pid(buffer) and
              is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
     %__MODULE__{
       id: id,
+      content: Content.buffer(buffer),
       buffer: buffer,
       viewport: Viewport.new(rows, cols)
     }
@@ -100,6 +111,7 @@ defmodule Minga.Editor.Window do
              is_tuple(cursor) do
     %__MODULE__{
       id: id,
+      content: Content.buffer(buffer),
       buffer: buffer,
       viewport: Viewport.new(rows, cols),
       cursor: cursor

@@ -27,7 +27,12 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   defp with_window(state, win_id \\ 1) do
-    window = %Window{id: win_id, buffer: self(), viewport: Viewport.new(24, 80)}
+    window = %Window{
+      id: win_id,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(24, 80)
+    }
 
     %{
       state
@@ -65,8 +70,19 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   defp with_vsplit(state) do
-    win1 = %Window{id: 1, buffer: self(), viewport: Viewport.new(24, 40)}
-    win2 = %Window{id: 2, buffer: self(), viewport: Viewport.new(24, 40)}
+    win1 = %Window{
+      id: 1,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(24, 40)
+    }
+
+    win2 = %Window{
+      id: 2,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(24, 40)
+    }
 
     %{
       state
@@ -80,8 +96,19 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   defp with_hsplit(state) do
-    win1 = %Window{id: 1, buffer: self(), viewport: Viewport.new(12, 80)}
-    win2 = %Window{id: 2, buffer: self(), viewport: Viewport.new(12, 80)}
+    win1 = %Window{
+      id: 1,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(12, 80)
+    }
+
+    win2 = %Window{
+      id: 2,
+      content: {:buffer, self()},
+      buffer: self(),
+      viewport: Viewport.new(12, 80)
+    }
 
     %{
       state

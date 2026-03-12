@@ -33,6 +33,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
   defp with_window(state, win_id \\ 1) do
     window = %Window{
       id: win_id,
+      content: {:buffer, self()},
       buffer: self(),
       viewport: Viewport.new(24, 80),
       # Simulate populated caches from a previous render
@@ -77,6 +78,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
     test "invalidates all windows in a split" do
       win1 = %Window{
         id: 1,
+        content: {:buffer, self()},
         buffer: self(),
         viewport: Viewport.new(12, 40),
         cached_content: %{0 => [{0, 0, "a", []}]},
@@ -85,6 +87,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
 
       win2 = %Window{
         id: 2,
+        content: {:buffer, self()},
         buffer: self(),
         viewport: Viewport.new(12, 40),
         cached_content: %{0 => [{0, 41, "b", []}]},

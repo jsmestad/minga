@@ -12,6 +12,7 @@ defmodule Minga.Editor.KeyDispatch do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Advice, as: ConfigAdvice
   alias Minga.Config.Hooks, as: ConfigHooks
+  alias Minga.EditingModel.Vim, as: VimModel
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
@@ -32,7 +33,14 @@ defmodule Minga.Editor.KeyDispatch do
   def handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
     old_mode = state.mode
-    {new_mode, commands, new_mode_state} = Mode.process(old_mode, key, state.mode_state)
+
+    # Route through EditingModel.Vim, which delegates to Mode.process/3.
+    # This proves the EditingModel abstraction under real load. When CUA
+    # (#306) arrives, this call site dispatches through the active editing
+    # model instead of hardcoding Vim.
+    vim_state = VimModel.from_editor(old_mode, state.mode_state)
+    {new_mode, commands, new_vim_state} = VimModel.process_key(vim_state, key)
+    {_, new_mode_state} = VimModel.to_editor(new_vim_state)
 
     # Record keys for dot repeat, unless we're currently replaying.
     state = ChangeTracking.maybe_record_change(state, old_mode, new_mode, commands, key)
