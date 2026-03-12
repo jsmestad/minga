@@ -8,7 +8,6 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp base_state do
     %EditorState{
@@ -17,12 +16,8 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       buffers: %Buffers{},
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: %AgentState{},
-        agentic: %ViewState{},
-        context: nil
-      }
+      agent: %AgentState{},
+      agentic: %ViewState{}
     }
   end
 

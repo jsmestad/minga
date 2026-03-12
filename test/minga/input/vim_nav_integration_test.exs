@@ -23,7 +23,6 @@ defmodule Minga.Input.VimNavIntegrationTest do
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Mode
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -62,12 +61,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
       marks: %{},
       change_recorder: ChangeRecorder.new(),
       macro_recorder: MacroRecorder.new(),
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       completion: nil,
       keymap_scope: :file_tree,
       focus_stack: [Scoped, Minga.Input.ModeFSM],

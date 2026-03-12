@@ -7,9 +7,6 @@ defmodule Minga.Agent.Events do
   `agent` and `agentic` fields on EditorState through AgentAccess,
   returning the updated state and a list of effects for the Editor
   GenServer to apply.
-
-  This replaces the Surface-based event dispatch that previously routed
-  events through `AgentView.handle_event/2` and `AgentViewState`.
   """
 
   alias Minga.Agent.DiffReview
