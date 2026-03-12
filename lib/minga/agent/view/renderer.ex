@@ -133,7 +133,8 @@ defmodule Minga.Agent.View.Renderer do
             help_visible: boolean(),
             focus: atom(),
             search: Minga.Agent.View.State.search_state() | nil,
-            toast: Minga.Agent.View.State.toast() | nil
+            toast: Minga.Agent.View.State.toast() | nil,
+            context_estimate: non_neg_integer()
           }
   end
 
@@ -345,7 +346,8 @@ defmodule Minga.Agent.View.Renderer do
         help_visible: agentic.help_visible,
         focus: agentic.focus,
         search: agentic.search,
-        toast: agentic.toast
+        toast: agentic.toast,
+        context_estimate: agentic.context_estimate
       },
       messages: messages,
       usage: usage,
@@ -397,8 +399,9 @@ defmodule Minga.Agent.View.Renderer do
     status_icon = status_icon(input.agent_status, panel.spinner_frame)
     status_fg = status_fg(input.agent_status, at)
 
+    estimate = input.agentic.context_estimate
     usage_text = format_usage(input.usage)
-    context_text = format_context_bar(input.usage, panel.model_name)
+    context_text = format_context_bar(input.usage, panel.model_name, estimate)
 
     left = " #{status_icon} "
     center = input.session_title
@@ -437,7 +440,15 @@ defmodule Minga.Agent.View.Renderer do
 
     # Overlay the context bar with colored segments
     context_bar_cmds =
-      render_context_bar_overlay(row, cols, right_len, input.usage, panel.model_name, at)
+      render_context_bar_overlay(
+        row,
+        cols,
+        right_len,
+        input.usage,
+        panel.model_name,
+        at,
+        estimate
+      )
 
     cmds ++ context_bar_cmds
   end
@@ -631,6 +642,8 @@ defmodule Minga.Agent.View.Renderer do
 
     # ── Context section ──
     total_tokens = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
+    estimate = input.agentic.context_estimate
+    display_tokens = max(total_tokens, estimate)
     limit = ModelLimits.context_limit(panel.model_name)
 
     context_lines = [
@@ -638,9 +651,11 @@ defmodule Minga.Agent.View.Renderer do
     ]
 
     context_lines =
-      if total_tokens > 0 do
+      if display_tokens > 0 do
         pct_text =
-          if limit, do: " (#{context_fill_pct(usage, panel.model_name) || 0}% used)", else: ""
+          if limit,
+            do: " (#{context_fill_pct(usage, panel.model_name, estimate) || 0}% used)",
+            else: ""
 
         cost_text = if usage.cost > 0, do: "$#{Float.round(usage.cost, 4)}", else: "$0.00"
         cache_read = Map.get(usage, :cache_read, 0)
@@ -1358,8 +1373,8 @@ defmodule Minga.Agent.View.Renderer do
   @context_bar_width 10
 
   @doc false
-  @spec context_fill_pct(map(), String.t()) :: non_neg_integer() | nil
-  def context_fill_pct(usage, model_name) do
+  @spec context_fill_pct(map(), String.t(), non_neg_integer()) :: non_neg_integer() | nil
+  def context_fill_pct(usage, model_name, context_estimate \\ 0) do
     limit = ModelLimits.context_limit(model_name)
 
     case limit do
@@ -1370,15 +1385,17 @@ defmodule Minga.Agent.View.Renderer do
         nil
 
       n ->
-        used = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
+        actual = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
+        # Use the higher of actual usage or pre-send estimate
+        used = max(actual, context_estimate)
         min(round(used / n * 100), 100)
     end
   end
 
   # Formats the context bar as plain text for title bar layout measurement.
-  @spec format_context_bar(map(), String.t()) :: String.t()
-  defp format_context_bar(usage, model_name) do
-    case context_fill_pct(usage, model_name) do
+  @spec format_context_bar(map(), String.t(), non_neg_integer()) :: String.t()
+  defp format_context_bar(usage, model_name, context_estimate) do
+    case context_fill_pct(usage, model_name, context_estimate) do
       nil -> ""
       pct -> context_bar_text(pct)
     end
@@ -1400,10 +1417,11 @@ defmodule Minga.Agent.View.Renderer do
           non_neg_integer(),
           map(),
           String.t(),
-          Theme.Agent.t()
+          Theme.Agent.t(),
+          non_neg_integer()
         ) :: [DisplayList.draw()]
-  defp render_context_bar_overlay(row, cols, right_len, usage, model_name, at) do
-    case context_fill_pct(usage, model_name) do
+  defp render_context_bar_overlay(row, cols, right_len, usage, model_name, at, context_estimate) do
+    case context_fill_pct(usage, model_name, context_estimate) do
       nil ->
         []
 

@@ -646,6 +646,11 @@ defmodule Minga.Agent.Session do
     notify_messages_changed(state)
   end
 
+  defp handle_provider_event(%Event.ContextUsage{} = event, state) do
+    broadcast(state, {:context_usage, event.estimated_tokens, event.context_limit})
+    state
+  end
+
   defp handle_provider_event(%Event.Error{message: message}, state) do
     state = set_status(state, :error)
     state = %{state | error_message: message}

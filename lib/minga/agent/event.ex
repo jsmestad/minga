@@ -28,6 +28,7 @@ defmodule Minga.Agent.Event do
           | tool_end()
           | tool_approval()
           | tool_file_changed()
+          | context_usage()
           | error()
 
   @typedoc "Agent has started processing a prompt."
@@ -78,6 +79,12 @@ defmodule Minga.Agent.Event do
           path: String.t(),
           before_content: String.t(),
           after_content: String.t()
+        }
+
+  @typedoc "Pre-send estimated context usage."
+  @type context_usage :: %__MODULE__.ContextUsage{
+          estimated_tokens: non_neg_integer(),
+          context_limit: non_neg_integer() | nil
         }
 
   @typedoc "An error occurred in the agent."
@@ -166,6 +173,17 @@ defmodule Minga.Agent.Event do
             path: String.t(),
             before_content: String.t(),
             after_content: String.t()
+          }
+  end
+
+  defmodule ContextUsage do
+    @moduledoc false
+    @enforce_keys [:estimated_tokens]
+    defstruct [:estimated_tokens, :context_limit]
+
+    @type t :: %__MODULE__{
+            estimated_tokens: non_neg_integer(),
+            context_limit: non_neg_integer() | nil
           }
   end
 

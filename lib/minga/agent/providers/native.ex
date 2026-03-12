@@ -35,6 +35,8 @@ defmodule Minga.Agent.Providers.Native do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
+  alias Minga.Agent.ModelLimits
+  alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
   alias Minga.Config.Options
   alias ReqLLM.Context
@@ -300,6 +302,9 @@ defmodule Minga.Agent.Providers.Native do
   @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp run_agent_loop(lctx, context) do
     stream_opts = build_stream_opts(lctx.tools, lctx.thinking_level)
+
+    # Emit pre-send token estimate so the context bar updates before the API call
+    emit_context_usage(lctx, context)
 
     case lctx.llm_client.(lctx.model, context.messages, stream_opts) do
       {:ok, stream_response} ->
@@ -646,6 +651,34 @@ defmodule Minga.Agent.Providers.Native do
     _ -> File.cwd!()
   catch
     :exit, _ -> File.cwd!()
+  end
+
+  # Estimates token usage for the current context and emits a ContextUsage event.
+  # The model name is stripped of the provider prefix for ModelLimits lookup.
+  @spec emit_context_usage(loop_ctx(), Context.t()) :: :ok
+  defp emit_context_usage(lctx, context) do
+    estimated = TokenEstimator.estimate(context.messages)
+    model_name = strip_provider_prefix(lctx.model)
+    context_limit = ModelLimits.context_limit(model_name)
+
+    send(
+      lctx.provider_pid,
+      {:agent_event,
+       %Event.ContextUsage{
+         estimated_tokens: estimated,
+         context_limit: context_limit
+       }}
+    )
+
+    :ok
+  end
+
+  @spec strip_provider_prefix(String.t()) :: String.t()
+  defp strip_provider_prefix(model) do
+    case String.split(model, ":", parts: 2) do
+      [_provider, name] -> name
+      [name] -> name
+    end
   end
 
   @spec emit_error_and_end(pid(), String.t()) :: :ok
