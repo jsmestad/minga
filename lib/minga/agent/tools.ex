@@ -15,10 +15,13 @@ defmodule Minga.Agent.Tools do
   | `write_file`     | Write content to a file (creates or overwrites) |
   | `edit_file`      | Replace exact text in a file                    |
   | `list_directory` | List files and directories at a path            |
+  | `find`           | Find files by name/glob pattern                 |
+  | `grep`           | Search file contents for a pattern              |
   | `shell`          | Run a shell command in the project root         |
   """
 
   alias Minga.Agent.Tools.EditFile
+  alias Minga.Agent.Tools.Find
   alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
   alias Minga.Agent.Tools.ReadFile
@@ -70,6 +73,7 @@ defmodule Minga.Agent.Tools do
       write_file(root),
       edit_file(root),
       list_directory(root),
+      find(root),
       grep(root),
       shell(root)
     ]
@@ -188,6 +192,46 @@ defmodule Minga.Agent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
         ListDirectory.execute(path)
+      end
+    )
+  end
+
+  @spec find(String.t()) :: Tool.t()
+  defp find(root) do
+    Tool.new!(
+      name: "find",
+      description: """
+      Find files and directories by name pattern (glob). Returns a sorted list
+      of matching paths relative to the project root. Use this to discover files
+      by name or extension. The tool is read-only and does not require approval.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "pattern" => %{
+            "type" => "string",
+            "description" => "Glob pattern to match, e.g. \"*.ex\", \"test_*.exs\", \"Makefile\""
+          },
+          "path" => %{
+            "type" => "string",
+            "description" =>
+              "Directory to search in, relative to the project root. Defaults to the project root."
+          },
+          "type" => %{
+            "type" => "string",
+            "enum" => ["file", "directory", "any"],
+            "description" => "Type of entries to find (default: \"file\")"
+          },
+          "max_depth" => %{
+            "type" => "integer",
+            "description" => "Maximum directory depth to search (default: 10)"
+          }
+        },
+        "required" => ["pattern"]
+      },
+      callback: fn args ->
+        search_path = resolve_and_validate_path!(root, args["path"] || ".")
+        Find.execute(args["pattern"], search_path, args)
       end
     )
   end
