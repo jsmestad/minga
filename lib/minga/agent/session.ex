@@ -180,6 +180,24 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :continue)
   end
 
+  @doc "Activates a skill by name."
+  @spec activate_skill(GenServer.server(), String.t()) :: {:ok, term()} | {:error, term()}
+  def activate_skill(session, name) do
+    GenServer.call(session, {:activate_skill, name})
+  end
+
+  @doc "Deactivates a skill by name."
+  @spec deactivate_skill(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def deactivate_skill(session, name) do
+    GenServer.call(session, {:deactivate_skill, name})
+  end
+
+  @doc "Lists all discovered skills and which are active."
+  @spec list_skills(GenServer.server()) :: {:ok, [map()], [String.t()]} | {:error, term()}
+  def list_skills(session) do
+    GenServer.call(session, :list_skills)
+  end
+
   @doc "Fetches available models from the provider."
   @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
@@ -449,6 +467,33 @@ defmodule Minga.Agent.Session do
     else
       {:reply, {:error, "Provider does not support continue"}, state}
     end
+  end
+
+  def handle_call({:activate_skill, _name}, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call({:activate_skill, name}, _from, state) do
+    result = GenServer.call(state.provider, {:activate_skill, name})
+    {:reply, result, state}
+  end
+
+  def handle_call({:deactivate_skill, _name}, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call({:deactivate_skill, name}, _from, state) do
+    result = GenServer.call(state.provider, {:deactivate_skill, name})
+    {:reply, result, state}
+  end
+
+  def handle_call(:list_skills, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:list_skills, _from, state) do
+    result = GenServer.call(state.provider, :list_skills)
+    {:reply, result, state}
   end
 
   def handle_call(:get_available_models, _from, %{provider: nil} = state) do

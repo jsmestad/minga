@@ -39,6 +39,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.ModelCatalog
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Retry
+  alias Minga.Agent.Skills
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
   alias Minga.Agent.Tools.Shell
@@ -87,7 +88,8 @@ defmodule Minga.Agent.Providers.Native do
           task: Task.t() | nil,
           streaming: boolean(),
           interrupted: boolean(),
-          last_user_prompt: String.t() | nil
+          last_user_prompt: String.t() | nil,
+          active_skills: [Skills.skill()]
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -194,7 +196,8 @@ defmodule Minga.Agent.Providers.Native do
       task: nil,
       streaming: false,
       interrupted: false,
-      last_user_prompt: nil
+      last_user_prompt: nil,
+      active_skills: []
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -287,6 +290,43 @@ defmodule Minga.Agent.Providers.Native do
     state = %{state | task: task}
 
     {:reply, :ok, state}
+  end
+
+  def handle_call({:activate_skill, name}, _from, state) do
+    already_active = Enum.any?(state.active_skills, &(&1.name == name))
+
+    if already_active do
+      {:reply, {:error, "Skill '#{name}' is already active"}, state}
+    else
+      case Skills.find(name, state.project_root) do
+        {:ok, skill} ->
+          active = state.active_skills ++ [skill]
+          state = rebuild_system_prompt(%{state | active_skills: active})
+          Minga.Log.info(:agent, "[Agent.Native] activated skill: #{name}")
+          {:reply, {:ok, skill}, state}
+
+        :not_found ->
+          {:reply, {:error, "Skill '#{name}' not found"}, state}
+      end
+    end
+  end
+
+  def handle_call({:deactivate_skill, name}, _from, state) do
+    active = Enum.reject(state.active_skills, &(&1.name == name))
+
+    if length(active) == length(state.active_skills) do
+      {:reply, {:error, "Skill '#{name}' is not active"}, state}
+    else
+      state = rebuild_system_prompt(%{state | active_skills: active})
+      Minga.Log.info(:agent, "[Agent.Native] deactivated skill: #{name}")
+      {:reply, :ok, state}
+    end
+  end
+
+  def handle_call(:list_skills, _from, state) do
+    all = Skills.discover(state.project_root)
+    active_names = Enum.map(state.active_skills, & &1.name)
+    {:reply, {:ok, all, active_names}, state}
   end
 
   def handle_call(:new_session, _from, state) do
@@ -888,14 +928,15 @@ defmodule Minga.Agent.Providers.Native do
     :exit, _ -> true
   end
 
-  @spec build_system_prompt(String.t()) :: String.t()
-  defp build_system_prompt(project_root) do
+  @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
+  defp build_system_prompt(project_root, active_skills \\ []) do
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
+    skills_section = Skills.format_for_prompt(active_skills)
     append = read_config_string(:agent_append_system_prompt)
 
     parts =
-      [base, instructions, append]
+      [base, instructions, skills_section, append]
       |> Enum.reject(&(is_nil(&1) or &1 == ""))
       |> Enum.join("\n\n")
 
@@ -1066,6 +1107,25 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   @spec detect_project_root() :: String.t()
+  # Rebuilds the system prompt with current active skills and replaces it
+  # in the context's first message.
+  @spec rebuild_system_prompt(state()) :: state()
+  defp rebuild_system_prompt(state) do
+    new_prompt = build_system_prompt(state.project_root, state.active_skills)
+    messages = state.context.messages
+
+    updated_messages =
+      case messages do
+        [%{role: :system} | rest] ->
+          [Context.system(new_prompt) | rest]
+
+        other ->
+          [Context.system(new_prompt) | other]
+      end
+
+    %{state | context: %{state.context | messages: updated_messages}}
+  end
+
   defp detect_project_root do
     case Minga.Project.root() do
       nil -> File.cwd!()
