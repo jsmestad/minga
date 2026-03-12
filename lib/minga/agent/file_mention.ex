@@ -41,8 +41,21 @@ defmodule Minga.Agent.FileMention do
           anchor_col: non_neg_integer()
         }
 
+  alias ReqLLM.Message.ContentPart
+
   @max_candidates 10
   @max_file_size 256 * 1024
+  @max_image_size 5 * 1024 * 1024
+
+  @image_extensions ~w(.png .jpg .jpeg .gif .webp)
+
+  @image_media_types %{
+    ".png" => "image/png",
+    ".jpg" => "image/jpeg",
+    ".jpeg" => "image/jpeg",
+    ".gif" => "image/gif",
+    ".webp" => "image/webp"
+  }
 
   # ── Extraction ──────────────────────────────────────────────────────────────
 
@@ -81,12 +94,17 @@ defmodule Minga.Agent.FileMention do
   @doc """
   Resolves all `@path` mentions in the text and returns an augmented prompt.
 
-  Each mentioned file's content is prepended as a fenced code block.
-  The `@path` references are removed from the body text.
+  Each mentioned text file is prepended as a fenced code block.
+  Image files (PNG, JPEG, GIF, WebP) are returned as ContentPart structs
+  for multi-modal API requests.
 
-  Returns `{:error, message}` if any file doesn't exist or can't be read.
+  Returns:
+  - `{:ok, String.t()}` when only text files are mentioned
+  - `{:ok, [ContentPart.t()]}` when images are present (mixed text + image parts)
+  - `{:error, message}` if any file doesn't exist or can't be read
   """
-  @spec resolve_prompt(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec resolve_prompt(String.t(), String.t()) ::
+          {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   def resolve_prompt(text, project_root) do
     mentions = extract_mentions(text)
 
@@ -97,13 +115,25 @@ defmodule Minga.Agent.FileMention do
     end
   end
 
+  @doc "Returns true if the path has an image file extension."
+  @spec image_path?(String.t()) :: boolean()
+  def image_path?(path) do
+    ext = path |> Path.extname() |> String.downcase()
+    ext in @image_extensions
+  end
+
   @spec resolve_all([mention()], String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   defp resolve_all(mentions, text, root) do
     results =
       Enum.map(mentions, fn %{path: path} ->
         abs_path = Path.expand(path, root)
-        {path, read_file_safe(abs_path)}
+
+        if image_path?(path) do
+          {path, read_image_safe(abs_path)}
+        else
+          {path, read_file_safe(abs_path)}
+        end
       end)
 
     errors = Enum.filter(results, fn {_path, result} -> match?({:error, _}, result) end)
@@ -112,16 +142,96 @@ defmodule Minga.Agent.FileMention do
       missing = Enum.map(errors, fn {path, {:error, reason}} -> "  #{path}: #{reason}" end)
       {:error, "Cannot resolve file mentions:\n#{Enum.join(missing, "\n")}"}
     else
-      context_blocks =
-        Enum.map_join(results, "\n\n", fn {path, {:ok, content}} ->
-          ext = Path.extname(path) |> String.trim_leading(".")
-          "Contents of #{path}:\n```#{ext}\n#{content}\n```"
-        end)
+      has_images =
+        Enum.any?(results, fn {_path, result} -> match?({:ok, {:image, _, _, _}}, result) end)
 
-      # Remove @mentions from the body text
       body = remove_mentions(text, mentions)
-      prompt = context_blocks <> "\n\n" <> String.trim(body)
-      {:ok, prompt}
+
+      if has_images do
+        build_multimodal_parts(results, body)
+      else
+        build_text_prompt(results, body)
+      end
+    end
+  end
+
+  @spec build_text_prompt([{String.t(), {:ok, String.t()}}], String.t()) :: {:ok, String.t()}
+  defp build_text_prompt(results, body) do
+    context_blocks =
+      Enum.map_join(results, "\n\n", fn {path, {:ok, content}} ->
+        ext = Path.extname(path) |> String.trim_leading(".")
+        "Contents of #{path}:\n```#{ext}\n#{content}\n```"
+      end)
+
+    prompt = context_blocks <> "\n\n" <> String.trim(body)
+    {:ok, prompt}
+  end
+
+  @spec build_multimodal_parts(
+          [
+            {String.t(),
+             {:ok, String.t()} | {:ok, {:image, binary(), String.t(), non_neg_integer()}}}
+          ],
+          String.t()
+        ) :: {:ok, [ContentPart.t()]}
+  defp build_multimodal_parts(results, body) do
+    # Build text context for non-image files
+    text_parts =
+      results
+      |> Enum.reject(fn {_path, result} -> match?({:ok, {:image, _, _, _}}, result) end)
+      |> Enum.map(fn {path, {:ok, content}} ->
+        ext = Path.extname(path) |> String.trim_leading(".")
+        "Contents of #{path}:\n```#{ext}\n#{content}\n```"
+      end)
+
+    # Build image parts
+    image_parts =
+      results
+      |> Enum.filter(fn {_path, result} -> match?({:ok, {:image, _, _, _}}, result) end)
+      |> Enum.map(fn {path, {:ok, {:image, data, media_type, size}}} ->
+        size_kb = div(size, 1024)
+        metadata = %{filename: Path.basename(path), size_display: "#{size_kb}KB"}
+        ContentPart.image(data, media_type, metadata)
+      end)
+
+    # Combine: text context first, then the user's prompt, then images
+    text_context = Enum.join(text_parts, "\n\n")
+
+    prompt_text =
+      if text_context == "" do
+        String.trim(body)
+      else
+        text_context <> "\n\n" <> String.trim(body)
+      end
+
+    parts = [ContentPart.text(prompt_text) | image_parts]
+    {:ok, parts}
+  end
+
+  @spec read_image_safe(String.t()) ::
+          {:ok, {:image, binary(), String.t(), non_neg_integer()}} | {:error, String.t()}
+  defp read_image_safe(path) do
+    ext = path |> Path.extname() |> String.downcase()
+    media_type = Map.get(@image_media_types, ext, "image/png")
+
+    case File.stat(path) do
+      {:ok, %{type: :regular, size: size}} when size > @max_image_size ->
+        {:error, "image too large (#{div(size, 1024)}KB, max #{div(@max_image_size, 1024)}KB)"}
+
+      {:ok, %{type: :regular, size: size}} ->
+        case File.read(path) do
+          {:ok, data} -> {:ok, {:image, data, media_type, size}}
+          {:error, reason} -> {:error, "#{reason}"}
+        end
+
+      {:ok, %{type: type}} ->
+        {:error, "not a regular file (#{type})"}
+
+      {:error, :enoent} ->
+        {:error, "file not found"}
+
+      {:error, reason} ->
+        {:error, "#{reason}"}
     end
   end
 

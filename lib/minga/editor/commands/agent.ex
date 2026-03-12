@@ -355,9 +355,10 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec send_prompt_to_llm(state(), String.t()) :: state()
   defp send_prompt_to_llm(state, text) do
-    # Resolve @file mentions before sending to the LLM
-    with {:ok, resolved_text} <- resolve_mentions(text),
-         :ok <- Session.send_prompt(AgentAccess.session(state), resolved_text) do
+    # Resolve @file mentions before sending to the LLM.
+    # Returns either a string (text only) or a list of ContentPart (when images are present).
+    with {:ok, resolved} <- resolve_mentions(text),
+         :ok <- Session.send_prompt(AgentAccess.session(state), resolved) do
       state = update_agent(state, &AgentState.clear_input_and_scroll/1)
 
       AgentAccess.update_agentic(state, fn _ ->
@@ -375,7 +376,8 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
-  @spec resolve_mentions(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec resolve_mentions(String.t()) ::
+          {:ok, String.t()} | {:ok, [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
   defp resolve_mentions(text) do
     root = project_root()
     FileMention.resolve_prompt(text, root)
