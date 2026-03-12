@@ -10,6 +10,7 @@ defmodule Minga.Agent.SlashCommand do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Instructions
+  alias Minga.Config.Options
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -39,6 +40,10 @@ defmodule Minga.Agent.SlashCommand do
     %{
       name: "instructions",
       description: "Show which AGENTS.md instruction files are loaded"
+    },
+    %{
+      name: "system-prompt",
+      description: "Show the current assembled system prompt"
     }
   ]
 
@@ -88,6 +93,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
+  defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
@@ -271,6 +277,45 @@ defmodule Minga.Agent.SlashCommand do
   end
 
   @spec do_instructions(state()) :: state()
+  @spec do_system_prompt(state()) :: state()
+  defp do_system_prompt(state) do
+    # Rebuild the system prompt from the same logic the provider uses.
+    # This gives a faithful view of what the model sees.
+    root = detect_project_root()
+    instructions = Instructions.assemble(root)
+
+    custom_base = read_config_string(:agent_system_prompt)
+    append = read_config_string(:agent_append_system_prompt)
+
+    summary_parts = [
+      "**Base prompt:** #{if custom_base == "", do: "(default)", else: "custom"}",
+      if(instructions,
+        do: "**Instructions:** #{String.length(instructions)} chars from AGENTS.md files",
+        else: nil
+      ),
+      if(append != "", do: "**Append:** #{String.length(append)} chars from config", else: nil)
+    ]
+
+    summary = Enum.reject(summary_parts, &is_nil/1) |> Enum.join("\n")
+
+    emit_system_message(
+      state,
+      "System prompt assembly:\n\n#{summary}\n\nUse /instructions to see loaded instruction files."
+    )
+  end
+
+  @spec read_config_string(atom()) :: String.t()
+  defp read_config_string(key) do
+    case Options.get(key) do
+      value when is_binary(value) -> value
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  catch
+    :exit, _ -> ""
+  end
+
   defp do_instructions(state) do
     root = detect_project_root()
     summary = Instructions.summary(root)

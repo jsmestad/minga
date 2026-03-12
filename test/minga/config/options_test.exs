@@ -56,6 +56,8 @@ defmodule Minga.Config.OptionsTest do
                agent_max_tokens: 16_384,
                agent_max_retries: 3,
                agent_prompt_cache: true,
+               agent_system_prompt: "",
+               agent_append_system_prompt: "",
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,
