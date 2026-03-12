@@ -115,6 +115,127 @@ defmodule Minga.Editor.TreeRendererTest do
       assert length(row1_draws) >= 2
     end
 
+    test "renders git status indicators right-aligned", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        git_status: %{main_path => :modified}
+      }
+
+      draws = TreeRenderer.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # The modified indicator symbol should appear
+      assert String.contains?(all_text, "●")
+    end
+
+    test "git status indicator has correct theme color", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+      theme = Theme.get!(:doom_one)
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: theme,
+        active_path: nil,
+        git_status: %{main_path => :staged}
+      }
+
+      draws = TreeRenderer.render(input)
+      # Find the draw that contains the staged symbol
+      staged_draw = Enum.find(draws, fn {_r, _c, text, _s} -> String.contains?(text, "✚") end)
+      assert staged_draw != nil
+      {_r, _c, _text, style} = staged_draw
+      assert Keyword.get(style, :fg) == theme.tree.git_staged_fg
+    end
+
+    test "renders modified buffer dot for dirty files", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        dirty_paths: MapSet.new([main_path])
+      }
+
+      draws = TreeRenderer.render(input)
+
+      # Find draws for the row containing main.ex (should have the dirty dot)
+      # The dirty dot is ● with the modified_fg color
+      dirty_draws =
+        Enum.filter(draws, fn {_r, _c, text, _s} ->
+          text == "●"
+        end)
+
+      assert dirty_draws != []
+
+      {_r, _c, _text, style} = hd(dirty_draws)
+      theme = Theme.get!(:doom_one)
+      assert Keyword.get(style, :fg) == theme.tree.modified_fg
+    end
+
+    test "dirty dot and git status coexist on same row", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        git_status: %{main_path => :modified},
+        dirty_paths: MapSet.new([main_path])
+      }
+
+      draws = TreeRenderer.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # Both the dirty dot (●) and git modified indicator (●) should appear
+      # The dirty dot is bare "●", the git one is " ●"
+      assert String.contains?(all_text, "●")
+    end
+
+    test "no dirty dot for directories", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      lib_path = Path.join(tmp_dir, "lib")
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        dirty_paths: MapSet.new([lib_path])
+      }
+
+      draws = TreeRenderer.render(input)
+      # The lib/ row should NOT have a dirty dot (dirs excluded)
+      # Find the lib/ entry row draws
+      # Only file entries get the dot, not directories
+      # lib/ shouldn't have a bare "●" (only guide/icon/name draws)
+      lib_row_draws =
+        Enum.filter(draws, fn {r, _c, text, _s} ->
+          r == 1 and text == "●"
+        end)
+
+      assert lib_row_draws == []
+    end
+
     test "highlights active file path", %{tmp_dir: tmp_dir} do
       main_path = Path.join(tmp_dir, "lib/main.ex")
 

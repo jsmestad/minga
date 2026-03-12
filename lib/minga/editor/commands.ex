@@ -659,6 +659,7 @@ defmodule Minga.Editor.Commands do
   defp open_file_tree(state) do
     root = Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
+    tree = FileTree.refresh_git_status(tree)
     tree = reveal_active_in_tree(tree, state.buffers.active)
     buf = BufferSync.start_buffer(tree)
 
@@ -730,8 +731,10 @@ defmodule Minga.Editor.Commands do
   @spec tree_refresh(state()) :: state()
   defp tree_refresh(%{file_tree: %{tree: nil}} = state), do: state
 
-  defp tree_refresh(%{file_tree: %{tree: tree}} = state),
-    do: tree_sync_and_update(state, FileTree.refresh(tree))
+  defp tree_refresh(%{file_tree: %{tree: tree}} = state) do
+    tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
+    tree_sync_and_update(state, tree)
+  end
 
   @spec tree_close(state()) :: state()
   defp tree_close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do

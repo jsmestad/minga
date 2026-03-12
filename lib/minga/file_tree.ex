@@ -9,6 +9,8 @@ defmodule Minga.FileTree do
   No GenServer; the editor owns this struct in its state.
   """
 
+  alias Minga.FileTree.GitStatus
+
   @typedoc """
   A single visible entry in the tree.
 
@@ -32,7 +34,8 @@ defmodule Minga.FileTree do
           expanded: MapSet.t(String.t()),
           cursor: non_neg_integer(),
           show_hidden: boolean(),
-          width: pos_integer()
+          width: pos_integer(),
+          git_status: GitStatus.status_map()
         }
 
   @enforce_keys [:root]
@@ -40,7 +43,8 @@ defmodule Minga.FileTree do
             expanded: MapSet.new(),
             cursor: 0,
             show_hidden: false,
-            width: 30
+            width: 30,
+            git_status: %{}
 
   @default_ignore ~w(.git _build deps node_modules .elixir_ls)
 
@@ -183,6 +187,12 @@ defmodule Minga.FileTree do
   def refresh(%__MODULE__{} = tree) do
     max_idx = max(length(visible_entries(tree)) - 1, 0)
     %{tree | cursor: min(tree.cursor, max_idx)}
+  end
+
+  @doc "Refreshes git status for the tree root. Returns the updated tree."
+  @spec refresh_git_status(t()) :: t()
+  def refresh_git_status(%__MODULE__{} = tree) do
+    %{tree | git_status: GitStatus.compute(tree.root)}
   end
 
   @doc """
