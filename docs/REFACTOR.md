@@ -5,15 +5,42 @@
 
 ## The One Rule
 
-**Every surface uses real buffers. The vim editing model (and future CUA model) applies everywhere. No reimplementing editing operations on custom data structures.**
+**The vim editing model applies to all navigable content. Each content type implements `NavigableContent` with the data structure that fits its domain. Don't reimplement navigation commands; implement the protocol instead.**
 
-The agent prompt should be a `Buffer.Server`, not a `TextField`. Chat content should be navigable through the same viewport/scroll abstractions files use. Read-only enforcement is a buffer property (`Buffer.Server.read_only?/1`), not a surface property. The `*Messages*` buffer is read-only in BufferView. Chat content is read-only in AgentView. Same mechanism.
+Minga is agentic-first. The agent view is not a file buffer pretending to be chat. Chat content is structured data (messages, tool calls, code blocks with collapse state, thinking sections). Forcing it into a flat `Buffer.Server` to get vim navigation is the wrong tradeoff: it loses semantic structure, creates streaming/undo problems, and makes interactive elements (approve, collapse) harder.
 
-This eliminates ~35 of the 62 "agent commands" that exist solely because the agent view reimplements vim on non-buffer data structures: scrolling, insert, backspace, cursor movement, yank, search, folding. All of these are standard vim commands that work on any buffer. The only genuinely agent-specific commands are domain actions: submit prompt, approve/reject tools, session lifecycle, model settings.
+The shared layer is the **interaction model**, not the data structure:
 
-**If you are about to write a command that duplicates an existing vim operation on a different data structure, stop.** Make the data structure a buffer instead. If you are about to add an `agent_` prefix to a command that already exists without the prefix, stop. The editing model should handle it.
+1. **The editing model (vim/CUA) produces command atoms from key sequences.** `Mode.process(mode, key, mode_state)` returns `:move_down`, `:scroll_half_page`, `:yank`, etc. It doesn't know what content it's operating on.
 
-The structural refactoring (Surfaces, bridges, state ownership) exists to enable this principle. If a structural change doesn't move us toward "one editing model, real buffers everywhere," it's the wrong change.
+2. **Each content type interprets those commands against its own data model** via the `NavigableContent` protocol. Same command, different content:
+   - File buffer: `:move_down` → `BufferServer.move(buf, :down)` (gap buffer cursor movement)
+   - Chat messages: `:move_down` → scroll to next visual line in rendered message list
+   - Agent prompt: `:move_down` → `BufferServer.move(prompt_buf, :down)` (this one IS a buffer)
+   - Terminal scrollback: `:move_down` → scroll terminal output
+   - Browser content: `:move_down` → scroll rendered page
+
+3. **Content-specific actions are domain commands, not editing commands.** Submit prompt, approve tool, reject hunk, toggle collapse, session lifecycle. These are surface-level actions, not vim operations. They belong in surface-specific command handlers, not in the editing model.
+
+### What goes where
+
+| Content | Data structure | Editing | NavigableContent |
+|---------|---------------|---------|-----------------|
+| File buffer | `Buffer.Server` (gap buffer) | Full vim/CUA (insert, visual, operators, motions) | Buffer adapter |
+| Agent prompt | `Buffer.Server` | Full vim/CUA | Buffer adapter |
+| Chat messages | Structured list (`[%Message{}, %ToolCall{}, ...]`) | Navigation only (no insert, no editing) | Structured chat adapter |
+| `*Messages*` buffer | `Buffer.Server` (read-only) | Navigation + yank (no insert) | Buffer adapter |
+| Preview/diff pane | Generated read-only content | Navigation + interactive (approve/reject hunks) | Buffer or custom adapter |
+| Terminal (future #122) | Terminal scrollback | Navigation only | Scrollback adapter |
+| Browser (future #305) | Rendered web content | Navigation only | Web adapter |
+
+### The test
+
+**If you are about to write a command that duplicates an existing vim operation on a different data structure, stop.** Implement `NavigableContent` for that data structure instead. If you are about to add an `agent_` prefix to a command that already exists without the prefix, stop. The editing model should produce the same command atom; the content adapter interprets it.
+
+This eliminates ~35 of the 62 "agent commands" that exist solely because the agent view reimplements vim on non-buffer data structures (scrolling, cursor movement, search, yank, folding). The only genuinely agent-specific commands are domain actions: submit prompt, approve/reject tools, session lifecycle, model settings.
+
+The structural refactoring (Surfaces, bridges, state ownership) exists to enable this principle. If a structural change doesn't move us toward "one editing model, NavigableContent everywhere," it's the wrong change.
 
 ## Current Migration Status
 
@@ -43,10 +70,13 @@ The structural refactoring (Surfaces, bridges, state ownership) exists to enable
 - Remaining bridge calls: 21 (down from 53)
 
 ### Remaining work
-- **Agent prompt → Buffer.Server**: replace `TextField` with a real buffer so standard vim commands apply. This eliminates ~35 agent commands that reimplement vim.
-- **Editing model as a behaviour**: `Minga.EditingModel` with `handle_key/4` and `execute/3`. Vim implements it today; CUA (#306) implements it later. Both surfaces use the same behaviour.
+- **`NavigableContent` protocol**: define the protocol (`move`, `scroll`, `text_in_range`, `search`, `fold_toggle`, `cursor`, `line_count`). Implement for `Buffer.Server` first (adapter that delegates to the GenServer). This is the foundational abstraction.
+- **Agent prompt → Buffer.Server**: replace `TextField` with a real buffer so standard vim editing applies. The prompt is editable text; it should use the same editing model as file buffers.
+- **Structured chat NavigableContent adapter**: implement `NavigableContent` for the agent chat's `[%Message{}, %ToolCall{}, ...]` data model. `j/k` scrolls rendered lines, `{/}` jumps between messages, `/` searches text, `yy` yanks, `za` toggles collapse. No insert mode. Content stays structured.
+- **Editing model as a behaviour**: `Minga.EditingModel` with `handle_key/4` and `execute/3`. Vim implements it today; CUA (#306) implements it later. Both surfaces use the same behaviour. Command atoms are universal; content adapters interpret them.
 - **VimState substruct stays**: editing model state (`mode`, `mode_state`, `reg`, `marks`, etc.) is grouped under `editing: %VimState{}` on BufferViewState. This is the right boundary for swapping in CUA later.
-- **Eliminate BufferView bridge**: once commands take `BufferViewState.t()` directly (via the editing model), the bridge round-trip dies.
+- **Eliminate ~35 agent commands**: once the editing model and NavigableContent are in place, agent navigation/scroll/yank/search/fold commands are deleted. Only domain actions remain (~27 commands).
+- **Eliminate BufferView bridge**: once commands operate through the editing model on NavigableContent, the bridge round-trip dies.
 - **Remove buffer fields from EditorState**: EditorState becomes a thin orchestrator (port, theme, tabs, overlays). Buffer-owned fields move to BufferViewState permanently.
 
 ---
