@@ -69,15 +69,31 @@ The structural refactoring (Surfaces, bridges, state ownership) exists to enable
 - Input.Router no longer imports or calls BufferView.Bridge
 - Remaining bridge calls: 21 (down from 53)
 
-### Remaining work
-- **`NavigableContent` protocol**: define the protocol (`move`, `scroll`, `text_in_range`, `search`, `fold_toggle`, `cursor`, `line_count`). Implement for `Buffer.Server` first (adapter that delegates to the GenServer). This is the foundational abstraction.
-- **Agent prompt → Buffer.Server**: replace `TextField` with a real buffer so standard vim editing applies. The prompt is editable text; it should use the same editing model as file buffers.
-- **Structured chat NavigableContent adapter**: implement `NavigableContent` for the agent chat's `[%Message{}, %ToolCall{}, ...]` data model. `j/k` scrolls rendered lines, `{/}` jumps between messages, `/` searches text, `yy` yanks, `za` toggles collapse. No insert mode. Content stays structured.
-- **Editing model as a behaviour**: `Minga.EditingModel` with `handle_key/4` and `execute/3`. Vim implements it today; CUA (#306) implements it later. Both surfaces use the same behaviour. Command atoms are universal; content adapters interpret them.
-- **VimState substruct stays**: editing model state (`mode`, `mode_state`, `reg`, `marks`, etc.) is grouped under `editing: %VimState{}` on BufferViewState. This is the right boundary for swapping in CUA later.
-- **Eliminate ~35 agent commands**: once the editing model and NavigableContent are in place, agent navigation/scroll/yank/search/fold commands are deleted. Only domain actions remain (~27 commands).
-- **Eliminate BufferView bridge**: once commands operate through the editing model on NavigableContent, the bridge round-trip dies.
-- **Remove buffer fields from EditorState**: EditorState becomes a thin orchestrator (port, theme, tabs, overlays). Buffer-owned fields move to BufferViewState permanently.
+### Remaining work: window-level content architecture
+
+The Surface abstraction (tab-level BufferView/AgentView) is being replaced by a simpler model: **the window tree hosts content**. Each window pane holds a content reference (buffer, agent session, terminal, etc.). The editing model and NavigableContent protocol make vim work in every pane. "Agent View" is a window layout preset, not a separate surface implementation.
+
+This eliminates: the Surface behaviour, both bridges, SurfaceSync, Context struct, two parallel render/layout/input pipelines, surface_module/surface_state on EditorState, and ~35 reimplemented agent commands.
+
+**Priority order:**
+
+1. **`NavigableContent` protocol**: define the protocol (`move`, `scroll`, `text_in_range`, `search`, `fold_toggle`, `cursor`, `line_count`). Implement for `Buffer.Server` first (adapter that delegates to the GenServer). This is the foundational abstraction.
+
+2. **`EditingModel` behaviour**: `handle_key/4` and `execute/3`. Vim implements it today (wrapping the existing Mode FSM); CUA (#306) implements it later. Command atoms are universal; NavigableContent adapters interpret them. Vim-specific state (`mode`, `mode_state`, `reg`, `marks`) stays grouped under the editing model, not on the editor or content types.
+
+3. **Window tree hosts any content type**: extend `WindowTree` so each window holds a content reference (buffer pid, agent session, etc.) instead of only buffer pids. The active window determines which NavigableContent and editing model state are active. Vim window commands (`Ctrl-W h/j/k/l/s/v`) work identically regardless of content type.
+
+4. **Agent prompt → Buffer.Server**: replace `TextField` with a real buffer so the standard editing model applies. The prompt is editable text; it should use the same editing model as file buffers.
+
+5. **Structured chat NavigableContent adapter**: implement `NavigableContent` for the agent chat's `[%Message{}, %ToolCall{}, ...]` data model. `j/k` scrolls rendered lines, `{/}` jumps between messages, `/` searches text, `yy` yanks, `za` toggles collapse. No insert mode. Content stays structured.
+
+6. **Window layout presets**: "Agent View" applies a default layout (e.g., file buffer left, agent chat right with prompt). User can customize from there with standard vim window commands. Tabs save/restore window tree configurations.
+
+7. **Eliminate ~35 agent commands**: once the editing model and NavigableContent are in place, agent navigation/scroll/yank/search/fold commands are deleted. Only domain actions remain (~27 commands).
+
+8. **Delete Surface layer**: remove `Minga.Surface` behaviour, both bridge modules, `SurfaceSync`, `Context` struct, `surface_module`/`surface_state` from EditorState. The window tree replaces all of this.
+
+9. **Remove buffer fields from EditorState**: EditorState becomes a thin orchestrator (port, theme, tabs, overlays, window tree). Content-specific state lives in each window's content.
 
 ---
 
@@ -256,75 +272,345 @@ Event types handled: `status_changed`, `text_delta`, `thinking_delta`, `messages
 
 ---
 
-## The Missing Concept: Surface
+## Why Not Surfaces?
 
-A **Surface** is an independent view context that owns its own state, input handling, and rendering. Both the editor buffer view and the agentic chat view are surfaces. In Domain-Driven Design terms, these are separate **bounded contexts** that share common infrastructure (vim grammar, display list IR, theme) but have their own domain models.
+The first iteration of this refactor proposed a **Surface** abstraction: a tab-level behaviour where BufferView and AgentView each implement `handle_key`, `render`, `handle_event`, etc. We built it, shipped it across PRs #319-#321, and learned it was the wrong abstraction. Here's why.
+
+### Surfaces are tab-level; composition needs window-level
+
+A Surface owns a tab. Switch to an agent tab, AgentView takes over the entire screen. Switch to a file tab, BufferView takes over. They can never coexist in the same tab. You can't split a window with a file buffer on the left and an agent chat on the right. You can't tile four agent sessions. The "agent side panel" (showing agent chat while editing a file) had to be built as a special-case hack rendered inside BufferView's chrome, because two Surfaces can't share a tab.
+
+Minga is agentic-first. The default agent workflow should look like OpenCode or Cursor: file buffer on one side, agent chat on the other, prompt at the bottom. That's a window layout, not a surface type. And users should be able to customize it with standard vim window commands (`Ctrl-W v/s/h/j/k/l`).
+
+### Surfaces duplicate the editing model
+
+The Surface abstraction treats BufferView and AgentView as separate bounded contexts with their own input handling. This led to AgentView reimplementing vim navigation on its own data structures: `agent_scroll_down`, `agent_self_insert`, `agent_input_backspace`, `agent_copy_code_block`, etc. 35 of 62 agent commands are vim operations rebuilt on `TextField` and custom scroll state instead of using the same editing model that file buffers use.
+
+The diagnosis was right ("vim should be shared infrastructure") but the Surface prescription preserved the duplication by giving each surface its own `handle_key` → command dispatch → command execution pipeline.
+
+### Surfaces require bridges
+
+Each Surface has its own state struct (`BufferViewState`, `AgentViewState`). But commands and input handlers were written against `EditorState`. This created a bridge layer: `reconstruct_editor_state` builds a fake EditorState from surface state, handlers run on it, then `Bridge.from_editor_state` deconstructs the result back. This copying happens on every key press, mouse event, and render frame. Adding a field to one struct and forgetting the bridge silently loses state.
+
+### What we keep from the Surface work
+
+The work wasn't wasted. Steps 1-5 established important foundations:
+- Agent state (`agent`, `agentic`) is fully removed from EditorState
+- Tab contexts store only `{surface_module, surface_state, keymap_scope}`
+- Background agent events go through the same handle_event as active tabs
+- Agent-specific input handlers (search, mention, approval, diff review) are separate `Input.Handler` modules on the focus stack
+
+These changes survive into the new architecture. The Surface behaviour itself, the bridges, and SurfaceSync are what gets replaced.
+
+---
+
+## The Right Abstraction: Window-Level Content
+
+The window tree already exists (`Minga.Editor.WindowTree`). It already manages splits. It currently only hosts buffer pids. The fix is simple: each window hosts a **content reference** (buffer pid, agent session, terminal, etc.) instead of only buffers. The editing model and `NavigableContent` protocol make vim work in every pane.
+
+### Three layers
+
+**1. EditingModel (behaviour)**: translates key sequences into command atoms.
+
+The vim Mode FSM already does this: `Mode.process(mode, key, mode_state)` returns `:move_down`, `:yank`, `:delete_line`, etc. It doesn't know what content it's operating on. This is the right design. The behaviour formalizes it so CUA (#306) can provide a different implementation.
 
 ```elixir
-defmodule Minga.Surface do
-  @moduledoc """
-  Behaviour for a view context that can receive input and render itself.
-
-  A Surface owns its domain state and manages its own lifecycle. The
-  Editor GenServer holds a reference to the active surface and delegates
-  input/rendering to it. Surfaces communicate with the Editor through
-  a narrow interface: "I need a re-render" and "switch to buffer X."
-  """
-
-  alias Minga.Editor.DisplayList
-
-  @typedoc "Opaque surface state. Each implementation defines its own struct."
-  @type state :: term()
-
-  @typedoc "Side effects the Editor must handle after a surface processes input."
-  @type effect ::
-          :render
-          | {:open_file, String.t()}
-          | {:switch_buffer, pid()}
-          | {:set_status, String.t()}
-          | {:push_overlay, module()}
-          | {:pop_overlay, module()}
-
-  @doc "Returns the keymap scope name for this surface."
-  @callback scope() :: Minga.Keymap.Scope.scope_name()
-
-  @doc "Processes a key press. Returns updated state and any side effects."
-  @callback handle_key(state(), codepoint :: non_neg_integer(), modifiers :: non_neg_integer()) ::
-              {state(), [effect()]}
-
-  @doc "Processes a mouse event. Returns updated state and any side effects."
-  @callback handle_mouse(state(), row :: integer(), col :: integer(), button :: atom(),
-              modifiers :: non_neg_integer(), event_type :: atom(), click_count :: pos_integer()) ::
-              {state(), [effect()]}
-
-  @doc "Renders the surface into the given rect. Returns display list draws."
-  @callback render(state(), rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}) ::
-              {state(), [DisplayList.draw()]}
-
-  @doc "Processes a domain-specific event (e.g., agent_event for AgentView)."
-  @callback handle_event(state(), event :: term()) :: {state(), [effect()]}
-
-  @doc "Returns the cursor position and shape for the surface."
-  @callback cursor(state()) :: {row :: non_neg_integer(), col :: non_neg_integer(), shape :: atom()}
-
-  @doc "Called when this surface becomes the active tab."
-  @callback activate(state()) :: state()
-
-  @doc "Called when this surface is backgrounded (another tab activated)."
-  @callback deactivate(state()) :: state()
+defmodule Minga.EditingModel do
+  @callback handle_key(state, buffer_or_content, codepoint, modifiers) :: {state, [command]}
+  @callback execute(state, navigable_content, command) :: {state, navigable_content}
 end
 ```
 
-Key properties:
+Vim-specific state (`mode`, `mode_state`, `reg`, `marks`, `change_recorder`, `macro_recorder`) lives inside the editing model's state struct, not on the window or editor. This is the right boundary: when CUA arrives, it brings its own state (selection anchor, clipboard mode) without touching the window or editor structs.
 
-- **Surfaces own their state.** `BufferView` owns the window tree, buffer list, viewport, file tree, and a pluggable editing model (vim by default). `AgentView` owns the session reference, chat scroll, panel state, preview, search, toast queue. Neither touches the other's state.
-- **Surfaces handle their own events.** Agent events go to `AgentView.handle_event/2`, not to the Editor. The Editor only forwards events it can't route itself.
-- **Surfaces render into a rect.** The Editor gives the surface a rectangle (the area between the tab bar and the minibuffer). The surface produces display list draws within that rect. The Editor handles shared chrome (tab bar, minibuffer).
-- **Side effects are declarative.** A surface returns `[effect()]` tuples, not imperative calls. The Editor interprets them. This keeps surfaces testable as pure `state -> {state, effects}` functions.
+**2. NavigableContent (protocol)**: lets commands operate on any content type.
+
+```elixir
+defprotocol Minga.NavigableContent do
+  def cursor(content)
+  def set_cursor(content, position)
+  def line_count(content)
+  def line_at(content, row)
+  def text_in_range(content, start_pos, end_pos)
+  def replace_range(content, start_pos, end_pos, text)  # no-op for read-only
+  def editable?(content)
+  def scroll_region(content)
+  def set_scroll(content, top)
+  def search(content, pattern, direction)
+  def fold_toggle(content, position)
+end
+```
+
+Commands are written ONCE against the protocol. `move_down` calls `NavigableContent.cursor`, computes the new position, calls `NavigableContent.set_cursor`. It doesn't know if the content is a gap buffer, a structured message list, or terminal scrollback. The protocol adapter handles the translation.
+
+This is why adding evil-surround works in one place: the command calls `text_in_range` and `replace_range`. Each content adapter implements those two functions. The surround logic is written once.
+
+**3. Window tree (universal container)**: each window pane holds content.
+
+```
+Editor GenServer
+├── Window Tree
+│   ├── Window 1: content=buffer_pid, viewport, editing_model_state
+│   ├── Window 2: content=agent_session, viewport, editing_model_state
+│   └── Window 3: content=buffer_pid, viewport, editing_model_state
+├── Tab Bar (saves/restores window tree layouts)
+├── Shared chrome (modeline per window, minibuffer, overlays)
+└── Editing model state (mode is global, registers are global)
+```
+
+### Why this is simpler
+
+**What goes away:**
+- `Minga.Surface` behaviour (10 callbacks, 2 implementations)
+- `BufferView.Bridge` and `AgentView.Bridge` (reconstruct/deconstruct EditorState)
+- `SurfaceSync` (sync_from_editor, sync_to_editor, init_surface, dispatch_event)
+- `Surface.Context` struct (copying shared fields between editor and surfaces)
+- Two render pipelines (`run_windows` vs `run_agentic`)
+- Two layout systems (`Layout.compute` vs `ViewRenderer` internal layout)
+- `surface_handlers()` mixed list with self-gating
+- Agent side panel hack (special-case rendering inside BufferView)
+- `surface_module`/`surface_state` on EditorState
+- ~35 reimplemented agent commands (scroll, insert, backspace, yank, search, fold)
+
+**What replaces it:**
+- `NavigableContent` protocol (~8 functions, N small adapters)
+- `EditingModel` behaviour (~2 functions, vim + future CUA)
+- Window tree accepts any content type (small extension to existing code)
+- Each content type: an adapter (~50-100 lines) + a renderer + domain commands
+- "Agent View" = a window layout preset, not a separate system
+
+### Content types and what they support
+
+| Content | Data structure | Editing | Why not Buffer.Server? |
+|---------|---------------|---------|----------------------|
+| File buffer | `Buffer.Server` (gap buffer) | Full vim/CUA | N/A, it IS a Buffer.Server |
+| Agent prompt | `Buffer.Server` | Full vim/CUA | N/A, it IS a Buffer.Server |
+| Chat messages | Structured list (`[%Message{}, %ToolCall{}, ...]`) | Navigation only (no insert) | Structured data with tool cards, streaming, collapse state. Flat text loses semantics, creates undo/reparse problems. |
+| `*Messages*` | `Buffer.Server` (read-only) | Navigation + yank | N/A, already a Buffer.Server |
+| Preview/diff | Generated read-only content | Navigation + interactive | Content is generated, not user-edited |
+| Terminal (#122) | Terminal scrollback | Navigation only | Terminal output has its own cursor model |
+| Browser (#305) | Rendered web content | Navigation only | Web content isn't text |
+
+The agent prompt is a Buffer.Server because it's editable text. Chat messages stay as structured data because they have semantic structure (message roles, tool call status, code block languages, collapse state) that flat text can't represent without a complex sidecar mapping system. The `NavigableContent` protocol brings vim navigation to the structured data without forcing it into the wrong data model.
 
 ---
 
 ## Target Architecture
+
+### Module organization
+
+Code is organized by **domain**, not by technical layer. `Minga.Agent` never imports from `Minga.Buffer`. `Minga.Buffer` never imports from `Minga.Agent`. Both import from shared infrastructure. The namespace makes coupling violations visible at code review.
+
+```
+Minga.Editor                              # Thin orchestrator
+  editor.ex                               # GenServer: window tree, tabs, overlays, port
+  editor/layout.ex                        # Gives each window a rect
+  editor/tab_bar.ex                       # Tab bar state and rendering
+  editor/modeline.ex                      # Per-window modeline rendering
+  editor/minibuffer.ex                    # Shared minibuffer
+
+Minga.Buffer                              # File editing domain
+  buffer/document.ex                      # Gap buffer data structure (exists)
+  buffer/server.ex                        # Buffer GenServer (exists)
+  buffer/commands/movement.ex             # Currently editor/commands/movement.ex
+  buffer/commands/editing.ex              # Currently editor/commands/editing.ex
+  buffer/commands/operators.ex            # etc.
+  buffer/renderer.ex                      # Currently run_windows in render_pipeline
+  buffer/layout.ex                        # Window splits, file tree sidebar
+  buffer/input/file_tree_handler.ex       # Currently input/file_tree_handler.ex
+  buffer/navigable_content.ex             # NavigableContent impl for Buffer.Server
+
+Minga.Agent                               # Agentic domain
+  agent/session.ex                        # Session GenServer (exists)
+  agent/commands.ex                       # Domain actions: submit, approve, reject
+  agent/renderer.ex                       # Currently agent/view/renderer.ex
+  agent/layout.ex                         # Chat, prompt, preview pane layout
+  agent/input/search.ex                   # Currently input/agent_search.ex
+  agent/input/mention_completion.ex       # Currently input/mention_completion.ex
+  agent/input/tool_approval.ex            # Currently input/tool_approval.ex
+  agent/input/diff_review.ex              # Currently input/diff_review.ex
+  agent/navigable_content/chat.ex         # NavigableContent impl for structured messages
+  agent/navigable_content/prompt.ex       # NavigableContent impl (delegates to Buffer.Server)
+
+Minga.EditingModel                        # Shared: key → command translation
+  editing_model.ex                        # Behaviour definition
+  editing_model/vim.ex                    # Vim Mode FSM (wraps existing Mode module)
+  editing_model/vim/state.ex              # mode, mode_state, reg, marks, etc.
+  editing_model/cua.ex                    # Future: CUA chords, shift-select (#306)
+
+Minga.NavigableContent                    # Shared: content navigation protocol
+  navigable_content.ex                    # Protocol definition
+
+Minga.Input                               # Shared: overlay handlers
+  input/picker.ex                         # Modal picker overlay
+  input/completion.ex                     # Completion popup overlay
+  input/conflict_prompt.ex                # Save conflict overlay
+```
+
+### How input flows
+
+```
+Key arrives at Editor.handle_info
+  │
+  ├─ Walk overlay handlers (picker, completion, conflict prompt)
+  │   └─ If handled: done
+  │
+  ├─ Walk active window's domain handlers
+  │   └─ Agent window: search, mention, tool approval, diff review
+  │   └─ Buffer window: file tree handler (if file tree focused)
+  │   └─ If handled: done
+  │
+  └─ Editing model handles key
+      └─ EditingModel.Vim.handle_key(vim_state, content, cp, mods)
+          ├─ Mode FSM produces command atoms
+          ├─ Commands execute against NavigableContent
+          │   └─ NavigableContent.move(content, :down)  ← one implementation
+          │   └─ NavigableContent.set_cursor(content, pos)
+          └─ Returns {new_vim_state, new_content}
+```
+
+Every content type goes through the same editing model. The NavigableContent protocol handles the content-specific behavior. Commands are written once.
+
+### How agent events flow
+
+```
+Agent.Session sends {:agent_event, event} to the owning window's content
+  │
+  ├─ Active window: content updates, Editor schedules render
+  │
+  └─ Background window/tab: content updates silently, renders when activated
+```
+
+The Editor is not the message broker. Each agent session knows which window's content it belongs to and sends events directly. The Editor only needs to know "a window's content changed; should I re-render?"
+
+### How rendering works
+
+```
+Editor gives each window a rect from the window tree layout
+  │
+  ├─ Each window renders its content into its rect
+  │   ├─ Buffer window: gutter + lines + cursor (Minga.Buffer.Renderer)
+  │   ├─ Agent window: chat messages + prompt + preview (Minga.Agent.Renderer)
+  │   └─ Terminal window: scrollback text (future)
+  │
+  ├─ Each window renders its modeline (shared component, content provides data)
+  │
+  └─ Editor renders shared chrome
+      ├─ Tab bar
+      ├─ Minibuffer / status line
+      └─ Overlays (picker popup, completion menu)
+```
+
+One render pipeline. Each content type has its own renderer, but they all receive a rect and produce display list draws. No `if agentic?` branches.
+
+### Window layout presets
+
+"Agent View" is not a surface type. It's a window layout preset:
+
+```
+Default "Agent View" layout:
+┌──────────────┬──────────────┐
+│ File buffer  │ Agent chat   │
+│ (editable)   │ (read-only)  │
+│              ├──────────────┤
+│              │ Prompt       │
+│              │ (editable)   │
+└──────────────┴──────────────┘
+```
+
+The user can customize this with standard vim window commands: `Ctrl-W v` to split, `Ctrl-W q` to close a pane, `Ctrl-W =` to equalize, drag borders with the mouse. Open three agents side by side, or go full-screen agent, or put a terminal at the bottom. It's just windows with content.
+
+Tabs save and restore window tree configurations. Switching tabs restores the exact window layout and content references from when you left.
+
+---
+
+## Testing Strategy
+
+### What to test
+
+- **NavigableContent protocol conformance.** Every content adapter runs against a shared test module that exercises all protocol functions. If `move(:down)` works for buffers, it must work (with appropriate semantics) for chat content, terminal scrollback, etc.
+- **EditingModel contract.** Arbitrary key sequences fed to the editing model never crash. Commands returned by the editing model are valid NavigableContent operations.
+- **Window tree composition.** Split a window, put different content types in each pane, verify: vim commands work in each pane, switching focus preserves state, closing a pane redistributes space, tab save/restore preserves the layout.
+- **Domain isolation.** Agent code never imports Buffer code. Buffer code never imports Agent code. A compile-time check or credo rule enforces this.
+- **Content-type-specific rendering.** Given known content state, each renderer produces expected display list draws. Snapshot tests work well here.
+- **Editing model switching.** When CUA arrives: switch a window's editing model from vim to CUA, verify standard chords work, switch back, verify vim state is preserved.
+
+### Property-based tests
+
+- Arbitrary key sequences fed to any content type through the editing model never crash.
+- Arbitrary window tree operations (split, close, resize, switch focus) never produce invalid layouts.
+- Arbitrary NavigableContent operations never move cursor outside content bounds.
+
+### Validation cadence
+
+After every change: `mix test --warnings-as-errors && mix dialyzer`. Dialyzer catches stale references when modules move between domains.
+
+---
+
+## Incremental Migration Plan
+
+The old Phases 1-4 (extract BufferView Surface, extract AgentView Surface, move agent events, push sub-state handlers) are superseded. Some of that work landed and remains valuable (Steps 1-5 above). The new plan builds on that foundation toward the window-level content architecture.
+
+### Phase A: NavigableContent protocol + Buffer.Server adapter
+
+**Goal:** Define the protocol. Implement it for `Buffer.Server`. Prove that existing buffer commands can be expressed as protocol operations.
+
+This is the foundational abstraction. Everything else builds on it. Start small: `cursor`, `set_cursor`, `line_count`, `line_at`, `editable?`. Add `text_in_range`, `replace_range`, `search`, `fold_toggle` as commands need them.
+
+### Phase B: EditingModel behaviour + Vim adapter
+
+**Goal:** Wrap the existing Mode FSM in the EditingModel behaviour. Commands execute against NavigableContent instead of pattern-matching on EditorState fields.
+
+Vim-specific state (`mode`, `mode_state`, `reg`, `marks`, etc.) moves into `EditingModel.Vim.State`, out of EditorState. The editing model is per-window (cursor, scroll) with some global state (registers, mode).
+
+### Phase C: Window tree hosts any content type
+
+**Goal:** Extend `WindowTree` so each window holds a content reference + viewport + editing model state, not just a buffer pid.
+
+The active window determines which content and editing model state receive key input. `Ctrl-W h/j/k/l` switches focus between windows regardless of content type.
+
+### Phase D: Agent prompt → Buffer.Server
+
+**Goal:** Replace `TextField` with a real `Buffer.Server` for the agent prompt. Standard vim editing applies.
+
+This eliminates `agent_self_insert`, `agent_input_backspace`, `agent_insert_newline`, `agent_input_up/down`, `agent_input_to_normal`, and the `Input.Vim` / `dispatch_vim_key` hack.
+
+### Phase E: Structured chat NavigableContent adapter
+
+**Goal:** Implement `NavigableContent` for the agent chat's message list. `j/k` scrolls, `{/}` jumps between messages, `/` searches, `yy` yanks, `za` toggles collapse.
+
+This eliminates `agent_scroll_down/up/half_down/half_up/top/bottom`, `agent_next_message/prev_message`, `agent_start_search/next_search_match/prev_search_match`, `agent_copy_message/copy_code_block`, `agent_toggle_collapse/collapse_all/expand_all`.
+
+### Phase F: Window layout presets + agent side panel removal
+
+**Goal:** "Agent View" becomes a window layout preset (file buffer left, agent chat right, prompt below chat). The agent side panel hack is deleted. The current toggle-agentic-view command applies the layout preset. User customizes with standard vim window commands.
+
+### Phase G: Domain reorganization
+
+**Goal:** Move code into `Minga.Buffer` and `Minga.Agent` namespaces. Delete the Surface layer, bridges, SurfaceSync, Context struct.
+
+Buffer commands move from `editor/commands/movement.ex` to `buffer/commands/movement.ex`. Agent commands move from `editor/commands/agent.ex` to `agent/commands.ex`. The old Surface behaviour module, both bridge modules, and SurfaceSync are deleted.
+
+### Phase H: Remove buffer fields from EditorState
+
+**Goal:** EditorState becomes a thin orchestrator struct: port, theme, tabs, window tree, overlays. No buffer-specific or agent-specific fields.
+
+Content-specific state lives in each window's content reference. Editing model state lives per-window. Shared infrastructure (theme, capabilities, port_manager) stays on EditorState.
+
+---
+
+## Success Criteria
+
+The refactoring is complete when:
+
+1. **No `if agentic?` branches** exist anywhere in the codebase. No parallel code paths for buffer vs agent.
+2. **`Minga.Editor` is under 500 lines** and contains only: GenServer callbacks, window tree management, tab management, overlay management, port communication, and shared chrome rendering.
+3. **Any content type can go in any window pane.** Split a window, put a file buffer in one pane and an agent chat in the other. Vim works in both.
+4. **Adding a new content type** (terminal, browser, git status) requires: implementing `NavigableContent`, writing a renderer, writing domain commands. Zero changes to Editor, Buffer, or Agent code.
+5. **`Minga.Agent` never imports from `Minga.Buffer`** and vice versa. Shared infrastructure lives in `Minga.EditingModel`, `Minga.NavigableContent`, and `Minga.Editor`.
+6. **evil-surround (or any new vim operation) is implemented once** and works in every content type that supports the required NavigableContent functions.
+7. **Agent bugfixes don't touch buffer code.** Buffer bugfixes don't touch agent code. Editing model improvements propagate to all content types automatically.
+8. **All tests pass**, `mix dialyzer` clean, CI coverage does not regress after each phase.
 
 ```
 Editor GenServer (thin orchestrator, ~500 lines)
