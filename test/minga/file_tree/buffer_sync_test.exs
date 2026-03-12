@@ -77,29 +77,59 @@ defmodule Minga.FileTree.BufferSyncTest do
   end
 
   describe "entries_to_text/2" do
-    test "formats entries with indentation and icons" do
+    test "formats entries with guide lines, icons, and trailing slash for dirs" do
       entries = [
-        %{path: "/root/dir", name: "dir", dir?: true, depth: 0},
-        %{path: "/root/dir/file.txt", name: "file.txt", dir?: false, depth: 1}
+        %{
+          path: "/root/dir",
+          name: "dir",
+          dir?: true,
+          depth: 0,
+          last_child?: false,
+          guides: []
+        },
+        %{
+          path: "/root/dir/file.txt",
+          name: "file.txt",
+          dir?: false,
+          depth: 1,
+          last_child?: true,
+          guides: [true]
+        }
       ]
 
       expanded = MapSet.new(["/root/dir"])
       text = BufferSync.entries_to_text(entries, expanded)
       lines = String.split(text, "\n")
 
-      assert hd(lines) == "▾ dir"
-      assert Enum.at(lines, 1) == "    file.txt"
+      # First line: connector + folder open icon + dir name with trailing slash
+      assert String.contains?(hd(lines), "dir/")
+      assert String.contains?(hd(lines), "├─")
+
+      # Second line: guide pipe + elbow connector + file icon + name
+      second = Enum.at(lines, 1)
+      assert String.contains?(second, "│ ")
+      assert String.contains?(second, "└─")
+      assert String.contains?(second, "file.txt")
     end
 
-    test "collapsed directory uses collapsed icon" do
+    test "collapsed directory uses closed folder icon" do
       entries = [
-        %{path: "/root/dir", name: "dir", dir?: true, depth: 0}
+        %{
+          path: "/root/dir",
+          name: "dir",
+          dir?: true,
+          depth: 0,
+          last_child?: true,
+          guides: []
+        }
       ]
 
       expanded = MapSet.new()
       text = BufferSync.entries_to_text(entries, expanded)
 
-      assert text == "▸ dir"
+      # Should contain the closed folder icon and dir name with trailing slash
+      assert String.contains?(text, "dir/")
+      assert String.contains?(text, "└─")
     end
   end
 end
