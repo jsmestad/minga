@@ -198,6 +198,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :list_skills)
   end
 
+  @doc "Generates a context artifact summarizing the current session."
+  @spec summarize(GenServer.server()) :: {:ok, String.t(), String.t()} | {:error, term()}
+  def summarize(session) do
+    GenServer.call(session, :summarize, 60_000)
+  end
+
   @doc "Fetches available models from the provider."
   @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
@@ -493,6 +499,15 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:list_skills, _from, state) do
     result = GenServer.call(state.provider, :list_skills)
+    {:reply, result, state}
+  end
+
+  def handle_call(:summarize, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:summarize, _from, state) do
+    result = GenServer.call(state.provider, :summarize, 55_000)
     {:reply, result, state}
   end
 

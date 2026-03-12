@@ -32,6 +32,7 @@ defmodule Minga.Agent.Providers.Native do
   use GenServer
 
   alias Minga.Agent.Compaction
+  alias Minga.Agent.ContextArtifact
   alias Minga.Agent.CostCalculator
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
@@ -410,6 +411,21 @@ defmodule Minga.Agent.Providers.Native do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:summarize, _from, %{streaming: true} = state) do
+    {:reply, {:error, "Cannot summarize while streaming"}, state}
+  end
+
+  def handle_call(:summarize, _from, state) do
+    messages = state.context.messages
+
+    if ContextArtifact.summarizable?(messages) do
+      result = generate_and_save_summary(state, messages)
+      {:reply, result, state}
+    else
+      {:reply, {:error, "Nothing to summarize (session too short)"}, state}
     end
   end
 
@@ -872,6 +888,36 @@ defmodule Minga.Agent.Providers.Native do
 
   # Wraps the streaming LLM client into a simpler function that returns {:ok, text}.
   # Used by the Compaction module which doesn't need streaming.
+  # Makes a synchronous LLM call (no streaming, no tool calls).
+  # Used for meta-operations like summarization.
+  @spec call_llm_sync(llm_client(), String.t(), [map()], keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  @spec generate_and_save_summary(state(), [map()]) ::
+          {:ok, String.t(), String.t()} | {:error, String.t()}
+  defp generate_and_save_summary(state, messages) do
+    summary_messages = messages ++ [Context.user(ContextArtifact.summary_prompt())]
+
+    case call_llm_sync(state.llm_client, state.model, summary_messages, max_tokens: 4096) do
+      {:ok, summary_text} ->
+        case ContextArtifact.save(summary_text, project_root: state.project_root) do
+          {:ok, path} -> {:ok, summary_text, path}
+          {:error, reason} -> {:error, "Summary generated but save failed: #{reason}"}
+        end
+
+      {:error, reason} ->
+        {:error, "Failed to generate summary: #{format_error(reason)}"}
+    end
+  end
+
+  defp call_llm_sync(llm_client, model, messages, opts) do
+    stream_opts = Keyword.take(opts, [:max_tokens])
+
+    with {:ok, stream_response} <- llm_client.(model, messages, stream_opts),
+         {:ok, response} <- StreamResponse.process_stream(stream_response) do
+      {:ok, ReqLLM.Response.text(response) || ""}
+    end
+  end
+
   @spec summary_client(llm_client()) :: Compaction.summary_fn()
   defp summary_client(llm_client) do
     fn model, messages, opts ->

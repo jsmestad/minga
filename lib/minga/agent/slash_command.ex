@@ -51,7 +51,8 @@ defmodule Minga.Agent.SlashCommand do
     %{name: "continue", description: "Continue from an interrupted stream response"},
     %{name: "export", description: "Export current session to a Markdown file"},
     %{name: "skills", description: "List all available skills"},
-    %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"}
+    %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
+    %{name: "summarize", description: "Generate a context artifact from this session for future use"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -105,6 +106,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "continue", _args), do: do_continue(state)
   defp dispatch(state, "export", _args), do: do_export(state)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
+  defp dispatch(state, "summarize", _args), do: do_summarize(state)
 
   # /skill:name activates, /skill:off:name deactivates
   defp dispatch(state, cmd, _args) when is_binary(cmd) do
@@ -419,6 +421,30 @@ defmodule Minga.Agent.SlashCommand do
       case Session.deactivate_skill(session, name) do
         :ok ->
           {:ok, emit_system_message(state, "Deactivated skill: #{name}")}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_summarize(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_summarize(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      case Session.summarize(session) do
+        {:ok, _summary_text, path} ->
+          root = detect_project_root()
+          relative = Path.relative_to(path, root)
+
+          {:ok,
+           emit_system_message(
+             state,
+             "Context artifact saved to #{relative}\nUse @#{relative} in a new session to carry this context forward."
+           )}
 
         {:error, reason} ->
           {:error, reason}

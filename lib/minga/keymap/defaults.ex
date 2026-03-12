@@ -100,6 +100,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Session history"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
+    {[{?a, @none}, {?e, @none}], :agent_summarize, "Summarize session to artifact"},
 
     # ── Tab ──────────────────────────────────────────────────────────────────
     {[{9, @none}, {?n, @none}], :tab_next, "Next tab"},

@@ -63,6 +63,7 @@ defmodule Minga.Command.RegistryTest do
           :agent_pick_model,
           :agent_cycle_model,
           :agent_cycle_thinking,
+          :agent_summarize,
           :git_blame_line,
           :git_preview_hunk,
           :git_revert_hunk,
