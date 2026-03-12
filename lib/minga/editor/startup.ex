@@ -6,13 +6,16 @@ defmodule Minga.Editor.Startup do
   Extracted to keep the GenServer module focused on message handling.
   """
 
+  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -81,8 +84,33 @@ defmodule Minga.Editor.Startup do
       focus_stack: Minga.Input.default_stack()
     }
 
-    %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+    maybe_apply_agent_split(state)
   end
+
+  @doc """
+  Creates the agent buffer and applies the agent split layout when
+  booting into agent mode.
+
+  This bridges the gap between `startup_view_state` (which decides
+  *whether* to use agent mode) and the window tree (which needs an
+  actual agent chat window for the render pipeline to find). Without
+  this step, `LayoutPreset.has_agent_chat?/1` returns false and the
+  agent session never starts.
+  """
+  @spec maybe_apply_agent_split(EditorState.t()) :: EditorState.t()
+  def maybe_apply_agent_split(%{keymap_scope: :agent} = state) do
+    agent_buf = AgentBufferSync.start_buffer()
+
+    if is_pid(agent_buf) do
+      state = AgentAccess.update_agent(state, fn a -> %{a | buffer: agent_buf} end)
+      LayoutPreset.apply(state, :agent_right, agent_buf)
+    else
+      state
+    end
+  end
+
+  def maybe_apply_agent_split(state), do: state
 
   @spec subscribe_port(GenServer.server() | nil) :: :ok
   defp subscribe_port(nil), do: :ok
@@ -115,10 +143,12 @@ defmodule Minga.Editor.Startup do
   @doc """
   Determines the initial view state based on CLI flags and config.
 
-  Returns `{keymap_scope, agentic_state, window_tree | nil}`.
+  Returns `{keymap_scope, agentic_state, window_tree}`. Both agent and
+  editor modes get a real WindowTree; agent mode creates the split layout
+  in `maybe_apply_agent_split/1` after the state struct is built.
   """
   @spec startup_view_state(GenServer.server() | nil, pos_integer()) ::
-          {atom(), ViewState.t(), WindowTree.t() | nil}
+          {atom(), ViewState.t(), WindowTree.t()}
   def startup_view_state(port_manager, window_id) do
     tui_mode? = port_manager == PortManager
     cli_flags = Minga.CLI.startup_flags()
@@ -130,7 +160,7 @@ defmodule Minga.Editor.Startup do
 
     if want_agent? do
       av = %ViewState{ViewState.new() | active: true, focus: :chat}
-      {:agent, av, nil}
+      {:agent, av, WindowTree.new(window_id)}
     else
       {:editor, ViewState.new(), WindowTree.new(window_id)}
     end
