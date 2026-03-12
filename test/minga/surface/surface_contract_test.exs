@@ -14,14 +14,14 @@ defmodule Minga.Surface.ContractTest do
   alias Minga.Mode
   alias Minga.Surface.BufferView
   alias Minga.Surface.BufferView.Bridge
-  alias Minga.Surface.BufferView.State, as: BVState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
   alias Minga.Surface.BufferView.State.VimState
   alias Minga.Theme
 
   # ── Helper: build a minimal BufferView state ──────────────────────────────
 
   defp build_bv_state do
-    %BVState{
+    %BufferViewState{
       viewport: Viewport.new(24, 80),
       editing: %VimState{
         mode: :normal,
@@ -49,7 +49,7 @@ defmodule Minga.Surface.ContractTest do
       bv = build_bv_state()
       {new_state, effects} = BufferView.handle_key(bv, ?j, 0)
 
-      assert %BVState{} = new_state
+      assert %BufferViewState{} = new_state
       assert is_list(effects)
     end
 
@@ -71,7 +71,7 @@ defmodule Minga.Surface.ContractTest do
       bv = build_bv_state()
       {new_state, effects} = BufferView.handle_mouse(bv, 5, 10, :left, 0, :press, 1)
 
-      assert %BVState{} = new_state
+      assert %BufferViewState{} = new_state
       assert is_list(effects)
     end
   end
@@ -84,7 +84,7 @@ defmodule Minga.Surface.ContractTest do
       rect = {0, 0, 80, 24}
       {new_state, draws} = BufferView.render(bv, rect)
 
-      assert %BVState{} = new_state
+      assert %BufferViewState{} = new_state
       assert is_list(draws)
     end
   end
@@ -96,7 +96,7 @@ defmodule Minga.Surface.ContractTest do
       bv = build_bv_state()
       {new_state, effects} = BufferView.handle_event(bv, {:unknown_event, :data})
 
-      assert %BVState{} = new_state
+      assert %BufferViewState{} = new_state
       assert is_list(effects)
     end
   end
@@ -160,12 +160,12 @@ defmodule Minga.Surface.ContractTest do
 
     test "activate returns a BufferView.State" do
       bv = build_bv_state()
-      assert %BVState{} = BufferView.activate(bv)
+      assert %BufferViewState{} = BufferView.activate(bv)
     end
 
     test "deactivate returns a BufferView.State" do
       bv = build_bv_state()
-      assert %BVState{} = BufferView.deactivate(bv)
+      assert %BufferViewState{} = BufferView.deactivate(bv)
     end
   end
 
@@ -182,7 +182,7 @@ defmodule Minga.Surface.ContractTest do
       }
 
       bv = Bridge.from_editor_state(es)
-      assert %BVState{} = bv
+      assert %BufferViewState{} = bv
       assert %VimState{mode: :normal} = bv.editing
     end
 
@@ -258,10 +258,10 @@ defmodule Minga.Surface.ContractTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Surface.AgentView
   alias Minga.Surface.AgentView.Bridge, as: AVBridge
-  alias Minga.Surface.AgentView.State, as: AVState
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp build_av_state do
-    %AVState{
+    %AgentViewState{
       agent: %AgentState{},
       agentic: %ViewState{}
     }
@@ -278,7 +278,7 @@ defmodule Minga.Surface.ContractTest do
       av = build_av_state()
       {new_state, effects} = AgentView.handle_key(av, ?j, 0)
 
-      assert %AVState{} = new_state
+      assert %AgentViewState{} = new_state
       assert is_list(effects)
     end
 
@@ -298,7 +298,7 @@ defmodule Minga.Surface.ContractTest do
       av = build_av_state()
       {new_state, effects} = AgentView.handle_mouse(av, 5, 10, :left, 0, :press, 1)
 
-      assert %AVState{} = new_state
+      assert %AgentViewState{} = new_state
       assert is_list(effects)
     end
   end
@@ -309,7 +309,7 @@ defmodule Minga.Surface.ContractTest do
       rect = {0, 0, 80, 24}
       {new_state, draws} = AgentView.render(av, rect)
 
-      assert %AVState{} = new_state
+      assert %AgentViewState{} = new_state
       assert is_list(draws)
     end
   end
@@ -319,7 +319,7 @@ defmodule Minga.Surface.ContractTest do
       av = build_av_state()
       {new_state, effects} = AgentView.handle_event(av, {:unknown_event, :data})
 
-      assert %AVState{} = new_state
+      assert %AgentViewState{} = new_state
       assert is_list(effects)
     end
 
@@ -461,7 +461,7 @@ defmodule Minga.Surface.ContractTest do
       }
 
       av = AVBridge.from_editor_state(es)
-      assert %AVState{} = av
+      assert %AgentViewState{} = av
       assert %AgentState{} = av.agent
       assert %ViewState{} = av.agentic
     end

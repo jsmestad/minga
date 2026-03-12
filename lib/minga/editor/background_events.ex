@@ -43,7 +43,8 @@ defmodule Minga.Editor.BackgroundEvents do
 
   def handle(state, tab, :messages_changed) do
     state = EditorState.update_background_agent(state, tab.id, &AgentState.maybe_auto_scroll/1)
-    maybe_update_tab_label(state, tab, Map.get(tab.context, :agent, %AgentState{}).session)
+    session = background_tab_session(tab)
+    maybe_update_tab_label(state, tab, session)
   end
 
   def handle(state, tab, {:tool_started, "shell", args}) do
@@ -128,6 +129,20 @@ defmodule Minga.Editor.BackgroundEvents do
   def handle(state, _tab, _event), do: state
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # Extracts the agent session pid from a background tab's stored context.
+  # Prefers the surface_state path; falls back to the legacy context.agent path.
+  @spec background_tab_session(Tab.t()) :: pid() | nil
+  defp background_tab_session(%Tab{session: pid}) when is_pid(pid), do: pid
+
+  defp background_tab_session(%Tab{context: ctx}) do
+    alias Minga.Surface.AgentView.State, as: AgentViewState
+
+    case Map.get(ctx, :surface_state) do
+      %AgentViewState{agent: agent} -> agent.session
+      _ -> Map.get(ctx, :agent, %AgentState{}).session
+    end
+  end
 
   @spec update_file_preview(state(), Tab.id(), String.t()) :: state()
   defp update_file_preview(state, tab_id, result) do

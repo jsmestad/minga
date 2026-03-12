@@ -14,6 +14,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Port.Protocol
 
   @type state :: EditorState.t()
@@ -98,18 +99,23 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
         ) ::
           {{non_neg_integer(), non_neg_integer()}, Protocol.cursor_shape()}
   def agent_cursor_override_from_layout(
-        %{agent: %{panel: %{visible: true, input_focused: true}}} = state,
-        _cursor,
-        _shape,
+        state,
+        cursor,
+        shape,
         %{agent_panel: {row, col, _w, h}} = _layout
       )
       when h > 0 do
-    panel = state.agent.panel
-    {cursor_line, cursor_col} = panel.input.cursor
-    input_row = row + h - @agent_input_height + 1 + cursor_line
-    input_col = col + 2 + cursor_col
+    panel = AgentAccess.panel(state)
 
-    {{input_row, input_col}, ChromeHelpers.input_cursor_shape(panel)}
+    if panel.visible and panel.input_focused do
+      {cursor_line, cursor_col} = panel.input.cursor
+      input_row = row + h - @agent_input_height + 1 + cursor_line
+      input_col = col + 2 + cursor_col
+
+      {{input_row, input_col}, ChromeHelpers.input_cursor_shape(panel)}
+    else
+      {cursor, shape}
+    end
   end
 
   def agent_cursor_override_from_layout(_state, cursor, shape, _layout) do

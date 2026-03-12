@@ -23,6 +23,7 @@ defmodule Minga.Agent.View.Mouse do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Mouse, as: MouseState
 
   @scroll_lines 3
@@ -153,7 +154,7 @@ defmodule Minga.Agent.View.Mouse do
     cols = state.viewport.cols
     rows = state.viewport.rows
 
-    input_lines = state.agent.panel.input.lines
+    input_lines = AgentAccess.panel(state).input.lines
     input_height = min(length(input_lines), 5) + 2
 
     # Tab bar at row 0, title bar at row 1, content starts at row 2.
@@ -167,7 +168,7 @@ defmodule Minga.Agent.View.Mouse do
     chat_height = max(panel_height - input_height, 1)
     input_row = panel_start + chat_height
 
-    chat_width_pct = state.agentic.chat_width_pct
+    chat_width_pct = AgentAccess.agentic(state).chat_width_pct
     chat_width = max(div(cols * chat_width_pct, 100), 20)
     sep_col = chat_width
 
@@ -244,11 +245,11 @@ defmodule Minga.Agent.View.Mouse do
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun) do
-    %{state | agent: fun.(state.agent)}
+    AgentAccess.update_agent(state, fun)
   end
 
   @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
   defp update_agentic(state, fun) do
-    %{state | agentic: fun.(state.agentic)}
+    AgentAccess.update_agentic(state, fun)
   end
 end

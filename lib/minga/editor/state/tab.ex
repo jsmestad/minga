@@ -7,19 +7,15 @@ defmodule Minga.Editor.State.Tab do
   inactive. The active tab's context is "live" on EditorState; inactive
   tabs carry a frozen snapshot that gets restored when you switch to them.
 
-  ## Context fields
+  ## Context format
 
-  File tabs snapshot: `windows`, `file_tree`, `mode`, `mode_state`,
-  `keymap_scope`, `active_buffer` (pid), `active_buffer_index`.
-
-  Agent tabs snapshot all of the above plus `agent` (AgentState) and
-  `agentic` (ViewState).
+  The canonical context has three fields: `surface_module`, `surface_state`,
+  and `keymap_scope`. All per-view state (buffers, windows, mode, agent, etc.)
+  lives inside `surface_state`. Legacy contexts with per-field snapshots are
+  auto-migrated on first restore.
   """
 
-  alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Editor.State.Agent, as: AgentState
-  alias Minga.Editor.State.FileTree, as: FileTreeState
-  alias Minga.Editor.State.Windows
+  # Legacy context type aliases removed. Surface state carries all per-view data.
 
   @typedoc "Unique tab identifier."
   @type id :: pos_integer()
@@ -30,21 +26,17 @@ defmodule Minga.Editor.State.Tab do
   @typedoc """
   Snapshotted per-tab state.
 
-  All fields are optional because the active tab's context is "live" on
-  EditorState and the context map may be empty until the first snapshot.
+  The canonical context has three fields: `surface_module`, `surface_state`,
+  and `keymap_scope`. All per-view state (buffers, windows, mode, etc.)
+  lives inside `surface_state`. Empty context means a brand-new tab.
+
+  Legacy contexts with per-field snapshots (windows, mode, active_buffer,
+  etc.) are auto-migrated to the canonical format on first restore.
   """
   @type context :: %{
-          optional(:windows) => Windows.t(),
-          optional(:file_tree) => FileTreeState.t(),
-          optional(:mode) => atom(),
-          optional(:mode_state) => term(),
-          optional(:keymap_scope) => atom(),
-          optional(:active_buffer) => pid() | nil,
-          optional(:active_buffer_index) => non_neg_integer(),
-          optional(:agent) => AgentState.t(),
-          optional(:agentic) => ViewState.t(),
           optional(:surface_module) => module() | nil,
-          optional(:surface_state) => term() | nil
+          optional(:surface_state) => term() | nil,
+          optional(:keymap_scope) => atom()
         }
 
   @typedoc "Opaque surface state stored on the tab when it's inactive."

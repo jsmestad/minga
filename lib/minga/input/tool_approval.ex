@@ -11,21 +11,19 @@ defmodule Minga.Input.ToolApproval do
 
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  def handle_key(
-        %{agent: %{pending_approval: approval, panel: %{input_focused: false}}} = state,
-        cp,
-        _mods
-      )
-      when is_map(approval) do
-    {:handled, dispatch_approval(state, cp)}
-  end
+  def handle_key(state, cp, _mods) do
+    agent = AgentAccess.agent(state)
 
-  def handle_key(state, _cp, _mods) do
-    {:passthrough, state}
+    if is_map(agent.pending_approval) and not agent.panel.input_focused do
+      {:handled, dispatch_approval(state, cp)}
+    else
+      {:passthrough, state}
+    end
   end
 
   @spec dispatch_approval(EditorState.t(), non_neg_integer()) :: EditorState.t()

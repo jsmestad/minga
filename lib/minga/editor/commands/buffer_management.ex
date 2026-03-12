@@ -18,6 +18,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
   alias Minga.Formatter
   alias Minga.Mode
@@ -620,19 +621,21 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec close_agent_tab(state()) :: state()
   defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
     # Stop spinner timer before it leaks
-    state = update_in(state.agent, &AgentState.stop_spinner_timer/1)
+    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
 
     # Unsubscribe and stop the agent session if running
-    if state.agent.session do
+    session = AgentAccess.session(state)
+
+    if session do
       try do
-        Session.unsubscribe(state.agent.session)
+        Session.unsubscribe(session)
       catch
         :exit, _ -> :ok
       end
 
-      if Process.alive?(state.agent.session) do
+      if Process.alive?(session) do
         try do
-          GenServer.stop(state.agent.session, :normal)
+          GenServer.stop(session, :normal)
         catch
           :exit, _ -> :ok
         end

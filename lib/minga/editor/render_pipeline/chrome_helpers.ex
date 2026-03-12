@@ -16,6 +16,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
@@ -80,9 +81,12 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
         buf_count: buf_count,
         macro_recording:
           if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
-        agent_status: if(is_active, do: state.agent.status, else: nil),
+        agent_status: if(is_active, do: AgentAccess.agent(state).status, else: nil),
         agent_theme_colors:
-          if(is_active && state.agent.status, do: Theme.agent_theme(state.theme), else: nil)
+          if(is_active && AgentAccess.agent(state).status,
+            do: Theme.agent_theme(state.theme),
+            else: nil
+          )
       },
       state.theme,
       col_off
@@ -138,12 +142,14 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   def render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []
 
   def render_agent_panel_from_layout(state, %{agent_panel: rect}) do
-    agent = state.agent
+    agent = AgentAccess.agent(state)
+    panel = AgentAccess.panel(state)
+    session = AgentAccess.session(state)
 
     messages =
-      if agent.session do
+      if session do
         try do
-          Session.messages(agent.session)
+          Session.messages(session)
         catch
           :exit, _ -> []
         end
@@ -152,9 +158,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
       end
 
     usage =
-      if agent.session do
+      if session do
         try do
-          Session.usage(agent.session)
+          Session.usage(session)
         catch
           :exit, _ -> %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
         end
@@ -165,16 +171,16 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     panel_state = %{
       messages: messages,
       status: agent.status || :idle,
-      input: agent.panel.input,
-      scroll: agent.panel.scroll,
-      spinner_frame: agent.panel.spinner_frame,
+      input: panel.input,
+      scroll: panel.scroll,
+      spinner_frame: panel.spinner_frame,
       usage: usage,
-      model_name: agent.panel.model_name,
-      thinking_level: agent.panel.thinking_level,
-      display_start_index: agent.panel.display_start_index,
+      model_name: panel.model_name,
+      thinking_level: panel.thinking_level,
+      display_start_index: panel.display_start_index,
       error_message: agent.error,
       pending_approval: agent.pending_approval,
-      mention_completion: agent.panel.mention_completion
+      mention_completion: panel.mention_completion
     }
 
     ChatRenderer.render(rect, panel_state, state.theme)

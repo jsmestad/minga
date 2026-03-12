@@ -12,35 +12,32 @@ defmodule Minga.Input.MentionCompletion do
 
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
   # Agent scope: mention completion active in insert mode
-  def handle_key(
-        %{
-          keymap_scope: :agent,
-          agent: %{panel: %{input_focused: true, mention_completion: comp}}
-        } = state,
-        cp,
-        mods
-      )
-      when comp != nil do
-    {:handled, AgentCommands.handle_mention_key(state, cp, mods)}
+  def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
+    panel = AgentAccess.panel(state)
+
+    if panel.input_focused and panel.mention_completion != nil do
+      {:handled, AgentCommands.handle_mention_key(state, cp, mods)}
+    else
+      {:passthrough, state}
+    end
   end
 
   # Editor scope: mention completion active in side panel
-  def handle_key(
-        %{
-          keymap_scope: :editor,
-          agent: %{panel: %{visible: true, input_focused: true, mention_completion: comp}}
-        } = state,
-        cp,
-        mods
-      )
-      when comp != nil do
-    {:handled, AgentCommands.handle_mention_key(state, cp, mods)}
+  def handle_key(%{keymap_scope: :editor} = state, cp, mods) do
+    panel = AgentAccess.panel(state)
+
+    if panel.visible and panel.input_focused and panel.mention_completion != nil do
+      {:handled, AgentCommands.handle_mention_key(state, cp, mods)}
+    else
+      {:passthrough, state}
+    end
   end
 
   def handle_key(state, _cp, _mods) do

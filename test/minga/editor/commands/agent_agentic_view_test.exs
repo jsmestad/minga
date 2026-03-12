@@ -116,9 +116,9 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       original_windows = state.windows
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # File tab (id 1) should have the original windows in its context
+      # File tab (id 1) should have the original windows inside its surface_state
       file_tab = TabBar.get(new_state.tab_bar, 1)
-      assert file_tab.context.windows == original_windows
+      assert file_tab.context.surface_state.windows == original_windows
     end
 
     test "resets agentic.focus to :chat" do
@@ -133,7 +133,12 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       fake_tree = {:split, :vertical, 40, {:leaf, 1}, {:leaf, 2}}
       state = %{state | windows: %{state.windows | tree: fake_tree}}
       new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.windows.tree == nil
+      # After switching to agent view, the windows tree on EditorState
+      # reflects the agent context (cleared). The file tab's saved
+      # surface_state preserves the original tree.
+      file_tab = TabBar.get(new_state.tab_bar, 1)
+      saved_tree = file_tab.context.surface_state.windows.tree
+      assert saved_tree == fake_tree
     end
 
     test "starts a session when none is running" do

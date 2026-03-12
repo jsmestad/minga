@@ -11,6 +11,7 @@ defmodule Minga.Picker.SessionHistorySource do
 
   alias Minga.Agent.Session
   alias Minga.Agent.SessionStore
+  alias Minga.Editor.State.AgentAccess
 
   @impl true
   @spec title() :: String.t()
@@ -34,7 +35,7 @@ defmodule Minga.Picker.SessionHistorySource do
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
   def on_select({session_id, _label, _desc}, state) when is_binary(session_id) do
-    case state.agent.session do
+    case AgentAccess.session(state) do
       nil ->
         state
 

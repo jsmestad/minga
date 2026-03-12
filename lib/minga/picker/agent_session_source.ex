@@ -12,7 +12,7 @@ defmodule Minga.Picker.AgentSessionSource do
   alias Minga.Agent.Session
   alias Minga.Agent.SessionStore
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
@@ -26,10 +26,9 @@ defmodule Minga.Picker.AgentSessionSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{tab_bar: %TabBar{} = tb, agent: %AgentState{}} = _state) do
+  def candidates(%{tab_bar: %TabBar{} = tb} = _state) do
     live = tab_candidates(tb)
     disk = disk_candidates()
-
     live_ids = MapSet.new(live, fn {{id, _}, _, _} -> id end)
 
     live ++
@@ -45,7 +44,7 @@ defmodule Minga.Picker.AgentSessionSource do
   end
 
   def on_select({{session_id, :disk}, _label, _desc}, state) do
-    case state.agent.session do
+    case AgentAccess.session(state) do
       nil ->
         state
 

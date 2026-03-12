@@ -9,6 +9,8 @@ defmodule Minga.Editor.State.SnapshotTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Surface.AgentView.State, as: AgentViewState
+  alias Minga.Surface.BufferView.State, as: BufferViewState
 
   defp make_state(opts \\ []) do
     buf = Keyword.get(opts, :buffer)
@@ -30,41 +32,71 @@ defmodule Minga.Editor.State.SnapshotTest do
   end
 
   describe "snapshot_tab_context/1" do
-    test "captures per-tab fields" do
+    test "captures only canonical fields (surface_module, surface_state, keymap_scope)" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
       state = make_state(buffer: buf, mode: :insert, keymap_scope: :agent)
 
       ctx = EditorState.snapshot_tab_context(state)
 
-      assert ctx.mode == :insert
+      # Canonical fields
       assert ctx.keymap_scope == :agent
-      assert ctx.active_buffer == buf
-      assert ctx.active_buffer_index == 0
-      assert %Windows{} = ctx.windows
-      # agent/agentic are no longer stored directly in the context;
-      # they live inside surface_state
       assert ctx.surface_module != nil
       assert ctx.surface_state != nil
+
+      # Per-view fields are NOT stored directly on the context;
+      # they live inside surface_state.
+      refute Map.has_key?(ctx, :mode)
+      refute Map.has_key?(ctx, :windows)
+      refute Map.has_key?(ctx, :active_buffer)
       refute Map.has_key?(ctx, :agent)
       refute Map.has_key?(ctx, :agentic)
+    end
+
+    test "surface_state contains the per-view data" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+      state = make_state(buffer: buf, mode: :insert, keymap_scope: :editor)
+
+      ctx = EditorState.snapshot_tab_context(state)
+
+      assert %BufferViewState{} = ctx.surface_state
+      assert ctx.surface_state.buffers.active == buf
+      assert ctx.surface_state.editing.mode == :insert
     end
   end
 
   describe "restore_tab_context/2" do
-    test "restores per-tab fields from a context with surface state" do
+    test "restores per-tab fields from a canonical context" do
       {:ok, buf_a} = BufferServer.start_link(content: "a")
       {:ok, buf_b} = BufferServer.start_link(content: "b")
 
       state = make_state(buffer: buf_a)
 
-      # Build a proper context via snapshot round-trip
-      state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :agent)
+      # Build a proper context via snapshot round-trip (editor scope)
+      state_b = make_state(buffer: buf_b, mode: :insert, keymap_scope: :editor)
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.mode == :insert
-      assert restored.keymap_scope == :agent
+      assert restored.keymap_scope == :editor
       assert restored.buffers.active == buf_b
+    end
+
+    test "restores agent scope context correctly" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      state = make_state(buffer: buf_a)
+
+      # Agent scope: surface_module is AgentView, agent state is in surface_state
+      state_b = make_state(buffer: buf_b, keymap_scope: :agent)
+      ctx = EditorState.snapshot_tab_context(state_b)
+
+      assert ctx.surface_module == Minga.Surface.AgentView
+      assert %AgentViewState{} = ctx.surface_state
+
+      restored = EditorState.restore_tab_context(state, ctx)
+      assert restored.keymap_scope == :agent
+      assert restored.surface_module == Minga.Surface.AgentView
     end
 
     test "restores legacy context with agent field (no surface_state)" do
@@ -73,10 +105,12 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       state = make_state(buffer: buf_a)
 
-      # Legacy context: has agent but no surface_state
+      # Legacy context: has agent but no surface_state.
+      # The migration converts this into a canonical context with an
+      # AgentView surface state.
       ctx = %{
         mode: :insert,
-        mode_state: :some_state,
+        mode_state: Minga.Mode.initial_state(),
         keymap_scope: :agent,
         active_buffer: buf_b,
         active_buffer_index: 1,
@@ -84,12 +118,32 @@ defmodule Minga.Editor.State.SnapshotTest do
       }
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.mode == :insert
-      assert restored.mode_state == :some_state
       assert restored.keymap_scope == :agent
+      assert restored.surface_module == Minga.Surface.AgentView
+      # Agent state is synced back from the surface state
+      assert restored.agent.status == :thinking
+    end
+
+    test "restores legacy editor context with mode and buffer (no surface_state)" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+
+      state = make_state(buffer: buf_a)
+
+      # Legacy editor context: has per-field snapshots but no surface_state
+      ctx = %{
+        mode: :insert,
+        mode_state: Minga.Mode.initial_state(),
+        keymap_scope: :editor,
+        active_buffer: buf_b,
+        active_buffer_index: 1
+      }
+
+      restored = EditorState.restore_tab_context(state, ctx)
+      assert restored.mode == :insert
+      assert restored.keymap_scope == :editor
       assert restored.buffers.active == buf_b
       assert restored.buffers.active_index == 1
-      assert restored.agent.status == :thinking
     end
 
     test "handles empty context gracefully" do
@@ -126,15 +180,17 @@ defmodule Minga.Editor.State.SnapshotTest do
       # Switch to tab b
       switched = EditorState.switch_tab(state, tab_b.id)
 
-      # Should have restored tab b's context
+      # Should have restored tab b's context (mode lives in surface_state.editing)
       assert switched.mode == :insert
       assert switched.buffers.active == buf_b
       assert switched.tab_bar.active_id == tab_b.id
 
-      # Tab a should have been snapshotted
+      # Tab a should have been snapshotted as a canonical context
       saved_a = TabBar.get(switched.tab_bar, tab_a.id)
-      assert saved_a.context.mode == :normal
-      assert saved_a.context.active_buffer == buf_a
+      assert saved_a.context.keymap_scope == :editor
+      assert %BufferViewState{} = saved_a.context.surface_state
+      assert saved_a.context.surface_state.editing.mode == :normal
+      assert saved_a.context.surface_state.buffers.active == buf_a
     end
 
     test "switching to the current tab is a no-op" do

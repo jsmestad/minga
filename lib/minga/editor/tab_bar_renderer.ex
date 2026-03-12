@@ -272,12 +272,23 @@ defmodule Minga.Editor.TabBarRenderer do
   defp tab_label(%Tab{label: label}), do: label
 
   @spec tab_dirty_marker(Tab.t(), map()) :: String.t()
-  defp tab_dirty_marker(%Tab{kind: :file, context: %{active_buffer: buf}}, _colors)
-       when is_pid(buf) do
-    if Process.alive?(buf) and BufferServer.dirty?(buf), do: " ●", else: ""
+  defp tab_dirty_marker(%Tab{kind: :file} = tab, _colors) do
+    buf = tab_active_buffer(tab)
+
+    if is_pid(buf) and Process.alive?(buf) and BufferServer.dirty?(buf), do: " ●", else: ""
   end
 
   defp tab_dirty_marker(_, _), do: ""
+
+  alias Minga.Surface.BufferView.State, as: BufferViewState
+
+  @spec tab_active_buffer(Tab.t()) :: pid() | nil
+  defp tab_active_buffer(%Tab{
+         context: %{surface_state: %BufferViewState{buffers: %{active: buf}}}
+       }),
+       do: buf
+
+  defp tab_active_buffer(_), do: nil
 
   @spec tab_bar_colors(Theme.t()) :: map()
   defp tab_bar_colors(%Theme{tab_bar: %Theme.TabBar{} = tb}), do: Map.from_struct(tb)

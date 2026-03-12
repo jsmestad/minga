@@ -38,6 +38,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Viewport
   alias Minga.Input.TextField
   alias Minga.Input.Vim
@@ -227,11 +228,11 @@ defmodule Minga.Agent.View.Renderer do
   @spec cursor_position(state()) :: {non_neg_integer(), non_neg_integer()}
   def cursor_position(state) do
     rows = state.viewport.rows
+    panel = AgentAccess.panel(state)
 
-    if state.agent.panel.input_focused do
-      panel = state.agent.panel
+    if panel.input_focused do
       cols = state.viewport.cols
-      chat_width_pct = state.agentic.chat_width_pct
+      chat_width_pct = AgentAccess.agentic(state).chat_width_pct
       chat_width = max(div(cols * chat_width_pct, 100), 20)
       inner_width = input_inner_width(chat_width)
 
@@ -264,13 +265,15 @@ defmodule Minga.Agent.View.Renderer do
 
   @spec extract_input(state()) :: RenderInput.t()
   defp extract_input(state) do
-    agent = state.agent
-    panel = agent.panel
+    agent = AgentAccess.agent(state)
+    panel = AgentAccess.panel(state)
+    session = AgentAccess.session(state)
+    agentic = AgentAccess.agentic(state)
 
     messages =
-      if agent.session do
+      if session do
         try do
-          Session.messages(agent.session)
+          Session.messages(session)
         catch
           :exit, _ -> []
         end
@@ -279,9 +282,9 @@ defmodule Minga.Agent.View.Renderer do
       end
 
     usage =
-      if agent.session do
+      if session do
         try do
-          Session.usage(agent.session)
+          Session.usage(session)
         catch
           :exit, _ -> empty_usage()
         end
@@ -293,18 +296,18 @@ defmodule Minga.Agent.View.Renderer do
     # When pinned, we ask for the tail of the buffer by passing a large
     # offset; render_snapshot clamps internally.
     preview_scroll =
-      if state.agentic.preview.scroll.pinned do
+      if agentic.preview.scroll.pinned do
         # Large value that render_snapshot will clamp to the real bottom.
         999_999
       else
-        state.agentic.preview.scroll.offset
+        agentic.preview.scroll.offset
       end
 
     rows = state.viewport.rows
     cols = state.viewport.cols
-    pct = state.agentic.chat_width_pct
+    pct = agentic.chat_width_pct
     chat_w = max(div(cols * pct, 100), 20)
-    input_h = compute_input_height(state.agent.panel.input.lines, input_inner_width(chat_w))
+    input_h = compute_input_height(panel.input.lines, input_inner_width(chat_w))
     content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
 
     buffer_snapshot =
@@ -338,22 +341,22 @@ defmodule Minga.Agent.View.Renderer do
         pasted_blocks: panel.pasted_blocks
       },
       agentic: %{
-        chat_width_pct: state.agentic.chat_width_pct,
-        help_visible: state.agentic.help_visible,
-        focus: state.agentic.focus,
-        search: state.agentic.search,
-        toast: state.agentic.toast
+        chat_width_pct: agentic.chat_width_pct,
+        help_visible: agentic.help_visible,
+        focus: agentic.focus,
+        search: agentic.search,
+        toast: agentic.toast
       },
       messages: messages,
       usage: usage,
-      preview: state.agentic.preview,
+      preview: agentic.preview,
       buffer_snapshot: buffer_snapshot,
       highlight: highlight,
       mode: state.mode,
       mode_state: state.mode_state,
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
-      pending_approval: state.agent.pending_approval,
+      pending_approval: agent.pending_approval,
       session_title: session_title(messages),
       lsp_servers: safe_lsp_servers()
     }

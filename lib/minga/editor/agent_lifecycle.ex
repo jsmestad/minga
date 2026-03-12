@@ -18,6 +18,7 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Surface.AgentView
@@ -32,10 +33,16 @@ defmodule Minga.Editor.AgentLifecycle do
   Also loads auto-context if configured. Called once the port is ready.
   """
   @spec maybe_start_session(state()) :: state()
-  def maybe_start_session(%{surface_module: AgentView, agent: %{session: nil}} = state) do
-    state = Commands.Agent.ensure_agent_session(state)
-    cli_flags = Minga.CLI.startup_flags()
-    maybe_load_auto_context(state, cli_flags)
+  def maybe_start_session(%{surface_module: AgentView} = state) do
+    agent = AgentAccess.agent(state)
+
+    if agent.session == nil do
+      state = Commands.Agent.ensure_agent_session(state)
+      cli_flags = Minga.CLI.startup_flags()
+      maybe_load_auto_context(state, cli_flags)
+    else
+      state
+    end
   rescue
     e ->
       Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
@@ -54,7 +61,7 @@ defmodule Minga.Editor.AgentLifecycle do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
     agent_surface_active = state.surface_module == AgentView
-    preview_empty = state.agentic.preview.content == :empty
+    preview_empty = AgentAccess.agentic(state).preview.content == :empty
 
     if agent_surface_active and preview_empty and auto_context and not cli_flags.no_context do
       content = BufferServer.content(buffer_pid)
@@ -70,20 +77,23 @@ defmodule Minga.Editor.AgentLifecycle do
   Called as a surface effect when the agent view receives new messages.
   """
   @spec sync_buffer(state()) :: state()
-  def sync_buffer(%{agent: %{buffer: buf, session: session}} = state)
-      when is_pid(buf) and is_pid(session) do
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
+  def sync_buffer(state) do
+    agent = AgentAccess.agent(state)
 
-    AgentBufferSync.sync(buf, messages)
-    state
+    if is_pid(agent.buffer) and is_pid(agent.session) do
+      messages =
+        try do
+          AgentSession.messages(agent.session)
+        catch
+          :exit, _ -> []
+        end
+
+      AgentBufferSync.sync(agent.buffer, messages)
+      state
+    else
+      state
+    end
   end
-
-  def sync_buffer(state), do: state
 
   @doc """
   Updates the active agent tab's label to the first user prompt (truncated).
@@ -91,24 +101,17 @@ defmodule Minga.Editor.AgentLifecycle do
   Only updates if the current label is the default "New Agent" or "minga".
   """
   @spec maybe_update_tab_label(state()) :: state()
-  def maybe_update_tab_label(
-        %{tab_bar: %{active_id: active_id} = tb, agent: %{session: session}} = state
-      )
-      when is_pid(session) do
-    case TabBar.active(tb) do
-      %{kind: :agent, label: label} when is_binary(label) ->
-        if default_agent_label?(label) do
-          update_tab_from_session(state, tb, active_id, session)
-        else
-          state
-        end
+  def maybe_update_tab_label(%{tab_bar: %{active_id: active_id} = tb} = state) do
+    session = AgentAccess.session(state)
 
-      _other ->
-        state
+    with true <- is_pid(session),
+         %{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tb),
+         true <- default_agent_label?(label) do
+      update_tab_from_session(state, tb, active_id, session)
+    else
+      _ -> state
     end
   end
-
-  def maybe_update_tab_label(state), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
@@ -159,7 +162,7 @@ defmodule Minga.Editor.AgentLifecycle do
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    %{state | agentic: ViewState.update_preview(state.agentic, fun)}
+    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
   end
 
   @spec default_agent_label?(String.t()) :: boolean()

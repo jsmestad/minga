@@ -10,6 +10,7 @@ defmodule Minga.Picker.AgentModelSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Agent.Session
+  alias Minga.Editor.State.AgentAccess
 
   @impl true
   @spec title() :: String.t()
@@ -21,28 +22,27 @@ defmodule Minga.Picker.AgentModelSource do
 
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
-  def candidates(%{agent: %{session: session}}) when is_pid(session) do
-    case Session.get_available_models(session) do
-      {:ok, %{"models" => models}} when is_list(models) ->
-        Enum.map(models, fn model ->
-          id = model["id"] || "unknown"
-          provider = model["provider"] || "unknown"
-          name = model["name"] || id
-          cost_info = format_cost(model["cost"])
+  def candidates(state) do
+    session = AgentAccess.session(state)
 
-          {
-            {provider, id},
-            "#{name}",
-            "#{provider} #{cost_info}"
-          }
-        end)
-
-      _ ->
-        []
+    with true <- is_pid(session),
+         {:ok, %{"models" => models}} when is_list(models) <-
+           Session.get_available_models(session) do
+      Enum.map(models, &format_model/1)
+    else
+      _ -> []
     end
   end
 
-  def candidates(_state), do: []
+  @spec format_model(map()) :: Minga.Picker.item()
+  defp format_model(model) do
+    id = model["id"] || "unknown"
+    provider = model["provider"] || "unknown"
+    name = model["name"] || id
+    cost_info = format_cost(model["cost"])
+
+    {{provider, id}, "#{name}", "#{provider} #{cost_info}"}
+  end
 
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
