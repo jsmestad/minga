@@ -2,7 +2,7 @@ defmodule Minga.Agent.ChatRendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.ChatRenderer
-  alias Minga.Input.TextField
+
   alias Minga.Theme
 
   defp default_theme do
@@ -21,11 +21,7 @@ defmodule Minga.Agent.ChatRendererTest do
     %{
       messages: Keyword.get(opts, :messages, []),
       status: Keyword.get(opts, :status, :idle),
-      input:
-        TextField.from_parts(
-          Keyword.get(opts, :input_lines, [""]),
-          Keyword.get(opts, :input_cursor, {0, 0})
-        ),
+      input_lines: Keyword.get(opts, :input_lines, [""]),
       scroll: scroll,
       spinner_frame: 0,
       usage: %{input: 0, output: 0, cost: 0.0},
