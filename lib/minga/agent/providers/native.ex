@@ -313,7 +313,7 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp run_agent_loop(lctx, context) do
-    stream_opts = build_stream_opts(lctx.tools, lctx.thinking_level, lctx.max_tokens)
+    stream_opts = build_stream_opts(lctx.model, lctx.tools, lctx.thinking_level, lctx.max_tokens)
 
     # Emit pre-send token estimate so the context bar updates before the API call
     emit_context_usage(lctx, context)
@@ -582,21 +582,50 @@ defmodule Minga.Agent.Providers.Native do
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
-  @spec build_stream_opts([ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
-  defp build_stream_opts(tools, thinking_level, max_tokens) do
+  @spec build_stream_opts(String.t(), [ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
+  defp build_stream_opts(model, tools, thinking_level, max_tokens) do
     opts = [tools: tools, max_tokens: max_tokens]
+
+    # Enable Anthropic prompt caching when the model is Anthropic
+    opts =
+      if anthropic_model?(model) and prompt_cache_enabled?() do
+        Keyword.put(opts, :provider_options, anthropic_prompt_cache: true)
+      else
+        opts
+      end
 
     case Map.get(@thinking_levels, thinking_level) do
       budget when is_integer(budget) and budget > 0 ->
-        Keyword.put(opts, :provider_options,
-          additional_model_request_fields: %{
-            thinking: %{type: "enabled", budget_tokens: budget}
-          }
-        )
+        # Merge thinking config into existing provider_options
+        existing = Keyword.get(opts, :provider_options, [])
+
+        merged =
+          Keyword.merge(existing,
+            additional_model_request_fields: %{
+              thinking: %{type: "enabled", budget_tokens: budget}
+            }
+          )
+
+        Keyword.put(opts, :provider_options, merged)
 
       _ ->
         opts
     end
+  end
+
+  @spec anthropic_model?(String.t()) :: boolean()
+  defp anthropic_model?(model) do
+    String.starts_with?(model, "anthropic:") or
+      not String.contains?(model, ":")
+  end
+
+  @spec prompt_cache_enabled?() :: boolean()
+  defp prompt_cache_enabled? do
+    Options.get(:agent_prompt_cache)
+  rescue
+    _ -> true
+  catch
+    :exit, _ -> true
   end
 
   @spec build_system_prompt(String.t()) :: String.t()
