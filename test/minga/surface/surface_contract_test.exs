@@ -417,10 +417,12 @@ defmodule Minga.Surface.ContractTest do
     end
 
     test "cursor is beam when input is focused" do
+      {:ok, prompt_buf} = Minga.Buffer.Server.start_link(content: "")
+
       av = %{
         build_av_state()
         | agent: %AgentState{
-            panel: %{PanelState.new() | input_focused: true}
+            panel: %{PanelState.new() | input_focused: true, prompt_buffer: prompt_buf}
           }
       }
 

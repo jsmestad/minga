@@ -31,7 +31,7 @@ defmodule Minga.Input.Scoped do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
-  alias Minga.Input.Vim
+
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
   alias Minga.Surface.AgentView
@@ -132,21 +132,15 @@ defmodule Minga.Input.Scoped do
     end
   end
 
-  defp handle_focused_input(state, panel, cp, mods) do
-    # Try Vim first for ALL modes (handles arrow keys in insert, all keys
-    # in normal/visual/operator-pending). Falls through to scope trie for
-    # surface-specific keys (self-insert, Enter, Backspace, Ctrl combos).
-    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
-      {:handled, new_vim, new_tf} ->
-        new_panel = %{panel | vim: new_vim, input: new_tf}
-        {:handled, AgentAccess.update_agent(state, fn agent -> %{agent | panel: new_panel} end)}
-
-      :not_handled ->
-        if PanelState.input_mode(panel) == :insert do
-          resolve_agent_key(state, :insert, cp, mods)
-        else
-          {:handled, AgentPanel.dispatch_vim_key(state, cp, mods)}
-        end
+  defp handle_focused_input(state, _panel, cp, mods) do
+    if state.mode == :insert do
+      # In insert mode, fall through to scope trie for self-insert,
+      # Enter, Backspace, Ctrl combos, etc.
+      resolve_agent_key(state, :insert, cp, mods)
+    else
+      # Normal, visual, operator-pending: route through Mode FSM
+      # targeting the prompt buffer.
+      {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
     end
   end
 
@@ -257,10 +251,10 @@ defmodule Minga.Input.Scoped do
   # Checks if the cursor is within the lines of an expanded paste block.
   # Used by handle_agent_key for Tab handling on paste placeholder lines.
   @spec cursor_on_expanded_block?(PanelState.t()) :: boolean()
-  defp cursor_on_expanded_block?(%{
-         input: %{cursor: {cursor_line, _}, lines: lines},
-         pasted_blocks: blocks
-       }) do
+  defp cursor_on_expanded_block?(%PanelState{pasted_blocks: blocks} = panel) do
+    {cursor_line, _} = PanelState.input_cursor(panel)
+    lines = PanelState.input_lines(panel)
+
     blocks
     |> Enum.filter(& &1.expanded)
     |> Enum.any?(&expanded_block_spans_cursor?(&1, lines, cursor_line))

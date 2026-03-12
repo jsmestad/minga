@@ -2,19 +2,19 @@ defmodule Minga.Agent.PanelState do
   @moduledoc """
   State for the agent chat panel UI.
 
-  Tracks visibility, scroll position, multi-line input with cursor,
+  Tracks visibility, scroll position, prompt editing (via Buffer.Server),
   prompt history, spinner animation, and other UI-only concerns.
   Stored in `Editor.State` and updated by agent event handlers.
 
-  Text editing is delegated to `Minga.Input.TextField`, which provides
-  the core insert/delete/cursor operations. PanelState adds domain
-  concerns on top: paste block collapsing, prompt history, mention
-  completion, and input focus tracking.
+  The prompt is backed by a `Buffer.Server` process. All vim editing
+  (motions, operators, visual mode, text objects, undo/redo) is handled
+  by the standard Mode FSM routed through the prompt buffer, not by a
+  reimplemented vim grammar. PanelState adds domain concerns on top:
+  paste block collapsing, prompt history, mention completion, and input
+  focus tracking.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Input.TextField
-  alias Minga.Input.Vim
   alias Minga.Scroll
 
   @typedoc "Thinking level for models that support extended reasoning."
@@ -30,8 +30,6 @@ defmodule Minga.Agent.PanelState do
   @type t :: %__MODULE__{
           visible: boolean(),
           scroll: Scroll.t(),
-          input: TextField.t(),
-          vim: Vim.t(),
           prompt_buffer: pid() | nil,
           prompt_history: [String.t()],
           history_index: integer(),
@@ -57,8 +55,6 @@ defmodule Minga.Agent.PanelState do
   @enforce_keys []
   defstruct visible: false,
             scroll: %Scroll{},
-            input: %TextField{},
-            vim: %Vim{},
             prompt_buffer: nil,
             prompt_history: [],
             history_index: -1,
@@ -75,6 +71,8 @@ defmodule Minga.Agent.PanelState do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  # ── Prompt buffer lifecycle ─────────────────────────────────────────────
+
   @doc """
   Ensures a prompt Buffer.Server is running. Starts one if `prompt_buffer`
   is nil or the process is dead.
@@ -86,59 +84,72 @@ defmodule Minga.Agent.PanelState do
   @spec ensure_prompt_buffer(t()) :: t()
   def ensure_prompt_buffer(%__MODULE__{prompt_buffer: pid} = state)
       when is_pid(pid) do
-    if Process.alive?(pid), do: state, else: start_prompt_buffer(state)
+    if Process.alive?(pid), do: state, else: start_prompt_buffer(state, "")
   end
 
-  def ensure_prompt_buffer(%__MODULE__{} = state), do: start_prompt_buffer(state)
+  def ensure_prompt_buffer(%__MODULE__{} = state), do: start_prompt_buffer(state, "")
 
-  @doc """
-  Returns the prompt text. Reads from the prompt buffer if available,
-  falls back to TextField. Paste placeholders are substituted in both cases.
-  """
-  @spec prompt_text(t()) :: String.t()
-  def prompt_text(%__MODULE__{prompt_buffer: pid, pasted_blocks: blocks} = state)
-      when is_pid(pid) do
-    if Process.alive?(pid) do
-      content = BufferServer.content(pid)
-      substitute_placeholders(content, blocks)
-    else
-      input_text(state)
-    end
-  end
-
-  def prompt_text(%__MODULE__{} = state), do: input_text(state)
-
-  @doc """
-  Syncs the TextField content to the prompt buffer. Call this after
-  any TextField mutation to keep the buffer in sync during the migration.
-  """
-  @spec sync_to_prompt_buffer(t()) :: t()
-  def sync_to_prompt_buffer(%__MODULE__{prompt_buffer: pid, input: tf} = state)
-      when is_pid(pid) do
-    if Process.alive?(pid) do
-      content = Enum.join(tf.lines, "\n")
-      current = BufferServer.content(pid)
-
-      if content != current do
-        BufferServer.replace_content(pid, content)
-      end
-    end
-
-    state
-  end
-
-  def sync_to_prompt_buffer(%__MODULE__{} = state), do: state
-
-  defp start_prompt_buffer(%__MODULE__{} = state) do
-    content = Enum.join(state.input.lines, "\n")
+  defp start_prompt_buffer(%__MODULE__{} = state, content) do
     {:ok, pid} = BufferServer.start_link(content: content)
     %{state | prompt_buffer: pid}
   end
 
-  defp substitute_placeholders(content, blocks) do
-    String.split(content, "\n")
-    |> Enum.map_join("\n", fn line -> substitute_placeholder(line, blocks) end)
+  # ── Accessors ───────────────────────────────────────────────────────────
+
+  @doc """
+  Returns the prompt text with paste placeholders substituted.
+
+  This is the text submitted to the LLM. Placeholder tokens are replaced
+  with the full paste content from `pasted_blocks`.
+  """
+  @spec prompt_text(t()) :: String.t()
+  def prompt_text(%__MODULE__{prompt_buffer: pid, pasted_blocks: blocks})
+      when is_pid(pid) do
+    content = BufferServer.content(pid)
+    substitute_placeholders(content, blocks)
   end
+
+  def prompt_text(%__MODULE__{}), do: ""
+
+  @doc "Returns the raw input text (with placeholders, not substituted)."
+  @spec input_text(t()) :: String.t()
+  def input_text(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
+    BufferServer.content(pid)
+  end
+
+  def input_text(%__MODULE__{}), do: ""
+
+  @doc "Returns the input lines as a list of strings."
+  @spec input_lines(t()) :: [String.t()]
+  def input_lines(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
+    BufferServer.content(pid) |> String.split("\n")
+  end
+
+  def input_lines(%__MODULE__{}), do: [""]
+
+  @doc "Returns the input cursor position as `{line, col}`."
+  @spec input_cursor(t()) :: {non_neg_integer(), non_neg_integer()}
+  def input_cursor(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
+    BufferServer.cursor(pid)
+  end
+
+  def input_cursor(%__MODULE__{}), do: {0, 0}
+
+  @doc "Returns the number of input lines."
+  @spec input_line_count(t()) :: pos_integer()
+  def input_line_count(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
+    BufferServer.line_count(pid)
+  end
+
+  def input_line_count(%__MODULE__{}), do: 1
+
+  @doc "Returns true if the input is empty (single empty line)."
+  @spec input_empty?(t()) :: boolean()
+  def input_empty?(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
+    BufferServer.content(pid) == ""
+  end
+
+  def input_empty?(%__MODULE__{}), do: true
 
   @doc "Toggles panel visibility."
   @spec toggle(t()) :: t()
@@ -152,32 +163,30 @@ defmodule Minga.Agent.PanelState do
     %{state | spinner_frame: state.spinner_frame + 1}
   end
 
-  # ── Input editing (delegates to TextField) ──────────────────────────────────
-
-  @doc """
-  Returns the full input text by joining lines with newlines.
-
-  Paste placeholder tokens are substituted with the full text from
-  their corresponding pasted_blocks entry, so the returned string
-  contains the complete content the user intends to submit.
-  """
-  @spec input_text(t()) :: String.t()
-  def input_text(%__MODULE__{input: tf, pasted_blocks: blocks}) do
-    Enum.map_join(tf.lines, "\n", fn line -> substitute_placeholder(line, blocks) end)
-  end
+  # ── Input editing (delegates to Buffer.Server) ──────────────────────────
 
   @doc "Inserts a character at the cursor position."
   @spec insert_char(t(), String.t()) :: t()
+  def insert_char(%__MODULE__{prompt_buffer: pid} = state, char) when is_pid(pid) do
+    BufferServer.insert_text(pid, char)
+    %{state | history_index: -1}
+  end
+
   def insert_char(%__MODULE__{} = state, char) do
-    %{state | input: TextField.insert_char(state.input, char), history_index: -1}
-    |> sync_to_prompt_buffer()
+    state = ensure_prompt_buffer(state)
+    insert_char(state, char)
   end
 
   @doc "Inserts a newline at the cursor, splitting the current line."
   @spec insert_newline(t()) :: t()
+  def insert_newline(%__MODULE__{prompt_buffer: pid} = state) when is_pid(pid) do
+    BufferServer.insert_text(pid, "\n")
+    %{state | history_index: -1}
+  end
+
   def insert_newline(%__MODULE__{} = state) do
-    %{state | input: TextField.insert_newline(state.input), history_index: -1}
-    |> sync_to_prompt_buffer()
+    state = ensure_prompt_buffer(state)
+    insert_newline(state)
   end
 
   @doc """
@@ -187,9 +196,21 @@ defmodule Minga.Agent.PanelState do
   At the start of the first line, no-op.
   """
   @spec delete_char(t()) :: t()
+  def delete_char(%__MODULE__{prompt_buffer: pid} = state) when is_pid(pid) do
+    {line, col} = BufferServer.cursor(pid)
+
+    if line == 0 and col == 0 do
+      state
+    else
+      BufferServer.delete_before(pid)
+    end
+
+    %{state | history_index: -1}
+  end
+
   def delete_char(%__MODULE__{} = state) do
-    %{state | input: TextField.delete_backward(state.input), history_index: -1}
-    |> sync_to_prompt_buffer()
+    state = ensure_prompt_buffer(state)
+    delete_char(state)
   end
 
   @doc "Clears the input (after submission). Saves current text to history first."
@@ -197,29 +218,45 @@ defmodule Minga.Agent.PanelState do
   def clear_input(%__MODULE__{} = state) do
     state = save_to_history(state)
 
-    %{state | input: TextField.clear(state.input), history_index: -1, pasted_blocks: []}
-    |> sync_to_prompt_buffer()
+    if is_pid(state.prompt_buffer) do
+      BufferServer.replace_content(state.prompt_buffer, "")
+    end
+
+    %{state | history_index: -1, pasted_blocks: []}
   end
 
-  # ── Cursor movement (delegates to TextField) ──────────────────────────────
+  # ── Cursor movement ────────────────────────────────────────────────────
 
   @doc "Moves cursor up within the input. Returns `:at_top` if already on the first line."
   @spec move_cursor_up(t()) :: t() | :at_top
-  def move_cursor_up(%__MODULE__{} = state) do
-    case TextField.move_up(state.input) do
-      :at_top -> :at_top
-      tf -> %{state | input: tf}
+  def move_cursor_up(%__MODULE__{prompt_buffer: pid} = state) when is_pid(pid) do
+    {line, _col} = BufferServer.cursor(pid)
+
+    if line == 0 do
+      :at_top
+    else
+      BufferServer.move_cursor(pid, :up)
+      state
     end
   end
 
+  def move_cursor_up(%__MODULE__{}), do: :at_top
+
   @doc "Moves cursor down within the input. Returns `:at_bottom` if already on the last line."
   @spec move_cursor_down(t()) :: t() | :at_bottom
-  def move_cursor_down(%__MODULE__{} = state) do
-    case TextField.move_down(state.input) do
-      :at_bottom -> :at_bottom
-      tf -> %{state | input: tf}
+  def move_cursor_down(%__MODULE__{prompt_buffer: pid} = state) when is_pid(pid) do
+    {line, _col} = BufferServer.cursor(pid)
+    total = BufferServer.line_count(pid)
+
+    if line >= total - 1 do
+      :at_bottom
+    else
+      BufferServer.move_cursor(pid, :down)
+      state
     end
   end
+
+  def move_cursor_down(%__MODULE__{}), do: :at_bottom
 
   # ── Paste handling ────────────────────────────────────────────────────────
 
@@ -227,30 +264,31 @@ defmodule Minga.Agent.PanelState do
   Inserts pasted text into the input.
 
   For short pastes (fewer than #{@paste_collapse_threshold} lines), the text is
-  inserted directly into the input as if typed. For longer pastes, the text is
+  inserted directly into the buffer. For longer pastes, the text is
   stored in `pasted_blocks` and a placeholder token is inserted at the cursor
   position. The placeholder renders as a compact indicator (e.g. "󰆏 [pasted 23 lines]")
-  but `input_text/1` substitutes the full content when the prompt is submitted.
+  but `prompt_text/1` substitutes the full content when the prompt is submitted.
   """
   @spec insert_paste(t(), String.t()) :: t()
   def insert_paste(%__MODULE__{} = state, ""), do: state
 
-  def insert_paste(%__MODULE__{} = state, text) do
+  def insert_paste(%__MODULE__{prompt_buffer: pid} = state, text) when is_pid(pid) do
     # Strip NUL bytes from paste to prevent fake placeholder injection
     clean_text = String.replace(text, "\0", "")
-
     lines = String.split(clean_text, "\n")
     line_count = length(lines)
 
-    result =
-      if line_count < @paste_collapse_threshold do
-        # Short paste: insert directly via TextField
-        %{state | input: TextField.insert_text(state.input, clean_text), history_index: -1}
-      else
-        insert_collapsed_paste(state, clean_text)
-      end
+    if line_count < @paste_collapse_threshold do
+      BufferServer.insert_text(pid, clean_text)
+      %{state | history_index: -1}
+    else
+      insert_collapsed_paste(state, clean_text)
+    end
+  end
 
-    sync_to_prompt_buffer(result)
+  def insert_paste(%__MODULE__{} = state, text) do
+    state = ensure_prompt_buffer(state)
+    insert_paste(state, text)
   end
 
   @doc """
@@ -263,9 +301,10 @@ defmodule Minga.Agent.PanelState do
   a paste placeholder or within an expanded block.
   """
   @spec toggle_paste_expand(t()) :: t()
-  def toggle_paste_expand(%__MODULE__{input: tf} = state) do
-    {cursor_line, _} = tf.cursor
-    current_line = Enum.at(tf.lines, cursor_line)
+  def toggle_paste_expand(%__MODULE__{prompt_buffer: pid} = state) when is_pid(pid) do
+    {cursor_line, _} = BufferServer.cursor(pid)
+    lines = input_lines(state)
+    current_line = Enum.at(lines, cursor_line)
 
     case parse_placeholder(current_line) do
       {:ok, block_index} ->
@@ -279,6 +318,8 @@ defmodule Minga.Agent.PanelState do
         end
     end
   end
+
+  def toggle_paste_expand(%__MODULE__{} = state), do: state
 
   @doc """
   Returns true if the given line is a paste placeholder token.
@@ -314,10 +355,8 @@ defmodule Minga.Agent.PanelState do
 
   @doc "Saves the current input to prompt history (if non-empty)."
   @spec save_to_history(t()) :: t()
-  def save_to_history(%__MODULE__{input: %TextField{lines: [""]}} = state), do: state
-
   def save_to_history(%__MODULE__{} = state) do
-    text = input_text(state)
+    text = prompt_text(state)
 
     if String.trim(text) == "" do
       state
@@ -330,30 +369,38 @@ defmodule Minga.Agent.PanelState do
   @spec history_prev(t()) :: t()
   def history_prev(%__MODULE__{prompt_history: []} = state), do: state
 
-  def history_prev(%__MODULE__{history_index: idx, prompt_history: history} = state) do
+  def history_prev(
+        %__MODULE__{prompt_buffer: pid, history_index: idx, prompt_history: history} = state
+      )
+      when is_pid(pid) do
     new_idx = min(idx + 1, length(history) - 1)
     text = Enum.at(history, new_idx)
-
-    %{state | input: TextField.new(text), history_index: new_idx}
-    |> sync_to_prompt_buffer()
+    BufferServer.replace_content(pid, text)
+    %{state | history_index: new_idx}
   end
+
+  def history_prev(%__MODULE__{} = state), do: state
 
   @doc "Recalls the next (more recent) prompt from history."
   @spec history_next(t()) :: t()
   def history_next(%__MODULE__{history_index: -1} = state), do: state
 
-  def history_next(%__MODULE__{history_index: 0} = state) do
-    %{state | input: TextField.new(), history_index: -1}
-    |> sync_to_prompt_buffer()
+  def history_next(%__MODULE__{prompt_buffer: pid, history_index: 0} = state) when is_pid(pid) do
+    BufferServer.replace_content(pid, "")
+    %{state | history_index: -1}
   end
 
-  def history_next(%__MODULE__{history_index: idx, prompt_history: history} = state) do
+  def history_next(
+        %__MODULE__{prompt_buffer: pid, history_index: idx, prompt_history: history} = state
+      )
+      when is_pid(pid) do
     new_idx = idx - 1
     text = Enum.at(history, new_idx)
-
-    %{state | input: TextField.new(text), history_index: new_idx}
-    |> sync_to_prompt_buffer()
+    BufferServer.replace_content(pid, text)
+    %{state | history_index: new_idx}
   end
+
+  def history_next(%__MODULE__{} = state), do: state
 
   # ── Scrolling (delegates to Minga.Scroll) ────────────────────────────────
 
@@ -391,37 +438,16 @@ defmodule Minga.Agent.PanelState do
     %{state | scroll: Scroll.pin_to_bottom(state.scroll)}
   end
 
-  @doc "Returns the current input vim mode, derived from the Vim state."
-  @spec input_mode(t()) :: input_mode()
-  def input_mode(%__MODULE__{vim: vim}), do: Vim.mode(vim)
-
-  @doc "Sets the input focus state. Entering focus starts in insert mode; leaving resets vim state."
+  @doc "Sets the input focus state. Entering focus ensures the prompt buffer exists."
   @spec set_input_focused(t(), boolean()) :: t()
   def set_input_focused(%__MODULE__{} = state, true) do
     state = ensure_prompt_buffer(state)
-    %{state | input_focused: true, vim: Vim.enter_insert(state.vim)}
+    %{state | input_focused: true}
   end
 
   def set_input_focused(%__MODULE__{} = state, false) do
-    %{state | input_focused: false, vim: Vim.enter_insert(state.vim)}
+    %{state | input_focused: false}
   end
-
-  @doc "Returns the number of input lines."
-  @spec input_line_count(t()) :: pos_integer()
-  def input_line_count(%__MODULE__{input: tf}), do: TextField.line_count(tf)
-
-  @doc "Returns the input lines as a list of strings."
-  @spec input_lines(t()) :: [String.t()]
-  def input_lines(%__MODULE__{input: tf}), do: tf.lines
-
-  @doc "Returns the input cursor position as `{line, col}`."
-  @spec input_cursor(t()) :: {non_neg_integer(), non_neg_integer()}
-  def input_cursor(%__MODULE__{input: tf}), do: tf.cursor
-
-  @doc "Returns true if the input is empty (single empty line)."
-  @spec input_empty?(t()) :: boolean()
-  def input_empty?(%__MODULE__{input: %TextField{lines: [""]}}), do: true
-  def input_empty?(%__MODULE__{}), do: false
 
   @doc """
   Clears the chat display without affecting conversation history.
@@ -437,11 +463,14 @@ defmodule Minga.Agent.PanelState do
   # ── Private: paste helpers ───────────────────────────────────────────────
 
   # Creates a collapsed paste block and inserts a placeholder token at the
-  # cursor position.
+  # cursor position in the buffer.
   @spec insert_collapsed_paste(t(), String.t()) :: t()
-  defp insert_collapsed_paste(%__MODULE__{input: tf, pasted_blocks: blocks} = state, text) do
-    {cursor_line, cursor_col} = tf.cursor
-    lines = tf.lines
+  defp insert_collapsed_paste(
+         %__MODULE__{prompt_buffer: pid, pasted_blocks: blocks} = state,
+         text
+       ) do
+    {cursor_line, cursor_col} = BufferServer.cursor(pid)
+    lines = input_lines(state)
 
     block_index = length(blocks)
     new_block = %{text: text, expanded: false}
@@ -450,8 +479,9 @@ defmodule Minga.Agent.PanelState do
     current = Enum.at(lines, cursor_line)
     {before, after_cursor} = String.split_at(current, cursor_col)
 
-    # Split into: before text, placeholder on its own line, after text
+    # Build new content with placeholder inserted
     new_lines = insert_placeholder_lines(lines, cursor_line, before, after_cursor, placeholder)
+    new_content = Enum.join(new_lines, "\n")
 
     # Position cursor on the line after the placeholder
     placeholder_line_idx = Enum.find_index(new_lines, &(&1 == placeholder))
@@ -460,12 +490,10 @@ defmodule Minga.Agent.PanelState do
     new_cursor_col =
       if new_cursor_line > placeholder_line_idx, do: 0, else: String.length(placeholder)
 
-    %{
-      state
-      | input: TextField.from_parts(new_lines, {new_cursor_line, new_cursor_col}),
-        pasted_blocks: blocks ++ [new_block],
-        history_index: -1
-    }
+    BufferServer.replace_content(pid, new_content)
+    BufferServer.set_cursor(pid, {new_cursor_line, new_cursor_col})
+
+    %{state | pasted_blocks: blocks ++ [new_block], history_index: -1}
   end
 
   # Determines how to insert a placeholder into the line list based on
@@ -502,9 +530,9 @@ defmodule Minga.Agent.PanelState do
 
   # Expands a collapsed paste block: replaces the placeholder with actual text lines.
   @spec expand_block(t(), non_neg_integer()) :: t()
-  defp expand_block(%__MODULE__{input: tf, pasted_blocks: blocks} = state, block_index) do
-    {cursor_line, _} = tf.cursor
-    lines = tf.lines
+  defp expand_block(%__MODULE__{prompt_buffer: pid, pasted_blocks: blocks} = state, block_index) do
+    {cursor_line, _} = BufferServer.cursor(pid)
+    lines = input_lines(state)
     block = Enum.at(blocks, block_index)
     placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
     placeholder_line_idx = Enum.find_index(lines, &(&1 == placeholder))
@@ -523,11 +551,10 @@ defmodule Minga.Agent.PanelState do
       new_cursor_line =
         if cursor_line > placeholder_line_idx, do: cursor_line + expansion, else: cursor_line
 
-      %{
-        state
-        | input: TextField.from_parts(new_lines, {new_cursor_line, 0}),
-          pasted_blocks: new_blocks
-      }
+      BufferServer.replace_content(pid, Enum.join(new_lines, "\n"))
+      BufferServer.set_cursor(pid, {new_cursor_line, 0})
+
+      %{state | pasted_blocks: new_blocks}
     else
       state
     end
@@ -535,9 +562,9 @@ defmodule Minga.Agent.PanelState do
 
   # Collapses an expanded paste block: replaces text lines with the placeholder.
   @spec collapse_block(t(), non_neg_integer()) :: t()
-  defp collapse_block(%__MODULE__{input: tf, pasted_blocks: blocks} = state, block_index) do
-    {cursor_line, _} = tf.cursor
-    lines = tf.lines
+  defp collapse_block(%__MODULE__{prompt_buffer: pid, pasted_blocks: blocks} = state, block_index) do
+    {cursor_line, _} = BufferServer.cursor(pid)
+    lines = input_lines(state)
     block = Enum.at(blocks, block_index)
     text_lines = String.split(block.text, "\n")
     text_line_count = length(text_lines)
@@ -556,11 +583,10 @@ defmodule Minga.Agent.PanelState do
       contraction = text_line_count - 1
       new_cursor_line = collapse_cursor_line(cursor_line, start_idx, text_line_count, contraction)
 
-      %{
-        state
-        | input: TextField.from_parts(new_lines, {new_cursor_line, 0}),
-          pasted_blocks: new_blocks
-      }
+      BufferServer.replace_content(pid, Enum.join(new_lines, "\n"))
+      BufferServer.set_cursor(pid, {new_cursor_line, 0})
+
+      %{state | pasted_blocks: new_blocks}
     else
       state
     end
@@ -587,12 +613,14 @@ defmodule Minga.Agent.PanelState do
   # Finds which expanded paste block (if any) contains the given cursor line.
   @spec find_expanded_block_at_cursor(t(), non_neg_integer()) ::
           {:ok, non_neg_integer()} | :not_found
-  defp find_expanded_block_at_cursor(%__MODULE__{input: tf, pasted_blocks: blocks}, cursor_line) do
-    blocks
+  defp find_expanded_block_at_cursor(%__MODULE__{} = state, cursor_line) do
+    lines = input_lines(state)
+
+    state.pasted_blocks
     |> Enum.with_index()
     |> Enum.find_value(:not_found, fn {block, index} ->
       if block.expanded do
-        expanded_block_contains_cursor?(tf.lines, block, index, cursor_line)
+        expanded_block_contains_cursor?(lines, block, index, cursor_line)
       end
     end)
   end
@@ -616,15 +644,15 @@ defmodule Minga.Agent.PanelState do
 
   # Finds where an expanded block's text lines start in input lines.
   @spec find_expanded_block_start([String.t()], [String.t()]) :: non_neg_integer() | nil
-  defp find_expanded_block_start(input_lines, text_lines) do
+  defp find_expanded_block_start(input_lines_list, text_lines) do
     text_len = length(text_lines)
-    max_start = length(input_lines) - text_len
+    max_start = length(input_lines_list) - text_len
 
     if max_start < 0 do
       nil
     else
       Enum.find(0..max_start, fn start ->
-        Enum.slice(input_lines, start, text_len) == text_lines
+        Enum.slice(input_lines_list, start, text_len) == text_lines
       end)
     end
   end
@@ -642,6 +670,13 @@ defmodule Minga.Agent.PanelState do
       _ ->
         :not_placeholder
     end
+  end
+
+  # Substitutes paste placeholders in a multi-line string.
+  @spec substitute_placeholders(String.t(), [paste_block()]) :: String.t()
+  defp substitute_placeholders(content, blocks) do
+    String.split(content, "\n")
+    |> Enum.map_join("\n", fn line -> substitute_placeholder(line, blocks) end)
   end
 
   # Substitutes a paste placeholder in a line with the actual text.

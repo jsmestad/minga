@@ -3,12 +3,16 @@ defmodule Minga.Input.AgentPanel do
   Input handler for the agent side panel (editor scope, panel visible).
 
   When the agent panel is visible in editor scope, this handler
-  intercepts keys for the panel's input field (insert mode) and
-  navigation mode. In insert mode, it handles prompt editing (Enter,
-  Backspace, Ctrl combos, arrow keys, @-mention triggers). In nav
-  mode, it handles q/Escape (close panel), i (focus input), and
-  delegates everything else to the mode FSM with the agent buffer
-  swapped in for vim navigation of chat content.
+  intercepts keys for the panel's input field and navigation mode.
+
+  In insert mode, it handles prompt editing (Enter, Backspace, Ctrl
+  combos, arrow keys, @-mention triggers). In normal/visual/
+  operator-pending mode, it routes keys through the standard Mode FSM
+  by temporarily swapping the active buffer to the prompt buffer.
+
+  Navigation mode (panel visible but input not focused) delegates to
+  the mode FSM with the agent chat buffer for vim navigation of chat
+  content.
   """
 
   @behaviour Minga.Input.Handler
@@ -22,7 +26,6 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Input.Vim
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
 
@@ -59,19 +62,12 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    panel = AgentAccess.panel(state)
-
-    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
-      {:handled, new_vim, new_tf} ->
-        new_panel = %{panel | vim: new_vim, input: new_tf}
-        AgentAccess.update_agent(state, fn agent -> %{agent | panel: new_panel} end)
-
-      :not_handled ->
-        if PanelState.input_mode(panel) == :insert do
-          handle_panel_insert(state, cp, mods)
-        else
-          dispatch_vim_key(state, cp, mods)
-        end
+    if state.mode == :insert do
+      handle_panel_insert(state, cp, mods)
+    else
+      # Normal, visual, operator-pending: route through Mode FSM
+      # targeting the prompt buffer
+      dispatch_prompt_via_mode_fsm(state, cp, mods)
     end
   end
 
@@ -80,7 +76,8 @@ defmodule Minga.Input.AgentPanel do
   # Ctrl+Q: unfocus first, then forward the quit key
   defp handle_panel_insert(state, ?q, mods) when band(mods, @ctrl) != 0 do
     send(self(), {:minga_input, {:key_press, ?q, mods}})
-    AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+    state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+    %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
   end
 
   # Ctrl+S: save current buffer
@@ -98,7 +95,7 @@ defmodule Minga.Input.AgentPanel do
 
   # Ctrl+C: submit prompt if input has text, abort if agent is active
   defp handle_panel_insert(state, ?c, mods) when band(mods, @ctrl) != 0 do
-    if PanelState.input_text(AgentAccess.panel(state)) == "" do
+    if PanelState.prompt_text(AgentAccess.panel(state)) == "" do
       if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
         AgentCommands.abort_agent(state)
       else
@@ -124,9 +121,9 @@ defmodule Minga.Input.AgentPanel do
     AgentCommands.clear_chat_display(state)
   end
 
-  # Escape: switch to normal mode (vim-style)
+  # Escape: switch to normal mode via Mode FSM
   defp handle_panel_insert(state, 27, _mods) do
-    AgentCommands.input_to_normal(state)
+    dispatch_prompt_via_mode_fsm(state, 27, 0)
   end
 
   # Backspace
@@ -213,7 +210,8 @@ defmodule Minga.Input.AgentPanel do
   end
 
   defp panel_nav_key(state, ?i, _mods) do
-    {:panel, AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))}
+    state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
+    {:panel, %{state | mode: :insert, mode_state: Minga.Mode.initial_state()}}
   end
 
   defp panel_nav_key(_state, _cp, _mods), do: :delegate
@@ -221,31 +219,36 @@ defmodule Minga.Input.AgentPanel do
   # ── Shared helpers ──────────────────────────────────────────────────────
 
   @doc """
-  Routes a key through Vim.handle_key for non-insert panel modes.
+  Routes a key through the standard Mode FSM targeting the prompt buffer.
 
-  Tries the Vim module first (handles arrow keys, etc.). If not handled,
-  falls through to the agent scope trie for meta keys (Escape, Ctrl+C).
-  Called by both AgentPanel (editor scope side panel) and Input.Scoped
-  (agent scope normal mode).
+  Swaps the active buffer to the prompt buffer, runs the key through
+  the mode FSM (which handles all vim operations: motions, operators,
+  visual mode, text objects, undo/redo), then restores the original
+  active buffer.
+
+  If the Mode FSM transitions to insert mode, we leave the mode as
+  insert so that subsequent keys are handled by `handle_panel_insert`.
   """
-  @spec dispatch_vim_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+  @spec dispatch_prompt_via_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  def dispatch_vim_key(state, cp, mods) do
+  def dispatch_prompt_via_mode_fsm(state, cp, mods) do
     panel = AgentAccess.panel(state)
+    prompt_pid = panel.prompt_buffer
 
-    case Vim.handle_key(panel.vim, panel.input, cp, mods) do
-      {:handled, new_vim, new_tf} ->
-        new_panel = %{panel | vim: new_vim, input: new_tf}
-        AgentAccess.update_agent(state, fn agent -> %{agent | panel: new_panel} end)
+    if is_pid(prompt_pid) and Process.alive?(prompt_pid) do
+      real_active = state.buffers.active
+      state = put_in(state.buffers.active, prompt_pid)
+      state = Minga.Editor.do_handle_key(state, cp, mods)
+      put_in(state.buffers.active, real_active)
+    else
+      # No prompt buffer, try scope bindings
+      key = {cp, mods}
 
-      :not_handled ->
-        key = {cp, mods}
-
-        case Scope.resolve_key(:agent, :input_normal, key) do
-          {:command, command} -> Commands.execute(state, command)
-          {:prefix, _node} -> state
-          :not_found -> state
-        end
+      case Scope.resolve_key(:agent, :input_normal, key) do
+        {:command, command} -> Commands.execute(state, command)
+        {:prefix, _node} -> state
+        :not_found -> state
+      end
     end
   end
 

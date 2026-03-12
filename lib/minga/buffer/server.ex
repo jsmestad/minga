@@ -203,6 +203,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :cursor)
   end
 
+  @doc "Sets the cursor to an absolute position. Clamped to buffer bounds."
+  @spec set_cursor(GenServer.server(), Document.position()) :: :ok
+  def set_cursor(server, {line, col}) when is_integer(line) and is_integer(col) do
+    GenServer.call(server, {:set_cursor, {line, col}})
+  end
+
+  @doc "Moves the cursor in the given direction."
+  @spec move_cursor(GenServer.server(), :up | :down | :left | :right) :: :ok
+  def move_cursor(server, direction) when direction in [:up, :down, :left, :right] do
+    GenServer.call(server, {:move_cursor, direction})
+  end
+
   @doc "Returns the total line count."
   @spec line_count(GenServer.server()) :: pos_integer()
   def line_count(server) do
@@ -843,6 +855,16 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:cursor, _from, state) do
     {:reply, Document.cursor(state.document), state}
+  end
+
+  def handle_call({:set_cursor, {line, col}}, _from, state) do
+    doc = Document.move_to(state.document, {line, col})
+    {:reply, :ok, %{state | document: doc}}
+  end
+
+  def handle_call({:move_cursor, direction}, _from, state) do
+    doc = Document.move(state.document, direction)
+    {:reply, :ok, %{state | document: doc}}
   end
 
   def handle_call(:line_count, _from, state) do

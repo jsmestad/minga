@@ -40,8 +40,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Viewport
-  alias Minga.Input.TextField
-  alias Minga.Input.Vim
+
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.Keymap.Scope
   alias Minga.Scroll
@@ -117,7 +116,8 @@ defmodule Minga.Agent.View.Renderer do
             input_focused: boolean(),
             input_lines: [String.t()],
             input_cursor: {non_neg_integer(), non_neg_integer()},
-            vim: Vim.t(),
+            mode: atom(),
+            mode_state: term(),
             scroll: Scroll.t(),
             spinner_frame: non_neg_integer(),
             model_name: String.t(),
@@ -336,7 +336,8 @@ defmodule Minga.Agent.View.Renderer do
         input_focused: panel.input_focused,
         input_lines: PanelState.input_lines(panel),
         input_cursor: PanelState.input_cursor(panel),
-        vim: panel.vim,
+        mode: state.mode,
+        mode_state: state.mode_state,
         scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
@@ -1068,7 +1069,7 @@ defmodule Minga.Agent.View.Renderer do
           map(),
           non_neg_integer(),
           InputWrap.visual_line(),
-          {TextField.cursor(), TextField.cursor()} | nil
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
         ) :: [DisplayList.draw()]
   defp render_input_row(row, display_text, fg_color, chrome, logical_idx, vl, sel_range) do
     padded = String.pad_trailing(display_text, chrome.inner_width)
@@ -1110,7 +1111,7 @@ defmodule Minga.Agent.View.Renderer do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          {TextField.cursor(), TextField.cursor()} | nil
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
         ) :: {non_neg_integer(), pos_integer()} | nil
   defp selection_slice(_logical_idx, _col_offset, _text_len, nil), do: nil
 
@@ -1166,26 +1167,40 @@ defmodule Minga.Agent.View.Renderer do
 
   # Returns the visual selection range from Vim state, or nil.
   @spec vim_visual_range(map()) ::
-          {TextField.cursor(), TextField.cursor()} | nil
-  defp vim_visual_range(%{vim: %Vim{} = vim, input_lines: lines, input_cursor: cursor}) do
-    tf = TextField.from_parts(lines, cursor)
-    Vim.visual_range(vim, tf)
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
+  # Visual selection range for the prompt input. Uses the editor's mode
+  # state (visual_start) when in visual mode, since the prompt uses the
+  # standard Mode FSM.
+  @spec vim_visual_range(map()) ::
+          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
+  defp vim_visual_range(%{input_cursor: cursor, mode: mode, mode_state: mode_state})
+       when mode in [:visual, :visual_line] do
+    case mode_state do
+      %{visual_start: {vl, vc}} when is_integer(vl) ->
+        {from, to} = if {vl, vc} <= cursor, do: {{vl, vc}, cursor}, else: {cursor, {vl, vc}}
+
+        if mode == :visual_line do
+          {from_line, _} = from
+          {to_line, _} = to
+          {{from_line, 0}, {to_line, 999_999}}
+        else
+          {from, to}
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp vim_visual_range(_panel), do: nil
 
-  # Checks for Vim state on PanelState structs; returns "" for plain maps (tests).
+  # Returns a mode label for the prompt border.
   @spec input_mode_label(map()) :: String.t()
-  defp input_mode_label(%{vim: %Vim{} = vim}) do
-    case Vim.mode(vim) do
-      :insert -> ""
-      :normal -> "NORMAL"
-      :visual -> "VISUAL"
-      :visual_line -> "V-LINE"
-      :operator_pending -> "OP"
-    end
-  end
-
+  defp input_mode_label(%{mode: :insert}), do: ""
+  defp input_mode_label(%{mode: :normal}), do: "NORMAL"
+  defp input_mode_label(%{mode: :visual}), do: "VISUAL"
+  defp input_mode_label(%{mode: :visual_line}), do: "V-LINE"
+  defp input_mode_label(%{mode: :operator_pending}), do: "OP"
   defp input_mode_label(_panel), do: ""
 
   # Computes the dynamic input area height for the bordered box:

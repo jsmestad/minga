@@ -26,6 +26,7 @@ defmodule Minga.Agent.View.Mouse do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Mouse, as: MouseState
+  alias Minga.Mode
 
   @scroll_lines 3
 
@@ -208,17 +209,24 @@ defmodule Minga.Agent.View.Mouse do
   @spec handle_click(state(), agent_region(), integer(), integer()) :: state()
 
   defp handle_click(state, :chat, _row, _col) do
-    update_agentic(state, fn av -> %{av | focus: :chat} end)
-    |> update_agent(&AgentState.focus_input(&1, false))
+    state =
+      update_agentic(state, fn av -> %{av | focus: :chat} end)
+      |> update_agent(&AgentState.focus_input(&1, false))
+
+    %{state | mode: :normal, mode_state: Mode.initial_state()}
   end
 
   defp handle_click(state, :file_viewer, _row, _col) do
-    update_agentic(state, fn av -> %{av | focus: :file_viewer} end)
-    |> update_agent(&AgentState.focus_input(&1, false))
+    state =
+      update_agentic(state, fn av -> %{av | focus: :file_viewer} end)
+      |> update_agent(&AgentState.focus_input(&1, false))
+
+    %{state | mode: :normal, mode_state: Mode.initial_state()}
   end
 
   defp handle_click(state, :input, _row, _col) do
-    update_agent(state, &AgentState.focus_input(&1, true))
+    state = update_agent(state, &AgentState.focus_input(&1, true))
+    %{state | mode: :insert, mode_state: Mode.initial_state()}
   end
 
   defp handle_click(state, :separator, _row, col) do

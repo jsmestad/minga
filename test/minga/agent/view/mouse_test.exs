@@ -17,6 +17,7 @@ defmodule Minga.Agent.View.MouseTest do
     chat_width_pct = Keyword.get(opts, :chat_width_pct, 50)
     input_focused = Keyword.get(opts, :input_focused, false)
     focus = Keyword.get(opts, :focus, :chat)
+    {:ok, prompt_buf} = Minga.Buffer.Server.start_link(content: "")
 
     %EditorState{
       port_manager: nil,
@@ -33,7 +34,8 @@ defmodule Minga.Agent.View.MouseTest do
         agent: %AgentState{
           panel: %PanelState{
             visible: false,
-            input_focused: input_focused
+            input_focused: input_focused,
+            prompt_buffer: prompt_buf
           }
         },
         context: nil

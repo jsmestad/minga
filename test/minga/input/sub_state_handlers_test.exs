@@ -32,6 +32,7 @@ defmodule Minga.Input.SubStateHandlersTest do
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     panel = %PanelState{
       visible: Keyword.get(opts, :panel_visible, false),
@@ -40,7 +41,8 @@ defmodule Minga.Input.SubStateHandlersTest do
       spinner_frame: 0,
       provider_name: "anthropic",
       model_name: "claude-sonnet-4",
-      thinking_level: "medium"
+      thinking_level: "medium",
+      prompt_buffer: prompt_buf
     }
 
     agent = %AgentState{

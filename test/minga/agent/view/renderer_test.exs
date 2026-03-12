@@ -13,7 +13,7 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.Viewport
   alias Minga.Input
-  alias Minga.Input.TextField
+
   alias Minga.Mode
   alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Theme
@@ -32,6 +32,8 @@ defmodule Minga.Agent.View.RendererTest do
       panel: %{
         input_focused: false,
         input_lines: [""],
+        mode: :normal,
+        mode_state: Minga.Mode.initial_state(),
         input_cursor: {0, 0},
         scroll: Minga.Scroll.new(),
         spinner_frame: 0,
@@ -67,10 +69,13 @@ defmodule Minga.Agent.View.RendererTest do
     input_cursor =
       Keyword.get(opts, :input_cursor, {0, String.length(Keyword.get(opts, :input_text, ""))})
 
+    {:ok, prompt_buf} = BufferServer.start_link(content: Enum.join(input_lines, "\n"))
+    BufferServer.set_cursor(prompt_buf, input_cursor)
+
     panel = %PanelState{
       visible: true,
       input_focused: Keyword.get(opts, :input_focused, false),
-      input: TextField.from_parts(input_lines, input_cursor),
+      prompt_buffer: prompt_buf,
       scroll: Minga.Scroll.new(),
       spinner_frame: 0,
       provider_name: "anthropic",
@@ -344,6 +349,8 @@ defmodule Minga.Agent.View.RendererTest do
         panel: %{
           input_focused: false,
           input_lines: [""],
+          mode: :normal,
+          mode_state: Minga.Mode.initial_state(),
           input_cursor: {0, 0},
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
@@ -385,6 +392,8 @@ defmodule Minga.Agent.View.RendererTest do
         panel: %{
           input_focused: true,
           input_lines: ["hello"],
+          mode: :normal,
+          mode_state: Minga.Mode.initial_state(),
           input_cursor: {0, 5},
           scroll: Minga.Scroll.new(),
           spinner_frame: 3,
@@ -440,6 +449,8 @@ defmodule Minga.Agent.View.RendererTest do
         panel: %{
           input_focused: false,
           input_lines: [""],
+          mode: :normal,
+          mode_state: Minga.Mode.initial_state(),
           input_cursor: {0, 0},
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
@@ -534,6 +545,8 @@ defmodule Minga.Agent.View.RendererTest do
           panel: %{
             input_focused: true,
             input_lines: [""],
+            mode: :normal,
+            mode_state: Minga.Mode.initial_state(),
             input_cursor: {0, 0},
             scroll: Minga.Scroll.new(),
             spinner_frame: 0,

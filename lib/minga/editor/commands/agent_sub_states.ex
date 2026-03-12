@@ -14,12 +14,12 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.Session
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Git.Diff
-  alias Minga.Input.TextField
 
   import Bitwise
 
@@ -320,10 +320,10 @@ defmodule Minga.Editor.Commands.AgentSubStates do
         new_line = before <> "@" <> path <> " " <> after_prefix
         new_col = anchor_col + 1 + String.length(path) + 1
         new_lines = List.replace_at(lines, line, new_line)
+        new_content = Enum.join(new_lines, "\n")
 
-        update_panel(state, fn p ->
-          %{p | input: TextField.from_parts(new_lines, {line, new_col}), mention_completion: nil}
-        end)
+        state = sync_mention_to_buffer(state, new_content, line, new_col)
+        update_panel(state, fn p -> %{p | mention_completion: nil} end)
     end
   end
 
@@ -449,6 +449,19 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     AgentAccess.update_agentic(state, fn agentic ->
       %{agentic | preview: fun.(agentic.preview)}
     end)
+  end
+
+  @spec sync_mention_to_buffer(state(), String.t(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp sync_mention_to_buffer(state, content, line, col) do
+    panel = AgentAccess.panel(state)
+
+    if is_pid(panel.prompt_buffer) do
+      BufferServer.replace_content(panel.prompt_buffer, content)
+      BufferServer.set_cursor(panel.prompt_buffer, {line, col})
+    end
+
+    state
   end
 
   @spec update_panel(state(), (term() -> term())) :: state()

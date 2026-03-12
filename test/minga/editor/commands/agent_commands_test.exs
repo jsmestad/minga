@@ -37,9 +37,12 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: Keyword.get(opts, :content, "hello\nworld"))
 
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+
     panel = %PanelState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
+      prompt_buffer: prompt_buf,
       scroll: Scroll.new(),
       spinner_frame: 0,
       provider_name: "anthropic",
@@ -157,7 +160,9 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
       state =
         AgentAccess.update_agent(state, fn agent ->
-          put_in(agent.panel.input.lines, ["hello agent"])
+          panel = PanelState.ensure_prompt_buffer(agent.panel)
+          BufferServer.replace_content(panel.prompt_buffer, "hello agent")
+          %{agent | panel: panel}
         end)
 
       new_state = AgentCommands.submit_prompt(state)

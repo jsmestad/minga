@@ -209,12 +209,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   # ── Input cursor shape ────────────────────────────────────────────────────
 
   @doc "Returns the cursor shape for the agent panel input area."
-  @spec input_cursor_shape(map()) :: Minga.Port.Protocol.cursor_shape()
-  def input_cursor_shape(%PanelState{input_focused: true} = panel) do
-    if PanelState.input_mode(panel) == :insert, do: :beam, else: :block
-  end
-
-  def input_cursor_shape(_panel), do: :block
+  @spec input_cursor_shape(atom()) :: Minga.Port.Protocol.cursor_shape()
+  def input_cursor_shape(:insert), do: :beam
+  def input_cursor_shape(_mode), do: :block
 
   # ── Private helpers ────────────────────────────────────────────────────────
 

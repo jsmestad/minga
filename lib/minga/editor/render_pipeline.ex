@@ -851,7 +851,7 @@ defmodule Minga.Editor.RenderPipeline do
       if state.picker_ui.picker do
         :beam
       else
-        ChromeHelpers.input_cursor_shape(AgentAccess.panel(state))
+        ChromeHelpers.input_cursor_shape(state.mode)
       end
 
     cursor =

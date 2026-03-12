@@ -2,9 +2,13 @@ defmodule Minga.Editor.State.AgentTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State.Agent, as: AgentState
 
-  defp new_agent, do: %AgentState{}
+  defp new_agent do
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    %AgentState{panel: %{PanelState.new() | prompt_buffer: prompt_buf}}
+  end
 
   describe "status" do
     test "set_status updates the status field" do

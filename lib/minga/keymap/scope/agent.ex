@@ -173,7 +173,7 @@ defmodule Minga.Keymap.Scope.Agent do
   # ── Input normal mode meta keys ──────────────────────────────────────────
   #
   # Vim editing keys (motions, operators, text objects, counts, visual mode)
-  # are handled by Minga.Input.Vim.handle_key/4 before reaching the trie.
+  # are handled by the standard Mode FSM via dispatch_prompt_via_mode_fsm.
   # This trie only contains meta keys that the Vim module passes through.
 
   @spec input_normal_trie() :: Bindings.node_t()
