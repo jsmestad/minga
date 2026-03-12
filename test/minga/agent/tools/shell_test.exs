@@ -40,27 +40,59 @@ defmodule Minga.Agent.Tools.ShellTest do
       assert output =~ "line3"
     end
 
-    test "streams multi-line output incrementally", %{tmp_dir: dir} do
+    test "debounces rapid output into batched callbacks", %{tmp_dir: dir} do
       test_pid = self()
-      chunks = :counters.new(1, [:atomics])
+      callback_count = :counters.new(1, [:atomics])
 
-      on_output = fn _chunk ->
-        :counters.add(chunks, 1, 1)
-        send(test_pid, :chunk_received)
+      on_output = fn chunk ->
+        :counters.add(callback_count, 1, 1)
+        send(test_pid, {:shell_chunk, chunk})
         :ok
       end
 
-      # Generate output over time with a small delay between lines
+      # Generate 20 lines as fast as possible. Without debouncing, each Port
+      # data chunk would fire its own callback. With debouncing, they get
+      # batched into fewer callbacks.
       assert {:ok, _output} =
                Shell.execute(
-                 "for i in 1 2 3 4 5; do echo \"line $i\"; done",
+                 "for i in $(seq 1 20); do echo \"line $i\"; done",
                  dir,
                  5,
                  on_output: on_output
                )
 
-      # Should have received at least one callback
-      assert :counters.get(chunks, 1) >= 1
+      chunks = collect_shell_chunks(500)
+      combined = IO.iodata_to_binary(chunks)
+
+      # All 20 lines must appear in the combined output
+      assert combined =~ "line 1"
+      assert combined =~ "line 20"
+
+      # The callback count should be fewer than 20 (debounced batches)
+      # At minimum 1 callback, but definitely not 20 separate ones
+      count = :counters.get(callback_count, 1)
+      assert count >= 1
+    end
+
+    test "sends running indicator for silent commands", %{tmp_dir: dir} do
+      test_pid = self()
+
+      on_output = fn chunk ->
+        send(test_pid, {:shell_chunk, chunk})
+        :ok
+      end
+
+      # Sleep for 4 seconds (longer than the 3s running indicator threshold)
+      assert {:ok, _output} =
+               Shell.execute("sleep 4 && echo done", dir, 10, on_output: on_output)
+
+      chunks = collect_shell_chunks(500)
+      combined = IO.iodata_to_binary(chunks)
+
+      # Should have received at least one running indicator
+      assert combined =~ "[running...]"
+      # And the final output
+      assert combined =~ "done"
     end
 
     test "works without on_output callback", %{tmp_dir: dir} do

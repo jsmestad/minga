@@ -3,14 +3,18 @@ defmodule Minga.Agent.Tools.Shell do
   Runs a shell command in the project root directory.
 
   Commands execute via a BEAM Port for incremental output streaming.
-  When a `on_output` callback is provided, output is streamed in chunks
-  as it arrives (debounced to avoid flooding). Stdout and stderr are
-  merged. The exit code is included in the result so the caller knows
-  if the command succeeded.
+  When an `on_output` callback is provided, output is debounced and
+  flushed at most every 200ms to avoid flooding the UI. If the command
+  produces no output for 3 seconds, a "running..." indicator is sent.
+  Stdout and stderr are merged. The exit code is included in the result
+  so the caller knows if the command succeeded.
   """
 
   @typedoc "Options for shell execution."
   @type execute_opts :: [on_output: (String.t() -> :ok)]
+
+  @debounce_ms 200
+  @running_indicator_ms 3_000
 
   @doc """
   Runs `command` in the given `cwd` with a `timeout_secs` limit.
@@ -19,8 +23,10 @@ defmodule Minga.Agent.Tools.Shell do
   Returns `{:ok, output}` with the combined stdout/stderr and exit code.
 
   Options:
-    - `:on_output` — callback function invoked with each chunk of output as
-      it arrives. Used for streaming output to the UI in real time.
+    - `:on_output` — callback function invoked with batched output chunks.
+      Debounced to at most one call every #{@debounce_ms}ms. If the command
+      produces no output for #{@running_indicator_ms}ms, a "running..."
+      indicator is sent.
   """
   @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) ::
           {:ok, String.t()} | {:error, String.t()}
@@ -43,24 +49,48 @@ defmodule Minga.Agent.Tools.Shell do
       )
 
     deadline = System.monotonic_time(:millisecond) + timeout_ms
-    collect_output(port, deadline, on_output, [])
+    now = System.monotonic_time(:millisecond)
+
+    collect_output(port, deadline, on_output, [], [], now, now)
   rescue
     e ->
       {:error, "command failed: #{Exception.message(e)}"}
   end
 
   # Collect output from the Port until it exits or times out.
-  @spec collect_output(port(), integer(), (String.t() -> :ok) | nil, [String.t()]) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp collect_output(port, deadline, on_output, acc) do
+  # `pending` accumulates chunks between flushes. `last_flush` tracks
+  # when we last called on_output. `last_data` tracks when we last
+  # received any data (for the "running..." indicator).
+  @spec collect_output(
+          port(),
+          integer(),
+          (String.t() -> :ok) | nil,
+          [String.t()],
+          [String.t()],
+          integer(),
+          integer()
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp collect_output(port, deadline, on_output, acc, pending, last_flush, last_data) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+    # Wake up at the sooner of: deadline, next debounce window, or running indicator
+    wait_ms = min(remaining, @debounce_ms)
 
     receive do
       {^port, {:data, data}} ->
-        if on_output, do: on_output.(data)
-        collect_output(port, deadline, on_output, [data | acc])
+        now = System.monotonic_time(:millisecond)
+        new_pending = [data | pending]
+
+        if on_output != nil and now - last_flush >= @debounce_ms do
+          flush_pending(on_output, new_pending)
+          collect_output(port, deadline, on_output, [data | acc], [], now, now)
+        else
+          collect_output(port, deadline, on_output, [data | acc], new_pending, last_flush, now)
+        end
 
       {^port, {:exit_status, exit_code}} ->
+        # Flush any remaining pending output
+        if on_output != nil and pending != [], do: flush_pending(on_output, pending)
+
         output = acc |> Enum.reverse() |> IO.iodata_to_binary() |> String.trim_trailing()
 
         result =
@@ -72,12 +102,57 @@ defmodule Minga.Agent.Tools.Shell do
 
         {:ok, result}
     after
-      remaining ->
-        Port.close(port)
+      wait_ms ->
+        now = System.monotonic_time(:millisecond)
 
-        {:error,
-         "command timed out after #{div(deadline - System.monotonic_time(:millisecond) + remaining, 1_000)}s"}
+        if now >= deadline do
+          # Flush before timing out
+          if on_output != nil and pending != [], do: flush_pending(on_output, pending)
+          Port.close(port)
+          elapsed_s = div(now - (deadline - remaining), 1_000)
+          {:error, "command timed out after #{elapsed_s}s"}
+        else
+          # Check if we should flush pending output or send a running indicator
+          {new_pending, new_flush, new_data} =
+            maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now)
+
+          collect_output(port, deadline, on_output, acc, new_pending, new_flush, new_data)
+        end
     end
+  end
+
+  @spec maybe_flush_or_indicate(
+          (String.t() -> :ok) | nil,
+          [String.t()],
+          integer(),
+          integer(),
+          integer()
+        ) :: {[String.t()], integer(), integer()}
+  defp maybe_flush_or_indicate(nil, pending, last_flush, last_data, _now) do
+    {pending, last_flush, last_data}
+  end
+
+  defp maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now) do
+    if pending != [] and now - last_flush >= @debounce_ms do
+      # Flush accumulated output
+      flush_pending(on_output, pending)
+      {[], now, last_data}
+    else
+      if pending == [] and now - last_data >= @running_indicator_ms do
+        # No output for a while, send a running indicator
+        on_output.("[running...]\n")
+        {[], now, now}
+      else
+        {pending, last_flush, last_data}
+      end
+    end
+  end
+
+  @spec flush_pending((String.t() -> :ok), [String.t()]) :: :ok
+  defp flush_pending(on_output, pending) do
+    batch = pending |> Enum.reverse() |> IO.iodata_to_binary()
+    on_output.(batch)
+    :ok
   end
 
   # Port env requires charlist tuples, not string tuples.
