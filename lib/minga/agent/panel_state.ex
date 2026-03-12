@@ -12,6 +12,7 @@ defmodule Minga.Agent.PanelState do
   completion, and input focus tracking.
   """
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Input.TextField
   alias Minga.Input.Vim
   alias Minga.Scroll
@@ -31,6 +32,7 @@ defmodule Minga.Agent.PanelState do
           scroll: Scroll.t(),
           input: TextField.t(),
           vim: Vim.t(),
+          prompt_buffer: pid() | nil,
           prompt_history: [String.t()],
           history_index: integer(),
           spinner_frame: non_neg_integer(),
@@ -57,6 +59,7 @@ defmodule Minga.Agent.PanelState do
             scroll: %Scroll{},
             input: %TextField{},
             vim: %Vim{},
+            prompt_buffer: nil,
             prompt_history: [],
             history_index: -1,
             spinner_frame: 0,
@@ -71,6 +74,71 @@ defmodule Minga.Agent.PanelState do
   @doc "Creates a new panel state."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc """
+  Ensures a prompt Buffer.Server is running. Starts one if `prompt_buffer`
+  is nil or the process is dead.
+
+  Called lazily when the panel is first focused or made visible. The buffer
+  is an unlisted, unnamed process owned by the editor. It does not appear
+  in the buffer list or tab bar.
+  """
+  @spec ensure_prompt_buffer(t()) :: t()
+  def ensure_prompt_buffer(%__MODULE__{prompt_buffer: pid} = state)
+      when is_pid(pid) do
+    if Process.alive?(pid), do: state, else: start_prompt_buffer(state)
+  end
+
+  def ensure_prompt_buffer(%__MODULE__{} = state), do: start_prompt_buffer(state)
+
+  @doc """
+  Returns the prompt text. Reads from the prompt buffer if available,
+  falls back to TextField. Paste placeholders are substituted in both cases.
+  """
+  @spec prompt_text(t()) :: String.t()
+  def prompt_text(%__MODULE__{prompt_buffer: pid, pasted_blocks: blocks} = state)
+      when is_pid(pid) do
+    if Process.alive?(pid) do
+      content = BufferServer.content(pid)
+      substitute_placeholders(content, blocks)
+    else
+      input_text(state)
+    end
+  end
+
+  def prompt_text(%__MODULE__{} = state), do: input_text(state)
+
+  @doc """
+  Syncs the TextField content to the prompt buffer. Call this after
+  any TextField mutation to keep the buffer in sync during the migration.
+  """
+  @spec sync_to_prompt_buffer(t()) :: t()
+  def sync_to_prompt_buffer(%__MODULE__{prompt_buffer: pid, input: tf} = state)
+      when is_pid(pid) do
+    if Process.alive?(pid) do
+      content = Enum.join(tf.lines, "\n")
+      current = BufferServer.content(pid)
+
+      if content != current do
+        BufferServer.replace_content(pid, content)
+      end
+    end
+
+    state
+  end
+
+  def sync_to_prompt_buffer(%__MODULE__{} = state), do: state
+
+  defp start_prompt_buffer(%__MODULE__{} = state) do
+    content = Enum.join(state.input.lines, "\n")
+    {:ok, pid} = BufferServer.start_link(content: content)
+    %{state | prompt_buffer: pid}
+  end
+
+  defp substitute_placeholders(content, blocks) do
+    String.split(content, "\n")
+    |> Enum.map_join("\n", fn line -> substitute_placeholder(line, blocks) end)
+  end
 
   @doc "Toggles panel visibility."
   @spec toggle(t()) :: t()
@@ -102,12 +170,14 @@ defmodule Minga.Agent.PanelState do
   @spec insert_char(t(), String.t()) :: t()
   def insert_char(%__MODULE__{} = state, char) do
     %{state | input: TextField.insert_char(state.input, char), history_index: -1}
+    |> sync_to_prompt_buffer()
   end
 
   @doc "Inserts a newline at the cursor, splitting the current line."
   @spec insert_newline(t()) :: t()
   def insert_newline(%__MODULE__{} = state) do
     %{state | input: TextField.insert_newline(state.input), history_index: -1}
+    |> sync_to_prompt_buffer()
   end
 
   @doc """
@@ -119,13 +189,16 @@ defmodule Minga.Agent.PanelState do
   @spec delete_char(t()) :: t()
   def delete_char(%__MODULE__{} = state) do
     %{state | input: TextField.delete_backward(state.input), history_index: -1}
+    |> sync_to_prompt_buffer()
   end
 
   @doc "Clears the input (after submission). Saves current text to history first."
   @spec clear_input(t()) :: t()
   def clear_input(%__MODULE__{} = state) do
     state = save_to_history(state)
+
     %{state | input: TextField.clear(state.input), history_index: -1, pasted_blocks: []}
+    |> sync_to_prompt_buffer()
   end
 
   # ── Cursor movement (delegates to TextField) ──────────────────────────────
@@ -169,12 +242,15 @@ defmodule Minga.Agent.PanelState do
     lines = String.split(clean_text, "\n")
     line_count = length(lines)
 
-    if line_count < @paste_collapse_threshold do
-      # Short paste: insert directly via TextField
-      %{state | input: TextField.insert_text(state.input, clean_text), history_index: -1}
-    else
-      insert_collapsed_paste(state, clean_text)
-    end
+    result =
+      if line_count < @paste_collapse_threshold do
+        # Short paste: insert directly via TextField
+        %{state | input: TextField.insert_text(state.input, clean_text), history_index: -1}
+      else
+        insert_collapsed_paste(state, clean_text)
+      end
+
+    sync_to_prompt_buffer(result)
   end
 
   @doc """
@@ -257,7 +333,9 @@ defmodule Minga.Agent.PanelState do
   def history_prev(%__MODULE__{history_index: idx, prompt_history: history} = state) do
     new_idx = min(idx + 1, length(history) - 1)
     text = Enum.at(history, new_idx)
+
     %{state | input: TextField.new(text), history_index: new_idx}
+    |> sync_to_prompt_buffer()
   end
 
   @doc "Recalls the next (more recent) prompt from history."
@@ -266,12 +344,15 @@ defmodule Minga.Agent.PanelState do
 
   def history_next(%__MODULE__{history_index: 0} = state) do
     %{state | input: TextField.new(), history_index: -1}
+    |> sync_to_prompt_buffer()
   end
 
   def history_next(%__MODULE__{history_index: idx, prompt_history: history} = state) do
     new_idx = idx - 1
     text = Enum.at(history, new_idx)
+
     %{state | input: TextField.new(text), history_index: new_idx}
+    |> sync_to_prompt_buffer()
   end
 
   # ── Scrolling (delegates to Minga.Scroll) ────────────────────────────────
@@ -317,6 +398,7 @@ defmodule Minga.Agent.PanelState do
   @doc "Sets the input focus state. Entering focus starts in insert mode; leaving resets vim state."
   @spec set_input_focused(t(), boolean()) :: t()
   def set_input_focused(%__MODULE__{} = state, true) do
+    state = ensure_prompt_buffer(state)
     %{state | input_focused: true, vim: Vim.enter_insert(state.vim)}
   end
 

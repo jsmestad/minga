@@ -259,7 +259,7 @@ defmodule Minga.Editor.Commands.Agent do
         %{state | status_msg: "No agent session, try closing and reopening the panel"}
 
       true ->
-        text = PanelState.input_text(panel)
+        text = PanelState.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
           state = update_agent(state, &AgentState.clear_input_and_scroll/1)
@@ -830,7 +830,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Submits if input has text, aborts if agent is active."
   @spec scope_submit_or_abort(state()) :: state()
   def scope_submit_or_abort(state) do
-    if PanelState.input_text(AgentAccess.panel(state)) != "" do
+    if PanelState.prompt_text(AgentAccess.panel(state)) != "" do
       submit_prompt(state)
     else
       abort_if_active(state)
