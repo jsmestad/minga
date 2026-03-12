@@ -31,6 +31,7 @@ defmodule Minga.Agent.Providers.Native do
 
   use GenServer
 
+  alias Minga.Agent.Compaction
   alias Minga.Agent.CostCalculator
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
@@ -135,6 +136,12 @@ defmodule Minga.Agent.Providers.Native do
   @spec get_available_models(GenServer.server()) :: {:ok, [map()]} | {:error, term()}
   def get_available_models(pid) do
     GenServer.call(pid, :get_available_models, 10_000)
+  end
+
+  @doc "Manually triggers context compaction."
+  @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
+  def compact(pid) do
+    GenServer.call(pid, :compact, 30_000)
   end
 
   # ── GenServer callbacks ─────────────────────────────────────────────────────
@@ -284,6 +291,29 @@ defmodule Minga.Agent.Providers.Native do
     {:reply, {:ok, models}, state}
   end
 
+  def handle_call(:compact, _from, %{streaming: true} = state) do
+    {:reply, {:error, "Cannot compact while streaming"}, state}
+  end
+
+  def handle_call(:compact, _from, state) do
+    compact_opts = [
+      model: state.model,
+      llm_client: summary_client(state.llm_client)
+    ]
+
+    case Compaction.compact(state.context, compact_opts) do
+      {:compacted, new_context, summary_info} ->
+        notify(state.subscriber, %Event.TextDelta{delta: "\n📦 #{summary_info}\n"})
+        {:reply, {:ok, summary_info}, %{state | context: new_context}}
+
+      {:ok, _context} ->
+        {:reply, {:ok, "Context is already small enough, no compaction needed."}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   @impl GenServer
   def handle_info({:agent_event, event}, state) do
     # Forwarded from the task
@@ -331,6 +361,9 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp run_agent_loop(lctx, context) do
+    # Check if context needs compaction before the API call
+    context = maybe_compact_context(lctx, context)
+
     stream_opts = build_stream_opts(lctx.model, lctx.tools, lctx.thinking_level, lctx.max_tokens)
 
     # Emit pre-send token estimate so the context bar updates before the API call
@@ -604,6 +637,41 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  # Checks if context needs compaction and performs it, notifying the subscriber.
+  @spec maybe_compact_context(loop_ctx(), Context.t()) :: Context.t()
+  defp maybe_compact_context(lctx, context) do
+    compact_opts = [
+      model: lctx.model,
+      llm_client: summary_client(lctx.llm_client)
+    ]
+
+    case Compaction.maybe_compact(context, compact_opts) do
+      {:compacted, new_context, summary_info} ->
+        send(
+          lctx.provider_pid,
+          {:agent_event, %Event.TextDelta{delta: "\n📦 #{summary_info}\n"}}
+        )
+
+        send(lctx.provider_pid, {:agent_context_update, new_context})
+        new_context
+
+      {:ok, context} ->
+        context
+    end
+  end
+
+  # Wraps the streaming LLM client into a simpler function that returns {:ok, text}.
+  # Used by the Compaction module which doesn't need streaming.
+  @spec summary_client(llm_client()) :: Compaction.summary_fn()
+  defp summary_client(llm_client) do
+    fn model, messages, opts ->
+      with {:ok, stream_response} <- llm_client.(model, messages, opts),
+           {:ok, response} <- StreamResponse.process_stream(stream_response) do
+        {:ok, ReqLLM.Response.text(response) || ""}
+      end
+    end
+  end
 
   @spec build_stream_opts(String.t(), [ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
   defp build_stream_opts(model, tools, thinking_level, max_tokens) do

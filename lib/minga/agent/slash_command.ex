@@ -44,7 +44,8 @@ defmodule Minga.Agent.SlashCommand do
     %{
       name: "system-prompt",
       description: "Show the current assembled system prompt"
-    }
+    },
+    %{name: "compact", description: "Compact conversation context (summarize older turns)"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -94,6 +95,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
   defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
+  defp dispatch(state, "compact", _args), do: do_compact(state)
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
@@ -314,6 +316,23 @@ defmodule Minga.Agent.SlashCommand do
     _ -> ""
   catch
     :exit, _ -> ""
+  end
+
+  @spec do_compact(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_compact(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      case Session.compact(session) do
+        {:ok, info} ->
+          {:ok, %{state | status_msg: info}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, "No active agent session"}
+    end
   end
 
   defp do_instructions(state) do
