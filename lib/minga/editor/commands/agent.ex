@@ -23,6 +23,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.Commands.AgentSubStates
   alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.Layout
+  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -81,6 +82,77 @@ defmodule Minga.Editor.Commands.Agent do
 
   def toggle_agentic_view(state) do
     activate_agentic_view(state)
+  end
+
+  @doc """
+  Toggles an agent chat split pane in the window tree.
+
+  When no agent pane exists: ensures an agent session is running,
+  then applies the `:agent_right` layout preset (file left, agent
+  chat right). When an agent pane exists: removes it and restores
+  the single-window layout.
+
+  Unlike `toggle_agentic_view`, this stays on the current tab. The
+  agent state lives in a background agent tab (created if needed).
+  """
+  @spec toggle_agent_split(state()) :: state()
+  def toggle_agent_split(state) do
+    if LayoutPreset.has_agent_chat?(state) do
+      state
+      |> LayoutPreset.restore_default()
+      |> Layout.invalidate()
+      |> EditorState.invalidate_all_windows()
+    else
+      state
+      |> ensure_agent_state()
+      |> apply_agent_split()
+    end
+  end
+
+  @spec ensure_agent_state(state()) :: state()
+  defp ensure_agent_state(state) do
+    agent = AgentAccess.agent(state)
+
+    if agent.buffer == nil or not is_pid(agent.buffer) or not Process.alive?(agent.buffer) do
+      # Create the agent buffer and ensure agent tab exists for state storage
+      ensure_agent_tab(state)
+    else
+      state
+    end
+  end
+
+  @spec ensure_agent_tab(state()) :: state()
+  defp ensure_agent_tab(state) do
+    case find_agent_tab(state) do
+      nil ->
+        # Create agent tab in the background (don't switch to it)
+        agent_context = new_agent_context(state)
+        {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+        agent_tab = TabBar.find_by_kind(tb, :agent)
+        tb = TabBar.update_context(tb, agent_tab.id, agent_context)
+
+        # Switch back to the original active tab
+        tb = %{tb | active_id: state.tab_bar.active_id}
+        %{state | tab_bar: tb}
+
+      _existing ->
+        state
+    end
+  end
+
+  @spec apply_agent_split(state()) :: state()
+  defp apply_agent_split(state) do
+    agent = AgentAccess.agent(state)
+
+    if is_pid(agent.buffer) and Process.alive?(agent.buffer) do
+      state
+      |> LayoutPreset.apply(:agent_right, agent.buffer)
+      |> Layout.invalidate()
+      |> EditorState.invalidate_all_windows()
+      |> maybe_start_session()
+    else
+      state
+    end
   end
 
   @spec deactivate_agentic_view(state()) :: state()
