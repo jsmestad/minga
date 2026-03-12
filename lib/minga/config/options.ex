@@ -96,6 +96,8 @@ defmodule Minga.Config.Options do
           | :agent_max_tokens
           | :agent_max_retries
           | :agent_prompt_cache
+          | :agent_system_prompt
+          | :agent_append_system_prompt
           | :font_family
           | :font_size
           | :font_weight
@@ -160,6 +162,8 @@ defmodule Minga.Config.Options do
     {:agent_max_tokens, :pos_integer, 16_384},
     {:agent_max_retries, :non_neg_integer, 3},
     {:agent_prompt_cache, :boolean, true},
+    {:agent_system_prompt, :string, ""},
+    {:agent_append_system_prompt, :string, ""},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},

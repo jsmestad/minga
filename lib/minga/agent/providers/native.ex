@@ -231,6 +231,12 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   def handle_call(:get_state, _from, state) do
+    system_prompt =
+      case state.context.messages do
+        [%{role: :system, content: content} | _] when is_binary(content) -> content
+        _ -> nil
+      end
+
     session_state = %{
       model: %{
         id: state.model,
@@ -238,7 +244,8 @@ defmodule Minga.Agent.Providers.Native do
         provider: "native"
       },
       is_streaming: state.streaming,
-      token_usage: nil
+      token_usage: nil,
+      system_prompt: system_prompt
     }
 
     {:reply, {:ok, session_state}, state}
@@ -628,35 +635,95 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec build_system_prompt(String.t()) :: String.t()
   defp build_system_prompt(project_root) do
+    base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
+    append = read_config_string(:agent_append_system_prompt)
 
-    """
-    You are an AI coding assistant running inside Minga, a modal text editor. You help users by reading files, editing code, running shell commands, and writing new files.
+    parts =
+      [base, instructions, append]
+      |> Enum.reject(&(is_nil(&1) or &1 == ""))
+      |> Enum.join("\n\n")
 
-    ## Available tools
+    parts
+  end
 
-    - read_file: Read file contents
-    - write_file: Create or overwrite files (creates parent directories automatically)
-    - edit_file: Make surgical edits (find exact text and replace). Read the file first to get exact text.
-    - list_directory: List files and directories at a path
-    - find: Find files by name or glob pattern. Prefer this over shell + find.
-    - grep: Search file contents for a pattern. Returns file:line:content. Prefer this over shell + grep.
-    - shell: Run shell commands in the project root
+  @default_system_prompt_template """
+  You are an AI coding assistant running inside Minga, a modal text editor. You help users by reading files, editing code, running shell commands, and writing new files.
 
-    ## Guidelines
+  ## Available tools
 
-    - Read files before editing them. The old_text in edit_file must match exactly.
-    - Use find to discover files by name or extension, and grep to search file contents.
-    - Use shell for running tests, linters, git commands, etc.
-    - Be concise and direct. Show file paths clearly when working with files.
-    - When you make changes, verify them by reading the result or running tests.
+  - read_file: Read file contents
+  - write_file: Create or overwrite files (creates parent directories automatically)
+  - edit_file: Make surgical edits (find exact text and replace). Read the file first to get exact text.
+  - list_directory: List files and directories at a path
+  - find: Find files by name or glob pattern. Prefer this over shell + find.
+  - grep: Search file contents for a pattern. Returns file:line:content. Prefer this over shell + grep.
+  - shell: Run shell commands in the project root
 
-    ## Environment
+  ## Guidelines
 
-    - Project root: #{project_root}
-    - Current time: #{DateTime.utc_now() |> DateTime.to_iso8601()}
-    #{if instructions, do: "\n#{instructions}", else: ""}
-    """
+  - Read files before editing them. The old_text in edit_file must match exactly.
+  - Use find to discover files by name or extension, and grep to search file contents.
+  - Use shell for running tests, linters, git commands, etc.
+  - Be concise and direct. Show file paths clearly when working with files.
+  - When you make changes, verify them by reading the result or running tests.
+  """
+
+  # Returns the base system prompt: either from config or the default template.
+  # Config value can be a string prompt or a file path.
+  @spec resolve_base_prompt(String.t()) :: String.t()
+  defp resolve_base_prompt(project_root) do
+    custom = read_config_string(:agent_system_prompt)
+
+    base =
+      if custom != "" do
+        resolve_prompt_value(custom, project_root)
+      else
+        @default_system_prompt_template
+      end
+
+    # Always append environment info
+    base <>
+      "\n## Environment\n\n" <>
+      "- Project root: #{project_root}\n" <>
+      "- Current time: #{DateTime.utc_now() |> DateTime.to_iso8601()}"
+  end
+
+  # If the value looks like a file path, read it. Otherwise return as-is.
+  @spec resolve_prompt_value(String.t(), String.t()) :: String.t()
+  defp resolve_prompt_value(value, project_root) do
+    expanded = expand_path(value, project_root)
+
+    if File.regular?(expanded) do
+      File.read!(expanded)
+    else
+      value
+    end
+  end
+
+  @spec expand_path(String.t(), String.t()) :: String.t()
+  defp expand_path("~/" <> rest, _project_root) do
+    Path.join(System.user_home!(), rest)
+  end
+
+  defp expand_path(path, project_root) do
+    if Path.type(path) == :absolute do
+      path
+    else
+      Path.join(project_root, path)
+    end
+  end
+
+  @spec read_config_string(atom()) :: String.t()
+  defp read_config_string(key) do
+    case Options.get(key) do
+      value when is_binary(value) -> value
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  catch
+    :exit, _ -> ""
   end
 
   # Sets the provider's API key env var if it's stored in the credentials
