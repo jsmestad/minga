@@ -114,12 +114,15 @@ defmodule Minga.Editor.State.EventRoutingTest do
     end
   end
 
-  describe "update_background_agent/3" do
-    test "updates agent status in background tab's surface_state" do
+  describe "update_background_surface_state/3" do
+    test "replaces entire surface_state in background tab" do
       %{state: state, tab2_id: tab_id} = make_state()
 
-      state =
-        EditorState.update_background_agent(state, tab_id, &AgentState.set_status(&1, :thinking))
+      tab = TabBar.get(state.tab_bar, tab_id)
+      old_av = tab.context.surface_state
+      new_av = %{old_av | agent: AgentState.set_status(old_av.agent, :thinking)}
+
+      state = EditorState.update_background_surface_state(state, tab_id, new_av)
 
       tab = TabBar.get(state.tab_bar, tab_id)
       assert tab.context.surface_state.agent.status == :thinking
@@ -128,26 +131,28 @@ defmodule Minga.Editor.State.EventRoutingTest do
     test "does not affect active tab's live state" do
       %{state: state, tab2_id: tab_id} = make_state()
 
-      state =
-        EditorState.update_background_agent(state, tab_id, &AgentState.set_status(&1, :thinking))
+      tab = TabBar.get(state.tab_bar, tab_id)
+      old_av = tab.context.surface_state
+      new_av = %{old_av | agent: AgentState.set_status(old_av.agent, :thinking)}
+
+      state = EditorState.update_background_surface_state(state, tab_id, new_av)
 
       assert AgentAccess.agent(state).status == :idle
     end
-  end
 
-  describe "update_background_agentic/3" do
-    test "updates agentic view state in background tab's surface_state" do
+    test "background event via AgentView.handle_event updates stored state" do
       %{state: state, tab2_id: tab_id} = make_state()
 
-      state =
-        EditorState.update_background_agentic(
-          state,
-          tab_id,
-          &ViewState.set_focus(&1, :file_viewer)
-        )
+      tab = TabBar.get(state.tab_bar, tab_id)
+      av_state = tab.context.surface_state
+
+      {new_av, _effects} =
+        AgentView.handle_event(av_state, {:status_changed, :thinking})
+
+      state = EditorState.update_background_surface_state(state, tab_id, new_av)
 
       tab = TabBar.get(state.tab_bar, tab_id)
-      assert tab.context.surface_state.agentic.focus == :file_viewer
+      assert tab.context.surface_state.agent.status == :thinking
     end
   end
 

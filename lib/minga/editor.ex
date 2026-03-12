@@ -13,11 +13,11 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Editor.AgentLifecycle
-  alias Minga.Editor.BackgroundEvents
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
@@ -43,6 +43,7 @@ defmodule Minga.Editor do
   alias Minga.Port.Manager, as: PortManager
 
   alias Minga.Project
+  alias Minga.Surface.AgentView
 
   require Logger
 
@@ -56,6 +57,8 @@ defmodule Minga.Editor do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -402,7 +405,7 @@ defmodule Minga.Editor do
         {:noreply, state}
 
       {:background, tab} ->
-        state = BackgroundEvents.handle(state, tab, event)
+        state = handle_background_agent_event(state, tab, event)
         {:noreply, state}
 
       :not_found ->
@@ -432,7 +435,125 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # Tab bar, view state, capabilities, parser subscription helpers
+  # ── Background agent events ──────────────────────────────────────────────
+
+  # Handles an agent event for a tab that isn't currently active. Extracts
+  # the tab's stored AgentViewState, runs it through the same handle_event
+  # that active tabs use, and writes the result back. Effects are applied
+  # selectively since the surface isn't visible.
+  @spec handle_background_agent_event(EditorState.t(), Tab.t(), term()) :: EditorState.t()
+  defp handle_background_agent_event(state, tab, event) do
+    alias Minga.Surface.AgentView.State, as: AgentViewState
+
+    av_state = extract_background_av_state(tab)
+    {new_av_state, effects} = AgentView.handle_event(av_state, event)
+    state = EditorState.update_background_surface_state(state, tab.id, new_av_state)
+    state = apply_background_effects(state, tab, effects)
+
+    # Tab label updates on messages_changed (needs session PID for message fetch)
+    if match?(:messages_changed, event) do
+      maybe_update_background_tab_label(state, tab)
+    else
+      state
+    end
+  end
+
+  # Extracts AgentViewState from a background tab's stored context.
+  # Returns a default if the tab has no surface_state.
+  @spec extract_background_av_state(Tab.t()) :: AgentView.State.t()
+  defp extract_background_av_state(%Tab{context: %{surface_state: %AgentView.State{} = av}}) do
+    av
+  end
+
+  defp extract_background_av_state(_tab) do
+    alias Minga.Editor.State.Agent, as: AgentState
+    alias Minga.Surface.AgentView.State, as: AgentViewState
+    %AgentViewState{agent: %AgentState{}, agentic: Minga.Agent.View.State.new()}
+  end
+
+  # Applies effects from a background tab's event handler. Only a subset
+  # of effects make sense for background tabs (render for tab bar updates,
+  # log messages). Most effects are ignored since the surface isn't visible.
+  @spec apply_background_effects(EditorState.t(), Tab.t(), [Minga.Surface.effect()]) ::
+          EditorState.t()
+  defp apply_background_effects(state, _tab, []), do: state
+
+  defp apply_background_effects(state, tab, [effect | rest]) do
+    state =
+      case effect do
+        :render -> schedule_render(state, 16)
+        {:render, delay} -> schedule_render(state, delay)
+        {:log_message, msg} -> log_message(state, msg)
+        _ -> state
+      end
+
+    apply_background_effects(state, tab, rest)
+  end
+
+  # Updates a background agent tab's label based on the first user message
+  # in the session. Only changes the label if it's still a default name.
+  @spec maybe_update_background_tab_label(EditorState.t(), Tab.t()) :: EditorState.t()
+  defp maybe_update_background_tab_label(state, tab) do
+    session_pid = background_tab_session(tab)
+
+    if session_pid && default_agent_label?(tab.label) do
+      messages =
+        try do
+          AgentSession.messages(session_pid)
+        catch
+          :exit, _ -> []
+        end
+
+      case first_user_message(messages) do
+        nil ->
+          state
+
+        text ->
+          label = truncate_label(text, 30)
+
+          %{
+            state
+            | tab_bar: TabBar.update_label(state.tab_bar, tab.id, label)
+          }
+      end
+    else
+      state
+    end
+  end
+
+  @spec background_tab_session(Tab.t()) :: pid() | nil
+  defp background_tab_session(%Tab{session: pid}) when is_pid(pid), do: pid
+
+  defp background_tab_session(%Tab{context: ctx}) do
+    case Map.get(ctx, :surface_state) do
+      %AgentView.State{agent: agent} -> agent.session
+      _ -> nil
+    end
+  end
+
+  @spec default_agent_label?(String.t()) :: boolean()
+  defp default_agent_label?("New Agent"), do: true
+  defp default_agent_label?("minga"), do: true
+  defp default_agent_label?(_), do: false
+
+  @spec first_user_message([term()]) :: String.t() | nil
+  defp first_user_message(messages) do
+    Enum.find_value(messages, fn
+      {:user, text} -> text
+      _ -> nil
+    end)
+  end
+
+  @spec truncate_label(String.t(), pos_integer()) :: String.t()
+  defp truncate_label(text, max) do
+    line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
+
+    if String.length(line) > max do
+      String.slice(line, 0, max) <> "…"
+    else
+      line
+    end
+  end
 
   # ── Surface lifecycle ──────────────────────────────────────────────────────
 
