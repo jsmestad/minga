@@ -41,6 +41,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Retry
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
+  alias Minga.Agent.Tools.Shell
   alias Minga.Config.Options
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse
@@ -540,13 +541,13 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_approval(_provider_pid, tool_call, available_tools, :none) do
-    {result, is_error} = run_single_tool(tool_call, available_tools)
+  defp execute_with_approval(provider_pid, tool_call, available_tools, :none) do
+    {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :none}
   end
 
-  defp execute_with_approval(_provider_pid, tool_call, available_tools, :approve_all) do
-    {result, is_error} = run_single_tool(tool_call, available_tools)
+  defp execute_with_approval(provider_pid, tool_call, available_tools, :approve_all) do
+    {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :approve_all}
   end
 
@@ -558,7 +559,7 @@ defmodule Minga.Agent.Providers.Native do
     if Tools.destructive?(tool_call.name) do
       request_approval(provider_pid, tool_call, available_tools)
     else
-      {result, is_error} = run_single_tool(tool_call, available_tools)
+      {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
       {result, is_error, :ask}
     end
   end
@@ -595,11 +596,11 @@ defmodule Minga.Agent.Providers.Native do
     # Block until the user responds (or timeout after 5 minutes)
     receive do
       {:tool_approval_response, _tool_call_id, :approve} ->
-        {result, is_error} = run_single_tool(tool_call, available_tools)
+        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
         {result, is_error, :ask}
 
       {:tool_approval_response, _tool_call_id, :approve_all} ->
-        {result, is_error} = run_single_tool(tool_call, available_tools)
+        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
         {result, is_error, :approve_all}
 
       {:tool_approval_response, _tool_call_id, :reject} ->
@@ -610,7 +611,6 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @spec run_single_tool(map(), [ReqLLM.Tool.t()]) :: {String.t(), boolean()}
   @file_tools ~w(edit_file write_file)
 
   @spec capture_file_before(map()) :: String.t() | nil
@@ -653,16 +653,48 @@ defmodule Minga.Agent.Providers.Native do
 
   defp maybe_emit_file_changed(_provider_pid, _tool_call, _before_content, _is_error), do: :ok
 
-  defp run_single_tool(tool_call, available_tools) do
+  @spec run_single_tool(map(), [ReqLLM.Tool.t()], pid() | nil) ::
+          {String.t(), boolean()}
+  defp run_single_tool(tool_call, available_tools, provider_pid) do
     case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
       nil ->
         {"Tool '#{tool_call.name}' not found", true}
+
+      _tool when tool_call.name == "shell" and is_pid(provider_pid) ->
+        run_shell_with_streaming(tool_call, provider_pid)
 
       tool ->
         case ReqLLM.Tool.execute(tool, tool_call.arguments) do
           {:ok, result} -> {format_tool_result(result), false}
           {:error, reason} -> {format_error(reason), true}
         end
+    end
+  end
+
+  # Runs the shell tool with incremental output streaming via ToolUpdate events.
+  @spec run_shell_with_streaming(map(), pid()) :: {String.t(), boolean()}
+  defp run_shell_with_streaming(tool_call, provider_pid) do
+    args = tool_call.arguments
+    root = detect_project_root()
+    timeout_secs = min(args["timeout"] || 30, 300)
+
+    on_output = fn chunk ->
+      send(
+        provider_pid,
+        {:agent_event,
+         %Event.ToolUpdate{
+           tool_call_id: tool_call.id,
+           name: "shell",
+           partial_result: chunk
+         }}
+      )
+
+      :ok
+    end
+
+    case Shell.execute(args["command"], root, timeout_secs, on_output: on_output) do
+      {:ok, result} -> {result, false}
+      {:error, reason} -> {reason, true}
     end
   end
 
