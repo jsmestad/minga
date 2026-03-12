@@ -52,6 +52,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
+  alias Minga.Editor.Window.Content
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.Scroll
@@ -238,8 +239,14 @@ defmodule Minga.Editor.RenderPipeline do
     {scrolls, state} = timed(:scroll, fn -> scroll_windows(state, layout) end)
 
     # Stage 4: Content (skips clean lines, updates window caches)
-    {window_frames, cursor_info, state} =
+    {buffer_frames, cursor_info, state} =
       timed(:content, fn -> build_content(state, scrolls) end)
+
+    # Stage 4b: Agent chat window content (rendered separately from buffers)
+    agent_chat_frames =
+      timed(:agent_content, fn -> build_agent_chat_content(state, layout) end)
+
+    window_frames = buffer_frames ++ agent_chat_frames
 
     # Stage 5: Chrome
     chrome = timed(:chrome, fn -> build_chrome(state, layout, scrolls, cursor_info) end)
@@ -357,7 +364,8 @@ defmodule Minga.Editor.RenderPipeline do
     |> Enum.reduce({%{}, state}, fn {win_id, win_layout}, {acc, st} ->
       window = Map.get(st.windows.map, win_id)
 
-      if window == nil or window.buffer == nil do
+      if window == nil or window.buffer == nil or Content.agent_chat?(window.content) do
+        # Skip nil windows and agent chat windows (rendered separately)
         {acc, st}
       else
         is_active = win_id == state.windows.active
@@ -639,6 +647,52 @@ defmodule Minga.Editor.RenderPipeline do
   # Builds a fingerprint from the render context that captures all inputs
   # affecting every visible line. Used to detect context changes between
   # frames (visual selection, search, highlights, signs, scroll, etc.).
+
+  # ── Stage 4b: Agent chat content ───────────────────────────────────────────
+
+  @doc """
+  Builds display list draws for agent chat windows.
+
+  Finds windows with `{:agent_chat, _}` content in the layout, renders
+  the agent chat content into their rects, and returns `WindowFrame`
+  structs. Buffer windows are skipped (handled by `build_content/2`).
+
+  Returns an empty list if no agent chat windows exist.
+  """
+  @spec build_agent_chat_content(state(), Layout.t()) :: [WindowFrame.t()]
+  def build_agent_chat_content(state, layout) do
+    layout.window_layouts
+    |> Enum.flat_map(fn {win_id, win_layout} ->
+      window = Map.get(state.windows.map, win_id)
+
+      case window do
+        %Window{content: {:agent_chat, _buf}} ->
+          [render_agent_chat_window(state, window, win_layout)]
+
+        _ ->
+          []
+      end
+    end)
+  end
+
+  @spec render_agent_chat_window(state(), Window.t(), Layout.window_layout()) :: WindowFrame.t()
+  defp render_agent_chat_window(state, _window, win_layout) do
+    {row_off, col_off, width, height} = win_layout.content
+
+    # Render agent chat into this rect using ViewRenderer.
+    # render_in_rect/3 draws chat messages, scroll position, and the
+    # prompt input area within the given bounds.
+    draws = ViewRenderer.render_in_rect(state, {row_off, col_off, width, height})
+
+    %WindowFrame{
+      rect: {row_off, col_off, width, height},
+      gutter: %{},
+      lines: DisplayList.draws_to_layer(draws),
+      tilde_lines: %{},
+      modeline: %{},
+      cursor: nil
+    }
+  end
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
 

@@ -103,6 +103,26 @@ defmodule Minga.Editor.Window do
     }
   end
 
+  @doc """
+  Creates a new agent chat window.
+
+  The `buffer` field is set to the agent's `*Agent*` Buffer.Server pid
+  for backward compatibility with code that reads `window.buffer`. The
+  `content` field uses the `:agent_chat` tag so the render pipeline can
+  dispatch to the agent chat renderer.
+  """
+  @spec new_agent_chat(id(), pid(), pos_integer(), pos_integer()) :: t()
+  def new_agent_chat(id, agent_buffer, rows, cols)
+      when is_integer(id) and id > 0 and is_pid(agent_buffer) and
+             is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
+    %__MODULE__{
+      id: id,
+      content: Content.agent_chat(agent_buffer),
+      buffer: agent_buffer,
+      viewport: Viewport.new(rows, cols)
+    }
+  end
+
   @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
   @spec new(id(), pid(), pos_integer(), pos_integer(), Document.position()) :: t()
   def new(id, buffer, rows, cols, cursor)
