@@ -164,6 +164,7 @@ defmodule Minga.Editor.Commands do
     do: PickerUI.open(state, Minga.Picker.SessionHistorySource)
 
   def execute(state, :agent_cycle_model), do: AgentCommands.cycle_model(state)
+  def execute(state, :agent_summarize), do: AgentCommands.summarize(state)
 
   def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
 

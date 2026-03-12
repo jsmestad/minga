@@ -94,6 +94,7 @@ defmodule Minga.Command.Registry do
     {:agent_new_session, "New AI agent session"},
     {:agent_pick_model, "Pick AI agent model"},
     {:agent_cycle_model, "Cycle AI agent model"},
+    {:agent_summarize, "Summarize session to context artifact"},
     {:agent_cycle_thinking, "Cycle AI thinking level"}
   ]
 
