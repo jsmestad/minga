@@ -3,14 +3,11 @@ defmodule Minga.Editor.State.SnapshotTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
-  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.BufferView.State, as: BufferViewState
 
   defp make_state(opts \\ []) do
@@ -88,41 +85,33 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       state = make_state(buffer: buf_a)
 
-      # Agent scope: surface_module is AgentView, agent state is in surface_state
+      # Agent scope is now just a keymap_scope value; surface stays BufferView
       state_b = make_state(buffer: buf_b, keymap_scope: :agent)
       ctx = EditorState.snapshot_tab_context(state_b)
 
-      assert ctx.surface_module == Minga.Surface.AgentView
-      assert %AgentViewState{} = ctx.surface_state
-
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.keymap_scope == :agent
-      assert restored.surface_module == Minga.Surface.AgentView
+      # Surface is always BufferView now (no AgentView surface)
+      assert restored.surface_module == Minga.Surface.BufferView
     end
 
-    test "restores legacy context with agent field (no surface_state)" do
+    test "restores legacy context with agent field preserves scope" do
       {:ok, buf_a} = BufferServer.start_link(content: "a")
       {:ok, buf_b} = BufferServer.start_link(content: "b")
 
       state = make_state(buffer: buf_a)
 
-      # Legacy context: has agent but no surface_state.
-      # The migration converts this into a canonical context with an
-      # AgentView surface state.
       ctx = %{
         mode: :insert,
         mode_state: Minga.Mode.initial_state(),
         keymap_scope: :agent,
         active_buffer: buf_b,
-        active_buffer_index: 1,
-        agent: AgentState.set_status(%AgentState{}, :thinking)
+        active_buffer_index: 1
       }
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.keymap_scope == :agent
-      assert restored.surface_module == Minga.Surface.AgentView
-      # Agent state is synced back from the surface state
-      assert AgentAccess.agent(restored).status == :thinking
+      assert restored.surface_module == Minga.Surface.BufferView
     end
 
     test "restores legacy editor context with mode and buffer (no surface_state)" do

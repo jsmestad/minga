@@ -72,7 +72,15 @@ defmodule Minga.Editor.LayoutPreset do
       {:ok, new_tree} ->
         map = Map.delete(state.windows.map, agent_win_id)
         windows = %{state.windows | tree: new_tree, map: map}
-        %{state | windows: windows}
+        state = %{state | windows: windows}
+
+        # If we were in agent scope, return to editor scope since the
+        # agent pane is gone.
+        if state.keymap_scope == :agent do
+          %{state | keymap_scope: :editor}
+        else
+          state
+        end
 
       :error ->
         state
@@ -83,8 +91,17 @@ defmodule Minga.Editor.LayoutPreset do
   defp maybe_switch_focus_away(state, closing_id) do
     if state.windows.active == closing_id do
       case find_non_agent_window(state) do
-        {buf_win_id, _} -> %{state | windows: %{state.windows | active: buf_win_id}}
-        nil -> state
+        {buf_win_id, window} ->
+          scope = EditorState.scope_for_content(window.content, state.keymap_scope)
+
+          %{
+            state
+            | windows: %{state.windows | active: buf_win_id},
+              keymap_scope: scope
+          }
+
+        nil ->
+          state
       end
     else
       state

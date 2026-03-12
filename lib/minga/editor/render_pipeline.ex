@@ -47,7 +47,6 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
@@ -55,7 +54,6 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.Window.Content
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
-  alias Minga.Scroll
 
   # Agent input area = 3 rows (border + text + padding); cursor goes on the text row.
 
@@ -214,14 +212,9 @@ defmodule Minga.Editor.RenderPipeline do
     dispatch_to_surface(state, layout)
   end
 
-  # Dispatches rendering to the appropriate pipeline based on the active
-  # surface module. AgentView uses the agentic pipeline; BufferView (and
-  # any unknown/nil surface) uses the windows pipeline.
+  # All rendering goes through the windows pipeline. Agent chat is rendered
+  # as a window content type within the same pipeline (Stage 4b).
   @spec dispatch_to_surface(state(), Layout.t()) :: state()
-  defp dispatch_to_surface(%{surface_module: Minga.Surface.AgentView} = state, layout) do
-    run_agentic_pipeline(state, layout)
-  end
-
   defp dispatch_to_surface(state, layout) do
     run_windows_pipeline(state, layout)
   end
@@ -260,50 +253,6 @@ defmodule Minga.Editor.RenderPipeline do
       timed(:compose, fn -> compose_windows(window_frames, chrome, cursor_info, state) end)
 
     # Stage 7: Emit
-    timed(:emit, fn -> emit(frame, state) end)
-
-    state
-  end
-
-  @doc """
-  Runs the agentic render pipeline stages.
-
-  Public entry point for `AgentView.render/2`. Handles content rendering
-  via `ViewRenderer`, agentic chrome (tab bar, modeline), composition,
-  and emit.
-  """
-  @spec run_agentic_pipeline(state(), Layout.t()) :: state()
-  def run_agentic_pipeline(state, layout) do
-    # Agentic path: Content is the ViewRenderer, Chrome is minimal.
-    # The renderer returns scroll metrics alongside draw commands so
-    # PanelState.scroll_up/down can resolve auto_scroll→manual transitions
-    # using concrete content dimensions.
-    {panel_draws, scroll_metrics} = timed(:content, fn -> ViewRenderer.render(state) end)
-
-    # Cache scroll metrics in PanelState. This runs every frame, so the
-    # cache is always fresh when the next scroll command executes.
-    state =
-      AgentAccess.update_agent(state, fn agent ->
-        panel = agent.panel
-
-        scroll =
-          Scroll.update_metrics(
-            panel.scroll,
-            scroll_metrics.total_lines,
-            scroll_metrics.visible_height
-          )
-
-        %{agent | panel: %{panel | scroll: scroll}}
-      end)
-
-    chrome = timed(:chrome, fn -> build_chrome_agentic(state, layout) end)
-
-    # Cache tab bar click regions
-    state = %{state | tab_bar_click_regions: chrome.tab_bar_click_regions}
-
-    frame =
-      timed(:compose, fn -> compose_agentic(panel_draws, chrome, state) end)
-
     timed(:emit, fn -> emit(frame, state) end)
 
     state
@@ -795,47 +744,11 @@ defmodule Minga.Editor.RenderPipeline do
   @doc """
   Chrome stage for the agentic (full-screen agent) path.
 
-  Produces minibuffer, overlays, and regions. No modeline, separators,
-  file tree, or agent panel sidebar.
-  """
-  @spec build_chrome_agentic(state(), Layout.t()) :: Chrome.t()
-  def build_chrome_agentic(state, layout) do
-    full_viewport = state.viewport
-    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
 
-    minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
-
-    render_overlays_flag = Caps.render_overlays?(state.capabilities)
-
-    whichkey_draws =
-      if render_overlays_flag, do: ChromeHelpers.render_whichkey(state, full_viewport), else: []
-
-    {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
-
-    overlays =
-      [
-        %Overlay{draws: whichkey_draws},
-        %Overlay{draws: picker_draws, cursor: picker_cursor}
-      ]
-      |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
-
-    # Tab bar
-    {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
-
-    regions = Regions.define_regions(layout)
-
-    %Chrome{
-      tab_bar: tab_bar_draws,
-      tab_bar_click_regions: tab_bar_regions,
-      minibuffer: [minibuffer_draw],
-      overlays: overlays,
-      regions: regions
-    }
-  end
 
   # ── Stage 6: Compose ──────────────────────────────────────────────────────
 
-  @doc """
+  @doc \"""
   Merges content WindowFrames and Chrome into a `Frame` struct.
 
   Injects modeline draws into each WindowFrame, resolves cursor
@@ -886,39 +799,6 @@ defmodule Minga.Editor.RenderPipeline do
       file_tree: chrome.file_tree,
       separators: chrome.separators,
       agent_panel: chrome.agent_panel,
-      minibuffer: chrome.minibuffer,
-      overlays: chrome.overlays,
-      regions: chrome.regions
-    }
-  end
-
-  @doc """
-  Compose stage for the agentic (full-screen agent) path.
-  """
-  @spec compose_agentic([DisplayList.draw()], Chrome.t(), state()) :: Frame.t()
-  def compose_agentic(panel_draws, chrome, state) do
-    # Cursor placement
-    {cursor_row, cursor_col} = ViewRenderer.cursor_position(state)
-    picker_cursor = ComposeHelpers.find_picker_cursor(chrome.overlays)
-
-    cursor_shape =
-      if state.picker_ui.picker do
-        :beam
-      else
-        ChromeHelpers.input_cursor_shape(state.mode)
-      end
-
-    cursor =
-      case picker_cursor do
-        {pr, pc} -> {pr, pc}
-        nil -> {cursor_row, cursor_col}
-      end
-
-    %Frame{
-      cursor: cursor,
-      cursor_shape: cursor_shape,
-      tab_bar: chrome.tab_bar,
-      agentic_view: panel_draws,
       minibuffer: chrome.minibuffer,
       overlays: chrome.overlays,
       regions: chrome.regions

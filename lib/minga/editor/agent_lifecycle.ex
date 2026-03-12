@@ -17,24 +17,23 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
+  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Surface.AgentView
-
   @type state :: EditorState.t()
 
   @doc """
-  Starts the agent session if the agentic view was activated during init.
+  Starts the agent session if the agent pane is visible during init.
 
   Also loads auto-context if configured. Called once the port is ready.
   """
   @spec maybe_start_session(state()) :: state()
-  def maybe_start_session(%{surface_module: AgentView} = state) do
+  def maybe_start_session(state) do
     agent = AgentAccess.agent(state)
 
-    if agent.session == nil do
+    if agent.session == nil and LayoutPreset.has_agent_chat?(state) do
       state = Commands.Agent.ensure_agent_session(state)
       cli_flags = Minga.CLI.startup_flags()
       maybe_load_auto_context(state, cli_flags)
@@ -47,21 +46,19 @@ defmodule Minga.Editor.AgentLifecycle do
       state
   end
 
-  def maybe_start_session(state), do: state
-
   @doc """
-  Sets a file's content as the agentic preview pane if the agentic view
+  Sets a file's content as the agentic preview pane if the agent pane
   is active and the preview is empty. Called when a file is opened while
-  the agentic view is already active.
+  the agent view is already active.
   """
   @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
   def maybe_set_auto_context(state, file_path, buffer_pid) do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
-    agent_surface_active = state.surface_module == AgentView
+    agent_visible = LayoutPreset.has_agent_chat?(state)
     preview_empty = AgentAccess.agentic(state).preview.content == :empty
 
-    if agent_surface_active and preview_empty and auto_context and not cli_flags.no_context do
+    if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
       content = BufferServer.content(buffer_pid)
       update_preview(state, &Preview.set_file(&1, file_path, content))
     else

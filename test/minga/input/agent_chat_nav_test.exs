@@ -15,8 +15,6 @@ defmodule Minga.Input.AgentChatNavTest do
   alias Minga.Editor.Viewport
   alias Minga.Input.AgentChatNav
   alias Minga.Mode
-  alias Minga.Surface.AgentView.State, as: AgentViewState
-
   @ctrl Minga.Port.Protocol.mod_ctrl()
 
   defp make_state(opts \\ []) do
@@ -62,12 +60,8 @@ defmodule Minga.Input.AgentChatNavTest do
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       buffers: %Buffers{active: file_buf, list: [file_buf]},
       mode: :normal,
       mode_state: Mode.initial_state(),

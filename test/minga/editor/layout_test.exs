@@ -13,7 +13,6 @@ defmodule Minga.Editor.LayoutTest do
   alias Minga.FileTree
   alias Minga.Mode
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,8 +52,8 @@ defmodule Minga.Editor.LayoutTest do
   defp with_agent_panel(state) do
     default_panel = %AgentState{} |> Map.get(:panel)
     agent = %AgentState{panel: %{default_panel | visible: true}}
-    av = %AgentViewState{agent: agent, agentic: ViewState.new()}
-    agent_ctx = %{surface_module: AgentView, surface_state: av, keymap_scope: :agent}
+    agentic = ViewState.new()
+    agent_ctx = %{surface_module: AgentView, keymap_scope: :agent}
 
     # Ensure a file tab exists and is active, then add a background agent tab.
     # TabBar.new/1 requires an initial Tab; we start with a file tab.
@@ -66,7 +65,7 @@ defmodule Minga.Editor.LayoutTest do
     # Keep the file tab active
     tb = TabBar.switch_to(tb, file_tab.id)
 
-    %{state | tab_bar: tb}
+    %{state | tab_bar: tb, agent: agent, agentic: agentic}
   end
 
   defp with_vsplit(state) do

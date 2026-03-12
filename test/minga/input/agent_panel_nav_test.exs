@@ -11,7 +11,6 @@ defmodule Minga.Input.AgentPanelNavTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -55,11 +54,8 @@ defmodule Minga.Input.AgentPanelNavTest do
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       buffers: %{active: nil, list: [], recent: []},
       mode: :normal,
       mode_state: Mode.initial_state(),

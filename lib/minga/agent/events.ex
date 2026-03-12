@@ -1,0 +1,220 @@
+defmodule Minga.Agent.Events do
+  @moduledoc """
+  Handles agent session events, updating EditorState directly.
+
+  Agent events (status changes, deltas, tool activity, errors) arrive
+  from the agent session process. Each handler reads and writes the
+  `agent` and `agentic` fields on EditorState through AgentAccess,
+  returning the updated state and a list of effects for the Editor
+  GenServer to apply.
+
+  This replaces the Surface-based event dispatch that previously routed
+  events through `AgentView.handle_event/2` and `AgentViewState`.
+  """
+
+  alias Minga.Agent.DiffReview
+  alias Minga.Agent.View.Preview
+  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
+
+  @type effect ::
+          :render
+          | {:render, pos_integer()}
+          | {:log_message, String.t()}
+          | :sync_agent_buffer
+          | {:update_tab_label, String.t()}
+
+  @spec handle(EditorState.t(), term()) :: {EditorState.t(), [effect()]}
+
+  def handle(state, {:status_changed, status}) do
+    state = AgentAccess.update_agent(state, &AgentState.set_status(&1, status))
+
+    {state, effects} =
+      case status do
+        :error ->
+          {state, [{:log_message, "Agent: error"}]}
+
+        :thinking ->
+          {AgentAccess.update_agent(state, &AgentState.engage_auto_scroll/1), []}
+
+        _ ->
+          {state, []}
+      end
+
+    state =
+      case status do
+        s when s in [:thinking, :tool_executing] ->
+          AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+
+        _ ->
+          AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+      end
+
+    {state, [:render | effects]}
+  end
+
+  def handle(state, {:text_delta, _delta}) do
+    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:thinking_delta, _delta}) do
+    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    {state, [{:render, 50}]}
+  end
+
+  def handle(state, :messages_changed) do
+    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
+  end
+
+  def handle(state, {:tool_started, "shell", args}) do
+    command = Map.get(args, "command", "")
+    state = update_preview(state, &Preview.set_shell(&1, command))
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:tool_update, _id, "shell", partial}) do
+    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = update_preview(state, &Preview.update_shell_output(&1, partial))
+    {state, [{:render, 50}]}
+  end
+
+  def handle(state, {:tool_update, _id, _name, _partial}) do
+    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    {state, [{:render, 50}]}
+  end
+
+  def handle(state, {:tool_ended, "shell", result, status}) do
+    shell_status = if status == :error, do: :error, else: :done
+    state = update_preview(state, &Preview.finish_shell(&1, result, shell_status))
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:tool_started, "read_file", args}) do
+    path = Map.get(args, "path", "")
+    state = update_preview(state, &Preview.set_file(&1, path, ""))
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:tool_ended, "read_file", result, _status}) do
+    case AgentAccess.agentic(state).preview.content do
+      {:file, path, _} ->
+        state = update_preview(state, &Preview.set_file(&1, path, result))
+        {state, [{:render, 16}]}
+
+      _ ->
+        {state, []}
+    end
+  end
+
+  def handle(state, {:tool_started, "list_directory", args}) do
+    path = Map.get(args, "path", ".")
+    state = update_preview(state, &Preview.set_directory(&1, path, []))
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:tool_ended, "list_directory", result, _status}) do
+    entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
+
+    case AgentAccess.agentic(state).preview.content do
+      {:directory, path, _} ->
+        state = update_preview(state, &Preview.set_directory(&1, path, entries))
+        {state, [{:render, 16}]}
+
+      _ ->
+        {state, []}
+    end
+  end
+
+  def handle(state, {:tool_started, _name, _args}) do
+    {state, []}
+  end
+
+  def handle(state, {:tool_ended, _name, _result, _status}) do
+    {state, []}
+  end
+
+  def handle(state, {:file_changed, path, before_content, after_content}) do
+    state =
+      AgentAccess.update_agentic(state, &ViewState.record_baseline(&1, path, before_content))
+
+    baseline = ViewState.get_baseline(AgentAccess.agentic(state), path)
+    existing_review = existing_diff_for_path(state, path)
+
+    review =
+      case existing_review do
+        nil -> DiffReview.new(path, baseline, after_content)
+        existing -> DiffReview.update_after(existing, after_content)
+      end
+
+    case review do
+      nil ->
+        {state, [{:render, 16}]}
+
+      _ ->
+        state = update_preview(state, &Preview.set_diff(&1, review))
+        state = AgentAccess.update_agentic(state, &ViewState.set_focus(&1, :file_viewer))
+        {state, [:render]}
+    end
+  end
+
+  def handle(state, {:approval_pending, approval}) do
+    cached = Map.take(approval, [:tool_call_id, :name, :args])
+    state = AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, cached))
+    {state, [:render]}
+  end
+
+  def handle(state, {:approval_resolved, _decision}) do
+    state = AgentAccess.update_agent(state, &AgentState.clear_pending_approval/1)
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:error, message}) do
+    state = AgentAccess.update_agent(state, &AgentState.set_error(&1, message))
+    {state, [:render, {:log_message, "Agent error: #{message}"}]}
+  end
+
+  def handle(state, :spinner_tick) do
+    if AgentState.busy?(AgentAccess.agent(state)) do
+      state = AgentAccess.update_agent(state, &AgentState.tick_spinner/1)
+      {state, [{:render, 16}]}
+    else
+      state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+      {state, []}
+    end
+  end
+
+  def handle(state, :dismiss_toast) do
+    state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, {:context_usage, estimated_tokens, _context_limit}) do
+    state =
+      AgentAccess.update_agentic(state, fn a -> %{a | context_estimate: estimated_tokens} end)
+
+    {state, [{:render, 16}]}
+  end
+
+  def handle(state, _unknown) do
+    {state, []}
+  end
+
+  # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
+  defp update_preview(state, fun) do
+    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
+  end
+
+  @spec existing_diff_for_path(EditorState.t(), String.t()) :: DiffReview.t() | nil
+  defp existing_diff_for_path(state, path) do
+    case Preview.diff_review(AgentAccess.agentic(state).preview) do
+      %DiffReview{path: ^path} = review -> review
+      _ -> nil
+    end
+  end
+end

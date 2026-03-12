@@ -3,6 +3,7 @@ defmodule Minga.Agent.SlashCommandTest do
 
   alias Minga.Agent.PanelState
   alias Minga.Agent.SlashCommand
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
 
@@ -78,6 +79,7 @@ defmodule Minga.Agent.SlashCommandTest do
           spinner_timer: nil,
           buffer: nil
         },
+        agentic: ViewState.new(),
         status_msg: nil,
         buffers: %{active: nil, list: [], active_index: 0}
       }

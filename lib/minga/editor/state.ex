@@ -98,7 +98,9 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             surface_module: nil,
-            surface_state: nil
+            surface_state: nil,
+            agent: %AgentState{},
+            agentic: Minga.Agent.View.State.new()
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -140,7 +142,9 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           surface_module: module() | nil,
-          surface_state: term() | nil
+          surface_state: term() | nil,
+          agent: AgentState.t(),
+          agentic: Minga.Agent.View.State.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -417,11 +421,18 @@ defmodule Minga.Editor.State do
     end
   end
 
+  @doc """
+  Derives the keymap scope from a window's content type.
+
+  Agent chat windows always use `:agent` scope. Buffer windows use
+  `:editor` when coming from `:agent` scope, and preserve the current
+  scope otherwise (e.g., `:file_tree` stays as `:file_tree`).
+  """
   @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
           Minga.Keymap.Scope.scope_name()
-  defp scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
-  defp scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
-  defp scope_for_content({:buffer, _pid}, current_scope), do: current_scope
+  def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
+  def scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
+  def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
   @spec buffer_label(pid()) :: String.t()
   defp buffer_label(pid) when is_pid(pid) do
@@ -594,46 +605,15 @@ defmodule Minga.Editor.State do
       end
 
     scope = Map.get(context, :keymap_scope, :editor)
-    mod = Map.get(context, :surface_module) || scope_to_surface(scope)
-    temp = %{temp | keymap_scope: scope, surface_module: mod}
+    temp = %{temp | keymap_scope: scope, surface_module: Minga.Surface.BufferView}
     temp = SurfaceSync.init_surface(temp)
-
-    # For agent scope, apply legacy agent/agentic fields to the surface state
-    surface_state =
-      if mod == Minga.Surface.AgentView do
-        apply_legacy_agent_fields(temp.surface_state, context)
-      else
-        temp.surface_state
-      end
 
     %{
       surface_module: temp.surface_module,
-      surface_state: surface_state,
+      surface_state: temp.surface_state,
       keymap_scope: scope
     }
   end
-
-  alias Minga.Surface.AgentView.State, as: AgentViewState
-
-  @spec apply_legacy_agent_fields(AgentViewState.t(), map()) :: AgentViewState.t()
-  defp apply_legacy_agent_fields(%AgentViewState{} = av, context) do
-    av =
-      case Map.fetch(context, :agent) do
-        {:ok, agent} -> %{av | agent: agent}
-        :error -> av
-      end
-
-    case Map.fetch(context, :agentic) do
-      {:ok, agentic} -> %{av | agentic: agentic}
-      :error -> av
-    end
-  end
-
-  defp apply_legacy_agent_fields(av, _context), do: av
-
-  @spec scope_to_surface(atom()) :: module()
-  defp scope_to_surface(:agent), do: Minga.Surface.AgentView
-  defp scope_to_surface(_), do: Minga.Surface.BufferView
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
@@ -791,39 +771,6 @@ defmodule Minga.Editor.State do
     kind
   end
 
-  # ══════════════════════════════════════════════════════════════════════════
-  # Per-tab agent event routing
-  # ══════════════════════════════════════════════════════════════════════════
-
-  @typedoc """
-  Result of resolving which tab an agent event belongs to.
-
-  - `{:active, tab}` — the event targets the currently active tab, so
-    the caller should update `state.agent` / `state.agentic` directly.
-  - `{:background, tab}` — the event targets a background tab. The caller
-    should run the event through the surface's `handle_event/2` and write
-    the result back via `update_background_surface_state/3`.
-  - `:not_found` — no tab owns this session (stale event after tab close).
-  """
-  @type route_result :: {:active, Tab.t()} | {:background, Tab.t()} | :not_found
-
-  @doc """
-  Resolves which tab an agent event belongs to, based on the session pid.
-
-  Checks the active tab's live `state.agent.session` first (fast path),
-  then falls back to scanning background tabs via `Tab.session`.
-  """
-  @spec route_agent_event(t(), pid()) :: route_result()
-  def route_agent_event(%__MODULE__{tab_bar: nil}, _session_pid), do: :not_found
-
-  def route_agent_event(%__MODULE__{tab_bar: tb} = state, session_pid) do
-    if AgentAccess.session(state) == session_pid do
-      {:active, TabBar.active(tb)}
-    else
-      find_session_in_tabs(tb, session_pid)
-    end
-  end
-
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
   @spec stop_outgoing_spinner(t()) :: t()
@@ -839,34 +786,6 @@ defmodule Minga.Editor.State do
       AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
     else
       state
-    end
-  end
-
-  @spec find_session_in_tabs(TabBar.t(), pid()) :: route_result()
-  defp find_session_in_tabs(tb, session_pid) do
-    case TabBar.find_by_session(tb, session_pid) do
-      %Tab{id: id} = tab when id == tb.active_id -> {:active, tab}
-      %Tab{} = tab -> {:background, tab}
-      nil -> :not_found
-    end
-  end
-
-  @doc """
-  Replaces the entire surface_state in a background tab's stored context.
-
-  Use this when you have a fully computed new surface state (e.g., after
-  running `AgentView.handle_event/2` on the stored state and writing
-  the result back to the tab).
-  """
-  @spec update_background_surface_state(t(), Tab.id(), term()) :: t()
-  def update_background_surface_state(%__MODULE__{tab_bar: tb} = state, tab_id, new_surface_state) do
-    case TabBar.get(tb, tab_id) do
-      %Tab{context: ctx} when is_map(ctx) ->
-        new_ctx = Map.put(ctx, :surface_state, new_surface_state)
-        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
-
-      _ ->
-        state
     end
   end
 

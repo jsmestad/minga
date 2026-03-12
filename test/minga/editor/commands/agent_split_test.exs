@@ -16,7 +16,6 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Mode
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp make_state do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
@@ -50,22 +49,14 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
 
     file_context = %{
       surface_module: Minga.Surface.BufferView,
-      surface_state: nil,
       keymap_scope: :editor
     }
 
     file_tab = %{file_tab | context: file_context}
     agent_tab = Tab.new_agent(2, "Agent")
 
-    agent_view_state = %AgentViewState{
-      agent: agent,
-      agentic: Minga.Agent.View.State.new(),
-      context: nil
-    }
-
     agent_context = %{
       surface_module: Minga.Surface.AgentView,
-      surface_state: agent_view_state,
       keymap_scope: :agent
     }
 
@@ -91,7 +82,8 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       mode_state: Mode.initial_state(),
       keymap_scope: :editor,
       surface_module: Minga.Surface.BufferView,
-      surface_state: nil,
+      agent: agent,
+      agentic: Minga.Agent.View.State.new(),
       tab_bar: tb,
       file_tree: %FileTreeState{}
     }

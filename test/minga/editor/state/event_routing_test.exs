@@ -1,6 +1,7 @@
 defmodule Minga.Editor.State.EventRoutingTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.Events, as: AgentEvents
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -9,45 +10,10 @@ defmodule Minga.Editor.State.EventRoutingTest do
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
 
-  alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AgentViewState
-
   defp make_state(opts \\ []) do
-    session1 = opts[:session1] || spawn(fn -> :timer.sleep(:infinity) end)
-    session2 = opts[:session2] || spawn(fn -> :timer.sleep(:infinity) end)
+    session = opts[:session] || spawn(fn -> :timer.sleep(:infinity) end)
 
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
-    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent 1")
-    tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session1))
-
-    agent_ctx = %{
-      keymap_scope: :agent,
-      surface_module: AgentView,
-      surface_state: %AgentViewState{
-        agent: %AgentState{session: session1, status: :idle},
-        agentic: %ViewState{active: true, focus: :chat}
-      }
-    }
-
-    tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
-
-    # Add a second agent tab (background)
-    {tb, agent_tab2} = TabBar.add(tb, :agent, "Agent 2")
-    tb = TabBar.update_tab(tb, agent_tab2.id, &Tab.set_session(&1, session2))
-
-    agent_ctx2 = %{
-      keymap_scope: :agent,
-      surface_module: AgentView,
-      surface_state: %AgentViewState{
-        agent: %AgentState{session: session2, status: :idle},
-        agentic: %ViewState{active: true, focus: :chat}
-      }
-    }
-
-    tb = TabBar.update_context(tb, agent_tab2.id, agent_ctx2)
-
-    # Switch back to agent_tab (first one) so it's active
-    tb = TabBar.switch_to(tb, agent_tab.id)
 
     state = %EditorState{
       port_manager: self(),
@@ -57,127 +23,162 @@ defmodule Minga.Editor.State.EventRoutingTest do
       windows: %Windows{},
       mode: :normal,
       mode_state: %{},
-      keymap_scope: :agent,
-      surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: %AgentState{session: session1, status: :idle},
-        agentic: %ViewState{active: true, focus: :chat}
-      },
+      keymap_scope: :editor,
+      surface_module: nil,
+      surface_state: nil,
+      agent: %AgentState{session: session, status: :idle},
+      agentic: ViewState.new(),
       file_tree: nil
     }
 
-    %{
-      state: state,
-      session1: session1,
-      session2: session2,
-      tab1_id: agent_tab.id,
-      tab2_id: agent_tab2.id
-    }
+    %{state: state, session: session}
   end
 
-  describe "route_agent_event/2" do
-    test "routes active session to {:active, tab}" do
-      %{state: state, session1: s1, tab1_id: tab_id} = make_state()
-      assert {:active, %Tab{id: ^tab_id}} = EditorState.route_agent_event(state, s1)
-    end
-
-    test "routes background session to {:background, tab}" do
-      %{state: state, session2: s2, tab2_id: tab_id} = make_state()
-      assert {:background, %Tab{id: ^tab_id}} = EditorState.route_agent_event(state, s2)
-    end
-
-    test "returns :not_found for unknown session" do
+  describe "Agent.Events.handle/2 — status changes" do
+    test "status_changed updates agent status" do
       %{state: state} = make_state()
-      unknown = spawn(fn -> :timer.sleep(:infinity) end)
-      assert :not_found = EditorState.route_agent_event(state, unknown)
+
+      {new_state, effects} = AgentEvents.handle(state, {:status_changed, :thinking})
+
+      assert AgentAccess.agent(new_state).status == :thinking
+      assert :render in effects
     end
 
-    test "returns :not_found when tab_bar is nil" do
-      state = %EditorState{
-        port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        tab_bar: nil,
-        buffers: %EditorState.Buffers{},
-        windows: %Windows{},
-        mode: :normal,
-        mode_state: %{},
-        keymap_scope: :editor,
-        surface_module: Minga.Surface.AgentView,
-        surface_state: %AgentViewState{
-          agent: %AgentState{},
-          agentic: %ViewState{}
-        },
-        file_tree: nil
-      }
+    test "status_changed to :thinking engages auto-scroll" do
+      %{state: state} = make_state()
 
-      assert :not_found = EditorState.route_agent_event(state, self())
+      {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
+
+      assert AgentAccess.agent(new_state).panel.scroll.pinned == true
+    end
+
+    test "status_changed to :error logs a message" do
+      %{state: state} = make_state()
+
+      {_new_state, effects} = AgentEvents.handle(state, {:status_changed, :error})
+
+      assert {:log_message, "Agent: error"} in effects
+    end
+
+    test "status_changed to :idle stops spinner" do
+      %{state: state} = make_state()
+      state = AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+
+      {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :idle})
+
+      assert AgentAccess.agent(new_state).spinner_timer == nil
     end
   end
 
-  describe "update_background_surface_state/3" do
-    test "replaces entire surface_state in background tab" do
-      %{state: state, tab2_id: tab_id} = make_state()
+  describe "Agent.Events.handle/2 — content deltas" do
+    test "text_delta triggers throttled render" do
+      %{state: state} = make_state()
 
-      tab = TabBar.get(state.tab_bar, tab_id)
-      old_av = tab.context.surface_state
-      new_av = %{old_av | agent: AgentState.set_status(old_av.agent, :thinking)}
+      {_new_state, effects} = AgentEvents.handle(state, {:text_delta, "hello"})
 
-      state = EditorState.update_background_surface_state(state, tab_id, new_av)
-
-      tab = TabBar.get(state.tab_bar, tab_id)
-      assert tab.context.surface_state.agent.status == :thinking
+      assert {:render, 16} in effects
     end
 
-    test "does not affect active tab's live state" do
-      %{state: state, tab2_id: tab_id} = make_state()
+    test "thinking_delta triggers throttled render" do
+      %{state: state} = make_state()
 
-      tab = TabBar.get(state.tab_bar, tab_id)
-      old_av = tab.context.surface_state
-      new_av = %{old_av | agent: AgentState.set_status(old_av.agent, :thinking)}
+      {_new_state, effects} = AgentEvents.handle(state, {:thinking_delta, "hmm"})
 
-      state = EditorState.update_background_surface_state(state, tab_id, new_av)
-
-      assert AgentAccess.agent(state).status == :idle
+      assert {:render, 50} in effects
     end
 
-    test "background event via AgentView.handle_event updates stored state" do
-      %{state: state, tab2_id: tab_id} = make_state()
+    test "messages_changed triggers buffer sync and tab label update" do
+      %{state: state} = make_state()
 
-      tab = TabBar.get(state.tab_bar, tab_id)
-      av_state = tab.context.surface_state
+      {_new_state, effects} = AgentEvents.handle(state, :messages_changed)
 
-      {new_av, _effects} =
-        AgentView.handle_event(av_state, {:status_changed, :thinking})
+      assert :sync_agent_buffer in effects
+      assert {:update_tab_label, ""} in effects
+    end
+  end
 
-      state = EditorState.update_background_surface_state(state, tab_id, new_av)
+  describe "Agent.Events.handle/2 — errors" do
+    test "error updates agent error state and logs" do
+      %{state: state} = make_state()
 
-      tab = TabBar.get(state.tab_bar, tab_id)
-      assert tab.context.surface_state.agent.status == :thinking
+      {new_state, effects} = AgentEvents.handle(state, {:error, "something broke"})
+
+      assert AgentAccess.agent(new_state).error == "something broke"
+      assert {:log_message, "Agent error: something broke"} in effects
+    end
+  end
+
+  describe "Agent.Events.handle/2 — spinner" do
+    test "spinner_tick when busy ticks the spinner frame" do
+      %{state: state} = make_state()
+      state = AgentAccess.update_agent(state, &AgentState.set_status(&1, :thinking))
+      state = AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+
+      {new_state, effects} = AgentEvents.handle(state, :spinner_tick)
+
+      assert AgentAccess.agent(new_state).panel.spinner_frame == 1
+      assert {:render, 16} in effects
+    end
+
+    test "spinner_tick when idle stops the spinner timer" do
+      %{state: state} = make_state()
+
+      {new_state, effects} = AgentEvents.handle(state, :spinner_tick)
+
+      assert AgentAccess.agent(new_state).spinner_timer == nil
+      assert effects == []
+    end
+  end
+
+  describe "Agent.Events.handle/2 — approval" do
+    test "approval_pending sets pending approval on agent" do
+      %{state: state} = make_state()
+
+      approval = %{tool_call_id: "123", name: "shell", args: %{"command" => "ls"}}
+      {new_state, effects} = AgentEvents.handle(state, {:approval_pending, approval})
+
+      assert AgentAccess.agent(new_state).pending_approval == %{
+               tool_call_id: "123",
+               name: "shell",
+               args: %{"command" => "ls"}
+             }
+
+      assert :render in effects
+    end
+
+    test "approval_resolved clears pending approval" do
+      %{state: state} = make_state()
+
+      state =
+        AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, %{name: "shell"}))
+
+      {new_state, _effects} = AgentEvents.handle(state, {:approval_resolved, :approved})
+
+      assert AgentAccess.agent(new_state).pending_approval == nil
+    end
+  end
+
+  describe "Agent.Events.handle/2 — unknown events" do
+    test "unknown events are a no-op" do
+      %{state: state} = make_state()
+
+      {new_state, effects} = AgentEvents.handle(state, {:some_future_event, "data"})
+
+      assert new_state == state
+      assert effects == []
     end
   end
 
   describe "set_tab_session/3" do
     test "sets the session pid on a tab for event routing" do
-      %{state: state, tab1_id: tab_id} = make_state()
+      %{state: state} = make_state()
+      tab = TabBar.active(state.tab_bar)
       new_session = spawn(fn -> :timer.sleep(:infinity) end)
 
-      state = EditorState.set_tab_session(state, tab_id, new_session)
+      state = EditorState.set_tab_session(state, tab.id, new_session)
 
-      tab = TabBar.get(state.tab_bar, tab_id)
+      tab = TabBar.get(state.tab_bar, tab.id)
       assert tab.session == new_session
-    end
-  end
-
-  describe "TabBar.find_by_session/2" do
-    test "finds the correct agent tab by session pid" do
-      %{state: state, session2: s2, tab2_id: tab_id} = make_state()
-      assert %Tab{id: ^tab_id} = TabBar.find_by_session(state.tab_bar, s2)
-    end
-
-    test "returns nil for unknown session" do
-      %{state: state} = make_state()
-      unknown = spawn(fn -> :timer.sleep(:infinity) end)
-      assert nil == TabBar.find_by_session(state.tab_bar, unknown)
     end
   end
 end

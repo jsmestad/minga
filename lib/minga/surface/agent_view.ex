@@ -23,8 +23,6 @@ defmodule Minga.Surface.AgentView do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
@@ -123,14 +121,9 @@ defmodule Minga.Surface.AgentView do
   end
 
   def render(%AgentViewState{} = av_state, _rect) do
-    editor_state = reconstruct_editor_state(av_state)
-
-    editor_state = RenderPipeline.compute_layout(editor_state)
-    layout = Layout.get(editor_state)
-
-    new_editor_state = RenderPipeline.run_agentic_pipeline(editor_state, layout)
-    new_av_state = extract_updated_av_state(new_editor_state, av_state)
-    {new_av_state, []}
+    # Legacy: this surface is no longer used for rendering.
+    # Agent chat is rendered as window content via the windows pipeline.
+    {av_state, []}
   end
 
   @doc """

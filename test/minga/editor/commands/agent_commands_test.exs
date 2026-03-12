@@ -30,7 +30,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Scroll
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -57,34 +56,9 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     }
 
     agentic = %ViewState{}
-    av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
-
-    # When agentic view is active, surface_module is AgentView.
-    # When testing no-op cases (panel hidden + view inactive), the caller
-    # should set surface_module to BufferView. We default to AgentView
-    # since most tests exercise the active agent view.
-    active_agent = Keyword.get(opts, :active_agent, true)
 
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
-
-    {surface_module, surface_state, tb} =
-      if active_agent do
-        {Minga.Surface.AgentView, av_state, tb}
-      else
-        # Put agent state in a background tab
-        {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
-
-        agent_ctx = %{
-          surface_module: Minga.Surface.AgentView,
-          surface_state: av_state,
-          keymap_scope: :agent
-        }
-
-        tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
-        tb = TabBar.switch_to(tb, file_tab.id)
-        {Minga.Surface.BufferView, nil, tb}
-      end
 
     %EditorState{
       port_manager: nil,
@@ -93,13 +67,14 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       windows: %Windows{
-        tree: nil,
+        tree: {:leaf, 1},
         map: %{1 => Window.new(1, buf, 24, 80)},
         active: 1,
         next_id: 2
       },
-      surface_module: surface_module,
-      surface_state: surface_state,
+      surface_module: Minga.Surface.BufferView,
+      agent: agent,
+      agentic: agentic,
       tab_bar: tb,
       focus_stack: Input.default_stack()
     }
@@ -335,21 +310,25 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   # ── new_agent_session ────────────────────────────────────────────────────
 
   describe "new_agent_session/1" do
-    test "creates a new agent tab" do
+    test "resets agent state for a fresh session" do
       state = base_state()
+      # Set some agent state
+      state = AgentAccess.update_agent(state, fn a -> %{a | error: "old error"} end)
+
       new_state = AgentCommands.new_agent_session(state)
 
-      # Should have switched to an agent tab
-      assert new_state.keymap_scope == :agent
+      # Error should be cleared
+      assert AgentAccess.agent(new_state).error == nil
     end
 
-    test "preserves the file tab" do
-      state = base_state()
+    test "preserves the agent buffer across reset" do
+      {:ok, agent_buf} = BufferServer.start_link(content: "old chat")
+      state = base_state(agent_buffer: agent_buf)
+
       new_state = AgentCommands.new_agent_session(state)
 
-      # The original file tab should still exist
-      file_tabs = TabBar.filter_by_kind(new_state.tab_bar, :file)
-      assert file_tabs != []
+      # Buffer should be preserved across session reset
+      assert AgentAccess.agent(new_state).buffer == agent_buf
     end
   end
 
