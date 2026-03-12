@@ -585,11 +585,13 @@ defmodule Minga.Agent.Providers.Native do
     - write_file: Create or overwrite files (creates parent directories automatically)
     - edit_file: Make surgical edits (find exact text and replace). Read the file first to get exact text.
     - list_directory: List files and directories at a path
+    - grep: Search file contents for a pattern. Returns file:line:content. Prefer this over shell + grep.
     - shell: Run shell commands in the project root
 
     ## Guidelines
 
     - Read files before editing them. The old_text in edit_file must match exactly.
+    - Use grep to search for code patterns, function definitions, imports, etc.
     - Use shell for running tests, linters, git commands, etc.
     - Be concise and direct. Show file paths clearly when working with files.
     - When you make changes, verify them by reading the result or running tests.

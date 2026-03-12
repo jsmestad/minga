@@ -19,6 +19,7 @@ defmodule Minga.Agent.Tools do
   """
 
   alias Minga.Agent.Tools.EditFile
+  alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
   alias Minga.Agent.Tools.ReadFile
   alias Minga.Agent.Tools.Shell
@@ -69,6 +70,7 @@ defmodule Minga.Agent.Tools do
       write_file(root),
       edit_file(root),
       list_directory(root),
+      grep(root),
       shell(root)
     ]
   end
@@ -186,6 +188,50 @@ defmodule Minga.Agent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
         ListDirectory.execute(path)
+      end
+    )
+  end
+
+  @spec grep(String.t()) :: Tool.t()
+  defp grep(root) do
+    Tool.new!(
+      name: "grep",
+      description: """
+      Search file contents for a pattern. Returns matching lines with file paths
+      and line numbers. Use this instead of shell + grep for structured, reliable
+      search results. The tool is read-only and does not require approval.
+      Prefer this over shell for searching code.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "pattern" => %{
+            "type" => "string",
+            "description" => "The search pattern (regex supported)"
+          },
+          "path" => %{
+            "type" => "string",
+            "description" =>
+              "Directory to search in, relative to the project root. Defaults to the project root."
+          },
+          "glob" => %{
+            "type" => "string",
+            "description" => "File pattern filter, e.g. \"*.ex\" to search only Elixir files"
+          },
+          "case_sensitive" => %{
+            "type" => "boolean",
+            "description" => "Whether the search is case-sensitive (default: true)"
+          },
+          "context_lines" => %{
+            "type" => "integer",
+            "description" => "Number of context lines around each match (default: 0)"
+          }
+        },
+        "required" => ["pattern"]
+      },
+      callback: fn args ->
+        search_path = resolve_and_validate_path!(root, args["path"] || ".")
+        Grep.execute(args["pattern"], search_path, args)
       end
     )
   end
