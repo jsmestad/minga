@@ -333,7 +333,7 @@ defmodule Minga.Agent.Providers.Native do
         | model: next_model,
           thinking_level: next_thinking || state.thinking_level,
           context: ReqLLM.Context.new(),
-          tools: Minga.Agent.Tools.all(project_root: state.project_root),
+          tools: Tools.all(project_root: state.project_root),
           system_prompt: build_system_prompt(state.project_root)
       }
 

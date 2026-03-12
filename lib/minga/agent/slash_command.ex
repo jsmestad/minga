@@ -10,9 +10,9 @@ defmodule Minga.Agent.SlashCommand do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Instructions
-  alias Minga.Config.Options
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Config.Options
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State.Agent, as: AgentState
