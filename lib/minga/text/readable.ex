@@ -5,8 +5,8 @@ defprotocol Minga.Text.Readable do
   Any data structure that holds text and can answer positional queries
   can implement this protocol. The vim motion, text-object, and operator
   systems dispatch through `Readable` so they work with any text container:
-  gap buffers (`Document`), plain line lists (`TextField`), or future types
-  like ropes.
+  gap buffers (`Document`) or future types like ropes and structured
+  content adapters.
 
   ## Required callbacks
 
