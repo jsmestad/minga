@@ -21,8 +21,6 @@ defmodule Minga.LSP.Supervisor do
   alias Minga.LSP.Client
   alias Minga.LSP.ServerRegistry
 
-  require Logger
-
   # ── Client API ─────────────────────────────────────────────────────────────
 
   @doc "Starts the LSP supervisor."
@@ -139,12 +137,15 @@ defmodule Minga.LSP.Supervisor do
 
       case DynamicSupervisor.start_child(supervisor, child_spec) do
         {:ok, pid} ->
-          Logger.info("Started LSP client #{server_config.name} for #{root_path}")
+          Minga.Log.info(:lsp, "Started LSP client #{server_config.name} for #{root_path}")
 
           {:ok, pid}
 
         {:error, reason} ->
-          Logger.error("Failed to start LSP client #{server_config.name}: #{inspect(reason)}")
+          Minga.Log.error(
+            :lsp,
+            "Failed to start LSP client #{server_config.name}: #{inspect(reason)}"
+          )
 
           {:error, reason}
       end

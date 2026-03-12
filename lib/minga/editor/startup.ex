@@ -23,8 +23,6 @@ defmodule Minga.Editor.Startup do
   alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
 
-  require Logger
-
   @doc """
   Builds the complete initial EditorState from startup opts.
 
@@ -92,7 +90,7 @@ defmodule Minga.Editor.Startup do
   defp subscribe_port(port_manager) do
     PortManager.subscribe(port_manager)
   catch
-    :exit, _ -> Logger.warning("Could not subscribe to port manager")
+    :exit, _ -> Minga.Log.warning(:editor, "Could not subscribe to port manager")
   end
 
   @doc """
@@ -173,7 +171,7 @@ defmodule Minga.Editor.Startup do
   def subscribe_to_parser(parser_manager) do
     Minga.Parser.Manager.subscribe(parser_manager)
   catch
-    :exit, _ -> Logger.warning("Could not subscribe to parser manager")
+    :exit, _ -> Minga.Log.warning(:editor, "Could not subscribe to parser manager")
   end
 
   @doc """

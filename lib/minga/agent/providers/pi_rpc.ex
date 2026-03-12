@@ -16,8 +16,6 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   use GenServer
 
-  require Logger
-
   alias Minga.Agent.Event
 
   @typedoc "Internal state for the Pi RPC provider."
@@ -198,7 +196,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.warning("[Agent.PiRpc] pi process exited with status #{status}")
+    Minga.Log.warning(:agent, "[Agent.PiRpc] pi process exited with status #{status}")
     notify(state.subscriber, %Event.Error{message: "pi process exited (status #{status})"})
     {:stop, {:pi_exited, status}, %{state | port: nil}}
   end
@@ -292,7 +290,7 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   defp send_command(port, command) do
     json = JSON.encode!(command)
-    Logger.info("[Agent → Pi] #{json}")
+    Minga.Log.info(:agent, "[Agent → Pi] #{json}")
     Port.command(port, [json, "\n"])
     :ok
   end
@@ -333,20 +331,20 @@ defmodule Minga.Agent.Providers.PiRpc do
         other -> other
       end
 
-    Logger.info("[Pi → Agent] message_update/#{summary}")
+    Minga.Log.info(:agent, "[Pi → Agent] message_update/#{summary}")
   end
 
   defp log_received_event(%{"type" => "response", "command" => cmd, "success" => success} = event) do
     error = if event["error"], do: " error=#{event["error"]}", else: ""
-    Logger.info("[Pi → Agent] response cmd=#{cmd} success=#{success}#{error}")
+    Minga.Log.info(:agent, "[Pi → Agent] response cmd=#{cmd} success=#{success}#{error}")
   end
 
   defp log_received_event(%{"type" => "extension_ui_request", "method" => method} = event) do
-    Logger.info("[Pi → Agent] extension_ui_request method=#{method} id=#{event["id"]}")
+    Minga.Log.info(:agent, "[Pi → Agent] extension_ui_request method=#{method} id=#{event["id"]}")
   end
 
   defp log_received_event(%{"type" => type}) do
-    Logger.info("[Pi → Agent] #{type}")
+    Minga.Log.info(:agent, "[Pi → Agent] #{type}")
   end
 
   defp log_received_event(_), do: :ok
@@ -447,7 +445,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   defp handle_event(%{"type" => "extension_ui_request", "method" => method, "id" => id}, state)
        when method in ["select", "confirm", "input", "editor"] do
     # Dialog methods block pi until we respond. Auto-cancel for now.
-    Logger.info("[Agent.PiRpc] auto-cancelling dialog: #{method} (id=#{id})")
+    Minga.Log.info(:agent, "[Agent.PiRpc] auto-cancelling dialog: #{method} (id=#{id})")
     response = %{"type" => "extension_ui_response", "id" => id, "cancelled" => true}
     send_command(state.port, response)
     {:noreply, state}
@@ -459,7 +457,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   end
 
   defp handle_event(%{"type" => "extension_error"} = event, state) do
-    Logger.warning("[Agent.PiRpc] extension error: #{event["error"]}")
+    Minga.Log.warning(:agent, "[Agent.PiRpc] extension error: #{event["error"]}")
     {:noreply, state}
   end
 

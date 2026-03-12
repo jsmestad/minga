@@ -20,8 +20,6 @@ defmodule Minga.CLI do
 
   alias Burrito.Util.Args
 
-  require Logger
-
   @typedoc "Parsed CLI result."
   @type parsed ::
           {:open, file :: String.t() | nil, flags()}
@@ -157,7 +155,7 @@ defmodule Minga.CLI do
             Minga.Editor.open_file(path)
 
           :timeout ->
-            Logger.error("Editor process did not start in time")
+            Minga.Log.error(:editor, "Editor process did not start in time")
         end
     end
 

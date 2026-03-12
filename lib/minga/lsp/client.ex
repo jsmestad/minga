@@ -33,8 +33,6 @@ defmodule Minga.LSP.Client do
   alias Minga.LSP.JsonRpc
   alias Minga.LSP.PositionEncoding
 
-  require Logger
-
   @request_timeout 30_000
 
   # ── Client API ─────────────────────────────────────────────────────────────
@@ -302,12 +300,16 @@ defmodule Minga.LSP.Client do
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    Logger.warning("LSP server #{state.server_config.name} exited with code #{code}")
+    Minga.Log.warning(:lsp, "LSP server #{state.server_config.name} exited with code #{code}")
     {:stop, {:server_exited, code}, %{state | port: nil, status: :shutdown}}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
-    Logger.warning("LSP server #{state.server_config.name} port crashed: #{inspect(reason)}")
+    Minga.Log.warning(
+      :lsp,
+      "LSP server #{state.server_config.name} port crashed: #{inspect(reason)}"
+    )
+
     {:stop, {:port_crashed, reason}, %{state | port: nil, status: :shutdown}}
   end
 
@@ -317,7 +319,7 @@ defmodule Minga.LSP.Client do
         {:noreply, state}
 
       {%{from: from, method: method}, pending} ->
-        Logger.warning("LSP request #{method} (id=#{id}) timed out")
+        Minga.Log.warning(:lsp, "LSP request #{method} (id=#{id}) timed out")
         reply_to_caller(from, {:error, :timeout})
         {:noreply, %{state | pending: pending}}
     end
@@ -374,7 +376,7 @@ defmodule Minga.LSP.Client do
   defp handle_response(id, result, state) do
     case Map.pop(state.pending, id) do
       {nil, _pending} ->
-        Logger.warning("Received response for unknown request id=#{id}")
+        Minga.Log.warning(:lsp, "Received response for unknown request id=#{id}")
         state
 
       {%{method: method, from: from, timer: timer}, pending} ->
@@ -401,7 +403,10 @@ defmodule Minga.LSP.Client do
 
     send_notification(state, "initialized", %{})
 
-    Logger.info("LSP server #{state.server_config.name} initialized (encoding: #{encoding})")
+    Minga.Log.info(
+      :lsp,
+      "LSP server #{state.server_config.name} initialized (encoding: #{encoding})"
+    )
 
     notify_subscribers(state.subscribers, {:lsp_ready, state.server_config.name})
 
@@ -409,7 +414,7 @@ defmodule Minga.LSP.Client do
   end
 
   defp handle_method_response("initialize", {:error, error}, _from, state) do
-    Logger.error("LSP initialize failed: #{inspect(error)}")
+    Minga.Log.error(:lsp, "LSP initialize failed: #{inspect(error)}")
     state
   end
 
@@ -465,7 +470,15 @@ defmodule Minga.LSP.Client do
         _ -> :debug
       end
 
-    Logger.log(log_level, "LSP [#{state.server_config.name}]: #{message}")
+    msg = "LSP [#{state.server_config.name}]: #{message}"
+
+    case log_level do
+      :error -> Minga.Log.error(:lsp, msg)
+      :warning -> Minga.Log.warning(:lsp, msg)
+      :info -> Minga.Log.info(:lsp, msg)
+      :debug -> Minga.Log.debug(:lsp, msg)
+    end
+
     state
   end
 

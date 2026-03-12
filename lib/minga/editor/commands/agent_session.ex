@@ -68,9 +68,8 @@ defmodule Minga.Editor.Commands.AgentSession do
         end
 
       {:error, reason} ->
-        require Logger
         msg = format_session_error(reason)
-        Logger.error("[Agent] #{msg}")
+        Minga.Log.error(:agent, "[Agent] #{msg}")
         Minga.Editor.log_to_messages("[Agent] #{msg}")
         AgentAccess.update_agent(state, &AgentState.set_error(&1, msg))
     end

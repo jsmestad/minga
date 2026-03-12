@@ -24,8 +24,6 @@ defmodule Minga.Config.Hooks do
 
   use Agent
 
-  require Logger
-
   @valid_events [:after_save, :after_open, :on_mode_change]
 
   @typedoc "Valid event names."
@@ -83,10 +81,13 @@ defmodule Minga.Config.Hooks do
           apply(hook, args)
         rescue
           e ->
-            Logger.warning("Hook #{event} failed: #{Exception.message(e)}")
+            Minga.Log.warning(:config, "Hook #{event} failed: #{Exception.message(e)}")
         catch
           kind, reason ->
-            Logger.warning("Hook #{event} crashed: #{inspect(kind)} #{inspect(reason)}")
+            Minga.Log.warning(
+              :config,
+              "Hook #{event} crashed: #{inspect(kind)} #{inspect(reason)}"
+            )
         end
       end)
     end

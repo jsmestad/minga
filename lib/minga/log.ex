@@ -14,6 +14,8 @@ defmodule Minga.Log do
   | `:lsp`     | `:log_level_lsp`    | LSP client communication and errors      |
   | `:agent`   | `:log_level_agent`  | AI agent providers and sessions          |
   | `:editor`  | `:log_level_editor` | General editor operations and commands   |
+  | `:config`  | `:log_level_config` | Config loading, hooks, advice, extensions|
+  | `:port`    | `:log_level_port`   | Port/parser process management            |
 
   ## Usage
 
@@ -36,7 +38,7 @@ defmodule Minga.Log do
 
   alias Minga.Config.Options
 
-  @type subsystem :: :render | :lsp | :agent | :editor
+  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port
 
   @type level :: :debug | :info | :warning | :error
 
@@ -52,7 +54,9 @@ defmodule Minga.Log do
     render: :log_level_render,
     lsp: :log_level_lsp,
     agent: :log_level_agent,
-    editor: :log_level_editor
+    editor: :log_level_editor,
+    config: :log_level_config,
+    port: :log_level_port
   }
 
   @doc "Logs a debug message for the given subsystem (if its level permits)."

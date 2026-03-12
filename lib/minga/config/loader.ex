@@ -32,8 +32,6 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
 
-  require Logger
-
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
           config_path: String.t(),
@@ -210,7 +208,7 @@ defmodule Minga.Config.Loader do
 
       {:error, reason} ->
         msg = "Could not read modules directory #{modules_dir}: #{inspect(reason)}"
-        Logger.warning(msg)
+        Minga.Log.warning(:config, msg)
         {[], [msg]}
     end
   end
@@ -244,17 +242,17 @@ defmodule Minga.Config.Loader do
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       msg = "Module compile error in #{path}: #{Exception.message(e)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       {:error, msg}
 
     e ->
       msg = "Module error in #{path}: #{Exception.message(e)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       {:error, msg}
   catch
     kind, reason ->
       msg = "Module error in #{path}: #{inspect(kind)} #{inspect(reason)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       {:error, msg}
   end
 
@@ -299,17 +297,17 @@ defmodule Minga.Config.Loader do
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       msg = "Config syntax error in #{path}: #{Exception.message(e)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       msg
 
     e ->
       msg = "Config error in #{path}: #{Exception.message(e)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       msg
   catch
     kind, reason ->
       msg = "Config error in #{path}: #{inspect(kind)} #{inspect(reason)}"
-      Logger.warning(msg)
+      Minga.Log.warning(:config, msg)
       msg
   end
 end

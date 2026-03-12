@@ -12,8 +12,6 @@ defmodule Minga.Picker.RecentFileSource do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Project
 
-  require Logger
-
   @impl true
   @spec title() :: String.t()
   def title, do: "Recent files"
@@ -48,7 +46,7 @@ defmodule Minga.Picker.RecentFileSource do
             EditorState.add_buffer(state, pid)
 
           {:error, reason} ->
-            Logger.error("Failed to open file: #{inspect(reason)}")
+            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
             state
         end
 

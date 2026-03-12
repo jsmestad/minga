@@ -40,8 +40,6 @@ defmodule Minga.Keymap.Active do
   alias Minga.Keymap.KeyParser
   alias Minga.Keymap.Scope
 
-  require Logger
-
   @typedoc """
   Per-scope, per-vim-state binding overrides from user config.
 
@@ -207,7 +205,7 @@ defmodule Minga.Keymap.Active do
         do_bind(server, mode, keys, command, description)
 
       {:error, reason} ->
-        Logger.warning("Invalid key binding #{inspect(key_str)}: #{reason}")
+        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
         {:error, reason}
     end
   end
@@ -279,7 +277,7 @@ defmodule Minga.Keymap.Active do
 
   # Normal mode: unsupported multi-key (not SPC-prefixed)
   defp do_bind(_server, :normal, keys, _command, _description) do
-    Logger.warning("Unsupported key sequence for normal mode: #{inspect(keys)}")
+    Minga.Log.warning(:config, "Unsupported key sequence for normal mode: #{inspect(keys)}")
     {:error, "unsupported key sequence for normal mode"}
   end
 
@@ -306,7 +304,7 @@ defmodule Minga.Keymap.Active do
   end
 
   defp do_bind(_server, mode, _keys, _command, _description) do
-    Logger.warning("Keybinding for mode #{inspect(mode)} not yet supported")
+    Minga.Log.warning(:config, "Keybinding for mode #{inspect(mode)} not yet supported")
     {:error, "keybinding for mode #{inspect(mode)} not yet supported"}
   end
 
@@ -328,7 +326,7 @@ defmodule Minga.Keymap.Active do
         end)
 
       {:error, reason} ->
-        Logger.warning("Invalid key binding #{inspect(key_str)}: #{reason}")
+        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
         {:error, reason}
     end
   end

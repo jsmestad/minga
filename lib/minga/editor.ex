@@ -45,8 +45,6 @@ defmodule Minga.Editor do
   alias Minga.Project
   alias Minga.Surface.AgentView
 
-  require Logger
-
   @typedoc "Options for starting the editor."
   @type start_opt ::
           {:name, GenServer.name()}
