@@ -12,6 +12,7 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Agent.Instructions
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Agent.SessionExport
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
@@ -46,7 +47,8 @@ defmodule Minga.Agent.SlashCommand do
       description: "Show the current assembled system prompt"
     },
     %{name: "compact", description: "Compact conversation context (summarize older turns)"},
-    %{name: "continue", description: "Continue from an interrupted stream response"}
+    %{name: "continue", description: "Continue from an interrupted stream response"},
+    %{name: "export", description: "Export current session to a Markdown file"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -98,6 +100,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
   defp dispatch(state, "compact", _args), do: do_compact(state)
   defp dispatch(state, "continue", _args), do: do_continue(state)
+  defp dispatch(state, "export", _args), do: do_export(state)
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
@@ -329,6 +332,30 @@ defmodule Minga.Agent.SlashCommand do
       case Session.continue(session) do
         :ok ->
           {:ok, emit_system_message(state, "Continuing from interrupted response...")}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_export(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_export(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      messages = Session.messages(session)
+      root = detect_project_root()
+
+      model = read_config_string(:agent_model)
+      model = if model == "", do: "unknown", else: model
+
+      case SessionExport.export_to_file(messages, project_root: root, model: model) do
+        {:ok, path} ->
+          relative = Path.relative_to(path, root)
+          {:ok, emit_system_message(state, "Session exported to ./#{relative}")}
 
         {:error, reason} ->
           {:error, reason}
