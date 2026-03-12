@@ -13,6 +13,7 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SessionExport
+  alias Minga.Agent.Skills
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
@@ -48,7 +49,9 @@ defmodule Minga.Agent.SlashCommand do
     },
     %{name: "compact", description: "Compact conversation context (summarize older turns)"},
     %{name: "continue", description: "Continue from an interrupted stream response"},
-    %{name: "export", description: "Export current session to a Markdown file"}
+    %{name: "export", description: "Export current session to a Markdown file"},
+    %{name: "skills", description: "List all available skills"},
+    %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -101,7 +104,16 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "compact", _args), do: do_compact(state)
   defp dispatch(state, "continue", _args), do: do_continue(state)
   defp dispatch(state, "export", _args), do: do_export(state)
-  defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
+  defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
+
+  # /skill:name activates, /skill:off:name deactivates
+  defp dispatch(state, cmd, _args) when is_binary(cmd) do
+    case parse_skill_command(cmd) do
+      {:activate, name} -> do_activate_skill(state, name)
+      {:deactivate, name} -> do_deactivate_skill(state, name)
+      :not_skill -> {:error, "Unknown command: /#{cmd}"}
+    end
+  end
 
   # ── Command implementations ────────────────────────────────────────────────
 
@@ -356,6 +368,57 @@ defmodule Minga.Agent.SlashCommand do
         {:ok, path} ->
           relative = Path.relative_to(path, root)
           {:ok, emit_system_message(state, "Session exported to ./#{relative}")}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec parse_skill_command(String.t()) ::
+          {:activate, String.t()} | {:deactivate, String.t()} | :not_skill
+  defp parse_skill_command(cmd) do
+    case String.split(cmd, ":", parts: 3) do
+      ["skill", "off", name] when name != "" -> {:deactivate, name}
+      ["skill", name] when name != "" -> {:activate, name}
+      _ -> :not_skill
+    end
+  end
+
+  @spec do_skills(state()) :: state()
+  defp do_skills(state) do
+    root = detect_project_root()
+    summary = Skills.summary(root)
+    emit_system_message(state, summary)
+  end
+
+  @spec do_activate_skill(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_activate_skill(state, name) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      case Session.activate_skill(session, name) do
+        {:ok, skill} ->
+          {:ok, emit_system_message(state, "Loaded skill: #{skill.name} — #{skill.description}")}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_deactivate_skill(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_deactivate_skill(state, name) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      case Session.deactivate_skill(session, name) do
+        :ok ->
+          {:ok, emit_system_message(state, "Deactivated skill: #{name}")}
 
         {:error, reason} ->
           {:error, reason}
