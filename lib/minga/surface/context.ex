@@ -79,9 +79,8 @@ defmodule Minga.Surface.Context do
       whichkey: es.whichkey,
       modeline_click_regions: es.modeline_click_regions,
       tab_bar_click_regions: es.tab_bar_click_regions,
-      # Buffer/vim fields carried in context so AgentView can
-      # reconstruct a complete EditorState (agent commands
-      # reference buffers.active and mode state).
+      # Buffer/vim fields carried in context so agent commands
+      # can reference buffers.active and mode state.
       buffers: es.buffers,
       viewport: es.viewport,
       mode: es.mode,

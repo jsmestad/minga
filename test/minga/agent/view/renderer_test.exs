@@ -107,7 +107,7 @@ defmodule Minga.Agent.View.RendererTest do
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
-      surface_module: Minga.Surface.AgentView,
+      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       theme: Theme.get!(:doom_one),

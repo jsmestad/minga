@@ -53,7 +53,7 @@ defmodule Minga.Input.AgentPanelNavTest do
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      surface_module: Minga.Surface.AgentView,
+      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       buffers: %{active: nil, list: [], recent: []},
