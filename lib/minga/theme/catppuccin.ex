@@ -87,6 +87,7 @@ defmodule Minga.Theme.Catppuccin do
         header_fg: p.blue,
         header_bg: p.mantle,
         separator_fg: p.surface1,
+        modified_fg: p.peach,
         git_modified_fg: p.peach,
         git_staged_fg: p.green,
         git_untracked_fg: p.overlay0,

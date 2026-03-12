@@ -105,6 +105,7 @@ defmodule Minga.Theme.DoomOne do
         header_fg: @blue,
         header_bg: @base3,
         separator_fg: @base5,
+        modified_fg: @orange,
         git_modified_fg: @orange,
         git_staged_fg: @green,
         git_untracked_fg: @grey,

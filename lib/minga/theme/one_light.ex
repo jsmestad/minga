@@ -102,6 +102,7 @@ defmodule Minga.Theme.OneLight do
         header_fg: @hue_2,
         header_bg: 0xF0F0F0,
         separator_fg: @mono_3,
+        modified_fg: @hue_6,
         git_modified_fg: @hue_6,
         git_staged_fg: @hue_4,
         git_untracked_fg: @mono_3,

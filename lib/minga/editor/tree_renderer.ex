@@ -33,7 +33,15 @@ defmodule Minga.Editor.TreeRenderer do
     Contains only the data needed to render the tree panel.
     """
     @enforce_keys [:tree, :rect, :focused, :theme, :active_path]
-    defstruct [:tree, :rect, :focused, :theme, :active_path, git_status: %{}]
+    defstruct [
+      :tree,
+      :rect,
+      :focused,
+      :theme,
+      :active_path,
+      git_status: %{},
+      dirty_paths: MapSet.new()
+    ]
 
     @type t :: %__MODULE__{
             tree: FileTree.t(),
@@ -41,7 +49,8 @@ defmodule Minga.Editor.TreeRenderer do
             focused: boolean(),
             theme: Theme.t(),
             active_path: String.t() | nil,
-            git_status: Minga.FileTree.GitStatus.status_map()
+            git_status: Minga.FileTree.GitStatus.status_map(),
+            dirty_paths: MapSet.t(String.t())
           }
   end
 
@@ -62,7 +71,8 @@ defmodule Minga.Editor.TreeRenderer do
       input.focused,
       input.theme,
       input.active_path,
-      input.git_status
+      input.git_status,
+      input.dirty_paths
     )
   end
 
@@ -81,7 +91,8 @@ defmodule Minga.Editor.TreeRenderer do
           focused: focused,
           theme: state.theme,
           active_path: active_buffer_path(state),
-          git_status: tree.git_status
+          git_status: tree.git_status,
+          dirty_paths: compute_dirty_paths(state)
         }
 
         render(input)
@@ -94,9 +105,18 @@ defmodule Minga.Editor.TreeRenderer do
           boolean(),
           Theme.t(),
           String.t() | nil,
-          FileTree.GitStatus.status_map()
+          FileTree.GitStatus.status_map(),
+          MapSet.t(String.t())
         ) :: [DisplayList.draw()]
-  defp do_render(tree, {row_off, col_off, width, height}, focused, theme, active_path, git_status) do
+  defp do_render(
+         tree,
+         {row_off, col_off, width, height},
+         focused,
+         theme,
+         active_path,
+         git_status,
+         dirty_paths
+       ) do
     entries = FileTree.visible_entries(tree)
 
     # Header: project directory name with folder icon
@@ -124,7 +144,8 @@ defmodule Minga.Editor.TreeRenderer do
       width: width,
       theme: theme,
       expanded: tree.expanded,
-      git_status: git_status
+      git_status: git_status,
+      dirty_paths: dirty_paths
     }
 
     entry_commands =
@@ -163,12 +184,14 @@ defmodule Minga.Editor.TreeRenderer do
       width: width,
       theme: theme,
       expanded: expanded,
-      git_status: git_status
+      git_status: git_status,
+      dirty_paths: dirty_paths
     } = opts
 
     is_cursor = idx == cursor
     is_active = active_path != nil and entry.path == active_path
     is_expanded = entry.dir? and MapSet.member?(expanded, entry.path)
+    is_dirty = not entry.dir? and MapSet.member?(dirty_paths, entry.path)
 
     # Build the guide prefix from the entry's ancestor guide flags
     guide_prefix = build_guides(entry.guides, entry.last_child?)
@@ -179,10 +202,12 @@ defmodule Minga.Editor.TreeRenderer do
     # Entry name (dirs get trailing slash)
     name = if entry.dir?, do: entry.name <> "/", else: entry.name
 
-    # Git status indicator (right-aligned)
+    # Right-side indicators: [modified_dot] [git_status]
+    # Modified dot = 1 col, git status = 2 cols (space + symbol)
     file_git_status = Map.get(git_status, entry.path)
-    # Reserve 2 columns for the indicator when present (symbol + padding)
-    indicator_width = if file_git_status, do: 2, else: 0
+    git_width = if file_git_status, do: 2, else: 0
+    dirty_width = if is_dirty, do: 1, else: 0
+    indicator_width = dirty_width + git_width
 
     # Compose the full line: guides + icon + space + name
     prefix = guide_prefix <> icon <> " "
@@ -195,7 +220,7 @@ defmodule Minga.Editor.TreeRenderer do
     # Background style for the full row
     row_bg = row_background(is_cursor, focused, theme)
 
-    # Build draw commands: guide, icon, name, (git indicator)
+    # Build draw commands: guide, icon, name, (dirty dot), (git indicator)
     guide_style = guide_draw_style(is_cursor, focused, theme)
     icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
     name_style = name_draw_style(entry, is_cursor, is_active, focused, theme)
@@ -216,21 +241,33 @@ defmodule Minga.Editor.TreeRenderer do
     icon_col = col + guide_len
     draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
 
-    # Name segment: pad to fill space between name and indicator (or end)
+    # Name segment: pad to fill space between name and indicators
     name_col = col + prefix_width
     name_pad_width = max(width - prefix_width - indicator_width, 0)
     padded_name = String.pad_trailing(display_name, name_pad_width)
     draws = draws ++ [DisplayList.draw(row, name_col, padded_name, name_style)]
 
-    # Git status indicator (right-aligned, last 2 columns)
+    # Right-aligned indicators start here
+    indicator_col = col + width - indicator_width
+
+    # Modified buffer dot (between name and git status)
+    draws =
+      if is_dirty do
+        dirty_style = dirty_indicator_style(is_cursor, focused, theme)
+        draws ++ [DisplayList.draw(row, indicator_col, "●", dirty_style)]
+      else
+        draws
+      end
+
+    # Git status indicator (rightmost)
     if file_git_status do
-      indicator_col = col + width - indicator_width
+      git_col = col + width - git_width
       git_symbol = " " <> Minga.FileTree.GitStatus.symbol(file_git_status)
       git_style = git_indicator_style(file_git_status, is_cursor, focused, theme)
-      draws ++ [DisplayList.draw(row, indicator_col, git_symbol, git_style)]
+      draws ++ [DisplayList.draw(row, git_col, git_symbol, git_style)]
     else
-      # Pad remaining space if needed
-      drawn_width = prefix_width + String.length(padded_name)
+      # Pad remaining space if no indicators
+      drawn_width = prefix_width + String.length(padded_name) + dirty_width
 
       if drawn_width < width do
         pad = String.duplicate(" ", width - drawn_width)
@@ -320,6 +357,22 @@ defmodule Minga.Editor.TreeRenderer do
 
   defp icon_draw_style(icon_color, _is_cursor, _focused, theme) do
     [fg: icon_color, bg: theme.tree.bg]
+  end
+
+  @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: keyword()
+  defp dirty_indicator_style(true = _is_cursor, true = _focused, theme) do
+    color = theme.tree.modified_fg || theme.tree.fg
+    [fg: theme.tree.bg, bg: color]
+  end
+
+  defp dirty_indicator_style(true = _is_cursor, false = _focused, theme) do
+    color = theme.tree.modified_fg || theme.tree.fg
+    [fg: color, bg: theme.tree.cursor_bg]
+  end
+
+  defp dirty_indicator_style(_is_cursor, _focused, theme) do
+    color = theme.tree.modified_fg || theme.tree.fg
+    [fg: color, bg: theme.tree.bg]
   end
 
   @spec git_indicator_style(
@@ -427,5 +480,15 @@ defmodule Minga.Editor.TreeRenderer do
       nil -> nil
       path -> Path.expand(path)
     end
+  end
+
+  @spec compute_dirty_paths(EditorState.t()) :: MapSet.t(String.t())
+  defp compute_dirty_paths(%{buffers: %{list: buffer_list}}) do
+    buffer_list
+    |> Enum.filter(fn pid -> Process.alive?(pid) and BufferServer.dirty?(pid) end)
+    |> Enum.map(fn pid -> BufferServer.file_path(pid) end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&Path.expand/1)
+    |> MapSet.new()
   end
 end
