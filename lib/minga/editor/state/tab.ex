@@ -29,7 +29,7 @@ defmodule Minga.Editor.State.Tab do
   The context stores per-tab fields directly (buffers, windows, mode, etc.).
   Empty context means a brand-new tab.
 
-  Legacy contexts with `surface_state` (old BufferViewState format) or
+  Legacy contexts with nested structure (old snapshot format) or
   bare fields (oldest format) are auto-migrated on first restore.
   """
   @type context :: %{

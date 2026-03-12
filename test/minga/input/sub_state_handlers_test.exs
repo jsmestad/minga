@@ -70,7 +70,6 @@ defmodule Minga.Input.SubStateHandlersTest do
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       tab_bar: tab_bar

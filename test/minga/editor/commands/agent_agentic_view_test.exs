@@ -19,7 +19,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.Window.Content
   alias Minga.Input
   alias Minga.Mode
-  alias Minga.Surface.BufferView
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
@@ -86,10 +85,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
     if active do
       # Build agent tab with keymap scope
-      agent_ctx = %{
-        keymap_scope: :agent,
-        surface_module: Minga.Surface.BufferView
-      }
       agent_ctx = %{keymap_scope: :agent}
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
@@ -104,7 +99,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       # This ensures the agent buffer is accessible to toggle_agent_split.
       agent_ctx = %{keymap_scope: :agent}
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      agent_ctx = %{keymap_scope: :agent, surface_module: Minga.Surface.BufferView}
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
       %{state | tab_bar: tb}

@@ -55,7 +55,6 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
     agent_tab = Tab.new_agent(2, "Agent")
 
     agent_context = %{
-      surface_module: Minga.Surface.BufferView,
       keymap_scope: :agent
     }
 

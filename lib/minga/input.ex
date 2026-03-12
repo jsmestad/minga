@@ -79,11 +79,10 @@ defmodule Minga.Input do
   end
 
   @doc """
-  Returns the surface-level handlers for the buffer view.
+  Returns the editor-level handlers for buffer editing.
 
   These handle scope-specific dispatch, global bindings, and the
-  vim mode FSM. They run inside `BufferView.handle_key` after
-  overlays have passed through.
+  vim mode FSM. They run after overlays have passed through.
   """
   @spec surface_handlers() :: [module()]
   def surface_handlers do

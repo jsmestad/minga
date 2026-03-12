@@ -52,7 +52,6 @@ defmodule Minga.Editor.LayoutTest do
     default_panel = %AgentState{} |> Map.get(:panel)
     agent = %AgentState{panel: %{default_panel | visible: true}}
     agentic = ViewState.new()
-    agent_ctx = %{surface_module: Minga.Surface.BufferView, keymap_scope: :agent}
     agent_ctx = %{keymap_scope: :agent}
 
     # Ensure a file tab exists and is active, then add a background agent tab.

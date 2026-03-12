@@ -427,16 +427,42 @@ defmodule Minga.Editor do
     apply_effects(state, effects)
   end
 
-  # ── Surface lifecycle ──────────────────────────────────────────────────────
+  # ── Agent lifecycle ──────────────────────────────────────────────────────
+
+  @typedoc """
+  Side effects returned by agent event handlers.
+
+  * `:render` — schedule a debounced render
+  * `{:render, delay_ms}` — schedule render with custom delay
+  * `{:open_file, path}` — open a file in a new or existing buffer
+  * `{:switch_buffer, pid}` — make this buffer active
+  * `{:set_status, msg}` — show a status message in the minibuffer
+  * `{:push_overlay, module}` — push an overlay handler onto the focus stack
+  * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
+  * `{:log_message, msg}` — log to *Messages* buffer
+  * `:sync_agent_buffer` — sync agent buffer with session output
+  * `{:update_tab_label, label}` — update active tab label
+  """
+  @type effect ::
+          :render
+          | {:render, delay_ms :: pos_integer()}
+          | {:open_file, String.t()}
+          | {:switch_buffer, pid()}
+          | {:set_status, String.t()}
+          | {:push_overlay, module()}
+          | {:pop_overlay, module()}
+          | {:log_message, String.t()}
+          | :sync_agent_buffer
+          | {:update_tab_label, String.t()}
 
   @doc """
-  Applies a list of surface effects to the editor state.
+  Applies a list of effects to the editor state.
 
-  Surfaces return `{new_state, [effect()]}` from their callbacks.
-  The Editor interprets each effect. This keeps surfaces testable as
+  Agent event handlers return `{new_state, [effect()]}` from their callbacks.
+  The Editor interprets each effect. This keeps handlers testable as
   pure `state -> {state, effects}` functions.
   """
-  @spec apply_effects(EditorState.t(), [Minga.Surface.effect()]) :: EditorState.t()
+  @spec apply_effects(EditorState.t(), [effect()]) :: EditorState.t()
   def apply_effects(state, []), do: state
 
   def apply_effects(state, [effect | rest]) do
@@ -444,7 +470,7 @@ defmodule Minga.Editor do
     apply_effects(state, rest)
   end
 
-  @spec apply_effect(EditorState.t(), Minga.Surface.effect()) :: EditorState.t()
+  @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
   defp apply_effect(state, :render), do: schedule_render(state, 16)
   defp apply_effect(state, {:set_status, msg}) when is_binary(msg), do: %{state | status_msg: msg}
 

@@ -501,7 +501,7 @@ defmodule Minga.Editor.State do
   brand-new tab; we build defaults with the current active buffer and
   viewport dimensions.
 
-  Backward compatibility: old contexts with `surface_state` are migrated
+  Backward compatibility: old contexts with nested structure are migrated
   to the new flat format via `maybe_migrate_legacy_context/2`.
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
@@ -592,14 +592,14 @@ defmodule Minga.Editor.State do
     }
   end
 
-  # Migrates legacy contexts (old BufferViewState format or oldest
+  # Migrates legacy contexts (old nested format or oldest
   # bare-field format) to the new flat format. If the context already
   # has the :buffers key (new format), returns it unchanged.
   @spec maybe_migrate_legacy_context(t(), Tab.context()) :: Tab.context()
   defp maybe_migrate_legacy_context(_state, %{buffers: _} = context), do: context
 
   defp maybe_migrate_legacy_context(_state, %{surface_state: %{buffers: _} = ss} = context) do
-    # Extract fields from old BufferViewState format
+    # Extract fields from old nested snapshot format
     vim = ss.editing || %{}
 
     %{
@@ -732,7 +732,7 @@ defmodule Minga.Editor.State do
   def active_tab(%__MODULE__{tab_bar: nil}), do: nil
   def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
 
-  @doc "Finds a file tab whose surface state has the given buffer pid as active."
+  @doc "Finds a file tab whose context has the given buffer pid as active."
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
   def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
 
