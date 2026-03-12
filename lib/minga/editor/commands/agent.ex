@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Agent do
   `state → state` transformations.
   """
 
+  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
@@ -21,7 +22,6 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.AgentSession
   alias Minga.Editor.Commands.AgentSubStates
-  alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.Layout
   alias Minga.Editor.LayoutPreset
   alias Minga.Editor.PickerUI
@@ -31,9 +31,6 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Input.AgentPanel
-  alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AgentViewState
-  alias Minga.Surface.Context
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -69,23 +66,13 @@ defmodule Minga.Editor.Commands.Agent do
   end
 
   @doc """
-  Toggles the full-screen agentic view on or off.
+  Toggles the agent chat view on or off.
 
-  On activate: switches to an agent tab (creating one if none exists),
-  which snapshots the current file tab's context and restores the agent
-  context. On deactivate: switches back to the most recent file tab.
+  Creates a split pane (file left, agent right) or removes it.
+  Delegates to `toggle_agent_split/1`.
   """
   @spec toggle_agentic_view(state()) :: state()
-  def toggle_agentic_view(%{surface_module: Minga.Surface.AgentView} = state) do
-    # Legacy path: if already on a full-screen AgentView surface (from a
-    # previous session or tab restore), deactivate it gracefully.
-    deactivate_agentic_view(state)
-  end
-
-  def toggle_agentic_view(state) do
-    # New path: toggle a split pane instead of switching surfaces/tabs
-    toggle_agent_split(state)
-  end
+  def toggle_agentic_view(state), do: toggle_agent_split(state)
 
   @doc """
   Toggles an agent chat split pane in the window tree.
@@ -129,16 +116,39 @@ defmodule Minga.Editor.Commands.Agent do
     case find_agent_tab(state) do
       nil ->
         # Create agent tab in the background (don't switch to it)
-        agent_context = new_agent_context(state)
         {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
         agent_tab = TabBar.find_by_kind(tb, :agent)
-        tb = TabBar.update_context(tb, agent_tab.id, agent_context)
+        tb = TabBar.update_context(tb, agent_tab.id, %{keymap_scope: :agent})
+
+        state = ensure_agent_buffer(state)
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}
         %{state | tab_bar: tb}
 
       _existing ->
+        state
+    end
+  end
+
+  @spec ensure_agent_buffer(state()) :: state()
+  defp ensure_agent_buffer(state) do
+    agent = AgentAccess.agent(state)
+
+    if is_pid(agent.buffer) and Process.alive?(agent.buffer) do
+      state
+    else
+      create_agent_buffer(state)
+    end
+  end
+
+  @spec create_agent_buffer(state()) :: state()
+  defp create_agent_buffer(state) do
+    case AgentBufferSync.start_buffer() do
+      buf when is_pid(buf) ->
+        AgentAccess.update_agent(state, fn a -> %{a | buffer: buf} end)
+
+      _ ->
         state
     end
   end
@@ -158,126 +168,19 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
-  @spec deactivate_agentic_view(state()) :: state()
-  defp deactivate_agentic_view(state) do
-    # switch_tab handles deactivation: sync_from_editor -> deactivate_surface
-    # -> snapshot. The surface's deactivate callback sets active: false.
-    case find_file_tab(state) do
-      nil ->
-        # No file tab yet (e.g., cold boot into agent mode). Create one
-        # for the scratch buffer and switch to it.
-        create_and_switch_to_file_tab(state)
-
-      file_tab ->
-        EditorState.switch_tab(state, file_tab.id)
-    end
-  end
-
   @doc """
   Cycles through agent tabs. If no agent tabs exist, creates one.
-  If on an agent tab, jumps to the next agent tab. If on a file tab,
-  jumps to the first agent tab.
+  Currently delegates to toggle_agent_split since there's one agent
+  session. Multi-agent tab cycling is future work.
   """
   @spec cycle_agent_tabs(state()) :: state()
   def cycle_agent_tabs(state) do
-    agent_tabs = TabBar.filter_by_kind(state.tab_bar, :agent)
-
-    case agent_tabs do
-      [] ->
-        activate_agentic_view(state)
-
-      _ ->
-        new_tb = TabBar.next_of_kind(state.tab_bar, :agent)
-
-        if new_tb.active_id != state.tab_bar.active_id do
-          EditorState.switch_tab(state, new_tb.active_id)
-        else
-          state
-        end
+    if LayoutPreset.has_agent_chat?(state) do
+      # Already showing the agent pane; no-op for now (future: cycle sessions)
+      state
+    else
+      toggle_agent_split(state)
     end
-  end
-
-  @spec activate_agentic_view(state()) :: state()
-  defp activate_agentic_view(state) do
-    case find_agent_tab(state) do
-      nil ->
-        create_and_switch_to_agent_tab(state)
-
-      agent_tab ->
-        switch_to_existing_agent_tab(state, agent_tab)
-    end
-  end
-
-  # Creates a new agent tab, snapshots the current file tab, and switches.
-  @spec create_and_switch_to_agent_tab(state()) :: state()
-  defp create_and_switch_to_agent_tab(state) do
-    # 1. Snapshot the current file tab before we leave it.
-    file_tab_id = state.tab_bar.active_id
-    file_context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, file_tab_id, file_context)
-
-    # 2. Add agent tab (TabBar.add makes it active).
-    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
-
-    # 3. Build and store the agent context.
-    agent_context = new_agent_context(state)
-    tb = TabBar.update_context(tb, agent_tab.id, agent_context)
-
-    # 4. Restore agent context into the live state.
-    state = %{state | tab_bar: tb}
-    state = EditorState.restore_tab_context(state, agent_context)
-    maybe_start_session(state)
-  end
-
-  # Switches to an existing agent tab, re-activating its agentic view.
-  # The surface's `activate` callback sets `agentic.active = true`.
-  # We also ensure `focus: :chat` for a clean return to the chat view.
-  @spec switch_to_existing_agent_tab(state(), Tab.t()) :: state()
-  defp switch_to_existing_agent_tab(state, agent_tab) do
-    # Patch the stored surface state to set focus before switch_tab
-    # calls activate. This ensures the user lands on :chat, not whatever
-    # focus was saved when they left (could be :file_viewer, :dashboard).
-    ctx = agent_tab.context
-
-    ctx =
-      case Map.get(ctx, :surface_state) do
-        %AgentViewState{agentic: agentic} = av ->
-          Map.put(ctx, :surface_state, %{av | agentic: %{agentic | focus: :chat}})
-
-        _ ->
-          ctx
-      end
-
-    tb = TabBar.update_context(state.tab_bar, agent_tab.id, ctx)
-
-    state = %{state | tab_bar: tb}
-    state = EditorState.switch_tab(state, agent_tab.id)
-    maybe_start_session(state)
-  end
-
-  @spec new_agent_context(state()) :: Tab.context()
-  defp new_agent_context(state) do
-    agent = AgentAccess.agent(state)
-    agentic = %{ViewState.new() | active: true, focus: :chat}
-
-    av_state = %AgentViewState{
-      agent: agent,
-      agentic: agentic,
-      context: Context.from_editor_state(state)
-    }
-
-    %{
-      keymap_scope: :agent,
-      surface_module: AgentView,
-      surface_state: av_state
-    }
-  end
-
-  @spec find_file_tab(state()) :: Tab.t() | nil
-  defp find_file_tab(%{tab_bar: nil}), do: nil
-
-  defp find_file_tab(%{tab_bar: tb}) do
-    TabBar.most_recent_of_kind(tb, :file) || TabBar.find_by_kind(tb, :file)
   end
 
   @spec find_agent_tab(state()) :: Tab.t() | nil
@@ -287,31 +190,6 @@ defmodule Minga.Editor.Commands.Agent do
   # Creates a new file tab for the active buffer and switches to it.
   # Used when deactivating the agentic view and no file tab exists yet
   # (e.g., cold boot into agent mode). The new tab starts with an empty
-  # context; `EditorState.restore_tab_context` detects this and calls
-  # `build_file_tab_defaults` to set up a proper window tree, editor
-  # keymap scope, and buffer binding.
-  @spec create_and_switch_to_file_tab(state()) :: state()
-  defp create_and_switch_to_file_tab(state) do
-    label =
-      if state.buffers.active && Process.alive?(state.buffers.active) do
-        CommandHelpers.buffer_display_name(state.buffers.active)
-      else
-        "*scratch*"
-      end
-
-    # Snapshot agent tab context before leaving.
-    agent_id = state.tab_bar.active_id
-    agent_ctx = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, agent_id, agent_ctx)
-
-    # Insert file tab (without switching active_id) so switch_tab
-    # performs the full snapshot/restore cycle. The tab has empty
-    # context, which triggers build_file_tab_defaults during restore.
-    {tb, file_tab} = TabBar.insert(tb, :file, label)
-    state = %{state | tab_bar: tb}
-    EditorState.switch_tab(state, file_tab.id)
-  end
-
   @spec maybe_start_session(state()) :: state()
   defp maybe_start_session(state) do
     if AgentAccess.session(state) == nil do
@@ -444,26 +322,15 @@ defmodule Minga.Editor.Commands.Agent do
   agent tab. If already on an agent tab, creates a new one alongside it.
   """
   @spec new_agent_session(state()) :: state()
-  def new_agent_session(%{tab_bar: %TabBar{}} = state) do
-    # Snapshot current tab before leaving it.
-    current_id = state.tab_bar.active_id
-    current_ctx = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, current_id, current_ctx)
-
-    # Add new agent tab (becomes active).
-    {tb, agent_tab} = TabBar.add(tb, :agent, "New Agent")
-
-    # Fresh agent state for the new tab.
-    agent_context = new_agent_context(state)
-
-    tb = TabBar.update_context(tb, agent_tab.id, agent_context)
-    state = %{state | tab_bar: tb}
-    state = EditorState.restore_tab_context(state, agent_context)
-    AgentSession.start_agent_session(state)
-  end
-
-  # Fallback for bare maps or states without a tab bar (tests, slash commands).
   def new_agent_session(state) do
+    # Reset agent state for a fresh session, then start it.
+    # The agent buffer is reused (content will be cleared by buffer sync).
+    state =
+      AgentAccess.update_agent(state, fn _a ->
+        %AgentState{buffer: AgentAccess.agent(state).buffer}
+      end)
+
+    state = AgentAccess.update_agentic(state, fn _a -> ViewState.new() end)
     AgentSession.start_agent_session(state)
   end
 
@@ -992,12 +859,11 @@ defmodule Minga.Editor.Commands.Agent do
   # ── Private helpers ─────────────────────────────────────────────────────────
 
   # Returns true when neither the full-screen agent view nor the side panel
-  # is visible, meaning agent input/scroll commands should be no-ops.
+  # Returns true when no agent UI is visible (panel or split pane),
+  # meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()
-  defp no_agent_ui?(%{surface_module: AgentView}), do: false
-
   defp no_agent_ui?(state) do
-    not AgentAccess.panel(state).visible
+    not AgentAccess.panel(state).visible and not LayoutPreset.has_agent_chat?(state)
   end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()

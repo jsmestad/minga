@@ -2,44 +2,18 @@ defmodule Minga.Editor.SurfaceSync do
   @moduledoc """
   Surface lifecycle: initialization, bidirectional sync, and event dispatch.
 
-  The Surface abstraction (BufferView, AgentView) maintains its own state
-  alongside EditorState. This module manages the bridge between them:
-  creating surface state from EditorState, syncing changes in both
-  directions, and dispatching events through the active surface.
-
-  All sync operations dispatch through the Surface behaviour's
-  `from_editor_state/1` and `to_editor_state/2` callbacks, making this
-  module generic: adding a new surface implementation requires no changes here.
+  Manages the bridge between EditorState and the active Surface
+  (currently only BufferView). Agent state lives directly on
+  EditorState and is handled by `Minga.Agent.Events`.
   """
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Surface.AgentView
   alias Minga.Surface.BufferView
 
   @doc """
-  Initializes the surface for the current keymap scope.
-
-  Agent scope creates an AgentView surface; everything else creates BufferView.
+  Initializes the surface. Always creates a BufferView surface.
   """
   @spec init_surface(EditorState.t()) :: EditorState.t()
-  def init_surface(
-        %EditorState{keymap_scope: :agent, surface_state: %AgentView.State{} = av} = state
-      ) do
-    # Preserve existing AgentViewState, just refresh the shared context
-    alias Minga.Surface.Context
-
-    %{
-      state
-      | surface_module: AgentView,
-        surface_state: %{av | context: Context.from_editor_state(state)}
-    }
-  end
-
-  def init_surface(%EditorState{keymap_scope: :agent} = state) do
-    surface_state = AgentView.from_editor_state(state)
-    %{state | surface_module: AgentView, surface_state: surface_state}
-  end
-
   def init_surface(%EditorState{} = state) do
     surface_state = BufferView.from_editor_state(state)
     %{state | surface_module: BufferView, surface_state: surface_state}
@@ -47,18 +21,8 @@ defmodule Minga.Editor.SurfaceSync do
 
   @doc """
   Updates the surface state from the current EditorState fields.
-
-  For BufferView, rebuilds the full surface state from EditorState fields
-  (buffers, windows, mode, etc.). For AgentView, refreshes the shared
-  context (theme, layout, tab_bar, etc.) and rebuilds surface_state from
-  the top-level agent/agentic fields.
   """
   @spec sync_from_editor(EditorState.t()) :: EditorState.t()
-  def sync_from_editor(%EditorState{surface_module: AgentView} = state) do
-    # AgentView: rebuild surface_state from top-level agent/agentic fields
-    %{state | surface_state: AgentView.from_editor_state(state)}
-  end
-
   def sync_from_editor(%EditorState{surface_module: mod} = state) when mod != nil do
     %{state | surface_state: mod.from_editor_state(state)}
   end
@@ -67,17 +31,8 @@ defmodule Minga.Editor.SurfaceSync do
 
   @doc """
   Updates EditorState fields from the current surface state.
-
-  For BufferView, writes buffer/vim/window fields back to EditorState.
-  For AgentView, writes agent/agentic fields and context changes back to EditorState.
   """
   @spec sync_to_editor(EditorState.t()) :: EditorState.t()
-  def sync_to_editor(
-        %EditorState{surface_module: AgentView, surface_state: %AgentView.State{} = av} = state
-      ) do
-    AgentView.to_editor_state(state, av)
-  end
-
   def sync_to_editor(%EditorState{surface_module: mod, surface_state: ss} = state)
       when mod != nil and ss != nil do
     mod.to_editor_state(state, ss)
@@ -88,9 +43,8 @@ defmodule Minga.Editor.SurfaceSync do
   @doc """
   Dispatches an event through the active surface's handle_event callback.
 
-  Calls handle_event directly on the current surface_state (no bridge
-  round-trip). Surface events operate on their own state and return
-  effects for the Editor to apply.
+  Used for BufferView events (file watcher notifications, etc.).
+  Agent events go through `Minga.Agent.Events.handle/2` directly.
   """
   @spec dispatch_event(EditorState.t(), term()) :: {EditorState.t(), [Minga.Surface.effect()]}
   def dispatch_event(%EditorState{surface_module: mod, surface_state: ss} = state, event)

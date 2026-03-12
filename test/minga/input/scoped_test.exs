@@ -8,6 +8,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -16,6 +17,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Input.AgentPanel
@@ -60,11 +62,6 @@ defmodule Minga.Input.ScopedTest do
         TabBar.new(Tab.new_file(1, "*scratch*"))
       end
 
-    is_agent = Keyword.get(opts, :agentic_active, false)
-
-    surface_module =
-      if is_agent, do: Minga.Surface.AgentView, else: Minga.Surface.BufferView
-
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
@@ -73,7 +70,7 @@ defmodule Minga.Input.ScopedTest do
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-      surface_module: surface_module,
+      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       tab_bar: tab_bar
@@ -227,8 +224,18 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "q closes agentic view", %{state: state} do
+      # Set up a proper window tree with agent split pane
+      {:ok, agent_buf} = BufferServer.start_link(content: "")
+
+      win = Window.new(1, state.buffers.active, 24, 80)
+      windows = %{state.windows | tree: {:leaf, win.id}, map: %{win.id => win}, active: win.id}
+      state = %{state | windows: windows}
+
+      state = LayoutPreset.apply(state, :agent_right, agent_buf)
+      assert LayoutPreset.has_agent_chat?(state)
+
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
-      assert new_state.surface_module != Minga.Surface.AgentView
+      refute LayoutPreset.has_agent_chat?(new_state)
       assert new_state.keymap_scope == :editor
     end
 
@@ -333,7 +340,14 @@ defmodule Minga.Input.ScopedTest do
 
   describe "agent scope — insert mode" do
     setup do
-      {:ok, state: base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)}
+      {:ok,
+       state:
+         base_state(
+           keymap_scope: :agent,
+           agentic_active: true,
+           input_focused: true,
+           panel_visible: true
+         )}
     end
 
     test "ESC switches to input normal mode", %{state: state} do
@@ -505,7 +519,14 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "SPC self-inserts in agent insert mode" do
-      state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
+      state =
+        base_state(
+          keymap_scope: :agent,
+          agentic_active: true,
+          input_focused: true,
+          panel_visible: true
+        )
+
       {:handled, new_state} = walk_surface_handlers(state, ?\s, 0)
       assert PanelState.input_text(AgentAccess.panel(new_state)) =~ " "
     end
@@ -565,7 +586,9 @@ defmodule Minga.Input.ScopedTest do
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =
-        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
+        AgentAccess.update_agent(state, fn agent ->
+          %{agent | panel: %{agent.panel | input_focused: true, visible: true}}
+        end)
 
       state = %{state | mode: :insert}
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)

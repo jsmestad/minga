@@ -13,6 +13,7 @@ defmodule Minga.Editor do
 
   use GenServer
 
+  alias Minga.Agent.Events
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -424,7 +425,7 @@ defmodule Minga.Editor do
 
   @spec dispatch_agent_event(EditorState.t(), term()) :: EditorState.t()
   defp dispatch_agent_event(state, event) do
-    {state, effects} = Minga.Agent.Events.handle(state, event)
+    {state, effects} = Events.handle(state, event)
     apply_effects(state, effects)
   end
 

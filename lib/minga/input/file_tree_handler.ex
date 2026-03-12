@@ -10,15 +10,12 @@ defmodule Minga.Input.FileTreeHandler do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Agent.View.Mouse, as: AgentViewMouse
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
   alias Minga.Keymap.Scope
-  alias Minga.Surface.AgentView
-
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
@@ -50,11 +47,6 @@ defmodule Minga.Input.FileTreeHandler do
           atom(),
           pos_integer()
         ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-
-  # AgentView surface active: route to the agentic mouse handler
-  def handle_mouse(%{surface_module: AgentView} = state, row, col, button, mods, event_type, cc) do
-    AgentViewMouse.handle(state, row, col, button, mods, event_type, cc)
-  end
 
   # File tree: left click opens file/toggles dir, scroll wheel scrolls tree
   def handle_mouse(

@@ -217,27 +217,25 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       assert buffer_surface_active?(new_state)
     end
 
-    test "switches back to the file tab" do
-      state = base_state(active: true)
-      new_state = AgentCommands.toggle_agentic_view(state)
-      assert EditorState.active_tab_kind(new_state) == :file
+    test "second toggle removes the split pane" do
+      state = base_state()
+      # First toggle: add agent split
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      assert LayoutPreset.has_agent_chat?(with_agent)
+
+      # Second toggle: remove agent split
+      without_agent = AgentCommands.toggle_agentic_view(with_agent)
+      refute LayoutPreset.has_agent_chat?(without_agent)
     end
 
-    test "does not crash when no file tab exists" do
-      # Start active with no file tab scenario handled gracefully
-      state = base_state(active: true)
-      new_state = AgentCommands.toggle_agentic_view(state)
-      assert buffer_surface_active?(new_state)
-    end
+    test "removing split resets keymap_scope to :editor" do
+      state = base_state()
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      # Simulate agent window having focus
+      with_agent = %{with_agent | keymap_scope: :agent}
 
-    test "resets keymap_scope to :editor" do
-      state = base_state(active: true)
-
-      state =
-        AgentAccess.update_agentic(state, fn agentic -> %{agentic | focus: :file_viewer} end)
-
-      new_state = AgentCommands.toggle_agentic_view(state)
-      assert new_state.keymap_scope == :editor
+      without_agent = AgentCommands.toggle_agentic_view(with_agent)
+      assert without_agent.keymap_scope == :editor
     end
   end
 

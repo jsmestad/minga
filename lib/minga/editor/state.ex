@@ -421,11 +421,18 @@ defmodule Minga.Editor.State do
     end
   end
 
+  @doc """
+  Derives the keymap scope from a window's content type.
+
+  Agent chat windows always use `:agent` scope. Buffer windows use
+  `:editor` when coming from `:agent` scope, and preserve the current
+  scope otherwise (e.g., `:file_tree` stays as `:file_tree`).
+  """
   @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
           Minga.Keymap.Scope.scope_name()
-  defp scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
-  defp scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
-  defp scope_for_content({:buffer, _pid}, current_scope), do: current_scope
+  def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
+  def scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
+  def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
   @spec buffer_label(pid()) :: String.t()
   defp buffer_label(pid) when is_pid(pid) do
@@ -598,46 +605,15 @@ defmodule Minga.Editor.State do
       end
 
     scope = Map.get(context, :keymap_scope, :editor)
-    mod = Map.get(context, :surface_module) || scope_to_surface(scope)
-    temp = %{temp | keymap_scope: scope, surface_module: mod}
+    temp = %{temp | keymap_scope: scope, surface_module: Minga.Surface.BufferView}
     temp = SurfaceSync.init_surface(temp)
-
-    # For agent scope, apply legacy agent/agentic fields to the surface state
-    surface_state =
-      if mod == Minga.Surface.AgentView do
-        apply_legacy_agent_fields(temp.surface_state, context)
-      else
-        temp.surface_state
-      end
 
     %{
       surface_module: temp.surface_module,
-      surface_state: surface_state,
+      surface_state: temp.surface_state,
       keymap_scope: scope
     }
   end
-
-  alias Minga.Surface.AgentView.State, as: AgentViewState
-
-  @spec apply_legacy_agent_fields(AgentViewState.t(), map()) :: AgentViewState.t()
-  defp apply_legacy_agent_fields(%AgentViewState{} = av, context) do
-    av =
-      case Map.fetch(context, :agent) do
-        {:ok, agent} -> %{av | agent: agent}
-        :error -> av
-      end
-
-    case Map.fetch(context, :agentic) do
-      {:ok, agentic} -> %{av | agentic: agentic}
-      :error -> av
-    end
-  end
-
-  defp apply_legacy_agent_fields(av, _context), do: av
-
-  @spec scope_to_surface(atom()) :: module()
-  defp scope_to_surface(:agent), do: Minga.Surface.AgentView
-  defp scope_to_surface(_), do: Minga.Surface.BufferView
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
