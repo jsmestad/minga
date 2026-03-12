@@ -69,7 +69,9 @@ defmodule Minga.Surface.AgentView do
         end
       end)
 
-    new_av_state = Bridge.from_editor_state(new_editor_state)
+    # Handlers write agent state through AgentAccess which updates surface_state.
+    # Read it back directly instead of going through the bridge.
+    new_av_state = extract_updated_av_state(new_editor_state, av_state)
     {new_av_state, []}
   end
 
@@ -98,7 +100,7 @@ defmodule Minga.Surface.AgentView do
     new_editor_state =
       walk_mouse_handlers(editor_state, row, col, button, mods, event_type, click_count)
 
-    new_av_state = Bridge.from_editor_state(new_editor_state)
+    new_av_state = extract_updated_av_state(new_editor_state, av_state)
     {new_av_state, []}
   end
 
@@ -126,7 +128,7 @@ defmodule Minga.Surface.AgentView do
     layout = Layout.get(editor_state)
 
     new_editor_state = RenderPipeline.run_agentic_pipeline(editor_state, layout)
-    new_av_state = Bridge.from_editor_state(new_editor_state)
+    new_av_state = extract_updated_av_state(new_editor_state, av_state)
     {new_av_state, []}
   end
 
@@ -410,6 +412,20 @@ defmodule Minga.Surface.AgentView do
   defp update_preview(%AgentViewState{} = av, fun) do
     %{av | agentic: ViewState.update_preview(av.agentic, fun)}
   end
+
+  # Extracts the updated AgentViewState from a reconstructed EditorState
+  # after handlers have run. Reads surface_state directly (handlers write
+  # through AgentAccess which updates surface_state) and refreshes the
+  # shared context from any fields that may have changed.
+  @spec extract_updated_av_state(EditorState.t(), AgentViewState.t()) :: AgentViewState.t()
+  defp extract_updated_av_state(
+         %EditorState{surface_state: %AgentViewState{} = new_av} = es,
+         _old_av
+       ) do
+    %{new_av | context: Context.from_editor_state(es)}
+  end
+
+  defp extract_updated_av_state(_es, old_av), do: old_av
 
   # Builds an EditorState from the AgentView state and its shared context.
   # Phase 2 scaffolding: the input handlers and render pipeline operate on
