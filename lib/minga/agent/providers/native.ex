@@ -84,7 +84,9 @@ defmodule Minga.Agent.Providers.Native do
           max_retries: non_neg_integer(),
           llm_client: llm_client(),
           task: Task.t() | nil,
-          streaming: boolean()
+          streaming: boolean(),
+          interrupted: boolean(),
+          last_user_prompt: String.t() | nil
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -150,6 +152,12 @@ defmodule Minga.Agent.Providers.Native do
     GenServer.call(pid, :cycle_model)
   end
 
+  @doc "Continues from an interrupted stream, asking the model to pick up where it left off."
+  @spec continue(GenServer.server()) :: :ok | {:error, term()}
+  def continue(pid) do
+    GenServer.call(pid, :continue)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -183,7 +191,9 @@ defmodule Minga.Agent.Providers.Native do
       max_retries: max_retries,
       llm_client: llm_client,
       task: nil,
-      streaming: false
+      streaming: false,
+      interrupted: false,
+      last_user_prompt: nil
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -199,7 +209,14 @@ defmodule Minga.Agent.Providers.Native do
   def handle_call({:send_prompt, text}, _from, state) do
     # Append user message to context
     context = Context.append(state.context, Context.user(text))
-    state = %{state | context: context, streaming: true}
+
+    state = %{
+      state
+      | context: context,
+        streaming: true,
+        interrupted: false,
+        last_user_prompt: text
+    }
 
     # Notify subscriber that agent is starting
     notify(state.subscriber, %Event.AgentStart{})
@@ -233,6 +250,40 @@ defmodule Minga.Agent.Providers.Native do
     Task.shutdown(state.task, :brutal_kill)
     state = %{state | task: nil, streaming: false}
     Minga.Log.info(:agent, "[Agent.Native] aborted current operation")
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:continue, _from, %{streaming: true} = state) do
+    {:reply, {:error, "Already streaming"}, state}
+  end
+
+  def handle_call(:continue, _from, %{interrupted: false} = state) do
+    {:reply, {:error, "No interrupted response to continue from"}, state}
+  end
+
+  def handle_call(:continue, _from, state) do
+    # Send a continuation prompt that tells the model to pick up where it left off
+    continuation =
+      "Your previous response was interrupted mid-stream. Please continue from where you left off. Do not repeat what you already said."
+
+    context = Context.append(state.context, Context.user(continuation))
+    state = %{state | context: context, streaming: true, interrupted: false}
+
+    notify(state.subscriber, %Event.AgentStart{})
+
+    lctx = %{
+      provider_pid: self(),
+      model: state.model,
+      tools: state.tools,
+      thinking_level: state.thinking_level,
+      max_tokens: state.max_tokens,
+      max_retries: state.max_retries,
+      llm_client: state.llm_client
+    }
+
+    task = Task.async(fn -> run_agent_loop(lctx, context) end)
+    state = %{state | task: task}
+
     {:reply, :ok, state}
   end
 
@@ -356,10 +407,20 @@ defmodule Minga.Agent.Providers.Native do
     {:noreply, %{state | context: context}}
   end
 
+  def handle_info({:stream_interrupted, _partial_text}, state) do
+    {:noreply, %{state | interrupted: true}}
+  end
+
   def handle_info({ref, :ok}, %{task: %Task{ref: ref}} = state) do
     # Task completed normally
     Process.demonitor(ref, [:flush])
     {:noreply, %{state | task: nil, streaming: false}}
+  end
+
+  def handle_info({ref, {:error, :stream_interrupted}}, %{task: %Task{ref: ref}} = state) do
+    # Stream was interrupted but partial response was preserved
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | task: nil, streaming: false, interrupted: true}}
   end
 
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
@@ -441,26 +502,38 @@ defmodule Minga.Agent.Providers.Native do
   @spec process_and_continue(loop_ctx(), Context.t(), StreamResponse.t()) ::
           :ok | {:error, term()}
   defp process_and_continue(lctx, context, stream_response) do
-    case StreamResponse.process_stream(stream_response,
-           on_result: fn text ->
-             send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: text}})
-           end,
-           on_thinking: fn text ->
-             send(lctx.provider_pid, {:agent_event, %Event.ThinkingDelta{delta: text}})
-           end,
-           on_tool_call: fn chunk ->
-             send(
-               lctx.provider_pid,
-               {:agent_event,
-                %Event.ToolStart{
-                  tool_call_id:
-                    Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
-                  name: chunk.name || "unknown",
-                  args: chunk.arguments || %{}
-                }}
-             )
-           end
-         ) do
+    # Track partial text as it streams in. If the stream drops, we still
+    # have what was received so far. Using an Agent (the OTP kind, not the
+    # AI kind) for thread-safe accumulation from the callback closures.
+    {:ok, accumulator} = Agent.start_link(fn -> "" end)
+
+    result =
+      StreamResponse.process_stream(stream_response,
+        on_result: fn text ->
+          Agent.update(accumulator, fn acc -> acc <> text end)
+          send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: text}})
+        end,
+        on_thinking: fn text ->
+          send(lctx.provider_pid, {:agent_event, %Event.ThinkingDelta{delta: text}})
+        end,
+        on_tool_call: fn chunk ->
+          send(
+            lctx.provider_pid,
+            {:agent_event,
+             %Event.ToolStart{
+               tool_call_id:
+                 Map.get(chunk.metadata, :id, "tool_#{:erlang.unique_integer([:positive])}"),
+               name: chunk.name || "unknown",
+               args: chunk.arguments || %{}
+             }}
+          )
+        end
+      )
+
+    partial_text = Agent.get(accumulator, & &1)
+    Agent.stop(accumulator)
+
+    case result do
       {:ok, response} ->
         tool_calls = extract_tool_calls(response)
         text = extract_text(response)
@@ -468,8 +541,41 @@ defmodule Minga.Agent.Providers.Native do
         dispatch_result(lctx, context, tool_calls, text, usage)
 
       {:error, reason} ->
-        emit_error_and_end(lctx.provider_pid, format_error(reason))
-        {:error, reason}
+        handle_stream_error(lctx, context, partial_text, reason)
+    end
+  end
+
+  # When a stream drops mid-response, preserve whatever text was received.
+  # If we got meaningful partial text, save it in context so the user can
+  # /continue from where it left off instead of losing everything.
+  @spec handle_stream_error(loop_ctx(), Context.t(), String.t(), term()) :: {:error, term()}
+  defp handle_stream_error(lctx, context, partial_text, reason) do
+    if partial_text != "" and String.length(partial_text) > 10 do
+      # Preserve the partial response in context
+      partial_msg = Context.assistant(partial_text <> "\n\n[response interrupted]")
+      updated_context = Context.append(context, partial_msg)
+      send(lctx.provider_pid, {:agent_context_update, updated_context})
+      send(lctx.provider_pid, {:stream_interrupted, partial_text})
+
+      send(
+        lctx.provider_pid,
+        {:agent_event,
+         %Event.TextDelta{
+           delta:
+             "\n\n⚠️ Stream interrupted: #{format_error(reason)}. " <>
+               "Partial response preserved. Use /continue to resume."
+         }}
+      )
+
+      send(
+        lctx.provider_pid,
+        {:agent_event, %Event.AgentEnd{usage: nil}}
+      )
+
+      {:error, :stream_interrupted}
+    else
+      emit_error_and_end(lctx.provider_pid, format_error(reason))
+      {:error, reason}
     end
   end
 
