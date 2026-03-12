@@ -93,6 +93,7 @@ defmodule Minga.Keymap.Defaults do
     # ── AI agent ─────────────────────────────────────────────────────────────
     {[{?a, @none}, {?a, @none}], :toggle_agentic_view, "Toggle agent view"},
     {[{?a, @none}, {?t, @none}], :toggle_agentic_view, "Toggle agent view"},
+    {[{?a, @none}, {?v, @none}], :toggle_agent_split, "Toggle agent split pane"},
     {[{?a, @none}, {?s, @none}], :agent_abort, "Stop agent"},
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
     {[{?a, @none}, {?m, @none}], :agent_pick_model, "Pick agent model"},

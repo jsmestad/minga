@@ -45,6 +45,15 @@ defmodule Minga.Credo.DomainBoundaryCheck do
 
   @reference_forms [:alias, :import, :require, :use]
 
+  # Agent modules that are allowed to reference Buffer.Server.
+  # The agent's prompt buffer is a Buffer.Server instance, so these
+  # cross-domain references are deliberate and unavoidable.
+  @allowed_agent_buffer_modules [
+    "Minga.Agent.View.Renderer",
+    "Minga.Agent.PanelState",
+    "Minga.Agent.BufferSync"
+  ]
+
   @impl Credo.Check
   def run(%SourceFile{} = source_file, params) do
     issue_meta = IssueMeta.for(source_file, params)
@@ -54,10 +63,13 @@ defmodule Minga.Credo.DomainBoundaryCheck do
     filename = source_file.filename
 
     source_domain = domain_for_file(filename)
+    source_module = module_for_file(filename)
 
-    if source_domain do
+    # Skip files outside agent/buffer domains, and skip test files
+    # (tests naturally need to reference the modules they test).
+    if source_domain && source_module do
       source_file
-      |> Credo.Code.prewalk(&find_violations(&1, &2, source_domain, issue_meta))
+      |> Credo.Code.prewalk(&find_violations(&1, &2, source_domain, source_module, issue_meta))
       |> Enum.filter(&is_map/1)
     else
       []
@@ -68,13 +80,15 @@ defmodule Minga.Credo.DomainBoundaryCheck do
          {form, meta, [{:__aliases__, _, ref_parts} | _]} = ast,
          issues,
          source_domain,
+         source_module,
          issue_meta
        )
        when form in @reference_forms do
     ref_name = Enum.join(ref_parts, ".")
     target_domain = domain_for_module(ref_name)
 
-    if target_domain && violates_boundary?(source_domain, target_domain) do
+    if target_domain && violates_boundary?(source_domain, target_domain) &&
+         not allowed?(source_module, source_domain, target_domain) do
       issue =
         format_issue(issue_meta,
           message:
@@ -89,7 +103,34 @@ defmodule Minga.Credo.DomainBoundaryCheck do
     end
   end
 
-  defp find_violations(ast, issues, _source_domain, _issue_meta), do: {ast, issues}
+  defp find_violations(ast, issues, _source_domain, _source_module, _issue_meta),
+    do: {ast, issues}
+
+  # Check if this specific module is allowed to cross the boundary.
+  defp allowed?(nil, _source_domain, _target_domain), do: false
+
+  defp allowed?(source_module, :agent, :buffer) do
+    source_module in @allowed_agent_buffer_modules
+  end
+
+  defp allowed?(_source_module, _source_domain, _target_domain), do: false
+
+  # Extract a likely module name from the file path.
+  # Returns nil for test files (tests are always allowed to cross boundaries).
+  defp module_for_file(filename) do
+    expanded = Path.expand(filename)
+
+    if String.contains?(expanded, "/test/") do
+      nil
+    else
+      expanded
+      |> String.split("/lib/")
+      |> List.last()
+      |> String.trim_trailing(".ex")
+      |> String.split("/")
+      |> Enum.map_join(".", &Macro.camelize/1)
+    end
+  end
 
   defp domain_for_file(filename) do
     expanded = Path.expand(filename)

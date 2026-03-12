@@ -5,6 +5,7 @@ defmodule Minga.Agent.View.MouseTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Mouse
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -17,7 +18,7 @@ defmodule Minga.Agent.View.MouseTest do
     chat_width_pct = Keyword.get(opts, :chat_width_pct, 50)
     input_focused = Keyword.get(opts, :input_focused, false)
     focus = Keyword.get(opts, :focus, :chat)
-    {:ok, prompt_buf} = Minga.Buffer.Server.start_link(content: "")
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     %EditorState{
       port_manager: nil,

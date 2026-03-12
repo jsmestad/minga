@@ -149,6 +149,7 @@ defmodule Minga.Editor.Commands do
   # ── AI Agent (before no-buffer guard — agent works without a buffer) ─────
   def execute(state, :toggle_agent_panel), do: AgentCommands.toggle_panel(state)
   def execute(state, :toggle_agentic_view), do: AgentCommands.toggle_agentic_view(state)
+  def execute(state, :toggle_agent_split), do: AgentCommands.toggle_agent_split(state)
   def execute(state, :cycle_agent_tabs), do: AgentCommands.cycle_agent_tabs(state)
   def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
   def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)
@@ -167,9 +168,12 @@ defmodule Minga.Editor.Commands do
   def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
 
   # ── Agent scope commands (dispatched via keymap scope resolution) ──────────
-  # Chat scroll commands (:agent_scroll_*) removed. Navigation keys (j, k,
-  # Ctrl-D, Ctrl-U, G, gg) now pass through the scope trie to AgentChatNav,
-  # which routes them through the Mode FSM against the *Agent* buffer.
+  # Chat scroll commands for normal mode (:agent_scroll_down/up/etc.) removed.
+  # Navigation keys now pass through the scope trie to AgentChatNav, which
+  # routes them through the Mode FSM against the *Agent* buffer.
+  # These two remain for scrolling chat while the prompt input is focused:
+  def execute(state, :agent_scroll_half_down), do: AgentCommands.scroll_chat_down(state)
+  def execute(state, :agent_scroll_half_up), do: AgentCommands.scroll_chat_up(state)
   def execute(state, :agent_toggle_collapse), do: AgentCommands.scope_toggle_collapse(state)
 
   def execute(state, :agent_toggle_all_collapse),

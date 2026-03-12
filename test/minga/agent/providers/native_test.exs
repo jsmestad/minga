@@ -275,6 +275,150 @@ defmodule Minga.Agent.Providers.NativeTest do
     end
   end
 
+  describe "stream recovery" do
+    test "preserves partial text when stream drops mid-response", %{tmp_dir: dir} do
+      # Create a stream that emits some text then raises an error
+      client = fn _model, _messages, _opts ->
+        error_stream =
+          Stream.resource(
+            fn -> 0 end,
+            fn
+              0 -> {[ReqLLM.StreamChunk.text("Hello, I was saying something ")], 1}
+              1 -> {[ReqLLM.StreamChunk.text("important about ")], 2}
+              2 -> raise "connection reset by peer"
+            end,
+            fn _ -> :ok end
+          )
+
+        build_stream_response(error_stream)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
+      :ok = Native.send_prompt(pid, "Tell me something important")
+
+      events = collect_events(1_000)
+
+      # Should have streamed the partial text before the error
+      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
+      streamed_text = Enum.map(text_deltas, & &1.delta) |> Enum.join()
+      assert streamed_text =~ "Hello, I was saying something"
+      assert streamed_text =~ "important about"
+
+      # Should have an interruption notice
+      assert streamed_text =~ "Stream interrupted"
+
+      # Should have AgentEnd (not left hanging)
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "continue resumes after interrupted stream", %{tmp_dir: dir} do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        if count == 0 do
+          # First call: stream drops mid-response
+          error_stream =
+            Stream.resource(
+              fn -> 0 end,
+              fn
+                0 -> {[ReqLLM.StreamChunk.text("Partial response here")], 1}
+                1 -> raise "connection reset"
+              end,
+              fn _ -> :ok end
+            )
+
+          build_stream_response(error_stream)
+        else
+          # Second call (continue): complete response
+          chunks = [
+            ReqLLM.StreamChunk.text("Continuing from where I left off."),
+            ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+          ]
+
+          build_stream_response(chunks)
+        end
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
+
+      # First prompt gets interrupted
+      :ok = Native.send_prompt(pid, "Tell me something")
+      _events1 = collect_events(1_000)
+
+      # Continue should work
+      :ok = Native.continue(pid)
+      events2 = collect_events(1_000)
+
+      text_deltas = Enum.filter(events2, &match?(%Event.TextDelta{}, &1))
+      continued_text = Enum.map(text_deltas, & &1.delta) |> Enum.join()
+      assert continued_text =~ "Continuing from where I left off"
+    end
+
+    test "continue fails when no stream was interrupted", %{tmp_dir: dir} do
+      chunks = [
+        ReqLLM.StreamChunk.text("Complete response"),
+        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      ]
+
+      client = fake_llm_client(chunks)
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+
+      :ok = Native.send_prompt(pid, "Hello")
+      _events = collect_events(500)
+
+      assert {:error, "No interrupted response to continue from"} = Native.continue(pid)
+    end
+
+    test "continue fails while already streaming", %{tmp_dir: dir} do
+      client = fn _model, _messages, _opts ->
+        slow_stream =
+          Stream.unfold(0, fn n ->
+            Process.sleep(100)
+            {ReqLLM.StreamChunk.text("chunk #{n}"), n + 1}
+          end)
+
+        build_stream_response(slow_stream)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+      :ok = Native.send_prompt(pid, "Long story")
+      Process.sleep(50)
+
+      assert {:error, "Already streaming"} = Native.continue(pid)
+
+      Native.abort(pid)
+    end
+
+    test "small partial text does not trigger recovery", %{tmp_dir: dir} do
+      # Stream only a few characters, then error - should get a normal error, not recovery
+      client = fn _model, _messages, _opts ->
+        error_stream =
+          Stream.resource(
+            fn -> 0 end,
+            fn
+              0 -> {[ReqLLM.StreamChunk.text("Hi")], 1}
+              1 -> raise "connection reset"
+            end,
+            fn _ -> :ok end
+          )
+
+        build_stream_response(error_stream)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
+      :ok = Native.send_prompt(pid, "Hello")
+
+      events = collect_events(1_000)
+
+      # Should get a normal error, not the recovery path
+      error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
+      assert length(error_events) >= 1
+    end
+  end
+
   describe "concurrent prompt rejection" do
     test "rejects second prompt while streaming", %{tmp_dir: dir} do
       client = fn _model, _messages, _opts ->
