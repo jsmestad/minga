@@ -53,6 +53,7 @@ defmodule Minga.Config.OptionsTest do
                agent_panel_split: 65,
                startup_view: :agent,
                agent_auto_context: true,
+               agent_max_tokens: 16_384,
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,

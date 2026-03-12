@@ -91,6 +91,7 @@ defmodule Minga.Config.Options do
           | :agent_panel_split
           | :startup_view
           | :agent_auto_context
+          | :agent_max_tokens
           | :font_family
           | :font_size
           | :font_weight
@@ -150,6 +151,7 @@ defmodule Minga.Config.Options do
     {:agent_panel_split, :pos_integer, 65},
     {:startup_view, {:enum, [:agent, :editor]}, :agent},
     {:agent_auto_context, :boolean, true},
+    {:agent_max_tokens, :pos_integer, 16_384},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},

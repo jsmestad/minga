@@ -58,6 +58,7 @@ defmodule Minga.Agent.Providers.Native do
           model: String.t(),
           tools: [ReqLLM.Tool.t()],
           thinking_level: String.t(),
+          max_tokens: pos_integer(),
           llm_client: llm_client()
         }
 
@@ -73,6 +74,7 @@ defmodule Minga.Agent.Providers.Native do
           tools: [ReqLLM.Tool.t()],
           project_root: String.t(),
           thinking_level: String.t(),
+          max_tokens: pos_integer(),
           llm_client: llm_client(),
           task: Task.t() | nil,
           streaming: boolean()
@@ -133,6 +135,7 @@ defmodule Minga.Agent.Providers.Native do
     thinking_level = Keyword.get(opts, :thinking_level, "off")
     project_root = Keyword.get(opts, :project_root) || detect_project_root()
 
+    max_tokens = Keyword.get(opts, :max_tokens) || read_config_max_tokens()
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
     system_prompt = build_system_prompt(project_root)
@@ -150,6 +153,7 @@ defmodule Minga.Agent.Providers.Native do
       tools: tools,
       project_root: project_root,
       thinking_level: thinking_level,
+      max_tokens: max_tokens,
       llm_client: llm_client,
       task: nil,
       streaming: false
@@ -179,6 +183,7 @@ defmodule Minga.Agent.Providers.Native do
       model: state.model,
       tools: state.tools,
       thinking_level: state.thinking_level,
+      max_tokens: state.max_tokens,
       llm_client: state.llm_client
     }
 
@@ -299,7 +304,7 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp run_agent_loop(lctx, context) do
-    stream_opts = build_stream_opts(lctx.tools, lctx.thinking_level)
+    stream_opts = build_stream_opts(lctx.tools, lctx.thinking_level, lctx.max_tokens)
 
     case lctx.llm_client.(lctx.model, context.messages, stream_opts) do
       {:ok, stream_response} ->
@@ -545,9 +550,9 @@ defmodule Minga.Agent.Providers.Native do
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
-  @spec build_stream_opts([ReqLLM.Tool.t()], String.t()) :: keyword()
-  defp build_stream_opts(tools, thinking_level) do
-    opts = [tools: tools]
+  @spec build_stream_opts([ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
+  defp build_stream_opts(tools, thinking_level, max_tokens) do
+    opts = [tools: tools, max_tokens: max_tokens]
 
     case Map.get(@thinking_levels, thinking_level) do
       budget when is_integer(budget) and budget > 0 ->
@@ -634,6 +639,17 @@ defmodule Minga.Agent.Providers.Native do
 
         :ok
     end
+  end
+
+  @default_max_tokens 16_384
+
+  @spec read_config_max_tokens() :: pos_integer()
+  defp read_config_max_tokens do
+    Options.get(:agent_max_tokens)
+  rescue
+    _ -> @default_max_tokens
+  catch
+    :exit, _ -> @default_max_tokens
   end
 
   @spec detect_project_root() :: String.t()
