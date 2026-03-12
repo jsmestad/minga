@@ -13,7 +13,6 @@ defmodule Minga.Editor.Startup do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.FileWatcherHelpers
-  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -89,14 +88,17 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Creates the agent buffer and applies the agent split layout when
-  booting into agent mode.
+  Creates the agent buffer and replaces the initial buffer window with
+  a full-screen agent chat window when booting into agent mode.
 
-  This bridges the gap between `startup_view_state` (which decides
-  *whether* to use agent mode) and the window tree (which needs an
-  actual agent chat window for the render pipeline to find). Without
-  this step, `LayoutPreset.has_agent_chat?/1` returns false and the
-  agent session never starts.
+  The render pipeline finds agent chat windows via
+  `LayoutPreset.has_agent_chat?/1`. Without an agent chat window in
+  the window map, `AgentLifecycle.maybe_start_session/1` skips session
+  startup and the user sees a bare scratch buffer.
+
+  Unlike `toggle_agent_split` (which creates a side-by-side split for
+  use during editing), startup replaces the root window entirely so the
+  agent chat takes the full screen, matching the OpenCode-style layout.
   """
   @spec maybe_apply_agent_split(EditorState.t()) :: EditorState.t()
   def maybe_apply_agent_split(%{keymap_scope: :agent} = state) do
@@ -104,7 +106,21 @@ defmodule Minga.Editor.Startup do
 
     if is_pid(agent_buf) do
       state = AgentAccess.update_agent(state, fn a -> %{a | buffer: agent_buf} end)
-      LayoutPreset.apply(state, :agent_right, agent_buf)
+
+      # Replace the initial scratch window with an agent chat window.
+      # The scratch buffer stays in buffers.active (needed for :q fallback)
+      # but the visible window is the agent chat.
+      win_id = state.windows.active
+      rows = state.viewport.rows
+      cols = state.viewport.cols
+      agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+      windows = %{
+        state.windows
+        | map: Map.put(state.windows.map, win_id, agent_window)
+      }
+
+      %{state | windows: windows}
     else
       state
     end

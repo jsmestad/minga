@@ -46,7 +46,7 @@ defmodule Minga.Editor.StartupTest do
   end
 
   describe "maybe_apply_agent_split/1 (the regression guard)" do
-    test "creates agent chat window in window tree when keymap_scope is :agent" do
+    test "replaces initial window with full-screen agent chat window" do
       # Build a minimal state that looks like what build_initial_state produces
       # in agent mode: keymap_scope :agent, a scratch buffer window, real tree.
       {:ok, scratch} = BufferServer.start_link(content: "scratch")
@@ -69,21 +69,22 @@ defmodule Minga.Editor.StartupTest do
 
       result = Startup.maybe_apply_agent_split(state)
 
-      # The agent split must be applied: has_agent_chat? is the check that
-      # AgentLifecycle.maybe_start_session uses to decide whether to start
-      # the agent session. If this is false, the agent never boots.
+      # has_agent_chat? must be true so AgentLifecycle.maybe_start_session
+      # starts the agent session. This was the original regression.
       assert LayoutPreset.has_agent_chat?(result),
              "agent startup must create an agent_chat window so the session can start"
 
-      # The window tree should be a split (scratch left, agent right)
-      assert {:split, :vertical, {:leaf, 1}, {:leaf, 2}, _} = result.windows.tree
+      # The window tree is a single leaf (full-screen), not a split.
+      # The old full-screen agentic view had no scratch buffer visible.
+      assert {:leaf, 1} = result.windows.tree
 
-      # The new window should have agent_chat content
-      agent_window = result.windows.map[2]
+      # The single window should be an agent_chat window, not a buffer
+      agent_window = result.windows.map[1]
       assert Content.agent_chat?(agent_window.content)
+      refute Content.buffer?(agent_window.content)
 
-      # The original scratch window should still be a buffer
-      assert Content.buffer?(result.windows.map[1].content)
+      # Only one window in the map (no scratch buffer window)
+      assert map_size(result.windows.map) == 1
 
       # The agent buffer should be stored in agent state
       assert is_pid(result.agent.buffer)
@@ -114,6 +115,8 @@ defmodule Minga.Editor.StartupTest do
       refute LayoutPreset.has_agent_chat?(result)
       assert result.windows.tree == WindowTree.new(1)
       assert map_size(result.windows.map) == 1
+      # Window should still be the original buffer window
+      assert Content.buffer?(result.windows.map[1].content)
     end
   end
 end
