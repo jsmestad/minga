@@ -58,7 +58,8 @@ defmodule Minga.Agent.View.State do
           search: search_state() | nil,
           toast: toast() | nil,
           toast_queue: term(),
-          diff_baselines: %{String.t() => String.t()}
+          diff_baselines: %{String.t() => String.t()},
+          context_estimate: non_neg_integer()
         }
 
   @enforce_keys []
@@ -73,6 +74,7 @@ defmodule Minga.Agent.View.State do
             search: nil,
             toast: nil,
             toast_queue: :queue.new(),
+            context_estimate: 0,
             diff_baselines: %{}
 
   @min_chat_pct 30

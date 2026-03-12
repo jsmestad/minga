@@ -47,7 +47,8 @@ defmodule Minga.Agent.View.RendererTest do
         help_visible: false,
         focus: :chat,
         search: nil,
-        toast: nil
+        toast: nil,
+        context_estimate: 0
       },
       messages: [],
       session_title: "Minga Agent"
@@ -358,7 +359,8 @@ defmodule Minga.Agent.View.RendererTest do
           help_visible: false,
           focus: :chat,
           search: nil,
-          toast: nil
+          toast: nil,
+          context_estimate: 0
         },
         messages: [],
         usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
@@ -398,7 +400,8 @@ defmodule Minga.Agent.View.RendererTest do
           help_visible: false,
           focus: :chat,
           search: nil,
-          toast: nil
+          toast: nil,
+          context_estimate: 0
         },
         messages: [],
         # Set preview to a file so the buffer preview renders (not dashboard)
@@ -447,7 +450,14 @@ defmodule Minga.Agent.View.RendererTest do
           mention_completion: nil,
           pasted_blocks: []
         },
-        agentic: %{chat_width_pct: 65, help_visible: false, focus: :chat, search: nil, toast: nil},
+        agentic: %{
+          chat_width_pct: 65,
+          help_visible: false,
+          focus: :chat,
+          search: nil,
+          toast: nil,
+          context_estimate: 0
+        },
         messages: [],
         usage: %{input: 50_000, output: 50_000, cache_read: 0, cache_write: 0, cost: 0.05},
         buffer_snapshot: nil,

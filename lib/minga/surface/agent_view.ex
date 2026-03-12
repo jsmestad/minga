@@ -305,6 +305,11 @@ defmodule Minga.Surface.AgentView do
     {av, effects}
   end
 
+  def handle_event(%AgentViewState{} = av, {:context_usage, estimated_tokens, _context_limit}) do
+    av = %{av | agentic: %{av.agentic | context_estimate: estimated_tokens}}
+    {av, [{:render, 16}]}
+  end
+
   def handle_event(%AgentViewState{} = av, _unknown) do
     {av, []}
   end
