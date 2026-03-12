@@ -113,7 +113,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       input_row = row + h - @agent_input_height + 1 + cursor_line
       input_col = col + 2 + cursor_col
 
-      {{input_row, input_col}, ChromeHelpers.input_cursor_shape(panel)}
+      {{input_row, input_col}, ChromeHelpers.input_cursor_shape(state.mode)}
     else
       {cursor, shape}
     end

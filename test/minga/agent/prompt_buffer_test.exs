@@ -2,35 +2,26 @@ defmodule Minga.Agent.PromptBufferTest do
   @moduledoc """
   Tests for the prompt Buffer.Server integration in PanelState.
 
-  These verify that the prompt buffer stays in sync with the TextField
-  during the migration period. Once TextField is removed, these tests
-  become the primary prompt storage tests.
+  Now that Buffer.Server is the primary store (not a shadow), these
+  verify that all PanelState operations correctly delegate to the buffer.
   """
 
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Input.TextField
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp focused_panel(text \\ "") do
     panel = PanelState.new()
+    panel = PanelState.set_input_focused(panel, true)
 
-    panel =
-      if text != "" do
-        lines = String.split(text, "\n")
-        %{panel | input: TextField.from_parts(lines, {0, 0})}
-      else
-        panel
-      end
+    if text != "" do
+      BufferServer.replace_content(panel.prompt_buffer, text)
+    end
 
-    PanelState.set_input_focused(panel, true)
-  end
-
-  defp buffer_content(panel) do
-    BufferServer.content(panel.prompt_buffer)
+    panel
   end
 
   # ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -49,12 +40,7 @@ defmodule Minga.Agent.PromptBufferTest do
 
     test "prompt buffer starts with empty content" do
       panel = focused_panel()
-      assert buffer_content(panel) == ""
-    end
-
-    test "prompt buffer starts with existing text if present" do
-      panel = focused_panel("existing text")
-      assert buffer_content(panel) == "existing text"
+      assert BufferServer.content(panel.prompt_buffer) == ""
     end
 
     test "ensure_prompt_buffer is idempotent" do
@@ -70,7 +56,6 @@ defmodule Minga.Agent.PromptBufferTest do
       old_pid = panel.prompt_buffer
       Process.exit(old_pid, :kill)
 
-      # Wait for the exit signal to arrive
       receive do
         {:EXIT, ^old_pid, :killed} -> :ok
       after
@@ -84,53 +69,53 @@ defmodule Minga.Agent.PromptBufferTest do
     end
   end
 
-  # ── Sync on text operations ────────────────────────────────────────────────
+  # ── Text operations write to buffer ────────────────────────────────────────
 
-  describe "sync on text operations" do
-    test "insert_char syncs to prompt buffer" do
+  describe "text operations" do
+    test "insert_char writes to buffer" do
       panel = focused_panel()
       panel = PanelState.insert_char(panel, "h")
       panel = PanelState.insert_char(panel, "i")
-      assert buffer_content(panel) == "hi"
+      assert BufferServer.content(panel.prompt_buffer) == "hi"
     end
 
-    test "insert_newline syncs to prompt buffer" do
+    test "insert_newline writes to buffer" do
       panel = focused_panel()
       panel = PanelState.insert_char(panel, "a")
       panel = PanelState.insert_newline(panel)
       panel = PanelState.insert_char(panel, "b")
-      assert buffer_content(panel) == "a\nb"
+      assert BufferServer.content(panel.prompt_buffer) == "a\nb"
     end
 
-    test "delete_char syncs to prompt buffer" do
+    test "delete_char writes to buffer" do
       panel = focused_panel("hello")
-      panel = %{panel | input: TextField.set_cursor(panel.input, {0, 5})}
+      BufferServer.set_cursor(panel.prompt_buffer, {0, 5})
       panel = PanelState.delete_char(panel)
-      assert buffer_content(panel) == "hell"
+      assert BufferServer.content(panel.prompt_buffer) == "hell"
     end
 
-    test "clear_input syncs to prompt buffer" do
+    test "clear_input empties buffer" do
       panel = focused_panel()
       panel = PanelState.insert_char(panel, "x")
       panel = PanelState.clear_input(panel)
-      assert buffer_content(panel) == ""
+      assert BufferServer.content(panel.prompt_buffer) == ""
     end
 
-    test "short paste syncs to prompt buffer" do
+    test "short paste writes to buffer" do
       panel = focused_panel()
       panel = PanelState.insert_paste(panel, "pasted")
-      assert buffer_content(panel) == "pasted"
+      assert BufferServer.content(panel.prompt_buffer) == "pasted"
     end
 
-    test "history_prev syncs to prompt buffer" do
+    test "history_prev writes to buffer" do
       panel = focused_panel()
       panel = PanelState.insert_char(panel, "x")
       panel = PanelState.clear_input(panel)
       panel = PanelState.history_prev(panel)
-      assert buffer_content(panel) == "x"
+      assert BufferServer.content(panel.prompt_buffer) == "x"
     end
 
-    test "history_next syncs to prompt buffer" do
+    test "history_next writes to buffer" do
       panel = focused_panel()
       panel = PanelState.insert_char(panel, "a")
       panel = PanelState.clear_input(panel)
@@ -140,30 +125,34 @@ defmodule Minga.Agent.PromptBufferTest do
       panel = PanelState.history_prev(panel)
       panel = PanelState.history_prev(panel)
       panel = PanelState.history_next(panel)
-      assert buffer_content(panel) == "b"
+      assert BufferServer.content(panel.prompt_buffer) == "b"
     end
   end
 
-  # ── prompt_text/1 ──────────────────────────────────────────────────────────
+  # ── Accessor consistency ───────────────────────────────────────────────────
 
-  describe "prompt_text/1" do
-    test "reads from prompt buffer when available" do
+  describe "accessor consistency" do
+    test "input_lines matches buffer content" do
+      panel = focused_panel("hello\nworld")
+      assert PanelState.input_lines(panel) == ["hello", "world"]
+    end
+
+    test "input_cursor matches buffer cursor" do
+      panel = focused_panel("hello")
+      BufferServer.set_cursor(panel.prompt_buffer, {0, 3})
+      assert PanelState.input_cursor(panel) == {0, 3}
+    end
+
+    test "input_line_count matches buffer" do
+      panel = focused_panel("a\nb\nc")
+      assert PanelState.input_line_count(panel) == 3
+    end
+
+    test "input_empty? reflects buffer state" do
       panel = focused_panel()
+      assert PanelState.input_empty?(panel)
       panel = PanelState.insert_char(panel, "x")
-      assert PanelState.prompt_text(panel) == "x"
-    end
-
-    test "falls back to input_text when no buffer" do
-      panel = PanelState.new()
-      panel = %{panel | input: TextField.from_parts(["hello"], {0, 5})}
-      assert PanelState.prompt_text(panel) == "hello"
-    end
-
-    test "substitutes paste placeholders" do
-      panel = focused_panel()
-      panel = PanelState.insert_paste(panel, "line1\nline2\nline3")
-      text = PanelState.prompt_text(panel)
-      assert text == "line1\nline2\nline3"
+      refute PanelState.input_empty?(panel)
     end
   end
 end

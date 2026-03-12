@@ -29,7 +29,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Input.Vim
+
   alias Minga.Surface.AgentView
   alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.Context
@@ -711,13 +711,15 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Focuses the input field and transitions to insert mode."
   @spec scope_focus_input(state()) :: state()
   def scope_focus_input(state) do
-    update_agent(state, &AgentState.focus_input(&1, true))
+    state = update_agent(state, &AgentState.focus_input(&1, true))
+    %{state | mode: :insert, mode_state: Minga.Mode.initial_state()}
   end
 
   @doc "Unfocuses the input field and transitions to normal mode."
   @spec scope_unfocus_input(state()) :: state()
   def scope_unfocus_input(state) do
-    update_agent(state, &AgentState.focus_input(&1, false))
+    state = update_agent(state, &AgentState.focus_input(&1, false))
+    %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
   end
 
   @doc "Unfocuses the input field and closes the agentic view."
@@ -730,16 +732,15 @@ defmodule Minga.Editor.Commands.Agent do
   # ── Input vim mode commands ──────────────────────────────────────────────
   #
   # Vim editing (motions, operators, visual mode, counts, text objects) is
-  # handled entirely by Minga.Input.Vim.handle_key/4 in the dispatch layer.
+  # handled by the standard Mode FSM via dispatch_prompt_via_mode_fsm.
   # Only mode transitions that originate from scope trie bindings live here.
 
-  @doc "Switches the input from insert to normal mode (called on Escape in insert)."
+  @doc "Switches the input from insert to normal mode. Delegates to Mode FSM via Escape."
   @spec input_to_normal(state()) :: state()
   def input_to_normal(state) do
-    update_agent(state, fn agent ->
-      {new_vim, new_tf} = Vim.enter_normal(agent.panel.vim, agent.panel.input)
-      %{agent | panel: %{agent.panel | vim: new_vim, input: new_tf}}
-    end)
+    # Route Escape through the prompt's Mode FSM which handles the
+    # insert → normal transition, cursor clamping, etc.
+    Minga.Input.AgentPanel.dispatch_prompt_via_mode_fsm(state, 27, 0)
   end
 
   # ── Panel management ───────────────────────────────────────────────────────

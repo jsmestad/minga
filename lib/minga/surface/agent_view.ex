@@ -20,6 +20,7 @@ defmodule Minga.Surface.AgentView do
   @behaviour Minga.Surface
 
   alias Minga.Agent.DiffReview
+  alias Minga.Agent.PanelState
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.Layout
@@ -317,8 +318,8 @@ defmodule Minga.Surface.AgentView do
   """
   @impl Minga.Surface
   @spec cursor(AgentViewState.t()) :: {non_neg_integer(), non_neg_integer(), atom()}
-  def cursor(%AgentViewState{agent: %{panel: %{input_focused: true, input: input}}}) do
-    {row, col} = input.cursor
+  def cursor(%AgentViewState{agent: %{panel: %{input_focused: true} = panel}}) do
+    {row, col} = PanelState.input_cursor(panel)
     {row, col, :beam}
   end
 

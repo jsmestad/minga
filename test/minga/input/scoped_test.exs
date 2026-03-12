@@ -26,6 +26,7 @@ defmodule Minga.Input.ScopedTest do
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     panel = %PanelState{
       visible: Keyword.get(opts, :panel_visible, false),
@@ -34,7 +35,8 @@ defmodule Minga.Input.ScopedTest do
       spinner_frame: 0,
       provider_name: "anthropic",
       model_name: "claude-sonnet-4",
-      thinking_level: "medium"
+      thinking_level: "medium",
+      prompt_buffer: prompt_buf
     }
 
     agent = %AgentState{
@@ -67,7 +69,7 @@ defmodule Minga.Input.ScopedTest do
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: :normal,
+      mode: if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal),
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
@@ -170,7 +172,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
+      assert new_state.mode == :normal
     end
 
     test "Backspace on empty input is safe", %{state: state} do
@@ -192,12 +194,12 @@ defmodule Minga.Input.ScopedTest do
 
     test "Shift+Enter inserts newline", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
-      assert length(AgentAccess.panel(new_state).input.lines) > 1
+      assert length(PanelState.input_lines(AgentAccess.panel(new_state))) > 1
     end
 
     test "Alt+Enter inserts newline", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x04)
-      assert length(AgentAccess.panel(new_state).input.lines) > 1
+      assert length(PanelState.input_lines(AgentAccess.panel(new_state))) > 1
     end
   end
 
@@ -334,7 +336,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
+      assert new_state.mode == :normal
     end
 
     test "printable char self-inserts", %{state: state} do
@@ -552,10 +554,11 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "only triggers when input is not focused", %{state: state} do
-      # If input is focused, approval keys should not be intercepted
+      # If input is focused in insert mode, approval keys should not be intercepted
       state =
         AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
+      state = %{state | mode: :insert}
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)
       # Should have typed 'y' into input, not approved
       assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "y"

@@ -37,7 +37,8 @@ defmodule Minga.Input.AgentPanelNavTest do
       {:assistant, "World\nLine 2\nLine 3\nLine 4\nLine 5"}
     ])
 
-    panel = %{PanelState.new() | visible: true, input_focused: false}
+    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    panel = %{PanelState.new() | visible: true, input_focused: false, prompt_buffer: prompt_buf}
 
     agent = %AgentState{
       panel: panel,
@@ -144,7 +145,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state) == true
-      assert PanelState.input_mode(AgentAccess.panel(new_state)) == :normal
+      assert new_state.mode == :normal
     end
 
     test "input mode intercepts printable chars" do
@@ -153,6 +154,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
+      state = %{state | mode: :insert}
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
       assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "a"
     end
@@ -193,9 +195,10 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
+      state = %{state | mode: :insert}
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
-      assert length(AgentAccess.panel(new_state).input.lines) > 1
+      assert length(PanelState.input_lines(AgentAccess.panel(new_state))) > 1
     end
 
     test "Backspace on empty input is safe" do
