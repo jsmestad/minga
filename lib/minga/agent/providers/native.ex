@@ -144,6 +144,12 @@ defmodule Minga.Agent.Providers.Native do
     GenServer.call(pid, :compact, 30_000)
   end
 
+  @impl Minga.Agent.Provider
+  @spec cycle_model(GenServer.server()) :: {:ok, map()} | {:error, term()}
+  def cycle_model(pid) do
+    GenServer.call(pid, :cycle_model)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -311,6 +317,30 @@ defmodule Minga.Agent.Providers.Native do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:cycle_model, _from, state) do
+    model_list = read_config_model_list()
+
+    if model_list == [] do
+      {:reply, {:error, "No model rotation configured. Set :agent_models in your config."}, state}
+    else
+      {next_model, next_thinking} = parse_model_entry(next_in_cycle(model_list, state.model))
+
+      new_state = %{
+        state
+        | model: next_model,
+          thinking_level: next_thinking || state.thinking_level,
+          context: ReqLLM.Context.new(),
+          tools: Minga.Agent.Tools.all(project_root: state.project_root),
+          system_prompt: build_system_prompt(state.project_root)
+      }
+
+      total = length(model_list)
+      index = Enum.find_index(model_list, &String.starts_with?(&1, next_model)) || 0
+
+      {:reply, {:ok, %{"model" => next_model, "index" => index + 1, "total" => total}}, new_state}
     end
   end
 
@@ -866,6 +896,34 @@ defmodule Minga.Agent.Providers.Native do
     _ -> @default_max_retries
   catch
     :exit, _ -> @default_max_retries
+  end
+
+  @spec read_config_model_list() :: [String.t()]
+  defp read_config_model_list do
+    Options.get(:agent_models)
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  # Finds the next entry in the cycle after the current model.
+  @spec next_in_cycle([String.t()], String.t()) :: String.t()
+  defp next_in_cycle(model_list, current_model) do
+    current_index =
+      Enum.find_index(model_list, &String.starts_with?(&1, current_model)) || -1
+
+    next_index = rem(current_index + 1, length(model_list))
+    Enum.at(model_list, next_index)
+  end
+
+  # Parses "provider:model:thinking_level" or "provider:model" into {model_str, thinking | nil}.
+  @spec parse_model_entry(String.t()) :: {String.t(), String.t() | nil}
+  defp parse_model_entry(entry) do
+    case String.split(entry, ":") do
+      [provider, model, thinking] -> {"#{provider}:#{model}", thinking}
+      _ -> {entry, nil}
+    end
   end
 
   @spec detect_project_root() :: String.t()
