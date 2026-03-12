@@ -33,6 +33,7 @@ defmodule Minga.Agent.Providers.Native do
 
   require Logger
 
+  alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Tools
   alias Minga.Config.Options
@@ -136,6 +137,11 @@ defmodule Minga.Agent.Providers.Native do
     tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
     system_prompt = build_system_prompt(project_root)
     context = Context.new([Context.system(system_prompt)])
+
+    # Resolve API key from credentials (env var or credentials file).
+    # If found in the file but not in the env, set the env var so ReqLLM
+    # picks it up automatically.
+    ensure_api_key_in_env(model)
 
     state = %{
       subscriber: subscriber,
@@ -593,6 +599,40 @@ defmodule Minga.Agent.Providers.Native do
     case File.read(path) do
       {:ok, content} -> content
       {:error, _} -> nil
+    end
+  end
+
+  # Sets the provider's API key env var if it's stored in the credentials
+  # file but not yet in the environment. This lets ReqLLM find the key
+  # without us having to thread it through every call.
+  @spec ensure_api_key_in_env(String.t()) :: :ok
+  defp ensure_api_key_in_env(model) do
+    provider = Credentials.provider_from_model(model)
+
+    case Credentials.resolve(provider) do
+      {:ok, key, :file} ->
+        # Key is in the credentials file but not in env; set it
+        case Credentials.env_var_for(provider) do
+          nil -> :ok
+          var_name -> System.put_env(var_name, key)
+        end
+
+        :ok
+
+      {:ok, _key, :env} ->
+        # Already in env, nothing to do
+        :ok
+
+      :error ->
+        # No key anywhere. The provider will fail on the first API call
+        # with a clear error from the API (e.g. "authentication_error").
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] No API key found for #{provider}. " <>
+            "Use /auth to configure one, or set #{Credentials.env_var_for(provider) || "the provider's env var"}."
+        )
+
+        :ok
     end
   end
 
