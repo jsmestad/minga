@@ -255,6 +255,7 @@ defmodule Minga.Surface.ContractTest do
 
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Surface.AgentView
@@ -417,7 +418,7 @@ defmodule Minga.Surface.ContractTest do
     end
 
     test "cursor is beam when input is focused" do
-      {:ok, prompt_buf} = Minga.Buffer.Server.start_link(content: "")
+      {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
       av = %{
         build_av_state()

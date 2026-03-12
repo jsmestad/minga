@@ -29,7 +29,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-
+  alias Minga.Input.AgentPanel
   alias Minga.Surface.AgentView
   alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.Context
@@ -700,7 +700,7 @@ defmodule Minga.Editor.Commands.Agent do
   def input_to_normal(state) do
     # Route Escape through the prompt's Mode FSM which handles the
     # insert → normal transition, cursor clamping, etc.
-    Minga.Input.AgentPanel.dispatch_prompt_via_mode_fsm(state, 27, 0)
+    AgentPanel.dispatch_prompt_via_mode_fsm(state, 27, 0)
   end
 
   # ── Panel management ───────────────────────────────────────────────────────
