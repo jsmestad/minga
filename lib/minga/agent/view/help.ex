@@ -66,7 +66,7 @@ defmodule Minga.Agent.View.Help do
        ]},
       {"View",
        [
-         {"q", "Close agentic view"},
+         {"q", "Close agent split"},
          {"?", "This help overlay"}
        ]}
     ]
@@ -94,7 +94,7 @@ defmodule Minga.Agent.View.Help do
        ]},
       {"View",
        [
-         {"q", "Close agentic view"},
+         {"q", "Close agent split"},
          {"?", "This help overlay"}
        ]}
     ]

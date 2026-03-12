@@ -128,7 +128,7 @@ defmodule Minga.Keymap.Scope.Agent do
     # Help
     |> Bindings.bind([{??, 0}], :agent_toggle_help, "Toggle help overlay")
     # Close
-    |> Bindings.bind([{?q, 0}], :agent_close, "Close agentic view")
+    |> Bindings.bind([{?q, 0}], :agent_close, "Close agent split")
     |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
     # Clear
     |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
@@ -263,7 +263,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"View",
        [
-         {"q", "Close agentic view"},
+         {"q", "Close agent split"},
          {"?", "This help overlay"}
        ]}
     ]
@@ -290,7 +290,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"View",
        [
-         {"q", "Close agentic view"},
+         {"q", "Close agent split"},
          {"?", "This help overlay"}
        ]}
     ]
