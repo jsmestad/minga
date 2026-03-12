@@ -15,6 +15,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Input
   alias Minga.Mode
@@ -67,7 +68,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
 
     # Create a proper window for the buffer
-    window = Minga.Editor.Window.new(1, buf, 24, 80)
+    window = Window.new(1, buf, 24, 80)
 
     state = %EditorState{
       port_manager: self(),
