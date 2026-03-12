@@ -28,12 +28,12 @@ defmodule Minga.Surface.AgentView.Bridge do
   @doc """
   Writes `AgentView.State` fields back onto the `EditorState`.
 
-  Updates the `surface_state` with the new AgentViewState and writes any
+  Updates the top-level agent and agentic fields, and writes any
   context changes (layout cache, click regions) back to EditorState.
   """
   @spec to_editor_state(EditorState.t(), AgentViewState.t()) :: EditorState.t()
   def to_editor_state(%EditorState{} = es, %AgentViewState{} = av) do
-    es = %{es | surface_state: av}
+    es = %{es | agent: av.agent, agentic: av.agentic}
 
     if av.context do
       Context.to_editor_state(es, av.context)

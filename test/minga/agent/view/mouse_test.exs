@@ -11,7 +11,6 @@ defmodule Minga.Agent.View.MouseTest do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Mouse, as: MouseState
   alias Minga.Editor.Viewport
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # Build a minimal editor state that looks like an active agentic view.
   defp agentic_state(opts \\ []) do
@@ -26,20 +25,17 @@ defmodule Minga.Agent.View.MouseTest do
       mode_state: Minga.Mode.initial_state(),
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
       surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agentic: %ViewState{
-          active: true,
-          focus: focus,
-          chat_width_pct: chat_width_pct
-        },
-        agent: %AgentState{
-          panel: %PanelState{
-            visible: false,
-            input_focused: input_focused,
-            prompt_buffer: prompt_buf
-          }
-        },
-        context: nil
+      agentic: %ViewState{
+        active: true,
+        focus: focus,
+        chat_width_pct: chat_width_pct
+      },
+      agent: %AgentState{
+        panel: %PanelState{
+          visible: false,
+          input_focused: input_focused,
+          prompt_buffer: prompt_buf
+        }
       },
       mouse: %MouseState{},
       buffers: %{active: nil, list: [], active_index: 0}

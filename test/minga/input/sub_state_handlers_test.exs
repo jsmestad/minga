@@ -28,7 +28,6 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Input.ToolApproval
   alias Minga.Mode
   alias Minga.Scroll
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
@@ -72,11 +71,8 @@ defmodule Minga.Input.SubStateHandlersTest do
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       surface_module: Minga.Surface.AgentView,
-      surface_state: %AgentViewState{
-        agent: agent,
-        agentic: agentic,
-        context: nil
-      },
+      agent: agent,
+      agentic: agentic,
       tab_bar: tab_bar
     }
   end

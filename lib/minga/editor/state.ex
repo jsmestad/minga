@@ -98,7 +98,9 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             surface_module: nil,
-            surface_state: nil
+            surface_state: nil,
+            agent: %AgentState{},
+            agentic: Minga.Agent.View.State.new()
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -140,7 +142,9 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           surface_module: module() | nil,
-          surface_state: term() | nil
+          surface_state: term() | nil,
+          agent: AgentState.t(),
+          agentic: Minga.Agent.View.State.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -791,39 +795,6 @@ defmodule Minga.Editor.State do
     kind
   end
 
-  # ══════════════════════════════════════════════════════════════════════════
-  # Per-tab agent event routing
-  # ══════════════════════════════════════════════════════════════════════════
-
-  @typedoc """
-  Result of resolving which tab an agent event belongs to.
-
-  - `{:active, tab}` — the event targets the currently active tab, so
-    the caller should update `state.agent` / `state.agentic` directly.
-  - `{:background, tab}` — the event targets a background tab. The caller
-    should run the event through the surface's `handle_event/2` and write
-    the result back via `update_background_surface_state/3`.
-  - `:not_found` — no tab owns this session (stale event after tab close).
-  """
-  @type route_result :: {:active, Tab.t()} | {:background, Tab.t()} | :not_found
-
-  @doc """
-  Resolves which tab an agent event belongs to, based on the session pid.
-
-  Checks the active tab's live `state.agent.session` first (fast path),
-  then falls back to scanning background tabs via `Tab.session`.
-  """
-  @spec route_agent_event(t(), pid()) :: route_result()
-  def route_agent_event(%__MODULE__{tab_bar: nil}, _session_pid), do: :not_found
-
-  def route_agent_event(%__MODULE__{tab_bar: tb} = state, session_pid) do
-    if AgentAccess.session(state) == session_pid do
-      {:active, TabBar.active(tb)}
-    else
-      find_session_in_tabs(tb, session_pid)
-    end
-  end
-
   # ── Spinner lifecycle for tab switching ──────────────────────────────────────
 
   @spec stop_outgoing_spinner(t()) :: t()
@@ -839,34 +810,6 @@ defmodule Minga.Editor.State do
       AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
     else
       state
-    end
-  end
-
-  @spec find_session_in_tabs(TabBar.t(), pid()) :: route_result()
-  defp find_session_in_tabs(tb, session_pid) do
-    case TabBar.find_by_session(tb, session_pid) do
-      %Tab{id: id} = tab when id == tb.active_id -> {:active, tab}
-      %Tab{} = tab -> {:background, tab}
-      nil -> :not_found
-    end
-  end
-
-  @doc """
-  Replaces the entire surface_state in a background tab's stored context.
-
-  Use this when you have a fully computed new surface state (e.g., after
-  running `AgentView.handle_event/2` on the stored state and writing
-  the result back to the tab).
-  """
-  @spec update_background_surface_state(t(), Tab.id(), term()) :: t()
-  def update_background_surface_state(%__MODULE__{tab_bar: tb} = state, tab_id, new_surface_state) do
-    case TabBar.get(tb, tab_id) do
-      %Tab{context: ctx} when is_map(ctx) ->
-        new_ctx = Map.put(ctx, :surface_state, new_surface_state)
-        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
-
-      _ ->
-        state
     end
   end
 

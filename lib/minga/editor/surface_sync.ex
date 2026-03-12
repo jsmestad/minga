@@ -49,17 +49,14 @@ defmodule Minga.Editor.SurfaceSync do
   Updates the surface state from the current EditorState fields.
 
   For BufferView, rebuilds the full surface state from EditorState fields
-  (buffers, windows, mode, etc.). For AgentView, only refreshes the shared
-  context (theme, layout, tab_bar, etc.) since agent-specific state already
-  lives in surface_state.
+  (buffers, windows, mode, etc.). For AgentView, refreshes the shared
+  context (theme, layout, tab_bar, etc.) and rebuilds surface_state from
+  the top-level agent/agentic fields.
   """
   @spec sync_from_editor(EditorState.t()) :: EditorState.t()
-  def sync_from_editor(
-        %EditorState{surface_module: AgentView, surface_state: %AgentView.State{} = av} = state
-      ) do
-    # AgentView: only refresh the shared context, not the agent/agentic fields
-    alias Minga.Surface.Context
-    %{state | surface_state: %{av | context: Context.from_editor_state(state)}}
+  def sync_from_editor(%EditorState{surface_module: AgentView} = state) do
+    # AgentView: rebuild surface_state from top-level agent/agentic fields
+    %{state | surface_state: AgentView.from_editor_state(state)}
   end
 
   def sync_from_editor(%EditorState{surface_module: mod} = state) when mod != nil do
@@ -72,17 +69,13 @@ defmodule Minga.Editor.SurfaceSync do
   Updates EditorState fields from the current surface state.
 
   For BufferView, writes buffer/vim/window fields back to EditorState.
-  For AgentView, only writes context changes (layout cache, click regions)
-  since agent state lives exclusively in surface_state.
+  For AgentView, writes agent/agentic fields and context changes back to EditorState.
   """
   @spec sync_to_editor(EditorState.t()) :: EditorState.t()
   def sync_to_editor(
-        %EditorState{surface_module: AgentView, surface_state: %AgentView.State{context: ctx}} =
-          state
-      )
-      when ctx != nil do
-    alias Minga.Surface.Context
-    Context.to_editor_state(state, ctx)
+        %EditorState{surface_module: AgentView, surface_state: %AgentView.State{} = av} = state
+      ) do
+    AgentView.to_editor_state(state, av)
   end
 
   def sync_to_editor(%EditorState{surface_module: mod, surface_state: ss} = state)

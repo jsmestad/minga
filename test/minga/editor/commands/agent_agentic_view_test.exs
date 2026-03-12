@@ -20,7 +20,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Surface.AgentView
-  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Surface.BufferView
 
   defp base_state(opts \\ []) do
@@ -65,8 +64,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
 
-    av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
-
     # Create a proper window for the buffer
     window = Window.new(1, buf, 24, 80)
 
@@ -78,7 +75,8 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       surface_module: Minga.Surface.BufferView,
-      surface_state: nil,
+      agent: agent,
+      agentic: agentic,
       tab_bar: tb,
       windows: %Minga.Editor.State.Windows{
         tree: {:leaf, 1},
@@ -89,14 +87,10 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     }
 
     if active do
-      # Build agent tab with proper surface state so switch_tab
-      # restores it correctly (with surface_module set).
-      active_av = %{av_state | agentic: %{agentic | active: true, focus: :chat}}
-
+      # Build agent tab with keymap scope
       agent_ctx = %{
         keymap_scope: :agent,
-        surface_module: AgentView,
-        surface_state: active_av
+        surface_module: AgentView
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
@@ -104,13 +98,13 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       # Switch back to file tab so switch_tab properly snapshots it
       tb = TabBar.switch_to(tb, file_tab.id)
 
-      state = %{state | tab_bar: tb}
+      state = %{state | tab_bar: tb, agentic: %{agentic | active: true, focus: :chat}}
       EditorState.switch_tab(state, at.id)
     else
-      # Always store agent state in a background agent tab so AgentAccess can find it.
+      # Always store an agent tab so AgentAccess can find it.
       # This ensures the agent buffer is accessible to toggle_agent_split.
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      agent_ctx = %{keymap_scope: :agent, surface_module: AgentView, surface_state: av_state}
+      agent_ctx = %{keymap_scope: :agent, surface_module: AgentView}
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
       %{state | tab_bar: tb}

@@ -30,7 +30,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Scroll
-  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -57,7 +56,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     }
 
     agentic = %ViewState{}
-    av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
 
     # When agentic view is active, surface_module is AgentView.
     # When testing no-op cases (panel hidden + view inactive), the caller
@@ -68,22 +66,21 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
 
-    {surface_module, surface_state, tb} =
+    {surface_module, tb} =
       if active_agent do
-        {Minga.Surface.AgentView, av_state, tb}
+        {Minga.Surface.AgentView, tb}
       else
-        # Put agent state in a background tab
+        # Put agent tab in background
         {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
 
         agent_ctx = %{
           surface_module: Minga.Surface.AgentView,
-          surface_state: av_state,
           keymap_scope: :agent
         }
 
         tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
         tb = TabBar.switch_to(tb, file_tab.id)
-        {Minga.Surface.BufferView, nil, tb}
+        {Minga.Surface.BufferView, tb}
       end
 
     %EditorState{
@@ -99,7 +96,8 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         next_id: 2
       },
       surface_module: surface_module,
-      surface_state: surface_state,
+      agent: agent,
+      agentic: agentic,
       tab_bar: tb,
       focus_stack: Input.default_stack()
     }
