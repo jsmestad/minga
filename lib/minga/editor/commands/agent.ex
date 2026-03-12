@@ -77,11 +77,14 @@ defmodule Minga.Editor.Commands.Agent do
   """
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(%{surface_module: Minga.Surface.AgentView} = state) do
+    # Legacy path: if already on a full-screen AgentView surface (from a
+    # previous session or tab restore), deactivate it gracefully.
     deactivate_agentic_view(state)
   end
 
   def toggle_agentic_view(state) do
-    activate_agentic_view(state)
+    # New path: toggle a split pane instead of switching surfaces/tabs
+    toggle_agent_split(state)
   end
 
   @doc """
