@@ -186,6 +186,24 @@ defmodule Minga.Agent.Providers.PiRpc do
     send_request(state, "cycle_thinking_level", from)
   end
 
+  def handle_call(:summarize, _from, state) do
+    {:reply,
+     {:error,
+      "Context artifacts are not supported with the pi-agent provider. Use the native provider."},
+     state}
+  end
+
+  def handle_call(:compact, _from, state) do
+    {:reply,
+     {:error,
+      "Context compaction is not supported with the pi-agent provider (pi-agent handles this automatically)."},
+     state}
+  end
+
+  def handle_call(:continue, _from, state) do
+    {:reply, {:error, "Stream recovery is not supported with the pi-agent provider."}, state}
+  end
+
   @impl GenServer
   def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
     handle_line(line, state)
