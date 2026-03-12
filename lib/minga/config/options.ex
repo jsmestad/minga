@@ -92,6 +92,7 @@ defmodule Minga.Config.Options do
           | :startup_view
           | :agent_auto_context
           | :agent_max_tokens
+          | :agent_max_retries
           | :font_family
           | :font_size
           | :font_weight
@@ -152,6 +153,7 @@ defmodule Minga.Config.Options do
     {:startup_view, {:enum, [:agent, :editor]}, :agent},
     {:agent_auto_context, :boolean, true},
     {:agent_max_tokens, :pos_integer, 16_384},
+    {:agent_max_retries, :non_neg_integer, 3},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},

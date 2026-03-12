@@ -233,7 +233,7 @@ defmodule Minga.Agent.Providers.NativeTest do
   describe "send_prompt with LLM error" do
     test "emits error event on API failure", %{tmp_dir: dir} do
       client = fake_error_client("API rate limited")
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_retries: 0)
 
       assert :ok = Native.send_prompt(pid, "Hello")
 

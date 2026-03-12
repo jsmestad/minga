@@ -54,6 +54,7 @@ defmodule Minga.Config.OptionsTest do
                startup_view: :agent,
                agent_auto_context: true,
                agent_max_tokens: 16_384,
+               agent_max_retries: 3,
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,
