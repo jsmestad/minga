@@ -31,6 +31,7 @@ defmodule Minga.Agent.Providers.Native do
 
   use GenServer
 
+  alias Minga.Agent.CostCalculator
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Instructions
@@ -408,7 +409,12 @@ defmodule Minga.Agent.Providers.Native do
     # No tool calls: final answer
     updated_context = Context.append(context, Context.assistant(text))
     send(lctx.provider_pid, {:agent_context_update, updated_context})
-    send(lctx.provider_pid, {:agent_event, %Event.AgentEnd{usage: normalize_usage(usage)}})
+
+    send(
+      lctx.provider_pid,
+      {:agent_event, %Event.AgentEnd{usage: normalize_usage(usage, lctx.model)}}
+    )
+
     :ok
   end
 
@@ -796,11 +802,11 @@ defmodule Minga.Agent.Providers.Native do
   defp extract_usage(%{usage: usage}) when is_map(usage), do: usage
   defp extract_usage(_), do: nil
 
-  @spec normalize_usage(map() | nil) :: Event.token_usage() | nil
-  defp normalize_usage(nil), do: nil
+  @spec normalize_usage(map() | nil, String.t()) :: Event.token_usage() | nil
+  defp normalize_usage(nil, _model), do: nil
 
-  defp normalize_usage(usage) when is_map(usage) do
-    %{
+  defp normalize_usage(usage, model) when is_map(usage) do
+    normalized = %{
       input: Map.get(usage, :input_tokens, 0) || Map.get(usage, :input, 0),
       output: Map.get(usage, :output_tokens, 0) || Map.get(usage, :output, 0),
       cache_read: Map.get(usage, :cache_read_input_tokens, 0) || Map.get(usage, :cache_read, 0),
@@ -808,6 +814,19 @@ defmodule Minga.Agent.Providers.Native do
         Map.get(usage, :cache_creation_input_tokens, 0) || Map.get(usage, :cache_write, 0),
       cost: Map.get(usage, :total_cost, 0.0) || 0.0
     }
+
+    {provider_atom, model_id} = parse_model_string(model)
+    CostCalculator.ensure_cost(normalized, model_id, provider_atom)
+  end
+
+  @spec parse_model_string(String.t()) :: {atom(), String.t()}
+  defp parse_model_string(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, id] -> {String.to_existing_atom(provider), id}
+      _ -> {:unknown, model}
+    end
+  rescue
+    ArgumentError -> {:unknown, model}
   end
 
   @spec format_tool_result(term()) :: String.t()
