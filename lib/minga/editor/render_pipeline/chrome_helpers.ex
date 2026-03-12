@@ -171,7 +171,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     panel_state = %{
       messages: messages,
       status: agent.status || :idle,
-      input: panel.input,
+      input_lines: PanelState.input_lines(panel),
       scroll: panel.scroll,
       spinner_frame: panel.spinner_frame,
       usage: usage,

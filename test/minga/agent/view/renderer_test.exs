@@ -31,7 +31,8 @@ defmodule Minga.Agent.View.RendererTest do
       agent_status: :idle,
       panel: %{
         input_focused: false,
-        input: TextField.new(),
+        input_lines: [""],
+        input_cursor: {0, 0},
         scroll: Minga.Scroll.new(),
         spinner_frame: 0,
         model_name: "claude-sonnet-4",
@@ -341,7 +342,8 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :idle,
         panel: %{
           input_focused: false,
-          input: TextField.from_parts([""], {0, 0}),
+          input_lines: [""],
+          input_cursor: {0, 0},
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
@@ -380,7 +382,8 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :thinking,
         panel: %{
           input_focused: true,
-          input: TextField.from_parts(["hello"], {0, 5}),
+          input_lines: ["hello"],
+          input_cursor: {0, 5},
           scroll: Minga.Scroll.new(),
           spinner_frame: 3,
           model_name: "claude-sonnet-4",
@@ -433,7 +436,8 @@ defmodule Minga.Agent.View.RendererTest do
         agent_status: :idle,
         panel: %{
           input_focused: false,
-          input: TextField.from_parts([""], {0, 0}),
+          input_lines: [""],
+          input_cursor: {0, 0},
           scroll: Minga.Scroll.new(),
           spinner_frame: 0,
           model_name: "claude-sonnet-4",
@@ -519,7 +523,8 @@ defmodule Minga.Agent.View.RendererTest do
         default_input(%{
           panel: %{
             input_focused: true,
-            input: TextField.from_parts([""], {0, 0}),
+            input_lines: [""],
+            input_cursor: {0, 0},
             scroll: Minga.Scroll.new(),
             spinner_frame: 0,
             model_name: "claude-sonnet-4",

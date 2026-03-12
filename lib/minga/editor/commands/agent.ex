@@ -252,7 +252,7 @@ defmodule Minga.Editor.Commands.Agent do
     panel = AgentAccess.panel(state)
 
     cond do
-      panel.input.lines == [""] ->
+      PanelState.input_empty?(panel) ->
         state
 
       AgentAccess.session(state) == nil ->
@@ -841,7 +841,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_input_up(state()) :: state()
   def scope_input_up(state) do
     panel = AgentAccess.panel(state)
-    {line, _col} = panel.input.cursor
+    {line, _col} = PanelState.input_cursor(panel)
 
     if line == 0 do
       update_agent(state, &AgentState.history_prev/1)
@@ -854,8 +854,8 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_input_down(state()) :: state()
   def scope_input_down(state) do
     panel = AgentAccess.panel(state)
-    {line, _col} = panel.input.cursor
-    max_line = length(panel.input.lines) - 1
+    {line, _col} = PanelState.input_cursor(panel)
+    max_line = PanelState.input_line_count(panel) - 1
 
     if line >= max_line do
       update_agent(state, &AgentState.history_next/1)

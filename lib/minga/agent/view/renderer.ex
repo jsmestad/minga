@@ -115,7 +115,8 @@ defmodule Minga.Agent.View.Renderer do
     @typedoc "Agent panel fields needed for rendering."
     @type panel_data :: %{
             input_focused: boolean(),
-            input: Minga.Input.TextField.t(),
+            input_lines: [String.t()],
+            input_cursor: {non_neg_integer(), non_neg_integer()},
             vim: Vim.t(),
             scroll: Scroll.t(),
             spinner_frame: non_neg_integer(),
@@ -155,7 +156,7 @@ defmodule Minga.Agent.View.Renderer do
     chat_width = max(div(cols * chat_width_pct, 100), 20)
 
     input_height =
-      compute_input_height(input.panel.input.lines, input_inner_width(chat_width))
+      compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
 
     # Tab bar at row 0, title bar at row 1, content starts at row 2.
     # Modeline at rows-2, minibuffer at rows-1.
@@ -236,9 +237,12 @@ defmodule Minga.Agent.View.Renderer do
       chat_width = max(div(cols * chat_width_pct, 100), 20)
       inner_width = input_inner_width(chat_width)
 
-      total_visual = InputWrap.visual_line_count(panel.input.lines, inner_width)
+      lines = PanelState.input_lines(panel)
+      cursor = PanelState.input_cursor(panel)
+
+      total_visual = InputWrap.visual_line_count(lines, inner_width)
       visible_lines = max(min(total_visual, @max_input_lines), 1)
-      input_height = compute_input_height(panel.input.lines, inner_width)
+      input_height = compute_input_height(lines, inner_width)
       modeline_row = rows - 1 - 1
       panel_start = 2
       panel_height = max(modeline_row - panel_start, 1)
@@ -247,7 +251,7 @@ defmodule Minga.Agent.View.Renderer do
 
       # Map logical cursor to visual position within wrapped lines
       {visual_line, visual_col} =
-        InputWrap.logical_to_visual(panel.input.lines, inner_width, panel.input.cursor)
+        InputWrap.logical_to_visual(lines, inner_width, cursor)
 
       scroll = InputWrap.scroll_offset(visual_line, visible_lines, total_visual)
       visible_offset = visual_line - scroll
@@ -307,7 +311,7 @@ defmodule Minga.Agent.View.Renderer do
     cols = state.viewport.cols
     pct = agentic.chat_width_pct
     chat_w = max(div(cols * pct, 100), 20)
-    input_h = compute_input_height(panel.input.lines, input_inner_width(chat_w))
+    input_h = compute_input_height(PanelState.input_lines(panel), input_inner_width(chat_w))
     content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
 
     buffer_snapshot =
@@ -329,7 +333,8 @@ defmodule Minga.Agent.View.Renderer do
       agent_status: agent.status,
       panel: %{
         input_focused: panel.input_focused,
-        input: panel.input,
+        input_lines: PanelState.input_lines(panel),
+        input_cursor: PanelState.input_cursor(panel),
         vim: panel.vim,
         scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,
@@ -450,7 +455,7 @@ defmodule Minga.Agent.View.Renderer do
     panel_state = %{
       messages: input.messages,
       status: input.agent_status || :idle,
-      input: input.panel.input,
+      input_lines: input.panel.input_lines,
       scroll: input.panel.scroll,
       spinner_frame: input.panel.spinner_frame,
       usage: input.usage,
@@ -916,9 +921,9 @@ defmodule Minga.Agent.View.Renderer do
     panel = input.panel
     border_style = [fg: at.input_border, bg: at.panel_bg]
 
-    is_empty = panel.input.lines == [""]
+    is_empty = panel.input_lines == [""]
     inner_width = input_inner_width(width)
-    total_visual = InputWrap.visual_line_count(panel.input.lines, inner_width)
+    total_visual = InputWrap.visual_line_count(panel.input_lines, inner_width)
     visible_lines = max(min(total_visual, @max_input_lines), 1)
 
     # Horizontal layout: "│" (1) + "   " (3) + text + pad + " " (1) + "│" (1) = 6 chars of chrome
@@ -957,12 +962,12 @@ defmodule Minga.Agent.View.Renderer do
       else
         # Map logical cursor to visual row for scrolling
         {cursor_visual, _} =
-          InputWrap.logical_to_visual(panel.input.lines, inner_width, panel.input.cursor)
+          InputWrap.logical_to_visual(panel.input_lines, inner_width, panel.input_cursor)
 
         scroll = InputWrap.scroll_offset(cursor_visual, visible_lines, total_visual)
 
         # Build flat list of visual lines tagged with logical line index
-        visual_lines = InputWrap.wrap_lines(panel.input.lines, inner_width)
+        visual_lines = InputWrap.wrap_lines(panel.input_lines, inner_width)
 
         sel_range = vim_visual_range(panel)
 
@@ -982,7 +987,7 @@ defmodule Minga.Agent.View.Renderer do
         |> Enum.with_index()
         |> Enum.flat_map(fn {{logical_idx, vl}, idx} ->
           r = content_start + idx
-          line_text = Enum.at(panel.input.lines, logical_idx)
+          line_text = Enum.at(panel.input_lines, logical_idx)
 
           {display_text, fg_color} =
             visual_row_display(vl, line_text, inner_width, panel, at)
@@ -1144,12 +1149,13 @@ defmodule Minga.Agent.View.Renderer do
   @spec input_inner_width(pos_integer()) :: pos_integer()
   defp input_inner_width(box_width), do: max(box_width - 6, 1)
 
-  # Returns a mode label for the input border (empty string in insert mode).
   # Returns the visual selection range from Vim state, or nil.
   @spec vim_visual_range(map()) ::
           {TextField.cursor(), TextField.cursor()} | nil
-  defp vim_visual_range(%{vim: %Vim{} = vim, input: %TextField{} = tf}),
-    do: Vim.visual_range(vim, tf)
+  defp vim_visual_range(%{vim: %Vim{} = vim, input_lines: lines, input_cursor: cursor}) do
+    tf = TextField.from_parts(lines, cursor)
+    Vim.visual_range(vim, tf)
+  end
 
   defp vim_visual_range(_panel), do: nil
 
