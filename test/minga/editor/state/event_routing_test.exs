@@ -24,8 +24,6 @@ defmodule Minga.Editor.State.EventRoutingTest do
       mode: :normal,
       mode_state: %{},
       keymap_scope: :editor,
-      surface_module: nil,
-      surface_state: nil,
       agent: %AgentState{session: session, status: :idle},
       agentic: ViewState.new(),
       file_tree: nil

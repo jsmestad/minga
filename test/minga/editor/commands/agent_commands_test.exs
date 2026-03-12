@@ -70,7 +70,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         active: 1,
         next_id: 2
       },
-      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       tab_bar: tb,

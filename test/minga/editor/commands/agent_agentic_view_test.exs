@@ -19,7 +19,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   alias Minga.Editor.Window.Content
   alias Minga.Input
   alias Minga.Mode
-  alias Minga.Surface.BufferView
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
@@ -73,7 +72,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
-      surface_module: Minga.Surface.BufferView,
       agent: agent,
       agentic: agentic,
       tab_bar: tb,
@@ -87,10 +85,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
     if active do
       # Build agent tab with keymap scope
-      agent_ctx = %{
-        keymap_scope: :agent,
-        surface_module: Minga.Surface.BufferView
-      }
+      agent_ctx = %{keymap_scope: :agent}
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
       tb = TabBar.update_context(tb, at.id, agent_ctx)
@@ -102,16 +97,16 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
     else
       # Always store an agent tab so AgentAccess can find it.
       # This ensures the agent buffer is accessible to toggle_agent_split.
+      agent_ctx = %{keymap_scope: :agent}
       {tb, at} = TabBar.add(tb, :agent, "Agent")
-      agent_ctx = %{keymap_scope: :agent, surface_module: Minga.Surface.BufferView}
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
       %{state | tab_bar: tb}
     end
   end
 
-  # Helper: checks whether the buffer surface is active
-  defp buffer_surface_active?(state), do: state.surface_module == BufferView
+  # Helper: checks whether the buffer view is active (keymap_scope :editor)
+  defp buffer_surface_active?(state), do: state.keymap_scope == :editor
 
   describe "toggle_agentic_view/1 — activating (split pane)" do
     test "creates an agent chat split pane" do
@@ -210,9 +205,12 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
   end
 
   describe "toggle_agentic_view/1 — deactivating" do
-    test "switches to BufferView surface" do
-      state = base_state(active: true)
-      new_state = AgentCommands.toggle_agentic_view(state)
+    test "switches to editor scope" do
+      state = base_state()
+      # First activate the agent split
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      # Then toggle it off
+      new_state = AgentCommands.toggle_agentic_view(with_agent)
       assert buffer_surface_active?(new_state)
     end
 
@@ -248,7 +246,6 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
       new_state = BufferManagement.execute(state, :kill_buffer)
 
       assert EditorState.active_tab_kind(new_state) == :file
-      assert new_state.surface_module == BufferView
       assert new_state.keymap_scope == :editor
     end
 
@@ -262,7 +259,7 @@ defmodule Minga.Editor.Commands.AgentAgenticViewTest do
 
       assert EditorState.active_tab_kind(state) == :file
       # Windows should be restored (though they may have different structure)
-      assert state.surface_module == BufferView
+      assert state.keymap_scope == :editor
     end
 
     test "does not crash when agent tab has no session" do

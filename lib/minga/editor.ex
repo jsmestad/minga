@@ -32,7 +32,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.MessageLog
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
-  alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.FileTree
@@ -92,7 +91,6 @@ defmodule Minga.Editor do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     state = Startup.build_initial_state(opts)
-    state = init_surface(state)
 
     # Logger redirect and startup messages
     tui_active? = state.port_manager == PortManager
@@ -214,7 +212,7 @@ defmodule Minga.Editor do
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
     new_state = AgentLifecycle.maybe_start_session(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   def handle_info({:minga_input, {:capabilities_updated, caps}}, state) do
@@ -236,7 +234,7 @@ defmodule Minga.Editor do
     new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
     new_state = Renderer.render(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   # ── Key press dispatch ──
@@ -246,14 +244,14 @@ defmodule Minga.Editor do
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     new_state = Input.Router.dispatch(state, codepoint, modifiers)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
   def handle_info({:minga_input, {:paste_event, text}}, state) do
     new_state = handle_paste_event(state, text)
     new_state = Renderer.render(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   # ── File watcher notification ──
@@ -261,7 +259,7 @@ defmodule Minga.Editor do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
     new_state = Renderer.render(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   def handle_info(
@@ -272,7 +270,7 @@ defmodule Minga.Editor do
       Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, click_count)
 
     new_state = Renderer.render(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   # Backward compat: 6-element mouse_event (no click_count)
@@ -282,7 +280,7 @@ defmodule Minga.Editor do
       ) do
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
     new_state = Renderer.render(new_state)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
@@ -326,7 +324,7 @@ defmodule Minga.Editor do
   def handle_info({tag, {:highlight_spans, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
     new_state = HighlightEvents.handle_spans(state, version, spans)
-    {:noreply, sync_surface_from_editor(new_state)}
+    {:noreply, new_state}
   end
 
   def handle_info({tag, {:grammar_loaded, _success, _name}}, state)
@@ -382,7 +380,7 @@ defmodule Minga.Editor do
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
     state = Renderer.render(state)
-    {:noreply, sync_surface_from_editor(%{state | render_timer: nil})}
+    {:noreply, %{state | render_timer: nil}}
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
@@ -429,16 +427,42 @@ defmodule Minga.Editor do
     apply_effects(state, effects)
   end
 
-  # ── Surface lifecycle ──────────────────────────────────────────────────────
+  # ── Agent lifecycle ──────────────────────────────────────────────────────
+
+  @typedoc """
+  Side effects returned by agent event handlers.
+
+  * `:render` — schedule a debounced render
+  * `{:render, delay_ms}` — schedule render with custom delay
+  * `{:open_file, path}` — open a file in a new or existing buffer
+  * `{:switch_buffer, pid}` — make this buffer active
+  * `{:set_status, msg}` — show a status message in the minibuffer
+  * `{:push_overlay, module}` — push an overlay handler onto the focus stack
+  * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
+  * `{:log_message, msg}` — log to *Messages* buffer
+  * `:sync_agent_buffer` — sync agent buffer with session output
+  * `{:update_tab_label, label}` — update active tab label
+  """
+  @type effect ::
+          :render
+          | {:render, delay_ms :: pos_integer()}
+          | {:open_file, String.t()}
+          | {:switch_buffer, pid()}
+          | {:set_status, String.t()}
+          | {:push_overlay, module()}
+          | {:pop_overlay, module()}
+          | {:log_message, String.t()}
+          | :sync_agent_buffer
+          | {:update_tab_label, String.t()}
 
   @doc """
-  Applies a list of surface effects to the editor state.
+  Applies a list of effects to the editor state.
 
-  Surfaces return `{new_state, [effect()]}` from their callbacks.
-  The Editor interprets each effect. This keeps surfaces testable as
+  Agent event handlers return `{new_state, [effect()]}` from their callbacks.
+  The Editor interprets each effect. This keeps handlers testable as
   pure `state -> {state, effects}` functions.
   """
-  @spec apply_effects(EditorState.t(), [Minga.Surface.effect()]) :: EditorState.t()
+  @spec apply_effects(EditorState.t(), [effect()]) :: EditorState.t()
   def apply_effects(state, []), do: state
 
   def apply_effects(state, [effect | rest]) do
@@ -446,7 +470,7 @@ defmodule Minga.Editor do
     apply_effects(state, rest)
   end
 
-  @spec apply_effect(EditorState.t(), Minga.Surface.effect()) :: EditorState.t()
+  @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
   defp apply_effect(state, :render), do: schedule_render(state, 16)
   defp apply_effect(state, {:set_status, msg}) when is_binary(msg), do: %{state | status_msg: msg}
 
@@ -474,23 +498,6 @@ defmodule Minga.Editor do
 
   defp apply_effect(state, {:update_tab_label, _label}),
     do: AgentLifecycle.maybe_update_tab_label(state)
-
-  @doc false
-  defdelegate init_surface(state), to: SurfaceSync
-
-  @spec sync_surface_from_editor(EditorState.t()) :: EditorState.t()
-  defdelegate sync_surface_from_editor(state), to: SurfaceSync, as: :sync_from_editor
-
-  @spec sync_editor_from_surface(EditorState.t()) :: EditorState.t()
-  defdelegate sync_editor_from_surface(state), to: SurfaceSync, as: :sync_to_editor
-
-  @spec dispatch_surface_event(EditorState.t(), term()) :: EditorState.t()
-  def dispatch_surface_event(state, event) do
-    # Legacy path: still used by BufferView surface events (e.g., file
-    # watcher notifications). Agent events go through dispatch_agent_event.
-    {state, effects} = SurfaceSync.dispatch_event(state, event)
-    apply_effects(state, effects)
-  end
 
   # Tab bar, view state, capabilities, parser subscription helpers
 

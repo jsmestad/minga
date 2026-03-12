@@ -47,8 +47,6 @@ defmodule Minga.Editor.RenderPipelineTest do
         next_id: win_id + 1
       },
       focus_stack: Input.default_stack(),
-      surface_module: Minga.Surface.BufferView,
-      surface_state: nil,
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
     }

@@ -26,21 +26,36 @@ defmodule Minga.Editor.State.Tab do
   @typedoc """
   Snapshotted per-tab state.
 
-  The canonical context has three fields: `surface_module`, `surface_state`,
-  and `keymap_scope`. All per-view state (buffers, windows, mode, etc.)
-  lives inside `surface_state`. Empty context means a brand-new tab.
+  The context stores per-tab fields directly (buffers, windows, mode, etc.).
+  Empty context means a brand-new tab.
 
-  Legacy contexts with per-field snapshots (windows, mode, active_buffer,
-  etc.) are auto-migrated to the canonical format on first restore.
+  Legacy contexts with nested structure (old snapshot format) or
+  bare fields (oldest format) are auto-migrated on first restore.
   """
   @type context :: %{
-          optional(:surface_module) => module() | nil,
-          optional(:surface_state) => term() | nil,
-          optional(:keymap_scope) => atom()
+          optional(:keymap_scope) => atom(),
+          optional(:buffers) => term(),
+          optional(:windows) => term(),
+          optional(:file_tree) => term(),
+          optional(:viewport) => term(),
+          optional(:mouse) => term(),
+          optional(:highlight) => term(),
+          optional(:lsp) => term(),
+          optional(:completion) => term(),
+          optional(:completion_trigger) => term(),
+          optional(:git_buffers) => term(),
+          optional(:injection_ranges) => term(),
+          optional(:search) => term(),
+          optional(:pending_conflict) => term(),
+          optional(:mode) => atom(),
+          optional(:mode_state) => term(),
+          optional(:reg) => term(),
+          optional(:marks) => term(),
+          optional(:last_jump_pos) => term(),
+          optional(:last_find_char) => term(),
+          optional(:change_recorder) => term(),
+          optional(:macro_recorder) => term()
         }
-
-  @typedoc "Opaque surface state stored on the tab when it's inactive."
-  @type surface_state :: term() | nil
 
   @typedoc "A tab."
   @type t :: %__MODULE__{
@@ -48,9 +63,7 @@ defmodule Minga.Editor.State.Tab do
           kind: kind(),
           label: String.t(),
           context: context(),
-          session: pid() | nil,
-          surface_module: module() | nil,
-          surface_state: surface_state()
+          session: pid() | nil
         }
 
   @enforce_keys [:id, :kind]
@@ -58,9 +71,7 @@ defmodule Minga.Editor.State.Tab do
             kind: nil,
             label: "",
             context: %{},
-            session: nil,
-            surface_module: nil,
-            surface_state: nil
+            session: nil
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()

@@ -223,8 +223,8 @@ defmodule Minga.Editor.RenderPipeline do
   Runs the windows render pipeline stages: scroll, content, chrome,
   compose, and emit.
 
-  Core rendering logic for the buffer view. Called directly by the
-  pipeline dispatcher and by `BufferView.render/2` through the bridge.
+  Core rendering logic for buffer editing. Called directly by the
+  pipeline dispatcher.
   """
   @spec run_windows_pipeline(state(), Layout.t()) :: state()
   def run_windows_pipeline(state, layout) do

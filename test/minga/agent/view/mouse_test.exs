@@ -24,7 +24,6 @@ defmodule Minga.Agent.View.MouseTest do
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
-      surface_module: Minga.Surface.BufferView,
       agentic: %ViewState{
         active: true,
         focus: focus,
