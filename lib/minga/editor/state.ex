@@ -43,6 +43,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
+  alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
   alias Minga.Log
@@ -399,16 +400,28 @@ defmodule Minga.Editor.State do
         # Restore target window's cursor into its buffer
         BufferServer.move_to(target_win.buffer, target_win.cursor)
 
+        # Derive keymap_scope from the target window's content type.
+        # Agent chat windows use :agent scope; buffer windows use the
+        # current scope (preserving :file_tree if the tree is focused).
+        scope = scope_for_content(target_win.content, state.keymap_scope)
+
         %{
           state
           | windows: %{ws | map: windows, active: target_id},
-            buffers: %{buffers | active: target_win.buffer}
+            buffers: %{buffers | active: target_win.buffer},
+            keymap_scope: scope
         }
 
       _ ->
         state
     end
   end
+
+  @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
+          Minga.Keymap.Scope.scope_name()
+  defp scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
+  defp scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
+  defp scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
   @spec buffer_label(pid()) :: String.t()
   defp buffer_label(pid) when is_pid(pid) do
