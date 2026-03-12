@@ -63,18 +63,15 @@ defmodule Minga.Editor.SurfaceSync do
   @doc """
   Dispatches an event through the active surface's handle_event callback.
 
-  Syncs the surface state from EditorState, calls handle_event, writes
-  back the updated surface state, and returns `{state, effects}` for
-  the caller to apply.
+  Calls handle_event directly on the current surface_state (no bridge
+  round-trip). Surface events operate on their own state and return
+  effects for the Editor to apply.
   """
   @spec dispatch_event(EditorState.t(), term()) :: {EditorState.t(), [Minga.Surface.effect()]}
-  def dispatch_event(%EditorState{surface_module: mod} = state, event)
-      when mod != nil do
-    state = sync_from_editor(state)
-    {new_surface_state, effects} = mod.handle_event(state.surface_state, event)
-    state = %{state | surface_state: new_surface_state}
-    state = sync_to_editor(state)
-    {state, effects}
+  def dispatch_event(%EditorState{surface_module: mod, surface_state: ss} = state, event)
+      when mod != nil and ss != nil do
+    {new_surface_state, effects} = mod.handle_event(ss, event)
+    {%{state | surface_state: new_surface_state}, effects}
   end
 
   def dispatch_event(state, _event), do: {state, []}

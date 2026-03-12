@@ -17,7 +17,6 @@ defmodule Minga.Input.Router do
   alias Minga.Editor
   alias Minga.Editor.State, as: EditorState
   alias Minga.Surface.BufferView
-  alias Minga.Surface.BufferView.Bridge, as: BVBridge
 
   @doc """
   Dispatches a key press through the focus stack and runs post-key housekeeping.
@@ -87,11 +86,11 @@ defmodule Minga.Input.Router do
         end
       end)
 
-    # Sync the surface state to reflect any changes.
-    %{new_state | surface_state: BVBridge.from_editor_state(new_state)}
+    # Surface state is synced by the Editor after dispatch returns.
+    new_state
   end
 
-  # Fallback for unknown surface modules (future: AgentView).
+  # Fallback for unknown surface modules.
   defp dispatch_to_surface(state, _surface_mod, codepoint, modifiers) do
     walk_handlers(state.focus_stack, state, codepoint, modifiers)
   end
@@ -200,7 +199,8 @@ defmodule Minga.Input.Router do
             try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
           end)
 
-        %{new_state | surface_state: BVBridge.from_editor_state(new_state)}
+        # Surface state is synced by the Editor after dispatch returns.
+        new_state
     end
   end
 

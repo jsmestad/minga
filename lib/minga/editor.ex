@@ -421,14 +421,14 @@ defmodule Minga.Editor do
   @toast_duration_ms 3_000
 
   def handle_info(:dismiss_toast, state) do
-    state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
+    state = dispatch_surface_event(state, :dismiss_toast)
 
     # If there's another toast in the queue, schedule its dismissal
     if ViewState.toast_visible?(AgentAccess.agentic(state)) do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
     end
 
-    {:noreply, schedule_render(state, 16)}
+    {:noreply, state}
   end
 
   def handle_info(_msg, state) do
