@@ -300,7 +300,7 @@ defmodule Minga.Agent.Providers.NativeTest do
 
       # Should have streamed the partial text before the error
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
-      streamed_text = Enum.map(text_deltas, & &1.delta) |> Enum.join()
+      streamed_text = Enum.map_join(text_deltas, & &1.delta)
       assert streamed_text =~ "Hello, I was saying something"
       assert streamed_text =~ "important about"
 
@@ -353,7 +353,7 @@ defmodule Minga.Agent.Providers.NativeTest do
       events2 = collect_events(1_000)
 
       text_deltas = Enum.filter(events2, &match?(%Event.TextDelta{}, &1))
-      continued_text = Enum.map(text_deltas, & &1.delta) |> Enum.join()
+      continued_text = Enum.map_join(text_deltas, & &1.delta)
       assert continued_text =~ "Continuing from where I left off"
     end
 
@@ -415,7 +415,7 @@ defmodule Minga.Agent.Providers.NativeTest do
 
       # Should get a normal error, not the recovery path
       error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
-      assert length(error_events) >= 1
+      assert error_events != []
     end
   end
 
