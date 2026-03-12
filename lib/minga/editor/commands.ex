@@ -165,12 +165,9 @@ defmodule Minga.Editor.Commands do
   def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
 
   # ── Agent scope commands (dispatched via keymap scope resolution) ──────────
-  def execute(state, :agent_scroll_down), do: AgentCommands.scope_scroll_down(state)
-  def execute(state, :agent_scroll_up), do: AgentCommands.scope_scroll_up(state)
-  def execute(state, :agent_scroll_half_down), do: AgentCommands.scope_scroll_half_down(state)
-  def execute(state, :agent_scroll_half_up), do: AgentCommands.scope_scroll_half_up(state)
-  def execute(state, :agent_scroll_bottom), do: AgentCommands.scope_scroll_bottom(state)
-  def execute(state, :agent_scroll_top), do: AgentCommands.scope_scroll_top(state)
+  # Chat scroll commands (:agent_scroll_*) removed. Navigation keys (j, k,
+  # Ctrl-D, Ctrl-U, G, gg) now pass through the scope trie to AgentChatNav,
+  # which routes them through the Mode FSM against the *Agent* buffer.
   def execute(state, :agent_toggle_collapse), do: AgentCommands.scope_toggle_collapse(state)
 
   def execute(state, :agent_toggle_all_collapse),

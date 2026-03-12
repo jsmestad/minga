@@ -518,72 +518,6 @@ defmodule Minga.Editor.Commands.Agent do
   # scope resolution system. Focus-aware commands check state.agentic.focus to
   # route to the correct panel (chat vs file viewer).
 
-  # ── Navigation ─────────────────────────────────────────────────────────────
-
-  @doc "Scrolls down 1 line in the focused panel."
-  @spec scope_scroll_down(state()) :: state()
-  def scope_scroll_down(state) do
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_down(&1, 1))
-    else
-      update_agent(state, &AgentState.scroll_down(&1, 1))
-    end
-  end
-
-  @doc "Scrolls up 1 line in the focused panel."
-  @spec scope_scroll_up(state()) :: state()
-  def scope_scroll_up(state) do
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_up(&1, 1))
-    else
-      update_agent(state, &AgentState.scroll_up(&1, 1))
-    end
-  end
-
-  @doc "Scrolls down half a page in the focused panel."
-  @spec scope_scroll_half_down(state()) :: state()
-  def scope_scroll_half_down(state) do
-    amount = half_page(state)
-
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_down(&1, amount))
-    else
-      update_agent(state, &AgentState.scroll_down(&1, amount))
-    end
-  end
-
-  @doc "Scrolls up half a page in the focused panel."
-  @spec scope_scroll_half_up(state()) :: state()
-  def scope_scroll_half_up(state) do
-    amount = half_page(state)
-
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_up(&1, amount))
-    else
-      update_agent(state, &AgentState.scroll_up(&1, amount))
-    end
-  end
-
-  @doc "Scrolls to the bottom of the focused panel."
-  @spec scope_scroll_bottom(state()) :: state()
-  def scope_scroll_bottom(state) do
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_to_bottom/1)
-    else
-      update_agent(state, &AgentState.scroll_to_bottom/1)
-    end
-  end
-
-  @doc "Scrolls to the top of the focused panel."
-  @spec scope_scroll_top(state()) :: state()
-  def scope_scroll_top(state) do
-    if AgentAccess.agentic(state).focus == :file_viewer do
-      update_agentic(state, &ViewState.scroll_viewer_to_top/1)
-    else
-      update_agent(state, &AgentState.scroll_to_top/1)
-    end
-  end
-
   # ── Fold / Collapse ────────────────────────────────────────────────────────
 
   @doc "Toggles collapse at cursor (currently toggles all)."
@@ -955,9 +889,6 @@ defmodule Minga.Editor.Commands.Agent do
   defp panel_height(state) do
     div(state.viewport.rows * 35, 100)
   end
-
-  @spec half_page(state()) :: pos_integer()
-  defp half_page(state), do: max(div(state.viewport.rows, 2), 1)
 
   @spec abort_if_active(state()) :: state()
   defp abort_if_active(state) do

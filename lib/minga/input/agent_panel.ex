@@ -26,6 +26,7 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Input.AgentChatNav
   alias Minga.Keymap.Scope
   alias Minga.Port.Protocol
 
@@ -252,27 +253,16 @@ defmodule Minga.Input.AgentPanel do
     end
   end
 
-  # Swaps the active buffer to the agent buffer, runs the key through the
-  # mode FSM, blocks mode transitions, and restores the real buffer.
-  # Used for panel nav mode (vim navigation of chat content).
+  # Delegates to the shared AgentChatNav dispatch, which swaps the active
+  # buffer to the agent buffer, runs through Mode FSM, blocks mode
+  # transitions, syncs cursor to scroll, and restores the original buffer.
   @spec delegate_to_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp delegate_to_mode_fsm(state, cp, mods) do
     buf = AgentAccess.agent(state).buffer
 
-    if is_pid(buf) do
-      real_active = state.buffers.active
-      state = put_in(state.buffers.active, buf)
-      state = Minga.Editor.do_handle_key(state, cp, mods)
-
-      state =
-        if state.mode != :normal do
-          %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
-        else
-          state
-        end
-
-      put_in(state.buffers.active, real_active)
+    if is_pid(buf) and Process.alive?(buf) do
+      AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
     else
       state
     end

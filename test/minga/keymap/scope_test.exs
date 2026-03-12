@@ -40,29 +40,29 @@ defmodule Minga.Keymap.ScopeTest do
   end
 
   describe "resolve_key/4 with :agent scope" do
-    test "resolves j to agent_scroll_down in normal mode" do
-      assert {:command, :agent_scroll_down} = Scope.resolve_key(:agent, :normal, {?j, 0})
+    test "j returns :not_found (handled by Mode FSM)" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?j, 0})
     end
 
-    test "resolves k to agent_scroll_up in normal mode" do
-      assert {:command, :agent_scroll_up} = Scope.resolve_key(:agent, :normal, {?k, 0})
+    test "k returns :not_found (handled by Mode FSM)" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?k, 0})
     end
 
-    test "resolves Ctrl+D to agent_scroll_half_down in normal mode" do
-      assert {:command, :agent_scroll_half_down} = Scope.resolve_key(:agent, :normal, {?d, 0x02})
+    test "Ctrl+D returns :not_found (handled by Mode FSM)" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?d, 0x02})
     end
 
-    test "resolves G to agent_scroll_bottom in normal mode" do
-      assert {:command, :agent_scroll_bottom} = Scope.resolve_key(:agent, :normal, {?G, 0})
+    test "G returns :not_found (handled by Mode FSM)" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?G, 0})
     end
 
     test "g is a prefix in normal mode" do
       assert {:prefix, _node} = Scope.resolve_key(:agent, :normal, {?g, 0})
     end
 
-    test "gg resolves to agent_scroll_top via prefix walk" do
+    test "gg resolves to move_to_document_start via prefix walk" do
       {:prefix, g_node} = Scope.resolve_key(:agent, :normal, {?g, 0})
-      assert {:command, :agent_scroll_top} = Scope.resolve_key_in_node(g_node, {?g, 0})
+      assert {:command, :move_to_document_start} = Scope.resolve_key_in_node(g_node, {?g, 0})
     end
 
     test "gf resolves to agent_open_code_block via prefix walk" do

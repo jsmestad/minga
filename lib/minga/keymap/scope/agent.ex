@@ -71,31 +71,41 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec normal_trie() :: Bindings.node_t()
   defp normal_trie do
     Bindings.new()
-    # Navigation
-    |> Bindings.bind([{?j, 0}], :agent_scroll_down, "Scroll down")
-    |> Bindings.bind([{?k, 0}], :agent_scroll_up, "Scroll up")
-    |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll half page down")
-    |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll half page up")
-    |> Bindings.bind([{?G, 0}], :agent_scroll_bottom, "Scroll to bottom")
-    # g-prefix
-    |> Bindings.bind([{?g, 0}, {?g, 0}], :agent_scroll_top, "Scroll to top")
+    #
+    # Navigation keys (j, k, w, b, e, G, Ctrl-D, Ctrl-U, /, n, N, etc.)
+    # are NOT bound here. They pass through to AgentChatNav, which routes
+    # them through the Mode FSM against the *Agent* buffer. This gives
+    # chat navigation the full vim grammar for free.
+    #
+    # Only DOMAIN-SPECIFIC commands live in this trie: collapse, copy,
+    # focus, session, panel management.
+    #
+    # PREFIX RULE: every prefix key claimed by this trie (g, z, ], [)
+    # must have ALL reasonable sub-bindings defined. Standard vim commands
+    # map to their Mode FSM command atoms. Domain commands map to agent-
+    # specific atoms. No sub-binding falls through, because the prefix
+    # key was consumed by the trie and the Mode FSM never saw it.
+    #
+    # g-prefix: domain + vim standard commands
+    |> Bindings.bind([{?g, 0}, {?g, 0}], :move_to_document_start, "Go to top")
     |> Bindings.bind([{?g, 0}, {?f, 0}], :agent_open_code_block, "Open code block in editor")
-    # z-prefix (fold/collapse)
+    |> Bindings.bind([{?g, 0}, {?d, 0}], :goto_definition, "Go to definition")
+    # z-prefix: domain fold/collapse commands
     |> Bindings.bind([{?z, 0}, {?a, 0}], :agent_toggle_collapse, "Toggle collapse at cursor")
     |> Bindings.bind([{?z, 0}, {?A, 0}], :agent_toggle_all_collapse, "Toggle all collapses")
     |> Bindings.bind([{?z, 0}, {?o, 0}], :agent_expand_at_cursor, "Expand at cursor")
     |> Bindings.bind([{?z, 0}, {?c, 0}], :agent_collapse_at_cursor, "Collapse at cursor")
     |> Bindings.bind([{?z, 0}, {?M, 0}], :agent_collapse_all, "Collapse all")
     |> Bindings.bind([{?z, 0}, {?R, 0}], :agent_expand_all, "Expand all")
-    # ]-prefix (next item)
+    # ]-prefix: semantic navigation (domain-specific)
     |> Bindings.bind([{?], 0}, {?m, 0}], :agent_next_message, "Next message")
     |> Bindings.bind([{?], 0}, {?c, 0}], :agent_next_code_block, "Next code block/hunk")
     |> Bindings.bind([{?], 0}, {?t, 0}], :agent_next_tool_call, "Next tool call")
-    # [-prefix (prev item)
+    # [-prefix: semantic navigation (domain-specific)
     |> Bindings.bind([{?[, 0}, {?m, 0}], :agent_prev_message, "Previous message")
     |> Bindings.bind([{?[, 0}, {?c, 0}], :agent_prev_code_block, "Previous code block/hunk")
     |> Bindings.bind([{?[, 0}, {?t, 0}], :agent_prev_tool_call, "Previous tool call")
-    # Copy
+    # Copy (domain: structured copy, not raw yank)
     |> Bindings.bind([{?y, 0}], :agent_copy_code_block, "Copy code block")
     |> Bindings.bind([{?Y, 0}], :agent_copy_message, "Copy full message")
     # Input focus
@@ -109,7 +119,7 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{?{, 0}], :agent_shrink_panel, "Shrink chat panel")
     |> Bindings.bind([{?=, 0}], :agent_reset_panel, "Reset panel split")
     |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
-    # Search
+    # Search (agent-specific: searches structured messages, not buffer text)
     |> Bindings.bind([{?/, 0}], :agent_start_search, "Search")
     |> Bindings.bind([{?n, 0}], :agent_next_search_match, "Next search match")
     |> Bindings.bind([{?N, 0}], :agent_prev_search_match, "Previous search match")
