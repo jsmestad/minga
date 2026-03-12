@@ -278,12 +278,6 @@ defmodule Minga.Surface.BufferView do
   # doesn't own.
   @spec reconstruct_editor_state(BufferViewState.t()) :: EditorState.t()
   defp reconstruct_editor_state(%BufferViewState{context: %Context{} = ctx, editing: vim} = bv) do
-    # Build agent defaults for fields carried in context.
-    # These are Phase 1 scaffolding: the agent fields live in context
-    # so Input.Scoped's agent-panel branches work correctly.
-    agent = ctx.agent || %Minga.Editor.State.Agent{}
-    agentic = ctx.agentic || %Minga.Agent.View.State{}
-
     %EditorState{
       # Buffer-view owned fields
       buffers: bv.buffers,
@@ -321,10 +315,7 @@ defmodule Minga.Surface.BufferView do
       picker_ui: ctx.picker_ui,
       whichkey: ctx.whichkey,
       modeline_click_regions: ctx.modeline_click_regions,
-      tab_bar_click_regions: ctx.tab_bar_click_regions,
-      # Agent fields (Phase 1 scaffolding, removed in Phase 2)
-      agent: agent,
-      agentic: agentic
+      tab_bar_click_regions: ctx.tab_bar_click_regions
     }
   end
 end

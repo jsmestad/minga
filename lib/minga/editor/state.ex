@@ -89,10 +89,8 @@ defmodule Minga.Editor.State do
             file_tree: %FileTreeState{},
             git_buffers: %{},
             injection_ranges: %{},
-            agent: %AgentState{},
             focus_stack: [],
             keymap_scope: :editor,
-            agentic: %ViewState{},
             tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
@@ -133,10 +131,8 @@ defmodule Minga.Editor.State do
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
             ]
           },
-          agent: AgentState.t(),
           focus_stack: [module()],
           keymap_scope: Minga.Keymap.Scope.scope_name(),
-          agentic: ViewState.t(),
           tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
@@ -573,8 +569,6 @@ defmodule Minga.Editor.State do
       |> maybe_restore(:file_tree, context)
       |> maybe_restore(:mode, context)
       |> maybe_restore(:mode_state, context)
-      |> maybe_restore(:agent, context)
-      |> maybe_restore(:agentic, context)
 
     temp =
       case Map.fetch(context, :active_buffer) do
@@ -591,12 +585,38 @@ defmodule Minga.Editor.State do
     temp = %{temp | keymap_scope: scope, surface_module: mod}
     temp = SurfaceSync.init_surface(temp)
 
+    # For agent scope, apply legacy agent/agentic fields to the surface state
+    surface_state =
+      if mod == Minga.Surface.AgentView do
+        apply_legacy_agent_fields(temp.surface_state, context)
+      else
+        temp.surface_state
+      end
+
     %{
       surface_module: temp.surface_module,
-      surface_state: temp.surface_state,
+      surface_state: surface_state,
       keymap_scope: scope
     }
   end
+
+  alias Minga.Surface.AgentView.State, as: AgentViewState
+
+  @spec apply_legacy_agent_fields(AgentViewState.t(), map()) :: AgentViewState.t()
+  defp apply_legacy_agent_fields(%AgentViewState{} = av, context) do
+    av =
+      case Map.fetch(context, :agent) do
+        {:ok, agent} -> %{av | agent: agent}
+        :error -> av
+      end
+
+    case Map.fetch(context, :agentic) do
+      {:ok, agentic} -> %{av | agentic: agentic}
+      :error -> av
+    end
+  end
+
+  defp apply_legacy_agent_fields(av, _context), do: av
 
   @spec scope_to_surface(atom()) :: module()
   defp scope_to_surface(:agent), do: Minga.Surface.AgentView

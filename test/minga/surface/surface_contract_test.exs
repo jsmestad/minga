@@ -256,6 +256,7 @@ defmodule Minga.Surface.ContractTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Surface.AgentView
   alias Minga.Surface.AgentView.Bridge, as: AVBridge
   alias Minga.Surface.AgentView.State, as: AgentViewState
@@ -480,7 +481,7 @@ defmodule Minga.Surface.ContractTest do
       av = %{av | agent: %{av.agent | status: :thinking}}
 
       es2 = AVBridge.to_editor_state(es, av)
-      assert es2.agent.status == :thinking
+      assert AgentAccess.agent(es2).status == :thinking
     end
 
     test "round-trip does not modify non-agent fields" do

@@ -1,12 +1,14 @@
 defmodule Minga.Editor.Commands.AgentCodeBlockTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp base_state do
     %EditorState{
@@ -15,7 +17,12 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       mode: :normal,
       mode_state: Minga.Mode.initial_state(),
       buffers: %Buffers{},
-      agent: %AgentState{session: nil}
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: %AgentState{},
+        agentic: %ViewState{},
+        context: nil
+      }
     }
   end
 

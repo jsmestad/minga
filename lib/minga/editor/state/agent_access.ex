@@ -20,17 +20,28 @@ defmodule Minga.Editor.State.AgentAccess do
 
   # ── Readers ────────────────────────────────────────────────────────────────
 
-  @doc "Returns the agent state from the active surface or background tab."
+  @doc """
+  Returns the agent state.
+
+  Checks (in order):
+  1. Active surface_state (when AgentView is active)
+  2. Background agent tab's stored surface_state
+  3. Default AgentState
+  """
   @spec agent(EditorState.t() | map()) :: AgentState.t()
   def agent(%EditorState{surface_state: %AgentViewState{agent: a}}), do: a
-  def agent(%EditorState{agent: a}), do: a
+  def agent(%EditorState{} = state), do: agent_from_tab(state)
   def agent(%{agent: a}), do: a
   def agent(_), do: %AgentState{}
 
-  @doc "Returns the agentic view state from the active surface or background tab."
+  @doc """
+  Returns the agentic view state.
+
+  Same lookup order as `agent/1`.
+  """
   @spec agentic(EditorState.t() | map()) :: ViewState.t()
   def agentic(%EditorState{surface_state: %AgentViewState{agentic: a}}), do: a
-  def agentic(%EditorState{agentic: a}), do: a
+  def agentic(%EditorState{} = state), do: agentic_from_tab(state)
   def agentic(%{agentic: a}), do: a
   def agentic(_), do: ViewState.new()
 
@@ -55,22 +66,30 @@ defmodule Minga.Editor.State.AgentAccess do
   @doc """
   Updates agent state. Writes to the correct location based on surface.
 
-  When AgentView is active, writes to both `surface_state` and the
-  EditorState `agent` field (dual-write for migration safety). When
-  BufferView is active, writes to the EditorState `agent` field (which
-  will be replaced by background tab writes once the field is removed).
+  When AgentView is active, writes to `surface_state`. When BufferView
+  is active, writes to the background agent tab's stored context.
   """
   @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
           EditorState.t() | map()
   def update_agent(%EditorState{surface_state: %AgentViewState{} = av} = state, fun) do
     new_agent = fun.(av.agent)
     new_av = %{av | agent: new_agent}
-    %{state | agent: new_agent, surface_state: new_av}
+    %{state | surface_state: new_av}
   end
 
-  def update_agent(%EditorState{} = state, fun) do
-    %{state | agent: fun.(state.agent)}
+  def update_agent(%EditorState{tab_bar: %TabBar{} = tb} = state, fun) do
+    case find_agent_tab(tb) do
+      %Tab{id: tab_id, context: %{surface_state: %AgentViewState{agent: agent} = av}} ->
+        new_av = %{av | agent: fun.(agent)}
+        update_tab_surface_state(state, tb, tab_id, new_av)
+
+      _ ->
+        # No agent tab exists; update is a no-op
+        state
+    end
   end
+
+  def update_agent(%EditorState{} = state, _fun), do: state
 
   # Bare map fallback (for tests and slash commands that use plain maps)
   def update_agent(%{agent: agent} = state, fun) do
@@ -85,12 +104,21 @@ defmodule Minga.Editor.State.AgentAccess do
   def update_agentic(%EditorState{surface_state: %AgentViewState{} = av} = state, fun) do
     new_agentic = fun.(av.agentic)
     new_av = %{av | agentic: new_agentic}
-    %{state | agentic: new_agentic, surface_state: new_av}
+    %{state | surface_state: new_av}
   end
 
-  def update_agentic(%EditorState{} = state, fun) do
-    %{state | agentic: fun.(state.agentic)}
+  def update_agentic(%EditorState{tab_bar: %TabBar{} = tb} = state, fun) do
+    case find_agent_tab(tb) do
+      %Tab{id: tab_id, context: %{surface_state: %AgentViewState{agentic: agentic} = av}} ->
+        new_av = %{av | agentic: fun.(agentic)}
+        update_tab_surface_state(state, tb, tab_id, new_av)
+
+      _ ->
+        state
+    end
   end
+
+  def update_agentic(%EditorState{} = state, _fun), do: state
 
   # Bare map fallback
   def update_agentic(%{agentic: agentic} = state, fun) do
@@ -133,4 +161,18 @@ defmodule Minga.Editor.State.AgentAccess do
 
   @spec find_agent_tab(TabBar.t()) :: Tab.t() | nil
   defp find_agent_tab(tb), do: TabBar.find_by_kind(tb, :agent)
+
+  # Updates a background tab's surface_state in the tab bar.
+  @spec update_tab_surface_state(EditorState.t(), TabBar.t(), Tab.id(), AgentViewState.t()) ::
+          EditorState.t()
+  defp update_tab_surface_state(state, tb, tab_id, new_av) do
+    case TabBar.get(tb, tab_id) do
+      %Tab{context: ctx} when is_map(ctx) ->
+        new_ctx = Map.put(ctx, :surface_state, new_av)
+        %{state | tab_bar: TabBar.update_context(tb, tab_id, new_ctx)}
+
+      _ ->
+        state
+    end
+  end
 end

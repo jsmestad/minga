@@ -58,7 +58,7 @@ defmodule Minga.Editor.Startup do
 
     windows = if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
-    {keymap_scope, agentic_state, effective_tree} =
+    {keymap_scope, _agentic_state, effective_tree} =
       startup_view_state(port_manager, initial_window_id)
 
     state = %EditorState{
@@ -80,7 +80,6 @@ defmodule Minga.Editor.Startup do
         next_id: initial_window_id + 1
       },
       keymap_scope: keymap_scope,
-      agentic: agentic_state,
       focus_stack: Minga.Input.default_stack()
     }
 

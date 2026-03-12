@@ -4,6 +4,7 @@ defmodule Minga.Agent.SlashCommandTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.SlashCommand
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
 
   describe "slash_command?/1" do
     test "returns true for slash-prefixed text" do
@@ -127,7 +128,7 @@ defmodule Minga.Agent.SlashCommandTest do
 
     test "/model with name sets model (triggers restart)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
-      assert state.agent.panel.model_name == "gpt-4o"
+      assert AgentAccess.panel(state).model_name == "gpt-4o"
     end
 
     test "/? is an alias for /help" do

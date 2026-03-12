@@ -15,6 +15,7 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Input
   alias Minga.Input.TextField
   alias Minga.Mode
+  alias Minga.Surface.AgentView.State, as: AgentViewState
   alias Minga.Theme
 
   defp default_theme do
@@ -100,8 +101,12 @@ defmodule Minga.Agent.View.RendererTest do
       mode_state: Mode.initial_state(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
-      agent: agent,
-      agentic: agentic,
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
     }

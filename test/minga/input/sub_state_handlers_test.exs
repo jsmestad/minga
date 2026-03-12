@@ -17,6 +17,7 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -27,6 +28,7 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Input.ToolApproval
   alias Minga.Mode
   alias Minga.Scroll
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
@@ -67,8 +69,12 @@ defmodule Minga.Input.SubStateHandlersTest do
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-      agent: agent,
-      agentic: agentic,
+      surface_module: Minga.Surface.AgentView,
+      surface_state: %AgentViewState{
+        agent: agent,
+        agentic: agentic,
+        context: nil
+      },
       tab_bar: tab_bar
     }
   end
@@ -80,7 +86,9 @@ defmodule Minga.Input.SubStateHandlersTest do
   describe "AgentSearch.handle_key/3" do
     test "handles keys when search is active" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
-      state = %{state | agentic: ViewState.start_search(state.agentic, 0)}
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic -> ViewState.start_search(agentic, 0) end)
 
       {:handled, _new_state} = AgentSearch.handle_key(state, ?h, 0)
     end
@@ -111,14 +119,22 @@ defmodule Minga.Input.SubStateHandlersTest do
 
     test "handles keys in agent scope with mention active", %{completion: comp} do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
-      state = put_in(state.agent.panel.mention_completion, comp)
+
+      state =
+        AgentAccess.update_agent(state, fn agent ->
+          put_in(agent.panel.mention_completion, comp)
+        end)
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
     end
 
     test "handles keys in editor scope with mention active", %{completion: comp} do
       state = base_state(keymap_scope: :editor, panel_visible: true, input_focused: true)
-      state = put_in(state.agent.panel.mention_completion, comp)
+
+      state =
+        AgentAccess.update_agent(state, fn agent ->
+          put_in(agent.panel.mention_completion, comp)
+        end)
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
     end
@@ -158,7 +174,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true, pending_approval: approval)
       {:handled, new_state} = ToolApproval.handle_key(state, ?x, 0)
       # Key is swallowed, approval still pending
-      assert new_state.agent.pending_approval != nil
+      assert AgentAccess.agent(new_state).pending_approval != nil
     end
 
     test "passes through when no approval pending" do
@@ -189,10 +205,10 @@ defmodule Minga.Input.SubStateHandlersTest do
 
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
 
-      state = %{
-        state
-        | agentic: %{state.agentic | preview: %Preview{content: {:diff, review}}}
-      }
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          %{agentic | preview: %Preview{content: {:diff, review}}}
+        end)
 
       {:ok, state: state}
     end
@@ -224,7 +240,9 @@ defmodule Minga.Input.SubStateHandlersTest do
     end
 
     test "passes through when input is focused", %{state: state} do
-      state = put_in(state.agent.panel.input_focused, true)
+      state =
+        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
+
       {:passthrough, _} = DiffReview.handle_key(state, ?y, 0)
     end
   end

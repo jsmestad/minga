@@ -20,6 +20,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -29,6 +30,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Scroll
+  alias Minga.Surface.AgentView.State, as: AgentViewState
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -51,7 +53,35 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
-    tab_bar = TabBar.new(Tab.new_file(1, "test.ex"))
+    agentic = %ViewState{}
+    av_state = %AgentViewState{agent: agent, agentic: agentic, context: nil}
+
+    # When agentic view is active, surface_module is AgentView.
+    # When testing no-op cases (panel hidden + view inactive), the caller
+    # should set surface_module to BufferView. We default to AgentView
+    # since most tests exercise the active agent view.
+    active_agent = Keyword.get(opts, :active_agent, true)
+
+    file_tab = Tab.new_file(1, "test.ex")
+    tb = TabBar.new(file_tab)
+
+    {surface_module, surface_state, tb} =
+      if active_agent do
+        {Minga.Surface.AgentView, av_state, tb}
+      else
+        # Put agent state in a background tab
+        {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+
+        agent_ctx = %{
+          surface_module: Minga.Surface.AgentView,
+          surface_state: av_state,
+          keymap_scope: :agent
+        }
+
+        tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
+        tb = TabBar.switch_to(tb, file_tab.id)
+        {Minga.Surface.BufferView, nil, tb}
+      end
 
     %EditorState{
       port_manager: nil,
@@ -65,9 +95,9 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         active: 1,
         next_id: 2
       },
-      agent: agent,
-      agentic: %ViewState{},
-      tab_bar: tab_bar,
+      surface_module: surface_module,
+      surface_state: surface_state,
+      tab_bar: tb,
       focus_stack: Input.default_stack()
     }
   end
@@ -76,24 +106,24 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
   describe "toggle_panel/1" do
     test "opens the panel when closed" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       new_state = AgentCommands.toggle_panel(state)
 
-      assert new_state.agent.panel.visible == true
+      assert AgentAccess.panel(new_state).visible == true
     end
 
     test "focuses input when opening the panel" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       new_state = AgentCommands.toggle_panel(state)
 
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "closes the panel when visible and input is focused" do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.toggle_panel(state)
 
-      assert new_state.agent.panel.visible == false
+      assert AgentAccess.panel(new_state).visible == false
     end
 
     test "focuses input when panel is visible but input is not focused" do
@@ -101,12 +131,12 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       new_state = AgentCommands.toggle_panel(state)
 
       # Should focus input, not close
-      assert new_state.agent.panel.visible == true
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.panel(new_state).visible == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
 
     test "invalidates layout when toggling" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       state = %{state | layout: :some_cached_layout}
       new_state = AgentCommands.toggle_panel(state)
 
@@ -124,7 +154,12 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
     test "sets error status when no session exists" do
       state = base_state(session: nil)
-      state = put_in(state.agent.panel.input.lines, ["hello agent"])
+
+      state =
+        AgentAccess.update_agent(state, fn agent ->
+          put_in(agent.panel.input.lines, ["hello agent"])
+        end)
+
       new_state = AgentCommands.submit_prompt(state)
 
       assert new_state.status_msg =~ "No agent session"
@@ -135,7 +170,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
   describe "scroll_chat_up/1 and scroll_chat_down/1" do
     test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       assert AgentCommands.scroll_chat_up(state) == state
       assert AgentCommands.scroll_chat_down(state) == state
     end
@@ -145,7 +180,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       new_state = AgentCommands.scroll_chat_up(state)
 
       # Scroll offset should change (exact value depends on panel height)
-      assert new_state.agent.panel.scroll != state.agent.panel.scroll
+      assert AgentAccess.panel(new_state).scroll != AgentAccess.panel(state).scroll
     end
   end
 
@@ -153,7 +188,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
   describe "input_char/2" do
     test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       assert AgentCommands.input_char(state, "a") == state
     end
 
@@ -161,7 +196,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_char(state, "a")
 
-      assert PanelState.input_text(new_state.agent.panel) == "a"
+      assert PanelState.input_text(AgentAccess.panel(new_state)) == "a"
     end
 
     test "inserts multiple characters sequentially" do
@@ -172,13 +207,13 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("h")
         |> AgentCommands.input_char("i")
 
-      assert PanelState.input_text(state.agent.panel) == "hi"
+      assert PanelState.input_text(AgentAccess.panel(state)) == "hi"
     end
   end
 
   describe "input_backspace/1" do
     test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       assert AgentCommands.input_backspace(state) == state
     end
 
@@ -191,13 +226,13 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("b")
         |> AgentCommands.input_backspace()
 
-      assert PanelState.input_text(state.agent.panel) == "a"
+      assert PanelState.input_text(AgentAccess.panel(state)) == "a"
     end
   end
 
   describe "input_paste/2" do
     test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false)
+      state = base_state(panel_visible: false, active_agent: false)
       assert AgentCommands.input_paste(state, "pasted text") == state
     end
 
@@ -205,7 +240,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_paste(state, "pasted")
 
-      text = PanelState.input_text(new_state.agent.panel)
+      text = PanelState.input_text(AgentAccess.panel(new_state))
       assert text =~ "pasted"
     end
   end
@@ -248,25 +283,35 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: false)
       new_state = AgentCommands.scope_focus_input(state)
 
-      assert new_state.agent.panel.input_focused == true
+      assert AgentAccess.input_focused?(new_state) == true
     end
   end
 
   describe "scope_switch_focus/1" do
     test "switches from chat to file_viewer" do
       state = base_state(panel_visible: true)
-      state = %{state | agentic: %{state.agentic | active: true, focus: :chat}}
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          %{agentic | active: true, focus: :chat}
+        end)
+
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert new_state.agentic.focus == :file_viewer
+      assert AgentAccess.agentic(new_state).focus == :file_viewer
     end
 
     test "switches from non-chat back to chat" do
       state = base_state(panel_visible: true)
-      state = %{state | agentic: %{state.agentic | active: true, focus: :file_viewer}}
+
+      state =
+        AgentAccess.update_agentic(state, fn agentic ->
+          %{agentic | active: true, focus: :file_viewer}
+        end)
+
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert new_state.agentic.focus == :chat
+      assert AgentAccess.agentic(new_state).focus == :chat
     end
   end
 
@@ -278,7 +323,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       new_state = AgentCommands.toggle_paste_expand(state)
 
       # Should not crash, input stays the same
-      assert PanelState.input_text(new_state.agent.panel) == ""
+      assert PanelState.input_text(AgentAccess.panel(new_state)) == ""
     end
   end
 
