@@ -40,7 +40,6 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.State.Windows
-  alias Minga.Editor.SurfaceSync
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
@@ -97,8 +96,6 @@ defmodule Minga.Editor.State do
             layout: nil,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
-            surface_module: nil,
-            surface_state: nil,
             agent: %AgentState{},
             agentic: Minga.Agent.View.State.new()
 
@@ -141,8 +138,6 @@ defmodule Minga.Editor.State do
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
-          surface_module: module() | nil,
-          surface_state: term() | nil,
           agent: AgentState.t(),
           agentic: Minga.Agent.View.State.t()
         }
@@ -326,13 +321,12 @@ defmodule Minga.Editor.State do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # Leave agentic view: reset to editor scope with BufferView surface.
+    # Leave agentic view: reset to editor scope.
     state = AgentAccess.update_agentic(state, fn _ -> %ViewState{} end)
     state = %{state | keymap_scope: :editor, tab_bar: tb}
-    state = SurfaceSync.init_surface(state)
     state = sync_active_window_buffer(state)
 
-    # Snapshot the new tab's context (surface state has the fresh buffer view).
+    # Snapshot the new tab's context.
     new_ctx = snapshot_tab_context(state)
     tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
 
@@ -463,50 +457,52 @@ defmodule Minga.Editor.State do
   """
   @spec snapshot_tab_context(t()) :: Tab.context()
   def snapshot_tab_context(%__MODULE__{} = state) do
-    # Initialize surface if not yet set (defensive for tests and early lifecycle).
-    state =
-      if state.surface_module == nil do
-        SurfaceSync.init_surface(state)
-      else
-        SurfaceSync.sync_from_editor(state)
-      end
-
     snapshot_tab_fields(state)
   end
 
-  # Internal: snapshots tab fields without syncing. Used by switch_tab
-  # where the caller has already synced and deactivated the surface.
+  # Internal: snapshots tab fields without syncing. Used by switch_tab.
   @spec snapshot_tab_context_no_sync(t()) :: Tab.context()
   defp snapshot_tab_context_no_sync(%__MODULE__{} = state) do
-    state =
-      if state.surface_module == nil do
-        SurfaceSync.init_surface(state)
-      else
-        state
-      end
-
     snapshot_tab_fields(state)
   end
 
   @spec snapshot_tab_fields(t()) :: Tab.context()
   defp snapshot_tab_fields(state) do
     %{
-      surface_module: state.surface_module,
-      surface_state: state.surface_state,
-      keymap_scope: state.keymap_scope
+      keymap_scope: state.keymap_scope,
+      buffers: state.buffers,
+      windows: state.windows,
+      file_tree: state.file_tree,
+      viewport: state.viewport,
+      mouse: state.mouse,
+      highlight: state.highlight,
+      lsp: state.lsp,
+      completion: state.completion,
+      completion_trigger: state.completion_trigger,
+      git_buffers: state.git_buffers,
+      injection_ranges: state.injection_ranges,
+      search: state.search,
+      pending_conflict: state.pending_conflict,
+      mode: state.mode,
+      mode_state: state.mode_state,
+      reg: state.reg,
+      marks: state.marks,
+      last_jump_pos: state.last_jump_pos,
+      last_find_char: state.last_find_char,
+      change_recorder: state.change_recorder,
+      macro_recorder: state.macro_recorder
     }
   end
 
   @doc """
   Writes a tab context back into the live editor state.
 
-  The context carries three fields: `surface_module`, `surface_state`,
-  and `keymap_scope`. All per-view state (buffers, windows, mode, etc.)
-  lives inside `surface_state` and is synced back to EditorState via
-  the surface's `to_editor_state` bridge.
+  The context carries per-tab fields directly. Empty context means a
+  brand-new tab; we build defaults with the current active buffer and
+  viewport dimensions.
 
-  Empty context means a brand-new tab; we build a fresh BufferView
-  surface with the current active buffer and viewport dimensions.
+  Backward compatibility: old contexts with `surface_state` are migrated
+  to the new flat format via `maybe_migrate_legacy_context/2`.
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
@@ -514,30 +510,39 @@ defmodule Minga.Editor.State do
       if map_size(context) == 0 do
         build_file_tab_defaults(state)
       else
-        context
+        maybe_migrate_legacy_context(state, context)
       end
 
-    # Support legacy contexts that have per-field snapshots but no
-    # surface_state (from older sessions or tests).
-    context = maybe_migrate_legacy_context(state, context)
-
+    # Restore all per-tab fields from the context
     state
     |> maybe_restore(:keymap_scope, context)
-    |> maybe_restore(:surface_module, context)
-    |> maybe_restore(:surface_state, context)
-    |> ensure_surface_initialized(context)
-    |> SurfaceSync.sync_to_editor()
+    |> maybe_restore(:buffers, context)
+    |> maybe_restore(:windows, context)
+    |> maybe_restore(:file_tree, context)
+    |> maybe_restore(:viewport, context)
+    |> maybe_restore(:mouse, context)
+    |> maybe_restore(:highlight, context)
+    |> maybe_restore(:lsp, context)
+    |> maybe_restore(:completion, context)
+    |> maybe_restore(:completion_trigger, context)
+    |> maybe_restore(:git_buffers, context)
+    |> maybe_restore(:injection_ranges, context)
+    |> maybe_restore(:search, context)
+    |> maybe_restore(:pending_conflict, context)
+    |> maybe_restore(:mode, context)
+    |> maybe_restore(:mode_state, context)
+    |> maybe_restore(:reg, context)
+    |> maybe_restore(:marks, context)
+    |> maybe_restore(:last_jump_pos, context)
+    |> maybe_restore(:last_find_char, context)
+    |> maybe_restore(:change_recorder, context)
+    |> maybe_restore(:macro_recorder, context)
   end
 
-  # Builds a file-tab context for a brand-new tab. Returns only the three
-  # canonical context fields (surface_module, surface_state, keymap_scope).
-  # The BufferView.State is built directly from the live state's buffer and
-  # viewport dimensions.
+  # Builds a file-tab context for a brand-new tab. Returns the flat format
+  # with per-tab fields directly.
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
-    alias Minga.Surface.BufferView.State, as: BufferViewState
-    alias Minga.Surface.BufferView.State.VimState
-
     win_id = state.windows.next_id
     rows = state.viewport.rows
     cols = state.viewport.cols
@@ -557,36 +562,74 @@ defmodule Minga.Editor.State do
         %Windows{}
       end
 
-    bv_state = %BufferViewState{
+    %{
+      keymap_scope: :editor,
       buffers: %Buffers{
         active: buf,
         list: if(buf, do: [buf], else: []),
         active_index: state.buffers.active_index
       },
       windows: windows,
+      file_tree: %FileTreeState{},
       viewport: state.viewport,
-      editing: %VimState{
-        mode: :normal,
-        mode_state: Mode.initial_state()
-      }
-    }
-
-    %{
-      surface_module: Minga.Surface.BufferView,
-      surface_state: bv_state,
-      keymap_scope: :editor
+      mouse: %Mouse{},
+      highlight: %Highlighting{},
+      lsp: DocumentSync.new(),
+      completion: nil,
+      completion_trigger: CompletionTrigger.new(),
+      git_buffers: %{},
+      injection_ranges: %{},
+      search: %Search{},
+      pending_conflict: nil,
+      mode: :normal,
+      mode_state: Mode.initial_state(),
+      reg: %Registers{},
+      marks: %{},
+      last_jump_pos: nil,
+      last_find_char: nil,
+      change_recorder: ChangeRecorder.new(),
+      macro_recorder: MacroRecorder.new()
     }
   end
 
-  # Migrates a legacy context (with per-field snapshots like :windows,
-  # :mode, :active_buffer) into the canonical 3-field format. If the
-  # context already has :surface_state, returns it unchanged.
+  # Migrates legacy contexts (old BufferViewState format or oldest
+  # bare-field format) to the new flat format. If the context already
+  # has the :buffers key (new format), returns it unchanged.
   @spec maybe_migrate_legacy_context(t(), Tab.context()) :: Tab.context()
-  defp maybe_migrate_legacy_context(_state, %{surface_state: _} = context), do: context
+  defp maybe_migrate_legacy_context(_state, %{buffers: _} = context), do: context
+
+  defp maybe_migrate_legacy_context(_state, %{surface_state: %{buffers: _} = ss} = context) do
+    # Extract fields from old BufferViewState format
+    vim = ss.editing || %{}
+
+    %{
+      keymap_scope: Map.get(context, :keymap_scope, :editor),
+      buffers: ss.buffers,
+      windows: ss.windows,
+      file_tree: ss.file_tree,
+      viewport: ss.viewport,
+      mouse: Map.get(ss, :mouse, %Mouse{}),
+      highlight: Map.get(ss, :highlight, %Highlighting{}),
+      lsp: Map.get(ss, :lsp, DocumentSync.new()),
+      completion: Map.get(ss, :completion),
+      completion_trigger: Map.get(ss, :completion_trigger, CompletionTrigger.new()),
+      git_buffers: Map.get(ss, :git_buffers, %{}),
+      injection_ranges: Map.get(ss, :injection_ranges, %{}),
+      search: Map.get(ss, :search, %Search{}),
+      pending_conflict: Map.get(ss, :pending_conflict),
+      mode: Map.get(vim, :mode, :normal),
+      mode_state: Map.get(vim, :mode_state, Mode.initial_state()),
+      reg: Map.get(vim, :reg, %Registers{}),
+      marks: Map.get(vim, :marks, %{}),
+      last_jump_pos: Map.get(vim, :last_jump_pos),
+      last_find_char: Map.get(vim, :last_find_char),
+      change_recorder: Map.get(vim, :change_recorder, ChangeRecorder.new()),
+      macro_recorder: Map.get(vim, :macro_recorder, MacroRecorder.new())
+    }
+  end
 
   defp maybe_migrate_legacy_context(state, context) do
-    # Build a temporary EditorState with the legacy fields applied,
-    # then snapshot it through the bridge to create a surface state.
+    # Oldest format: bare fields like :active_buffer, :windows, :mode
     temp =
       state
       |> maybe_restore(:windows, context)
@@ -604,15 +647,7 @@ defmodule Minga.Editor.State do
           temp
       end
 
-    scope = Map.get(context, :keymap_scope, :editor)
-    temp = %{temp | keymap_scope: scope, surface_module: Minga.Surface.BufferView}
-    temp = SurfaceSync.init_surface(temp)
-
-    %{
-      surface_module: temp.surface_module,
-      surface_state: temp.surface_state,
-      keymap_scope: scope
-    }
+    snapshot_tab_fields(%{temp | keymap_scope: Map.get(context, :keymap_scope, :editor)})
   end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
@@ -631,21 +666,8 @@ defmodule Minga.Editor.State do
   @spec log_switch_tab_result(t()) :: :ok
   defp log_switch_tab_result(state) do
     Log.debug(:editor, fn ->
-      "[tab] switch_tab restored: surface=#{state.surface_module} scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
+      "[tab] switch_tab restored: scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
     end)
-  end
-
-  # Ensures surface_module and surface_state are set after restoring
-  # a tab context. Handles legacy contexts that don't carry surface data
-  # by deriving the surface from keymap_scope.
-  @spec ensure_surface_initialized(t(), Tab.context()) :: t()
-  defp ensure_surface_initialized(%__MODULE__{surface_module: mod} = state, _context)
-       when mod != nil do
-    state
-  end
-
-  defp ensure_surface_initialized(state, _context) do
-    SurfaceSync.init_surface(state)
   end
 
   @spec maybe_restore(t(), atom(), Tab.context()) :: t()
@@ -654,24 +676,6 @@ defmodule Minga.Editor.State do
       {:ok, value} -> Map.put(state, key, value)
       :error -> state
     end
-  end
-
-  # ── Surface lifecycle ──────────────────────────────────────────────────────
-
-  @spec deactivate_surface(t()) :: t()
-  defp deactivate_surface(%__MODULE__{surface_module: nil} = state), do: state
-  defp deactivate_surface(%__MODULE__{surface_state: nil} = state), do: state
-
-  defp deactivate_surface(%__MODULE__{surface_module: mod, surface_state: ss} = state) do
-    %{state | surface_state: mod.deactivate(ss)}
-  end
-
-  @spec activate_surface(t()) :: t()
-  defp activate_surface(%__MODULE__{surface_module: nil} = state), do: state
-  defp activate_surface(%__MODULE__{surface_state: nil} = state), do: state
-
-  defp activate_surface(%__MODULE__{surface_module: mod, surface_state: ss} = state) do
-    %{state | surface_state: mod.activate(ss)}
   end
 
   @doc """
@@ -697,14 +701,7 @@ defmodule Minga.Editor.State do
       # The timer ref is in state.agent (the live field) before snapshot.
       state = stop_outgoing_spinner(state)
 
-      # Sync surface state from editor, then deactivate it.
-      # Order matters: sync first so the surface has current editor state,
-      # then deactivate marks the surface as inactive. snapshot_tab_context
-      # skips sync_from_editor because we just did it.
-      state = SurfaceSync.sync_from_editor(state)
-      state = deactivate_surface(state)
-
-      # Snapshot current tab (surface state is already up-to-date + deactivated)
+      # Snapshot current tab
       context = snapshot_tab_context_no_sync(state)
       tb = TabBar.update_context(tb, current_id, context)
 
@@ -716,9 +713,6 @@ defmodule Minga.Editor.State do
       state = %{state | tab_bar: tb}
 
       state = restore_tab_context(state, target.context)
-
-      # Activate the incoming surface (if any).
-      state = activate_surface(state)
 
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)
@@ -743,8 +737,6 @@ defmodule Minga.Editor.State do
   def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
 
   def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
-    alias Minga.Surface.BufferView.State, as: BufferViewState
-
     Enum.find(tb.tabs, fn tab ->
       tab.kind == :file and tab_has_active_buffer?(tab, pid)
     end)
@@ -752,11 +744,11 @@ defmodule Minga.Editor.State do
 
   @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
   defp tab_has_active_buffer?(tab, pid) do
-    alias Minga.Surface.BufferView.State, as: BufferViewState
-
-    case Map.get(tab.context, :surface_state) do
-      %BufferViewState{buffers: %{active: ^pid}} -> true
-      _ -> Map.get(tab.context, :active_buffer) == pid
+    case tab.context do
+      %{buffers: %{active: ^pid}} -> true
+      %{surface_state: %{buffers: %{active: ^pid}}} -> true
+      %{active_buffer: ^pid} -> true
+      _ -> false
     end
   end
 

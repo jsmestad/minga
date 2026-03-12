@@ -16,7 +16,6 @@ defmodule Minga.Input.Router do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Surface.BufferView
 
   @doc """
   Dispatches a key press through the focus stack and runs post-key housekeeping.
@@ -38,15 +37,9 @@ defmodule Minga.Input.Router do
   end
 
   # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
-  # If none consume the key, delegates to the active surface.
-  # Falls back to the legacy full-stack walk when no surface is set
-  # (e.g., agent tabs before Phase 2).
+  # If none consume the key, delegates to surface handlers (Scoped, GlobalBindings, ModeFSM).
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
-  defp dispatch_split(%EditorState{surface_module: nil} = state, codepoint, modifiers) do
-    walk_handlers(state.focus_stack, state, codepoint, modifiers)
-  end
-
-  defp dispatch_split(%EditorState{surface_module: surface_mod} = state, codepoint, modifiers) do
+  defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do
     overlay_handlers = Minga.Input.overlay_handlers()
 
     case walk_handlers_until_passthrough(overlay_handlers, state, codepoint, modifiers) do
@@ -54,45 +47,24 @@ defmodule Minga.Input.Router do
         new_state
 
       {:passthrough, state_after_overlays} ->
-        dispatch_to_surface(state_after_overlays, surface_mod, codepoint, modifiers)
+        dispatch_to_surface(state_after_overlays, codepoint, modifiers)
     end
   end
 
-  # Delegates a key press to the active surface.
+  # Delegates a key press to surface handlers.
   #
-  # During Phase 1, the surface handlers (Scoped, GlobalBindings, ModeFSM)
-  # still operate on EditorState. The surface boundary is structural:
-  # only surface_handlers() are walked here, not overlays. The surface
-  # state is synced after dispatch.
-  #
-  # In later phases, the surface will own its handlers directly and
-  # operate on its own state type.
-  @spec dispatch_to_surface(EditorState.t(), module(), non_neg_integer(), non_neg_integer()) ::
+  # Surface handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
+  # directly. This preserves all side effects (status_msg, focus_stack changes,
+  # mode transitions) that handlers produce.
+  @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  defp dispatch_to_surface(
-         %EditorState{surface_module: BufferView} = state,
-         BufferView,
-         codepoint,
-         modifiers
-       ) do
-    # Walk the surface-level handlers on EditorState directly.
-    # This preserves all side effects (status_msg, focus_stack changes,
-    # mode transitions) that handlers produce.
-    new_state =
-      Enum.reduce_while(Minga.Input.surface_handlers(), state, fn handler, acc ->
-        case handler.handle_key(acc, codepoint, modifiers) do
-          {:handled, new_state} -> {:halt, new_state}
-          {:passthrough, new_state} -> {:cont, new_state}
-        end
-      end)
-
-    # Surface state is synced by the Editor after dispatch returns.
-    new_state
-  end
-
-  # Fallback for unknown surface modules.
-  defp dispatch_to_surface(state, _surface_mod, codepoint, modifiers) do
-    walk_handlers(state.focus_stack, state, codepoint, modifiers)
+  defp dispatch_to_surface(state, codepoint, modifiers) do
+    Enum.reduce_while(Minga.Input.surface_handlers(), state, fn handler, acc ->
+      case handler.handle_key(acc, codepoint, modifiers) do
+        {:handled, new_state} -> {:halt, new_state}
+        {:passthrough, new_state} -> {:cont, new_state}
+      end
+    end)
   end
 
   @doc """
@@ -142,7 +114,7 @@ defmodule Minga.Input.Router do
     dispatch_mouse_split(state, row, col, button, mods, event_type, click_count)
   end
 
-  # When no surface is set, walk the full focus stack for mouse events.
+  # Walks overlay handlers first for mouse events, then delegates to surface handlers.
   @spec dispatch_mouse_split(
           EditorState.t(),
           integer(),
@@ -153,29 +125,7 @@ defmodule Minga.Input.Router do
           pos_integer()
         ) ::
           EditorState.t()
-  defp dispatch_mouse_split(
-         %EditorState{surface_module: nil} = state,
-         row,
-         col,
-         button,
-         mods,
-         et,
-         cc
-       ) do
-    Enum.reduce_while(state.focus_stack, state, fn handler, acc ->
-      try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
-    end)
-  end
-
-  defp dispatch_mouse_split(
-         %EditorState{surface_module: BufferView} = state,
-         row,
-         col,
-         button,
-         mods,
-         et,
-         cc
-       ) do
+  defp dispatch_mouse_split(%EditorState{} = state, row, col, button, mods, et, cc) do
     overlay_handlers = Minga.Input.overlay_handlers()
 
     # Walk overlay handlers first for mouse events.
@@ -193,22 +143,10 @@ defmodule Minga.Input.Router do
 
       {:passthrough, state_after_overlays} ->
         # Delegate to surface-level mouse handlers.
-        new_state =
-          Enum.reduce_while(Minga.Input.surface_handlers(), state_after_overlays, fn handler,
-                                                                                     acc ->
-            try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
-          end)
-
-        # Surface state is synced by the Editor after dispatch returns.
-        new_state
+        Enum.reduce_while(Minga.Input.surface_handlers(), state_after_overlays, fn handler, acc ->
+          try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
+        end)
     end
-  end
-
-  # Fallback for unknown surface modules.
-  defp dispatch_mouse_split(state, row, col, button, mods, et, cc) do
-    Enum.reduce_while(state.focus_stack, state, fn handler, acc ->
-      try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
-    end)
   end
 
   @spec try_mouse_handler(
@@ -233,19 +171,6 @@ defmodule Minga.Input.Router do
     else
       {:cont, state}
     end
-  end
-
-  # Walks a list of handlers, returning the final state.
-  # Used for the legacy full-stack dispatch (when no surface is set).
-  @spec walk_handlers([module()], EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t()
-  defp walk_handlers(handlers, state, codepoint, modifiers) do
-    Enum.reduce_while(handlers, state, fn handler, acc ->
-      case handler.handle_key(acc, codepoint, modifiers) do
-        {:handled, new_state} -> {:halt, new_state}
-        {:passthrough, new_state} -> {:cont, new_state}
-      end
-    end)
   end
 
   # Walks handlers and reports whether any consumed the key.
