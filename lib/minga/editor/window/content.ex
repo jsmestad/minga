@@ -37,21 +37,43 @@ defmodule Minga.Editor.Window.Content do
   """
   @type t ::
           {:buffer, pid()}
-
-  # Future variants (uncomment as implemented):
-  # | {:agent_chat, pid()}
-  # | {:agent_prompt, pid()}
-  # | {:terminal, pid()}
+          | {:agent_chat, pid()}
 
   @doc "Creates a buffer content reference."
   @spec buffer(pid()) :: t()
   def buffer(pid) when is_pid(pid), do: {:buffer, pid}
 
+  @doc "Creates an agent chat content reference. The pid is the agent's `*Agent*` Buffer.Server."
+  @spec agent_chat(pid()) :: t()
+  def agent_chat(pid) when is_pid(pid), do: {:agent_chat, pid}
+
   @doc "Returns the buffer pid if this is a buffer content reference, nil otherwise."
   @spec buffer_pid(t()) :: pid() | nil
   def buffer_pid({:buffer, pid}), do: pid
+  def buffer_pid({:agent_chat, _pid}), do: nil
+
+  @doc """
+  Returns the underlying pid for any content type.
+
+  For `:buffer`, this is the Buffer.Server pid. For `:agent_chat`, this
+  is the agent's `*Agent*` Buffer.Server pid (used for cursor/scroll).
+  """
+  @spec pid(t()) :: pid()
+  def pid({:buffer, p}), do: p
+  def pid({:agent_chat, p}), do: p
 
   @doc "Returns true if this content reference is a file buffer."
   @spec buffer?(t()) :: boolean()
   def buffer?({:buffer, _pid}), do: true
+  def buffer?({:agent_chat, _pid}), do: false
+
+  @doc "Returns true if this content reference is an agent chat."
+  @spec agent_chat?(t()) :: boolean()
+  def agent_chat?({:agent_chat, _pid}), do: true
+  def agent_chat?({:buffer, _pid}), do: false
+
+  @doc "Returns true if the content is editable (supports insert mode)."
+  @spec editable?(t()) :: boolean()
+  def editable?({:buffer, _pid}), do: true
+  def editable?({:agent_chat, _pid}), do: false
 end

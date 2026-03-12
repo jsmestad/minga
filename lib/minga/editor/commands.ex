@@ -149,6 +149,7 @@ defmodule Minga.Editor.Commands do
   # ── AI Agent (before no-buffer guard — agent works without a buffer) ─────
   def execute(state, :toggle_agent_panel), do: AgentCommands.toggle_panel(state)
   def execute(state, :toggle_agentic_view), do: AgentCommands.toggle_agentic_view(state)
+  def execute(state, :toggle_agent_split), do: AgentCommands.toggle_agent_split(state)
   def execute(state, :cycle_agent_tabs), do: AgentCommands.cycle_agent_tabs(state)
   def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
   def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)

@@ -222,6 +222,34 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   @doc """
+  Renders agent chat content within a bounded window rect.
+
+  Used when the agent chat is hosted in a window pane (Phase F) rather
+  than as a full-screen surface. Renders chat messages in the top portion
+  and the prompt input at the bottom, without title bar, modeline,
+  separator, or file viewer.
+
+  Returns a flat list of draw commands positioned within the given rect.
+  """
+  @spec render_in_rect(state(), rect()) :: [DisplayList.draw()]
+  def render_in_rect(%EditorState{} = state, {row, col, width, height}) do
+    input = extract_input(state)
+
+    input_height =
+      compute_input_height(input.panel.input_lines, input_inner_width(width))
+
+    chat_height = max(height - input_height, 1)
+    input_row = row + chat_height
+
+    {chat_draws, _metrics} =
+      render_chat_from_input(input, {row, col, width, chat_height})
+
+    input_draws = render_input_from_input(input, input_row, width)
+
+    chat_draws ++ input_draws
+  end
+
+  @doc """
   Returns `{row, col}` for where the terminal cursor should be placed.
 
   When the chat input is focused the cursor sits in the full-width input area.
