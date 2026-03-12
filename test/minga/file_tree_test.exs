@@ -296,6 +296,92 @@ defmodule Minga.FileTreeTest do
     end
   end
 
+  describe "entry guide metadata" do
+    @tag :tmp_dir
+    test "entries include last_child? and guides fields", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+
+      tree = FileTree.new(tmp_dir)
+      entries = FileTree.visible_entries(tree)
+
+      # All depth-0 entries have empty guides list
+      assert Enum.all?(entries, fn e -> e.guides == [] end)
+
+      # First file is not last child, second is
+      first = Enum.at(entries, 0)
+      last = Enum.at(entries, 1)
+      assert first.last_child? == false
+      assert last.last_child? == true
+    end
+
+    @tag :tmp_dir
+    test "single entry is marked as last child", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "only.txt"), "")
+
+      tree = FileTree.new(tmp_dir)
+      [entry] = FileTree.visible_entries(tree)
+
+      assert entry.last_child? == true
+      assert entry.guides == []
+    end
+
+    @tag :tmp_dir
+    test "nested entries have correct guide flags for ancestor columns", %{tmp_dir: tmp_dir} do
+      # Create: lib/ (not last) -> app.ex (last child of lib)
+      #         mix.exs (last sibling at depth 0)
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      File.write!(Path.join([tmp_dir, "lib", "app.ex"]), "")
+      File.write!(Path.join(tmp_dir, "mix.exs"), "")
+
+      tree = FileTree.new(tmp_dir)
+      tree = %{tree | expanded: MapSet.put(tree.expanded, Path.join(tmp_dir, "lib"))}
+
+      entries = FileTree.visible_entries(tree)
+      # Expected: lib (depth 0, not last), app.ex (depth 1, last), mix.exs (depth 0, last)
+      [lib_entry, app_entry, mix_entry] = entries
+
+      assert lib_entry.last_child? == false
+      assert lib_entry.guides == []
+
+      # app.ex is the only child of lib, so it's last_child?
+      # Its guides list has one entry: true (because lib is NOT the last sibling,
+      # so the depth-0 column should still draw │)
+      assert app_entry.last_child? == true
+      assert app_entry.guides == [true]
+
+      assert mix_entry.last_child? == true
+      assert mix_entry.guides == []
+    end
+
+    @tag :tmp_dir
+    test "deeply nested entries accumulate guide flags", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join([tmp_dir, "a", "b", "c"]))
+      File.write!(Path.join([tmp_dir, "a", "b", "c", "deep.txt"]), "")
+
+      tree = FileTree.new(tmp_dir)
+
+      tree = %{
+        tree
+        | expanded:
+            tree.expanded
+            |> MapSet.put(Path.join(tmp_dir, "a"))
+            |> MapSet.put(Path.join([tmp_dir, "a", "b"]))
+            |> MapSet.put(Path.join([tmp_dir, "a", "b", "c"]))
+      }
+
+      entries = FileTree.visible_entries(tree)
+      deep = List.last(entries)
+
+      assert deep.name == "deep.txt"
+      assert deep.depth == 3
+      # All ancestors are last children (only child at each level),
+      # so all guide flags should be false (no more siblings = no │)
+      assert deep.guides == [false, false, false]
+      assert deep.last_child? == true
+    end
+  end
+
   describe "refresh/1" do
     @tag :tmp_dir
     test "clamps cursor after files are deleted", %{tmp_dir: tmp_dir} do

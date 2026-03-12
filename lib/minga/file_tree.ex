@@ -9,12 +9,22 @@ defmodule Minga.FileTree do
   No GenServer; the editor owns this struct in its state.
   """
 
-  @typedoc "A single visible entry in the tree."
+  @typedoc """
+  A single visible entry in the tree.
+
+  The `guides` field is a list of booleans, one per ancestor depth level
+  (index 0 = depth 0, index 1 = depth 1, etc.). `true` means the ancestor
+  at that depth has more siblings below this entry (draw `│`), `false`
+  means it was the last child (draw blank). The renderer uses this plus
+  `last_child?` to pick `├──` vs `└──` at the entry's own depth.
+  """
   @type entry :: %{
           path: String.t(),
           name: String.t(),
           dir?: boolean(),
-          depth: non_neg_integer()
+          depth: non_neg_integer(),
+          last_child?: boolean(),
+          guides: [boolean()]
         }
 
   @type t :: %__MODULE__{
@@ -165,7 +175,7 @@ defmodule Minga.FileTree do
   """
   @spec visible_entries(t()) :: [entry()]
   def visible_entries(%__MODULE__{} = tree) do
-    walk(tree.root, 0, tree)
+    walk(tree.root, 0, tree, [])
   end
 
   @doc "Refreshes the tree by recomputing visible entries (clamps cursor)."
@@ -199,32 +209,52 @@ defmodule Minga.FileTree do
 
   # ── Private ───────────────────────────────────────────────────────────────
 
-  @spec walk(String.t(), non_neg_integer(), t()) :: [entry()]
-  defp walk(dir_path, depth, tree) do
+  @spec walk(String.t(), non_neg_integer(), t(), [boolean()]) :: [entry()]
+  defp walk(dir_path, depth, tree, parent_guides) do
     case File.ls(dir_path) do
       {:ok, names} ->
-        names
-        |> Enum.reject(&ignored?/1)
-        |> maybe_filter_hidden(tree.show_hidden)
-        |> Enum.sort_by(fn name ->
-          full = Path.join(dir_path, name)
-          {if(File.dir?(full), do: 0, else: 1), String.downcase(name)}
+        sorted =
+          names
+          |> Enum.reject(&ignored?/1)
+          |> maybe_filter_hidden(tree.show_hidden)
+          |> Enum.sort_by(fn name ->
+            full = Path.join(dir_path, name)
+            {if(File.dir?(full), do: 0, else: 1), String.downcase(name)}
+          end)
+
+        last_idx = length(sorted) - 1
+
+        sorted
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {name, idx} ->
+          walk_entry(name, dir_path, depth, tree, parent_guides, idx == last_idx)
         end)
-        |> Enum.flat_map(&walk_entry(&1, dir_path, depth, tree))
 
       {:error, _} ->
         []
     end
   end
 
-  @spec walk_entry(String.t(), String.t(), non_neg_integer(), t()) :: [entry()]
-  defp walk_entry(name, dir_path, depth, tree) do
+  @spec walk_entry(String.t(), String.t(), non_neg_integer(), t(), [boolean()], boolean()) ::
+          [entry()]
+  defp walk_entry(name, dir_path, depth, tree, parent_guides, is_last) do
     full = Path.join(dir_path, name)
     is_dir = File.dir?(full)
-    entry = %{path: full, name: name, dir?: is_dir, depth: depth}
+
+    entry = %{
+      path: full,
+      name: name,
+      dir?: is_dir,
+      depth: depth,
+      last_child?: is_last,
+      guides: parent_guides
+    }
 
     if is_dir and MapSet.member?(tree.expanded, full) do
-      [entry | walk(full, depth + 1, tree)]
+      # Children need to know: at this entry's depth, are there more siblings?
+      # If this entry is NOT the last child, its depth column should draw │.
+      child_guides = parent_guides ++ [not is_last]
+      [entry | walk(full, depth + 1, tree, child_guides)]
     else
       [entry]
     end

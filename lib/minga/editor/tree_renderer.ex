@@ -3,17 +3,29 @@ defmodule Minga.Editor.TreeRenderer do
   Renders the file tree panel into draw tuples for the left side of the screen.
 
   Produces a list of `DisplayList.draw()` tuples for the tree entries,
-  the separator column, and the header line.
+  the separator column, and the header line. Uses Nerd Font icons per
+  filetype, box-drawing indent guides, and a project-name header to
+  match neo-tree.nvim's visual style.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
+  alias Minga.Filetype
   alias Minga.Theme
 
-  @indent_size 2
+  # Box-drawing characters for indent guides
+  @guide_pipe "│ "
+  @guide_tee "├─"
+  @guide_elbow "└─"
+  @guide_blank "  "
+
+  # Nerd Font folder icons (nf-md-folder / nf-md-folder-open)
+  @folder_closed "\u{F024B}"
+  @folder_open "\u{F0256}"
 
   defmodule RenderInput do
     @moduledoc """
@@ -77,11 +89,13 @@ defmodule Minga.Editor.TreeRenderer do
   defp do_render(tree, {row_off, col_off, width, height}, focused, theme, active_path) do
     entries = FileTree.visible_entries(tree)
 
-    # Header row
-    header_text = " File Tree" |> String.pad_trailing(width)
+    # Header: project directory name with folder icon
+    project_name = Path.basename(tree.root)
+    header_text = " #{@folder_open} #{project_name}/"
+    header_display = String.slice(header_text, 0, width) |> String.pad_trailing(width)
 
     header = [
-      DisplayList.draw(row_off, col_off, header_text,
+      DisplayList.draw(row_off, col_off, header_display,
         fg: theme.tree.header_fg,
         bg: theme.tree.header_bg,
         bold: true
@@ -108,15 +122,15 @@ defmodule Minga.Editor.TreeRenderer do
       |> Enum.drop(scroll_offset)
       |> Enum.take(content_rows)
       |> Enum.with_index()
-      |> Enum.map(fn {{entry, global_idx}, screen_row} ->
+      |> Enum.flat_map(fn {{entry, global_idx}, screen_row} ->
         render_entry(entry, global_idx, row_off + 1 + screen_row, render_opts)
       end)
 
     # Fill remaining rows with blanks
-    rendered_count = length(entry_commands)
+    visible_count = entries |> Enum.drop(scroll_offset) |> Enum.take(content_rows) |> length()
 
     blank_commands =
-      render_blanks(rendered_count, content_rows, row_off + 1, col_off, width, theme)
+      render_blanks(visible_count, content_rows, row_off + 1, col_off, width, theme)
 
     # Separator column (one column right of the tree area)
     sep_col = col_off + width
@@ -125,8 +139,10 @@ defmodule Minga.Editor.TreeRenderer do
     header ++ entry_commands ++ blank_commands ++ sep_commands
   end
 
+  # ── Entry rendering ──────────────────────────────────────────────────────
+
   @spec render_entry(FileTree.entry(), non_neg_integer(), non_neg_integer(), map()) ::
-          DisplayList.draw()
+          [DisplayList.draw()]
   defp render_entry(entry, idx, row, opts) do
     %{
       cursor: cursor,
@@ -138,29 +154,155 @@ defmodule Minga.Editor.TreeRenderer do
       expanded: expanded
     } = opts
 
-    is_expanded = entry.dir? and MapSet.member?(expanded, entry.path)
-    indent = String.duplicate(" ", entry.depth * @indent_size)
-
-    icon =
-      case {entry.dir?, is_expanded} do
-        {true, true} -> "▾ "
-        {true, false} -> "▸ "
-        {false, _} -> "  "
-      end
-
-    label = indent <> icon <> entry.name
-    display = String.slice(label, 0, width) |> String.pad_trailing(width)
-
     is_cursor = idx == cursor
     is_active = active_path != nil and entry.path == active_path
+    is_expanded = entry.dir? and MapSet.member?(expanded, entry.path)
 
-    style = entry_style(entry, is_cursor, is_active, focused, theme)
+    # Build the guide prefix from the entry's ancestor guide flags
+    guide_prefix = build_guides(entry.guides, entry.last_child?)
 
-    DisplayList.draw(row, col, display, style)
+    # Pick the icon and its color
+    {icon, icon_color} = entry_icon(entry, is_expanded)
+
+    # Entry name (dirs get trailing slash)
+    name = if entry.dir?, do: entry.name <> "/", else: entry.name
+
+    # Compose the full line: guides + icon + space + name
+    # The icon occupies 1 cell + 1 space after it
+    prefix = guide_prefix <> icon <> " "
+    prefix_width = String.length(prefix)
+
+    # Truncate name to fit, pad the whole row
+    max_name_len = max(width - prefix_width, 0)
+    display_name = String.slice(name, 0, max_name_len)
+
+    # Background style for the full row (used for cursor highlight + blanks)
+    row_bg = row_background(is_cursor, focused, theme)
+
+    # Build draw commands: guide segment, icon segment, name segment
+    # This lets each part have its own foreground color while sharing the row bg.
+
+    guide_style = guide_draw_style(is_cursor, focused, theme)
+    icon_style = icon_draw_style(icon_color, is_cursor, focused, theme)
+    name_style = name_draw_style(entry, is_cursor, is_active, focused, theme)
+
+    # Pad the name to fill the remaining width so the background is continuous
+    padded_name = String.pad_trailing(display_name, max_name_len)
+
+    guide_len = String.length(guide_prefix)
+
+    draws = []
+
+    # Guide segment (if any depth > 0)
+    draws =
+      if guide_len > 0 do
+        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
+      else
+        draws
+      end
+
+    # Icon segment
+    icon_col = col + guide_len
+    draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
+
+    # Name segment
+    name_col = col + prefix_width
+    draws = draws ++ [DisplayList.draw(row, name_col, padded_name, name_style)]
+
+    # If the total drawn width is less than panel width, pad with blank
+    drawn_width = prefix_width + String.length(padded_name)
+
+    if drawn_width < width do
+      pad = String.duplicate(" ", width - drawn_width)
+      draws ++ [DisplayList.draw(row, col + drawn_width, pad, [fg: theme.tree.fg] ++ row_bg)]
+    else
+      draws
+    end
   end
 
-  @spec entry_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: keyword()
-  defp entry_style(entry, is_cursor, is_active, focused, theme) do
+  # ── Indent guides ──────────────────────────────────────────────────────
+
+  @spec build_guides([boolean()], boolean()) :: String.t()
+  defp build_guides(ancestor_guides, last_child?) do
+    # Ancestor columns: each is either │ (more siblings) or blank (last child)
+    ancestor_part =
+      Enum.map_join(ancestor_guides, fn
+        true -> @guide_pipe
+        false -> @guide_blank
+      end)
+
+    # The connector at this entry's own depth
+    # Depth-0 entries (direct children of root) also get a connector
+    connector =
+      if last_child? do
+        @guide_elbow
+      else
+        @guide_tee
+      end
+
+    ancestor_part <> connector
+  end
+
+  # ── Icon selection ──────────────────────────────────────────────────────
+
+  @spec entry_icon(FileTree.entry(), boolean()) :: {String.t(), non_neg_integer()}
+  defp entry_icon(%{dir?: true}, true = _expanded) do
+    {@folder_open, 0x519ABA}
+  end
+
+  defp entry_icon(%{dir?: true}, false = _expanded) do
+    {@folder_closed, 0x519ABA}
+  end
+
+  defp entry_icon(%{path: path}, _expanded) do
+    filetype = Filetype.detect(path)
+    Devicon.icon_and_color(filetype)
+  end
+
+  # ── Style helpers ──────────────────────────────────────────────────────
+
+  @spec row_background(boolean(), boolean(), Theme.t()) :: keyword()
+  defp row_background(true = _is_cursor, true = _focused, theme) do
+    [bg: theme.tree.dir_fg]
+  end
+
+  defp row_background(true = _is_cursor, false = _focused, theme) do
+    [bg: theme.tree.cursor_bg]
+  end
+
+  defp row_background(false = _is_cursor, _focused, theme) do
+    [bg: theme.tree.bg]
+  end
+
+  @spec guide_draw_style(boolean(), boolean(), Theme.t()) :: keyword()
+  defp guide_draw_style(true = _is_cursor, true = _focused, theme) do
+    [fg: theme.tree.bg, bg: theme.tree.dir_fg]
+  end
+
+  defp guide_draw_style(true = _is_cursor, false = _focused, theme) do
+    [fg: theme.tree.separator_fg, bg: theme.tree.cursor_bg]
+  end
+
+  defp guide_draw_style(_is_cursor, _focused, theme) do
+    [fg: theme.tree.separator_fg, bg: theme.tree.bg]
+  end
+
+  @spec icon_draw_style(non_neg_integer(), boolean(), boolean(), Theme.t()) :: keyword()
+  defp icon_draw_style(_icon_color, true = _is_cursor, true = _focused, theme) do
+    # Focused cursor row: invert, use bg as fg
+    [fg: theme.tree.bg, bg: theme.tree.dir_fg]
+  end
+
+  defp icon_draw_style(icon_color, true = _is_cursor, false = _focused, theme) do
+    [fg: icon_color, bg: theme.tree.cursor_bg]
+  end
+
+  defp icon_draw_style(icon_color, _is_cursor, _focused, theme) do
+    [fg: icon_color, bg: theme.tree.bg]
+  end
+
+  @spec name_draw_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: keyword()
+  defp name_draw_style(entry, is_cursor, is_active, focused, theme) do
     tree = theme.tree
 
     base_fg =
@@ -181,6 +323,8 @@ defmodule Minga.Editor.TreeRenderer do
         [fg: base_fg, bg: tree.bg, bold: entry.dir?]
     end
   end
+
+  # ── Blanks, separator, scroll ──────────────────────────────────────────
 
   @spec render_blanks(
           non_neg_integer(),

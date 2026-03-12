@@ -38,7 +38,7 @@ defmodule Minga.Editor.TreeRendererTest do
       assert Enum.all?(draws, &(tuple_size(&1) == 4))
     end
 
-    test "includes a header row", %{tmp_dir: tmp_dir} do
+    test "includes a header row with project name and folder icon", %{tmp_dir: tmp_dir} do
       input = %RenderInput{
         tree: sample_tree(tmp_dir),
         rect: {0, 0, 20, 10},
@@ -48,8 +48,13 @@ defmodule Minga.Editor.TreeRendererTest do
       }
 
       draws = TreeRenderer.render(input)
-      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "File Tree"))
+      # Header is the draw at row 0, col 0 with bold style
+      header = Enum.find(draws, fn {r, c, _t, _s} -> r == 0 and c == 0 end)
+      assert header != nil
+      {_r, _c, text, style} = header
+      # Contains the folder open icon (nf-md-folder-open U+F0256)
+      assert String.contains?(text, "\u{F0256}")
+      assert Keyword.get(style, :bold) == true
     end
 
     test "renders separator column", %{tmp_dir: tmp_dir} do
@@ -65,6 +70,49 @@ defmodule Minga.Editor.TreeRendererTest do
       # Separator is at col 20 (width of tree rect)
       sep_draws = Enum.filter(draws, fn {_r, c, text, _s} -> c == 20 and text == "│" end)
       assert sep_draws != []
+    end
+
+    test "renders indent guides and file icons", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil
+      }
+
+      draws = TreeRenderer.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # Box-drawing guide characters should be present
+      assert String.contains?(all_text, "├─")
+      assert String.contains?(all_text, "└─")
+      # Expanded lib/ should produce a pipe guide for its children
+      assert String.contains?(all_text, "│ ")
+
+      # Directory names should have trailing slashes
+      assert String.contains?(all_text, "lib/")
+      assert String.contains?(all_text, "test/")
+
+      # File entries should have Elixir icon (U+E62D)
+      assert String.contains?(all_text, "\u{E62D}")
+    end
+
+    test "renders multiple draw commands per entry row for icon coloring", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil
+      }
+
+      draws = TreeRenderer.render(input)
+      # Row 1 is the first entry (lib/ directory). It should have multiple draws:
+      # guide segment, icon segment, name segment
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+      assert length(row1_draws) >= 2
     end
 
     test "highlights active file path", %{tmp_dir: tmp_dir} do
