@@ -8,7 +8,7 @@ defmodule Minga.Input do
      conflict prompt) that take priority over everything. These live
      in the Editor's focus stack and are checked first.
 
-  2. **Surface handlers** — scope-specific dispatch (Scoped), global
+  2. **Editor handlers** — scope-specific dispatch (Scoped), global
      bindings (Ctrl+S, Ctrl+Q), and the mode FSM (vim normal/insert/
      visual). These live inside the active surface and are called
      after overlays pass through.

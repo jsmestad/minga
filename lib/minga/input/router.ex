@@ -53,7 +53,7 @@ defmodule Minga.Input.Router do
 
   # Delegates a key press to surface handlers.
   #
-  # Surface handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
+  # Editor handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
   # directly. This preserves all side effects (status_msg, focus_stack changes,
   # mode transitions) that handlers produce.
   @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::

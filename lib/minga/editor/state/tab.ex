@@ -15,7 +15,7 @@ defmodule Minga.Editor.State.Tab do
   auto-migrated on first restore.
   """
 
-  # Legacy context type aliases removed. Surface state carries all per-view data.
+  # Tab contexts store per-tab fields directly as flat maps.
 
   @typedoc "Unique tab identifier."
   @type id :: pos_integer()

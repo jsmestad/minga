@@ -387,7 +387,7 @@ defmodule Minga.Editor do
   #
   # All agent events are tagged with the session pid so we can route them
   # Agent events are handled directly via Agent.Events, which reads and
-  # writes agent/agentic fields on EditorState. No Surface dispatch.
+  # writes agent/agentic fields on EditorState directly.
 
   def handle_info({:agent_event, session_pid, event}, state) do
     if AgentAccess.session(state) == session_pid do
