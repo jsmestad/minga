@@ -37,6 +37,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Event
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.TokenEstimator
+  alias Minga.Agent.Retry
   alias Minga.Agent.Tools
   alias Minga.Config.Options
   alias ReqLLM.Context
@@ -61,6 +62,7 @@ defmodule Minga.Agent.Providers.Native do
           tools: [ReqLLM.Tool.t()],
           thinking_level: String.t(),
           max_tokens: pos_integer(),
+          max_retries: non_neg_integer(),
           llm_client: llm_client()
         }
 
@@ -77,6 +79,7 @@ defmodule Minga.Agent.Providers.Native do
           project_root: String.t(),
           thinking_level: String.t(),
           max_tokens: pos_integer(),
+          max_retries: non_neg_integer(),
           llm_client: llm_client(),
           task: Task.t() | nil,
           streaming: boolean()
@@ -138,6 +141,7 @@ defmodule Minga.Agent.Providers.Native do
     project_root = Keyword.get(opts, :project_root) || detect_project_root()
 
     max_tokens = Keyword.get(opts, :max_tokens) || read_config_max_tokens()
+    max_retries = Keyword.get(opts, :max_retries) || read_config_max_retries()
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
     system_prompt = build_system_prompt(project_root)
@@ -156,6 +160,7 @@ defmodule Minga.Agent.Providers.Native do
       project_root: project_root,
       thinking_level: thinking_level,
       max_tokens: max_tokens,
+      max_retries: max_retries,
       llm_client: llm_client,
       task: nil,
       streaming: false
@@ -186,6 +191,7 @@ defmodule Minga.Agent.Providers.Native do
       tools: state.tools,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
+      max_retries: state.max_retries,
       llm_client: state.llm_client
     }
 
@@ -311,7 +317,27 @@ defmodule Minga.Agent.Providers.Native do
     # Emit pre-send token estimate so the context bar updates before the API call
     emit_context_usage(lctx, context)
 
-    case lctx.llm_client.(lctx.model, context.messages, stream_opts) do
+    on_retry = fn attempt, delay_ms, reason ->
+      delay_s = Float.round(delay_ms / 1000, 1)
+
+      send(
+        lctx.provider_pid,
+        {:agent_event,
+         %Event.TextDelta{
+           delta:
+             "\n⏳ #{reason} — retrying in #{delay_s}s (attempt #{attempt}/#{lctx.max_retries})...\n"
+         }}
+      )
+    end
+
+    result =
+      Retry.with_retry(
+        fn -> lctx.llm_client.(lctx.model, context.messages, stream_opts) end,
+        max_retries: lctx.max_retries,
+        on_retry: on_retry
+      )
+
+    case result do
       {:ok, stream_response} ->
         process_and_continue(lctx, context, stream_response)
 
@@ -657,6 +683,17 @@ defmodule Minga.Agent.Providers.Native do
     _ -> @default_max_tokens
   catch
     :exit, _ -> @default_max_tokens
+  end
+
+  @default_max_retries 3
+
+  @spec read_config_max_retries() :: non_neg_integer()
+  defp read_config_max_retries do
+    Options.get(:agent_max_retries)
+  rescue
+    _ -> @default_max_retries
+  catch
+    :exit, _ -> @default_max_retries
   end
 
   @spec detect_project_root() :: String.t()
