@@ -23,8 +23,6 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Editor.State.TabBar
   alias Minga.Surface.AgentView
 
-  require Logger
-
   @type state :: EditorState.t()
 
   @doc """
@@ -45,7 +43,7 @@ defmodule Minga.Editor.AgentLifecycle do
     end
   rescue
     e ->
-      Logger.warning("Failed to start agent session at boot: #{Exception.message(e)}")
+      Minga.Log.warning(:agent, "Failed to start agent session at boot: #{Exception.message(e)}")
       state
   end
 

@@ -24,8 +24,6 @@ defmodule Minga.Parser.Manager do
 
   alias Minga.Port.Protocol
 
-  require Logger
-
   @typedoc "Options for starting the parser manager."
   @type start_opt ::
           {:name, GenServer.name()}
@@ -107,18 +105,18 @@ defmodule Minga.Parser.Manager do
         {:noreply, state}
 
       {:error, reason} ->
-        Logger.warning("Parser: failed to decode event: #{inspect(reason)}")
+        Minga.Log.warning(:port, "Parser: failed to decode event: #{inspect(reason)}")
         {:noreply, state}
     end
   end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
-    Logger.info("Parser process exited normally")
+    Minga.Log.info(:port, "Parser process exited normally")
     {:noreply, %{state | port: nil, ready: false}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.error("Parser process exited with status #{status}")
+    Minga.Log.error(:port, "Parser process exited with status #{status}")
     {:noreply, %{state | port: nil, ready: false}}
   end
 
@@ -144,7 +142,7 @@ defmodule Minga.Parser.Manager do
 
       %{state | port: port, ready: true}
     else
-      Logger.warning("Parser binary not found at #{state.parser_path}")
+      Minga.Log.warning(:port, "Parser binary not found at #{state.parser_path}")
       state
     end
   end

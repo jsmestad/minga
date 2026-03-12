@@ -12,8 +12,6 @@ defmodule Minga.Picker.FileSource do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Log
 
-  require Logger
-
   @impl true
   @spec title() :: String.t()
   def title, do: "Find file"
@@ -30,7 +28,7 @@ defmodule Minga.Picker.FileSource do
         end)
 
       {:error, msg} ->
-        Logger.error("find_file: #{msg}")
+        Minga.Log.error(:editor, "find_file: #{msg}")
         []
     end
   end
@@ -50,7 +48,7 @@ defmodule Minga.Picker.FileSource do
             EditorState.add_buffer(state, pid)
 
           {:error, reason} ->
-            Logger.error("Failed to open file: #{inspect(reason)}")
+            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
             state
         end
 
@@ -97,11 +95,11 @@ defmodule Minga.Picker.FileSource do
 
     case File.rm(abs_path) do
       :ok ->
-        Logger.info("Deleted file: #{abs_path}")
+        Minga.Log.info(:editor, "Deleted file: #{abs_path}")
         state
 
       {:error, reason} ->
-        Logger.error("Failed to delete file: #{inspect(reason)}")
+        Minga.Log.error(:editor, "Failed to delete file: #{inspect(reason)}")
         state
     end
   end

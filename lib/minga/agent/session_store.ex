@@ -11,8 +11,6 @@ defmodule Minga.Agent.SessionStore do
   picker calls `list/0` to scan the directory for past sessions.
   """
 
-  require Logger
-
   @typedoc "Session metadata for the picker (without full message content)."
   @type session_meta :: %{
           id: String.t(),
@@ -59,7 +57,7 @@ defmodule Minga.Agent.SessionStore do
         File.rename(tmp_path, path)
 
       {:error, reason} ->
-        Logger.warning("[SessionStore] failed to save #{id}: #{reason}")
+        Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{reason}")
         {:error, reason}
     end
   end

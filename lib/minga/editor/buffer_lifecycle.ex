@@ -14,8 +14,6 @@ defmodule Minga.Editor.BufferLifecycle do
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Mode
 
-  require Logger
-
   @type state :: EditorState.t()
 
   # ── LSP lifecycle ──────────────────────────────────────────────────────
@@ -124,7 +122,7 @@ defmodule Minga.Editor.BufferLifecycle do
         %{state | git_buffers: Map.put(state.git_buffers, buffer_pid, git_pid)}
 
       {:error, reason} ->
-        Logger.warning("Failed to start git buffer: #{inspect(reason)}")
+        Minga.Log.warning(:editor, "Failed to start git buffer: #{inspect(reason)}")
         state
     end
   end

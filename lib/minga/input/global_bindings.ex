@@ -11,8 +11,6 @@ defmodule Minga.Input.GlobalBindings do
 
   import Bitwise
 
-  require Logger
-
   alias Minga.Buffer.Server, as: BufferServer
 
   alias Minga.Port.Protocol
@@ -27,7 +25,7 @@ defmodule Minga.Input.GlobalBindings do
     if state.buffers.active do
       case BufferServer.save(state.buffers.active) do
         :ok -> :ok
-        {:error, reason} -> Logger.error("Save failed: #{inspect(reason)}")
+        {:error, reason} -> Minga.Log.error(:editor, "Save failed: #{inspect(reason)}")
       end
     end
 

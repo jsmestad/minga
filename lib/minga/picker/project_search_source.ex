@@ -11,8 +11,6 @@ defmodule Minga.Picker.ProjectSearchSource do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
 
-  require Logger
-
   @impl true
   @spec title() :: String.t()
   def title, do: "Search project"
@@ -68,7 +66,7 @@ defmodule Minga.Picker.ProjectSearchSource do
         new_state
 
       {:error, reason} ->
-        Logger.error("Failed to open file: #{inspect(reason)}")
+        Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
         state
     end
   end

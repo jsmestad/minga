@@ -64,7 +64,9 @@ defmodule Minga.Config.OptionsTest do
                log_level_render: :default,
                log_level_lsp: :default,
                log_level_agent: :default,
-               log_level_editor: :default
+               log_level_editor: :default,
+               log_level_config: :default,
+               log_level_port: :default
              }
     end
   end

@@ -17,8 +17,6 @@ defmodule Minga.Extension.Supervisor do
 
   alias Minga.Extension.Registry, as: ExtRegistry
 
-  require Logger
-
   # ── Client API ──────────────────────────────────────────────────────────────
 
   @doc "Starts the extension supervisor."
@@ -81,19 +79,19 @@ defmodule Minga.Extension.Supervisor do
       case DynamicSupervisor.start_child(supervisor, child_spec) do
         {:ok, pid} ->
           ExtRegistry.update(registry, name, module: module, status: :running, pid: pid)
-          Logger.info("Extension #{name} started (#{module})")
+          Minga.Log.info(:config, "Extension #{name} started (#{module})")
           {:ok, pid}
 
         {:error, reason} ->
           msg = "Extension #{name} failed to start: #{inspect(reason)}"
-          Logger.warning(msg)
+          Minga.Log.warning(:config, msg)
           ExtRegistry.update(registry, name, module: module, status: :load_error, pid: nil)
           {:error, reason}
       end
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
-        Logger.warning(msg)
+        Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
         {:error, reason}
     end

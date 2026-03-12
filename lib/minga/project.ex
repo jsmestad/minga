@@ -29,8 +29,6 @@ defmodule Minga.Project do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Project.Detector
 
-  require Logger
-
   @enforce_keys []
   defstruct current_root: nil,
             project_type: nil,
@@ -205,7 +203,7 @@ defmodule Minga.Project do
 
       {:noreply, state}
     else
-      Logger.warning("Project.switch: directory not found: #{expanded}")
+      Minga.Log.warning(:editor, "Project.switch: directory not found: #{expanded}")
       {:noreply, state}
     end
   end
@@ -222,7 +220,7 @@ defmodule Minga.Project do
       state = add_to_known(state, expanded)
       {:noreply, state}
     else
-      Logger.warning("Project.add: directory not found: #{expanded}")
+      Minga.Log.warning(:editor, "Project.add: directory not found: #{expanded}")
       {:noreply, state}
     end
   end
@@ -275,7 +273,7 @@ defmodule Minga.Project do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{rebuild_ref: ref} = state) do
     if reason != :normal do
-      Logger.warning("Project file cache rebuild failed: #{inspect(reason)}")
+      Minga.Log.warning(:editor, "Project file cache rebuild failed: #{inspect(reason)}")
     end
 
     {:noreply, %{state | rebuilding?: false, rebuild_ref: nil}}
@@ -378,7 +376,7 @@ defmodule Minga.Project do
     :ok
   rescue
     e ->
-      Logger.warning("Failed to persist known projects: #{Exception.message(e)}")
+      Minga.Log.warning(:editor, "Failed to persist known projects: #{Exception.message(e)}")
       :ok
   end
 
@@ -437,7 +435,7 @@ defmodule Minga.Project do
     :ok
   rescue
     e ->
-      Logger.warning("Failed to persist recent files: #{Exception.message(e)}")
+      Minga.Log.warning(:editor, "Failed to persist recent files: #{Exception.message(e)}")
       :ok
   end
 end

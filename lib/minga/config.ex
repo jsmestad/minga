@@ -40,8 +40,6 @@ defmodule Minga.Config do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
 
-  require Logger
-
   @doc """
   Injects the config DSL into the calling module or script.
 
@@ -109,7 +107,7 @@ defmodule Minga.Config do
 
     case result do
       :ok -> :ok
-      {:error, reason} -> Logger.warning("bind failed: #{reason}")
+      {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end
 
     :ok
@@ -132,7 +130,7 @@ defmodule Minga.Config do
              is_binary(description) and is_list(opts) do
     case KeymapActive.bind(mode, key_str, command_name, description, opts) do
       :ok -> :ok
-      {:error, reason} -> Logger.warning("bind failed: #{reason}")
+      {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end
 
     :ok
@@ -219,7 +217,7 @@ defmodule Minga.Config do
         rescue
           e ->
             msg = "Command #{name} failed: #{Exception.message(e)}"
-            Logger.warning(msg)
+            Minga.Log.warning(:config, msg)
 
             try do
               Minga.API.message(msg)
@@ -357,7 +355,7 @@ defmodule Minga.Config do
     expanded = Path.expand(path)
 
     unless File.dir?(expanded) do
-      Logger.warning("extension #{name}: path does not exist: #{expanded}")
+      Minga.Log.warning(:config, "extension #{name}: path does not exist: #{expanded}")
     end
 
     ExtRegistry.register(name, expanded, config)

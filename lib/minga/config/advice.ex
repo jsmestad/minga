@@ -48,8 +48,6 @@ defmodule Minga.Config.Advice do
       end)
   """
 
-  require Logger
-
   @valid_phases [:before, :after, :around, :override]
 
   @table __MODULE__
@@ -236,11 +234,12 @@ defmodule Minga.Config.Advice do
         fun.(acc)
       rescue
         e ->
-          Logger.warning("Advice #{phase}:#{command} failed: #{Exception.message(e)}")
+          Minga.Log.warning(:config, "Advice #{phase}:#{command} failed: #{Exception.message(e)}")
           acc
       catch
         kind, reason ->
-          Logger.warning(
+          Minga.Log.warning(
+            :config,
             "Advice #{phase}:#{command} crashed: #{inspect(kind)} #{inspect(reason)}"
           )
 
@@ -254,11 +253,15 @@ defmodule Minga.Config.Advice do
     core.(state)
   rescue
     e ->
-      Logger.warning("Advice core for #{command} failed: #{Exception.message(e)}")
+      Minga.Log.warning(:config, "Advice core for #{command} failed: #{Exception.message(e)}")
       state
   catch
     kind, reason ->
-      Logger.warning("Advice core for #{command} crashed: #{inspect(kind)} #{inspect(reason)}")
+      Minga.Log.warning(
+        :config,
+        "Advice core for #{command} crashed: #{inspect(kind)} #{inspect(reason)}"
+      )
+
       state
   end
 

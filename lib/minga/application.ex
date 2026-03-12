@@ -97,8 +97,10 @@ defmodule Minga.Application do
     pruned = SessionStore.prune(retention_days)
 
     if pruned > 0 do
-      require Logger
-      Logger.info("[Agent] pruned #{pruned} sessions older than #{retention_days} days")
+      Minga.Log.info(
+        :agent,
+        "[Agent] pruned #{pruned} sessions older than #{retention_days} days"
+      )
     end
 
     :ok

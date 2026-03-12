@@ -23,8 +23,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Formatter
   alias Minga.Mode
 
-  require Logger
-
   @type state :: EditorState.t()
 
   @spec execute(state(), Mode.command()) :: state()
@@ -119,7 +117,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         Commands.add_buffer(state, pid)
 
       {:error, reason} ->
-        Logger.error("Failed to create buffer: #{inspect(reason)}")
+        Minga.Log.error(:editor, "Failed to create buffer: #{inspect(reason)}")
         state
     end
   end
@@ -225,7 +223,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
             Commands.add_buffer(state, pid)
 
           {:error, reason} ->
-            Logger.error("Failed to open file: #{inspect(reason)}")
+            Minga.Log.error(:editor, "Failed to open file: #{inspect(reason)}")
             state
         end
 
@@ -438,7 +436,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         EditorState.add_buffer(state, pid)
 
       {:error, reason} ->
-        Logger.warning("Failed to open config: #{inspect(reason)}")
+        Minga.Log.warning(:editor, "Failed to open config: #{inspect(reason)}")
         state
     end
   end
@@ -748,7 +746,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       {_, {:error, msg}} ->
         Minga.Editor.log_to_messages("Format-on-save failed: #{buf_name} (#{msg})")
-        Logger.warning("Format-on-save failed: #{msg}")
+        Minga.Log.warning(:editor, "Format-on-save failed: #{msg}")
         state
     end
   end

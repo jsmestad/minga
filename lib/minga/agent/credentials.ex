@@ -14,8 +14,6 @@ defmodule Minga.Agent.Credentials do
   sent to `*Messages*`.
   """
 
-  require Logger
-
   @typedoc "A supported provider name."
   @type provider :: String.t()
 

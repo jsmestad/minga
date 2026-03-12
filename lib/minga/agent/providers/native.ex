@@ -31,8 +31,6 @@ defmodule Minga.Agent.Providers.Native do
 
   use GenServer
 
-  require Logger
-
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Instructions
@@ -167,7 +165,7 @@ defmodule Minga.Agent.Providers.Native do
       streaming: false
     }
 
-    Logger.info("[Agent.Native] started with model=#{model} root=#{project_root}")
+    Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
 
     {:ok, state}
   end
@@ -213,7 +211,7 @@ defmodule Minga.Agent.Providers.Native do
   def handle_call(:abort, _from, state) do
     Task.shutdown(state.task, :brutal_kill)
     state = %{state | task: nil, streaming: false}
-    Logger.info("[Agent.Native] aborted current operation")
+    Minga.Log.info(:agent, "[Agent.Native] aborted current operation")
     {:reply, :ok, state}
   end
 
@@ -227,7 +225,7 @@ defmodule Minga.Agent.Providers.Native do
     context = Context.new([Context.system(system_prompt)])
 
     state = %{state | context: context, task: nil, streaming: false}
-    Logger.info("[Agent.Native] new session started")
+    Minga.Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
   end
@@ -248,7 +246,7 @@ defmodule Minga.Agent.Providers.Native do
 
   def handle_call({:set_thinking_level, level}, _from, state) do
     if Map.has_key?(@thinking_levels, level) do
-      Logger.info("[Agent.Native] thinking level set to #{level}")
+      Minga.Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
       {:reply, :ok, %{state | thinking_level: level}}
     else
       {:reply,
@@ -262,7 +260,7 @@ defmodule Minga.Agent.Providers.Native do
     next_index = rem(current_index + 1, length(@thinking_cycle))
     next_level = Enum.at(@thinking_cycle, next_index)
 
-    Logger.info("[Agent.Native] thinking level cycled to #{next_level}")
+    Minga.Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
     {:reply, {:ok, %{"level" => next_level}}, %{state | thinking_level: next_level}}
   end
 
@@ -287,7 +285,7 @@ defmodule Minga.Agent.Providers.Native do
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
     # Task completed with an error
     Process.demonitor(ref, [:flush])
-    Logger.error("[Agent.Native] agent loop error: #{inspect(reason)}")
+    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{inspect(reason)}")
     notify(state.subscriber, %Event.Error{message: format_error(reason)})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
     {:noreply, %{state | task: nil, streaming: false}}
@@ -295,7 +293,7 @@ defmodule Minga.Agent.Providers.Native do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     # Task crashed
-    Logger.error("[Agent.Native] agent task crashed: #{inspect(reason)}")
+    Minga.Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
     notify(state.subscriber, %Event.Error{message: "Agent task crashed: #{inspect(reason)}"})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
     {:noreply, %{state | task: nil, streaming: false}}

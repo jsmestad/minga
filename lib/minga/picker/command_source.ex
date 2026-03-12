@@ -17,8 +17,6 @@ defmodule Minga.Picker.CommandSource do
   alias Minga.Keymap.Defaults
   alias Minga.Picker.OptionScopeSource
 
-  require Logger
-
   @impl true
   @spec title() :: String.t()
   def title, do: "Commands"
@@ -38,7 +36,7 @@ defmodule Minga.Picker.CommandSource do
       |> Enum.sort_by(fn {_id, label, _desc} -> label end)
     catch
       :exit, _ ->
-        Logger.warning("Command registry not available")
+        Minga.Log.warning(:editor, "Command registry not available")
         []
     end
   end

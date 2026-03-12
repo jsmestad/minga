@@ -21,8 +21,6 @@ defmodule Minga.Agent.Session do
 
   use GenServer
 
-  require Logger
-
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Message
@@ -378,7 +376,7 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call({:respond_to_approval, _decision}, _from, %{pending_approval: nil} = state) do
-    Logger.warning("[Session] respond_to_approval called with no pending approval")
+    Minga.Log.warning(:agent, "[Session] respond_to_approval called with no pending approval")
     {:reply, {:error, :no_pending_approval}, state}
   end
 
@@ -494,7 +492,7 @@ defmodule Minga.Agent.Session do
         {:noreply, state}
 
       {:error, reason} ->
-        Logger.error("[Agent.Session] failed to start provider: #{inspect(reason)}")
+        Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
         state = set_status(state, :error)
         state = %{state | error_message: format_error(reason)}
         broadcast(state, {:error, state.error_message})
@@ -508,7 +506,7 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
-    Logger.warning("[Agent.Session] provider process died: #{inspect(reason)}")
+    Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
     state = set_status(state, :error)
     state = %{state | provider: nil, error_message: "Agent provider crashed"}
     broadcast(state, {:error, state.error_message})

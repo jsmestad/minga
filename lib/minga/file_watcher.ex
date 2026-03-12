@@ -21,8 +21,6 @@ defmodule Minga.FileWatcher do
 
   use GenServer
 
-  require Logger
-
   @enforce_keys [:subscriber, :debounce_ms]
   defstruct subscriber: nil,
             debounce_ms: nil,
@@ -146,7 +144,7 @@ defmodule Minga.FileWatcher do
   end
 
   def handle_info({:file_event, _watcher_pid, :stop}, %__MODULE__{} = state) do
-    Logger.warning("File watcher stopped unexpectedly")
+    Minga.Log.warning(:editor, "File watcher stopped unexpectedly")
     {:noreply, %__MODULE__{state | watcher: nil}}
   end
 
@@ -189,11 +187,11 @@ defmodule Minga.FileWatcher do
         pid
 
       :ignore ->
-        Logger.warning("File watcher not supported on this platform")
+        Minga.Log.warning(:editor, "File watcher not supported on this platform")
         nil
 
       {:error, reason} ->
-        Logger.error("Failed to start file watcher: #{inspect(reason)}")
+        Minga.Log.error(:editor, "Failed to start file watcher: #{inspect(reason)}")
         nil
     end
   end
