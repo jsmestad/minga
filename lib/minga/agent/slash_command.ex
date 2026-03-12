@@ -8,6 +8,7 @@ defmodule Minga.Agent.SlashCommand do
   and any arguments after the command name.
   """
 
+  alias Minga.Agent.Credentials
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -29,7 +30,11 @@ defmodule Minga.Agent.SlashCommand do
     %{name: "thinking", description: "Set thinking level: /thinking [off|low|medium|high]"},
     %{name: "model", description: "Set the model: /model <name>"},
     %{name: "help", description: "Show available slash commands"},
-    %{name: "sessions", description: "Browse and switch between sessions"}
+    %{name: "sessions", description: "Browse and switch between sessions"},
+    %{
+      name: "auth",
+      description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
+    }
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -76,6 +81,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
+  defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(_state, cmd, _args), do: {:error, "Unknown command: /#{cmd}"}
 
   # ── Command implementations ────────────────────────────────────────────────
@@ -138,6 +144,133 @@ defmodule Minga.Agent.SlashCommand do
   @spec do_sessions(state()) :: state()
   defp do_sessions(state) do
     PickerUI.open(state, Minga.Picker.AgentSessionSource)
+  end
+
+  # ── Auth command ─────────────────────────────────────────────────────────────
+
+  @spec do_auth(state(), String.t()) :: state()
+  defp do_auth(state, "") do
+    # No args: show status for all providers
+    statuses = Credentials.status()
+
+    lines =
+      Enum.map_join(statuses, "\n", fn s ->
+        icon = if s.configured, do: "✓", else: "✗"
+        source_hint = if s.source, do: " (#{s.source})", else: ""
+        "  #{icon} #{String.capitalize(s.provider)}#{source_hint}"
+      end)
+
+    message =
+      "API key status:\n#{lines}\n\nUse /auth <provider> <key> to add a key.\nUse /auth revoke <provider> to remove one."
+
+    emit_system_message(state, message)
+  end
+
+  defp do_auth(state, args) do
+    parts = String.split(String.trim(args), " ", parts: 3)
+
+    case parts do
+      ["revoke", provider] ->
+        do_auth_revoke(state, String.downcase(provider))
+
+      ["revoke"] ->
+        emit_system_message(
+          state,
+          "Usage: /auth revoke <provider>\nProviders: #{Enum.join(Credentials.known_providers(), ", ")}"
+        )
+
+      [provider, key] ->
+        do_auth_store(state, String.downcase(provider), key)
+
+      [provider] ->
+        emit_system_message(
+          state,
+          "Usage: /auth #{provider} <api-key>\nPaste your API key after the provider name."
+        )
+
+      _ ->
+        emit_system_message(
+          state,
+          "Usage: /auth [provider] [key]\nProviders: #{Enum.join(Credentials.known_providers(), ", ")}"
+        )
+    end
+  end
+
+  @spec do_auth_store(state(), String.t(), String.t()) :: state()
+  defp do_auth_store(state, provider, key) do
+    case validate_and_store(provider, key) do
+      :ok ->
+        emit_system_message(
+          state,
+          "✓ #{String.capitalize(provider)} API key saved. It will be used for new sessions."
+        )
+
+      {:error, :unknown_provider} ->
+        emit_system_message(
+          state,
+          "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
+        )
+
+      {:error, reason} ->
+        emit_system_message(state, "✗ Failed to save key: #{inspect(reason)}")
+    end
+  end
+
+  @spec validate_and_store(String.t(), String.t()) :: :ok | {:error, term()}
+  defp validate_and_store(provider, key) do
+    if provider in Credentials.known_providers() do
+      case Credentials.store(provider, key) do
+        :ok ->
+          set_env_for_provider(provider, key)
+          :ok
+
+        error ->
+          error
+      end
+    else
+      {:error, :unknown_provider}
+    end
+  end
+
+  # Sets the env var for a provider so the current session picks it up immediately.
+  @spec set_env_for_provider(String.t(), String.t()) :: :ok
+  defp set_env_for_provider(provider, key) do
+    case Credentials.env_var_for(provider) do
+      nil -> :ok
+      var_name -> System.put_env(var_name, key)
+    end
+
+    :ok
+  end
+
+  @spec do_auth_revoke(state(), String.t()) :: state()
+  defp do_auth_revoke(state, provider) do
+    if provider in Credentials.known_providers() do
+      case Credentials.revoke(provider) do
+        :ok ->
+          emit_system_message(
+            state,
+            "✓ #{String.capitalize(provider)} API key removed from credentials file.\nNote: if the key is also set via environment variable (#{Credentials.env_var_for(provider)}), it will still be used."
+          )
+
+        {:error, reason} ->
+          emit_system_message(state, "✗ Failed to revoke key: #{inspect(reason)}")
+      end
+    else
+      emit_system_message(
+        state,
+        "Unknown provider: #{provider}\nKnown providers: #{Enum.join(Credentials.known_providers(), ", ")}"
+      )
+    end
+  end
+
+  @spec emit_system_message(state(), String.t()) :: state()
+  defp emit_system_message(state, message) do
+    if AgentAccess.session(state) do
+      Session.add_system_message(AgentAccess.session(state), message)
+    end
+
+    %{state | status_msg: String.slice(message, 0, 80)}
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

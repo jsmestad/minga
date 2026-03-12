@@ -23,6 +23,7 @@ defmodule Minga.Agent.Session do
 
   require Logger
 
+  alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Message
   alias Minga.Agent.ProviderResolver
@@ -489,6 +490,7 @@ defmodule Minga.Agent.Session do
         Process.monitor(pid)
         state = %{state | provider: pid}
         state = apply_pending_thinking_level(state)
+        state = maybe_show_auth_onboarding(state)
         {:noreply, state}
 
       {:error, reason} ->
@@ -739,6 +741,24 @@ defmodule Minga.Agent.Session do
   defp format_error(reason), do: inspect(reason)
 
   @spec apply_pending_thinking_level(state()) :: state()
+  # Shows an onboarding message when no API keys are configured and the
+  # native provider is active. Only fires once per session.
+  @spec maybe_show_auth_onboarding(map()) :: map()
+  defp maybe_show_auth_onboarding(state) do
+    if state.provider_module == Minga.Agent.Providers.Native and not Credentials.any_configured?() do
+      msg =
+        "No API keys configured. Use `/auth` to get started.\n\n" <>
+          "Example: `/auth anthropic sk-ant-your-key-here`\n" <>
+          "Run `/auth` with no arguments to see status for all providers."
+
+      messages = state.messages ++ [Message.system(msg)]
+      broadcast(state, {:system_message, msg, :info})
+      %{state | messages: messages}
+    else
+      state
+    end
+  end
+
   defp apply_pending_thinking_level(%{pending_thinking_level: nil} = state), do: state
 
   defp apply_pending_thinking_level(%{pending_thinking_level: level} = state) do
