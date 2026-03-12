@@ -410,6 +410,19 @@ defmodule Minga.Agent.PanelState do
   @spec input_line_count(t()) :: pos_integer()
   def input_line_count(%__MODULE__{input: tf}), do: TextField.line_count(tf)
 
+  @doc "Returns the input lines as a list of strings."
+  @spec input_lines(t()) :: [String.t()]
+  def input_lines(%__MODULE__{input: tf}), do: tf.lines
+
+  @doc "Returns the input cursor position as `{line, col}`."
+  @spec input_cursor(t()) :: {non_neg_integer(), non_neg_integer()}
+  def input_cursor(%__MODULE__{input: tf}), do: tf.cursor
+
+  @doc "Returns true if the input is empty (single empty line)."
+  @spec input_empty?(t()) :: boolean()
+  def input_empty?(%__MODULE__{input: %TextField{lines: [""]}}), do: true
+  def input_empty?(%__MODULE__{}), do: false
+
   @doc """
   Clears the chat display without affecting conversation history.
 

@@ -8,6 +8,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
+  alias Minga.Agent.PanelState
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Overlay, WindowFrame}
@@ -108,7 +109,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
     panel = AgentAccess.panel(state)
 
     if panel.visible and panel.input_focused do
-      {cursor_line, cursor_col} = panel.input.cursor
+      {cursor_line, cursor_col} = PanelState.input_cursor(panel)
       input_row = row + h - @agent_input_height + 1 + cursor_line
       input_col = col + 2 + cursor_col
 

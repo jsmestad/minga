@@ -115,8 +115,8 @@ defmodule Minga.Input.Scoped do
     # Normal dispatch: determine vim state and resolve through scope
     # Tab on a paste placeholder line: toggle expand/collapse
     if cp == @tab and mods == 0 and panel.input_focused do
-      {cursor_line, _} = panel.input.cursor
-      current_line = Enum.at(panel.input.lines, cursor_line)
+      {cursor_line, _} = PanelState.input_cursor(panel)
+      current_line = Enum.at(PanelState.input_lines(panel), cursor_line)
 
       if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
         {:handled, AgentCommands.toggle_paste_expand(state)}

@@ -20,6 +20,7 @@ defmodule Minga.Agent.View.Mouse do
       └──────── minibuffer ────────────────-┘  ← shared chrome (:passthrough)
   """
 
+  alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -154,8 +155,8 @@ defmodule Minga.Agent.View.Mouse do
     cols = state.viewport.cols
     rows = state.viewport.rows
 
-    input_lines = AgentAccess.panel(state).input.lines
-    input_height = min(length(input_lines), 5) + 2
+    panel = AgentAccess.panel(state)
+    input_height = min(PanelState.input_line_count(panel), 5) + 2
 
     # Tab bar at row 0, title bar at row 1, content starts at row 2.
     panel_start = 2

@@ -10,6 +10,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
+  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
@@ -279,15 +280,15 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @spec should_trigger_mention?(state()) :: boolean()
   defp should_trigger_mention?(state) do
     panel = AgentAccess.panel(state)
-    {line, col} = panel.input.cursor
-    current_line = Enum.at(panel.input.lines, line, "")
+    {line, col} = PanelState.input_cursor(panel)
+    current_line = Enum.at(PanelState.input_lines(panel), line, "")
     col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
   end
 
   @spec start_mention_completion(state()) :: state()
   defp start_mention_completion(state) do
     files = list_project_files()
-    {line, col} = AgentAccess.panel(state).input.cursor
+    {line, col} = PanelState.input_cursor(AgentAccess.panel(state))
     completion = FileMention.new_completion(files, line, col - 1)
     update_panel(state, fn p -> %{p | mention_completion: completion} end)
   end
@@ -302,8 +303,9 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
       path ->
         panel = AgentAccess.panel(state)
-        {line, _col} = panel.input.cursor
-        current = Enum.at(panel.input.lines, line)
+        {line, _col} = PanelState.input_cursor(panel)
+        lines = PanelState.input_lines(panel)
+        current = Enum.at(lines, line)
         anchor_col = comp.anchor_col
 
         before = String.slice(current, 0, anchor_col)
@@ -317,7 +319,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
         new_line = before <> "@" <> path <> " " <> after_prefix
         new_col = anchor_col + 1 + String.length(path) + 1
-        new_lines = List.replace_at(panel.input.lines, line, new_line)
+        new_lines = List.replace_at(lines, line, new_line)
 
         update_panel(state, fn p ->
           %{p | input: TextField.from_parts(new_lines, {line, new_col}), mention_completion: nil}
