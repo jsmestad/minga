@@ -22,6 +22,19 @@ defmodule Minga.Editor.SurfaceSync do
   Agent scope creates an AgentView surface; everything else creates BufferView.
   """
   @spec init_surface(EditorState.t()) :: EditorState.t()
+  def init_surface(
+        %EditorState{keymap_scope: :agent, surface_state: %AgentView.State{} = av} = state
+      ) do
+    # Preserve existing AgentViewState, just refresh the shared context
+    alias Minga.Surface.Context
+
+    %{
+      state
+      | surface_module: AgentView,
+        surface_state: %{av | context: Context.from_editor_state(state)}
+    }
+  end
+
   def init_surface(%EditorState{keymap_scope: :agent} = state) do
     surface_state = AgentView.from_editor_state(state)
     %{state | surface_module: AgentView, surface_state: surface_state}
