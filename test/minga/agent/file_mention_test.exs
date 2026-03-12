@@ -104,6 +104,97 @@ defmodule Minga.Agent.FileMentionTest do
     end
   end
 
+  # ── Image support ────────────────────────────────────────────────────────────
+
+  describe "image_path?/1" do
+    test "recognizes image extensions" do
+      assert FileMention.image_path?("screenshot.png")
+      assert FileMention.image_path?("photo.jpg")
+      assert FileMention.image_path?("photo.jpeg")
+      assert FileMention.image_path?("anim.gif")
+      assert FileMention.image_path?("modern.webp")
+    end
+
+    test "case insensitive" do
+      assert FileMention.image_path?("PHOTO.PNG")
+      assert FileMention.image_path?("image.JPG")
+    end
+
+    test "rejects non-image extensions" do
+      refute FileMention.image_path?("code.ex")
+      refute FileMention.image_path?("readme.md")
+      refute FileMention.image_path?("data.json")
+    end
+  end
+
+  describe "resolve_prompt/2 with images" do
+    test "returns ContentPart list when image is mentioned", %{tmp_dir: dir} do
+      # Create a minimal 1x1 red PNG (67 bytes)
+      png_data = create_minimal_png()
+      path = Path.join(dir, "screenshot.png")
+      File.write!(path, png_data)
+
+      {:ok, parts} = FileMention.resolve_prompt("@screenshot.png what is this?", dir)
+
+      assert is_list(parts)
+      assert length(parts) == 2
+
+      [text_part, image_part] = parts
+      assert text_part.type == :text
+      assert text_part.text =~ "what is this?"
+
+      assert image_part.type == :image
+      assert image_part.media_type == "image/png"
+      assert is_binary(image_part.data)
+    end
+
+    test "mixes text files and images as content parts", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "code.ex"), "defmodule Foo do\nend")
+      File.write!(Path.join(dir, "design.png"), create_minimal_png())
+
+      {:ok, parts} = FileMention.resolve_prompt("@code.ex @design.png compare", dir)
+
+      assert is_list(parts)
+      text_parts = Enum.filter(parts, &(&1.type == :text))
+      image_parts = Enum.filter(parts, &(&1.type == :image))
+
+      assert length(text_parts) == 1
+      assert length(image_parts) == 1
+
+      assert hd(text_parts).text =~ "defmodule Foo"
+      assert hd(text_parts).text =~ "compare"
+    end
+
+    test "rejects oversized images", %{tmp_dir: dir} do
+      # Create a file that exceeds the 5MB limit
+      path = Path.join(dir, "huge.png")
+      File.write!(path, :binary.copy(<<0>>, 6 * 1024 * 1024))
+
+      assert {:error, msg} = FileMention.resolve_prompt("@huge.png look", dir)
+      assert msg =~ "image too large"
+    end
+
+    test "returns error for missing image file", %{tmp_dir: dir} do
+      assert {:error, msg} = FileMention.resolve_prompt("@missing.png look", dir)
+      assert msg =~ "file not found"
+    end
+
+    test "text-only mentions still return a string", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.ex"), "code")
+
+      {:ok, result} = FileMention.resolve_prompt("@test.ex explain", dir)
+      assert is_binary(result)
+    end
+  end
+
+  # Helper to create a minimal valid PNG for testing
+  defp create_minimal_png do
+    # Minimal 1x1 red PNG
+    <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2,
+      0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 8, 215, 99, 248, 207, 192, 0, 0, 0,
+      3, 0, 1, 24, 216, 141, 110, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130>>
+  end
+
   # ── Completion ──────────────────────────────────────────────────────────────
 
   describe "new_completion/3" do

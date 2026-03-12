@@ -207,16 +207,17 @@ defmodule Minga.Agent.Providers.Native do
     {:reply, {:error, :already_streaming}, state}
   end
 
-  def handle_call({:send_prompt, text}, _from, state) do
-    # Append user message to context
-    context = Context.append(state.context, Context.user(text))
+  def handle_call({:send_prompt, content}, _from, state) do
+    # Append user message to context.
+    # content is either a string or a list of ContentPart (for multi-modal).
+    context = Context.append(state.context, Context.user(content))
 
     state = %{
       state
       | context: context,
         streaming: true,
         interrupted: false,
-        last_user_prompt: text
+        last_user_prompt: content
     }
 
     # Notify subscriber that agent is starting

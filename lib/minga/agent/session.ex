@@ -67,10 +67,16 @@ defmodule Minga.Agent.Session do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
   end
 
-  @doc "Sends a user prompt to the agent."
-  @spec send_prompt(GenServer.server(), String.t()) :: :ok | {:error, term()}
-  def send_prompt(session, text) when is_binary(text) do
-    GenServer.call(session, {:send_prompt, text})
+  @doc """
+  Sends a user prompt to the agent.
+
+  Accepts either a plain text string or a list of ContentPart structs
+  (for multi-modal messages with images).
+  """
+  @spec send_prompt(GenServer.server(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          :ok | {:error, term()}
+  def send_prompt(session, content) when is_binary(content) or is_list(content) do
+    GenServer.call(session, {:send_prompt, content})
   end
 
   @doc "Aborts the current agent operation."
