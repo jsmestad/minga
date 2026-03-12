@@ -1,5 +1,6 @@
 defmodule Minga.NavigableContentTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Buffer.Document
   alias Minga.NavigableContent
@@ -334,6 +335,88 @@ defmodule Minga.NavigableContentTest do
       assert Readable.line_at(s, 0) == "line1"
       assert Readable.line_at(s, 1) == "LINE2"
       assert Readable.line_at(s, 2) == "line3"
+    end
+  end
+
+  # ── Property-based tests ────────────────────────────────────────────────────
+
+  describe "properties" do
+    property "set_cursor always clamps to valid content bounds" do
+      check all(
+              text <- string(:printable, min_length: 1, max_length: 200),
+              line <- integer(0..50),
+              col <- integer(0..200)
+            ) do
+        s = snapshot(text)
+        s = NavigableContent.set_cursor(s, {line, col})
+        {actual_line, actual_col} = NavigableContent.cursor(s)
+
+        total_lines = Readable.line_count(s)
+        assert actual_line < total_lines
+
+        line_text = Readable.line_at(s, actual_line) || ""
+        assert actual_col <= byte_size(line_text)
+      end
+    end
+
+    property "replace_range never crashes on valid positions" do
+      check all(
+              text <- string(:printable, min_length: 1, max_length: 100),
+              replacement <- string(:printable, max_length: 20)
+            ) do
+        s = snapshot(text)
+        total = Readable.line_count(s)
+        last_line = total - 1
+        last_line_text = Readable.line_at(s, last_line) || ""
+        last_col = byte_size(last_line_text)
+
+        # Replace from start to end with replacement text
+        result =
+          NavigableContent.replace_range(
+            s,
+            {0, 0},
+            {last_line, max(last_col - 1, 0)},
+            replacement
+          )
+
+        assert %BufferSnapshot{} = result
+      end
+    end
+
+    property "search_forward returns nil or a valid position" do
+      check all(
+              text <- string(:printable, min_length: 1, max_length: 100),
+              pattern <- string(:alphanumeric, min_length: 1, max_length: 5)
+            ) do
+        s = snapshot(text)
+        result = NavigableContent.search_forward(s, pattern, {0, 0})
+
+        case result do
+          nil ->
+            :ok
+
+          {line, col} ->
+            total = Readable.line_count(s)
+            assert line < total
+            line_text = Readable.line_at(s, line) || ""
+            assert col < byte_size(line_text) or col == 0
+        end
+      end
+    end
+
+    property "motion functions never crash on BufferSnapshot" do
+      check all(text <- string(:printable, min_length: 1, max_length: 200)) do
+        s = snapshot(text)
+        cursor = NavigableContent.cursor(s)
+
+        # These should never crash, regardless of content
+        _pos1 = Minga.Motion.word_forward(s, cursor)
+        _pos2 = Minga.Motion.word_backward(s, cursor)
+        _pos3 = Minga.Motion.line_start(s, cursor)
+        _pos4 = Minga.Motion.line_end(s, cursor)
+        _pos5 = Minga.Motion.document_start(s)
+        _pos6 = Minga.Motion.document_end(s)
+      end
     end
   end
 end
