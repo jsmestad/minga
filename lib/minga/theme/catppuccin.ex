@@ -86,7 +86,11 @@ defmodule Minga.Theme.Catppuccin do
         cursor_bg: p.surface0,
         header_fg: p.blue,
         header_bg: p.mantle,
-        separator_fg: p.surface1
+        separator_fg: p.surface1,
+        git_modified_fg: p.peach,
+        git_staged_fg: p.green,
+        git_untracked_fg: p.overlay0,
+        git_conflict_fg: p.red
       },
       agent: %Minga.Theme.Agent{
         panel_bg: p.base,

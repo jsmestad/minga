@@ -381,7 +381,20 @@ defmodule Minga.Theme do
       :header_bg,
       :separator_fg
     ]
-    defstruct [:bg, :fg, :dir_fg, :active_fg, :cursor_bg, :header_fg, :header_bg, :separator_fg]
+    defstruct [
+      :bg,
+      :fg,
+      :dir_fg,
+      :active_fg,
+      :cursor_bg,
+      :header_fg,
+      :header_bg,
+      :separator_fg,
+      :git_modified_fg,
+      :git_staged_fg,
+      :git_untracked_fg,
+      :git_conflict_fg
+    ]
 
     @type t :: %__MODULE__{
             bg: Minga.Theme.color(),
@@ -391,7 +404,11 @@ defmodule Minga.Theme do
             cursor_bg: Minga.Theme.color(),
             header_fg: Minga.Theme.color(),
             header_bg: Minga.Theme.color(),
-            separator_fg: Minga.Theme.color()
+            separator_fg: Minga.Theme.color(),
+            git_modified_fg: Minga.Theme.color() | nil,
+            git_staged_fg: Minga.Theme.color() | nil,
+            git_untracked_fg: Minga.Theme.color() | nil,
+            git_conflict_fg: Minga.Theme.color() | nil
           }
   end
 

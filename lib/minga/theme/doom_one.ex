@@ -104,7 +104,11 @@ defmodule Minga.Theme.DoomOne do
         cursor_bg: 0x3E4451,
         header_fg: @blue,
         header_bg: @base3,
-        separator_fg: @base5
+        separator_fg: @base5,
+        git_modified_fg: @orange,
+        git_staged_fg: @green,
+        git_untracked_fg: @grey,
+        git_conflict_fg: @red
       },
       agent: %Minga.Theme.Agent{
         panel_bg: @bg,

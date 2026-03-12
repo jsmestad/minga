@@ -115,6 +115,49 @@ defmodule Minga.Editor.TreeRendererTest do
       assert length(row1_draws) >= 2
     end
 
+    test "renders git status indicators right-aligned", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        git_status: %{main_path => :modified}
+      }
+
+      draws = TreeRenderer.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # The modified indicator symbol should appear
+      assert String.contains?(all_text, "●")
+    end
+
+    test "git status indicator has correct theme color", %{tmp_dir: tmp_dir} do
+      tree = sample_tree(tmp_dir)
+      main_path = Path.join(tmp_dir, "lib/main.ex")
+      theme = Theme.get!(:doom_one)
+
+      input = %RenderInput{
+        tree: tree,
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: theme,
+        active_path: nil,
+        git_status: %{main_path => :staged}
+      }
+
+      draws = TreeRenderer.render(input)
+      # Find the draw that contains the staged symbol
+      staged_draw = Enum.find(draws, fn {_r, _c, text, _s} -> String.contains?(text, "✚") end)
+      assert staged_draw != nil
+      {_r, _c, _text, style} = staged_draw
+      assert Keyword.get(style, :fg) == theme.tree.git_staged_fg
+    end
+
     test "highlights active file path", %{tmp_dir: tmp_dir} do
       main_path = Path.join(tmp_dir, "lib/main.ex")
 
