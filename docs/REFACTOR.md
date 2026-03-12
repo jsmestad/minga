@@ -3,6 +3,18 @@
 **Status:** Agent state fully owned by surfaces. Bridge layer reduction in progress.
 **Date:** 2026-03-10 (proposed), 2026-03-11 (Phases 1-4 + post-phase landed), 2026-03-11 (Steps 1-3 landed)
 
+## The One Rule
+
+**Every surface uses real buffers. The vim editing model (and future CUA model) applies everywhere. No reimplementing editing operations on custom data structures.**
+
+The agent prompt should be a `Buffer.Server`, not a `TextField`. Chat content should be navigable through the same viewport/scroll abstractions files use. Read-only enforcement is a buffer property (`Buffer.Server.read_only?/1`), not a surface property. The `*Messages*` buffer is read-only in BufferView. Chat content is read-only in AgentView. Same mechanism.
+
+This eliminates ~35 of the 62 "agent commands" that exist solely because the agent view reimplements vim on non-buffer data structures: scrolling, insert, backspace, cursor movement, yank, search, folding. All of these are standard vim commands that work on any buffer. The only genuinely agent-specific commands are domain actions: submit prompt, approve/reject tools, session lifecycle, model settings.
+
+**If you are about to write a command that duplicates an existing vim operation on a different data structure, stop.** Make the data structure a buffer instead. If you are about to add an `agent_` prefix to a command that already exists without the prefix, stop. The editing model should handle it.
+
+The structural refactoring (Surfaces, bridges, state ownership) exists to enable this principle. If a structural change doesn't move us toward "one editing model, real buffers everywhere," it's the wrong change.
+
 ## Current Migration Status
 
 ### Step 1: Surface state authoritative for tab lifecycle ✅ (#319)
@@ -31,10 +43,11 @@
 - Remaining bridge calls: 21 (down from 53)
 
 ### Remaining work
-- **Buffer field migration**: ~221 refs across the codebase. The right approach is changing command signatures, not wrapping reads in an access module.
-- **Command signature changes**: `execute(EditorState.t(), command)` should become surface-specific
-- **Input handler signature changes**: handlers should receive surface state directly instead of EditorState
-- **Eliminate SurfaceSync**: replace sync_surface_from_editor calls with direct surface_state management
+- **Agent prompt → Buffer.Server**: replace `TextField` with a real buffer so standard vim commands apply. This eliminates ~35 agent commands that reimplement vim.
+- **Editing model as a behaviour**: `Minga.EditingModel` with `handle_key/4` and `execute/3`. Vim implements it today; CUA (#306) implements it later. Both surfaces use the same behaviour.
+- **VimState substruct stays**: editing model state (`mode`, `mode_state`, `reg`, `marks`, etc.) is grouped under `editing: %VimState{}` on BufferViewState. This is the right boundary for swapping in CUA later.
+- **Eliminate BufferView bridge**: once commands take `BufferViewState.t()` directly (via the editing model), the bridge round-trip dies.
+- **Remove buffer fields from EditorState**: EditorState becomes a thin orchestrator (port, theme, tabs, overlays). Buffer-owned fields move to BufferViewState permanently.
 
 ---
 
