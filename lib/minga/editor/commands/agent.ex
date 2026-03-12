@@ -157,6 +157,7 @@ defmodule Minga.Editor.Commands.Agent do
       |> Layout.invalidate()
       |> EditorState.invalidate_all_windows()
       |> maybe_start_session()
+      |> then(&update_agent(&1, fn a -> AgentState.focus_input(a, true) end))
     else
       state
     end
