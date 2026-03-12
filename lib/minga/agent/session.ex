@@ -167,6 +167,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :compact, 30_000)
   end
 
+  @doc "Continues from an interrupted stream response."
+  @spec continue(GenServer.server()) :: :ok | {:error, term()}
+  def continue(session) do
+    GenServer.call(session, :continue)
+  end
+
   @doc "Fetches available models from the provider."
   @spec get_available_models(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_available_models(session) do
@@ -422,6 +428,19 @@ defmodule Minga.Agent.Session do
       {:reply, result, state}
     else
       {:reply, {:error, "Provider does not support compaction"}, state}
+    end
+  end
+
+  def handle_call(:continue, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:continue, _from, state) do
+    if function_exported?(state.provider_module, :continue, 1) do
+      result = state.provider_module.continue(state.provider)
+      {:reply, result, state}
+    else
+      {:reply, {:error, "Provider does not support continue"}, state}
     end
   end
 
