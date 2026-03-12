@@ -45,8 +45,8 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
     test "non-overridden keys still work from scope defaults" do
       KeymapActive.bind({:agent, :normal}, "y", :my_yank, "My yank")
 
-      # j should still be agent_scroll_down from the default scope keymap
-      assert {:command, :agent_scroll_down} = Scope.resolve_key(:agent, :normal, {?j, 0})
+      # q should still be agent_close from the default scope keymap
+      assert {:command, :agent_close} = Scope.resolve_key(:agent, :normal, {?q, 0})
     end
 
     test "user can add new keys to a scope" do

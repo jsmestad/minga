@@ -212,21 +212,22 @@ defmodule Minga.Input.ScopedTest do
       {:ok, state: base_state(keymap_scope: :agent, agentic_active: true)}
     end
 
-    test "j scrolls down", %{state: state} do
-      assert {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
-
-      assert AgentAccess.panel(new_state).scroll.offset != AgentAccess.panel(state).scroll.offset or
-               new_state == state
+    test "j passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
+      # Full chain handling (through AgentChatNav)
+      assert {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
 
-    test "k scrolls up", %{state: state} do
-      # First scroll down so there's room to scroll up
-      {:handled, scrolled} = Scoped.handle_key(state, ?j, 0)
-      assert {:handled, _} = Scoped.handle_key(scrolled, ?k, 0)
+    test "k passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+      assert {:passthrough, _} = Scoped.handle_key(state, ?k, 0)
+      # Full chain handling
+      assert {:handled, _} = walk_surface_handlers(state, ?k, 0)
     end
 
-    test "G scrolls to bottom", %{state: state} do
-      assert {:handled, _} = Scoped.handle_key(state, ?G, 0)
+    test "G passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+      assert {:passthrough, _} = Scoped.handle_key(state, ?G, 0)
+      # Full chain handling
+      assert {:handled, _} = walk_surface_handlers(state, ?G, 0)
     end
 
     test "q closes agentic view", %{state: state} do
@@ -308,12 +309,16 @@ defmodule Minga.Input.ScopedTest do
                AgentAccess.agentic(state).chat_width_pct
     end
 
-    test "Ctrl+D scrolls half page down", %{state: state} do
-      assert {:handled, _} = Scoped.handle_key(state, ?d, 0x02)
+    test "Ctrl+D passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+      assert {:passthrough, _} = Scoped.handle_key(state, ?d, 0x02)
+      # Full chain handling
+      assert {:handled, _} = walk_surface_handlers(state, ?d, 0x02)
     end
 
-    test "Ctrl+U scrolls half page up", %{state: state} do
-      assert {:handled, _} = Scoped.handle_key(state, ?u, 0x02)
+    test "Ctrl+U passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+      assert {:passthrough, _} = Scoped.handle_key(state, ?u, 0x02)
+      # Full chain handling
+      assert {:handled, _} = walk_surface_handlers(state, ?u, 0x02)
     end
 
     test "ESC dismisses help when visible", %{state: state} do
@@ -322,9 +327,11 @@ defmodule Minga.Input.ScopedTest do
       refute AgentAccess.agentic(new_state).help_visible
     end
 
-    test "unbound key is swallowed in normal mode", %{state: state} do
-      # tilde is not bound in agent scope
-      assert {:handled, ^state} = Scoped.handle_key(state, ?~, 0)
+    test "unbound key passthrough to Mode FSM", %{state: state} do
+      # tilde is not bound in agent scope, passes through to AgentChatNav → Mode FSM
+      assert {:passthrough, _} = Scoped.handle_key(state, ?~, 0)
+      # Full chain handling (AgentChatNav routes to Mode FSM)
+      assert {:handled, _} = walk_surface_handlers(state, ?~, 0)
     end
   end
 
@@ -390,15 +397,21 @@ defmodule Minga.Input.ScopedTest do
 
       assert ViewState.toast_visible?(AgentAccess.agentic(state))
 
-      {:handled, new_state} = Scoped.handle_key(state, ?j, 0)
+      # Toast dismissal is still handled by Scoped, but j itself returns passthrough
+      {:passthrough, new_state} = Scoped.handle_key(state, ?j, 0)
+      # Toast should be dismissed
       refute ViewState.toast_visible?(AgentAccess.agentic(new_state))
+      # Full chain still handles the key (through AgentChatNav)
+      {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
   end
 
   describe "agent scope — file viewer focus" do
-    test "j scrolls viewer when focus is :file_viewer" do
+    test "j passthrough, handled by AgentChatNav in file_viewer focus" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
-      assert {:handled, _} = Scoped.handle_key(state, ?j, 0)
+      assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
+      # Full chain handling through AgentChatNav
+      assert {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
 
     test "Tab switches back to chat from viewer" do
