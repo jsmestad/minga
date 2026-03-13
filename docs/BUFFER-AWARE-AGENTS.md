@@ -48,6 +48,46 @@ The more ambitious version: each agent session gets its own fork of the buffer. 
 
 ---
 
+## Prior Art: How Existing Tools Handle Agent Edits
+
+No existing tool does what this doc proposes. But the landscape splits into two categories that explain why.
+
+### Editor-integrated agents (get Phase 1 for free)
+
+**Cursor and Windsurf** (VS Code forks) apply AI edits through VS Code's `WorkspaceEdit` API, which routes through Monaco's `TextDocument` model. Edits land in the in-memory buffer, undo works, syntax highlighting updates. The editor also suppresses its own file watcher for writes it originated, avoiding the "file changed on disk, reload?" noise. But this isn't a deliberate architectural choice for AI agents. It's just how VS Code's extension API works. The AI uses the same API any extension would.
+
+**Zed** is the most interesting comparison. Their collaboration system uses CRDT-inspired data structures (operational transform) for human-to-human collaborative editing. But that machinery serves human collaborators, not AI agents. Their AI assistant edits go through Zed's buffer system, same as Cursor, without any multi-agent coordination layer.
+
+**Cline** (VS Code extension) goes through VS Code's buffer API. Same story as Cursor.
+
+None of these do explicit batching to reduce filesystem churn. Each edit is applied individually through the editor's document model. VS Code groups edits into a single undo entry when they come from a `WorkspaceEdit`, but each edit still fires buffer change events internally.
+
+### Standalone CLI agents (all filesystem-direct)
+
+**Claude Code** uses `edit` (find-and-replace via read-modify-write) and `write` (full file overwrite). Each tool call is a separate disk round-trip. No batching. No buffer concept. It's a CLI tool; there are no buffers to route through.
+
+**pi** (the agent harness Minga's agent runs inside) has the same `edit` and `write` tools. Same filesystem-direct approach.
+
+**Aider** generates git diffs and applies them with `git apply`. Clever in that it gets atomic multi-file changes via git's machinery, but still filesystem I/O underneath.
+
+**OpenCode** (Go-based TUI) writes to the filesystem. Same pattern.
+
+### The gap Minga sits in
+
+Minga is an **editor with an integrated agent**, but its agent tools behave like a **standalone CLI agent**. It has buffers, `apply_text_edits/2`, undo stacks, tree-sitter sync, dirty tracking. All the infrastructure for Phase 1 exists. The agent tools just don't use any of it.
+
+Cursor gets Phase 1 "for free" because the AI is a VS Code extension calling the editor's own API. Minga's agent lives inside the editor but bypasses it, going straight to disk.
+
+### What nobody does
+
+- **Buffer forking for multi-agent editing (Phase 2).** No tool supports this. Cursor doesn't run multiple concurrent AI agents. Zed's CRDTs serve human collaborators. Aider runs one session at a time.
+- **Explicit edit batching to avoid filesystem churn.** No tool optimizes for this. Editor-integrated agents get partial protection from watcher suppression, but as a side effect of the extension API, not by design.
+- **In-memory-first with selective flush.** Every tool either writes to disk immediately (CLI agents) or writes to a buffer that auto-saves on a timer (editors). Nobody treats the buffer as the source of truth with on-demand disk materialization.
+
+The combination of Phase 1 (buffer-routed agent edits) and Phase 2 (forked buffers with three-way merge for concurrent agents) doesn't exist anywhere. The closest analogy is Zed's collaboration CRDTs, but applied to AI agents instead of human collaborators, and with three-way merge instead of character-level operational transforms.
+
+---
+
 ## Performance Reality Check
 
 A natural question: is in-memory editing meaningfully faster than filesystem I/O on a modern NVMe SSD? The honest answer: barely, and that's not the reason to do this.
