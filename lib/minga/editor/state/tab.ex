@@ -68,7 +68,8 @@ defmodule Minga.Editor.State.Tab do
           label: String.t(),
           context: context(),
           session: pid() | nil,
-          agent_status: agent_status()
+          agent_status: agent_status(),
+          attention: boolean()
         }
 
   @enforce_keys [:id, :kind]
@@ -77,7 +78,8 @@ defmodule Minga.Editor.State.Tab do
             label: "",
             context: %{},
             session: nil,
-            agent_status: nil
+            agent_status: nil,
+            attention: false
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -123,5 +125,11 @@ defmodule Minga.Editor.State.Tab do
   @spec set_agent_status(t(), agent_status()) :: t()
   def set_agent_status(%__MODULE__{} = tab, status) do
     %{tab | agent_status: status}
+  end
+
+  @doc "Sets the attention flag (agent needs user input)."
+  @spec set_attention(t(), boolean()) :: t()
+  def set_attention(%__MODULE__{} = tab, value) when is_boolean(value) do
+    %{tab | attention: value}
   end
 end

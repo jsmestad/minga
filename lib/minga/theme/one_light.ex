@@ -91,7 +91,10 @@ defmodule Minga.Theme.OneLight do
       popup: %Minga.Theme.Popup{
         fg: @mono_1,
         bg: @syntax_guide,
-        border_fg: @mono_3
+        border_fg: @mono_3,
+        sel_fg: @syntax_bg,
+        sel_bg: @hue_2,
+        title_fg: @hue_2
       },
       tree: %Minga.Theme.Tree{
         bg: 0xF0F0F0,
@@ -153,6 +156,7 @@ defmodule Minga.Theme.OneLight do
         inactive_bg: @ui_bg,
         separator_fg: @syntax_guide,
         modified_fg: @hue_6,
+        attention_fg: @hue_5,
         bg: @ui_bg
       }
     }

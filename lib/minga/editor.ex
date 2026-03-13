@@ -33,11 +33,13 @@ defmodule Minga.Editor do
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
+  alias Minga.Editor.WarningLog
   alias Minga.Editor.Window
   alias Minga.FileTree
 
   alias Minga.Input
   alias Minga.Mode
+  alias Minga.Popup.Lifecycle, as: PopupLifecycle
 
   alias Minga.Port.Manager, as: PortManager
 
@@ -87,11 +89,23 @@ defmodule Minga.Editor do
     GenServer.cast(server, {:log_to_messages, text})
   end
 
+  @doc "Log a warning/error to the *Warnings* buffer with auto-popup. Used by the custom Logger handler."
+  @spec log_to_warnings(String.t(), GenServer.server()) :: :ok
+  def log_to_warnings(text, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_to_warnings, text})
+  end
+
   # ── Server Callbacks ─────────────────────────────────────────────────────────
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    # Tune GC for the Editor process: frequent full sweeps reclaim binary
+    # refs from the render loop, and a larger initial heap avoids repeated
+    # grow-and-GC cycles during startup.
+    Process.flag(:fullsweep_after, 20)
+    Process.flag(:min_heap_size, 4096)
+
     state = Startup.build_initial_state(opts)
 
     # Logger redirect and startup messages
@@ -194,6 +208,11 @@ defmodule Minga.Editor do
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:log_to_messages, text}, state) do
     {:noreply, log_message(state, text)}
+  end
+
+  def handle_cast({:log_to_warnings, text}, state) do
+    state = WarningLog.log(state, text)
+    {:noreply, maybe_schedule_warning_popup(state)}
   end
 
   def handle_cast(:render, state) do
@@ -385,6 +404,13 @@ defmodule Minga.Editor do
     {:noreply, %{state | render_timer: nil}}
   end
 
+  # Warning popup debounce timer fired — open the *Warnings* popup if not
+  # already visible.
+  def handle_info(:warning_popup_timeout, state) do
+    state = %{state | warning_popup_timer: nil}
+    {:noreply, open_warnings_popup_if_needed(state)}
+  end
+
   # ── Agent events ──────────────────────────────────────────────────────────
   #
   # All agent events are tagged with the session pid so we can route them
@@ -396,9 +422,11 @@ defmodule Minga.Editor do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
     else
-      # Background tab: update tab metadata only. The Session process
-      # holds the real state; we just need the status for the tab bar.
+      # Background tab: update tab metadata and attention. The Session
+      # process holds the real state; we only track status and attention
+      # on the Tab struct for tab bar rendering.
       state = update_background_tab_status(state, session_pid, event)
+      state = maybe_set_background_attention(state, session_pid, event)
       {:noreply, state}
     end
   end
@@ -449,6 +477,32 @@ defmodule Minga.Editor do
 
   defp update_background_tab_status(state, _session_pid, _event), do: state
 
+  # Sets the attention flag on a background agent tab when the session
+  # reaches a state that needs user input. Derived from domain events;
+  # the Session process doesn't know about UI attention.
+  @spec maybe_set_background_attention(EditorState.t(), pid(), term()) :: EditorState.t()
+  defp maybe_set_background_attention(state, session_pid, {:status_changed, status})
+       when status in [:idle, :error] do
+    set_tab_attention(state, session_pid)
+  end
+
+  defp maybe_set_background_attention(state, session_pid, {:approval_pending, _}) do
+    set_tab_attention(state, session_pid)
+  end
+
+  defp maybe_set_background_attention(state, _session_pid, _event), do: state
+
+  @spec set_tab_attention(EditorState.t(), pid()) :: EditorState.t()
+  defp set_tab_attention(state, session_pid) do
+    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+      nil ->
+        state
+
+      _tab ->
+        %{state | tab_bar: TabBar.set_attention_by_session(state.tab_bar, session_pid, true)}
+    end
+  end
+
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 
   @typedoc """
@@ -462,6 +516,7 @@ defmodule Minga.Editor do
   * `{:push_overlay, module}` — push an overlay handler onto the focus stack
   * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
   * `{:log_message, msg}` — log to *Messages* buffer
+  * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
   * `:sync_agent_buffer` — sync agent buffer with session output
   * `{:update_tab_label, label}` — update active tab label
   """
@@ -474,6 +529,7 @@ defmodule Minga.Editor do
           | {:push_overlay, module()}
           | {:pop_overlay, module()}
           | {:log_message, String.t()}
+          | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
 
@@ -516,6 +572,12 @@ defmodule Minga.Editor do
     do: schedule_render(state, delay_ms)
 
   defp apply_effect(state, {:log_message, msg}) when is_binary(msg), do: log_message(state, msg)
+
+  defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
+    Minga.Log.warning(:editor, msg)
+    state
+  end
+
   defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
 
   defp apply_effect(state, {:update_tab_label, _label}),
@@ -626,6 +688,62 @@ defmodule Minga.Editor do
 
   @spec log_message(state(), String.t()) :: state()
   defp log_message(state, text), do: MessageLog.log(state, text)
+
+  # ── Warning popup debounce ───────────────────────────────────────────────
+
+  @warning_popup_debounce_ms 200
+
+  @spec maybe_schedule_warning_popup(state()) :: state()
+  defp maybe_schedule_warning_popup(%{warning_popup_timer: ref} = state) when is_reference(ref) do
+    # Timer already running; the pending timeout will open the popup.
+    state
+  end
+
+  defp maybe_schedule_warning_popup(state) do
+    ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
+    %{state | warning_popup_timer: ref}
+  end
+
+  @spec open_warnings_popup_if_needed(state()) :: state()
+  defp open_warnings_popup_if_needed(%{buffers: %{warnings: nil}} = state), do: state
+
+  defp open_warnings_popup_if_needed(state) do
+    warnings_buf = state.buffers.warnings
+
+    # Check if *Warnings* is already visible in any window
+    already_visible =
+      Enum.any?(state.windows.map, fn {_id, win} ->
+        win.buffer == warnings_buf
+      end)
+
+    if already_visible do
+      # Scroll the warnings window to the end so the latest entry is visible
+      scroll_warnings_to_end(state, warnings_buf)
+    else
+      open_warnings_popup(state, warnings_buf)
+    end
+  end
+
+  @spec open_warnings_popup(state(), pid()) :: state()
+  defp open_warnings_popup(state, warnings_buf) do
+    case PopupLifecycle.open_popup(state, "*Warnings*", warnings_buf) do
+      {:ok, new_state} -> schedule_render(new_state, 16)
+      :no_match -> state
+    end
+  end
+
+  @spec scroll_warnings_to_end(state(), pid()) :: state()
+  defp scroll_warnings_to_end(state, warnings_buf) do
+    case Enum.find(state.windows.map, fn {_id, win} -> win.buffer == warnings_buf end) do
+      {_id, _win} ->
+        # The popup rule has focus: true, which means the user's cursor is there.
+        # Just trigger a render so the viewport catches up to the appended content.
+        schedule_render(state, 16)
+
+      nil ->
+        state
+    end
+  end
 
   # ── Window resize ────────────────────────────────────────────────────────
 

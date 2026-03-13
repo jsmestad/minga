@@ -76,7 +76,10 @@ defmodule Minga.Theme.Catppuccin do
       popup: %Minga.Theme.Popup{
         fg: p.text,
         bg: p.surface0,
-        border_fg: p.overlay1
+        border_fg: p.overlay1,
+        sel_fg: p.base,
+        sel_bg: p.blue,
+        title_fg: p.blue
       },
       tree: %Minga.Theme.Tree{
         bg: p.mantle,
@@ -138,6 +141,7 @@ defmodule Minga.Theme.Catppuccin do
         inactive_bg: p.mantle,
         separator_fg: p.surface0,
         modified_fg: p.peach,
+        attention_fg: p.red,
         bg: p.mantle
       }
     }

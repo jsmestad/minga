@@ -11,6 +11,7 @@ defmodule Minga.Editor.State.Buffers do
           list: [pid()],
           active_index: non_neg_integer(),
           messages: pid() | nil,
+          warnings: pid() | nil,
           scratch: pid() | nil,
           help: pid() | nil
         }
@@ -19,6 +20,7 @@ defmodule Minga.Editor.State.Buffers do
             list: [],
             active_index: 0,
             messages: nil,
+            warnings: nil,
             scratch: nil,
             help: nil
 

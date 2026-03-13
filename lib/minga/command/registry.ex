@@ -57,6 +57,7 @@ defmodule Minga.Command.Registry do
     {:tab_goto_8, "Switch to tab 8"},
     {:tab_goto_9, "Switch to tab 9"},
     {:view_messages, "View *Messages* buffer"},
+    {:view_warnings, "View *Warnings* buffer"},
     {:view_scratch, "Switch to *scratch* buffer"},
     {:new_buffer, "Create new empty buffer"},
     {:command_palette, "Execute command"},

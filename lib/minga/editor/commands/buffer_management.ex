@@ -140,6 +140,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
     open_special_buffer(state, "*Messages*", msg_buf)
   end
 
+  def execute(%{buffers: %{warnings: nil}} = state, :view_warnings) do
+    %{state | status_msg: "No warnings buffer"}
+  end
+
+  def execute(%{buffers: %{warnings: warn_buf}} = state, :view_warnings) do
+    open_special_buffer(state, "*Warnings*", warn_buf)
+  end
+
   # ── Line number style ─────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :cycle_line_numbers) when is_pid(buf) do
@@ -342,6 +350,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:new_buffer, []}}) do
     execute(state, :new_buffer)
+  end
+
+  def execute(state, {:execute_ex_command, {:view_warnings, []}}) do
+    execute(state, :view_warnings)
   end
 
   def execute(state, {:execute_ex_command, {:reload_highlights, []}}) do
@@ -730,8 +742,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         state
 
       {_, {:error, msg}} ->
-        Minga.Editor.log_to_messages("Format-on-save failed: #{buf_name} (#{msg})")
-        Minga.Log.warning(:editor, "Format-on-save failed: #{msg}")
+        Minga.Log.warning(:editor, "Format-on-save failed: #{buf_name} (#{msg})")
         state
     end
   end

@@ -100,6 +100,7 @@ defmodule Minga.Editor.State do
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
+            warning_popup_timer: nil,
             windows: %Windows{},
             file_tree: %FileTreeState{},
             git_buffers: %{},
@@ -131,6 +132,7 @@ defmodule Minga.Editor.State do
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
+          warning_popup_timer: reference() | nil,
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           git_buffers: %{pid() => pid()},
@@ -796,6 +798,12 @@ defmodule Minga.Editor.State do
       # Session process (the source of truth for status, pending
       # approval, and error).
       state = rebuild_agent_from_session(state, target)
+
+      # Clear attention flag on the tab we're switching to.
+      state = %{
+        state
+        | tab_bar: TabBar.update_tab(state.tab_bar, target_id, &Tab.set_attention(&1, false))
+      }
 
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)

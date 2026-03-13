@@ -206,14 +206,17 @@ defmodule Minga.Theme do
   end
 
   defmodule Popup do
-    @moduledoc "Popup (which-key, etc.) colors."
+    @moduledoc "Popup (which-key, floating window, etc.) colors."
     @enforce_keys [:fg, :bg, :border_fg]
-    defstruct [:fg, :bg, :border_fg]
+    defstruct [:fg, :bg, :border_fg, :sel_fg, :sel_bg, :title_fg]
 
     @type t :: %__MODULE__{
             fg: Minga.Theme.color(),
             bg: Minga.Theme.color(),
-            border_fg: Minga.Theme.color()
+            border_fg: Minga.Theme.color(),
+            sel_fg: Minga.Theme.color() | nil,
+            sel_bg: Minga.Theme.color() | nil,
+            title_fg: Minga.Theme.color() | nil
           }
   end
 
@@ -226,6 +229,7 @@ defmodule Minga.Theme do
       :inactive_bg,
       :separator_fg,
       :modified_fg,
+      :attention_fg,
       :bg
     ]
     defstruct [
@@ -235,6 +239,7 @@ defmodule Minga.Theme do
       :inactive_bg,
       :separator_fg,
       :modified_fg,
+      :attention_fg,
       :bg
     ]
 
@@ -245,6 +250,7 @@ defmodule Minga.Theme do
             inactive_bg: Minga.Theme.color(),
             separator_fg: Minga.Theme.color(),
             modified_fg: Minga.Theme.color(),
+            attention_fg: Minga.Theme.color(),
             bg: Minga.Theme.color()
           }
   end

@@ -83,6 +83,10 @@ defmodule Minga.Port.Manager do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    # Port.Manager sends large binary render commands every frame.
+    # Frequent full sweeps reclaim binary refs promptly.
+    Process.flag(:fullsweep_after, 20)
+
     backend = Keyword.get(opts, :backend, :tui)
     renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path(backend))
 
@@ -176,15 +180,13 @@ defmodule Minga.Port.Manager do
   end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
-    Minga.Log.info(:port, "Zig renderer exited normally")
-    Minga.Editor.log_to_messages("Renderer: exited normally")
+    Minga.Log.info(:port, "Renderer: exited normally")
     maybe_stop_system(0)
     {:noreply, %{state | port: nil, ready: false}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Minga.Log.error(:port, "Zig renderer exited with status #{status}")
-    Minga.Editor.log_to_messages("Renderer: crashed (exit #{status})")
+    Minga.Log.error(:port, "Renderer: crashed (exit #{status})")
     maybe_stop_system(1)
     {:noreply, %{state | port: nil, ready: false}}
   end
