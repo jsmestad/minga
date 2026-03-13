@@ -76,6 +76,59 @@ defmodule Minga.Input.PickerMouseTest do
     end
   end
 
+  describe "centered picker clicks" do
+    defp centered_picker_state(items) do
+      picker =
+        PickerData.new(items, max_visible: 10, title: "Test")
+
+      %EditorState{
+        port_manager: nil,
+        vim: VimState.new(),
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        picker_ui: %Minga.Editor.State.Picker{
+          picker: picker,
+          source: TestSource,
+          layout: :centered
+        }
+      }
+    end
+
+    test "clicking an item inside the centered float selects it" do
+      items = [%{id: 1, label: "alpha"}, %{id: 2, label: "beta"}]
+      state = centered_picker_state(items)
+
+      # 70% of 24 rows = 16 rows, centered: box starts at row 4
+      # Interior starts at row 5 (box_row + 1 border)
+      # First item is at interior row 0 = screen row 5
+      {:handled, new_state} = PickerInput.handle_mouse(state, 5, 20, :left, 0, :press, 1)
+
+      assert new_state.picker_ui.picker == nil
+      assert Map.has_key?(new_state, :selected_item)
+    end
+
+    test "clicking outside the centered float dismisses the picker" do
+      items = [%{id: 1, label: "alpha"}]
+      state = centered_picker_state(items)
+
+      # Click at row 0, col 0 (outside the centered box)
+      {:handled, new_state} = PickerInput.handle_mouse(state, 0, 0, :left, 0, :press, 1)
+
+      # Picker should be closed (dismissed), no item selected
+      assert new_state.picker_ui.picker == nil
+      refute Map.has_key?(new_state, :selected_item)
+    end
+
+    test "scroll wheel works inside centered picker" do
+      items = [%{id: 1, label: "one"}, %{id: 2, label: "two"}]
+      state = centered_picker_state(items)
+
+      {:handled, new_state} =
+        PickerInput.handle_mouse(state, 10, 20, :wheel_down, 0, :press, 1)
+
+      assert new_state.picker_ui.picker.selected == 1
+    end
+  end
+
   describe "passthrough when inactive" do
     test "passes through when no picker is active" do
       state = %EditorState{

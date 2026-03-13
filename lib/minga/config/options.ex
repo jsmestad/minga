@@ -105,6 +105,7 @@ defmodule Minga.Config.Options do
           | :font_size
           | :font_weight
           | :font_ligatures
+          | :whichkey_layout
           | :log_level
           | :log_level_render
           | :log_level_lsp
@@ -170,6 +171,7 @@ defmodule Minga.Config.Options do
     {:agent_notify_on, :any, [:approval, :complete, :error]},
     {:agent_system_prompt, :string, ""},
     {:agent_append_system_prompt, :string, ""},
+    {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},

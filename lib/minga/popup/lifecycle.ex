@@ -135,9 +135,41 @@ defmodule Minga.Popup.Lifecycle do
     |> Enum.map(fn {_id, window} -> render_float_overlay(state, window) end)
   end
 
+  @doc """
+  Returns true when the click at `{row, col}` falls inside any float
+  popup's bounding box. Used by the input layer to decide whether a
+  click should be swallowed or should dismiss the popup.
+  """
+  @spec click_inside_float?(state(), integer(), integer()) :: boolean()
+  def click_inside_float?(state, row, col) do
+    state.windows.map
+    |> Enum.any?(fn {_id, w} ->
+      float_popup?(w) and inside_float_box?(state, w, row, col)
+    end)
+  end
+
   @spec float_popup?(Window.t()) :: boolean()
   defp float_popup?(%Window{popup_meta: %PopupActive{rule: %Rule{display: :float}}}), do: true
   defp float_popup?(_), do: false
+
+  @spec inside_float_box?(state(), Window.t(), integer(), integer()) :: boolean()
+  defp inside_float_box?(state, window, row, col) do
+    rule = window.popup_meta.rule
+    vp = state.viewport
+
+    box_w = resolve_float_dim(float_width(rule), vp.cols)
+    box_h = resolve_float_dim(float_height(rule), vp.rows)
+    box_row = max(div(vp.rows - box_h, 2), 0)
+    box_col = max(div(vp.cols - box_w, 2), 0)
+
+    row >= box_row and row < box_row + box_h and
+      col >= box_col and col < box_col + box_w
+  end
+
+  @spec resolve_float_dim(FloatingWindow.Spec.size(), pos_integer()) :: pos_integer()
+  defp resolve_float_dim({:percent, pct}, total), do: max(div(total * pct, 100), 1)
+  defp resolve_float_dim({:cols, n}, _total), do: n
+  defp resolve_float_dim({:rows, n}, _total), do: n
 
   @spec render_float_overlay(state(), Window.t()) :: DisplayList.Overlay.t()
   defp render_float_overlay(state, window) do

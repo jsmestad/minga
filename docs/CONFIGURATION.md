@@ -40,6 +40,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
 | `:agent_auto_context` | boolean | `true` | Load CLI file as agent preview context on startup |
+| `:whichkey_layout` | `:bottom` or `:float` | `:bottom` | Which-key popup display mode (see [Which-key popup](#which-key-popup) below) |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |
 | `:font_weight` | weight atom | `:regular` | Font weight (see [Fonts](#fonts) below) |
@@ -179,6 +180,24 @@ minga --editor
 | `startup_view: :agent` | `minga --editor foo.ex` | Editor view, file open |
 | `startup_view: :editor` | `minga foo.ex` | Editor view, file open |
 | `startup_view: :editor` | `minga` | Editor view, scratch buffer |
+
+## Which-key popup
+
+When you press a leader key (like `SPC`) and pause, a which-key popup appears showing all available continuations. By default it renders as a horizontal bar anchored to the bottom of the viewport (like Doom Emacs):
+
+```elixir
+set :whichkey_layout, :bottom   # default
+```
+
+Set it to `:float` to render the which-key popup as a centered floating window with a rounded border and title:
+
+```elixir
+set :whichkey_layout, :float
+```
+
+The float layout uses the same `FloatingWindow` primitive as the centered picker. It auto-sizes to fit the bindings (up to 70% width and 60% height of the viewport) and uses your theme's popup colors for the background, text, and border.
+
+Both layouts respond to mouse clicks. In float mode, clicking outside the popup dismisses it.
 
 ## Themes
 
@@ -902,6 +921,7 @@ set :line_numbers, :relative
 set :scroll_margin, 5
 set :autopair, true
 set :theme, :catppuccin_mocha
+set :whichkey_layout, :float        # centered floating window (or :bottom)
 
 # Font (GUI backend only; no effect in TUI mode)
 set :font_family, "JetBrains Mono"

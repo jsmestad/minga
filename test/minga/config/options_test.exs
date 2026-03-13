@@ -61,6 +61,7 @@ defmodule Minga.Config.OptionsTest do
                agent_notify_on: [:approval, :complete, :error],
                agent_system_prompt: "",
                agent_append_system_prompt: "",
+               whichkey_layout: :bottom,
                font_family: "Menlo",
                font_size: 13,
                font_weight: :regular,
