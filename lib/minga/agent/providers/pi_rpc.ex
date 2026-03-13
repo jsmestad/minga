@@ -18,6 +18,16 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   alias Minga.Agent.Event
 
+  @doc """
+  The pi version this module was last validated against.
+
+  When the installed pi version doesn't match, a warning is logged to
+  `*Messages*` so users (and developers) know the RPC protocol may have
+  changed. Update this value after verifying compatibility with a new
+  pi release.
+  """
+  @validated_pi_version "0.57.1"
+
   @typedoc "Internal state for the Pi RPC provider."
   @type state :: %{
           port: port() | nil,
@@ -121,6 +131,7 @@ defmodule Minga.Agent.Providers.PiRpc do
 
         case spawn_pi(state) do
           {:ok, port} ->
+            check_pi_version(path)
             {:ok, %{state | port: port}}
 
           {:error, reason} ->
@@ -553,5 +564,27 @@ defmodule Minga.Agent.Providers.PiRpc do
   @spec find_pi() :: String.t() | nil
   defp find_pi do
     System.find_executable("pi")
+  end
+
+  @spec check_pi_version(String.t()) :: :ok
+  defp check_pi_version(pi_path) do
+    case System.cmd(pi_path, ["--version"], stderr_to_stdout: true) do
+      {raw, 0} ->
+        installed = String.trim(raw)
+
+        if installed != @validated_pi_version do
+          Minga.Log.warning(
+            :agent,
+            "[Agent.PiRpc] pi version mismatch: installed #{installed}, validated against #{@validated_pi_version}. " <>
+              "RPC protocol may have changed. Run the protocol probe test: mix test --only pi"
+          )
+        end
+
+        :ok
+
+      _ ->
+        Minga.Log.warning(:agent, "[Agent.PiRpc] could not determine pi version")
+        :ok
+    end
   end
 end
