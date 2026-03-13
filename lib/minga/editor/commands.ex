@@ -44,6 +44,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.Window
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Formatter
@@ -59,7 +60,7 @@ defmodule Minga.Editor.Commands do
   @type action ::
           {:dot_repeat, non_neg_integer() | nil}
           | {:replay_macro, String.t()}
-          | {:whichkey_update, Minga.Editor.State.WhichKey.t()}
+          | {:whichkey_update, EditorState.WhichKey.t()}
 
   @doc """
   Executes a single command against the editor state.
@@ -108,7 +109,7 @@ defmodule Minga.Editor.Commands do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
 
-    whichkey = %Minga.Editor.State.WhichKey{node: node, timer: timer, show: false}
+    whichkey = %EditorState.WhichKey{node: node, timer: timer, show: false}
     {state, {:whichkey_update, whichkey}}
   end
 
@@ -121,7 +122,7 @@ defmodule Minga.Editor.Commands do
     # to the correct command for the current filetype.
     {effective_node, state} = maybe_substitute_filetype_trie(state, node)
 
-    whichkey = %Minga.Editor.State.WhichKey{
+    whichkey = %EditorState.WhichKey{
       node: effective_node,
       timer: timer,
       show: state.whichkey.show
@@ -133,7 +134,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, :leader_cancel) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
 
-    whichkey = %Minga.Editor.State.WhichKey{node: nil, timer: nil, show: false}
+    whichkey = %EditorState.WhichKey{node: nil, timer: nil, show: false}
     {state, {:whichkey_update, whichkey}}
   end
 
@@ -340,12 +341,18 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:dedent_lines, _} = cmd), do: Editing.execute(state, cmd)
   def execute(state, {:indent_motion, _} = cmd), do: Editing.execute(state, cmd)
   def execute(state, {:dedent_motion, _} = cmd), do: Editing.execute(state, cmd)
+  def execute(state, {:reindent_lines, _} = cmd), do: Editing.execute(state, cmd)
+  def execute(state, {:reindent_motion, _} = cmd), do: Editing.execute(state, cmd)
+  def execute(state, {:reindent_text_object, _, _} = cmd), do: Editing.execute(state, cmd)
 
   def execute(state, :indent_visual_selection),
     do: Editing.execute(state, :indent_visual_selection)
 
   def execute(state, :dedent_visual_selection),
     do: Editing.execute(state, :dedent_visual_selection)
+
+  def execute(state, :reindent_visual_selection),
+    do: Editing.execute(state, :reindent_visual_selection)
 
   # ── Operators ─────────────────────────────────────────────────────────────
 
@@ -366,6 +373,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :yank_visual_selection), do: Visual.execute(state, :yank_visual_selection)
   def execute(state, {:wrap_visual_selection, _, _} = cmd), do: Visual.execute(state, cmd)
+  def execute(state, {:visual_text_object, _, _} = cmd), do: Visual.execute(state, cmd)
 
   # ── Search ────────────────────────────────────────────────────────────────
 
@@ -476,6 +484,50 @@ defmodule Minga.Editor.Commands do
   def execute(state, :diagnostics_list) do
     PickerUI.open(state, Minga.Diagnostics.PickerSource)
   end
+
+  # ── Textobject navigation ──────────────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, {:goto_next_textobject, type})
+      when is_pid(buf) do
+    {row, col} = BufferServer.cursor(buf)
+
+    case EditorState.active_window_struct(state) do
+      nil ->
+        state
+
+      %Window{} = win ->
+        case Window.next_textobject(win, type, {row, col}) do
+          nil ->
+            state
+
+          {target_row, target_col} ->
+            BufferServer.move_to(buf, {target_row, target_col})
+            state
+        end
+    end
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:goto_prev_textobject, type})
+      when is_pid(buf) do
+    {row, col} = BufferServer.cursor(buf)
+
+    case EditorState.active_window_struct(state) do
+      nil ->
+        state
+
+      %Window{} = win ->
+        case Window.prev_textobject(win, type, {row, col}) do
+          nil ->
+            state
+
+          {target_row, target_col} ->
+            BufferServer.move_to(buf, {target_row, target_col})
+            state
+        end
+    end
+  end
+
+  # ── Diagnostics ───────────────────────────────────────────────────────────
 
   def execute(state, :next_diagnostic) do
     Diagnostics.execute(state, :next_diagnostic)

@@ -59,6 +59,7 @@ defmodule Minga.Editor.Window do
           cursor: Document.position(),
           fold_map: FoldMap.t(),
           fold_ranges: [FoldRange.t()],
+          textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
           popup_meta: PopupActive.t() | nil,
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
           cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
@@ -80,6 +81,7 @@ defmodule Minga.Editor.Window do
     cursor: {0, 0},
     fold_map: %FoldMap{folds: []},
     fold_ranges: [],
+    textobject_positions: %{},
     popup_meta: nil,
     dirty_lines: %{},
     cached_gutter: %{},
@@ -168,6 +170,25 @@ defmodule Minga.Editor.Window do
   @doc "Returns true if this window has any active folds."
   @spec has_folds?(t()) :: boolean()
   def has_folds?(%__MODULE__{fold_map: fm}), do: not FoldMap.empty?(fm)
+
+  @doc "Finds the next textobject position of the given type after (row, col)."
+  @spec next_textobject(t(), atom(), {non_neg_integer(), non_neg_integer()}) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def next_textobject(%__MODULE__{textobject_positions: positions}, type, {row, col}) do
+    positions
+    |> Map.get(type, [])
+    |> Enum.find(fn {r, c} -> r > row or (r == row and c > col) end)
+  end
+
+  @doc "Finds the previous textobject position of the given type before (row, col)."
+  @spec prev_textobject(t(), atom(), {non_neg_integer(), non_neg_integer()}) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def prev_textobject(%__MODULE__{textobject_positions: positions}, type, {row, col}) do
+    positions
+    |> Map.get(type, [])
+    |> Enum.reverse()
+    |> Enum.find(fn {r, c} -> r < row or (r == row and c < col) end)
+  end
 
   @doc "Toggles the fold at the given buffer line using the window's available fold ranges."
   @spec toggle_fold(t(), non_neg_integer()) :: t()

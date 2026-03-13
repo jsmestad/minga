@@ -284,6 +284,12 @@ defmodule Minga.Mode.OperatorPending do
      OPState.to_base_state(state)}
   end
 
+  # == — reindent current line(s)
+  def handle_key({?=, 0}, %OPState{operator: :reindent} = state) do
+    {:execute_then_transition, [{:reindent_lines, OPState.total_count(state)}], :normal,
+     OPState.to_base_state(state)}
+  end
+
   # ── Page / half-page motions ───────────────────────────────────────────────
 
   def handle_key({?d, mods}, %OPState{} = state) when band(mods, @ctrl) != 0 do
@@ -333,6 +339,7 @@ defmodule Minga.Mode.OperatorPending do
   defp text_object_command(:comment, modifier, spec), do: {:comment_text_object, modifier, spec}
   defp text_object_command(:indent, modifier, spec), do: {:indent_text_object, modifier, spec}
   defp text_object_command(:dedent, modifier, spec), do: {:dedent_text_object, modifier, spec}
+  defp text_object_command(:reindent, modifier, spec), do: {:reindent_text_object, modifier, spec}
 
   # Build and emit the motion command, with correct repetition.
   @spec execute_with_motion(OPState.t(), atom()) :: Mode.result()
@@ -354,4 +361,5 @@ defmodule Minga.Mode.OperatorPending do
   defp motion_command(:comment, motion), do: {:comment_motion, motion}
   defp motion_command(:indent, motion), do: {:indent_motion, motion}
   defp motion_command(:dedent, motion), do: {:dedent_motion, motion}
+  defp motion_command(:reindent, motion), do: {:reindent_motion, motion}
 end

@@ -356,6 +356,61 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
+  # ── Reindent (= operator) ──────────────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, {:reindent_lines, n}) do
+    {cursor_line, _} = BufferServer.cursor(buf)
+    total = BufferServer.line_count(buf)
+    end_line = min(cursor_line + n - 1, total - 1)
+    do_reindent_lines(buf, cursor_line, end_line)
+    state
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:reindent_motion, motion}) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Document.cursor(gb)
+    target = Helpers.resolve_motion(gb, cursor, motion)
+    {cursor_line, _} = cursor
+    {target_line, _} = target
+    start_line = min(cursor_line, target_line)
+    end_line = max(cursor_line, target_line)
+    do_reindent_lines(buf, start_line, end_line)
+    state
+  end
+
+  def execute(
+        %{vim: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}} = state,
+        :reindent_visual_selection
+      ) do
+    anchor = ms.visual_anchor
+    cursor = BufferServer.cursor(buf)
+    {anchor_line, _} = anchor
+    {cursor_line, _} = cursor
+    start_line = min(anchor_line, cursor_line)
+    end_line = max(anchor_line, cursor_line)
+    do_reindent_lines(buf, start_line, end_line)
+    state
+  end
+
+  def execute(
+        %{buffers: %{active: buf}} = state,
+        {:reindent_text_object, modifier, spec}
+      )
+      when is_pid(buf) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Document.cursor(gb)
+    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec)
+
+    case range do
+      nil ->
+        state
+
+      {{start_line, _}, {end_line, _}} ->
+        do_reindent_lines(buf, start_line, end_line)
+        state
+    end
+  end
+
   # ── Comment toggling ────────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :comment_line) when is_pid(buf) do
@@ -431,6 +486,65 @@ defmodule Minga.Editor.Commands.Editing do
     end
 
     :ok
+  end
+
+  # ── Private reindent helpers ──────────────────────────────────────────────
+
+  @spec do_reindent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp do_reindent_lines(buf, start_line, end_line) do
+    {cursor_line, _} = BufferServer.cursor(buf)
+
+    for line <- start_line..end_line do
+      reindent_single_line(buf, line)
+    end
+
+    # Move cursor to first non-blank on cursor line
+    case BufferServer.get_lines(buf, cursor_line, 1) do
+      [text] ->
+        first_non_blank = Indent.first_non_blank_col(text)
+        BufferServer.move_to(buf, {cursor_line, first_non_blank})
+
+      [] ->
+        BufferServer.move_to(buf, {cursor_line, 0})
+    end
+
+    :ok
+  end
+
+  @spec reindent_single_line(pid(), non_neg_integer()) :: :ok
+  defp reindent_single_line(buf, line) do
+    # Compute the desired indent for this line based on the previous line
+    desired_indent =
+      if line == 0 do
+        ""
+      else
+        Indent.compute_for_newline(buf, line - 1)
+      end
+
+    # Check if current line starts with a dedent trigger
+    desired_indent =
+      if Indent.should_dedent_line?(buf, line) do
+        Indent.remove_one_indent_level(desired_indent, buf)
+      else
+        desired_indent
+      end
+
+    # Get current line text and its existing indent
+    case BufferServer.get_lines(buf, line, 1) do
+      [text] ->
+        current_indent = Indent.extract_leading_ws(text)
+
+        if current_indent != desired_indent do
+          # Replace leading whitespace using apply_text_edit
+          indent_end_col = byte_size(current_indent)
+          BufferServer.apply_text_edit(buf, line, 0, line, indent_end_col, desired_indent)
+        end
+
+        :ok
+
+      [] ->
+        :ok
+    end
   end
 
   # ── Private indent helpers ────────────────────────────────────────────────

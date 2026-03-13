@@ -73,6 +73,14 @@ defmodule Minga.Port.Protocol do
   @op_set_textobject_query 0x2B
   @op_request_textobject 0x2C
 
+  # Well-known textobject type IDs (match Zig constants)
+  @textobj_function 0
+  @textobj_class 1
+  @textobj_parameter 2
+  @textobj_block 3
+  @textobj_comment 4
+  @textobj_test 5
+
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
   @op_highlight_names 0x31
@@ -83,6 +91,7 @@ defmodule Minga.Port.Protocol do
   @op_fold_ranges 0x36
   @op_indent_result 0x37
   @op_textobject_result 0x38
+  @op_textobject_positions 0x39
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -165,6 +174,8 @@ defmodule Minga.Port.Protocol do
              result ::
                {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
                | nil}
+          | {:textobject_positions, version :: non_neg_integer(),
+             %{atom() => [{non_neg_integer(), non_neg_integer()}]}}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -600,6 +611,11 @@ defmodule Minga.Port.Protocol do
     {:ok, {:textobject_result, request_id, nil}}
   end
 
+  def decode_event(<<@op_textobject_positions, version::32, count::32, entries::binary>>) do
+    positions = decode_textobject_entries(entries, count, %{})
+    {:ok, {:textobject_positions, version, positions}}
+  end
+
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
     level = decode_log_level(level_byte)
     {:ok, {:log_message, level, msg}}
@@ -686,6 +702,31 @@ defmodule Minga.Port.Protocol do
   def decode_command(<<>>) do
     {:error, :malformed}
   end
+
+  @spec decode_textobject_entries(binary(), non_neg_integer(), map()) :: map()
+  defp decode_textobject_entries(_data, 0, acc), do: acc
+
+  defp decode_textobject_entries(
+         <<type_id::8, row::32, col::32, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    type_atom = textobj_type_to_atom(type_id)
+    existing = Map.get(acc, type_atom, [])
+    updated = Map.put(acc, type_atom, existing ++ [{row, col}])
+    decode_textobject_entries(rest, remaining - 1, updated)
+  end
+
+  defp decode_textobject_entries(_, _, acc), do: acc
+
+  @spec textobj_type_to_atom(non_neg_integer()) :: atom()
+  defp textobj_type_to_atom(@textobj_function), do: :function
+  defp textobj_type_to_atom(@textobj_class), do: :class
+  defp textobj_type_to_atom(@textobj_parameter), do: :parameter
+  defp textobj_type_to_atom(@textobj_block), do: :block
+  defp textobj_type_to_atom(@textobj_comment), do: :comment
+  defp textobj_type_to_atom(@textobj_test), do: :test
+  defp textobj_type_to_atom(_), do: :unknown
 
   # ── Private ──
 

@@ -61,21 +61,46 @@ defmodule Minga.Editor.Indent do
     end
   end
 
+  @doc "Extracts leading whitespace from a line of text."
+  @spec extract_leading_ws(String.t()) :: String.t()
+  def extract_leading_ws(text) do
+    case Regex.run(~r/^(\s*)/, text) do
+      [_, ws] -> ws
+      _ -> ""
+    end
+  end
+
+  @doc "Returns the byte offset of the first non-blank character in text."
+  @spec first_non_blank_col(String.t()) :: non_neg_integer()
+  def first_non_blank_col(text) do
+    byte_size(extract_leading_ws(text))
+  end
+
+  @doc """
+  Removes one level of indentation from the given whitespace string.
+
+  If the whitespace ends with a tab, removes one tab. Otherwise removes
+  `tab_size` spaces (or whatever is available).
+  """
+  @spec remove_one_indent_level(String.t(), pid()) :: String.t()
+  def remove_one_indent_level(indent, buf) do
+    tab_size = BufferServer.get_option(buf, :tab_size) || 2
+
+    if String.ends_with?(indent, "\t") do
+      String.slice(indent, 0, String.length(indent) - 1)
+    else
+      remove_len = min(tab_size, byte_size(indent))
+      binary_part(indent, 0, byte_size(indent) - remove_len)
+    end
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec leading_whitespace(pid(), non_neg_integer()) :: String.t()
   defp leading_whitespace(buf, line_num) do
     case get_line_text(buf, line_num) do
       nil -> ""
-      text -> extract_leading_whitespace(text)
-    end
-  end
-
-  @spec extract_leading_whitespace(String.t()) :: String.t()
-  defp extract_leading_whitespace(text) do
-    case Regex.run(~r/^(\s*)/, text) do
-      [_, ws] -> ws
-      _ -> ""
+      text -> extract_leading_ws(text)
     end
   end
 
