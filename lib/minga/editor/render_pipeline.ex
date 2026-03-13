@@ -53,6 +53,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
+  alias Minga.Popup.Lifecycle, as: PopupLifecycle
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
@@ -714,12 +715,16 @@ defmodule Minga.Editor.RenderPipeline do
           []
       end
 
+    # Float popup overlays (from the popup system)
+    float_overlays = PopupLifecycle.render_float_overlays(state)
+
     overlays =
-      [
-        %Overlay{draws: whichkey_draws},
-        %Overlay{draws: completion_draws},
-        %Overlay{draws: picker_draws, cursor: picker_cursor}
-      ]
+      (float_overlays ++
+         [
+           %Overlay{draws: whichkey_draws},
+           %Overlay{draws: completion_draws},
+           %Overlay{draws: picker_draws, cursor: picker_cursor}
+         ])
       |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
 
     # Tab bar
