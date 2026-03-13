@@ -4,6 +4,8 @@ defmodule Minga.ConfigTest do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Hooks
   alias Minga.Config.Options
+  alias Minga.Extension.Entry
+  alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias Minga.Popup.Registry, as: PopupRegistry
@@ -34,6 +36,11 @@ defmodule Minga.ConfigTest do
       {:error, {:already_started, _}} -> Hooks.reset()
     end
 
+    case ExtRegistry.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> ExtRegistry.reset()
+    end
+
     PopupRegistry.init()
     PopupRegistry.clear()
 
@@ -46,6 +53,12 @@ defmodule Minga.ConfigTest do
         catch
           :exit, _ -> :ok
         end
+      end
+
+      try do
+        ExtRegistry.reset()
+      catch
+        :exit, _ -> :ok
       end
 
       try do
@@ -291,6 +304,127 @@ defmodule Minga.ConfigTest do
 
       assert {:ok, rule} = PopupRegistry.match("*test-popup*")
       assert rule.side == :right
+    end
+  end
+
+  describe "extension/2" do
+    test "registers a path-sourced extension" do
+      dir = System.tmp_dir!() |> Path.expand()
+      Minga.Config.extension(:my_tool, path: dir)
+
+      assert {:ok, %Entry{} = entry} = ExtRegistry.get(:my_tool)
+      assert entry.source_type == :path
+      assert entry.path == dir
+    end
+
+    test "passes extra options as config for path source" do
+      dir = System.tmp_dir!() |> Path.expand()
+      Minga.Config.extension(:my_tool, path: dir, greeting: "hello")
+
+      assert {:ok, entry} = ExtRegistry.get(:my_tool)
+      assert entry.config == [greeting: "hello"]
+    end
+
+    test "expands ~ in path" do
+      Minga.Config.extension(:my_tool, path: "~/code/my_tool")
+
+      assert {:ok, entry} = ExtRegistry.get(:my_tool)
+      assert entry.path == Path.expand("~/code/my_tool")
+    end
+
+    test "registers a git-sourced extension" do
+      Minga.Config.extension(:snippets, git: "https://github.com/user/snippets")
+
+      assert {:ok, %Entry{} = entry} = ExtRegistry.get(:snippets)
+      assert entry.source_type == :git
+      assert entry.git.url == "https://github.com/user/snippets"
+      assert entry.git.branch == nil
+      assert entry.git.ref == nil
+    end
+
+    test "registers a git extension with branch" do
+      Minga.Config.extension(:snippets,
+        git: "https://github.com/user/snippets",
+        branch: "develop"
+      )
+
+      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert entry.git.branch == "develop"
+    end
+
+    test "registers a git extension with ref" do
+      Minga.Config.extension(:snippets,
+        git: "git@github.com:user/snippets.git",
+        ref: "v1.0.0"
+      )
+
+      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert entry.git.ref == "v1.0.0"
+    end
+
+    test "registers a git extension with SSH URL" do
+      Minga.Config.extension(:private, git: "git@github.com:user/private.git")
+
+      assert {:ok, entry} = ExtRegistry.get(:private)
+      assert entry.git.url == "git@github.com:user/private.git"
+    end
+
+    test "passes extra options as config for git source" do
+      Minga.Config.extension(:snippets,
+        git: "https://github.com/user/snippets",
+        branch: "main",
+        greeting: "hello"
+      )
+
+      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert entry.config == [greeting: "hello"]
+    end
+
+    test "registers a hex-sourced extension" do
+      Minga.Config.extension(:snippets, hex: "minga_snippets", version: "~> 0.3")
+
+      assert {:ok, %Entry{} = entry} = ExtRegistry.get(:snippets)
+      assert entry.source_type == :hex
+      assert entry.hex.package == "minga_snippets"
+      assert entry.hex.version == "~> 0.3"
+    end
+
+    test "registers a hex extension without version" do
+      Minga.Config.extension(:snippets, hex: "minga_snippets")
+
+      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert entry.hex.version == nil
+    end
+
+    test "passes extra options as config for hex source" do
+      Minga.Config.extension(:snippets, hex: "minga_snippets", version: "~> 1.0", debug: true)
+
+      assert {:ok, entry} = ExtRegistry.get(:snippets)
+      assert entry.config == [debug: true]
+    end
+
+    test "raises when no source is provided" do
+      assert_raise ArgumentError, ~r/one of :path, :git, or :hex is required/, fn ->
+        Minga.Config.extension(:bad, greeting: "hello")
+      end
+    end
+
+    test "raises when multiple sources are provided" do
+      assert_raise ArgumentError, ~r/only one of :path, :git, or :hex/, fn ->
+        Minga.Config.extension(:bad, path: "/tmp/ext", git: "https://example.com/repo")
+      end
+    end
+
+    test "raises for empty git URL" do
+      assert_raise ArgumentError, ~r/non-empty URL/, fn ->
+        Minga.Config.extension(:bad, git: "")
+      end
+    end
+
+    test "raises for empty hex package name" do
+      assert_raise ArgumentError, ~r/non-empty package name/, fn ->
+        Minga.Config.extension(:bad, hex: "")
+      end
     end
   end
 end

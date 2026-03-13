@@ -45,14 +45,8 @@ defmodule Minga.Extension do
   @typedoc "Extension runtime status."
   @type extension_status :: :running | :stopped | :crashed | :load_error
 
-  @typedoc "Extension metadata and runtime info."
-  @type extension_info :: %{
-          module: module(),
-          path: String.t(),
-          config: keyword(),
-          status: extension_status(),
-          pid: pid() | nil
-        }
+  @typedoc "Extension metadata and runtime info. See `Minga.Extension.Entry`."
+  @type extension_info :: Minga.Extension.Entry.t()
 
   @doc "The extension's unique name (atom)."
   @callback name() :: atom()

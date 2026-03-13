@@ -65,11 +65,20 @@ defmodule Minga.Extension.Supervisor do
   @doc """
   Starts a single extension by name.
 
-  Compiles the module from path, validates the behaviour, calls `init/1`,
-  and starts the child_spec under this supervisor.
+  For path extensions, compiles the module from the local directory.
+  Git and hex extensions must be resolved to a local path or loaded
+  via Mix.install before calling this function.
   """
   @spec start_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
           {:ok, pid()} | {:error, term()}
+  def start_extension(_supervisor, registry, name, %{source_type: source_type})
+      when source_type in [:git, :hex] do
+    msg = "Extension #{name}: #{source_type} source loading not yet implemented"
+    Minga.Log.warning(:config, msg)
+    ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+    {:error, :not_implemented}
+  end
+
   def start_extension(supervisor, registry, name, entry) do
     with {:ok, module} <- compile_extension(entry.path),
          :ok <- validate_behaviour(module, name),

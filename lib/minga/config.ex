@@ -365,25 +365,52 @@ defmodule Minga.Config do
   end
 
   @doc """
-  Declares an extension to load from a local path.
+  Declares an extension to load.
 
-  The extension module at `path` must implement the `Minga.Extension`
-  behaviour. Extra keyword options (beyond `:path`) are passed to the
-  extension's `init/1` callback as config.
+  Exactly one source must be provided: `path:`, `git:`, or `hex:`.
+  Extra keyword options (beyond the source and its options) are passed
+  to the extension's `init/1` callback as config.
 
-  ## Examples
+  ## Path source (local development)
 
       extension :my_tool, path: "~/code/minga_my_tool"
       extension :greeter, path: "~/code/greeter", greeting: "howdy"
+
+  ## Git source (bleeding-edge or private)
+
+      extension :snippets, git: "https://github.com/user/minga_snippets"
+      extension :snippets, git: "https://github.com/user/minga_snippets", branch: "main"
+      extension :snippets, git: "git@github.com:user/minga_snippets.git", ref: "v1.0.0"
+
+  ## Hex source (stable, published)
+
+      extension :snippets, hex: "minga_snippets", version: "~> 0.3"
+      extension :snippets, hex: "minga_snippets"
   """
   @spec extension(atom(), keyword()) :: :ok
   def extension(name, opts) when is_atom(name) and is_list(opts) do
-    {path, config} = Keyword.pop(opts, :path)
+    has_path = Keyword.has_key?(opts, :path)
+    has_git = Keyword.has_key?(opts, :git)
+    has_hex = Keyword.has_key?(opts, :hex)
 
-    if is_nil(path) do
-      raise ArgumentError, "extension #{name}: :path option is required"
+    source_count = Enum.count([has_path, has_git, has_hex], & &1)
+
+    if source_count == 0 do
+      raise ArgumentError,
+            "extension #{name}: one of :path, :git, or :hex is required"
     end
 
+    if source_count > 1 do
+      raise ArgumentError,
+            "extension #{name}: only one of :path, :git, or :hex can be specified"
+    end
+
+    register_extension_source(name, opts, {has_path, has_git, has_hex})
+  end
+
+  @spec register_extension_source(atom(), keyword(), {boolean(), boolean(), boolean()}) :: :ok
+  defp register_extension_source(name, opts, {true, false, false}) do
+    {path, config} = Keyword.pop(opts, :path)
     expanded = Path.expand(path)
 
     unless File.dir?(expanded) do
@@ -391,5 +418,25 @@ defmodule Minga.Config do
     end
 
     ExtRegistry.register(name, expanded, config)
+  end
+
+  defp register_extension_source(name, opts, {false, true, false}) do
+    {url, rest} = Keyword.pop(opts, :git)
+
+    unless is_binary(url) and url != "" do
+      raise ArgumentError, "extension #{name}: :git value must be a non-empty URL string"
+    end
+
+    ExtRegistry.register_git(name, url, rest)
+  end
+
+  defp register_extension_source(name, opts, {false, false, true}) do
+    {package, rest} = Keyword.pop(opts, :hex)
+
+    unless is_binary(package) and package != "" do
+      raise ArgumentError, "extension #{name}: :hex value must be a non-empty package name"
+    end
+
+    ExtRegistry.register_hex(name, package, rest)
   end
 end
