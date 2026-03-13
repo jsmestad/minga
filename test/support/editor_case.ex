@@ -22,6 +22,7 @@ defmodule Minga.Test.EditorCase do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
   alias Minga.Test.HeadlessPort
+  alias Minga.Test.Snapshot
 
   using do
     quote do
@@ -320,6 +321,69 @@ defmodule Minga.Test.EditorCase do
 
       assert String.contains?(ml, badge),
              "Expected modeline to show #{badge} mode, got: #{inspect(ml)}"
+    end
+  end
+
+  @doc """
+  Asserts the current screen matches a stored snapshot baseline.
+
+  On first run (no baseline), writes the snapshot and passes with a log
+  message. On subsequent runs, diffs the current screen against the
+  baseline. Any difference fails the test.
+
+  Run with `UPDATE_SNAPSHOTS=1 mix test` to overwrite all baselines.
+
+  ## Example
+
+      ctx = start_editor("hello world")
+      send_keys(ctx, "llx")
+      assert_screen_snapshot(ctx, "after_delete_char")
+  """
+  defmacro assert_screen_snapshot(ctx, snapshot_name) do
+    quote do
+      ctx = unquote(ctx)
+      name = unquote(snapshot_name)
+      rows = screen_text(ctx)
+      cursor = screen_cursor(ctx)
+      shape = cursor_shape(ctx)
+      mode = editor_mode(ctx)
+
+      metadata = %{
+        cursor: cursor,
+        cursor_shape: shape,
+        mode: mode,
+        width: ctx.width,
+        height: ctx.height
+      }
+
+      current = Snapshot.serialize(rows, metadata)
+      path = Snapshot.snapshot_path(__MODULE__, name)
+
+      if Snapshot.update_mode?() do
+        Snapshot.write!(path, current)
+      else
+        case Snapshot.compare(current, path) do
+          :match ->
+            :ok
+
+          {:no_baseline, baseline_path} ->
+            Snapshot.write!(baseline_path, current)
+
+            require Logger
+            Logger.warning("New snapshot written: #{baseline_path}. Review and commit.")
+
+          {:mismatch, diff} ->
+            flunk("""
+            Screen snapshot mismatch for "#{name}"
+            Snapshot file: #{path}
+
+            Run UPDATE_SNAPSHOTS=1 mix test to accept the new output.
+
+            Diff (- expected, + actual):
+            #{diff}
+            """)
+        end
+      end
     end
   end
 
