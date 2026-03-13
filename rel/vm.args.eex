@@ -1,0 +1,50 @@
+## Minga BEAM VM Configuration
+##
+## Tuned for an interactive editor: single user, latency-sensitive,
+## few processes, bursty allocations, long idle periods between
+## keystrokes. The defaults are optimized for web servers and are
+## wrong for this workload.
+##
+## Override any flag at runtime via ERL_FLAGS environment variable:
+##   ERL_FLAGS="+S 2:2" mix minga
+##
+## See docs/PERFORMANCE.md for rationale on each flag.
+
+## ── Async threads ───────────────────────────────────────────────────
+##
+## Async thread pool for Port I/O (Zig renderer, tree-sitter parser).
+## Default is 1; 4 gives headroom for both Ports plus file operations.
++A 4
+
+## ── Scheduler wake/sleep behavior ───────────────────────────────────
+##
+## Disable scheduler busy-waiting. The editor spends most of its time
+## idle between keystrokes. Busy-waiting burns CPU (and battery) for
+## no benefit when there's nothing to schedule.
++sbwt none
++sbwtdcpu none
++sbwtdio none
+
+## Wake schedulers faster when a keystroke arrives. The default "low"
+## threshold delays wakeup slightly to batch work; an editor needs
+## instant response.
++swt very_low
++swtdcpu very_low
++swtdio very_low
+
+## ── Memory allocators ───────────────────────────────────────────────
+##
+## Address-order best fit reduces fragmentation for bursty allocation
+## patterns (render loop builds then discards IO lists every frame).
++MBas aobf
+
+## Return unused memory carriers to the OS aggressively. An editor
+## should have a small footprint when idle, not cache memory "just
+## in case" like a web server expecting the next request burst.
++Mea min
++MBacul 0
+
+## Lower the minimum binary virtual heap size. This triggers binary
+## GC sooner on processes that churn binaries (Editor, Buffer.Server
+## during render and streaming). Default is 262144 words.
++hmbs 32768

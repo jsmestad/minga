@@ -16,6 +16,78 @@ The following optimizations have been completed (see commit `8beec9d`):
 - **Motion: multi-clause functions replacing `cond`** `advance_word_forward/4`, `advance_word_end/4`, bracket scan helpers extracted as multi-clause functions.
 - **Editor: `content_and_cursor/1`** 12 separate `content()` + `cursor()` GenServer call pairs replaced with single round-trip.
 - **Git: in-memory diffing** `Git.Buffer` caches HEAD content and diffs against current buffer using `List.myers_difference/2` in pure Elixir. No `git diff` subprocess spawned on edits. Git commands only run at buffer open and explicit stage operations.
+- **BEAM VM tuning** (see below)
+
+---
+
+## BEAM VM Tuning
+
+The BEAM's defaults are tuned for web servers: many concurrent connections, high throughput, long-running processes. An editor is the opposite: single user, latency-sensitive, few processes, bursty allocations from the render loop, and long idle periods between keystrokes. Minga ships custom VM flags that address three areas:
+
+### Scheduler and thread configuration (`rel/vm.args.eex`, `bin/minga`)
+
+Scheduler count (`+S`) and dirty IO threads (`+SDio`) are left at BEAM defaults. Reducing schedulers provides negligible benefit once busy-waiting is disabled (see below), and risks starving background work (agent streaming, LSP, git) under load.
+
+| Flag | Default | Minga | Why |
+|------|---------|-------|-----|
+| `+A 4` | 1 | 4 | Async threads handle Port I/O (Zig renderer, tree-sitter parser). 4 gives headroom for both Ports plus file operations. |
+
+### Scheduler wake/sleep behavior
+
+| Flag | Default | Minga | Why |
+|------|---------|-------|-----|
+| `+sbwt none` | short | none | Disable busy-waiting. The editor is idle between keystrokes; busy-waiting burns CPU and battery for nothing. |
+| `+sbwtdcpu none` | short | none | Same for dirty CPU schedulers. |
+| `+sbwtdio none` | short | none | Same for dirty IO schedulers. |
+| `+swt very_low` | low | very_low | Wake schedulers faster when a keystroke arrives. Low latency matters more than throughput for an editor. |
+| `+swtdcpu very_low` | low | very_low | Same for dirty CPU schedulers. |
+| `+swtdio very_low` | low | very_low | Same for dirty IO schedulers. |
+
+### Memory allocators
+
+| Flag | Default | Minga | Why |
+|------|---------|-------|-----|
+| `+MBas aobf` | bf | aobf | Address-order best fit reduces fragmentation for bursty allocation patterns (render loop builds then discards IO lists every frame). |
+| `+Mea min` | (default) | min | Return unused memory carriers to the OS sooner. Editors should have a small idle footprint. |
+| `+MBacul 0` | (default) | 0 | Abandon carriers more aggressively. Don't hold memory the editor isn't using. |
+| `+hmbs 32768` | 262144 | 32768 | Lower minimum binary virtual heap. Triggers binary GC sooner on processes that churn binaries (Editor, Buffer.Server during render and streaming). |
+
+### Per-process GC tuning (Elixir code)
+
+Applied in `init/1` of hot GenServer processes:
+
+```elixir
+Process.flag(:fullsweep_after, 20)   # Default is 65535; frequent full GC reclaims dead binary refs
+Process.flag(:min_heap_size, 4096)   # Pre-allocate larger heap; avoids repeated grow-and-GC cycles
+```
+
+Processes with this tuning:
+- `Minga.Editor` (render loop, state management)
+- `Minga.Buffer.Server` (gap buffer, binary churn on edits)
+- `Minga.Port.Manager` (binary render commands every frame; fullsweep only, no min_heap bump)
+
+### Development vs release
+
+- **`mix minga`**: VM flags aren't available after the BEAM starts. Use `bin/minga` wrapper script which sets `ERL_FLAGS` before launching Mix, or set `ERL_FLAGS` manually.
+- **Release / Burrito**: `rel/vm.args.eex` is compiled into the release and read by the Burrito launcher automatically. No user action needed.
+- **Per-process GC tuning**: Applied in Elixir code at process startup. Works in both dev and release.
+
+### Overriding flags
+
+Any flag can be overridden at runtime. Flags in `ERL_FLAGS` are appended after the vm.args defaults, so later flags win:
+
+```bash
+# Try more aggressive scheduler reduction
+ERL_FLAGS="+S 2:2" bin/minga
+
+# Disable all custom flags (pass empty to override)
+ERL_FLAGS=" " mix minga
+```
+
+### Future work
+
+- Measure memory footprint with `:erlang.memory/0` and OS RSS before/after.
+- Profile render latency via `[render:content]` log timings.
 
 ---
 

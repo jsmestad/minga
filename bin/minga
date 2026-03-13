@@ -1,20 +1,19 @@
-#!/bin/sh
-# Development launcher for Minga.
-#
-# Captures the real tty device path (e.g. /dev/ttys003) before Erlang/BEAM
-# starts.  This is a belt-and-suspenders fallback — the Port Manager also
-# auto-detects the tty via `ps`, but setting MINGA_TTY explicitly is more
-# reliable across environments.
-#
-# The Burrito release binary doesn't use this script; it relies on the
-# auto-detection in Minga.Port.Manager.detect_tty/0.
+#!/usr/bin/env bash
+# Launch Minga with editor-tuned BEAM flags.
 #
 # Usage:
-#   bin/minga README.md
-#   bin/minga              # empty buffer
+#   bin/minga [filename]
+#   bin/minga +gui [filename]
+#
+# Override any flag via ERL_FLAGS:
+#   ERL_FLAGS="+S 2:2" bin/minga README.md
 
-export MINGA_TTY=$(tty)
+set -euo pipefail
 
-exec elixir -S mix run --no-halt --no-start \
-  -e 'Application.put_env(:minga, :start_editor, true); Application.ensure_all_started(:minga); Minga.CLI.main(System.argv())' \
-  -- "$@"
+# Editor-tuned VM flags (see rel/vm.args.eex for rationale).
+# ERL_FLAGS set by the caller are appended, so they can override.
+MINGA_ERL_FLAGS="+A 4 +sbwt none +sbwtdcpu none +sbwtdio none +swt very_low +swtdcpu very_low +swtdio very_low +MBas aobf +Mea min +MBacul 0 +hmbs 32768"
+
+export ERL_FLAGS="${MINGA_ERL_FLAGS} ${ERL_FLAGS:-}"
+
+exec mix minga "$@"

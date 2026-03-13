@@ -478,6 +478,12 @@ defmodule Minga.Buffer.Server do
   @impl true
   @spec init(keyword()) :: {:ok, state()} | {:stop, term()}
   def init(opts) do
+    # Tune GC for buffer processes: they churn binaries during edits and
+    # content queries. Frequent full sweeps prevent binary ref buildup;
+    # larger initial heap reduces grow-and-GC cycles for large files.
+    Process.flag(:fullsweep_after, 20)
+    Process.flag(:min_heap_size, 4096)
+
     file_path = Keyword.get(opts, :file_path)
     initial_content = Keyword.get(opts, :content, "")
 
