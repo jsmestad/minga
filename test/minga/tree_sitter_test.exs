@@ -116,6 +116,54 @@ defmodule Minga.TreeSitterTest do
     end
   end
 
+  describe "resolve_query_inherits/2" do
+    test "returns query unchanged when no inherits directive" do
+      query = "(identifier) @variable\n(string) @string\n"
+      assert TreeSitter.resolve_query_inherits(query, :highlights) == query
+    end
+
+    test "resolves single parent inheritance" do
+      # TypeScript inherits from ecma. The ecma highlights should be prepended.
+      query = "; inherits: ecma\n(type_identifier) @type\n"
+      resolved = TreeSitter.resolve_query_inherits(query, :highlights)
+
+      # Should contain ecma content
+      assert String.contains?(resolved, "arrow_function")
+      # Should contain the child's own content
+      assert String.contains?(resolved, "type_identifier")
+      # Should NOT contain the inherits directive
+      refute String.starts_with?(resolved, "; inherits:")
+    end
+
+    test "resolves multiple parents" do
+      query = "; inherits: ecma,jsx\n; child content\n(my_node) @custom\n"
+      resolved = TreeSitter.resolve_query_inherits(query, :highlights)
+
+      # ecma content
+      assert String.contains?(resolved, "arrow_function")
+      # jsx content
+      assert String.contains?(resolved, "jsx_element")
+      # Own content
+      assert String.contains?(resolved, "my_node")
+    end
+
+    test "handles missing parent gracefully" do
+      query = "; inherits: nonexistent_language\n(foo) @bar\n"
+      resolved = TreeSitter.resolve_query_inherits(query, :highlights)
+
+      # Should still contain the child content
+      assert String.contains?(resolved, "(foo) @bar")
+    end
+
+    test "handles missing query type for parent" do
+      # bash has highlights but no folds
+      query = "; inherits: bash\n(foo) @fold\n"
+      resolved = TreeSitter.resolve_query_inherits(query, :folds)
+
+      assert String.contains?(resolved, "(foo) @fold")
+    end
+  end
+
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   @spec shared_lib_ext() :: String.t()
