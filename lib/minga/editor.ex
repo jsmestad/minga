@@ -630,10 +630,20 @@ defmodule Minga.Editor do
 
   # ── Render scheduling ────────────────────────────────────────────────────────
 
-  # Schedules a render within `delay_ms`. If a render is already scheduled,
-  # this is a no-op (the pending render will pick up the latest state).
-  # Use this instead of `Renderer.render/1` in paths that may fire rapidly
-  # (e.g., diagnostics, LSP responses, file watcher events).
+  # Schedules a render within `delay_ms` using throttle semantics.
+  #
+  # The first call renders immediately (delay_ms == 0 path) or schedules
+  # at the given delay. Subsequent calls during an active window are
+  # coalesced: the pending timer already covers them. The `:debounced_render`
+  # handler clears `render_timer` so the next event after the window can
+  # schedule again.
+  #
+  # For streaming agent responses, this ensures new text is visible within
+  # one frame (~16ms) of arriving at the BEAM, because:
+  # 1. First delta triggers an immediate or near-immediate render.
+  # 2. Deltas arriving mid-window are picked up by the pending timer.
+  # 3. The timer fires, renders the latest state, and clears the guard
+  #    so the next delta can schedule again.
   @spec schedule_render(state(), non_neg_integer()) :: state()
   defp schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
 
