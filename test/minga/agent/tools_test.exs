@@ -35,7 +35,7 @@ defmodule Minga.Agent.ToolsTest do
   end
 
   describe "all/1" do
-    test "returns a list of seven tools", %{tmp_dir: dir} do
+    test "returns a list of eight tools", %{tmp_dir: dir} do
       tools = Tools.all(project_root: dir)
       assert length(tools) == 8
 

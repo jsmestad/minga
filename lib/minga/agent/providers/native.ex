@@ -926,7 +926,7 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @file_tools ~w(edit_file write_file)
+  @file_tools ~w(edit_file multi_edit_file write_file)
 
   @spec capture_file_before(map()) :: String.t() | nil
   defp capture_file_before(%{name: name, arguments: %{"path" => path}})
@@ -1146,9 +1146,10 @@ defmodule Minga.Agent.Providers.Native do
 
   ## Available tools
 
-  - read_file: Read file contents
+  - read_file: Read file contents. Supports offset and limit for partial reads of large files.
   - write_file: Create or overwrite files (creates parent directories automatically)
   - edit_file: Make surgical edits (find exact text and replace). Read the file first to get exact text.
+  - multi_edit_file: Apply multiple edits to one file in a single call. More efficient than calling edit_file N times.
   - list_directory: List files and directories at a path
   - find: Find files by name or glob pattern. Prefer this over shell + find.
   - grep: Search file contents for a pattern. Returns file:line:content. Prefer this over shell + grep.
