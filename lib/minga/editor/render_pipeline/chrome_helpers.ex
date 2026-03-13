@@ -142,10 +142,12 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec whichkey_column_layout([WhichKey.Binding.t()], integer()) ::
           {pos_integer(), [[WhichKey.Binding.t() | nil]]}
   defp whichkey_column_layout(bindings, available_width) do
-    # Compute the widest entry to determine column width.
-    # Entry width: 2 (icon+space or padding) + key_width + 3 (" : ") + desc_width
-    entry_width = fn %WhichKey.Binding{key: key, description: desc, icon: icon} ->
-      icon_w = if icon, do: 2, else: 0
+    # When any binding has an icon, all entries reserve 2 chars for the icon
+    # column so keys stay aligned. Include that in the width calculation.
+    has_icons = Enum.any?(bindings, fn %WhichKey.Binding{icon: icon} -> icon != nil end)
+    icon_w = if has_icons, do: 2, else: 0
+
+    entry_width = fn %WhichKey.Binding{key: key, description: desc} ->
       icon_w + String.length(key) + 3 + String.length(desc)
     end
 
@@ -168,14 +170,17 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   end
 
   # Renders a single binding entry as a list of styled draws at the given position.
+  # When `has_icons` is true, all entries reserve 2 chars for the icon column so
+  # keys and descriptions stay aligned even when some entries lack an icon.
   @spec render_whichkey_entry(
           WhichKey.Binding.t(),
           non_neg_integer(),
           non_neg_integer(),
-          Theme.Popup.t()
+          Theme.Popup.t(),
+          boolean()
         ) ::
           [DisplayList.draw()]
-  defp render_whichkey_entry(%WhichKey.Binding{} = binding, row, col, popup) do
+  defp render_whichkey_entry(%WhichKey.Binding{} = binding, row, col, popup, has_icons) do
     key_fg = Map.get(popup, :key_fg) || popup.fg
     sep_fg = Map.get(popup, :separator_fg) || popup.fg
     desc_fg = whichkey_desc_fg(binding.kind, popup)
@@ -184,13 +189,18 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     draws = []
     cur_col = col
 
-    # Icon (if present)
+    # Icon column: when any entry in the grid has an icon, reserve 2 chars
+    # for every entry so keys stay aligned.
     {draws, cur_col} =
       if binding.icon do
         icon_draw = DisplayList.draw(row, cur_col, binding.icon, fg: desc_fg, bg: bg)
         {[icon_draw | draws], cur_col + 2}
       else
-        {draws, cur_col}
+        if has_icons do
+          {draws, cur_col + 2}
+        else
+          {draws, cur_col}
+        end
       end
 
     # Key
@@ -323,10 +333,21 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec whichkey_grid_draws([[WhichKey.Binding.t() | nil]], non_neg_integer(), Theme.Popup.t()) ::
           [DisplayList.draw()]
   defp whichkey_grid_draws(visible_grid, col_width, popup) do
+    has_icons =
+      Enum.any?(visible_grid, fn row ->
+        Enum.any?(row, fn
+          nil -> false
+          %WhichKey.Binding{icon: icon} -> icon != nil
+        end)
+      end)
+
     Enum.flat_map(Enum.with_index(visible_grid), fn {row_entries, row_idx} ->
       Enum.flat_map(Enum.with_index(row_entries), fn
-        {nil, _col_idx} -> []
-        {entry, col_idx} -> render_whichkey_entry(entry, row_idx, col_idx * col_width, popup)
+        {nil, _col_idx} ->
+          []
+
+        {entry, col_idx} ->
+          render_whichkey_entry(entry, row_idx, col_idx * col_width, popup, has_icons)
       end)
     end)
   end

@@ -10,7 +10,7 @@ defmodule Minga.Editor.State.WhichKey do
           node: Minga.Keymap.Bindings.node_t() | nil,
           timer: Minga.WhichKey.timer_ref() | nil,
           show: boolean(),
-          prefix_keys: [Minga.Keymap.Bindings.key()],
+          prefix_keys: [String.t()],
           page: non_neg_integer()
         }
 

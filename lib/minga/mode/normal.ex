@@ -193,6 +193,16 @@ defmodule Minga.Mode.Normal do
     {:execute, [:leader_cancel, {:leader_start, trie}], new_state}
   end
 
+  # Ctrl+D / Ctrl+U while in leader mode → paginate which-key popup.
+  # These are intercepted before the trie walk so they don't cancel the leader sequence.
+  def handle_key({?d, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
+    {:execute, :whichkey_next_page, state}
+  end
+
+  def handle_key({?u, 0x02}, %ModeState{leader_node: node} = state) when is_map(node) do
+    {:execute, :whichkey_prev_page, state}
+  end
+
   # Any other key while in leader mode → walk the trie.
   def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, key) do

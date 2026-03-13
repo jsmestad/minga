@@ -14,15 +14,15 @@
 09│   ~
 10│   ~
 11│╭──────────────────────────────────── SPC ─────────────────────────────────────╮
-12││/ : Search project       9 : Tab 9                  m : +filetype             │
-13││1 : Tab 1                : : Execute command      󰏌 o : +open                 │
-14││2 : Tab 2                󰓫 TAB : +tab               p : +project              │
-15││3 : Tab 3                󰚩 a : +ai                󰗼 q : +quit                 │
-16││4 : Tab 4                󰓩 b : +buffer              s : +search               │
-17││5 : Tab 5                  c : +code              󰔡 t : +toggle               │
-18││6 : Tab 6                󰈔 f : +file                w : +window               │
-19││7 : Tab 7                  g : +git                                           │
-20││8 : Tab 8                󰋖 h : +help                                          │
+12││  / : Search project       9 : Tab 9                m : +filetype             │
+13││  1 : Tab 1                : : Execute command    󰏌 o : +open                 │
+14││  2 : Tab 2              󰓫 TAB : +tab               p : +project              │
+15││  3 : Tab 3              󰚩 a : +ai                󰗼 q : +quit                 │
+16││  4 : Tab 4              󰓩 b : +buffer              s : +search               │
+17││  5 : Tab 5                c : +code              󰔡 t : +toggle               │
+18││  6 : Tab 6              󰈔 f : +file                w : +window               │
+19││  7 : Tab 7                g : +git                                           │
+20││  8 : Tab 8              󰋖 h : +help                                          │
 21│╰──────────────────────────────────────────────────────────────────────────────╯
 22│ NORMAL  [scratch]                                               Text  1:1  Top
 23│

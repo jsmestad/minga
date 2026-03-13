@@ -121,7 +121,7 @@ defmodule Minga.WhichKey do
   ## Examples
 
       iex> Minga.WhichKey.format_bindings([{{?j, 0}, "Move cursor down"}])
-      [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down"}]
+      [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down", kind: :command, icon: nil}]
   """
   @spec format_bindings([{Bindings.key(), String.t() | atom()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
@@ -149,26 +149,6 @@ defmodule Minga.WhichKey do
     |> Bindings.children()
     |> format_bindings()
     |> Enum.sort_by(& &1.key)
-  end
-
-  @doc """
-  Renders a which-key popup as a plain-text list of columns.
-
-  Returns a list of strings, one per row, each of the form `"  key  description"`.
-  Suitable for drawing with the port renderer.
-
-  ## Examples
-
-      iex> alias Minga.WhichKey.Binding
-      iex> Minga.WhichKey.render_popup([%Binding{key: "j", description: "Move down"}])
-      ["  j       Move down"]
-  """
-  @spec render_popup([binding()]) :: [String.t()]
-  def render_popup(bindings) when is_list(bindings) do
-    Enum.map(bindings, fn %Binding{key: key, description: desc} ->
-      padded_key = String.pad_trailing(key, 8)
-      "  #{padded_key}#{desc}"
-    end)
   end
 
   # ── Private ───────────────────────────────────────────────────────────────────

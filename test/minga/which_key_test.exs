@@ -34,6 +34,14 @@ defmodule Minga.WhichKeyTest do
       assert WhichKey.format_key({?s, 0x06}) == "C-M-s"
     end
 
+    test "formats TAB (codepoint 9) as 'TAB'" do
+      assert WhichKey.format_key({9, 0}) == "TAB"
+    end
+
+    test "formats RET (codepoint 13) as 'RET'" do
+      assert WhichKey.format_key({13, 0}) == "RET"
+    end
+
     test "formats uppercase letters" do
       assert WhichKey.format_key({?G, 0}) == "G"
       assert WhichKey.format_key({?Z, 0}) == "Z"
@@ -169,29 +177,6 @@ defmodule Minga.WhichKeyTest do
       # The leaf node (returned via Bindings.lookup → get child) has no children.
       {:ok, leaf} = Map.fetch(trie.children, {?s, 0})
       assert WhichKey.bindings_from_node(leaf) == []
-    end
-  end
-
-  # ── render_popup/1 ────────────────────────────────────────────────────────────
-
-  describe "render_popup/1" do
-    test "renders each binding as a padded text line" do
-      bindings = [
-        %Minga.WhichKey.Binding{key: "f", description: "Find file", kind: :command},
-        %Minga.WhichKey.Binding{key: "s", description: "Save file", kind: :command}
-      ]
-
-      lines = WhichKey.render_popup(bindings)
-
-      assert length(lines) == 2
-      assert Enum.at(lines, 0) =~ "f"
-      assert Enum.at(lines, 0) =~ "Find file"
-      assert Enum.at(lines, 1) =~ "s"
-      assert Enum.at(lines, 1) =~ "Save file"
-    end
-
-    test "renders empty popup for empty bindings" do
-      assert WhichKey.render_popup([]) == []
     end
   end
 

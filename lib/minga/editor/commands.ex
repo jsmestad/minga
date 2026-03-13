@@ -154,6 +154,16 @@ defmodule Minga.Editor.Commands do
     {state, {:whichkey_update, whichkey}}
   end
 
+  def execute(state, :whichkey_next_page) do
+    whichkey = %{state.whichkey | page: state.whichkey.page + 1}
+    {state, {:whichkey_update, whichkey}}
+  end
+
+  def execute(state, :whichkey_prev_page) do
+    whichkey = %{state.whichkey | page: max(state.whichkey.page - 1, 0)}
+    {state, {:whichkey_update, whichkey}}
+  end
+
   # ── Eval ───────────────────────────────────────────────────────────────────
 
   def execute(state, {:eval_expression, _} = cmd), do: Eval.execute(state, cmd)
