@@ -9,9 +9,16 @@ defmodule Minga.Agent.Tools.Subagent do
 
   The subagent's conversation is ephemeral (not saved to session history).
   Only the final text response is returned to the parent as the tool result.
+
+  ## Blocking behavior
+
+  `execute/2` blocks the calling process (typically the parent agent's tool
+  execution task) for up to 5 minutes while waiting for the subagent to
+  finish. The parent agent cannot execute other tools concurrently during
+  this time. This is acceptable because tool execution already runs in an
+  isolated Task, but callers should be aware of the timeout.
   """
 
-  alias Minga.Agent.Event
   alias Minga.Agent.Session
   alias Minga.Agent.Supervisor, as: AgentSupervisor
 
@@ -107,7 +114,7 @@ defmodule Minga.Agent.Tools.Subagent do
     AgentSupervisor.stop_session(session_pid)
     :ok
   rescue
-    _ -> :ok
+    ArgumentError -> :ok
   catch
     :exit, _ -> :ok
   end
@@ -134,12 +141,8 @@ defmodule Minga.Agent.Tools.Subagent do
       root -> root
     end
   rescue
-    _ -> File.cwd!()
+    ArgumentError -> File.cwd!()
   catch
     :exit, _ -> File.cwd!()
   end
-
-  # Suppress the unused alias warning; Event is referenced in type context
-  # but not directly called in this module.
-  _ = Event
 end
