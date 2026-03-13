@@ -58,6 +58,8 @@ pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
 pub const OP_SET_FOLD_QUERY: u8 = 0x28;
 pub const OP_SET_INDENT_QUERY: u8 = 0x29;
 pub const OP_REQUEST_INDENT: u8 = 0x2A;
+pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
+pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -74,6 +76,9 @@ pub const OP_FOLD_RANGES: u8 = 0x36;
 
 // Indent responses (Zig → BEAM)
 pub const OP_INDENT_RESULT: u8 = 0x37;
+
+// Textobject responses (Zig → BEAM)
+pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -238,6 +243,8 @@ pub const RenderCommand = union(enum) {
     set_fold_query: []const u8,
     set_indent_query: []const u8,
     request_indent: RequestIndent,
+    set_textobject_query: []const u8,
+    request_textobject: RequestTextobject,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
 };
@@ -280,6 +287,13 @@ pub const ParseBuffer = struct {
 pub const RequestIndent = struct {
     request_id: u32,
     line: u32,
+};
+
+pub const RequestTextobject = struct {
+    request_id: u32,
+    row: u32,
+    col: u32,
+    capture_name: []const u8,
 };
 
 pub const LoadGrammar = struct {
@@ -594,6 +608,24 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .line = std.mem.readInt(u32, rest[4..8], .big),
             } };
         },
+        OP_SET_TEXTOBJECT_QUERY => {
+            if (rest.len < 4) return error.Malformed;
+            const query_len = std.mem.readInt(u32, rest[0..4], .big);
+            if (rest.len < 4 + query_len) return error.Malformed;
+            return .{ .set_textobject_query = rest[4 .. 4 + query_len] };
+        },
+        OP_REQUEST_TEXTOBJECT => {
+            // request_id:4, row:4, col:4, name_len:2, name
+            if (rest.len < 14) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[12..14], .big);
+            if (rest.len < 14 + name_len) return error.Malformed;
+            return .{ .request_textobject = .{
+                .request_id = std.mem.readInt(u32, rest[0..4], .big),
+                .row = std.mem.readInt(u32, rest[4..8], .big),
+                .col = std.mem.readInt(u32, rest[8..12], .big),
+                .capture_name = rest[14 .. 14 + name_len],
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -711,7 +743,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len = std.mem.readInt(u32, payload[5..9], .big);
             break :blk 9 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY => blk: {
             if (payload.len < 5) break :blk payload.len;
             const query_len = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + query_len;
@@ -731,6 +763,12 @@ pub fn commandSize(payload: []const u8) usize {
         },
         OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
         OP_REQUEST_INDENT => 9, // opcode(1) + request_id(4) + line(4)
+        OP_REQUEST_TEXTOBJECT => blk: {
+            // opcode(1) + request_id(4) + row(4) + col(4) + name_len(2) + name
+            if (payload.len < 15) break :blk payload.len;
+            const nl = std.mem.readInt(u16, payload[13..15], .big);
+            break :blk 15 + nl;
+        },
         OP_EDIT_BUFFER => blk: {
             // opcode(1) + version(4) + edit_count(2) + variable per edit
             if (payload.len < 7) break :blk payload.len;
@@ -871,6 +909,31 @@ pub fn encodeFoldRanges(allocator: std.mem.Allocator, version: u32, ranges: []co
     }
 
     return buf;
+}
+
+/// Text object result (shared between protocol and highlighter).
+pub const TextobjectResult = struct {
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+};
+
+/// Encodes textobject_result: opcode(1) + request_id(4) + found(1) + start_row(4) + start_col(4) + end_row(4) + end_col(4) = 22 bytes
+pub fn encodeTextobjectResult(buf: *[22]u8, request_id: u32, result: ?TextobjectResult) usize {
+    buf[0] = OP_TEXTOBJECT_RESULT;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    if (result) |r| {
+        buf[5] = 1; // found
+        std.mem.writeInt(u32, buf[6..10], r.start_row, .big);
+        std.mem.writeInt(u32, buf[10..14], r.start_col, .big);
+        std.mem.writeInt(u32, buf[14..18], r.end_row, .big);
+        std.mem.writeInt(u32, buf[18..22], r.end_col, .big);
+        return 22;
+    } else {
+        buf[5] = 0; // not found
+        return 6;
+    }
 }
 
 /// Encodes indent_result: opcode(1) + request_id(4) + line(4) + indent_level(4, signed)

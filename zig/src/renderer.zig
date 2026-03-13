@@ -174,7 +174,7 @@ pub fn Renderer(comptime SurfaceT: type) type {
                 },
 
                 // edit_buffer, measure_text and highlight commands are handled by the event loop, not the renderer.
-                .noop, .edit_buffer, .measure_text, .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .set_fold_query, .set_indent_query, .request_indent, .load_grammar, .query_language_at => {},
+                .noop, .edit_buffer, .measure_text, .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .set_fold_query, .set_indent_query, .request_indent, .set_textobject_query, .request_textobject, .load_grammar, .query_language_at => {},
             }
         }
 

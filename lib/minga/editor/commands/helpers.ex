@@ -354,6 +354,12 @@ defmodule Minga.Editor.Commands.Helpers do
   def compute_text_object_range(buf, pos, :around, {:paren, open, close}),
     do: TextObject.a_parens(buf, pos, open, close)
 
+  def compute_text_object_range(_buf, pos, :inner, {:structural, type}),
+    do: TextObject.structural_inner(type, pos)
+
+  def compute_text_object_range(_buf, pos, :around, {:structural, type}),
+    do: TextObject.structural_around(type, pos)
+
   def compute_text_object_range(_buf, _pos, _modifier, _spec), do: nil
 
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."

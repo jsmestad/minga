@@ -35,13 +35,17 @@ defmodule Minga.Parser.Manager do
     defstruct port: nil,
               subscribers: [],
               parser_path: "",
-              ready: false
+              ready: false,
+              next_request_id: 1,
+              pending_requests: %{}
 
     @type t :: %__MODULE__{
             port: port() | nil,
             subscribers: [pid()],
             parser_path: String.t(),
-            ready: boolean()
+            ready: boolean(),
+            next_request_id: non_neg_integer(),
+            pending_requests: %{non_neg_integer() => GenServer.from()}
           }
   end
 
@@ -78,6 +82,28 @@ defmodule Minga.Parser.Manager do
       when is_binary(name) and is_binary(lib_path) do
     commands = [Protocol.encode_load_grammar(name, lib_path)]
     send_commands(server, commands)
+  end
+
+  @doc """
+  Requests a tree-sitter text object range synchronously.
+
+  Sends a `request_textobject` command to the Zig parser and blocks until
+  the result arrives (or times out after 2 seconds).
+
+  Returns `{start_row, start_col, end_row, end_col}` or `nil` if no match.
+  """
+  @spec request_textobject(
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          GenServer.server()
+        ) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  def request_textobject(row, col, capture_name, server \\ __MODULE__)
+      when is_integer(row) and is_integer(col) and is_binary(capture_name) do
+    GenServer.call(server, {:request_textobject, row, col, capture_name}, 2_000)
+  catch
+    :exit, _ -> nil
   end
 
   @doc """
@@ -122,6 +148,20 @@ defmodule Minga.Parser.Manager do
     {:reply, :ok, %{state | subscribers: subscribers}}
   end
 
+  def handle_call({:request_textobject, _row, _col, _capture}, _from, %{port: nil} = state) do
+    {:reply, nil, state}
+  end
+
+  def handle_call({:request_textobject, row, col, capture_name}, from, state) do
+    request_id = state.next_request_id
+    cmd = Protocol.encode_request_textobject(request_id, row, col, capture_name)
+    Port.command(state.port, cmd)
+
+    pending = Map.put(state.pending_requests, request_id, from)
+
+    {:noreply, %{state | next_request_id: request_id + 1, pending_requests: pending}}
+  end
+
   @impl true
   @spec handle_cast(term(), State.t()) :: {:noreply, State.t()}
   def handle_cast({:send_commands, _commands}, %{port: nil} = state) do
@@ -138,6 +178,16 @@ defmodule Minga.Parser.Manager do
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     case Protocol.decode_event(data) do
+      {:ok, {:textobject_result, request_id, result}} ->
+        case Map.pop(state.pending_requests, request_id) do
+          {nil, _pending} ->
+            {:noreply, state}
+
+          {from, pending} ->
+            GenServer.reply(from, result)
+            {:noreply, %{state | pending_requests: pending}}
+        end
+
       {:ok, event} ->
         broadcast(state.subscribers, {:minga_highlight, event})
         {:noreply, state}

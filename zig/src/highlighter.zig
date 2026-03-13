@@ -34,6 +34,7 @@ const BuiltinGrammar = struct {
     injection_query: ?[]const u8 = null,
     fold_query: ?[]const u8 = null,
     indent_query: ?[]const u8 = null,
+    textobject_query: ?[]const u8 = null,
 };
 
 pub const InjectionRange = protocol.InjectionRange;
@@ -48,6 +49,7 @@ pub const Highlighter = struct {
     injection_query: ?*c.TSQuery = null,
     fold_query: ?*c.TSQuery = null,
     indent_query: ?*c.TSQuery = null,
+    textobject_query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
     current_language_name: ?[]const u8 = null,
     current_source: ?[]const u8 = null,
@@ -56,6 +58,7 @@ pub const Highlighter = struct {
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -80,6 +83,7 @@ pub const Highlighter = struct {
             .injection_query_cache = .empty,
             .fold_query_cache = .empty,
             .indent_query_cache = .empty,
+            .textobject_query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -115,6 +119,9 @@ pub const Highlighter = struct {
             }
             if (entry.indent_query) |indent_source| {
                 self.prewarmOne(entry.name, indent_source, &self.indent_query_cache);
+            }
+            if (entry.textobject_query) |textobj_source| {
+                self.prewarmOne(entry.name, textobj_source, &self.textobject_query_cache);
             }
         }
         self.prewarm_done.store(true, .release);
@@ -193,6 +200,13 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.indent_query_cache.deinit(self.allocator);
+
+        // Free all cached textobject queries
+        var toit = self.textobject_query_cache.iterator();
+        while (toit.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.textobject_query_cache.deinit(self.allocator);
 
         if (self.injection_ranges.len > 0) {
             self.allocator.free(self.injection_ranges);
@@ -291,6 +305,25 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, indent_source.ptr, @intCast(indent_source.len), &err_off, &err_type)) |compiled| {
                                 self.indent_query = compiled;
                                 self.indent_query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Textobject query
+            if (self.textobject_query_cache.get(name)) |cached| {
+                self.textobject_query = cached;
+            } else {
+                self.textobject_query = null;
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.textobject_query) |textobj_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, textobj_source.ptr, @intCast(textobj_source.len), &err_off, &err_type)) |compiled| {
+                                self.textobject_query = compiled;
+                                self.textobject_query_cache.put(self.allocator, entry.name, compiled) catch {};
                             }
                         }
                     }
@@ -557,6 +590,111 @@ pub const Highlighter = struct {
 
         _ = line_start;
         return indent_count;
+    }
+
+    /// Compile and cache a user-provided textobject query for the current language.
+    pub fn setTextobjectQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+
+        if (self.textobject_query_cache.get(name)) |cached| {
+            self.textobject_query = cached;
+            return;
+        }
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        const new_query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.warn("Textobject query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+
+        self.textobject_query = new_query;
+        self.textobject_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    /// Alias for the shared TextobjectResult type.
+    pub const TextobjectResult = protocol.TextobjectResult;
+
+    /// Find the smallest text object matching `capture_name` (e.g., "function.inside",
+    /// "class.around") that contains the cursor position (row, col).
+    ///
+    /// Returns null if no matching capture spans the cursor position.
+    pub fn findTextobject(self: *Highlighter, row: u32, col: u32, capture_name: []const u8) ?TextobjectResult {
+        const tq = self.textobject_query orelse return null;
+        const tree = self.tree orelse return null;
+        const root = c.ts_tree_root_node(tree);
+
+        // Find the capture ID matching the requested name.
+        const cap_count = c.ts_query_capture_count(tq);
+        var target_id: ?u32 = null;
+
+        for (0..cap_count) |i| {
+            var name_len: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(tq, @intCast(i), &name_len);
+            if (name_ptr == null) continue;
+            const cap_name = name_ptr[0..name_len];
+            if (std.mem.eql(u8, cap_name, capture_name)) {
+                target_id = @intCast(i);
+                break;
+            }
+        }
+
+        const tid = target_id orelse return null;
+
+        const cursor = c.ts_query_cursor_new() orelse return null;
+        defer c.ts_query_cursor_delete(cursor);
+        c.ts_query_cursor_exec(cursor, tq, root);
+
+        // Find the smallest (innermost) capture that contains the cursor.
+        var best: ?TextobjectResult = null;
+        var best_size: u64 = std.math.maxInt(u64);
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..@intCast(match.capture_count)];
+            for (captures) |cap| {
+                if (cap.index != tid) continue;
+
+                const node = cap.node;
+                const start = c.ts_node_start_point(node);
+                const end = c.ts_node_end_point(node);
+
+                // Check if cursor is within this node
+                const cursor_after_start = (row > start.row) or (row == start.row and col >= start.column);
+                const cursor_before_end = (row < end.row) or (row == end.row and col <= end.column);
+
+                if (cursor_after_start and cursor_before_end) {
+                    const start_byte = c.ts_node_start_byte(node);
+                    const end_byte = c.ts_node_end_byte(node);
+                    const size: u64 = end_byte - start_byte;
+
+                    if (size < best_size) {
+                        best = .{
+                            .start_row = start.row,
+                            .start_col = start.column,
+                            .end_row = end.row,
+                            .end_col = end.column,
+                        };
+                        best_size = size;
+                    }
+                }
+            }
+        }
+
+        return best;
     }
 
     /// Find the byte offset where a given line starts in the source.
@@ -1250,44 +1388,49 @@ fn qlIndent(comptime name: []const u8) ?[]const u8 {
     return comptime query_loader.resolve(name, .indents);
 }
 
+/// Helper to resolve a textobjects query via the query_loader.
+fn qlTextobj(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .textobjects);
+}
+
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir"), .indent_query = qlIndent("elixir") },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir"), .indent_query = qlIndent("elixir"), .textobject_query = qlTextobj("elixir") },
     .{ .name = "heex", .func = tree_sitter_heex },
     .{ .name = "json", .func = tree_sitter_json, .query = ql("json"), .fold_query = qlFold("json"), .indent_query = qlIndent("json") },
     .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml"), .fold_query = qlFold("yaml"), .indent_query = qlIndent("yaml") },
     .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml"), .fold_query = qlFold("toml") },
     .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown"), .fold_query = qlFold("markdown") },
     .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = ql("markdown_inline"), .injection_query = qlInj("markdown_inline") },
-    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby"), .indent_query = qlIndent("ruby") },
-    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript"), .indent_query = qlIndent("javascript") },
-    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript"), .indent_query = qlIndent("typescript") },
-    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx") },
-    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go"), .indent_query = qlIndent("go") },
-    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust"), .indent_query = qlIndent("rust") },
-    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig"), .indent_query = qlIndent("zig") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby"), .indent_query = qlIndent("ruby"), .textobject_query = qlTextobj("ruby") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript"), .indent_query = qlIndent("javascript"), .textobject_query = qlTextobj("javascript") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript"), .indent_query = qlIndent("typescript"), .textobject_query = qlTextobj("typescript") },
+    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx"), .textobject_query = qlTextobj("tsx") },
+    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go"), .indent_query = qlIndent("go"), .textobject_query = qlTextobj("go") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust"), .indent_query = qlIndent("rust"), .textobject_query = qlTextobj("rust") },
+    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig"), .indent_query = qlIndent("zig"), .textobject_query = qlTextobj("zig") },
     .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang"), .fold_query = qlFold("erlang") },
-    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash"), .indent_query = qlIndent("bash") },
-    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c"), .indent_query = qlIndent("c") },
-    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp"), .indent_query = qlIndent("cpp") },
+    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash"), .indent_query = qlIndent("bash"), .textobject_query = qlTextobj("bash") },
+    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c"), .indent_query = qlIndent("c"), .textobject_query = qlTextobj("c") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp"), .indent_query = qlIndent("cpp"), .textobject_query = qlTextobj("cpp") },
     .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html"), .fold_query = qlFold("html") },
     .{ .name = "css", .func = tree_sitter_css, .query = ql("css"), .fold_query = qlFold("css"), .indent_query = qlIndent("css") },
-    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua"), .indent_query = qlIndent("lua") },
-    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python"), .indent_query = qlIndent("python") },
-    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin"), .indent_query = qlIndent("kotlin") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua"), .indent_query = qlIndent("lua"), .textobject_query = qlTextobj("lua") },
+    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python"), .indent_query = qlIndent("python"), .textobject_query = qlTextobj("python") },
+    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin"), .indent_query = qlIndent("kotlin"), .textobject_query = qlTextobj("kotlin") },
     .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam"), .fold_query = qlFold("gleam") },
-    .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java"), .indent_query = qlIndent("java") },
+    .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java"), .indent_query = qlIndent("java"), .textobject_query = qlTextobj("java") },
     .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp") },
     .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php"), .fold_query = qlFold("php") },
     .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = ql("dockerfile") },
     .{ .name = "hcl", .func = tree_sitter_hcl, .query = ql("hcl") },
     .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss"), .fold_query = qlFold("scss") },
     .{ .name = "graphql", .func = tree_sitter_graphql, .query = ql("graphql") },
-    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix"), .indent_query = qlIndent("nix") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix"), .indent_query = qlIndent("nix"), .textobject_query = qlTextobj("nix") },
     .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml"), .indent_query = qlIndent("ocaml") },
-    .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell"), .fold_query = qlFold("haskell") },
-    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala"), .indent_query = qlIndent("scala") },
+    .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell"), .fold_query = qlFold("haskell"), .textobject_query = qlTextobj("haskell") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala"), .indent_query = qlIndent("scala"), .textobject_query = qlTextobj("scala") },
     .{ .name = "r", .func = tree_sitter_r, .query = ql("r") },
-    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart"), .indent_query = qlIndent("dart") },
+    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart"), .indent_query = qlIndent("dart"), .textobject_query = qlTextobj("dart") },
     .{ .name = "make", .func = tree_sitter_make, .query = ql("make"), .fold_query = qlFold("make") },
     .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff"), .fold_query = qlFold("diff") },
     .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
