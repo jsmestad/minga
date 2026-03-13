@@ -60,20 +60,34 @@ defmodule Minga.Agent.Providers.Native do
 
   @thinking_cycle ["off", "low", "medium", "high"]
 
+  defmodule LoopCtx do
+    @moduledoc false
+    @enforce_keys [:provider_pid, :model, :tools, :thinking_level, :max_tokens,
+                   :max_retries, :llm_client, :max_turns, :max_cost]
+    defstruct [
+      :provider_pid, :model, :tools, :thinking_level, :max_tokens,
+      :max_retries, :llm_client, :max_turns, :max_cost,
+      turn_count: 0,
+      session_cost: 0.0
+    ]
+
+    @type t :: %__MODULE__{
+            provider_pid: pid(),
+            model: String.t(),
+            tools: [ReqLLM.Tool.t()],
+            thinking_level: String.t(),
+            max_tokens: pos_integer(),
+            max_retries: non_neg_integer(),
+            llm_client: term(),
+            max_turns: pos_integer(),
+            max_cost: float() | nil,
+            turn_count: non_neg_integer(),
+            session_cost: float()
+          }
+  end
+
   @typedoc "Captures the immutable parameters for one agent turn loop invocation."
-  @type loop_ctx :: %{
-          provider_pid: pid(),
-          model: String.t(),
-          tools: [ReqLLM.Tool.t()],
-          thinking_level: String.t(),
-          max_tokens: pos_integer(),
-          max_retries: non_neg_integer(),
-          llm_client: llm_client(),
-          max_turns: pos_integer(),
-          max_cost: float() | nil,
-          turn_count: non_neg_integer(),
-          session_cost: float()
-        }
+  @type loop_ctx :: LoopCtx.t()
 
   @typedoc "Function that performs the LLM streaming call."
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
@@ -247,7 +261,7 @@ defmodule Minga.Agent.Providers.Native do
     notify(state.subscriber, %Event.AgentStart{})
 
     # Check cost budget before starting
-    if cost_budget_exceeded?(state) do
+    if over_budget?(state) do
       notify(state.subscriber, %Event.Error{
         message: cost_limit_message(state.session_cost, state.max_cost)
       })
@@ -255,7 +269,7 @@ defmodule Minga.Agent.Providers.Native do
       {:reply, {:error, :cost_limit_reached}, %{state | context: context}}
     else
       # Spawn the agent turn loop in a linked task
-      lctx = %{
+      lctx = %LoopCtx{
         provider_pid: self(),
         model: state.model,
         tools: state.tools,
@@ -265,7 +279,6 @@ defmodule Minga.Agent.Providers.Native do
         llm_client: state.llm_client,
         max_turns: state.max_turns,
         max_cost: state.max_cost,
-        turn_count: 0,
         session_cost: state.session_cost
       }
 
@@ -309,7 +322,7 @@ defmodule Minga.Agent.Providers.Native do
 
     notify(state.subscriber, %Event.AgentStart{})
 
-    lctx = %{
+    lctx = %LoopCtx{
       provider_pid: self(),
       model: state.model,
       tools: state.tools,
@@ -319,7 +332,6 @@ defmodule Minga.Agent.Providers.Native do
       llm_client: state.llm_client,
       max_turns: state.max_turns,
       max_cost: state.max_cost,
-      turn_count: 0,
       session_cost: state.session_cost
     }
 
@@ -502,8 +514,8 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
-    Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount / 1, 2)}")
-    {:reply, :ok, %{state | max_cost: amount / 1}}
+    Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
+    {:reply, :ok, %{state | max_cost: amount + 0.0}}
   end
 
   def handle_call({:set_max_cost, nil}, _from, state) do
@@ -606,25 +618,15 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec check_safety_limits(loop_ctx()) ::
           :ok | {:turn_limit, String.t()} | {:cost_limit, String.t()}
-  defp check_safety_limits(lctx) do
-    cond_result =
-      if lctx.turn_count >= lctx.max_turns do
-        {:turn_limit,
-         "Turn limit reached (#{lctx.turn_count}/#{lctx.max_turns}). Use /continue to resume."}
-      else
-        :ok
-      end
+  defp check_safety_limits(%LoopCtx{turn_count: tc, max_turns: mt}) when tc >= mt do
+    {:turn_limit, "Turn limit reached (#{tc}/#{mt}). Use /continue to resume."}
+  end
 
-    case cond_result do
-      :ok ->
-        if cost_over_budget?(lctx) do
-          {:cost_limit, cost_limit_message(lctx.session_cost, lctx.max_cost)}
-        else
-          :ok
-        end
-
-      other ->
-        other
+  defp check_safety_limits(%LoopCtx{} = lctx) do
+    if over_budget?(lctx) do
+      {:cost_limit, cost_limit_message(lctx.session_cost, lctx.max_cost)}
+    else
+      :ok
     end
   end
 
@@ -1273,7 +1275,7 @@ defmodule Minga.Agent.Providers.Native do
   defp read_config_max_turns do
     Options.get(:agent_max_turns)
   rescue
-    _ -> @default_max_turns
+    ArgumentError -> @default_max_turns
   catch
     :exit, _ -> @default_max_turns
   end
@@ -1282,23 +1284,16 @@ defmodule Minga.Agent.Providers.Native do
   defp read_config_max_cost do
     Options.get(:agent_max_cost)
   rescue
-    _ -> nil
+    ArgumentError -> nil
   catch
     :exit, _ -> nil
   end
 
-  @spec cost_over_budget?(loop_ctx()) :: boolean()
-  defp cost_over_budget?(%{max_cost: nil}), do: false
+  # Works with both LoopCtx and state since both have max_cost/session_cost fields.
+  @spec over_budget?(%{max_cost: float() | nil, session_cost: float()}) :: boolean()
+  defp over_budget?(%{max_cost: nil}), do: false
 
-  defp cost_over_budget?(%{max_cost: max_cost, session_cost: session_cost})
-       when is_number(max_cost) do
-    session_cost >= max_cost
-  end
-
-  @spec cost_budget_exceeded?(state()) :: boolean()
-  defp cost_budget_exceeded?(%{max_cost: nil}), do: false
-
-  defp cost_budget_exceeded?(%{max_cost: max_cost, session_cost: session_cost})
+  defp over_budget?(%{max_cost: max_cost, session_cost: session_cost})
        when is_number(max_cost) do
     session_cost >= max_cost
   end
@@ -1306,7 +1301,7 @@ defmodule Minga.Agent.Providers.Native do
   @spec cost_limit_message(float(), float() | nil) :: String.t()
   defp cost_limit_message(session_cost, max_cost) do
     formatted_spent = :erlang.float_to_binary(session_cost, decimals: 2)
-    formatted_limit = :erlang.float_to_binary((max_cost || 0.0) / 1, decimals: 2)
+    formatted_limit = :erlang.float_to_binary(max_cost || 0.0, decimals: 2)
 
     "Session cost limit reached ($#{formatted_spent} / $#{formatted_limit}). " <>
       "Raise the limit with /budget <amount> or start a new session."

@@ -439,6 +439,9 @@ defmodule Minga.Config.Options do
     {:error, "#{name} must be a positive number or nil, got: #{inspect(value)}"}
   end
 
+  # :any is used for options whose values are complex types (lists of atoms,
+  # nested keywords) that don't fit the simple type validators. Currently only
+  # used by :agent_notify_on which accepts a list of event atoms.
   defp validate_type(:any, _name, _value), do: :ok
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do

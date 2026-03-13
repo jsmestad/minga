@@ -513,7 +513,7 @@ defmodule Minga.Agent.SlashCommand do
     limit_text =
       case budget.max_cost do
         nil -> "no limit"
-        amount -> "$#{:erlang.float_to_binary(amount / 1, decimals: 2)}"
+        amount -> "$#{:erlang.float_to_binary(amount + 0.0, decimals: 2)}"
       end
 
     "Session budget:\n" <>
@@ -525,6 +525,8 @@ defmodule Minga.Agent.SlashCommand do
 
   # Gets the provider pid from the session. Used for direct GenServer calls
   # to provider-specific features (budget, etc.) that aren't in the Provider behaviour.
+  # TODO: Consider adding get_budget/1 and set_budget/2 to the Provider behaviour
+  # so slash commands don't need to reach past the Session abstraction.
   @spec get_provider(pid()) :: pid() | nil
   defp get_provider(session_pid) do
     # The session stores the provider pid in its state. We need to access it.
