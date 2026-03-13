@@ -287,20 +287,9 @@ defmodule Minga.Extension.Supervisor do
 
   @spec compile_and_find_extension([String.t()]) :: {:ok, module()} | {:error, String.t()}
   defp compile_and_find_extension(files) do
-    modules =
-      Enum.flat_map(files, fn file ->
-        file
-        |> Code.compile_file()
-        |> Enum.map(&elem(&1, 0))
-      end)
-
-    case Enum.find(modules, &implements_extension?/1) do
-      nil ->
-        {:error, "no module implementing Minga.Extension behaviour found"}
-
-      mod ->
-        {:ok, mod}
-    end
+    {result, diagnostics} = compile_quietly(files)
+    log_diagnostics(diagnostics)
+    result
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       {:error, "compile error: #{Exception.message(e)}"}
@@ -311,6 +300,81 @@ defmodule Minga.Extension.Supervisor do
     kind, reason ->
       {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
   end
+
+  # Compiles extension files using ParallelCompiler (resolves cross-module
+  # references) while suppressing stderr output. Diagnostics are captured
+  # via Code.with_diagnostics and routed to *Messages* instead.
+  @spec compile_quietly([String.t()]) :: {{:ok, module()} | {:error, String.t()}, [map()]}
+  defp compile_quietly(files) do
+    {:ok, string_io} = StringIO.open("")
+    original_stderr = Process.whereis(:standard_error)
+    Process.unregister(:standard_error)
+    Process.register(string_io, :standard_error)
+
+    {result, diagnostics} =
+      Code.with_diagnostics(fn ->
+        parallel_compile_and_find(files)
+      end)
+
+    Process.unregister(:standard_error)
+    Process.register(original_stderr, :standard_error)
+    StringIO.close(string_io)
+
+    {result, diagnostics}
+  end
+
+  @spec parallel_compile_and_find([String.t()]) :: {:ok, module()} | {:error, String.t()}
+  defp parallel_compile_and_find(files) do
+    case Kernel.ParallelCompiler.compile(files, return_diagnostics: true) do
+      {:ok, modules, _diag_map} ->
+        find_extension_in_compiled(modules)
+
+      {:error, _errors, _diag_map} ->
+        {:error, "extension compilation failed (see *Messages*)"}
+    end
+  end
+
+  @spec find_extension_in_compiled([module()]) :: {:ok, module()} | {:error, String.t()}
+  defp find_extension_in_compiled(modules) do
+    case Enum.find(modules, &implements_extension?/1) do
+      nil -> {:error, "no module implementing Minga.Extension behaviour found"}
+      mod -> {:ok, mod}
+    end
+  end
+
+  @spec log_diagnostics([map()]) :: :ok
+  defp log_diagnostics([]), do: :ok
+
+  defp log_diagnostics(diagnostics) do
+    for diag <- diagnostics do
+      file = Map.get(diag, :file, "unknown")
+      position = Map.get(diag, :position, nil)
+      message = Map.get(diag, :message, "")
+      severity = Map.get(diag, :severity, :warning)
+      short_file = Path.basename(file)
+      pos_str = format_position(position)
+
+      case severity do
+        :error ->
+          Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{pos_str}: #{message}")
+
+        :warning ->
+          Minga.Log.warning(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
+
+        _ ->
+          Minga.Log.debug(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
+      end
+    end
+
+    :ok
+  end
+
+  @spec format_position(term()) :: String.t()
+  defp format_position({line, col}) when is_integer(line) and is_integer(col),
+    do: "#{line}:#{col}"
+
+  defp format_position(line) when is_integer(line), do: "#{line}"
+  defp format_position(_), do: "?"
 
   @spec implements_extension?(module()) :: boolean()
   defp implements_extension?(module) do

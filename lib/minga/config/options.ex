@@ -109,6 +109,8 @@ defmodule Minga.Config.Options do
           | :agent_system_prompt
           | :agent_append_system_prompt
           | :agent_diff_size_threshold
+          | :agent_max_turns
+          | :agent_max_cost
           | :font_family
           | :font_size
           | :font_weight
@@ -137,6 +139,7 @@ defmodule Minga.Config.Options do
            | :theme_atom
            | :string_or_nil
            | :string_list
+           | :float_or_nil
 
   @typedoc "ETS table reference used for reads and writes."
   @type table :: :ets.table()
@@ -163,7 +166,8 @@ defmodule Minga.Config.Options do
     {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
     {:agent_model, :string_or_nil, nil},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
-    {:agent_destructive_tools, :string_list, ["write_file", "edit_file", "shell"]},
+    {:agent_destructive_tools, :string_list,
+     ["write_file", "edit_file", "multi_edit_file", "shell"]},
     {:agent_session_retention_days, :pos_integer, 30},
     {:agent_panel_split, :pos_integer, 65},
     {:startup_view, {:enum, [:agent, :editor]}, :agent},
@@ -177,6 +181,8 @@ defmodule Minga.Config.Options do
     {:agent_system_prompt, :string, ""},
     {:agent_append_system_prompt, :string, ""},
     {:agent_diff_size_threshold, :pos_integer, 1_048_576},
+    {:agent_max_turns, :pos_integer, 100},
+    {:agent_max_cost, :float_or_nil, nil},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
@@ -427,6 +433,19 @@ defmodule Minga.Config.Options do
   defp validate_type(:string_list, name, value) do
     {:error, "#{name} must be a list of strings, got: #{inspect(value)}"}
   end
+
+  defp validate_type(:float_or_nil, _name, nil), do: :ok
+  defp validate_type(:float_or_nil, _name, value) when is_float(value) and value > 0, do: :ok
+  defp validate_type(:float_or_nil, _name, value) when is_integer(value) and value > 0, do: :ok
+
+  defp validate_type(:float_or_nil, name, value) do
+    {:error, "#{name} must be a positive number or nil, got: #{inspect(value)}"}
+  end
+
+  # :any is used for options whose values are complex types (lists of atoms,
+  # nested keywords) that don't fit the simple type validators. Currently only
+  # used by :agent_notify_on which accepts a list of event atoms.
+  defp validate_type(:any, _name, _value), do: :ok
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do
     if value in Minga.Theme.available() do

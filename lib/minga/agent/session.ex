@@ -292,6 +292,12 @@ defmodule Minga.Agent.Session do
     GenServer.cast(session, {:add_system_message, text, level})
   end
 
+  @doc "Returns the provider pid for direct provider-specific calls."
+  @spec get_provider(GenServer.server()) :: pid() | nil
+  def get_provider(session) do
+    GenServer.call(session, :get_provider)
+  end
+
   # ── GenServer callbacks ─────────────────────────────────────────────────────
 
   @impl GenServer
@@ -452,6 +458,10 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:usage, _from, state) do
     {:reply, state.total_usage, state}
+  end
+
+  def handle_call(:get_provider, _from, state) do
+    {:reply, state.provider, state}
   end
 
   def handle_call(:editor_snapshot, _from, state) do
@@ -868,6 +878,11 @@ defmodule Minga.Agent.Session do
 
   defp handle_provider_event(%Event.ContextUsage{} = event, state) do
     broadcast(state, {:context_usage, event.estimated_tokens, event.context_limit})
+    state
+  end
+
+  defp handle_provider_event(%Event.TurnLimitReached{current: current, limit: limit}, state) do
+    broadcast(state, {:turn_limit_reached, current, limit})
     state
   end
 
