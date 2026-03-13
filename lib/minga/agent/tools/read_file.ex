@@ -92,7 +92,12 @@ defmodule Minga.Agent.Tools.ReadFile do
     end
   end
 
-  @spec read_partial_slice([String.t()], non_neg_integer(), non_neg_integer(), pos_integer() | nil) ::
+  @spec read_partial_slice(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer() | nil
+        ) ::
           {:ok, String.t()}
   defp read_partial_slice(all_lines, total_lines, start_idx, limit) do
     sliced =

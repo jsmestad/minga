@@ -92,7 +92,11 @@ defmodule Minga.Agent.Tools.MultiEditFile do
 
       n ->
         {:error,
-         %EditResult{index: index, status: :error, message: "old_text found #{n} times (ambiguous)"}}
+         %EditResult{
+           index: index,
+           status: :error,
+           message: "old_text found #{n} times (ambiguous)"
+         }}
     end
   end
 
