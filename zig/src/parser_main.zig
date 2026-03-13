@@ -151,6 +151,16 @@ fn handleCommand(
             try protocol.writeMessage(stdout, rbuf[0..rlen]);
             try stdout.flush();
         },
+        .set_textobject_query => |source| {
+            hl.setTextobjectQuery(source) catch {};
+        },
+        .request_textobject => |req| {
+            const result = hl.findTextobject(req.row, req.col, req.capture_name);
+            var rbuf: [22]u8 = undefined;
+            const rlen = protocol.encodeTextobjectResult(&rbuf, req.request_id, result);
+            try protocol.writeMessage(stdout, rbuf[0..rlen]);
+            try stdout.flush();
+        },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
                 var rbuf: [260]u8 = undefined;

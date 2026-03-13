@@ -138,6 +138,32 @@ defmodule Minga.Mode.OperatorPending do
     execute_text_object(state, modifier, {:paren, "{", "}"})
   end
 
+  # ── Tree-sitter structural text objects ────────────────────────────────────
+
+  # `f` — function text object.
+  def handle_key({?f, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, {:structural, :function})
+  end
+
+  # `c` — class/module text object.
+  def handle_key({?c, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, {:structural, :class})
+  end
+
+  # `a` — argument/parameter text object (when modifier is already set).
+  def handle_key({?a, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, {:structural, :parameter})
+  end
+
+  # `b` — block text object (if/for/while/do body).
+  def handle_key({?b, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    execute_text_object(state, modifier, {:structural, :block})
+  end
+
   # ── Count accumulation ───────────────────────────────────────────────────
 
   def handle_key({digit, 0}, %OPState{count: count} = state) when digit in ?1..?9 do
@@ -304,6 +330,9 @@ defmodule Minga.Mode.OperatorPending do
   defp text_object_command(:delete, modifier, spec), do: {:delete_text_object, modifier, spec}
   defp text_object_command(:change, modifier, spec), do: {:change_text_object, modifier, spec}
   defp text_object_command(:yank, modifier, spec), do: {:yank_text_object, modifier, spec}
+  defp text_object_command(:comment, modifier, spec), do: {:comment_text_object, modifier, spec}
+  defp text_object_command(:indent, modifier, spec), do: {:indent_text_object, modifier, spec}
+  defp text_object_command(:dedent, modifier, spec), do: {:dedent_text_object, modifier, spec}
 
   # Build and emit the motion command, with correct repetition.
   @spec execute_with_motion(OPState.t(), atom()) :: Mode.result()

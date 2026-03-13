@@ -33,6 +33,7 @@ defmodule Minga.TextObject do
 
   alias Minga.Buffer.Unicode
   alias Minga.Motion.Helpers
+  alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Text.Readable
 
   @typedoc "A zero-indexed `{line, byte_col}` position."
@@ -224,6 +225,58 @@ defmodule Minga.TextObject do
       pair -> pair
     end
   end
+
+  # ── Tree-sitter structural text objects ────────────────────────────────────────
+  #
+  # These query the Zig parser for structural ranges using textobjects.scm.
+  # Helix uses @X.inside / @X.around capture names (e.g., @function.inside).
+
+  @typedoc "Structural text object type."
+  @type structural_type :: :function | :class | :parameter | :block | :comment | :test
+
+  @doc """
+  Returns the inner range of a structural text object (e.g., function body,
+  class body, parameter) at the cursor position.
+
+  Uses tree-sitter textobjects.scm queries. Returns `nil` if no text object
+  of the requested type contains the cursor, or if tree-sitter is unavailable.
+  """
+  @spec structural_inner(structural_type(), position()) :: range()
+  def structural_inner(type, {line, col}) when is_atom(type) do
+    capture = Atom.to_string(type) <> ".inside"
+    query_structural(line, col, capture)
+  end
+
+  @doc """
+  Returns the outer range of a structural text object at the cursor position.
+
+  Includes the structural delimiters (e.g., `def...end`, braces, etc.).
+  """
+  @spec structural_around(structural_type(), position()) :: range()
+  def structural_around(type, {line, col}) when is_atom(type) do
+    capture = Atom.to_string(type) <> ".around"
+    query_structural(line, col, capture)
+  end
+
+  @spec query_structural(non_neg_integer(), non_neg_integer(), String.t()) :: range()
+  defp query_structural(row, col, capture_name) do
+    case ParserManager.request_textobject(row, col, capture_name) do
+      {start_row, start_col, end_row, end_col} ->
+        # Zig returns byte columns. The end position from tree-sitter is
+        # exclusive, so we subtract 1 to make it inclusive for Vim semantics.
+        end_pos = adjust_end_position(end_row, end_col)
+        {{start_row, start_col}, end_pos}
+
+      nil ->
+        nil
+    end
+  end
+
+  # Tree-sitter end positions are exclusive. Convert to inclusive for Vim.
+  @spec adjust_end_position(non_neg_integer(), non_neg_integer()) :: position()
+  defp adjust_end_position(row, 0) when row > 0, do: {row - 1, 0}
+  defp adjust_end_position(row, col) when col > 0, do: {row, col - 1}
+  defp adjust_end_position(row, col), do: {row, col}
 
   # ── Private — word helpers ────────────────────────────────────────────────────
 

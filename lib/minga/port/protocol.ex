@@ -70,6 +70,8 @@ defmodule Minga.Port.Protocol do
   @op_set_fold_query 0x28
   @op_set_indent_query 0x29
   @op_request_indent 0x2A
+  @op_set_textobject_query 0x2B
+  @op_request_textobject 0x2C
 
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
@@ -80,6 +82,7 @@ defmodule Minga.Port.Protocol do
   @op_text_width 0x35
   @op_fold_ranges 0x36
   @op_indent_result 0x37
+  @op_textobject_result 0x38
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -158,6 +161,10 @@ defmodule Minga.Port.Protocol do
              [{start_line :: non_neg_integer(), end_line :: non_neg_integer()}]}
           | {:indent_result, request_id :: non_neg_integer(), line :: non_neg_integer(),
              indent_level :: integer()}
+          | {:textobject_result, request_id :: non_neg_integer(),
+             result ::
+               {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+               | nil}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -446,6 +453,27 @@ defmodule Minga.Port.Protocol do
     <<@op_request_indent, request_id::32, line::32>>
   end
 
+  @doc "Encodes a set_textobject_query command."
+  @spec encode_set_textobject_query(String.t()) :: binary()
+  def encode_set_textobject_query(query) when is_binary(query) do
+    <<@op_set_textobject_query, byte_size(query)::32, query::binary>>
+  end
+
+  @doc "Encodes a request_textobject command: request_id(4) + row(4) + col(4) + name_len(2) + name."
+  @spec encode_request_textobject(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) ::
+          binary()
+  def encode_request_textobject(request_id, row, col, capture_name)
+      when is_integer(request_id) and is_integer(row) and is_integer(col) and
+             is_binary(capture_name) do
+    <<@op_request_textobject, request_id::32, row::32, col::32, byte_size(capture_name)::16,
+      capture_name::binary>>
+  end
+
   @doc "Encodes a load_grammar command."
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
@@ -559,6 +587,17 @@ defmodule Minga.Port.Protocol do
 
   def decode_event(<<@op_indent_result, request_id::32, line::32, indent_level::32-signed>>) do
     {:ok, {:indent_result, request_id, line, indent_level}}
+  end
+
+  def decode_event(
+        <<@op_textobject_result, request_id::32, 1, start_row::32, start_col::32, end_row::32,
+          end_col::32>>
+      ) do
+    {:ok, {:textobject_result, request_id, {start_row, start_col, end_row, end_col}}}
+  end
+
+  def decode_event(<<@op_textobject_result, request_id::32, 0>>) do
+    {:ok, {:textobject_result, request_id, nil}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
