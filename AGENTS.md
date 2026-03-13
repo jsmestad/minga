@@ -173,6 +173,7 @@ end
 - **Descriptive names**: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
+- **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
 - Run with `mix test --warnings-as-errors`
 
 ### Zig

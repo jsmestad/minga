@@ -1,27 +1,22 @@
 defmodule Minga.Test.EditorCase do
   @moduledoc """
   ExUnit case template for headless editor tests.
-
   Provides helpers to start an editor with a virtual screen capture,
   send keystrokes, and assert on rendered output.
-
   ## Usage
-
       defmodule MyTest do
         use Minga.Test.EditorCase, async: true
-
         test "shows file content on screen", ctx do
           ctx = start_editor(ctx, "hello world")
           assert_row_contains(ctx, 0, "hello world")
         end
       end
   """
-
   use ExUnit.CaseTemplate
-
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
   alias Minga.Test.HeadlessPort
+  alias Minga.Test.Snapshot
 
   using do
     quote do
@@ -38,14 +33,10 @@ defmodule Minga.Test.EditorCase do
           width: pos_integer(),
           height: pos_integer()
         }
-
   # ── Setup helpers ────────────────────────────────────────────────────────────
-
   @doc """
   Starts an editor with headless port for render capture.
-
   Returns the context map with `:editor`, `:buffer`, `:port` keys added.
-
   Options:
     - `:width` — terminal width (default 80)
     - `:height` — terminal height (default 24)
@@ -58,12 +49,9 @@ defmodule Minga.Test.EditorCase do
     height = Keyword.get(opts, :height, 24)
     file_path = Keyword.get(opts, :file_path)
     id = :erlang.unique_integer([:positive])
-
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
-
     buffer_opts = [content: content]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
-
     {:ok, buffer} = BufferServer.start_link(buffer_opts)
 
     {:ok, editor} =
@@ -78,7 +66,7 @@ defmodule Minga.Test.EditorCase do
     # Send ready event to trigger initial render
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    :ok = HeadlessPort.collect_frame(ref)
+    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
     Map.merge(ctx, %{
       editor: editor,
@@ -95,7 +83,6 @@ defmodule Minga.Test.EditorCase do
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     id = :erlang.unique_integer([:positive])
-
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
     {:ok, editor} =
@@ -109,7 +96,7 @@ defmodule Minga.Test.EditorCase do
 
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    :ok = HeadlessPort.collect_frame(ref)
+    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
     %{
       editor: editor,
@@ -121,10 +108,8 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Highlight injection helpers ─────────────────────────────────────────────
-
   @doc """
   Injects highlight state into the editor and waits for it to be fully processed.
-
   Flushes any pending messages (like `:setup_highlight` from the `:ready` handler)
   before injecting, then syncs again to ensure the highlight state is applied
   before the test continues.
@@ -133,29 +118,32 @@ defmodule Minga.Test.EditorCase do
   def inject_highlights(ctx, capture_names, version \\ 1, spans) do
     # Flush pending messages (e.g. :setup_highlight from :ready)
     _ = :sys.get_state(ctx.editor)
-
     send(ctx.editor, {:minga_input, {:highlight_names, capture_names}})
     send(ctx.editor, {:minga_input, {:highlight_spans, version, spans}})
-
     # Sync: ensure both messages have been processed before returning
     _ = :sys.get_state(ctx.editor)
-
     ctx
   end
 
   # ── Key sending helpers ──────────────────────────────────────────────────────
-
-  @doc "Sends a key press and waits for the next rendered frame."
+  @doc """
+  Sends a key press and waits for the next rendered frame.
+  Stores the captured frame snapshot in the process dictionary so
+  `assert_screen_snapshot` can use the race-free captured state
+  instead of reading the (possibly overwritten) HeadlessPort grid.
+  """
   @spec send_key(editor_ctx(), non_neg_integer(), non_neg_integer()) :: :ok
   def send_key(%{editor: editor, port: port}, codepoint, mods \\ 0) do
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    :ok = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    # Store snapshot keyed by port pid so concurrent tests don't collide
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
   end
 
   @doc """
   Sends a key and waits for the editor GenServer to process it.
-
   Uses `:sys.get_state` as a synchronization barrier instead of waiting
   for a render frame. This is faster and more reliable for tests that
   only check editor state, not rendered screen output. Returns the
@@ -212,7 +200,6 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Screen query helpers ─────────────────────────────────────────────────────
-
   @doc "Returns the rendered text for a specific row."
   @spec screen_row(editor_ctx(), non_neg_integer()) :: String.t()
   def screen_row(%{port: port}, row) do
@@ -274,7 +261,6 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Assertion helpers ────────────────────────────────────────────────────────
-
   @doc "Asserts that a screen row contains the expected text."
   defmacro assert_row_contains(ctx, row, expected) do
     quote do
@@ -324,8 +310,80 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc """
-  Polls the editor state until the given function returns a truthy value.
+  Asserts the current screen matches a stored snapshot baseline.
+  On first run (no baseline), writes the snapshot and passes with a log
+  message. On subsequent runs, diffs the current screen against the
+  baseline. Any difference fails the test.
+  Run with `UPDATE_SNAPSHOTS=1 mix test` to overwrite all baselines.
+  ## Example
+      ctx = start_editor("hello world")
+      send_keys(ctx, "llx")
+      assert_screen_snapshot(ctx, "after_delete_char")
+  """
+  defmacro assert_screen_snapshot(ctx, snapshot_name) do
+    quote do
+      ctx = unquote(ctx)
+      name = unquote(snapshot_name)
+      # Use the frame snapshot captured atomically at batch_end time
+      # (stored by send_key/send_keys, keyed by port pid). This is
+      # race-free: no late render can overwrite it because it lives in
+      # the test process's memory. Falls back to reading the live grid
+      # if no snapshot was captured (e.g., asserting immediately after
+      # start_editor without any keys).
+      {rows, snap_cursor, snap_shape} =
+        case Process.get({:last_frame_snapshot, ctx.port}) do
+          %{grid: grid, cursor: c, cursor_shape: s} ->
+            r =
+              Enum.map(grid, fn row ->
+                row |> Enum.map_join(& &1.char) |> String.trim_trailing()
+              end)
 
+            {r, c, s}
+
+          nil ->
+            {screen_text(ctx), screen_cursor(ctx), cursor_shape(ctx)}
+        end
+
+      mode = editor_mode(ctx)
+
+      metadata = %{
+        cursor: snap_cursor,
+        cursor_shape: snap_shape,
+        mode: mode,
+        width: ctx.width,
+        height: ctx.height
+      }
+
+      current = Snapshot.serialize(rows, metadata)
+      path = Snapshot.snapshot_path(__MODULE__, name)
+
+      if Snapshot.update_mode?() do
+        Snapshot.write!(path, current)
+      else
+        case Snapshot.compare(current, path) do
+          :match ->
+            :ok
+
+          {:no_baseline, baseline_path} ->
+            Snapshot.write!(baseline_path, current)
+            require Logger
+            Logger.warning("New snapshot written: #{baseline_path}. Review and commit.")
+
+          {:mismatch, diff} ->
+            flunk("""
+            Screen snapshot mismatch for "#{name}"
+            Snapshot file: #{path}
+            Run UPDATE_SNAPSHOTS=1 mix test to accept the new output.
+            Diff (- expected, + actual):
+            #{diff}
+            """)
+        end
+      end
+    end
+  end
+
+  @doc """
+  Polls the editor state until the given function returns a truthy value.
   Retries up to `max_attempts` times with `interval_ms` between attempts.
   Returns the final state on success, or raises with the given message.
   Useful for waiting on async state transitions (file opens, picker
@@ -336,7 +394,6 @@ defmodule Minga.Test.EditorCase do
     max = Keyword.get(opts, :max_attempts, 20)
     interval = Keyword.get(opts, :interval_ms, 10)
     message = Keyword.get(opts, :message, "Condition not met after polling")
-
     do_wait_until(editor, condition, max, interval, message)
   end
 
@@ -356,15 +413,64 @@ defmodule Minga.Test.EditorCase do
     raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.mode}"
   end
 
+  # ── Mouse and resize helpers ─────────────────────────────────────────────────
+
+  @doc """
+  Sends a mouse event to the editor and waits for the next rendered frame.
+  `button` is an atom like `:left`, `:right`, `:middle`, `:wheel_up`, `:wheel_down`.
+  `event_type` is `:press`, `:release`, or `:drag`.
+  """
+  @spec send_mouse(
+          editor_ctx(),
+          non_neg_integer(),
+          non_neg_integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: :ok
+  def send_mouse(
+        %{editor: editor, port: port},
+        row,
+        col,
+        button,
+        mods \\ 0,
+        event_type \\ :press,
+        click_count \\ 1
+      ) do
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
+  end
+
+  @doc """
+  Sends a resize event to the editor and waits for the next rendered frame.
+  Updates the HeadlessPort grid dimensions first, then triggers the editor resize.
+  """
+  @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
+  def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
+    HeadlessPort.resize(port, new_width, new_height)
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:resize, new_width, new_height}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    %{ctx | width: new_width, height: new_height}
+  end
+
+  @doc "Returns true if any screen row contains the given text."
+  @spec screen_contains?(editor_ctx(), String.t()) :: boolean()
+  def screen_contains?(ctx, text) do
+    screen_text(ctx)
+    |> Enum.any?(fn row -> String.contains?(row, text) end)
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────────
-
   @ctrl 0x02
-
   @spec parse_key_sequence(String.t()) :: [{non_neg_integer(), non_neg_integer()}]
   defp parse_key_sequence(seq), do: do_parse_keys(seq, [])
-
   defp do_parse_keys("", acc), do: Enum.reverse(acc)
-
   defp do_parse_keys("<Esc>" <> rest, acc), do: do_parse_keys(rest, [{27, 0} | acc])
   defp do_parse_keys("<CR>" <> rest, acc), do: do_parse_keys(rest, [{13, 0} | acc])
   defp do_parse_keys("<Enter>" <> rest, acc), do: do_parse_keys(rest, [{13, 0} | acc])
