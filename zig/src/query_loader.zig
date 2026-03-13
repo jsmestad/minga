@@ -20,6 +20,7 @@ pub const QueryType = enum {
     injections,
     locals,
     folds,
+    indents,
 };
 
 /// Resolve a query with inheritance. Returns the fully concatenated query
@@ -117,65 +118,67 @@ fn queryLookup(comptime name: []const u8, comptime qtype: QueryType) ?[]const u8
         .injections => @embedFile(query_dir ++ "ecma/injections.scm"),
         .locals => @embedFile(query_dir ++ "ecma/locals.scm"),
         .folds => @embedFile(query_dir ++ "ecma/folds.scm"),
+        .indents => @embedFile(query_dir ++ "ecma/indents.scm"),
     };
     if (comptime std.mem.eql(u8, name, "jsx")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "jsx/highlights.scm"),
         .injections => @embedFile(query_dir ++ "jsx/injections.scm"),
         .folds => @embedFile(query_dir ++ "jsx/folds.scm"),
-        .locals => null,
+        else => null,
     };
     if (comptime std.mem.eql(u8, name, "html_tags")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "html_tags/highlights.scm"),
         .injections => @embedFile(query_dir ++ "html_tags/injections.scm"),
-        .locals, .folds => null,
+        else => null,
     };
     if (comptime std.mem.eql(u8, name, "php_only")) return switch (qtype) {
         .highlights => @embedFile(query_dir ++ "php_only/highlights.scm"),
         .injections => @embedFile(query_dir ++ "php_only/injections.scm"),
         .locals => @embedFile(query_dir ++ "php_only/locals.scm"),
         .folds => @embedFile(query_dir ++ "php_only/folds.scm"),
+        else => null,
     };
 
     // Real languages (alphabetical)
-    if (comptime std.mem.eql(u8, name, "bash")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "bash/highlights.scm"), .folds => @embedFile(query_dir ++ "bash/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "c")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "c/highlights.scm"), .folds => @embedFile(query_dir ++ "c/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "bash")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "bash/highlights.scm"), .folds => @embedFile(query_dir ++ "bash/folds.scm"), .indents => @embedFile(query_dir ++ "bash/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "c")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "c/highlights.scm"), .folds => @embedFile(query_dir ++ "c/folds.scm"), .indents => @embedFile(query_dir ++ "c/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "c_sharp")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "c_sharp/highlights.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "cpp")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "cpp/highlights.scm"), .injections => @embedFile(query_dir ++ "cpp/injections.scm"), .folds => @embedFile(query_dir ++ "cpp/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "css")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "css/highlights.scm"), .folds => @embedFile(query_dir ++ "css/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "dart")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "dart/highlights.scm"), .folds => @embedFile(query_dir ++ "dart/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "cpp")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "cpp/highlights.scm"), .injections => @embedFile(query_dir ++ "cpp/injections.scm"), .folds => @embedFile(query_dir ++ "cpp/folds.scm"), .indents => @embedFile(query_dir ++ "cpp/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "css")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "css/highlights.scm"), .folds => @embedFile(query_dir ++ "css/folds.scm"), .indents => @embedFile(query_dir ++ "css/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "dart")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "dart/highlights.scm"), .folds => @embedFile(query_dir ++ "dart/folds.scm"), .indents => @embedFile(query_dir ++ "dart/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "diff")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "diff/highlights.scm"), .folds => @embedFile(query_dir ++ "diff/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "dockerfile")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "dockerfile/highlights.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "elisp")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "elisp/highlights.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "elixir")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "elixir/highlights.scm"), .injections => @embedFile(query_dir ++ "elixir/injections.scm"), .folds => @embedFile(query_dir ++ "elixir/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "elixir")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "elixir/highlights.scm"), .injections => @embedFile(query_dir ++ "elixir/injections.scm"), .folds => @embedFile(query_dir ++ "elixir/folds.scm"), .indents => @embedFile(query_dir ++ "elixir/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "erlang")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "erlang/highlights.scm"), .folds => @embedFile(query_dir ++ "erlang/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "gleam")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "gleam/highlights.scm"), .injections => @embedFile(query_dir ++ "gleam/injections.scm"), .locals => @embedFile(query_dir ++ "gleam/locals.scm"), .folds => @embedFile(query_dir ++ "gleam/folds.scm") };
-    if (comptime std.mem.eql(u8, name, "go")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "go/highlights.scm"), .folds => @embedFile(query_dir ++ "go/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "gleam")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "gleam/highlights.scm"), .injections => @embedFile(query_dir ++ "gleam/injections.scm"), .locals => @embedFile(query_dir ++ "gleam/locals.scm"), .folds => @embedFile(query_dir ++ "gleam/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "go")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "go/highlights.scm"), .folds => @embedFile(query_dir ++ "go/folds.scm"), .indents => @embedFile(query_dir ++ "go/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "graphql")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "graphql/highlights.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "haskell")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "haskell/highlights.scm"), .folds => @embedFile(query_dir ++ "haskell/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "hcl")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "hcl/highlights.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "html")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "html/highlights.scm"), .injections => @embedFile(query_dir ++ "html/injections.scm"), .folds => @embedFile(query_dir ++ "html/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "java")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "java/highlights.scm"), .folds => @embedFile(query_dir ++ "java/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "javascript")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "javascript/highlights.scm"), .injections => @embedFile(query_dir ++ "javascript/injections.scm"), .locals => @embedFile(query_dir ++ "javascript/locals.scm"), .folds => @embedFile(query_dir ++ "javascript/folds.scm") };
-    if (comptime std.mem.eql(u8, name, "json")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "json/highlights.scm"), .folds => @embedFile(query_dir ++ "json/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "kotlin")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "kotlin/highlights.scm"), .folds => @embedFile(query_dir ++ "kotlin/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "lua")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "lua/highlights.scm"), .injections => @embedFile(query_dir ++ "lua/injections.scm"), .locals => @embedFile(query_dir ++ "lua/locals.scm"), .folds => @embedFile(query_dir ++ "lua/folds.scm") };
+    if (comptime std.mem.eql(u8, name, "java")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "java/highlights.scm"), .folds => @embedFile(query_dir ++ "java/folds.scm"), .indents => @embedFile(query_dir ++ "java/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "javascript")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "javascript/highlights.scm"), .injections => @embedFile(query_dir ++ "javascript/injections.scm"), .locals => @embedFile(query_dir ++ "javascript/locals.scm"), .folds => @embedFile(query_dir ++ "javascript/folds.scm"), .indents => @embedFile(query_dir ++ "javascript/indents.scm") };
+    if (comptime std.mem.eql(u8, name, "json")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "json/highlights.scm"), .folds => @embedFile(query_dir ++ "json/folds.scm"), .indents => @embedFile(query_dir ++ "json/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "kotlin")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "kotlin/highlights.scm"), .folds => @embedFile(query_dir ++ "kotlin/folds.scm"), .indents => @embedFile(query_dir ++ "kotlin/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "lua")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "lua/highlights.scm"), .injections => @embedFile(query_dir ++ "lua/injections.scm"), .locals => @embedFile(query_dir ++ "lua/locals.scm"), .folds => @embedFile(query_dir ++ "lua/folds.scm"), .indents => @embedFile(query_dir ++ "lua/indents.scm") };
     if (comptime std.mem.eql(u8, name, "make")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "make/highlights.scm"), .folds => @embedFile(query_dir ++ "make/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "markdown")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "markdown/highlights.scm"), .injections => @embedFile(query_dir ++ "markdown/injections.scm"), .folds => @embedFile(query_dir ++ "markdown/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "markdown_inline")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "markdown_inline/highlights.scm"), .injections => @embedFile(query_dir ++ "markdown_inline/injections.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "nix")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "nix/highlights.scm"), .folds => @embedFile(query_dir ++ "nix/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "ocaml")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "ocaml/highlights.scm"), .folds => @embedFile(query_dir ++ "ocaml/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "nix")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "nix/highlights.scm"), .folds => @embedFile(query_dir ++ "nix/folds.scm"), .indents => @embedFile(query_dir ++ "nix/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "ocaml")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "ocaml/highlights.scm"), .folds => @embedFile(query_dir ++ "ocaml/folds.scm"), .indents => @embedFile(query_dir ++ "ocaml/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "php")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "php/highlights.scm"), .folds => @embedFile(query_dir ++ "php/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "python")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "python/highlights.scm"), .folds => @embedFile(query_dir ++ "python/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "python")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "python/highlights.scm"), .folds => @embedFile(query_dir ++ "python/folds.scm"), .indents => @embedFile(query_dir ++ "python/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "r")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "r/highlights.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "ruby")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "ruby/highlights.scm"), .locals => @embedFile(query_dir ++ "ruby/locals.scm"), .folds => @embedFile(query_dir ++ "ruby/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "rust")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "rust/highlights.scm"), .injections => @embedFile(query_dir ++ "rust/injections.scm"), .folds => @embedFile(query_dir ++ "rust/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "scala")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "scala/highlights.scm"), .folds => @embedFile(query_dir ++ "scala/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "ruby")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "ruby/highlights.scm"), .locals => @embedFile(query_dir ++ "ruby/locals.scm"), .folds => @embedFile(query_dir ++ "ruby/folds.scm"), .indents => @embedFile(query_dir ++ "ruby/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "rust")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "rust/highlights.scm"), .injections => @embedFile(query_dir ++ "rust/injections.scm"), .folds => @embedFile(query_dir ++ "rust/folds.scm"), .indents => @embedFile(query_dir ++ "rust/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "scala")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "scala/highlights.scm"), .folds => @embedFile(query_dir ++ "scala/folds.scm"), .indents => @embedFile(query_dir ++ "scala/indents.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "scss")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "scss/highlights.scm"), .folds => @embedFile(query_dir ++ "scss/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "toml")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "toml/highlights.scm"), .folds => @embedFile(query_dir ++ "toml/folds.scm"), else => null };
     if (comptime std.mem.eql(u8, name, "tsx")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "tsx/highlights.scm"), .locals => @embedFile(query_dir ++ "tsx/locals.scm"), .folds => @embedFile(query_dir ++ "tsx/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "typescript")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "typescript/highlights.scm"), .locals => @embedFile(query_dir ++ "typescript/locals.scm"), .folds => @embedFile(query_dir ++ "typescript/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "yaml")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "yaml/highlights.scm"), .folds => @embedFile(query_dir ++ "yaml/folds.scm"), else => null };
-    if (comptime std.mem.eql(u8, name, "zig")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "zig/highlights.scm"), .injections => @embedFile(query_dir ++ "zig/injections.scm"), .folds => @embedFile(query_dir ++ "zig/folds.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "typescript")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "typescript/highlights.scm"), .locals => @embedFile(query_dir ++ "typescript/locals.scm"), .folds => @embedFile(query_dir ++ "typescript/folds.scm"), .indents => @embedFile(query_dir ++ "typescript/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "yaml")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "yaml/highlights.scm"), .folds => @embedFile(query_dir ++ "yaml/folds.scm"), .indents => @embedFile(query_dir ++ "yaml/indents.scm"), else => null };
+    if (comptime std.mem.eql(u8, name, "zig")) return switch (qtype) { .highlights => @embedFile(query_dir ++ "zig/highlights.scm"), .injections => @embedFile(query_dir ++ "zig/injections.scm"), .folds => @embedFile(query_dir ++ "zig/folds.scm"), .indents => @embedFile(query_dir ++ "zig/indents.scm"), else => null };
 
     return null;
 }

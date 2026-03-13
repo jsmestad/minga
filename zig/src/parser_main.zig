@@ -141,6 +141,16 @@ fn handleCommand(
         .set_fold_query => |source| {
             hl.setFoldQuery(source) catch {};
         },
+        .set_indent_query => |source| {
+            hl.setIndentQuery(source) catch {};
+        },
+        .request_indent => |req| {
+            const level = hl.computeIndent(req.line, ps.source.items);
+            var rbuf: [13]u8 = undefined;
+            const rlen = protocol.encodeIndentResult(&rbuf, req.request_id, req.line, level);
+            try protocol.writeMessage(stdout, rbuf[0..rlen]);
+            try stdout.flush();
+        },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
                 var rbuf: [260]u8 = undefined;

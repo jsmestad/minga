@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Comment
 
   alias Minga.Editor.Commands.Helpers
+  alias Minga.Editor.Indent
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
   alias Minga.Mode.ReplaceState
@@ -45,7 +46,9 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Insertion ─────────────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :insert_newline) do
-    BufferServer.insert_char(buf, "\n")
+    {line, _col} = BufferServer.cursor(buf)
+    indent = Indent.compute_for_newline(buf, line)
+    BufferServer.insert_char(buf, "\n" <> indent)
     state
   end
 
@@ -79,16 +82,18 @@ defmodule Minga.Editor.Commands.Editing do
         [] -> 0
       end
 
+    indent = Indent.compute_for_newline(buf, line)
     BufferServer.move_to(buf, {line, end_col})
-    BufferServer.insert_char(buf, "\n")
+    BufferServer.insert_char(buf, "\n" <> indent)
     state
   end
 
   def execute(%{buffers: %{active: buf}} = state, :insert_line_above) do
     {line, _col} = BufferServer.cursor(buf)
+    indent = Indent.compute_for_newline(buf, max(line - 1, 0))
     BufferServer.move_to(buf, {line, 0})
-    BufferServer.insert_char(buf, "\n")
-    BufferServer.move(buf, :up)
+    BufferServer.insert_char(buf, indent <> "\n")
+    BufferServer.move_to(buf, {line, byte_size(indent)})
     state
   end
 

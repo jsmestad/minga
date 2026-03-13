@@ -26,13 +26,14 @@ pub const HighlightResult = struct {
 /// Compiled-in grammar language function type.
 const LanguageFn = *const fn () callconv(.c) ?*const c.TSLanguage;
 
-/// Built-in grammar entry with optional embedded highlight, injection, and fold queries.
+/// Built-in grammar entry with optional embedded highlight, injection, fold, and indent queries.
 const BuiltinGrammar = struct {
     name: []const u8,
     func: LanguageFn,
     query: ?[]const u8 = null,
     injection_query: ?[]const u8 = null,
     fold_query: ?[]const u8 = null,
+    indent_query: ?[]const u8 = null,
 };
 
 pub const InjectionRange = protocol.InjectionRange;
@@ -46,6 +47,7 @@ pub const Highlighter = struct {
     query: ?*c.TSQuery = null,
     injection_query: ?*c.TSQuery = null,
     fold_query: ?*c.TSQuery = null,
+    indent_query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
     current_language_name: ?[]const u8 = null,
     current_source: ?[]const u8 = null,
@@ -53,6 +55,7 @@ pub const Highlighter = struct {
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -76,6 +79,7 @@ pub const Highlighter = struct {
             .query_cache = .empty,
             .injection_query_cache = .empty,
             .fold_query_cache = .empty,
+            .indent_query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -108,6 +112,9 @@ pub const Highlighter = struct {
             }
             if (entry.fold_query) |fold_source| {
                 self.prewarmOne(entry.name, fold_source, &self.fold_query_cache);
+            }
+            if (entry.indent_query) |indent_source| {
+                self.prewarmOne(entry.name, indent_source, &self.indent_query_cache);
             }
         }
         self.prewarm_done.store(true, .release);
@@ -179,6 +186,13 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.fold_query_cache.deinit(self.allocator);
+
+        // Free all cached indent queries
+        var idit = self.indent_query_cache.iterator();
+        while (idit.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.indent_query_cache.deinit(self.allocator);
 
         if (self.injection_ranges.len > 0) {
             self.allocator.free(self.injection_ranges);
@@ -258,6 +272,25 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, fold_source.ptr, @intCast(fold_source.len), &err_off, &err_type)) |compiled| {
                                 self.fold_query = compiled;
                                 self.fold_query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Indent query
+            if (self.indent_query_cache.get(name)) |cached| {
+                self.indent_query = cached;
+            } else {
+                self.indent_query = null;
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.indent_query) |indent_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, indent_source.ptr, @intCast(indent_source.len), &err_off, &err_type)) |compiled| {
+                                self.indent_query = compiled;
+                                self.indent_query_cache.put(self.allocator, entry.name, compiled) catch {};
                             }
                         }
                     }
@@ -412,6 +445,128 @@ pub const Highlighter = struct {
         }
 
         return try ranges.toOwnedSlice(alloc);
+    }
+
+    /// Compile an indent query (.scm source) for the current language.
+    pub fn setIndentQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+
+        if (self.indent_query_cache.get(name)) |cached| {
+            self.indent_query = cached;
+            return;
+        }
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        const new_query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.warn("Indent query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+
+        self.indent_query = new_query;
+        self.indent_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    /// Compute the indent level for a given line using the indent query.
+    /// Returns the indent delta: positive means indent, negative means outdent.
+    /// The BEAM side multiplies this by tab_size to get whitespace columns.
+    ///
+    /// Algorithm (simplified Helix approach):
+    /// 1. Find the deepest node at the start of the given line
+    /// 2. Walk up ancestors, checking which ones match @indent or @outdent captures
+    /// 3. Net indent = count of @indent ancestors - count of @outdent on this line
+    pub fn computeIndent(self: *Highlighter, line: u32, source: []const u8) i32 {
+        const iq = self.indent_query orelse return 0;
+        const tree = self.tree orelse return 0;
+        const root = c.ts_tree_root_node(tree);
+
+        // Find capture IDs for @indent and @outdent
+        const pattern_count = c.ts_query_capture_count(iq);
+        var indent_id: ?u32 = null;
+        var outdent_id: ?u32 = null;
+
+        for (0..pattern_count) |i| {
+            var name_len: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(iq, @intCast(i), &name_len);
+            if (name_ptr == null) continue;
+            const cap_name = name_ptr[0..name_len];
+            if (std.mem.eql(u8, cap_name, "indent")) indent_id = @intCast(i);
+            if (std.mem.eql(u8, cap_name, "outdent")) outdent_id = @intCast(i);
+        }
+
+        if (indent_id == null and outdent_id == null) return 0;
+
+        // Find byte offset of the start of the target line
+        const line_start = lineStartByte(source, line);
+
+        // Run the query, scoped to the area around this line
+        const cursor = c.ts_query_cursor_new() orelse return 0;
+        defer c.ts_query_cursor_delete(cursor);
+
+        // Set range to a few lines before and after for context
+        const context_start = if (line > 0) line - 1 else 0;
+        _ = c.ts_query_cursor_set_point_range(
+            cursor,
+            .{ .row = context_start, .column = 0 },
+            .{ .row = line + 1, .column = 0 },
+        );
+        c.ts_query_cursor_exec(cursor, iq, root);
+
+        var indent_count: i32 = 0;
+        var match: c.TSQueryMatch = undefined;
+
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..@intCast(match.capture_count)];
+            for (captures) |cap| {
+                const node = cap.node;
+                const node_start = c.ts_node_start_point(node).row;
+                const node_end = c.ts_node_end_point(node).row;
+
+                if (indent_id) |iid| {
+                    if (cap.index == iid) {
+                        // If the indent node starts before our line and ends
+                        // at or after our line, we're inside it: indent.
+                        if (node_start < line and node_end >= line) {
+                            indent_count += 1;
+                        }
+                    }
+                }
+                if (outdent_id) |oid| {
+                    if (cap.index == oid) {
+                        // If the outdent node starts on our line, dedent.
+                        if (node_start == line) {
+                            indent_count -= 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        _ = line_start;
+        return indent_count;
+    }
+
+    /// Find the byte offset where a given line starts in the source.
+    fn lineStartByte(source: []const u8, target_line: u32) usize {
+        var line: u32 = 0;
+        for (source, 0..) |ch, i| {
+            if (line == target_line) return i;
+            if (ch == '\n') line += 1;
+        }
+        return source.len;
     }
 
     /// Parse source text. Full re-parse (no incremental).
@@ -1090,44 +1245,49 @@ fn qlFold(comptime name: []const u8) ?[]const u8 {
     return comptime query_loader.resolve(name, .folds);
 }
 
+/// Helper to resolve an indent query via the query_loader.
+fn qlIndent(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .indents);
+}
+
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir") },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir"), .indent_query = qlIndent("elixir") },
     .{ .name = "heex", .func = tree_sitter_heex },
-    .{ .name = "json", .func = tree_sitter_json, .query = ql("json"), .fold_query = qlFold("json") },
-    .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml"), .fold_query = qlFold("yaml") },
+    .{ .name = "json", .func = tree_sitter_json, .query = ql("json"), .fold_query = qlFold("json"), .indent_query = qlIndent("json") },
+    .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml"), .fold_query = qlFold("yaml"), .indent_query = qlIndent("yaml") },
     .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml"), .fold_query = qlFold("toml") },
     .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown"), .fold_query = qlFold("markdown") },
     .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = ql("markdown_inline"), .injection_query = qlInj("markdown_inline") },
-    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby") },
-    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript") },
-    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby"), .indent_query = qlIndent("ruby") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript"), .indent_query = qlIndent("javascript") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript"), .indent_query = qlIndent("typescript") },
     .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx") },
-    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go") },
-    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust") },
-    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig") },
+    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go"), .indent_query = qlIndent("go") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust"), .indent_query = qlIndent("rust") },
+    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig"), .indent_query = qlIndent("zig") },
     .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang"), .fold_query = qlFold("erlang") },
-    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash") },
-    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c") },
-    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp") },
+    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash"), .indent_query = qlIndent("bash") },
+    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c"), .indent_query = qlIndent("c") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp"), .indent_query = qlIndent("cpp") },
     .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html"), .fold_query = qlFold("html") },
-    .{ .name = "css", .func = tree_sitter_css, .query = ql("css"), .fold_query = qlFold("css") },
-    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua") },
-    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python") },
-    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin") },
+    .{ .name = "css", .func = tree_sitter_css, .query = ql("css"), .fold_query = qlFold("css"), .indent_query = qlIndent("css") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua"), .indent_query = qlIndent("lua") },
+    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python"), .indent_query = qlIndent("python") },
+    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin"), .indent_query = qlIndent("kotlin") },
     .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam"), .fold_query = qlFold("gleam") },
-    .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java") },
+    .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java"), .indent_query = qlIndent("java") },
     .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp") },
     .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php"), .fold_query = qlFold("php") },
     .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = ql("dockerfile") },
     .{ .name = "hcl", .func = tree_sitter_hcl, .query = ql("hcl") },
     .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss"), .fold_query = qlFold("scss") },
     .{ .name = "graphql", .func = tree_sitter_graphql, .query = ql("graphql") },
-    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix") },
-    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix"), .indent_query = qlIndent("nix") },
+    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml"), .indent_query = qlIndent("ocaml") },
     .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell"), .fold_query = qlFold("haskell") },
-    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala"), .indent_query = qlIndent("scala") },
     .{ .name = "r", .func = tree_sitter_r, .query = ql("r") },
-    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart") },
+    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart"), .indent_query = qlIndent("dart") },
     .{ .name = "make", .func = tree_sitter_make, .query = ql("make"), .fold_query = qlFold("make") },
     .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff"), .fold_query = qlFold("diff") },
     .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },

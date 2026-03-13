@@ -56,6 +56,8 @@ pub const OP_LOAD_GRAMMAR: u8 = 0x23;
 pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
 pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
 pub const OP_SET_FOLD_QUERY: u8 = 0x28;
+pub const OP_SET_INDENT_QUERY: u8 = 0x29;
+pub const OP_REQUEST_INDENT: u8 = 0x2A;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -69,6 +71,9 @@ pub const OP_TEXT_WIDTH: u8 = 0x35;
 
 // Fold responses (Zig → BEAM)
 pub const OP_FOLD_RANGES: u8 = 0x36;
+
+// Indent responses (Zig → BEAM)
+pub const OP_INDENT_RESULT: u8 = 0x37;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -231,6 +236,8 @@ pub const RenderCommand = union(enum) {
     set_highlight_query: []const u8,
     set_injection_query: []const u8,
     set_fold_query: []const u8,
+    set_indent_query: []const u8,
+    request_indent: RequestIndent,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
 };
@@ -268,6 +275,11 @@ pub const QueryLanguageAt = struct {
 pub const ParseBuffer = struct {
     version: u32,
     source: []const u8,
+};
+
+pub const RequestIndent = struct {
+    request_id: u32,
+    line: u32,
 };
 
 pub const LoadGrammar = struct {
@@ -568,6 +580,20 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 4 + query_len) return error.Malformed;
             return .{ .set_fold_query = rest[4 .. 4 + query_len] };
         },
+        OP_SET_INDENT_QUERY => {
+            if (rest.len < 4) return error.Malformed;
+            const query_len = std.mem.readInt(u32, rest[0..4], .big);
+            if (rest.len < 4 + query_len) return error.Malformed;
+            return .{ .set_indent_query = rest[4 .. 4 + query_len] };
+        },
+        OP_REQUEST_INDENT => {
+            // request_id:4, line:4
+            if (rest.len < 8) return error.Malformed;
+            return .{ .request_indent = .{
+                .request_id = std.mem.readInt(u32, rest[0..4], .big),
+                .line = std.mem.readInt(u32, rest[4..8], .big),
+            } };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -685,7 +711,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len = std.mem.readInt(u32, payload[5..9], .big);
             break :blk 9 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY => blk: {
             if (payload.len < 5) break :blk payload.len;
             const query_len = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + query_len;
@@ -704,6 +730,7 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
+        OP_REQUEST_INDENT => 9, // opcode(1) + request_id(4) + line(4)
         OP_EDIT_BUFFER => blk: {
             // opcode(1) + version(4) + edit_count(2) + variable per edit
             if (payload.len < 7) break :blk payload.len;
@@ -844,6 +871,15 @@ pub fn encodeFoldRanges(allocator: std.mem.Allocator, version: u32, ranges: []co
     }
 
     return buf;
+}
+
+/// Encodes indent_result: opcode(1) + request_id(4) + line(4) + indent_level(4, signed)
+pub fn encodeIndentResult(buf: *[13]u8, request_id: u32, line: u32, indent_level: i32) usize {
+    buf[0] = OP_INDENT_RESULT;
+    std.mem.writeInt(u32, buf[1..5], request_id, .big);
+    std.mem.writeInt(u32, buf[5..9], line, .big);
+    std.mem.writeInt(i32, buf[9..13], indent_level, .big);
+    return 13;
 }
 
 /// Reads a 4-byte big-endian length header from the reader.
