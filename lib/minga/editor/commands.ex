@@ -546,9 +546,15 @@ defmodule Minga.Editor.Commands do
     do: Diagnostics.execute(state, :lsp_info)
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
+    execute(state, :extension_list)
+  end
+
+  def execute(state, :extension_list) do
+    alias Minga.Extension.Registry, as: ExtRegistry
     alias Minga.Extension.Supervisor, as: ExtSupervisor
 
     extensions = ExtSupervisor.list_extensions()
+    all_entries = ExtRegistry.all()
 
     msg =
       case extensions do
@@ -558,13 +564,32 @@ defmodule Minga.Editor.Commands do
         exts ->
           lines =
             Enum.map(exts, fn {name, version, status} ->
-              "  #{name} v#{version} [#{status}]"
+              source_label = format_source_label(name, all_entries)
+              "  #{name} v#{version} [#{status}] (#{source_label})"
             end)
 
           ["Extensions:" | lines] |> Enum.join("\n")
       end
 
     %{state | status_msg: msg}
+  end
+
+  def execute(state, {:execute_ex_command, {:extension_update_all, []}}) do
+    execute(state, :extension_update_all)
+  end
+
+  def execute(state, :extension_update_all) do
+    Task.start(fn -> do_extension_update_all() end)
+    %{state | status_msg: "Checking for extension updates..."}
+  end
+
+  def execute(state, {:execute_ex_command, {:extension_update, []}}) do
+    execute(state, :extension_update)
+  end
+
+  def execute(state, :extension_update) do
+    Task.start(fn -> do_extension_update_all() end)
+    %{state | status_msg: "Checking for extension updates..."}
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
@@ -808,5 +833,88 @@ defmodule Minga.Editor.Commands do
     KeymapActive.filetype_trie(filetype)
   catch
     :exit, _ -> Bindings.new()
+  end
+
+  # ── Extension management helpers ───────────────────────────────────────────
+
+  @spec format_source_label(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
+  defp format_source_label(name, all_entries) do
+    case List.keyfind(all_entries, name, 0) do
+      {_, %{source_type: :path, path: path}} -> "path: #{path}"
+      {_, %{source_type: :git, git: %{url: url}}} -> "git: #{url}"
+      {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
+      _ -> "unknown"
+    end
+  end
+
+  @spec do_extension_update_all() :: :ok
+  defp do_extension_update_all do
+    entries = Minga.Extension.Registry.all()
+    git_entries = Enum.filter(entries, fn {_, e} -> e.source_type == :git end)
+    hex_entries = Enum.filter(entries, fn {_, e} -> e.source_type == :hex end)
+
+    results = check_git_updates(git_entries)
+
+    if hex_entries != [] do
+      Minga.Editor.log_to_messages(
+        "Hex extensions use Mix.install cache. Run :ConfigReload to pick up version changes."
+      )
+    end
+
+    report_update_results(results)
+  end
+
+  @spec check_git_updates([{atom(), Minga.Extension.Entry.t()}]) :: [
+          {:ok, Minga.Extension.Git.update_info()}
+          | {:up_to_date, atom()}
+          | {:error, atom(), String.t()}
+        ]
+  defp check_git_updates(git_entries) do
+    Enum.map(git_entries, fn {name, entry} ->
+      case Minga.Extension.Git.fetch_updates(name, entry.git) do
+        {:ok, info} -> {:ok, info}
+        :up_to_date -> {:up_to_date, name}
+        {:error, reason} -> {:error, name, reason}
+      end
+    end)
+  end
+
+  @spec report_update_results([term()]) :: :ok
+  defp report_update_results(results) do
+    updates = Enum.filter(results, &match?({:ok, _}, &1))
+    up_to_date = Enum.filter(results, &match?({:up_to_date, _}, &1))
+    errors = Enum.filter(results, &match?({:error, _, _}, &1))
+
+    messages = []
+
+    messages =
+      if updates != [] do
+        lines =
+          Enum.map(updates, fn {:ok, info} ->
+            "  #{info.name}: #{info.old_ref} -> #{info.new_ref} (#{info.commit_count} commits on #{info.branch})"
+          end)
+
+        messages ++ ["Updates available:" | lines] ++ ["Run :ConfigReload to apply."]
+      else
+        messages ++ ["All git extensions are up to date."]
+      end
+
+    messages =
+      if errors != [] do
+        error_lines = Enum.map(errors, fn {:error, name, reason} -> "  #{name}: #{reason}" end)
+        messages ++ ["Errors:" | error_lines]
+      else
+        messages
+      end
+
+    msg = Enum.join(messages, "\n")
+    Minga.Editor.log_to_messages(msg)
+
+    if up_to_date != [] do
+      count = length(up_to_date)
+      Minga.Log.debug(:config, "#{count} extension(s) already up to date")
+    end
+
+    :ok
   end
 end
