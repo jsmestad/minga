@@ -83,6 +83,10 @@ defmodule Minga.Port.Manager do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    # Port.Manager sends large binary render commands every frame.
+    # Frequent full sweeps reclaim binary refs promptly.
+    Process.flag(:fullsweep_after, 20)
+
     backend = Keyword.get(opts, :backend, :tui)
     renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path(backend))
 

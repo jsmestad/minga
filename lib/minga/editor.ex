@@ -98,6 +98,12 @@ defmodule Minga.Editor do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    # Tune GC for the Editor process: frequent full sweeps reclaim binary
+    # refs from the render loop, and a larger initial heap avoids repeated
+    # grow-and-GC cycles during startup.
+    Process.flag(:fullsweep_after, 20)
+    Process.flag(:min_heap_size, 4096)
+
     state = Startup.build_initial_state(opts)
 
     # Logger redirect and startup messages
