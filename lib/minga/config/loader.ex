@@ -272,6 +272,23 @@ defmodule Minga.Config.Loader do
 
   @spec resolve_config_path() :: String.t()
   defp resolve_config_path do
+    case cli_config_file() do
+      path when is_binary(path) -> path
+      nil -> default_config_path()
+    end
+  end
+
+  # Checks CLI startup flags for a --config override.
+  @spec cli_config_file() :: String.t() | nil
+  defp cli_config_file do
+    case Application.get_env(:minga, :cli_startup_flags) do
+      %{config_file: path} when is_binary(path) -> path
+      _ -> nil
+    end
+  end
+
+  @spec default_config_path() :: String.t()
+  defp default_config_path do
     base =
       case System.get_env("XDG_CONFIG_HOME") do
         nil -> Path.expand("~/.config")
