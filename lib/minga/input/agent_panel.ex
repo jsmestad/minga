@@ -182,5 +182,4 @@ defmodule Minga.Input.AgentPanel do
       state
     end
   end
-
 end

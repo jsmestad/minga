@@ -208,5 +208,4 @@ defmodule Minga.Input.FileTreeHandler do
   defp tree_scroll_offset(cursor, visible_rows), do: cursor - visible_rows + 1
 
   # ── Shared helpers ──────────────────────────────────────────────────────
-
 end
