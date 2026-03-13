@@ -58,4 +58,58 @@ defmodule Minga.Agent.Tools.ReadFileTest do
       assert {:ok, ""} = ReadFile.execute(path)
     end
   end
+
+  describe "execute/2 with offset and limit" do
+    setup %{tmp_dir: dir} do
+      path = Path.join(dir, "lines.txt")
+      lines = Enum.map_join(1..100, "\n", &"line #{&1}")
+      File.write!(path, lines)
+      %{path: path}
+    end
+
+    test "reads a slice with offset and limit", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path, offset: 10, limit: 5)
+      assert result =~ "[lines 10-14 of 100]"
+      assert result =~ "line 10"
+      assert result =~ "line 14"
+      refute result =~ "line 9\n"
+      refute result =~ "line 15"
+    end
+
+    test "reads from offset to end when limit is omitted", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path, offset: 95)
+      assert result =~ "[lines 95-100 of 100]"
+      assert result =~ "line 95"
+      assert result =~ "line 100"
+    end
+
+    test "reads first N lines when only limit is given", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path, limit: 3)
+      assert result =~ "[lines 1-3 of 100]"
+      assert result =~ "line 1"
+      assert result =~ "line 3"
+      refute result =~ "line 4\n"
+    end
+
+    test "offset beyond file length returns empty slice", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path, offset: 200)
+      assert result =~ "[lines 200-"
+      assert result =~ "of 100]"
+    end
+
+    test "full file is returned when no offset/limit", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path)
+      # Should NOT have the header when no offset/limit
+      refute result =~ "[lines"
+      assert result =~ "line 1"
+      assert result =~ "line 100"
+    end
+
+    test "offset 1 with limit returns from the beginning", %{path: path} do
+      assert {:ok, result} = ReadFile.execute(path, offset: 1, limit: 2)
+      assert result =~ "[lines 1-2 of 100]"
+      assert result =~ "line 1"
+      assert result =~ "line 2"
+    end
+  end
 end
