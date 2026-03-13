@@ -26,8 +26,12 @@ defmodule Minga.Agent.Tools.Git do
 
         parts =
           [
-            if(staged != [], do: "Staged changes:\n" <> Enum.map_join(staged, "\n", &format_status_entry/1)),
-            if(unstaged != [], do: "Unstaged changes:\n" <> Enum.map_join(unstaged, "\n", &format_status_entry/1))
+            if(staged != [],
+              do: "Staged changes:\n" <> Enum.map_join(staged, "\n", &format_status_entry/1)
+            ),
+            if(unstaged != [],
+              do: "Unstaged changes:\n" <> Enum.map_join(unstaged, "\n", &format_status_entry/1)
+            )
           ]
           |> Enum.reject(&is_nil/1)
 

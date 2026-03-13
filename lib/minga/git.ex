@@ -293,12 +293,7 @@ defmodule Minga.Git do
     # A file can appear in both staged and unstaged state.
     # For simplicity, we report the most significant status.
     {status, staged} = interpret_status_codes(index_status, worktree_status)
-
-    if status do
-      %StatusEntry{path: path, status: status, staged: staged}
-    else
-      nil
-    end
+    %StatusEntry{path: path, status: status, staged: staged}
   end
 
   defp parse_status_line(_), do: nil
@@ -313,6 +308,7 @@ defmodule Minga.Git do
   defp interpret_status_codes("C", _), do: {:copied, true}
   defp interpret_status_codes(" ", "M"), do: {:modified, false}
   defp interpret_status_codes(" ", "D"), do: {:deleted, false}
+
   defp interpret_status_codes(idx, wt) do
     require Logger
     Logger.warning("[Git] unexpected status codes: index=#{inspect(idx)} worktree=#{inspect(wt)}")
