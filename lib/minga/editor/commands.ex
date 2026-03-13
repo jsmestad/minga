@@ -439,7 +439,7 @@ defmodule Minga.Editor.Commands do
         %{state | status_msg: "Config reloaded"}
 
       {:error, msg} ->
-        Minga.Editor.log_to_messages("Config reload error: #{msg}")
+        Minga.Log.warning(:config, "Config reload error: #{msg}")
         %{state | status_msg: "Config reload error: #{msg}"}
     end
   end
@@ -627,7 +627,7 @@ defmodule Minga.Editor.Commands do
         %{state | status_msg: "Formatted"}
 
       {:error, msg} ->
-        Minga.Editor.log_to_messages("Formatter failed: #{buf_name} (#{msg})")
+        Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
         %{state | status_msg: "Format error: #{msg}"}
     end
   end

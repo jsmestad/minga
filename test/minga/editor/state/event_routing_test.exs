@@ -102,7 +102,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
       {new_state, effects} = AgentEvents.handle(state, {:error, "something broke"})
 
       assert AgentAccess.agent(new_state).error == "something broke"
-      assert {:log_message, "Agent error: something broke"} in effects
+      assert {:log_warning, "Agent error: something broke"} in effects
     end
   end
 

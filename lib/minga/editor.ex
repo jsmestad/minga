@@ -460,6 +460,7 @@ defmodule Minga.Editor do
   * `{:push_overlay, module}` — push an overlay handler onto the focus stack
   * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
   * `{:log_message, msg}` — log to *Messages* buffer
+  * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
   * `:sync_agent_buffer` — sync agent buffer with session output
   * `{:update_tab_label, label}` — update active tab label
   """
@@ -472,6 +473,7 @@ defmodule Minga.Editor do
           | {:push_overlay, module()}
           | {:pop_overlay, module()}
           | {:log_message, String.t()}
+          | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
 
@@ -514,6 +516,12 @@ defmodule Minga.Editor do
     do: schedule_render(state, delay_ms)
 
   defp apply_effect(state, {:log_message, msg}) when is_binary(msg), do: log_message(state, msg)
+
+  defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
+    Minga.Log.warning(:editor, msg)
+    state
+  end
+
   defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
 
   defp apply_effect(state, {:update_tab_label, _label}),

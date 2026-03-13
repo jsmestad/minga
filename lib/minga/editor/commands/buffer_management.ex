@@ -742,8 +742,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         state
 
       {_, {:error, msg}} ->
-        Minga.Editor.log_to_messages("Format-on-save failed: #{buf_name} (#{msg})")
-        Minga.Log.warning(:editor, "Format-on-save failed: #{msg}")
+        Minga.Log.warning(:editor, "Format-on-save failed: #{buf_name} (#{msg})")
         state
     end
   end
