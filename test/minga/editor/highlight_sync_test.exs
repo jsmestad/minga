@@ -4,7 +4,7 @@ defmodule Minga.Editor.HighlightSyncTest do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
-  alias Minga.Mode
+  alias Minga.Editor.VimState
 
   # Minimal state for testing — no real port or buffer needed for
   # handle_names and handle_spans.
@@ -12,8 +12,7 @@ defmodule Minga.Editor.HighlightSyncTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state()
+      vim: VimState.new()
     }
   end
 

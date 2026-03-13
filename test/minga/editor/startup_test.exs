@@ -7,11 +7,11 @@ defmodule Minga.Editor.StartupTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
   alias Minga.Input
-  alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
 
   describe "startup_view_state/1" do
@@ -87,8 +87,7 @@ defmodule Minga.Editor.StartupTest do
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: VimState.new(),
         keymap_scope: :agent,
         windows: %Windows{
           tree: WindowTree.new(1),
@@ -113,8 +112,7 @@ defmodule Minga.Editor.StartupTest do
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: VimState.new(),
         keymap_scope: :editor,
         windows: %Windows{
           tree: WindowTree.new(1),

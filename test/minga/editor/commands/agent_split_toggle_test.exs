@@ -15,10 +15,10 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Input
-  alias Minga.Mode
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
@@ -68,8 +68,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     state = %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       agent: agent,

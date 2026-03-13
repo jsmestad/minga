@@ -636,14 +636,14 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_focus_input(state()) :: state()
   def scope_focus_input(state) do
     state = update_agent(state, &AgentState.focus_input(&1, true))
-    %{state | mode: :insert, mode_state: Minga.Mode.initial_state()}
+    %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}
   end
 
   @doc "Unfocuses the input field and transitions to normal mode."
   @spec scope_unfocus_input(state()) :: state()
   def scope_unfocus_input(state) do
     state = update_agent(state, &AgentState.focus_input(&1, false))
-    %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
+    %{state | vim: %{state.vim | mode: :normal, mode_state: Minga.Mode.initial_state()}}
   end
 
   @doc "Unfocuses the input field and closes the agent split pane."

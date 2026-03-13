@@ -42,7 +42,7 @@ defmodule Minga.Editor.CompletionHandling do
   @spec maybe_handle(EditorState.t(), atom(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   def maybe_handle(state, old_mode, codepoint, modifiers) do
-    if state.mode == :insert and old_mode == :insert do
+    if state.vim.mode == :insert and old_mode == :insert do
       maybe_update(state, codepoint, modifiers)
     else
       dismiss(state)

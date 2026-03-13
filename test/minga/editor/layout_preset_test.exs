@@ -6,10 +6,9 @@ defmodule Minga.Editor.LayoutPresetTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
-
-  alias Minga.Mode
 
   defp make_state do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
@@ -25,8 +24,7 @@ defmodule Minga.Editor.LayoutPresetTest do
         active: 1,
         next_id: 2
       },
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       keymap_scope: :editor
     }
   end

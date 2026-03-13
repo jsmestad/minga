@@ -20,9 +20,9 @@ defmodule Minga.Editor.Startup do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Mode
   alias Minga.Port.Manager, as: PortManager
 
   @doc """
@@ -78,8 +78,7 @@ defmodule Minga.Editor.Startup do
       },
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       windows: %Windows{
         tree: WindowTree.new(initial_window_id),
         map: windows,

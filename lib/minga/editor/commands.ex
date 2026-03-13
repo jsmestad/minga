@@ -83,7 +83,10 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :search_project) do
-    %{state | mode: :search_prompt, mode_state: %Minga.Mode.SearchPromptState{}}
+    %{
+      state
+      | vim: %{state.vim | mode: :search_prompt, mode_state: %Minga.Mode.SearchPromptState{}}
+    }
   end
 
   # Dot-repeat: return a tagged tuple so the GenServer can call replay_last_change/2.
@@ -95,7 +98,7 @@ defmodule Minga.Editor.Commands do
   # `"` (unnamed) maps to the empty-string key; all others are stored as-is.
   def execute(state, {:select_register, char}) when is_binary(char) do
     name = if char == "\"", do: "", else: char
-    put_in(state.reg.active, name)
+    put_in(state.vim.reg.active, name)
   end
 
   # ── Leader / which-key (no buffer required) ───────────────────────────────
@@ -491,15 +494,18 @@ defmodule Minga.Editor.Commands do
   def execute(state, :toggle_macro_recording) do
     alias Minga.Editor.MacroRecorder
 
-    case MacroRecorder.recording?(state.macro_recorder) do
+    case MacroRecorder.recording?(state.vim.macro_recorder) do
       {true, _reg} ->
         # Stop recording
-        rec = MacroRecorder.stop_recording(state.macro_recorder)
-        %{state | macro_recorder: rec, status_msg: "Recorded macro"}
+        rec = MacroRecorder.stop_recording(state.vim.macro_recorder)
+        %{state | vim: %{state.vim | macro_recorder: rec}, status_msg: "Recorded macro"}
 
       false ->
         # Enter pending state for register selection
-        %{state | mode_state: %{state.mode_state | pending_macro_register: true}}
+        %{
+          state
+          | vim: %{state.vim | mode_state: %{state.vim.mode_state | pending_macro_register: true}}
+        }
     end
   end
 
@@ -507,31 +513,31 @@ defmodule Minga.Editor.Commands do
     alias Minga.Editor.MacroRecorder
 
     rec =
-      state.macro_recorder
+      state.vim.macro_recorder
       |> MacroRecorder.start_recording(register)
       |> Map.put(:last_register, register)
 
-    %{state | macro_recorder: rec}
+    %{state | vim: %{state.vim | macro_recorder: rec}}
   end
 
   def execute(state, {:replay_macro, register}) do
     alias Minga.Editor.MacroRecorder
 
-    case MacroRecorder.get_macro(state.macro_recorder, register) do
+    case MacroRecorder.get_macro(state.vim.macro_recorder, register) do
       nil ->
         %{state | status_msg: "No macro in register @#{register}"}
 
       _keys ->
-        rec = %{state.macro_recorder | last_register: register}
-        {%{state | macro_recorder: rec}, {:replay_macro, register}}
+        rec = %{state.vim.macro_recorder | last_register: register}
+        {%{state | vim: %{state.vim | macro_recorder: rec}}, {:replay_macro, register}}
     end
   end
 
-  def execute(%{macro_recorder: %{last_register: nil}} = state, :replay_last_macro) do
+  def execute(%{vim: %{macro_recorder: %{last_register: nil}}} = state, :replay_last_macro) do
     %{state | status_msg: "No previous macro"}
   end
 
-  def execute(%{macro_recorder: %{last_register: reg}} = state, :replay_last_macro) do
+  def execute(%{vim: %{macro_recorder: %{last_register: reg}}} = state, :replay_last_macro) do
     {state, {:replay_macro, reg}}
   end
 
@@ -768,7 +774,7 @@ defmodule Minga.Editor.Commands do
           {Bindings.node_t(), EditorState.t()}
   defp maybe_substitute_filetype_trie(state, node) do
     # Check if we just arrived at SPC m (leader_keys is ["m", "SPC"])
-    case state.mode_state do
+    case state.vim.mode_state do
       %{leader_keys: ["m", "SPC"]} ->
         filetype = current_filetype(state)
         ft_trie = filetype_trie_for(filetype)
@@ -778,7 +784,7 @@ defmodule Minga.Editor.Commands do
           {node, state}
         else
           # Substitute with the filetype trie and update mode_state
-          state = put_in(state.mode_state.leader_node, ft_trie)
+          state = put_in(state.vim.mode_state.leader_node, ft_trie)
           {ft_trie, state}
         end
 

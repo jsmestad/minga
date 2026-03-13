@@ -26,7 +26,7 @@ defmodule Minga.Input.Router do
   @spec dispatch(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def dispatch(state, codepoint, modifiers) do
     old_buffer = state.buffers.active
-    old_mode = state.mode
+    old_mode = state.vim.mode
     buf_version_before = buffer_version(state)
 
     state = %{state | status_msg: nil}

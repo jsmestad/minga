@@ -14,15 +14,18 @@ defmodule Minga.Editor.Commands.Marks do
 
   @spec execute(state(), Mode.command()) :: state()
 
-  def execute(%{buffers: %{active: buf}, marks: marks} = state, {:set_mark, char})
+  def execute(%{buffers: %{active: buf}, vim: %{marks: marks}} = state, {:set_mark, char})
       when is_binary(char) and is_pid(buf) do
     pos = BufferServer.cursor(buf)
     buf_marks = Map.get(marks, buf, %{})
     new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
-    %{state | marks: new_marks}
+    %{state | vim: %{state.vim | marks: new_marks}}
   end
 
-  def execute(%{buffers: %{active: buf}, marks: marks} = state, {:jump_to_mark_line, char})
+  def execute(
+        %{buffers: %{active: buf}, vim: %{marks: marks}} = state,
+        {:jump_to_mark_line, char}
+      )
       when is_binary(char) and is_pid(buf) do
     buf_marks = Map.get(marks, buf, %{})
 
@@ -40,7 +43,10 @@ defmodule Minga.Editor.Commands.Marks do
     end
   end
 
-  def execute(%{buffers: %{active: buf}, marks: marks} = state, {:jump_to_mark_exact, char})
+  def execute(
+        %{buffers: %{active: buf}, vim: %{marks: marks}} = state,
+        {:jump_to_mark_exact, char}
+      )
       when is_binary(char) and is_pid(buf) do
     buf_marks = Map.get(marks, buf, %{})
 
@@ -55,7 +61,10 @@ defmodule Minga.Editor.Commands.Marks do
     end
   end
 
-  def execute(%{buffers: %{active: buf}, last_jump_pos: last_pos} = state, :jump_to_last_pos_line)
+  def execute(
+        %{buffers: %{active: buf}, vim: %{last_jump_pos: last_pos}} = state,
+        :jump_to_last_pos_line
+      )
       when is_pid(buf) and not is_nil(last_pos) do
     current_pos = BufferServer.cursor(buf)
     {last_line, _} = last_pos
@@ -63,19 +72,19 @@ defmodule Minga.Editor.Commands.Marks do
     tmp_buf = Document.new(content)
     target = Minga.Motion.first_non_blank(tmp_buf, {last_line, 0})
     BufferServer.move_to(buf, target)
-    %{state | last_jump_pos: current_pos}
+    %{state | vim: %{state.vim | last_jump_pos: current_pos}}
   end
 
   def execute(state, :jump_to_last_pos_line), do: state
 
   def execute(
-        %{buffers: %{active: buf}, last_jump_pos: last_pos} = state,
+        %{buffers: %{active: buf}, vim: %{last_jump_pos: last_pos}} = state,
         :jump_to_last_pos_exact
       )
       when is_pid(buf) and not is_nil(last_pos) do
     current_pos = BufferServer.cursor(buf)
     BufferServer.move_to(buf, last_pos)
-    %{state | last_jump_pos: current_pos}
+    %{state | vim: %{state.vim | last_jump_pos: current_pos}}
   end
 
   def execute(state, :jump_to_last_pos_exact), do: state

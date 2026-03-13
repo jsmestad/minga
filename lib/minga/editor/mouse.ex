@@ -129,7 +129,7 @@ defmodule Minga.Editor.Mouse do
           {target_line, target_col} ->
             BufferServer.move_to(state.buffers.active, {target_line, target_col})
             state = cancel_mode_for_mouse(state)
-            state = %{state | mode: :normal, mode_state: Mode.initial_state()}
+            state = %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
             Minga.Editor.dispatch_command(state, :paste_after)
         end
     end
@@ -224,7 +224,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   def handle(
-        %{mouse: %MouseState{dragging: true}, mode: :visual} = state,
+        %{mouse: %MouseState{dragging: true}, vim: %{mode: :visual}} = state,
         _r,
         _c,
         :left,
@@ -321,8 +321,7 @@ defmodule Minga.Editor.Mouse do
 
             %{
               state
-              | mode: :visual,
-                mode_state: visual_state,
+              | vim: %{state.vim | mode: :visual, mode_state: visual_state},
                 mouse: MouseState.start_drag(state.mouse, {line, word_start})
             }
 
@@ -359,8 +358,7 @@ defmodule Minga.Editor.Mouse do
 
         %{
           state
-          | mode: :visual,
-            mode_state: visual_state,
+          | vim: %{state.vim | mode: :visual, mode_state: visual_state},
             mouse: MouseState.start_drag(state.mouse, {line, 0})
         }
     end
@@ -379,9 +377,9 @@ defmodule Minga.Editor.Mouse do
 
         # Get current cursor as anchor if not already in visual mode
         anchor =
-          case state.mode do
+          case state.vim.mode do
             :visual ->
-              state.mode_state.visual_anchor
+              state.vim.mode_state.visual_anchor
 
             _ ->
               BufferServer.cursor(buf)
@@ -394,7 +392,7 @@ defmodule Minga.Editor.Mouse do
           visual_type: :char
         }
 
-        %{state | mode: :visual, mode_state: visual_state}
+        %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
     end
   end
 
@@ -410,7 +408,7 @@ defmodule Minga.Editor.Mouse do
         buf = state.buffers.active
         BufferServer.move_to(buf, {target_line, target_col})
         state = cancel_mode_for_mouse(state)
-        state = %{state | mode: :normal, mode_state: Mode.initial_state()}
+        state = %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
         Minga.Editor.dispatch_command(state, :goto_definition)
     end
   end
@@ -474,7 +472,7 @@ defmodule Minga.Editor.Mouse do
       visual_type: :line
     }
 
-    %{state | mode: :visual, mode_state: visual_state}
+    %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
   end
 
   # ── Word boundary detection ────────────────────────────────────────────────
@@ -624,8 +622,7 @@ defmodule Minga.Editor.Mouse do
 
             %{
               state
-              | mode: :normal,
-                mode_state: Mode.initial_state(),
+              | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()},
                 mouse: MouseState.start_drag(state.mouse, {target_line, target_col})
             }
         end
@@ -843,11 +840,11 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()
-  defp enter_visual_if_needed(%{mode: :visual} = state, _anchor), do: state
+  defp enter_visual_if_needed(%{vim: %{mode: :visual}} = state, _anchor), do: state
 
   defp enter_visual_if_needed(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
-    %{state | mode: :visual, mode_state: visual_state}
+    %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
   end
 
   @spec clamp_col_to_line(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
@@ -862,7 +859,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec cancel_mode_for_mouse(state()) :: state()
-  defp cancel_mode_for_mouse(%{mode: :command} = state) do
+  defp cancel_mode_for_mouse(%{vim: %{mode: :command}} = state) do
     %{state | whichkey: WhichKeyState.clear(state.whichkey)}
   end
 

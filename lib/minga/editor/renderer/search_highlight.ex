@@ -23,7 +23,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   @spec maybe_substitute_preview(state(), [String.t()], non_neg_integer()) ::
           {[String.t()], [search_match()]}
   def maybe_substitute_preview(
-        %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}},
+        %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}},
         lines,
         first_line
       ) do
@@ -150,14 +150,15 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   end
 
   @spec active_search_pattern(state()) :: String.t() | nil
-  defp active_search_pattern(%{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}})
+  defp active_search_pattern(%{
+         vim: %{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}}
+       })
        when input != "" do
     input
   end
 
   defp active_search_pattern(%{
-         mode: :command,
-         mode_state: %Minga.Mode.CommandState{input: input}
+         vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
        }) do
     extract_substitute_pattern(input)
   end

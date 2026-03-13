@@ -120,8 +120,8 @@ defmodule Minga.Input.FileTreeHandler do
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
     state =
-      if state.mode != :normal do
-        %{state | mode: :normal, mode_state: Minga.Mode.initial_state()}
+      if state.vim.mode != :normal do
+        %{state | vim: %{state.vim | mode: :normal, mode_state: Minga.Mode.initial_state()}}
       else
         state
       end
@@ -209,8 +209,13 @@ defmodule Minga.Input.FileTreeHandler do
   # ── Shared helpers ──────────────────────────────────────────────────────
 
   @spec key_sequence_pending?(EditorState.t()) :: boolean()
-  defp key_sequence_pending?(%{mode_state: %{leader_node: node}}) when node != nil, do: true
-  defp key_sequence_pending?(%{mode_state: %{pending_g: true}}), do: true
-  defp key_sequence_pending?(%{mode: mode}) when mode in [:operator_pending, :command], do: true
+  defp key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
+    do: true
+
+  defp key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
+
+  defp key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
+    do: true
+
   defp key_sequence_pending?(_state), do: false
 end

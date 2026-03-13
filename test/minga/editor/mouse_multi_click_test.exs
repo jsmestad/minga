@@ -43,10 +43,10 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row, @gutter + 6, :left, :press, 0, 2)
 
       s = state(editor)
-      assert s.mode == :visual
-      assert s.mode_state.visual_type == :char
+      assert s.vim.mode == :visual
+      assert s.vim.mode_state.visual_type == :char
       # Anchor should be at start of "world" (col 6)
-      {_anchor_line, anchor_col} = s.mode_state.visual_anchor
+      {_anchor_line, anchor_col} = s.vim.mode_state.visual_anchor
       assert anchor_col == 6
 
       # Cursor should be at end of "world" (col 10)
@@ -59,8 +59,8 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row, @gutter + 2, :left, :press, 0, 2)
 
       s = state(editor)
-      assert s.mode == :visual
-      {_line, anchor_col} = s.mode_state.visual_anchor
+      assert s.vim.mode == :visual
+      {_line, anchor_col} = s.vim.mode_state.visual_anchor
       assert anchor_col == 0
 
       {_line, cursor_col} = BufferServer.cursor(buffer)
@@ -72,7 +72,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row, @gutter + 5, :left, :press, 0, 2)
 
       s = state(editor)
-      assert s.mode == :visual
+      assert s.vim.mode == :visual
     end
   end
 
@@ -82,9 +82,9 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row + 1, @gutter + 2, :left, :press, 0, 3)
 
       s = state(editor)
-      assert s.mode == :visual
-      assert s.mode_state.visual_type == :line
-      {anchor_line, anchor_col} = s.mode_state.visual_anchor
+      assert s.vim.mode == :visual
+      assert s.vim.mode_state.visual_type == :line
+      {anchor_line, anchor_col} = s.vim.mode_state.visual_anchor
       assert anchor_line == 1
       assert anchor_col == 0
     end
@@ -101,8 +101,8 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row, @gutter + 10, :left, :press, 0x01)
 
       s = state(editor)
-      assert s.mode == :visual
-      {_line, anchor_col} = s.mode_state.visual_anchor
+      assert s.vim.mode == :visual
+      {_line, anchor_col} = s.vim.mode_state.visual_anchor
       assert anchor_col == 0
 
       {_line, cursor_col} = BufferServer.cursor(buffer)
@@ -120,7 +120,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, @content_row, @gutter + 15, :left, :press, 0x01)
 
       s = state(editor)
-      assert s.mode == :visual
+      assert s.vim.mode == :visual
       {_line, cursor_col} = BufferServer.cursor(buffer)
       assert cursor_col == 15
     end

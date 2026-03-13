@@ -7,6 +7,7 @@ defmodule Minga.Picker.CommandSourceTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Picker.CommandSource
 
   describe "on_select/2 — regular command" do
@@ -26,8 +27,7 @@ defmodule Minga.Picker.CommandSourceTest do
         viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         picker_ui: %PickerState{},
-        mode: :normal,
-        mode_state: Minga.Mode.initial_state()
+        vim: VimState.new()
       }
 
       result =

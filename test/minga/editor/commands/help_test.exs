@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.HelpTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
-  alias Minga.Mode
+  alias Minga.Editor.VimState
 
   # ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -22,8 +22,7 @@ defmodule Minga.Editor.Commands.HelpTest do
     %EditorState{
       port_manager: nil,
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf]}
     }
   end

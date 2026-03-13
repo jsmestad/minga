@@ -23,7 +23,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── h / l (mode-aware) ────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}, mode: mode} = state, :move_left) do
+  def execute(%{buffers: %{active: buf}, vim: %{mode: mode}} = state, :move_left) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}, mode: mode} = state, :move_right) do
+  def execute(%{buffers: %{active: buf}, vim: %{mode: mode}} = state, :move_right) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
@@ -199,10 +199,13 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{buffers: %{active: buf}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
-    %{state | last_find_char: {dir, char}}
+    %{state | vim: %{state.vim | last_find_char: {dir, char}}}
   end
 
-  def execute(%{last_find_char: {dir, char}, buf: %{buffer: buf}} = state, :repeat_find_char) do
+  def execute(
+        %{vim: %{last_find_char: {dir, char}}, buf: %{buffer: buf}} = state,
+        :repeat_find_char
+      ) do
     Helpers.apply_find_char(buf, dir, char)
     state
   end
@@ -210,7 +213,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :repeat_find_char), do: state
 
   def execute(
-        %{last_find_char: {dir, char}, buf: %{buffer: buf}} = state,
+        %{vim: %{last_find_char: {dir, char}}, buf: %{buffer: buf}} = state,
         :repeat_find_char_reverse
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)
@@ -293,8 +296,13 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :window_close), do: close_window(state)
 
   def execute(state, :describe_key) do
-    new_mode_state = %{state.mode_state | pending_describe_key: true}
-    %{state | mode_state: new_mode_state, status_msg: "Press key to describe:"}
+    new_mode_state = %{state.vim.mode_state | pending_describe_key: true}
+
+    %{
+      state
+      | vim: %{state.vim | mode_state: new_mode_state},
+        status_msg: "Press key to describe:"
+    }
   end
 
   @spec split_window(state(), WindowTree.direction()) :: state()

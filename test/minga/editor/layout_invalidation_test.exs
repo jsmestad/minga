@@ -16,6 +16,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.FileTree
 
@@ -25,8 +26,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(rows, cols),
-      mode: :normal,
-      mode_state: Minga.Mode.initial_state()
+      vim: VimState.new()
     }
   end
 

@@ -12,9 +12,8 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input
-
-  alias Minga.Mode
   alias Minga.Theme
 
   defp default_theme do
@@ -103,8 +102,7 @@ defmodule Minga.Agent.View.RendererTest do
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(rows, cols),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       agent: agent,

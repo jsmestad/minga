@@ -17,6 +17,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
@@ -62,11 +63,12 @@ defmodule Minga.Input.ScopedTest do
         TabBar.new(Tab.new_file(1, "*scratch*"))
       end
 
+    mode = if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal)
+
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal),
-      mode_state: Mode.initial_state(),
+      vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
@@ -164,7 +166,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert new_state.mode == :normal
+      assert new_state.vim.mode == :normal
     end
 
     test "Backspace on empty input is safe", %{state: state} do
@@ -259,7 +261,11 @@ defmodule Minga.Input.ScopedTest do
 
     test "leader sequence in progress passes through", %{state: state} do
       # Simulate a leader sequence in progress
-      leader_state = %{state | mode_state: %{state.mode_state | leader_node: %{}}}
+      leader_state = %{
+        state
+        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: %{}}}
+      }
+
       assert {:passthrough, _} = Scoped.handle_key(leader_state, ?f, 0)
     end
 
@@ -352,7 +358,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert new_state.mode == :normal
+      assert new_state.vim.mode == :normal
     end
 
     test "printable char self-inserts", %{state: state} do
@@ -454,7 +460,12 @@ defmodule Minga.Input.ScopedTest do
       # Use a real Bindings.Node, not a plain map, because the mode FSM
       # calls Bindings.lookup on leader_node.
       leader_node = %Minga.Keymap.Bindings.Node{children: %{}, command: nil, description: nil}
-      leader_state = %{state | mode_state: %{state.mode_state | leader_node: leader_node}}
+
+      leader_state = %{
+        state
+        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: leader_node}}
+      }
+
       {:handled, _new_state} = walk_surface_handlers(leader_state, ?f, 0)
     end
 
@@ -532,7 +543,12 @@ defmodule Minga.Input.ScopedTest do
 
     test "leader node pending passes through in agent scope" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
-      state = %{state | mode_state: %{state.mode_state | leader_node: %{}}}
+
+      state = %{
+        state
+        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: %{}}}
+      }
+
       assert {:passthrough, _} = Scoped.handle_key(state, ?a, 0)
     end
 
@@ -589,7 +605,7 @@ defmodule Minga.Input.ScopedTest do
           %{agent | panel: %{agent.panel | input_focused: true, visible: true}}
         end)
 
-      state = %{state | mode: :insert}
+      state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)
       # Should have typed 'y' into input, not approved
       assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "y"

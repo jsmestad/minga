@@ -9,9 +9,9 @@ defmodule Minga.Editor.LayoutTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.FileTree
-  alias Minga.Mode
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -19,8 +19,7 @@ defmodule Minga.Editor.LayoutTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(rows, cols),
-      mode: :normal,
-      mode_state: Mode.initial_state()
+      vim: VimState.new()
     }
   end
 

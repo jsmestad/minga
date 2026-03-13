@@ -6,9 +6,9 @@ defmodule Minga.Editor.StateTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Mode
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -16,8 +16,7 @@ defmodule Minga.Editor.StateTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state()
+      vim: VimState.new()
     }
   end
 

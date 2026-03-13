@@ -40,7 +40,7 @@ defmodule Minga.Editor.Title do
   @spec build_vars(state()) :: [{String.t(), String.t()}]
   defp build_vars(%EditorState{} = state) do
     ctx = EditorState.active_content_context(state)
-    mode_str = state.mode |> to_string() |> String.upcase()
+    mode_str = state.vim.mode |> to_string() |> String.upcase()
 
     case ctx.type do
       :agent ->
@@ -70,7 +70,7 @@ defmodule Minga.Editor.Title do
   end
 
   # Fallback for non-EditorState maps (e.g. tests passing plain maps)
-  defp build_vars(%{mode: mode} = state) do
+  defp build_vars(%{vim: %{mode: mode}} = state) do
     buf = get_in(state, [:buffers, :active])
 
     if is_pid(buf) do
