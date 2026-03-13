@@ -397,4 +397,71 @@ defmodule Minga.Mode.OperatorPendingTest do
                OperatorPending.handle_key({?g, 0}, state)
     end
   end
+
+  # ── Reindent (= operator) ─────────────────────────────────────────────────
+
+  describe "== (reindent current lines)" do
+    test "== emits {:reindent_lines, 1} and returns to :normal" do
+      state = op_state(:reindent)
+
+      assert {:execute_then_transition, [{:reindent_lines, 1}], :normal, _} =
+               OperatorPending.handle_key({?=, 0}, state)
+    end
+
+    test "== with op_count=3 emits {:reindent_lines, 3}" do
+      state = op_state(:reindent, 3)
+
+      assert {:execute_then_transition, [{:reindent_lines, 3}], :normal, _} =
+               OperatorPending.handle_key({?=, 0}, state)
+    end
+  end
+
+  describe "=motion (reindent to motion target)" do
+    test "=w emits {:reindent_motion, :word_forward} and returns to :normal" do
+      state = op_state(:reindent)
+
+      assert {:execute_then_transition, [{:reindent_motion, :word_forward}], :normal, _} =
+               OperatorPending.handle_key({?w, 0}, state)
+    end
+
+    test "=G emits {:reindent_motion, :document_end} and returns to :normal" do
+      state = op_state(:reindent)
+
+      assert {:execute_then_transition, [{:reindent_motion, :document_end}], :normal, _} =
+               OperatorPending.handle_key({?G, 0}, state)
+    end
+
+    test "=gg emits {:reindent_motion, :document_start} and returns to :normal" do
+      state = %OperatorPendingState{operator: :reindent, op_count: 1, pending_g: true}
+
+      assert {:execute_then_transition, [{:reindent_motion, :document_start}], :normal, _} =
+               OperatorPending.handle_key({?g, 0}, state)
+    end
+  end
+
+  describe "=<text_object> (reindent text object)" do
+    test "=if emits {:reindent_text_object, :inner, {:structural, :function}}" do
+      state = %OperatorPendingState{
+        operator: :reindent,
+        op_count: 1,
+        text_object_modifier: :inner
+      }
+
+      assert {:execute_then_transition,
+              [{:reindent_text_object, :inner, {:structural, :function}}], :normal, _} =
+               OperatorPending.handle_key({?f, 0}, state)
+    end
+
+    test "=af emits {:reindent_text_object, :around, {:structural, :function}}" do
+      state = %OperatorPendingState{
+        operator: :reindent,
+        op_count: 1,
+        text_object_modifier: :around
+      }
+
+      assert {:execute_then_transition,
+              [{:reindent_text_object, :around, {:structural, :function}}], :normal, _} =
+               OperatorPending.handle_key({?f, 0}, state)
+    end
+  end
 end

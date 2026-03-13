@@ -60,6 +60,9 @@ Current status and planned features. Updated as development progresses.
 | `%` | ✅ | Matching bracket |
 | `;` `,` (repeat find) | 📋 | Stubbed, not yet wired |
 | `H` `M` `L` | 📋 | Screen top / middle / bottom |
+| `]f` / `[f` | ✅ | Goto next/prev function (tree-sitter textobject cache, #442) |
+| `]t` / `[t` | ✅ | Goto next/prev type/class (tree-sitter textobject cache, #442) |
+| `]a` / `[a` | ✅ | Goto next/prev argument/parameter (tree-sitter textobject cache, #442) |
 
 ## Operators
 
@@ -73,6 +76,7 @@ Current status and planned features. Updated as development progresses.
 | `x` / `X` | ✅ | Delete char under / before cursor |
 | `D` / `C` | ✅ | Delete / change to end of line |
 | `>>` / `<<` | ✅ | Indent / dedent |
+| `=` / `==` | ✅ | Reindent line/range/selection using tree-sitter indent heuristics (#441) |
 
 ## Text Objects
 
@@ -86,9 +90,14 @@ Current status and planned features. Updated as development progresses.
 | `i[` / `a[` | ✅ | Inner / a brackets |
 | `i{` / `a{` | ✅ | Inner / a braces |
 | `i<` / `a<` | ✅ | Inner / a angle brackets |
+| `if` / `af` | ✅ | Inner / around function (tree-sitter, #442) |
+| `ic` / `ac` | ✅ | Inner / around class/module (tree-sitter, #442) |
+| `ia` / `aa` | ✅ | Inner / around argument/parameter (tree-sitter, #442) |
+| `ib` / `ab` | ✅ | Inner / around block (tree-sitter, #442) |
 | `it` / `at` | 📋 | Inner / a HTML tag |
 | `ip` / `ap` | 📋 | Inner / a paragraph |
 | `is` / `as` | 📋 | Inner / a sentence |
+| Visual text objects | ✅ | `vi"`, `viw`, `vif`, `vaf`, etc. expand selection to text object range (#442) |
 
 ## Leader Key (`SPC`) Commands
 

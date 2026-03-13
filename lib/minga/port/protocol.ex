@@ -704,7 +704,9 @@ defmodule Minga.Port.Protocol do
   end
 
   @spec decode_textobject_entries(binary(), non_neg_integer(), map()) :: map()
-  defp decode_textobject_entries(_data, 0, acc), do: acc
+  defp decode_textobject_entries(_data, 0, acc) do
+    Map.new(acc, fn {type, positions} -> {type, Enum.reverse(positions)} end)
+  end
 
   defp decode_textobject_entries(
          <<type_id::8, row::32, col::32, rest::binary>>,
@@ -713,11 +715,13 @@ defmodule Minga.Port.Protocol do
        ) do
     type_atom = textobj_type_to_atom(type_id)
     existing = Map.get(acc, type_atom, [])
-    updated = Map.put(acc, type_atom, existing ++ [{row, col}])
+    updated = Map.put(acc, type_atom, [{row, col} | existing])
     decode_textobject_entries(rest, remaining - 1, updated)
   end
 
-  defp decode_textobject_entries(_, _, acc), do: acc
+  defp decode_textobject_entries(_, _, acc) do
+    Map.new(acc, fn {type, positions} -> {type, Enum.reverse(positions)} end)
+  end
 
   @spec textobj_type_to_atom(non_neg_integer()) :: atom()
   defp textobj_type_to_atom(@textobj_function), do: :function
