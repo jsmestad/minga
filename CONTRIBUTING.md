@@ -1,22 +1,45 @@
 # Contributing to Minga
 
-Thanks for your interest! Minga is in early development and contributions are welcome: whether that's bug reports, feature ideas, or code.
+Thanks for your interest! Minga is in early development and contributions are welcome, whether that's bug reports, feature ideas, or code.
 
-## Getting Started
+## Build from source
+
+Minga is two programs: an Elixir app (editor logic) and a Zig binary (terminal rendering). You need both toolchains plus Erlang. A version manager makes this painless.
+
+### Install the toolchain
+
+Using [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/):
 
 ```bash
-# Prerequisites: Elixir 1.19+, OTP 28+, Zig 0.15+ (see .tool-versions)
-git clone https://github.com/justinsmestad/minga.git
+asdf plugin add erlang
+asdf plugin add elixir
+asdf plugin add zig
+```
+
+### Clone and build
+
+```bash
+git clone https://github.com/jsmestad/minga.git
 cd minga
+asdf install          # Installs pinned Erlang, Elixir, Zig from .tool-versions
 mix deps.get
-mix compile
+mix compile           # Builds both Elixir and Zig
+```
+
+The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are incremental and fast.
+
+### Run it
+
+```bash
+bin/minga              # Empty buffer
+bin/minga path/to/file # Open a file
 ```
 
 ## Running Tests
 
 ```bash
-mix test                       # 1,393 Elixir tests
-cd zig && zig build test       # 105 Zig tests
+mix test                       # Elixir tests
+cd zig && zig build test       # Zig renderer tests
 ```
 
 ## Before Committing
