@@ -47,6 +47,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
@@ -239,6 +240,12 @@ defmodule Minga.Editor.RenderPipeline do
     # Stage 4b: Agent chat window content (rendered separately from buffers)
     agent_chat_frames =
       timed(:agent_content, fn -> build_agent_chat_content(state, layout) end)
+
+    # If the agent chat window set a cursor, use it (overrides buffer cursor).
+    cursor_info =
+      Enum.reduce(agent_chat_frames, cursor_info, fn wf, acc ->
+        if wf.cursor != nil, do: wf.cursor, else: acc
+      end)
 
     window_frames = buffer_frames ++ agent_chat_frames
 
@@ -628,11 +635,21 @@ defmodule Minga.Editor.RenderPipeline do
   @spec render_agent_chat_window(state(), Window.t(), Layout.window_layout()) :: WindowFrame.t()
   defp render_agent_chat_window(state, _window, win_layout) do
     {row_off, col_off, width, height} = win_layout.content
+    is_fullscreen = not EditorState.split?(state)
 
-    # Render agent chat into this rect using ViewRenderer.
-    # render_in_rect/3 draws chat messages, scroll position, and the
-    # prompt input area within the given bounds.
-    draws = ViewRenderer.render_in_rect(state, {row_off, col_off, width, height})
+    # When the agent chat is the sole window (full-screen agent mode),
+    # render the two-column layout: chat+input on the left, file
+    # viewer/dashboard on the right with a vertical separator. In a
+    # split alongside a file buffer, use the compact chat-only view.
+    draws =
+      if is_fullscreen do
+        ViewRenderer.render_with_sidebar(state, {row_off, col_off, width, height})
+      else
+        ViewRenderer.render_in_rect(state, {row_off, col_off, width, height})
+      end
+
+    # Compute cursor position for the agent chat input area.
+    cursor = ViewRenderer.cursor_position_in_rect(state, {row_off, col_off, width, height})
 
     %WindowFrame{
       rect: {row_off, col_off, width, height},
@@ -640,7 +657,7 @@ defmodule Minga.Editor.RenderPipeline do
       lines: DisplayList.draws_to_layer(draws),
       tilde_lines: %{},
       modeline: %{},
-      cursor: nil
+      cursor: cursor
     }
   end
 
@@ -788,9 +805,17 @@ defmodule Minga.Editor.RenderPipeline do
         nil -> ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
       end
 
-    # Agent panel input can steal the cursor
+    # Agent panel input can steal the cursor (bottom panel mode)
     {cursor, cursor_shape} =
       ComposeHelpers.agent_cursor_override_from_layout(state, cursor, cursor_shape, layout)
+
+    # Agent chat window input also overrides cursor shape to :beam
+    cursor_shape =
+      if AgentAccess.panel(state).input_focused and not EditorState.split?(state) do
+        :beam
+      else
+        cursor_shape
+      end
 
     %Frame{
       cursor: cursor,

@@ -250,6 +250,103 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   @doc """
+  Renders agent chat with the sidebar (file viewer/dashboard) within a
+  bounded window rect.
+
+  Used when the agent chat is the sole window (full-screen agent mode).
+  Produces the two-column layout: chat+input on the left, file
+  viewer/dashboard on the right, with a vertical separator. Does not
+  render title bar or modeline (those are handled by the pipeline's
+  chrome layer).
+
+  Returns a flat list of draw commands positioned within the given rect.
+  """
+  @spec render_with_sidebar(state(), rect()) :: [DisplayList.draw()]
+  def render_with_sidebar(%EditorState{} = state, {row_off, col_off, width, height}) do
+    input = extract_input(state)
+
+    chat_width_pct = input.agentic.chat_width_pct
+    chat_width = max(div(width * chat_width_pct, 100), 20)
+
+    input_height =
+      compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
+
+    chat_height = max(height - input_height, 1)
+    input_row = row_off + chat_height
+    separator_col = col_off + chat_width
+    viewer_col = separator_col + 1
+    viewer_width = max(width - chat_width - 1, 10)
+
+    {chat_commands, _metrics} =
+      render_chat_from_input(input, {row_off, col_off, chat_width, chat_height})
+
+    separator_commands =
+      render_separator(separator_col, row_off, height, input.theme)
+
+    viewer_commands =
+      render_file_viewer_from_input(
+        input,
+        {row_off, viewer_col, viewer_width, height}
+      )
+
+    input_commands = render_input_from_input(input, input_row, chat_width)
+
+    overlays =
+      if input.agentic.help_visible do
+        render_help_overlay(input, width, height)
+      else
+        []
+      end
+
+    toast_cmds = render_toast_overlay(input, width)
+
+    chat_commands ++
+      separator_commands ++ viewer_commands ++ input_commands ++ overlays ++ toast_cmds
+  end
+
+  @doc """
+  Returns `{row, col}` for the cursor within a bounded content rect.
+
+  Used by the render pipeline to position the cursor in the agent chat
+  input area when the agent is hosted in a window pane. The rect
+  determines the coordinate space.
+
+  Returns nil when input is not focused (cursor hidden).
+  """
+  @spec cursor_position_in_rect(state(), rect()) :: {non_neg_integer(), non_neg_integer()} | nil
+  def cursor_position_in_rect(state, {row_off, _col_off, width, height}) do
+    panel = AgentAccess.panel(state)
+
+    if panel.input_focused do
+      agentic = AgentAccess.agentic(state)
+      chat_width_pct = agentic.chat_width_pct
+      chat_width = max(div(width * chat_width_pct, 100), 20)
+      inner_width = input_inner_width(chat_width)
+
+      lines = PanelState.input_lines(panel)
+      cursor = PanelState.input_cursor(panel)
+
+      total_visual = InputWrap.visual_line_count(lines, inner_width)
+      visible_lines = max(min(total_visual, @max_input_lines), 1)
+      input_height = compute_input_height(lines, inner_width)
+      chat_height = max(height - input_height, 1)
+      input_row = row_off + chat_height
+
+      {visual_line, visual_col} =
+        InputWrap.logical_to_visual(lines, inner_width, cursor)
+
+      scroll = InputWrap.scroll_offset(visual_line, visible_lines, total_visual)
+      visible_offset = visual_line - scroll
+
+      input_text_row = input_row + 1 + min(visible_offset, visible_lines - 1)
+      input_col = 1 + 3 + visual_col
+      {input_text_row, input_col}
+    else
+      nil
+    end
+  end
+
+  @doc """
   Returns `{row, col}` for where the terminal cursor should be placed.
 
   When the chat input is focused the cursor sits in the full-width input area.
