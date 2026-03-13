@@ -6,6 +6,12 @@ defmodule Minga.Config.Options do
   read options via `get/1` (global) or `get_for_filetype/2` (merged with
   filetype overrides).
 
+  Backed by ETS with `read_concurrency: true` for lock-free reads on
+  every render frame and keystroke. The GenServer exists only to own
+  the ETS table lifecycle. Reads go directly to ETS; writes validate
+  and then insert directly (no GenServer round-trip needed since ETS
+  writes are atomic per-key).
+
   ## Supported options
 
   | Option          | Type                                          | Default   |
@@ -36,6 +42,7 @@ defmodule Minga.Config.Options do
   | `:font_size`              | positive integer (point size)               | `13`        |
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
   | `:font_ligatures`         | boolean                                     | `true`      |
+  | `:whichkey_layout`        | `:bottom` or `:float`                       | `:bottom`   |
   | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
   | `:log_level_render`       | log level or `:default`                     | `:default`  |
   | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
@@ -63,7 +70,7 @@ defmodule Minga.Config.Options do
       #=> 4
   """
 
-  use Agent
+  use GenServer
 
   @typedoc "Valid option names."
   @type option_name ::
@@ -130,11 +137,8 @@ defmodule Minga.Config.Options do
            | :string_or_nil
            | :string_list
 
-  @typedoc "Internal state: global options + per-filetype overrides."
-  @type state :: %{
-          global: %{option_name() => term()},
-          filetype: %{atom() => %{option_name() => term()}}
-        }
+  @typedoc "ETS table reference used for reads and writes."
+  @type table :: :ets.table()
 
   @option_specs [
     {:tab_width, :pos_integer, 2},
@@ -192,14 +196,23 @@ defmodule Minga.Config.Options do
 
   @types Map.new(@option_specs, fn {name, type, _default} -> {name, type} end)
 
-  # ── Client API ──────────────────────────────────────────────────────────────
+  # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
-  @doc "Starts the options registry."
-  @spec start_link(keyword()) :: Agent.on_start()
+  @doc "Starts the options registry and creates the backing ETS table."
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    Agent.start_link(fn -> %{global: @defaults, filetype: %{}} end, name: name)
+    GenServer.start_link(__MODULE__, name, name: name)
   end
+
+  @impl GenServer
+  def init(name) do
+    table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
+    seed_defaults(table)
+    {:ok, %{table: table}}
+  end
+
+  # ── Client API (reads go directly to ETS) ───────────────────────────────────
 
   @doc """
   Sets a global option value after type validation.
@@ -214,10 +227,7 @@ defmodule Minga.Config.Options do
   def set(server, name, value) when is_atom(name) do
     case validate(name, value) do
       :ok ->
-        Agent.update(server, fn %{global: g} = state ->
-          %{state | global: Map.put(g, name, value)}
-        end)
-
+        :ets.insert(table_name(server), {name, value})
         {:ok, value}
 
       {:error, _} = err ->
@@ -233,9 +243,12 @@ defmodule Minga.Config.Options do
   def get(name) when is_atom(name), do: get(__MODULE__, name)
 
   def get(server, name) when is_atom(name) do
-    Agent.get(server, fn %{global: g} ->
-      Map.get(g, name, Map.get(@defaults, name))
-    end)
+    table = table_name(server)
+
+    case :ets.lookup(table, name) do
+      [{^name, value}] -> value
+      [] -> Map.get(@defaults, name)
+    end
   end
 
   @doc """
@@ -252,14 +265,12 @@ defmodule Minga.Config.Options do
   def get_for_filetype(server, name, nil), do: get(server, name)
 
   def get_for_filetype(server, name, filetype) when is_atom(name) and is_atom(filetype) do
-    Agent.get(server, fn %{global: g, filetype: ft} ->
-      ft_opts = Map.get(ft, filetype, %{})
+    table = table_name(server)
 
-      case Map.fetch(ft_opts, name) do
-        {:ok, value} -> value
-        :error -> Map.get(g, name, Map.get(@defaults, name))
-      end
-    end)
+    case :ets.lookup(table, {:filetype, filetype, name}) do
+      [{_key, value}] -> value
+      [] -> get(server, name)
+    end
   end
 
   @doc """
@@ -278,11 +289,7 @@ defmodule Minga.Config.Options do
       when is_atom(filetype) and is_atom(name) do
     case validate(name, value) do
       :ok ->
-        Agent.update(server, fn %{filetype: ft} = state ->
-          ft_opts = Map.get(ft, filetype, %{})
-          %{state | filetype: Map.put(ft, filetype, Map.put(ft_opts, name, value))}
-        end)
-
+        :ets.insert(table_name(server), {{:filetype, filetype, name}, value})
         {:ok, value}
 
       {:error, _} = err ->
@@ -296,7 +303,19 @@ defmodule Minga.Config.Options do
   @spec all() :: %{option_name() => term()}
   @spec all(GenServer.server()) :: %{option_name() => term()}
   def all, do: all(__MODULE__)
-  def all(server), do: Agent.get(server, & &1.global)
+
+  def all(server) do
+    table = table_name(server)
+
+    :ets.foldl(
+      fn
+        {name, value}, acc when is_atom(name) -> Map.put(acc, name, value)
+        _filetype_entry, acc -> acc
+      end,
+      %{},
+      table
+    )
+  end
 
   @doc """
   Resets all options (global and per-filetype) to defaults.
@@ -304,7 +323,13 @@ defmodule Minga.Config.Options do
   @spec reset() :: :ok
   @spec reset(GenServer.server()) :: :ok
   def reset, do: reset(__MODULE__)
-  def reset(server), do: Agent.update(server, fn _ -> %{global: @defaults, filetype: %{}} end)
+
+  def reset(server) do
+    table = table_name(server)
+    :ets.delete_all_objects(table)
+    seed_defaults(table)
+    :ok
+  end
 
   @doc """
   Returns the default value for an option.
@@ -411,5 +436,22 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:theme_atom, _name, value) do
     {:error, "theme must be a theme name atom, got: #{inspect(value)}"}
+  end
+
+  # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec table_name(GenServer.server()) :: atom()
+  defp table_name(name) when is_atom(name), do: :"#{name}_ets"
+  defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
+
+  @spec seed_defaults(:ets.table()) :: true
+  defp seed_defaults(table) do
+    entries = Enum.map(@defaults, fn {name, value} -> {name, value} end)
+    :ets.insert(table, entries)
+  end
+
+  @impl GenServer
+  def handle_call(:table_name, _from, %{table: table} = state) do
+    {:reply, table, state}
   end
 end
