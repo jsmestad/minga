@@ -79,7 +79,10 @@ defmodule Minga.Theme.Catppuccin do
         border_fg: p.overlay1,
         sel_fg: p.base,
         sel_bg: p.blue,
-        title_fg: p.blue
+        title_fg: p.blue,
+        key_fg: p.teal,
+        separator_fg: p.overlay0,
+        group_fg: p.blue
       },
       tree: %Minga.Theme.Tree{
         bg: p.mantle,

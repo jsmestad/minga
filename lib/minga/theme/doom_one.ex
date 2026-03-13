@@ -97,7 +97,10 @@ defmodule Minga.Theme.DoomOne do
         border_fg: @base6,
         sel_fg: @bg,
         sel_bg: @blue,
-        title_fg: @blue
+        title_fg: @blue,
+        key_fg: @cyan,
+        separator_fg: @base5,
+        group_fg: @blue
       },
       tree: %Minga.Theme.Tree{
         bg: @base3,

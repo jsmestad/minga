@@ -16,14 +16,14 @@
 11│   ~
 12│   ~
 13│   ~
-14│────────────────────────────────────────────────────────────────────────────────
-15│  d       Close window
-16│  h       Window left
-17│  j       Window down
-18│  k       Window up
-19│  l       Window right
-20│  s       Horizontal split
-21│  v       Vertical split
+14│   ~
+15│   ~
+16│   ~
+17│╭─────────────────────────────────── SPC w ────────────────────────────────────╮
+18││d : Close window         k : Window up            v : Vertical split          │
+19││h : Window left          l : Window right                                     │
+20││j : Window down          s : Horizontal split                                 │
+21│╰──────────────────────────────────────────────────────────────────────────────╯
 22│ NORMAL  [scratch]                                               Text  1:1  Top
 23│
 ────────────────────────────────────────────────────────────────────────────────

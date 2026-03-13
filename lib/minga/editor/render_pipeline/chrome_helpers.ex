@@ -114,72 +114,231 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec render_whichkey(state(), Viewport.t(), :bottom | :float) :: [DisplayList.draw()]
   def render_whichkey(state, viewport, layout \\ Options.get(:whichkey_layout))
 
-  def render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport, layout)
+  def render_whichkey(%{whichkey: %{show: true, node: node} = wk, theme: theme}, viewport, layout)
       when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
-    lines = WhichKey.render_popup(bindings)
+    prefix_title = whichkey_prefix_title(wk)
+    page = Map.get(wk, :page, 0)
 
     case layout do
-      :float -> render_whichkey_float(lines, theme, viewport)
-      _bottom -> render_whichkey_bottom(lines, theme, viewport)
+      :float -> render_whichkey_float(bindings, prefix_title, page, theme, viewport)
+      _bottom -> render_whichkey_bottom(bindings, prefix_title, page, theme, viewport)
     end
   end
 
   def render_whichkey(_state, _viewport, _layout), do: []
 
-  @spec render_whichkey_bottom([String.t()], Theme.t(), Viewport.t()) :: [DisplayList.draw()]
-  defp render_whichkey_bottom(lines, theme, viewport) do
-    popup_row = max(0, viewport.rows - 3 - length(lines))
-
-    border =
-      DisplayList.draw(popup_row, 0, String.duplicate("─", viewport.cols),
-        fg: theme.popup.border_fg
-      )
-
-    content_draws =
-      lines
-      |> Enum.with_index(popup_row + 1)
-      |> Enum.map(fn {line_text, row} ->
-        padded = String.pad_trailing(line_text, viewport.cols)
-        DisplayList.draw(row, 0, padded, fg: theme.popup.fg, bg: theme.popup.bg)
-      end)
-
-    [border | content_draws]
+  # Builds the prefix path title (e.g. "SPC f") from accumulated keys.
+  @spec whichkey_prefix_title(map()) :: String.t()
+  defp whichkey_prefix_title(%{prefix_keys: keys}) when is_list(keys) and keys != [] do
+    Enum.join(keys, " ")
   end
 
-  @spec render_whichkey_float([String.t()], Theme.t(), Viewport.t()) :: [DisplayList.draw()]
-  defp render_whichkey_float(lines, theme, viewport) do
-    popup_theme = %{
-      fg: theme.popup.fg,
-      bg: theme.popup.bg,
-      border_fg: theme.popup.border_fg,
-      title_fg: Map.get(theme.popup, :title_fg, theme.popup.border_fg)
-    }
+  defp whichkey_prefix_title(_), do: "Which Key"
 
-    # Size the float to fit the content with some padding.
-    # Width: widest line + border + padding, capped at 70%.
-    max_line_w = lines |> Enum.map(&String.length/1) |> Enum.max(fn -> 20 end)
-    content_w = min(max_line_w + 4, div(viewport.cols * 70, 100))
-    content_h = min(length(lines), div(viewport.rows * 60, 100))
+  # Computes multi-column layout for which-key bindings.
+  # Returns {column_count, rows_per_page, grid} where grid is a list of rows,
+  # each row is a list of bindings (or nil for empty cells).
+  @spec whichkey_column_layout([WhichKey.Binding.t()], integer()) ::
+          {pos_integer(), [[WhichKey.Binding.t() | nil]]}
+  defp whichkey_column_layout(bindings, available_width) do
+    # Compute the widest entry to determine column width.
+    # Entry width: 2 (icon+space or padding) + key_width + 3 (" : ") + desc_width
+    entry_width = fn %WhichKey.Binding{key: key, description: desc, icon: icon} ->
+      icon_w = if icon, do: 2, else: 0
+      icon_w + String.length(key) + 3 + String.length(desc)
+    end
 
-    content_draws =
-      lines
-      |> Enum.with_index()
-      |> Enum.map(fn {line_text, row} ->
-        DisplayList.draw(row, 0, line_text, fg: theme.popup.fg, bg: theme.popup.bg)
-      end)
+    max_entry_w = bindings |> Enum.map(entry_width) |> Enum.max(fn -> 20 end)
+    col_width = max_entry_w + 2
+    num_cols = max(div(available_width, col_width), 1) |> min(3)
+
+    num_rows = ceil(length(bindings) / num_cols)
+
+    # Fill columns left-to-right, then top-to-bottom (Doom order).
+    grid =
+      for row <- 0..(num_rows - 1) do
+        for col <- 0..(num_cols - 1) do
+          idx = col * num_rows + row
+          Enum.at(bindings, idx)
+        end
+      end
+
+    {num_cols, grid}
+  end
+
+  # Renders a single binding entry as a list of styled draws at the given position.
+  @spec render_whichkey_entry(
+          WhichKey.Binding.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Theme.Popup.t()
+        ) ::
+          [DisplayList.draw()]
+  defp render_whichkey_entry(%WhichKey.Binding{} = binding, row, col, popup) do
+    key_fg = Map.get(popup, :key_fg) || popup.fg
+    sep_fg = Map.get(popup, :separator_fg) || popup.fg
+    desc_fg = whichkey_desc_fg(binding.kind, popup)
+    bg = popup.bg
+
+    draws = []
+    cur_col = col
+
+    # Icon (if present)
+    {draws, cur_col} =
+      if binding.icon do
+        icon_draw = DisplayList.draw(row, cur_col, binding.icon, fg: desc_fg, bg: bg)
+        {[icon_draw | draws], cur_col + 2}
+      else
+        {draws, cur_col}
+      end
+
+    # Key
+    key_draw = DisplayList.draw(row, cur_col, binding.key, fg: key_fg, bg: bg)
+    cur_col = cur_col + String.length(binding.key)
+
+    # Separator
+    sep_draw = DisplayList.draw(row, cur_col, " : ", fg: sep_fg, bg: bg)
+    cur_col = cur_col + 3
+
+    # Description
+    desc_draw = DisplayList.draw(row, cur_col, binding.description, fg: desc_fg, bg: bg)
+
+    Enum.reverse([desc_draw, sep_draw, key_draw | draws])
+  end
+
+  @spec whichkey_desc_fg(:command | :group, Theme.Popup.t()) :: Theme.color()
+  defp whichkey_desc_fg(:group, popup), do: Map.get(popup, :group_fg) || popup.fg
+  defp whichkey_desc_fg(:command, popup), do: popup.fg
+
+  @spec render_whichkey_bottom(
+          [WhichKey.Binding.t()],
+          String.t(),
+          non_neg_integer(),
+          Theme.t(),
+          Viewport.t()
+        ) :: [DisplayList.draw()]
+  defp render_whichkey_bottom(bindings, prefix_title, page, theme, viewport) do
+    popup = theme.popup
+    # Available interior width (border + padding on each side)
+    interior_w = viewport.cols - 4
+
+    {_num_cols, grid} = whichkey_column_layout(bindings, interior_w)
+
+    col_width =
+      if interior_w > 0,
+        do: max(div(interior_w, max(length(List.first(grid, [])), 1)), 20),
+        else: 20
+
+    total_rows = length(grid)
+    # Max rows that fit: viewport height minus modeline(1) + minibuffer(1) + border(2) + title row
+    max_content_rows = max(viewport.rows - 5, 3)
+    total_pages = max(ceil(total_rows / max_content_rows), 1)
+    safe_page = min(page, total_pages - 1)
+    page_start = safe_page * max_content_rows
+    visible_grid = Enum.slice(grid, page_start, max_content_rows)
+    visible_rows = length(visible_grid)
+
+    # FloatingWindow dimensions: content + border
+    float_h = visible_rows + 2
+    float_w = viewport.cols
+
+    # Position at bottom, above modeline + minibuffer
+    float_row = max(viewport.rows - 2 - float_h, 0)
+
+    footer =
+      if total_pages > 1, do: "#{safe_page + 1} of #{total_pages}", else: nil
+
+    content_draws = whichkey_grid_draws(visible_grid, col_width, popup)
+    popup_theme = whichkey_popup_theme(popup)
 
     spec = %FloatingWindow.Spec{
-      title: "Which Key",
+      title: prefix_title,
+      footer: footer,
       content: content_draws,
-      width: {:cols, content_w + 2},
-      height: {:rows, content_h + 2},
+      width: {:cols, float_w},
+      height: {:rows, float_h},
+      position:
+        {float_row - div(viewport.rows - float_h, 2), 0 - div(viewport.cols - float_w, 2)},
       border: :rounded,
       theme: popup_theme,
       viewport: {viewport.rows, viewport.cols}
     }
 
     FloatingWindow.render(spec)
+  end
+
+  @spec render_whichkey_float(
+          [WhichKey.Binding.t()],
+          String.t(),
+          non_neg_integer(),
+          Theme.t(),
+          Viewport.t()
+        ) :: [DisplayList.draw()]
+  defp render_whichkey_float(bindings, prefix_title, page, theme, viewport) do
+    popup = theme.popup
+    popup_theme = whichkey_popup_theme(popup)
+
+    # Available interior width (70% of terminal minus border/padding)
+    float_w = min(div(viewport.cols * 70, 100), viewport.cols)
+    interior_w = float_w - 4
+
+    {_num_cols, grid} = whichkey_column_layout(bindings, interior_w)
+
+    col_width =
+      if interior_w > 0,
+        do: max(div(interior_w, max(length(List.first(grid, [])), 1)), 20),
+        else: 20
+
+    total_rows = length(grid)
+    max_content_rows = max(div(viewport.rows * 60, 100), 3)
+    total_pages = max(ceil(total_rows / max_content_rows), 1)
+    safe_page = min(page, total_pages - 1)
+    page_start = safe_page * max_content_rows
+    visible_grid = Enum.slice(grid, page_start, max_content_rows)
+    visible_rows = length(visible_grid)
+
+    float_h = visible_rows + 2
+
+    footer =
+      if total_pages > 1, do: "#{safe_page + 1} of #{total_pages}", else: nil
+
+    content_draws = whichkey_grid_draws(visible_grid, col_width, popup)
+
+    spec = %FloatingWindow.Spec{
+      title: prefix_title,
+      footer: footer,
+      content: content_draws,
+      width: {:cols, float_w},
+      height: {:rows, float_h},
+      border: :rounded,
+      theme: popup_theme,
+      viewport: {viewport.rows, viewport.cols}
+    }
+
+    FloatingWindow.render(spec)
+  end
+
+  # Converts a paginated grid of bindings into a flat list of styled draws.
+  @spec whichkey_grid_draws([[WhichKey.Binding.t() | nil]], non_neg_integer(), Theme.Popup.t()) ::
+          [DisplayList.draw()]
+  defp whichkey_grid_draws(visible_grid, col_width, popup) do
+    Enum.flat_map(Enum.with_index(visible_grid), fn {row_entries, row_idx} ->
+      Enum.flat_map(Enum.with_index(row_entries), fn
+        {nil, _col_idx} -> []
+        {entry, col_idx} -> render_whichkey_entry(entry, row_idx, col_idx * col_width, popup)
+      end)
+    end)
+  end
+
+  @spec whichkey_popup_theme(Theme.Popup.t()) :: map()
+  defp whichkey_popup_theme(popup) do
+    %{
+      fg: popup.fg,
+      bg: popup.bg,
+      border_fg: popup.border_fg,
+      title_fg: Map.get(popup, :title_fg, popup.border_fg)
+    }
   end
 
   # ── Agent panel ────────────────────────────────────────────────────────────
