@@ -16,6 +16,7 @@ defmodule Minga.Editor.PickerUI do
 
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.FloatingWindow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
@@ -84,6 +85,8 @@ defmodule Minga.Editor.PickerUI do
             state
           end
 
+        layout = Minga.Picker.Source.layout(source_module)
+
         %{
           new_state
           | picker_ui: %PickerState{
@@ -91,7 +94,8 @@ defmodule Minga.Editor.PickerUI do
               source: source_module,
               restore: state.buffers.active_index,
               restore_theme: state.theme,
-              context: context
+              context: context,
+              layout: layout
             }
         }
     end
@@ -281,6 +285,10 @@ defmodule Minga.Editor.PickerUI do
           {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
   def render(%RenderInput{picker_state: %{picker: nil}}), do: {[], nil}
 
+  def render(%RenderInput{picker_state: %{layout: :centered}} = input) do
+    render_centered(input)
+  end
+
   def render(%RenderInput{
         picker_state: %{picker: picker, action_menu: action_menu},
         theme_picker: pc,
@@ -411,6 +419,163 @@ defmodule Minga.Editor.PickerUI do
   def close(state) do
     %{state | picker_ui: %PickerState{}}
   end
+
+  # ── Centered (floating) layout ───────────────────────────────────────────────
+
+  @spec render_centered(RenderInput.t()) ::
+          {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
+  defp render_centered(%RenderInput{
+         picker_state: %{picker: picker},
+         theme_picker: pc,
+         viewport: viewport
+       }) do
+    {visible, selected_offset} = Picker.visible_items(picker)
+
+    # Compute float window dimensions
+    float_width = {:percent, 60}
+    float_height = {:percent, 70}
+
+    popup_theme = %{
+      fg: pc.text_fg,
+      bg: pc.bg,
+      border_fg: pc.dim_fg,
+      title_fg: pc.highlight_fg
+    }
+
+    spec = %FloatingWindow.Spec{
+      title: picker.title,
+      footer: "#{Picker.count(picker)}/#{Picker.total(picker)}",
+      width: float_width,
+      height: float_height,
+      border: :rounded,
+      theme: popup_theme,
+      viewport: {viewport.rows, viewport.cols}
+    }
+
+    {interior_h, interior_w} = FloatingWindow.interior_size(spec)
+
+    # Reserve 1 row for the prompt at the bottom of the interior
+    items_h = max(interior_h - 1, 0)
+
+    # Build content draws (relative to interior origin)
+    item_draws =
+      visible
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{_id, label, desc}, idx} ->
+        if idx >= items_h,
+          do: [],
+          else:
+            render_centered_item(
+              idx,
+              label,
+              desc,
+              idx == selected_offset,
+              picker.query,
+              interior_w,
+              pc
+            )
+      end)
+
+    # Prompt at the bottom of the interior
+    prompt_text = "> " <> picker.query
+
+    prompt_draw =
+      DisplayList.draw(interior_h - 1, 0, String.pad_trailing(prompt_text, interior_w),
+        fg: pc.highlight_fg,
+        bg: pc.prompt_bg
+      )
+
+    content = item_draws ++ [prompt_draw]
+    spec = %{spec | content: content}
+
+    draws = FloatingWindow.render(spec)
+
+    # Compute absolute cursor position inside the floating window
+    {vp_rows, vp_cols} = {viewport.rows, viewport.cols}
+    box_w = resolve_percent(60, vp_cols)
+    box_h = resolve_percent(70, vp_rows)
+    box_row = max(div(vp_rows - box_h, 2), 0)
+    box_col = max(div(vp_cols - box_w, 2), 0)
+    # Interior starts at box + 1 (border inset)
+    cursor_row = box_row + 1 + (interior_h - 1)
+    cursor_col = box_col + 1 + Unicode.display_width(prompt_text)
+    cursor_pos = {cursor_row, cursor_col}
+
+    {draws, cursor_pos}
+  end
+
+  @spec render_centered_item(
+          non_neg_integer(),
+          String.t(),
+          String.t() | nil,
+          boolean(),
+          String.t(),
+          pos_integer(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_centered_item(row, label, desc, selected, query, width, pc) do
+    bg = if selected, do: pc.sel_bg, else: pc.bg
+    fg = if selected, do: pc.text_fg, else: pc.text_fg
+
+    desc_text =
+      case desc do
+        nil -> ""
+        "" -> ""
+        d -> " " <> d
+      end
+
+    # Pad the entire row
+    full_text = label <> desc_text
+    padded = String.pad_trailing(full_text, width)
+
+    # Base draw (full row background)
+    base = [DisplayList.draw(row, 0, padded, fg: pc.dim_fg, bg: bg)]
+
+    # Label (brighter text)
+    label_draw = [DisplayList.draw(row, 0, label, fg: fg, bg: bg)]
+
+    # Highlight matching characters in the label
+    match_draws = highlight_matches(row, label, query, pc.match_fg, bg)
+
+    base ++ label_draw ++ match_draws
+  end
+
+  @spec highlight_matches(non_neg_integer(), String.t(), String.t(), term(), term()) :: [
+          DisplayList.draw()
+        ]
+  defp highlight_matches(row, label, query, match_fg, bg) do
+    query_chars = String.downcase(query) |> String.graphemes()
+    label_chars = String.graphemes(label)
+    label_lower = String.downcase(label) |> String.graphemes()
+
+    do_highlight_matches(row, label_chars, label_lower, query_chars, 0, match_fg, bg, [])
+  end
+
+  @spec do_highlight_matches(
+          non_neg_integer(),
+          [String.t()],
+          [String.t()],
+          [String.t()],
+          non_neg_integer(),
+          term(),
+          term(),
+          [DisplayList.draw()]
+        ) :: [DisplayList.draw()]
+  defp do_highlight_matches(_row, _label, _lower, [], _col, _fg, _bg, acc), do: Enum.reverse(acc)
+  defp do_highlight_matches(_row, [], _lower, _query, _col, _fg, _bg, acc), do: Enum.reverse(acc)
+
+  defp do_highlight_matches(row, [lc | lt], [ll | llt], [qc | qt] = query, col, fg, bg, acc) do
+    if ll == qc do
+      draw = DisplayList.draw(row, col, lc, fg: fg, bg: bg, bold: true)
+
+      do_highlight_matches(row, lt, llt, qt, col + Unicode.display_width(lc), fg, bg, [draw | acc])
+    else
+      do_highlight_matches(row, lt, llt, query, col + Unicode.display_width(lc), fg, bg, acc)
+    end
+  end
+
+  @spec resolve_percent(pos_integer(), pos_integer()) :: pos_integer()
+  defp resolve_percent(pct, total), do: max(div(total * pct, 100), 1)
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

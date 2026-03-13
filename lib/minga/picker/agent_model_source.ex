@@ -25,6 +25,10 @@ defmodule Minga.Picker.AgentModelSource do
   def preview?, do: false
 
   @impl true
+  @spec layout() :: Minga.Picker.Source.layout()
+  def layout, do: :centered
+
+  @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
   def candidates(state) do
     session = AgentAccess.session(state)

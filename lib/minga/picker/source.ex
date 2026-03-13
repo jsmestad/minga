@@ -68,7 +68,17 @@ defmodule Minga.Picker.Source do
   """
   @callback on_action(atom(), Picker.item(), state :: term()) :: term()
 
-  @optional_callbacks [preview?: 0, actions: 1, on_action: 3]
+  @typedoc "Picker layout: bottom-anchored (default) or centered floating window."
+  @type layout :: :bottom | :centered
+
+  @doc """
+  Returns the preferred layout for this picker source.
+  Defaults to `:bottom` (Emacs-style minibuffer overlay).
+  `:centered` renders inside a FloatingWindow overlay.
+  """
+  @callback layout() :: layout()
+
+  @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0]
 
   @doc """
   Returns whether a source module supports preview.
@@ -100,6 +110,18 @@ defmodule Minga.Picker.Source do
       module.actions(item)
     else
       []
+    end
+  end
+
+  @doc """
+  Returns the preferred layout for a source, defaulting to `:bottom`.
+  """
+  @spec layout(module()) :: layout()
+  def layout(module) do
+    if function_exported?(module, :layout, 0) do
+      module.layout()
+    else
+      :bottom
     end
   end
 end
