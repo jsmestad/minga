@@ -46,4 +46,14 @@ defmodule Minga.Editor.State.Windows do
       :error -> win
     end
   end
+
+  @doc """
+  Returns all popup windows as a list of `{window_id, window}` tuples.
+
+  Popup windows are those with a non-nil `popup_meta` field.
+  """
+  @spec popup_windows(t()) :: [{Window.id(), Window.t()}]
+  def popup_windows(%__MODULE__{map: windows}) do
+    Enum.filter(windows, fn {_id, window} -> Window.popup?(window) end)
+  end
 end

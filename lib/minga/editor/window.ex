@@ -33,6 +33,7 @@ defmodule Minga.Editor.Window do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
+  alias Minga.Popup.Active, as: PopupActive
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
@@ -54,6 +55,7 @@ defmodule Minga.Editor.Window do
           buffer: pid(),
           viewport: Viewport.t(),
           cursor: Document.position(),
+          popup_meta: PopupActive.t() | nil,
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
           cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
           cached_content: %{optional(non_neg_integer()) => [DisplayList.draw()]},
@@ -72,6 +74,7 @@ defmodule Minga.Editor.Window do
     :buffer,
     :viewport,
     cursor: {0, 0},
+    popup_meta: nil,
     dirty_lines: %{},
     cached_gutter: %{},
     cached_content: %{},
@@ -146,6 +149,13 @@ defmodule Minga.Editor.Window do
     |> invalidate()
     |> Map.put(:viewport, Viewport.new(rows, cols))
   end
+
+  # ── Popup queries ──────────────────────────────────────────────────────────
+
+  @doc "Returns true if this window is a popup (has popup metadata attached)."
+  @spec popup?(t()) :: boolean()
+  def popup?(%__MODULE__{popup_meta: nil}), do: false
+  def popup?(%__MODULE__{popup_meta: %PopupActive{}}), do: true
 
   # ── Dirty-line tracking ───────────────────────────────────────────────────
 
