@@ -8,7 +8,7 @@ This document covers how to cut a release and what infrastructure supports it.
 
 The release workflow requires one secret configured in the repo's Settings > Secrets and variables > Actions:
 
-- **`HOMEBREW_TAP_TOKEN`** — A GitHub Personal Access Token (classic) with `repo` scope, scoped to the `jsmestad/homebrew-minga` repository. The release workflow uses this to push formula updates to the Homebrew tap after a stable release is published.
+- **`HOMEBREW_TAP_TOKEN`**: A GitHub Personal Access Token (classic) with `repo` scope, scoped to the `jsmestad/homebrew-minga` repository. The release workflow uses this to push formula updates to the Homebrew tap after a stable release is published.
 
 The built-in `GITHUB_TOKEN` handles everything else (creating the GitHub Release, updating `CHANGELOG.md`).
 

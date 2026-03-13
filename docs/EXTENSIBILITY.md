@@ -75,12 +75,12 @@ Emacs's advice system (`advice-add`, `define-advice`) lets you wrap any function
 
 **Elixir:**
 ```elixir
-# :before — transform state before the command
+# :before - transform state before the command
 advise :before, :save, fn state ->
   strip_trailing_whitespace(state)
 end
 
-# :around — conditionally skip a command (replaces Emacs :before-while)
+# :around - conditionally skip a command (replaces Emacs :before-while)
 advise :around, :format_buffer, fn execute, state ->
   errors =
     state.buffers.active
@@ -90,7 +90,7 @@ advise :around, :format_buffer, fn execute, state ->
   if errors == 0, do: execute.(state), else: state
 end
 
-# :override — replace a command entirely
+# :override - replace a command entirely
 advise :override, :save, fn state ->
   state = Minga.API.save()
   case Minga.Buffer.Server.file_path(state.buffers.active) do

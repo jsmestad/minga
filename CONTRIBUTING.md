@@ -1,22 +1,45 @@
 # Contributing to Minga
 
-Thanks for your interest! Minga is in early development and contributions are welcome — whether that's bug reports, feature ideas, or code.
+Thanks for your interest! Minga is in early development and contributions are welcome, whether that's bug reports, feature ideas, or code.
 
-## Getting Started
+## Build from source
+
+Minga is two programs: an Elixir app (editor logic) and a Zig binary (terminal rendering). You need both toolchains plus Erlang. A version manager makes this painless.
+
+### Install the toolchain
+
+Using [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/):
 
 ```bash
-# Prerequisites: Elixir 1.19+, OTP 28+, Zig 0.15+ (see .tool-versions)
-git clone https://github.com/justinsmestad/minga.git
+asdf plugin add erlang
+asdf plugin add elixir
+asdf plugin add zig
+```
+
+### Clone and build
+
+```bash
+git clone https://github.com/jsmestad/minga.git
 cd minga
+asdf install          # Installs pinned Erlang, Elixir, Zig from .tool-versions
 mix deps.get
-mix compile
+mix compile           # Builds both Elixir and Zig
+```
+
+The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are incremental and fast.
+
+### Run it
+
+```bash
+bin/minga              # Empty buffer
+bin/minga path/to/file # Open a file
 ```
 
 ## Running Tests
 
 ```bash
-mix test                       # 1,393 Elixir tests
-cd zig && zig build test       # 105 Zig tests
+mix test                       # Elixir tests
+cd zig && zig build test       # Zig renderer tests
 ```
 
 ## Before Committing
@@ -31,11 +54,11 @@ mix dialyzer                      # Typespec consistency
 
 ## Project Layout
 
-See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and conventions. The highlights:
+See `AGENTS.md` (in the repo root) for the full project structure, coding standards, and conventions. The highlights:
 
-- **`@spec` on every public function** — Elixir 1.19's type system is strict
-- **Pattern matching over `if`/`cond`** — multi-clause functions preferred
-- **Test files mirror `lib/`** — `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
+- **`@spec` on every public function**: Elixir 1.19's type system is strict
+- **Pattern matching over `if`/`cond`**: multi-clause functions preferred
+- **Test files mirror `lib/`**: `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
 - **Property-based tests** with StreamData for data structures
 
 ## Key Documentation
@@ -43,10 +66,10 @@ See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and
 | Doc | What it covers |
 |-----|---------------|
 | [README.md](README.md) | Project overview and quick start |
-| [ROADMAP.md](ROADMAP.md) | Feature grid — what's done, what's planned |
+| [ROADMAP.md](ROADMAP.md) | Feature grid: what's done, what's planned |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Optimization roadmap with BEAM-specific techniques |
-| [AGENTS.md](AGENTS.md) | Coding standards, project structure, how to add features |
+| `AGENTS.md` | Coding standards, project structure, how to add features |
 
 ## How to Add Things
 
@@ -87,6 +110,6 @@ Examples:
 ## Updating Documentation
 
 When you finish a feature or change the architecture, update:
-- **`ROADMAP.md`** — flip status (📋 → 🚧 → ✅), add new rows as needed
-- **`docs/ARCHITECTURE.md`** — if you add process types, opcodes, or change supervision
-- **`docs/PERFORMANCE.md`** — mark optimizations as done
+- **`ROADMAP.md`**: flip status (📋 → 🚧 → ✅), add new rows as needed
+- **`docs/ARCHITECTURE.md`**: if you add process types, opcodes, or change supervision
+- **`docs/PERFORMANCE.md`**: mark optimizations as done

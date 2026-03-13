@@ -10,13 +10,13 @@ Minga's two-process architecture (BEAM for logic, Zig for terminal output) remai
 
 The rendering pipeline lives in `Minga.Editor.RenderPipeline` and runs seven named stages per frame:
 
-1. **Invalidation** — detects what changed since the last frame
-2. **Layout** — computes screen rectangles via `Layout.put/1`
-3. **Scroll** — per-window viewport adjustment + buffer data fetch
-4. **Content** — builds display list draws for dirty lines only
-5. **Chrome** — modeline, minibuffer, overlays, separators, file tree, agent panel
-6. **Compose** — merges content + chrome into a `Frame` struct
-7. **Emit** — converts frame to protocol commands and sends to the Zig port
+1. **Invalidation**: detects what changed since the last frame
+2. **Layout**: computes screen rectangles via `Layout.put/1`
+3. **Scroll**: per-window viewport adjustment + buffer data fetch
+4. **Content**: builds display list draws for dirty lines only
+5. **Chrome**: modeline, minibuffer, overlays, separators, file tree, agent panel
+6. **Compose**: merges content + chrome into a `Frame` struct
+7. **Emit**: converts frame to protocol commands and sends to the Zig port
 
 Each stage is a public function with typed inputs/outputs and per-stage timing via `Logger.debug`.
 
@@ -82,12 +82,12 @@ Stage result types are defined as module structs: `Invalidation`, `WindowScroll`
 
 **Implementation:** `Minga.Editor.DisplayList` defines a styled text run IR between editor state and protocol encoding:
 
-- `draw()` — `{row, col, text, style}` tuples produced by all renderer modules
-- `text_run()` — column + text + style (no row)
-- `display_line()` — list of text runs for one screen row
-- `render_layer()` — rows mapped to display lines
-- `WindowFrame` — per-window display data (gutter, lines, tildes, modeline, cursor)
-- `Frame` — complete frame (windows + chrome + overlays + regions + cursor)
+- `draw()`: `{row, col, text, style}` tuples produced by all renderer modules
+- `text_run()`: column + text + style (no row)
+- `display_line()`: list of text runs for one screen row
+- `render_layer()`: rows mapped to display lines
+- `WindowFrame`: per-window display data (gutter, lines, tildes, modeline, cursor)
+- `Frame`: complete frame (windows + chrome + overlays + regions + cursor)
 
 `DisplayList.to_commands/1` converts a `Frame` to protocol command binaries for the TUI. Other frontends (GUI, headless) can consume the `Frame` directly without going through the binary protocol.
 
@@ -107,17 +107,17 @@ Stage result types are defined as module structs: `Invalidation`, `WindowScroll`
 
 **Implementation:** UI elements are separate renderer modules that receive only the data they need:
 
-- `Renderer.BufferLine` — per-line content rendering
-- `Renderer.Gutter` — line numbers and sign column
-- `Renderer.Minibuffer` — command/search input
-- `Renderer.SearchHighlight` — search match highlighting
-- `Renderer.Regions` — region definitions from layout
-- `Editor.Modeline` — mode, file, cursor info
-- `Editor.TreeRenderer` — file tree sidebar
-- `Editor.PickerUI` — fuzzy finder overlay
-- `Editor.CompletionUI` — completion menu
-- `Agent.ChatRenderer` — agent panel sidebar
-- `Agent.View.Renderer` — full-screen agent view
+- `Renderer.BufferLine`: per-line content rendering
+- `Renderer.Gutter`: line numbers and sign column
+- `Renderer.Minibuffer`: command/search input
+- `Renderer.SearchHighlight`: search match highlighting
+- `Renderer.Regions`: region definitions from layout
+- `Editor.Modeline`: mode, file, cursor info
+- `Editor.TreeRenderer`: file tree sidebar
+- `Editor.PickerUI`: fuzzy finder overlay
+- `Editor.CompletionUI`: completion menu
+- `Agent.ChatRenderer`: agent panel sidebar
+- `Agent.View.Renderer`: full-screen agent view
 
 Each module produces `[DisplayList.draw()]` lists. The pipeline's Chrome stage collects them; the Compose stage merges them into the final `Frame`.
 
@@ -137,10 +137,10 @@ With all gaps closed, the rendering pipeline has these properties:
 
 The Zig side (`zig/src/renderer.zig`) is intentionally thin: ~430 lines that translate protocol commands into libvaxis cell writes. It handles:
 
-- `draw_text` — grapheme iteration, display width calculation, cell writes with region clipping
-- `set_cursor` / `set_cursor_shape` — cursor positioning
-- `define_region` / `set_active_region` / `clear_region` — region management
-- `batch_end` — triggers libvaxis frame diff and terminal flush
+- `draw_text`: grapheme iteration, display width calculation, cell writes with region clipping
+- `set_cursor` / `set_cursor_shape`: cursor positioning
+- `define_region` / `set_active_region` / `clear_region`: region management
+- `batch_end`: triggers libvaxis frame diff and terminal flush
 
 libvaxis provides cell-level diffing (only changed cells are written to the terminal), grapheme cluster handling, and terminal capability detection. The BEAM side's dirty-line tracking reduces how much data crosses the Port boundary; libvaxis's cell diffing reduces how much data hits the terminal. Both layers contribute to rendering efficiency.
 
