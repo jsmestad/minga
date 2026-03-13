@@ -6,28 +6,35 @@ defmodule Minga.Editor.MessagesBufferTest do
   use Minga.Test.EditorCase, async: true
 
   describe "*Messages* buffer" do
-    test "SPC b m switches to messages buffer" do
+    test "SPC b m opens messages buffer in a popup split" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bm")
 
-      ml = modeline(ctx)
-      assert String.contains?(ml, "*Messages*")
+      # The messages buffer opens as a popup split. Its modeline should be
+      # visible on screen (not necessarily the last modeline row, since
+      # the popup occupies the bottom portion).
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "*Messages*")
     end
 
     test "messages buffer contains editor startup log" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bm")
 
-      row0 = screen_row(ctx, 1)
-      assert String.contains?(row0, "Editor started")
+      # The messages buffer content appears in the popup split area.
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "Editor started")
     end
 
     test "messages buffer shows [RO] indicator" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bm")
 
-      ml = modeline(ctx)
-      assert String.contains?(ml, "[RO]")
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "[RO]")
     end
 
     test "entering insert mode on messages buffer is blocked" do
@@ -36,8 +43,9 @@ defmodule Minga.Editor.MessagesBufferTest do
       send_keys(ctx, "i")
 
       assert editor_mode(ctx) == :normal
-      mb = minibuffer(ctx)
-      assert String.contains?(mb, "read-only")
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "read-only")
     end
 
     test "messages buffer is hidden from buffer picker" do

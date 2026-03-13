@@ -49,9 +49,10 @@ defmodule Minga.Editor.KeyDispatch do
     state = MacroReplay.maybe_record_key(state, key, commands)
 
     # Guard: block insert/replace transitions on read-only buffers.
+    # Check the active window's buffer (which may differ from state.buffers.active
+    # when a popup window is focused).
     {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and state.buffers.active != nil and
-           BufferServer.read_only?(state.buffers.active) do
+      if new_mode in [:insert, :replace] and active_buffer_read_only?(state) do
         {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
       else
         {new_mode, commands, new_mode_state, state}
@@ -115,6 +116,25 @@ defmodule Minga.Editor.KeyDispatch do
   defp command_name(cmd) when is_tuple(cmd), do: elem(cmd, 0)
   defp command_name(cmd) when is_list(cmd), do: :multi
   defp command_name(_cmd), do: :unknown
+
+  # Checks whether the buffer in the active window is read-only.
+  # Prefers the active window's buffer over state.buffers.active, since popup
+  # windows may display a different buffer than the one tracked in the
+  # buffers struct.
+  @spec active_buffer_read_only?(EditorState.t()) :: boolean()
+  defp active_buffer_read_only?(%{windows: %{map: map, active: active_id}} = state) do
+    buf =
+      case Map.fetch(map, active_id) do
+        {:ok, window} -> window.buffer
+        :error -> state.buffers.active
+      end
+
+    buf != nil and BufferServer.read_only?(buf)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
 
   @spec fire_hook(ConfigHooks.event(), [term()]) :: :ok
   defp fire_hook(event, args) do
