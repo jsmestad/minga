@@ -116,7 +116,205 @@ defmodule Minga.Git do
     Path.relative_to(Path.expand(file_path), Path.expand(git_root))
   end
 
+  @typedoc "A structured status entry for one file."
+  @type status_entry :: %{
+          path: String.t(),
+          status: :added | :modified | :deleted | :renamed | :copied | :untracked | :unknown,
+          staged: boolean()
+        }
+
+  @doc """
+  Returns a structured list of changed files with their status.
+
+  Each entry has `:path`, `:status` (added/modified/deleted/untracked), and
+  `:staged` (whether the change is in the index).
+  """
+  @spec status(String.t()) :: {:ok, [status_entry()]} | {:error, String.t()}
+  def status(git_root) when is_binary(git_root) do
+    case System.cmd("git", ["status", "--porcelain=v1", "-uall"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        entries =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_status_line/1)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok, entries}
+
+      {output, _} ->
+        {:error, "git status failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "git status error: #{Exception.message(e)}"}
+  end
+
+  @doc """
+  Returns the diff for a specific file or all changes.
+
+  When `path` is nil, returns the diff for all unstaged changes.
+  When `staged: true` is passed, returns the staged (cached) diff.
+  """
+  @spec diff(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def diff(git_root, opts \\ []) when is_binary(git_root) do
+    path = Keyword.get(opts, :path)
+    staged = Keyword.get(opts, :staged, false)
+
+    args = ["diff"]
+    args = if staged, do: args ++ ["--cached"], else: args
+    args = if path, do: args ++ ["--", path], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "git diff error: #{Exception.message(e)}"}
+  end
+
+  @typedoc "A structured log entry."
+  @type log_entry :: %{
+          hash: String.t(),
+          short_hash: String.t(),
+          author: String.t(),
+          date: String.t(),
+          message: String.t()
+        }
+
+  @doc """
+  Returns recent commits as structured entries.
+
+  Options:
+    * `:count` - number of commits to return (default: 10)
+    * `:path` - limit to commits affecting this file path
+  """
+  @spec log(String.t(), keyword()) :: {:ok, [log_entry()]} | {:error, String.t()}
+  def log(git_root, opts \\ []) when is_binary(git_root) do
+    count = Keyword.get(opts, :count, 10)
+    path = Keyword.get(opts, :path)
+
+    # Use a delimiter-separated format for reliable parsing
+    format = "%H%x1f%h%x1f%an%x1f%ai%x1f%s"
+    args = ["log", "--format=#{format}", "-n", "#{count}"]
+    args = if path, do: args ++ ["--", path], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {output, 0} ->
+        entries =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_log_line/1)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok, entries}
+
+      {output, _} ->
+        {:error, "git log failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "git log error: #{Exception.message(e)}"}
+  end
+
+  @doc """
+  Stages specific files (equivalent to `git add`).
+
+  Accepts a single file path or a list of paths.
+  """
+  @spec stage(String.t(), String.t() | [String.t()]) :: :ok | {:error, String.t()}
+  def stage(git_root, path) when is_binary(git_root) and is_binary(path) do
+    stage(git_root, [path])
+  end
+
+  def stage(git_root, paths) when is_binary(git_root) and is_list(paths) do
+    args = ["add", "--"] ++ paths
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git add failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "git add error: #{Exception.message(e)}"}
+  end
+
+  @doc """
+  Creates a commit with the given message.
+
+  The staging area must already contain changes (use `stage/2` first).
+  """
+  @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit(git_root, message) when is_binary(git_root) and is_binary(message) do
+    case System.cmd("git", ["commit", "-m", message],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        # Extract the short hash from git's output (e.g., "[main abc1234] commit message")
+        short_hash =
+          case Regex.run(~r"\[[\w/.-]+ ([a-f0-9]+)\]", output) do
+            [_, hash] -> hash
+            _ -> "unknown"
+          end
+
+        {:ok, short_hash}
+
+      {output, _} ->
+        {:error, "git commit failed: #{String.trim(output)}"}
+    end
+  rescue
+    e -> {:error, "git commit error: #{Exception.message(e)}"}
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec parse_status_line(String.t()) :: status_entry() | nil
+  defp parse_status_line(line) when byte_size(line) >= 3 do
+    index_status = String.at(line, 0)
+    worktree_status = String.at(line, 1)
+    path = String.trim(String.slice(line, 3..-1//1))
+
+    # A file can appear in both staged and unstaged state.
+    # For simplicity, we report the most significant status.
+    {status, staged} = interpret_status_codes(index_status, worktree_status)
+
+    if status do
+      %{path: path, status: status, staged: staged}
+    else
+      nil
+    end
+  end
+
+  defp parse_status_line(_), do: nil
+
+  @spec interpret_status_codes(String.t(), String.t()) ::
+          {status_entry_status :: atom() | nil, boolean()}
+  defp interpret_status_codes("?", "?"), do: {:untracked, false}
+  defp interpret_status_codes("A", _), do: {:added, true}
+  defp interpret_status_codes("M", _), do: {:modified, true}
+  defp interpret_status_codes("D", _), do: {:deleted, true}
+  defp interpret_status_codes("R", _), do: {:renamed, true}
+  defp interpret_status_codes("C", _), do: {:copied, true}
+  defp interpret_status_codes(" ", "M"), do: {:modified, false}
+  defp interpret_status_codes(" ", "D"), do: {:deleted, false}
+  defp interpret_status_codes(_, _), do: {:unknown, false}
+
+  @spec parse_log_line(String.t()) :: log_entry() | nil
+  defp parse_log_line(line) do
+    case String.split(line, <<0x1F>>) do
+      [hash, short_hash, author, date, message] ->
+        %{
+          hash: hash,
+          short_hash: short_hash,
+          author: author,
+          date: date,
+          message: message
+        }
+
+      _ ->
+        nil
+    end
+  end
 
   @spec parse_porcelain_blame(String.t()) :: String.t()
   defp parse_porcelain_blame(output) do
