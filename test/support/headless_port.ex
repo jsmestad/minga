@@ -175,7 +175,7 @@ defmodule Minga.Test.HeadlessPort do
     :ok = GenServer.call(server, {:wait_for_frame, self(), ref})
 
     receive do
-      {:frame_ready, ^ref} -> :ok
+      {:frame_ready, ^ref, _snapshot} -> :ok
     after
       timeout -> {:error, :timeout}
     end
@@ -195,11 +195,16 @@ defmodule Minga.Test.HeadlessPort do
 
   @doc """
   Waits for a frame using a ref from `prepare_await/1`.
+
+  Returns `{:ok, snapshot}` where snapshot is the frozen screen state at
+  the moment `batch_end` was processed. This is race-free: no subsequent
+  render can overwrite the captured data because it lives in the calling
+  process's mailbox, not in the HeadlessPort's mutable grid.
   """
-  @spec collect_frame(reference(), timeout()) :: :ok | {:error, :timeout}
+  @spec collect_frame(reference(), timeout()) :: {:ok, screen()} | {:error, :timeout}
   def collect_frame(ref, timeout \\ 1000) do
     receive do
-      {:frame_ready, ^ref} -> :ok
+      {:frame_ready, ^ref, snapshot} -> {:ok, snapshot}
     after
       timeout -> {:error, :timeout}
     end
@@ -350,9 +355,19 @@ defmodule Minga.Test.HeadlessPort do
         %{state | cursor_shape: shape}
 
       {:ok, :batch_end} ->
-        # Notify all waiters that a frame is complete
+        # Snapshot the screen at this exact moment, before any subsequent
+        # render can overwrite the grid. Include the snapshot in the
+        # notification so the test process captures it atomically.
+        snapshot = %{
+          grid: state.grid,
+          cursor: state.cursor,
+          cursor_shape: state.cursor_shape,
+          width: state.width,
+          height: state.height
+        }
+
         Enum.each(state.waiters, fn {pid, ref} ->
-          send(pid, {:frame_ready, ref})
+          send(pid, {:frame_ready, ref, snapshot})
         end)
 
         %{state | waiters: [], frame_count: state.frame_count + 1}
