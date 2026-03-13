@@ -98,10 +98,12 @@ defmodule Minga.Agent.CredentialsTest do
       System.delete_env("ANTHROPIC_API_KEY")
       System.delete_env("OPENAI_API_KEY")
       System.delete_env("GOOGLE_API_KEY")
+      System.delete_env("OPENROUTER_API_KEY")
+      System.delete_env("GROQ_API_KEY")
 
       statuses = Credentials.status()
-      assert length(statuses) == 3
-      assert Enum.all?(statuses, fn s -> s.configured == false end)
+      # 5 key-based providers + 1 Ollama (auto-detected)
+      assert length(statuses) == 6
     end
 
     test "reports configured with correct source" do

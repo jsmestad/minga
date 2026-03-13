@@ -10,6 +10,7 @@ defmodule Minga.Agent.SlashCommand do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Instructions
+  alias Minga.Agent.Memory
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SessionExport
@@ -55,7 +56,10 @@ defmodule Minga.Agent.SlashCommand do
     %{
       name: "summarize",
       description: "Generate a context artifact from this session for future use"
-    }
+    },
+    %{name: "remember", description: "Save a learning to persistent memory: /remember <text>"},
+    %{name: "memory", description: "Show the current memory file contents"},
+    %{name: "forget", description: "Clear the persistent memory file"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -111,6 +115,9 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
+  defp dispatch(state, "remember", args), do: do_remember(state, args)
+  defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
+  defp dispatch(state, "forget", _args), do: do_forget(state)
 
   # /skill:name activates, /skill:off:name deactivates
   defp dispatch(state, cmd, _args) when is_binary(cmd) do
@@ -475,6 +482,32 @@ defmodule Minga.Agent.SlashCommand do
       end
     else
       {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_remember(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_remember(_state, ""), do: {:error, "Usage: /remember <text to remember>"}
+
+  defp do_remember(state, text) do
+    case Memory.append(text) do
+      :ok ->
+        {:ok, emit_system_message(state, "Saved to memory: #{String.trim(text)}")}
+
+      {:error, reason} ->
+        {:error, "Failed to save memory: #{inspect(reason)}"}
+    end
+  end
+
+  @spec do_memory(state()) :: state()
+  defp do_memory(state) do
+    emit_system_message(state, Memory.summary())
+  end
+
+  @spec do_forget(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_forget(state) do
+    case Memory.clear() do
+      :ok -> {:ok, emit_system_message(state, "Memory cleared.")}
+      {:error, reason} -> {:error, "Failed to clear memory: #{inspect(reason)}"}
     end
   end
 

@@ -33,8 +33,15 @@ defmodule Minga.Agent.Credentials do
   @env_vars %{
     "anthropic" => "ANTHROPIC_API_KEY",
     "openai" => "OPENAI_API_KEY",
-    "google" => "GOOGLE_API_KEY"
+    "google" => "GOOGLE_API_KEY",
+    "openrouter" => "OPENROUTER_API_KEY",
+    "groq" => "GROQ_API_KEY"
   }
+
+  # Ollama doesn't use an API key; it's auto-detected when the local server
+  # is running. We store the host URL instead.
+  @ollama_host_var "OLLAMA_HOST"
+  @ollama_default_host "http://localhost:11434"
 
   @known_providers Map.keys(@env_vars)
 
@@ -107,22 +114,31 @@ defmodule Minga.Agent.Credentials do
   end
 
   @doc """
-  Returns the auth status for all known providers.
+  Returns the auth status for all known providers plus Ollama.
 
   Each entry shows whether a key is configured and where it was found
   (`:env`, `:file`, or `nil`). Keys themselves are never exposed.
   """
   @spec status() :: [provider_status()]
   def status do
-    Enum.map(@known_providers, fn provider ->
-      case resolve(provider) do
-        {:ok, _key, source} ->
-          %{provider: provider, configured: true, source: source}
+    standard =
+      Enum.map(@known_providers, fn provider ->
+        case resolve(provider) do
+          {:ok, _key, source} ->
+            %{provider: provider, configured: true, source: source}
 
-        :error ->
-          %{provider: provider, configured: false, source: nil}
-      end
-    end)
+          :error ->
+            %{provider: provider, configured: false, source: nil}
+        end
+      end)
+
+    ollama_status = %{
+      provider: "ollama",
+      configured: ollama_available?(),
+      source: if(ollama_available?(), do: :local, else: nil)
+    }
+
+    standard ++ [ollama_status]
   end
 
   @doc """
@@ -153,6 +169,35 @@ defmodule Minga.Agent.Credentials do
   @spec env_var_for(provider()) :: String.t() | nil
   def env_var_for(provider) when is_binary(provider) do
     Map.get(@env_vars, String.downcase(provider))
+  end
+
+  @doc """
+  Returns the Ollama host URL. Checks `OLLAMA_HOST` env var first,
+  then falls back to the default localhost URL.
+  """
+  @spec ollama_host() :: String.t()
+  def ollama_host do
+    System.get_env(@ollama_host_var) || @ollama_default_host
+  end
+
+  @doc """
+  Returns true if Ollama appears to be running locally.
+
+  Makes a quick HTTP request to the Ollama API tags endpoint.
+  Returns false on connection errors or timeouts.
+  """
+  @spec ollama_available?() :: boolean()
+  def ollama_available? do
+    host = ollama_host()
+
+    case :httpc.request(:get, {~c"#{host}/api/tags", []}, [{:timeout, 2000}], []) do
+      {:ok, {{_, 200, _}, _, _}} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
