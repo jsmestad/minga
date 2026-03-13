@@ -118,4 +118,71 @@ defmodule Minga.Input.PopupTest do
       assert map_size(new_state.windows.map) == 1
     end
   end
+
+  describe "handle_mouse/7 with float popups" do
+    defp build_state_with_float_popup do
+      main_buf = fake_pid()
+      popup_buf = fake_pid()
+
+      main_window = Window.new(1, main_buf, 24, 80)
+
+      rule =
+        Rule.new("*test*",
+          display: :float,
+          width: {:percent, 60},
+          height: {:percent, 70}
+        )
+
+      active = PopupActive.new(rule, 2, WindowTree.new(1), 1)
+      popup_window = %{Window.new(2, popup_buf, 24, 80) | popup_meta: active}
+
+      %EditorState{
+        port_manager: nil,
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: VimState.new(),
+        buffers: %Buffers{active: main_buf, list: [main_buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => main_window, 2 => popup_window},
+          active: 1,
+          next_id: 3
+        }
+      }
+    end
+
+    test "clicking outside float popup dismisses it" do
+      state = build_state_with_float_popup()
+
+      # Float is 60%x70% of 80x24, centered.
+      # Box: 48 wide, 16 tall, starts at row 4, col 16.
+      # Click at (0, 0) is outside.
+      assert {:handled, new_state} = PopupHandler.handle_mouse(state, 0, 0, :left, 0, :press, 1)
+
+      # Popup window should be removed
+      refute Map.has_key?(new_state.windows.map, 2)
+    end
+
+    test "clicking inside float popup passes through" do
+      state = build_state_with_float_popup()
+
+      # Box starts at row 4, col 16 (centered 48x16 in 80x24)
+      # Click inside at (10, 30)
+      assert {:passthrough, ^state} =
+               PopupHandler.handle_mouse(state, 10, 30, :left, 0, :press, 1)
+    end
+
+    test "passes through when no float popups exist" do
+      state = build_state_no_popup()
+
+      assert {:passthrough, ^state} =
+               PopupHandler.handle_mouse(state, 10, 10, :left, 0, :press, 1)
+    end
+
+    test "non-left clicks pass through" do
+      state = build_state_with_float_popup()
+
+      assert {:passthrough, ^state} =
+               PopupHandler.handle_mouse(state, 0, 0, :right, 0, :press, 1)
+    end
+  end
 end

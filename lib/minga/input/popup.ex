@@ -36,7 +36,48 @@ defmodule Minga.Input.Popup do
     end
   end
 
+  @impl true
+  @spec handle_mouse(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  def handle_mouse(state, row, col, :left, _mods, :press, _cc) do
+    # Check if any float popups are visible. Clicks outside their box
+    # dismiss them; clicks inside are passed through to the buffer.
+    case find_float_popup_id(state) do
+      nil ->
+        {:passthrough, state}
+
+      popup_id ->
+        if Lifecycle.click_inside_float?(state, row, col) do
+          {:passthrough, state}
+        else
+          {:handled, Lifecycle.close_popup(state, popup_id)}
+        end
+    end
+  end
+
+  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
+    {:passthrough, state}
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec find_float_popup_id(EditorState.t()) :: integer() | nil
+  defp find_float_popup_id(%{windows: %{map: map}}) do
+    Enum.find_value(map, fn
+      {id, %Window{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}}} ->
+        id
+
+      _ ->
+        nil
+    end)
+  end
 
   @spec active_popup_meta(EditorState.t()) :: Minga.Popup.Active.t() | nil
   defp active_popup_meta(%{windows: %{map: map, active: active_id}}) do

@@ -81,4 +81,107 @@ defmodule Minga.Editor.PickerUITest do
       end)
     end
   end
+
+  describe "render/1 centered layout" do
+    test "renders draws inside a centered floating window" do
+      items = [{"1", "claude-sonnet-4", "Anthropic"}, {"2", "gpt-4o", "OpenAI"}]
+      picker = Picker.new(items, title: "Select Model", max_visible: 10)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, cursor} = PickerUI.render(input)
+      assert [_ | _] = draws
+      assert {cursor_row, cursor_col} = cursor
+      assert is_integer(cursor_row)
+      assert is_integer(cursor_col)
+    end
+
+    test "all draws are within the floating window rect" do
+      items = [{"1", "model-a", "desc"}, {"2", "model-b", "desc"}]
+      picker = Picker.new(items, title: "Models", max_visible: 10)
+
+      vp = Viewport.new(24, 80)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: vp
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+
+      # FloatingWindow at 60% x 70% centered in 80x24
+      box_w = div(80 * 60, 100)
+      box_h = div(24 * 70, 100)
+      box_row = div(24 - box_h, 2)
+      box_col = div(80 - box_w, 2)
+
+      Enum.each(draws, fn {row, col, _text, _style} ->
+        assert row >= box_row and row < box_row + box_h,
+               "draw row #{row} outside box (#{box_row}..#{box_row + box_h - 1})"
+
+        assert col >= box_col and col < box_col + box_w,
+               "draw col #{col} outside box (#{box_col}..#{box_col + box_w - 1})"
+      end)
+    end
+
+    test "cursor is inside the floating window (not at viewport bottom)" do
+      items = [{"1", "test-model", ""}]
+      picker = Picker.new(items, title: "Pick", max_visible: 5)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {_draws, {cursor_row, _col}} = PickerUI.render(input)
+
+      # In centered mode, cursor should NOT be at the viewport bottom (row 23)
+      # It should be inside the float box
+      box_h = div(24 * 70, 100)
+      box_row = div(24 - box_h, 2)
+
+      assert cursor_row >= box_row and cursor_row < box_row + box_h,
+             "cursor row #{cursor_row} should be inside the float box"
+    end
+
+    test "contains border characters from rounded style" do
+      items = [{"1", "item", ""}]
+      picker = Picker.new(items, title: "Test", max_visible: 5)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "╭")), "expected rounded top-left border"
+      assert Enum.any?(texts, &String.contains?(&1, "╰")), "expected rounded bottom-left border"
+    end
+
+    test "title appears in the draws" do
+      items = [{"1", "item", ""}]
+      picker = Picker.new(items, title: "My Title", max_visible: 5)
+
+      input = %RenderInput{
+        picker_state: %PickerState{picker: picker, source: nil, layout: :centered},
+        theme_picker: theme_picker(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      {draws, _cursor} = PickerUI.render(input)
+      texts = Enum.map(draws, fn {_r, _c, text, _s} -> text end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "My Title")),
+             "expected title in centered picker draws"
+    end
+  end
 end
