@@ -4,26 +4,46 @@ Five minutes from install to editing. Let's go.
 
 ## Install
 
-### macOS (Homebrew)
+> **Pre-release notice:** Minga hasn't cut a release yet. For now, you need to build from source. Homebrew and pre-built binaries are coming soon.
+
+### From source
+
+You'll need Erlang, Elixir, and Zig. A version manager like [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/) makes this painless:
 
 ```bash
-brew install jsmestad/minga/minga
+# Install plugins if you don't have them
+asdf plugin add erlang
+asdf plugin add elixir
+asdf plugin add zig
+
+# Clone and build
+git clone https://github.com/jsmestad/minga.git
+cd minga
+asdf install          # Installs pinned versions from .tool-versions
+mix deps.get
+mix compile           # Builds both Elixir and Zig
 ```
 
-### From a release binary
+The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are fast.
 
-Download the latest binary for your platform from [GitHub Releases](https://github.com/jsmestad/minga/releases). Unpack it and put it somewhere on your `$PATH`.
+### After release (coming soon)
 
-### From source (contributors)
+Once releases ship, installation will be simpler:
 
-If you want to hack on Minga itself, see the [Contributing guide](contributing.html) for the full build-from-source setup. You'll need Erlang, Elixir, and Zig installed via a version manager.
+```bash
+# macOS (Homebrew)
+brew install jsmestad/minga/minga
+
+# Or download a binary from GitHub Releases
+# https://github.com/jsmestad/minga/releases
+```
 
 ## Launch
 
 ```bash
-minga                      # Empty buffer
-minga path/to/file         # Open a file
-minga lib/ test/           # Open multiple files or directories
+bin/minga                  # Empty buffer
+bin/minga path/to/file     # Open a file
+bin/minga lib/ test/       # Open multiple files or directories
 ```
 
 ## Your first 30 seconds
