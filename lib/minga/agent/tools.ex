@@ -19,10 +19,16 @@ defmodule Minga.Agent.Tools do
   | `find`            | Find files by name/glob pattern                      |
   | `grep`            | Search file contents for a pattern                   |
   | `shell`           | Run a shell command in the project root              |
+  | `git_status`      | Show changed files with structured status (read-only)|
+  | `git_diff`        | Show unified diff for files or all changes (read-only)|
+  | `git_log`         | Show recent commits with structured output (read-only)|
+  | `git_stage`       | Stage files for commit (destructive)                 |
+  | `git_commit`      | Create a commit with a message (destructive)         |
   """
 
   alias Minga.Agent.Tools.EditFile
   alias Minga.Agent.Tools.Find
+  alias Minga.Agent.Tools.Git, as: GitTools
   alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
   alias Minga.Agent.Tools.MultiEditFile
@@ -36,7 +42,7 @@ defmodule Minga.Agent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [project_root: String.t()]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit)
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -80,7 +86,12 @@ defmodule Minga.Agent.Tools do
       find(root),
       grep(root),
       shell(root),
-      subagent(root)
+      subagent(root),
+      git_status(root),
+      git_diff(root),
+      git_log(root),
+      git_stage(root),
+      git_commit(root)
     ]
   end
 
@@ -409,6 +420,131 @@ defmodule Minga.Agent.Tools do
       },
       callback: fn args ->
         Subagent.execute(args["task"], project_root: root, model: args["model"])
+      end
+    )
+  end
+
+  # ── Git tools ────────────────────────────────────────────────────────────────
+
+  @spec git_status(String.t()) :: Tool.t()
+  defp git_status(root) do
+    Tool.new!(
+      name: "git_status",
+      description: """
+      Show git status: staged, unstaged, and untracked files with their change type.
+      Returns structured output grouped by staged/unstaged state. Read-only.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{}
+      },
+      callback: fn _args -> GitTools.status(root) end
+    )
+  end
+
+  @spec git_diff(String.t()) :: Tool.t()
+  defp git_diff(root) do
+    Tool.new!(
+      name: "git_diff",
+      description: """
+      Show git diff. Returns unified diff output. Read-only.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File path to diff (omit for all changes)"
+          },
+          "staged" => %{
+            "type" => "boolean",
+            "description" => "Show staged changes instead of unstaged (default: false)"
+          }
+        }
+      },
+      callback: fn args ->
+        opts = []
+        opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
+        opts = if args["staged"], do: [{:staged, args["staged"]} | opts], else: opts
+        GitTools.diff(root, opts)
+      end
+    )
+  end
+
+  @spec git_log(String.t()) :: Tool.t()
+  defp git_log(root) do
+    Tool.new!(
+      name: "git_log",
+      description: """
+      Show recent git commits with hash, author, date, and message. Read-only.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "count" => %{
+            "type" => "integer",
+            "description" => "Number of commits to show (default: 10)"
+          },
+          "path" => %{
+            "type" => "string",
+            "description" => "File path to limit history to (omit for all files)"
+          }
+        }
+      },
+      callback: fn args ->
+        opts = []
+        opts = if args["count"], do: [{:count, args["count"]} | opts], else: opts
+        opts = if args["path"], do: [{:path, args["path"]} | opts], else: opts
+        GitTools.log(root, opts)
+      end
+    )
+  end
+
+  @spec git_stage(String.t()) :: Tool.t()
+  defp git_stage(root) do
+    Tool.new!(
+      name: "git_stage",
+      description: """
+      Stage files for commit (equivalent to git add). Destructive: requires approval.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "paths" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" => "List of file paths to stage"
+          }
+        },
+        "required" => ["paths"]
+      },
+      callback: fn args ->
+        paths = args["paths"] || []
+        GitTools.stage(root, paths)
+      end
+    )
+  end
+
+  @spec git_commit(String.t()) :: Tool.t()
+  defp git_commit(root) do
+    Tool.new!(
+      name: "git_commit",
+      description: """
+      Create a git commit with a message. Stage files first with git_stage.
+      Destructive: requires approval.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "message" => %{
+            "type" => "string",
+            "description" => "The commit message"
+          }
+        },
+        "required" => ["message"]
+      },
+      callback: fn args ->
+        GitTools.commit(root, args["message"])
       end
     )
   end
