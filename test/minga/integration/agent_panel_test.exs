@@ -139,5 +139,4 @@ defmodule Minga.Integration.AgentPanelTest do
              "expected at least 2 separators (tree|editor|agent), found #{separator_count}"
     end
   end
-
 end
