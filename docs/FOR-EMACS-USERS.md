@@ -86,6 +86,8 @@ Now imagine agentic tools that don't just chat but modify files, run shell comma
 
 **Minga:** Each AI agent session is its own supervised process tree. It communicates with buffers via message passing, the same mechanism the editor itself uses. An agent can't interfere with buffer state because it doesn't have direct access to buffer memory. The BEAM's preemptive scheduler guarantees your typing is always responsive regardless of what agents are doing. You can run multiple agents on multiple buffers simultaneously, and you can inspect any agent's live state with `:sys.get_state(agent_pid)`.
 
+And Minga is going further: agent tools are being [wired to edit buffers in-memory](BUFFER-AWARE-AGENTS.md) instead of writing to the filesystem. Agent edits will go through the same `Buffer.Server` GenServer as your keystrokes, with full undo integration, incremental tree-sitter sync, and no "file changed on disk" prompts. Multiple agents will be able to work on the same file concurrently via buffer forking with three-way merge, replacing the need for git worktrees. This is something no editor does today, and the BEAM's process model makes it architecturally natural.
+
 ---
 
 ## What you gain

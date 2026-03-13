@@ -91,6 +91,48 @@ ERL_FLAGS=" " mix minga
 
 ---
 
+## Agent Edit Performance
+
+Agent tools (`EditFile`, `WriteFile`, `ReadFile`) are a distinct performance domain from human keystroke editing. An agent making 20 edits to a single file in a refactoring pass creates a different bottleneck profile than a human typing one character at a time.
+
+### Current path: filesystem round-trips
+
+Each `edit_file` call does: `File.read` (4 syscalls) → `String.split` (find match) → `String.replace` → `File.write` (3 syscalls). For 20 edits to one file, that's 20 full read-modify-write cycles, 140 syscalls, and 20 `FileWatcher` notifications that trigger "file changed on disk" checks.
+
+The raw I/O isn't the bottleneck (OS page cache makes reads/writes effectively memory operations). The problems are:
+
+1. **Redundant work per edit.** Each `File.read` re-reads content the buffer already holds. Each `File.write` triggers a watcher event that may cause a buffer reload, competing with the next edit.
+2. **No batching.** 20 tool calls = 20 filesystem round-trips. Each one allocates a fresh binary for the full file content, does the string replace, then discards it.
+3. **No incremental tree-sitter sync.** The parser doesn't learn about individual edits. It gets a full reparse trigger after each file watcher notification.
+
+### Planned path: buffer-routed edits
+
+Route through `Buffer.Server.apply_text_edits/2`: one GenServer call with a list of edits, one undo entry, one version bump, one `EditDelta` batch for tree-sitter. Zero filesystem events.
+
+| Metric | Filesystem (20 edits) | Buffer (20 edits, 1 batch) |
+|--------|----------------------|---------------------------|
+| Syscalls | ~140 (7 per edit × 20) | 0 |
+| Binary allocations | 40 (read + write per edit) | 1 (edit list) |
+| FileWatcher events | 20 | 0 |
+| Tree-sitter reparses | 20 (one per watcher notification) | 1 (incremental) |
+| Undo entries | 0 (not on stack) | 1 |
+
+### Buffer fork vs git worktree
+
+For multi-agent concurrent editing, the performance gap is dramatic:
+
+| Operation | Git worktree | Buffer fork |
+|-----------|-------------|-------------|
+| Create | Seconds to minutes (clone directory, cold caches) | Microseconds (copy a struct into a new process) |
+| Memory | Full checkout + separate `_build` + `deps` | Two binaries + a few integers |
+| First build | Cold (recompile everything) | Shared `_build` and `deps` |
+| Merge | `git merge` (disk-based, may need conflict resolution) | Three-way merge in memory, instant for non-overlapping changes |
+| Cleanup | `git worktree remove` + `git worktree prune` | Process exits, garbage collected automatically |
+
+See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the full design.
+
+---
+
 ## Table of Contents
 
 1. [Gap Buffer: Eliminate Repeated Full-Text Materialization](#1-gap-buffer-eliminate-repeated-full-text-materialization)

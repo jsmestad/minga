@@ -103,13 +103,16 @@ Minga.Supervisor (rest_for_one)
 ├── Filetype.Registry        ← static data, rarely fails
 ├── Buffer.Supervisor        ← if this restarts, buffers survive
 │    ├── Buffer processes    ← one per open file/scratch buffer
-│    └── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
+│    ├── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
+│    └── Buffer.Fork processes ← (planned) per-agent forks for concurrent editing
 ├── Eval.TaskSupervisor      ← supervised tasks for user code
 ├── Command.Registry         ← rebuilt from module attributes on restart
 ├── Extension.Registry       ← extension metadata store
 ├── Extension.Supervisor     ← DynamicSupervisor for extension processes
 ├── Diagnostics              ← source-agnostic diagnostic aggregation
 ├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
+├── Agent.Supervisor         ← DynamicSupervisor for agent session process trees
+│    └── Agent.Session       ← one per active agent session (provider, conversation, tools)
 ├── Project                  ← project root detection, known-projects persistence, file cache
 ├── FileWatcher              ← OS file notifications
 ├── Parser.Manager           ← owns the tree-sitter parser process
@@ -419,23 +422,25 @@ Future plugins will run as supervised BEAM processes. A misbehaving plugin is co
 
 ### Agentic AI integration
 
-This is where Minga's architecture becomes genuinely prescient. AI coding agents (tools like Claude Code, Cursor, Aider, and Copilot) work by spawning external processes: LLM API calls, shell commands, file rewrites, tool invocations. These processes are inherently unpredictable. API calls time out. Shell commands hang. File operations conflict with what you're editing. An agent might try to write to a buffer you're actively modifying.
+AI coding agents (tools like Claude Code, Cursor, Aider, and Copilot) work by spawning external processes: LLM API calls, shell commands, file rewrites, tool invocations. These processes are inherently unpredictable. API calls time out. Shell commands hang. File operations conflict with what you're editing. An agent might try to write to a buffer you're actively modifying.
 
 In a traditional editor, these workloads fight for the same event loop as your typing. A long-running API call can cause UI jank. Concurrent buffer modifications create race conditions. And you have limited visibility into what the agent is actually doing at any moment.
 
 Minga's architecture was *designed* for exactly this kind of workload:
 
-- **Each agent session runs as its own supervised process tree.** Agents are isolated from your buffers, from each other, and from the editor core. They communicate through the same message-passing interface the editor itself uses.
+- **Each agent session runs as its own supervised process tree.** ✅ Agents are isolated from your buffers, from each other, and from the editor core. They communicate through the same message-passing interface the editor itself uses.
 
-- **Buffer access goes through message passing.** An agent process that wants to modify a file sends a message to that buffer's GenServer. The buffer processes the edit atomically. There's no possibility of a torn write or a race condition between your typing and the agent's edits. The buffer's mailbox serializes them naturally.
+- **The BEAM's preemptive scheduler prevents starvation.** ✅ A long-running agent can't cause UI jank. The scheduler guarantees every process gets CPU time, regardless of what any single process is doing. You keep editing while the agent works in the background, not because of careful async engineering, but because the VM enforces it at the scheduler level.
 
-- **The BEAM's preemptive scheduler prevents starvation.** A long-running agent can't cause UI jank. The scheduler guarantees every process gets CPU time, regardless of what any single process is doing. You keep editing while the agent works in the background, not because of careful async engineering, but because the VM enforces it at the scheduler level.
+- **Process monitoring enables real-time observability.** ✅ The editor monitors agent processes and reflects their status in the UI: running, waiting for API response, applying changes, failed. You can inspect an agent's state with `:sys.get_state(agent_pid)` without stopping it.
 
-- **Process monitoring enables real-time observability.** The editor can monitor agent processes and reflect their status in the UI: running, waiting for API response, applying changes, failed. You can inspect an agent's state with `:sys.get_state(agent_pid)` without stopping it. When something unexpected is happening, you don't guess. You look.
+- **Concurrent agents are free.** ✅ Want to run a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. There's no thread pool to tune, no async runtime to configure, no event loop to worry about blocking.
 
-- **Concurrent agents are free.** Want to run a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. There's no thread pool to tune, no async runtime to configure, no event loop to worry about blocking.
+- **Buffer access goes through message passing.** (Planned) The architecture enables this: an agent process sends a message to a buffer's GenServer, which processes the edit atomically and pushes an undo entry. Today, agent tools bypass this and write directly to the filesystem via `File.read/write`. The batch edit API (`Buffer.Server.apply_text_edits/2`) and incremental sync infrastructure (`EditDelta`) already exist; the agent tools just need to be wired to use them. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the full design.
 
-Most editors are trying to retrofit agent support onto architectures that assumed a single human operator making sequential edits. Minga's process model treats "external thing wants to modify a buffer" as a first-class operation, because that's literally how the editor itself works internally.
+- **Buffer forking for concurrent agents.** (Planned) Each agent session will get its own in-memory fork of the document, enabling truly concurrent editing without filesystem-level conflicts. Forks merge back via three-way merge, with the existing diff review UI for conflict resolution. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge).
+
+Most editors are trying to retrofit agent support onto architectures that assumed a single human operator making sequential edits. Minga's process model treats "external thing wants to modify a buffer" as a first-class operation, because that's literally how the editor itself works internally. The [buffer-aware agents](BUFFER-AWARE-AGENTS.md) roadmap closes the remaining gap between what the architecture enables and what the agent tools actually use.
 
 ### Concurrent background work
 

@@ -319,6 +319,15 @@ When implementing features, completing planned work, or changing architecture:
 2. Register in `Minga.Mode.OperatorPending`
 3. Test with edge cases (cursor outside delimiters, nested, empty)
 
+### New or modified agent tool
+Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool that reads or writes file content:
+
+1. **Prefer `Buffer.Server` over filesystem I/O.** If a buffer is open for the file, route through it. Use `Buffer.Server.content/1` instead of `File.read/1`, and `Buffer.Server.apply_text_edits/2` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
+2. **Batch edits into a single `apply_text_edits/2` call** rather than making N separate GenServer calls. One call = one undo entry, one version bump.
+3. **Test the tool function** in `test/minga/agent/tools/`.
+
+> **Note:** Buffer routing is being implemented in phases. Today, tools still use `File.read/write` directly. When wiring a tool to use buffers, follow the pattern in `BUFFER-AWARE-AGENTS.md` Phase 1.
+
 ### New render command (requires both sides)
 1. Add opcode constant and encoder in `Minga.Port.Protocol`
 2. Add decoder and handler in `zig/src/protocol.zig` + `zig/src/renderer.zig`

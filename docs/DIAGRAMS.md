@@ -25,15 +25,23 @@ graph TD
     BUFSUP --> B1["Buffer: main.ex"]
     BUFSUP --> B2["Buffer: router.ex"]
     BUFSUP --> B3["Buffer: schema.ex"]
+    BUFSUP --> BF1["Buffer.Fork: main.ex<br/><i>(agent session A)</i>"]
+
+    SUP --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
+    AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
+    AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
 
     LSPSUP --> LSP1["LSP Client: elixir-ls"]
     LSPSUP --> LSP2["LSP Client: lua-ls"]
 
     PM -. "stdin/stdout<br/>Port protocol" .-> ZIG["Zig Process<br/><i>libvaxis + tree-sitter</i>"]
 
+    AS1 -. "apply_text_edits<br/>(message passing)" .-> BF1
+
     style SUP fill:#6c3483,stroke:#4a235a,color:#fff
     style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
     style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
+    style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
     style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
     style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
     style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
@@ -41,9 +49,14 @@ graph TD
     style B1 fill:#2471a3,stroke:#1a5276,color:#fff
     style B2 fill:#2471a3,stroke:#1a5276,color:#fff
     style B3 fill:#2471a3,stroke:#1a5276,color:#fff
+    style BF1 fill:#2471a3,stroke:#1a5276,color:#fff,stroke-dasharray: 5 5
+    style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
+    style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
     style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
     style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
+
+> **Note:** `Buffer.Fork` processes (dashed border) are planned. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge). `Agent.Supervisor` and `Agent.Session` are shipped.
 
 ## Two-Process Architecture
 

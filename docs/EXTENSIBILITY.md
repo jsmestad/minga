@@ -349,6 +349,8 @@ Agent.Session.start(provider: :claude, buffer: current_buffer())
 
 This is where the BEAM architecture pays off the most. Every other editor is trying to bolt async AI support onto a fundamentally single-threaded architecture. Minga's process model means "an external thing wants to modify a buffer" is a first-class, safe, concurrent operation.
 
+The same `Buffer.Server` API that user extensions use (`apply_text_edits/2`, `content/1`, `replace_content/2`) is the API that agent tools will use. There's one interface for programmatic buffer access, whether the caller is a user's custom command, an LSP client, or an AI agent. Agent tools are being [wired to route through this API](BUFFER-AWARE-AGENTS.md) instead of bypassing it with filesystem I/O, which means extensions that hook into buffer events (`:after_save`, advice on commands) will automatically see and respond to agent edits too.
+
 ---
 
 ## The bottom line

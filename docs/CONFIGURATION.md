@@ -115,6 +115,16 @@ The two options are orthogonal. `:agent_tool_approval` controls *whether* to pro
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
 
+### Planned: buffer-aware agent options
+
+When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), additional configuration options will control the new editing behavior:
+
+- Whether agent edits auto-save to disk or stay in-memory until explicit save
+- Whether buffer forks merge automatically (clean merges only) or always go through diff review
+- Whether to flush dirty buffers before agent shell commands
+
+These options don't exist yet. See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the design.
+
 ## Startup view
 
 Minga boots into the full-screen agentic view by default. The chat panel is visible, the input is focused, and an agent session starts automatically. You're ready to talk to the agent the moment Minga opens.

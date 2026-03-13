@@ -49,7 +49,9 @@ Your keystroke:     {:insert, "x", {50, 10}}     → processed first
 Agent edit:         {:insert, code, {200, 0}}     → processed second
 ```
 
-No locks. No mutexes. No "file changed on disk" dialogs. Just ordered message passing. The agent's edits participate in the same undo system as your typing, so you can undo them the same way you undo your own work.
+No locks. No mutexes. No "file changed on disk" dialogs. Just ordered message passing.
+
+> **Where we are today:** Agent tools currently write to the filesystem (`File.read/write`), bypassing the buffer. The architecture above is what the BEAM enables, and we're actively wiring agent tools to route through `Buffer.Server` so edits go through the same mailbox as your keystrokes, with full undo integration. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the design and phased plan.
 
 ### You can see what agents are doing
 
@@ -95,6 +97,8 @@ Want a code review agent examining one buffer while a refactoring agent works on
 
 These are just processes. The BEAM was built to run millions of them. Each agent has its own memory, its own state, and communicates with buffers through message passing. There's no thread pool to configure, no async runtime to tune, no concern about one agent blocking another.
 
+> **Where we are today:** Multiple agent sessions work, and process isolation prevents them from interfering with each other at the BEAM level. But because agent tools write directly to the filesystem, two agents editing the same file can clobber each other on disk. The planned fix is [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge): each agent gets its own in-memory copy of the document, and changes merge back via three-way merge when the agent finishes.
+
 ---
 
 ## How this compares to what you use now
@@ -120,7 +124,9 @@ And here's the thing nobody says out loud: **you still open an editor.** You run
 
 The terminal agent can't show you the codebase the way an editor can. The editor can't see or control the agent. So you play air traffic controller between them, context-switching constantly, losing flow state every time you alt-tab.
 
-**Minga:** Terminal agents could communicate directly with Minga's buffer processes. Agent edits flow through the same undo system as your typing. You can edit one part of a file while an agent edits another. The buffer serializes both safely. And because Minga runs on the BEAM, it could host the agent runtime directly: no separate process, no file-watching lag, just another supervised process tree in the editor. The "sidecar editor" workflow collapses into one tool. You watch the agent work in real-time, review inline, and intervene without switching windows.
+**Minga today:** Minga's built-in agent already collapses the two-tool workflow. You chat with the agent, watch it work, and review inline diffs without switching windows. Agent edits appear in the diff review UI as they happen.
+
+**Minga next:** Agent tools are being [rewired to route through `Buffer.Server`](BUFFER-AWARE-AGENTS.md) instead of the filesystem. When that lands, agent edits will flow through the same undo system as your typing, appear instantly in the editor (no file watcher delay), and trigger incremental tree-sitter updates. You'll be able to edit one part of a file while an agent edits another, with the GenServer mailbox serializing both safely.
 
 ### vs. Copilot / inline completions
 
@@ -152,19 +158,29 @@ That's what Minga is. Not a throwback to the IDE era, but the version of it that
 
 ## What this enables (that no other editor can do)
 
-### Agent-aware undo
+### Agent status in the modeline ✅
 
-Because agent edits flow through the buffer's GenServer, they participate in the undo system. You can undo an agent's changes the same way you undo your own typing (`u` in normal mode). No "accept/reject" modal dialog. Just undo.
-
-### Agent status in the modeline
-
-The editor can monitor agent processes and reflect their status:
+The editor monitors agent processes and reflects their status:
 
 ```
  NORMAL  main.ex [+]  ◐ Claude: refactoring extract_function  42:10
 ```
 
-Running, thinking, writing, errored: the editor knows because it supervises the agent process.
+Running, thinking, writing, errored: the editor knows because it supervises the agent process. This works today.
+
+### Inline diff review ✅
+
+When the agent edits a file, the diff appears in the preview pane immediately. You review hunks with `y` (accept) / `x` (reject), navigate with `]c` / `[c`. No context switching to a terminal or a separate diff tool. This works today.
+
+### Agent-aware undo (planned)
+
+Once agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers), agent edits will participate in the undo system. You'll undo an agent's changes the same way you undo your own typing (`u` in normal mode). No "accept/reject" modal dialog. Just undo.
+
+Today, agent edits go to the filesystem and aren't part of the undo stack. The buffer architecture supports this (every edit through `apply_text_edits/2` pushes an undo entry); the agent tools just need to be wired to use it.
+
+### Buffer forking for concurrent agents (planned)
+
+Multiple agents will be able to edit the same file concurrently, each working on their own [in-memory fork](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) of the buffer. When they finish, changes merge back via three-way merge. Conflicts go through the diff review UI. This replaces git worktrees for most multi-agent workflows.
 
 ### Pausable agents
 
@@ -180,7 +196,7 @@ Because agents are BEAM processes, you can suspend them:
 
 This is a built-in BEAM capability. No special agent-side support needed.
 
-### Edit boundaries
+### Edit boundaries (planned)
 
 Define regions of a file that an agent can or can't touch:
 
@@ -189,7 +205,7 @@ Define regions of a file that an agent can or can't touch:
 Agent.Session.set_boundary(session, buffer_pid, {50, 0}, {100, :end})
 ```
 
-Because all buffer access goes through the GenServer, enforcing boundaries is just a guard clause on the message handler.
+Once agent edits route through the GenServer, enforcing boundaries is just a guard clause on the message handler.
 
 ---
 
@@ -198,9 +214,10 @@ Because all buffer access goes through the GenServer, enforcing boundaries is ju
 | Current tool has | Minga status |
 |-----------------|-------------|
 | VS Code's extension ecosystem | Early. Core editor only. |
-| Cursor's inline diff view | Planned. Agent edits as reviewable diffs. |
+| Cursor's inline diff view | ✅ Shipped. Agent edits shown as reviewable diffs in preview pane. |
 | Copilot ghost text | Planned. |
-| Multi-file agent edits with preview | Planned. BEAM makes this architecturally clean. |
+| Agent undo integration | Planned. Requires [buffer-routed agent tools](BUFFER-AWARE-AGENTS.md). |
+| Multi-agent concurrent editing | Planned. [Buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) with three-way merge. |
 | Claude Code's autonomous mode | Future. Minga could host the agent runtime directly. |
 | GUI (mouse-driven, graphical) | Terminal-based. Minga uses Zig + libvaxis for TUI. |
 
