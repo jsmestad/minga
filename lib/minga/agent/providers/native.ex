@@ -62,11 +62,27 @@ defmodule Minga.Agent.Providers.Native do
 
   defmodule LoopCtx do
     @moduledoc false
-    @enforce_keys [:provider_pid, :model, :tools, :thinking_level, :max_tokens,
-                   :max_retries, :llm_client, :max_turns, :max_cost]
+    @enforce_keys [
+      :provider_pid,
+      :model,
+      :tools,
+      :thinking_level,
+      :max_tokens,
+      :max_retries,
+      :llm_client,
+      :max_turns,
+      :max_cost
+    ]
     defstruct [
-      :provider_pid, :model, :tools, :thinking_level, :max_tokens,
-      :max_retries, :llm_client, :max_turns, :max_cost,
+      :provider_pid,
+      :model,
+      :tools,
+      :thinking_level,
+      :max_tokens,
+      :max_retries,
+      :llm_client,
+      :max_turns,
+      :max_cost,
       turn_count: 0,
       session_cost: 0.0
     ]
@@ -1290,7 +1306,7 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   # Works with both LoopCtx and state since both have max_cost/session_cost fields.
-  @spec over_budget?(%{max_cost: float() | nil, session_cost: float()}) :: boolean()
+  @spec over_budget?(LoopCtx.t() | state()) :: boolean()
   defp over_budget?(%{max_cost: nil}), do: false
 
   defp over_budget?(%{max_cost: max_cost, session_cost: session_cost})
@@ -1310,7 +1326,6 @@ defmodule Minga.Agent.Providers.Native do
   @spec turn_cost_from_usage(Event.token_usage() | nil) :: float()
   defp turn_cost_from_usage(nil), do: 0.0
   defp turn_cost_from_usage(%{cost: cost}) when is_number(cost), do: cost
-  defp turn_cost_from_usage(_), do: 0.0
 
   @spec report_turn_cost(loop_ctx(), Event.token_usage() | nil) :: :ok
   defp report_turn_cost(_lctx, nil), do: :ok

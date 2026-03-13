@@ -59,6 +59,8 @@ defmodule Minga.Config.OptionsTest do
                agent_prompt_cache: true,
                agent_notifications: true,
                agent_notify_on: [:approval, :complete, :error],
+               agent_max_turns: 100,
+               agent_max_cost: nil,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                whichkey_layout: :bottom,
