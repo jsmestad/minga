@@ -15,6 +15,7 @@ defmodule Minga.Application do
       ├── Minga.Config.Advice
       ├── Minga.Config.Loader
       ├── Minga.Buffer.Supervisor (DynamicSupervisor)
+      ├── Minga.Fold.Registry
       ├── Minga.Extension.Registry
       ├── Minga.Extension.Supervisor (DynamicSupervisor)
       ├── Minga.Agent.Supervisor (DynamicSupervisor)
@@ -50,6 +51,7 @@ defmodule Minga.Application do
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
+      Minga.Fold.Registry,
       Minga.Extension.Registry,
       Minga.Extension.Supervisor,
       Minga.Config.Loader,

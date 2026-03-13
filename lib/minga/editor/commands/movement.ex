@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Buffer.Unicode
 
   alias Minga.Editor.Commands.Helpers
+  alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
@@ -59,7 +60,7 @@ defmodule Minga.Editor.Commands.Movement do
       visual_line_move(buf, state, :up)
     else
       BufferServer.move(buf, :up)
-      state
+      skip_folded_line(state, buf, :up)
     end
   end
 
@@ -68,7 +69,7 @@ defmodule Minga.Editor.Commands.Movement do
       visual_line_move(buf, state, :down)
     else
       BufferServer.move(buf, :down)
-      state
+      skip_folded_line(state, buf, :down)
     end
   end
 
@@ -483,4 +484,38 @@ defmodule Minga.Editor.Commands.Movement do
   catch
     :exit, _ -> false
   end
+
+  # After a buffer move, check if the cursor landed on a folded (hidden) line.
+  # If so, move it to the next/prev visible line using the active window's fold map.
+  @spec skip_folded_line(state(), pid(), :up | :down) :: state()
+  defp skip_folded_line(state, buf, direction) do
+    case active_fold_map(state) do
+      nil -> state
+      fm -> maybe_skip_fold(fm, buf, direction, state)
+    end
+  end
+
+  @spec active_fold_map(state()) :: FoldMap.t() | nil
+  defp active_fold_map(state) do
+    case EditorState.active_window_struct(state) do
+      nil -> nil
+      %Window{fold_map: fm} -> if FoldMap.empty?(fm), do: nil, else: fm
+    end
+  end
+
+  @spec maybe_skip_fold(FoldMap.t(), pid(), :up | :down, state()) :: state()
+  defp maybe_skip_fold(fm, buf, direction, state) do
+    {cursor_line, _col} = BufferServer.cursor(buf)
+
+    if FoldMap.folded?(fm, cursor_line) do
+      target = fold_skip_target(fm, cursor_line, direction)
+      BufferServer.move_to(buf, {target, 0})
+    end
+
+    state
+  end
+
+  @spec fold_skip_target(FoldMap.t(), non_neg_integer(), :up | :down) :: non_neg_integer()
+  defp fold_skip_target(fm, cursor_line, :down), do: FoldMap.next_visible(fm, cursor_line - 1)
+  defp fold_skip_target(fm, cursor_line, :up), do: FoldMap.prev_visible(fm, cursor_line + 1)
 end

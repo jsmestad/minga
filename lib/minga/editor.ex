@@ -24,6 +24,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.FoldRange
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.KeyDispatch
@@ -217,6 +218,20 @@ defmodule Minga.Editor do
     {:reply, :ok, new_state}
   end
 
+  def handle_call({:api_set_fold_ranges, ranges}, _from, state) do
+    new_state =
+      case EditorState.active_window_struct(state) do
+        nil ->
+          state
+
+        %Window{id: id} ->
+          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, ranges))
+      end
+
+    new_state = Renderer.render(new_state)
+    {:reply, :ok, new_state}
+  end
+
   def handle_call({:api_log_message, text}, _from, state) do
     new_state = log_message(state, text)
     {:reply, :ok, new_state}
@@ -372,6 +387,25 @@ defmodule Minga.Editor do
   def handle_info({tag, {:highlight_spans, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
     new_state = HighlightEvents.handle_spans(state, version, spans)
+    {:noreply, new_state}
+  end
+
+  def handle_info({tag, {:fold_ranges, _version, ranges}}, state)
+      when tag in [:minga_highlight, :minga_input] do
+    fold_ranges =
+      Enum.map(ranges, fn {start_line, end_line} ->
+        FoldRange.new!(start_line, end_line)
+      end)
+
+    new_state =
+      case EditorState.active_window_struct(state) do
+        nil ->
+          state
+
+        %Window{id: id} ->
+          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+      end
+
     {:noreply, new_state}
   end
 

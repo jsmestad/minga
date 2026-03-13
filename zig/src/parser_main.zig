@@ -125,6 +125,9 @@ fn handleCommand(
             if (hl.query != null) {
                 try sendHighlightResults(hl, pb.version, stdout, alloc);
             }
+            if (hl.fold_query != null) {
+                try sendFoldResults(hl, pb.version, stdout, alloc);
+            }
         },
         .edit_buffer => {
             // Handled at dispatch level via handleEditBuffer().
@@ -134,6 +137,9 @@ fn handleCommand(
         },
         .set_injection_query => |source| {
             hl.setInjectionQuery(source) catch {};
+        },
+        .set_fold_query => |source| {
+            hl.setFoldQuery(source) catch {};
         },
         .load_grammar => |lg| {
             hl.loadGrammar(lg.name, lg.path) catch {
@@ -184,6 +190,25 @@ fn handleEditBuffer(
     if (hl.query != null) {
         try sendHighlightResults(hl, decoded.version, stdout, alloc);
     }
+    if (hl.fold_query != null) {
+        try sendFoldResults(hl, decoded.version, stdout, alloc);
+    }
+}
+
+/// Send fold range results to stdout.
+fn sendFoldResults(
+    hl: *highlighter_mod.Highlighter,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    const ranges = hl.runFoldQuery(alloc) catch return orelse return;
+    defer alloc.free(ranges);
+
+    const buf = try protocol.encodeFoldRanges(alloc, version, ranges);
+    defer alloc.free(buf);
+    try protocol.writeMessage(stdout, buf);
+    try stdout.flush();
 }
 
 /// Send highlight results (names, spans, injection ranges) to stdout.

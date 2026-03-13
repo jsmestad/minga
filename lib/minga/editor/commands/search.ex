@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Search do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Window
   alias Minga.Mode
   alias Minga.Mode.SearchState
   alias Minga.ProjectSearch
@@ -55,6 +56,7 @@ defmodule Minga.Editor.Commands.Search do
         BufferServer.move_to(buf, {line, col})
 
         state
+        |> auto_unfold_at(line)
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
     end
@@ -82,7 +84,7 @@ defmodule Minga.Editor.Commands.Search do
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
-        state
+        auto_unfold_at(state, line)
     end
   end
 
@@ -105,7 +107,7 @@ defmodule Minga.Editor.Commands.Search do
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
-        state
+        auto_unfold_at(state, line)
     end
   end
 
@@ -133,6 +135,7 @@ defmodule Minga.Editor.Commands.Search do
             BufferServer.move_to(buf, {line, col})
 
             state
+            |> auto_unfold_at(line)
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :forward)
         end
@@ -159,6 +162,7 @@ defmodule Minga.Editor.Commands.Search do
             BufferServer.move_to(buf, {line, col})
 
             state
+            |> auto_unfold_at(line)
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :backward)
         end
@@ -367,5 +371,22 @@ defmodule Minga.Editor.Commands.Search do
     end
   catch
     :exit, _ -> File.cwd!()
+  end
+
+  # Auto-unfold any fold containing the given line in the active window.
+  @spec auto_unfold_at(state(), non_neg_integer()) :: state()
+  defp auto_unfold_at(state, line) do
+    case active_foldable_window(state) do
+      nil -> state
+      win -> EditorState.update_window(state, win.id, &Window.unfold_containing(&1, [line]))
+    end
+  end
+
+  @spec active_foldable_window(state()) :: Window.t() | nil
+  defp active_foldable_window(state) do
+    case EditorState.active_window_struct(state) do
+      %Window{} = win -> if Window.has_folds?(win), do: win
+      nil -> nil
+    end
   end
 end

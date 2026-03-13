@@ -88,7 +88,12 @@ defmodule Minga.Command.RegistryTest do
           :tab_goto_9,
           :toggle_comment_line,
           :toggle_comment_selection,
-          :toggle_wrap
+          :toggle_wrap,
+          :fold_toggle,
+          :fold_close,
+          :fold_open,
+          :fold_close_all,
+          :fold_open_all
         ]
         |> Enum.sort()
 

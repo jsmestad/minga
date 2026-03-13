@@ -503,6 +503,43 @@ defmodule Minga.Mode.Normal do
     {:execute, :tab_prev, %{state | pending_g: false}}
   end
 
+  # ── Fold commands (z prefix) ──────────────────────────────────────────────
+
+  # z prefix — wait for second key
+  def handle_key({?z, 0}, %ModeState{pending_z: false} = state) do
+    {:continue, %{state | pending_z: true}}
+  end
+
+  # za — toggle fold
+  def handle_key({?a, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :fold_toggle, %{state | pending_z: false}}
+  end
+
+  # zc — close (fold) at cursor
+  def handle_key({?c, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :fold_close, %{state | pending_z: false}}
+  end
+
+  # zo — open (unfold) at cursor
+  def handle_key({?o, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :fold_open, %{state | pending_z: false}}
+  end
+
+  # zM — close all folds
+  def handle_key({?M, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :fold_close_all, %{state | pending_z: false}}
+  end
+
+  # zR — open all folds
+  def handle_key({?R, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :fold_open_all, %{state | pending_z: false}}
+  end
+
+  # Unknown z{key} — cancel
+  def handle_key(_key, %ModeState{pending_z: true} = state) do
+    {:continue, %{state | pending_z: false}}
+  end
+
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do

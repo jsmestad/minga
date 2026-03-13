@@ -45,6 +45,7 @@ defmodule Minga.Editor.HighlightSync do
 
     query_override = user_query_override(language)
     injection_override = user_injection_query_override(language)
+    fold_override = user_fold_query_override(language)
 
     parse_cmd = Protocol.encode_parse_buffer(version, content)
 
@@ -53,6 +54,7 @@ defmodule Minga.Editor.HighlightSync do
         [Protocol.encode_set_language(language)],
         query_override,
         injection_override,
+        fold_override,
         [parse_cmd]
       ])
 
@@ -106,6 +108,30 @@ defmodule Minga.Editor.HighlightSync do
     case System.user_home() do
       nil -> nil
       home -> Path.join([home, ".config", "minga", "queries", language, "injections.scm"])
+    end
+  end
+
+  # Returns a list with a set_fold_query command if the user has a custom
+  # fold query file for this language, or an empty list to use the Zig built-in.
+  @spec user_fold_query_override(String.t()) :: [binary()]
+  defp user_fold_query_override(language) do
+    user_path = user_fold_query_path(language)
+
+    if user_path != nil and File.exists?(user_path) do
+      case File.read(user_path) do
+        {:ok, query_text} -> [Protocol.encode_set_fold_query(query_text)]
+        {:error, _} -> []
+      end
+    else
+      []
+    end
+  end
+
+  @spec user_fold_query_path(String.t()) :: String.t() | nil
+  defp user_fold_query_path(language) do
+    case System.user_home() do
+      nil -> nil
+      home -> Path.join([home, ".config", "minga", "queries", language, "folds.scm"])
     end
   end
 

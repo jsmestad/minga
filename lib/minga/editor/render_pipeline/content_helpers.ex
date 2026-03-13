@@ -101,10 +101,29 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   # ── Line rendering ────────────────────────────────────────────────────────
 
-  @doc "Renders lines without wrapping, with dirty-line caching."
-  @spec render_lines_nowrap([String.t()], line_render_opts()) ::
+  @doc """
+  Renders lines without word wrapping.
+
+  When `opts.visible_line_map` is non-nil (folds active), uses the fold-aware
+  path that skips hidden lines and renders fold summaries. Otherwise uses the
+  zero-overhead sequential path.
+  """
+  @spec render_lines_nowrap([String.t()], map()) ::
           {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
   def render_lines_nowrap(lines, opts) do
+    visible_line_map = Map.get(opts, :visible_line_map)
+
+    if visible_line_map != nil do
+      render_lines_nowrap_folded(lines, opts, visible_line_map)
+    else
+      render_lines_nowrap_sequential(lines, opts)
+    end
+  end
+
+  # Standard sequential rendering (no folds, zero overhead fast path)
+  @spec render_lines_nowrap_sequential([String.t()], map()) ::
+          {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
+  defp render_lines_nowrap_sequential(lines, opts) do
     %{
       first_line: first_line,
       cursor_line: cursor_line,
@@ -158,6 +177,116 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       )
 
     {Enum.reverse(gutters), Enum.reverse(contents_rev), length(lines), window}
+  end
+
+  # Fold-aware rendering: uses visible_line_map to skip folded lines
+  # and render fold summary indicators
+  @spec render_lines_nowrap_folded(
+          [String.t()],
+          line_render_opts(),
+          [Minga.Editor.FoldMap.VisibleLines.line_entry()]
+        ) :: {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
+  defp render_lines_nowrap_folded(lines, opts, visible_line_map) do
+    %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      row_off: row_off,
+      col_off: col_off,
+      window: window
+    } = opts
+
+    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+    max_rows = length(visible_line_map)
+
+    {gutters, contents_rev, window} =
+      visible_line_map
+      |> Enum.with_index()
+      |> Enum.reduce({[], [], window}, fn {{buf_line, fold_info}, screen_row}, {g, c, win} ->
+        line_index = buf_line - first_line
+        line_text = Enum.at(lines, line_index, "")
+        display_text = fold_display_text(line_text, fold_info)
+
+        render_folded_line(
+          win,
+          buf_line,
+          display_text,
+          fold_info,
+          screen_row,
+          %{
+            cursor_line: cursor_line,
+            ctx: ctx,
+            ln_style: ln_style,
+            gutter_w: gutter_w,
+            sign_w: sign_w,
+            max_rows: max_rows,
+            row_off: row_off,
+            col_off: col_off
+          },
+          {g, c}
+        )
+      end)
+
+    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(visible_line_map), window}
+  end
+
+  @spec fold_display_text(String.t(), :normal | {:fold_start, pos_integer()}) :: String.t()
+  defp fold_display_text(text, :normal), do: text
+  defp fold_display_text(text, {:fold_start, hidden}), do: text <> " ··· #{hidden} lines"
+
+  @spec fold_gutter_indicator(
+          :normal | {:fold_start, pos_integer()},
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          [DisplayList.draw()]
+  defp fold_gutter_indicator({:fold_start, _}, screen_row, row_off, col_off) do
+    [DisplayList.draw(screen_row + row_off, col_off, "▸")]
+  end
+
+  defp fold_gutter_indicator(:normal, _screen_row, _row_off, _col_off), do: []
+
+  @spec render_folded_line(
+          Window.t(),
+          non_neg_integer(),
+          String.t(),
+          :normal | {:fold_start, pos_integer()},
+          non_neg_integer(),
+          map(),
+          {[DisplayList.draw()], [DisplayList.draw()]}
+        ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
+  defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
+    if Window.dirty?(win, buf_line) do
+      fold_g =
+        fold_gutter_indicator(fold_info, screen_row, render_opts.row_off, render_opts.col_off)
+
+      {g_cmds, c_cmds, _rows} =
+        BufferLine.render(%{
+          line_text: display_text,
+          buf_line: buf_line,
+          cursor_line: render_opts.cursor_line,
+          byte_offset: 0,
+          screen_row: screen_row,
+          ctx: render_opts.ctx,
+          ln_style: render_opts.ln_style,
+          gutter_w: render_opts.gutter_w,
+          sign_w: render_opts.sign_w,
+          wrap_entry: nil,
+          max_rows: render_opts.max_rows,
+          row_offset: render_opts.row_off,
+          col_offset: render_opts.col_off
+        })
+
+      win = Window.cache_line(win, buf_line, fold_g ++ g_cmds, c_cmds)
+      {(fold_g ++ g_cmds) ++ g, prepend_all(c, c_cmds), win}
+    else
+      g_cmds = Map.get(win.cached_gutter, buf_line, [])
+      c_cmds = Map.get(win.cached_content, buf_line, [])
+      {g_cmds ++ g, prepend_all(c, c_cmds), win}
+    end
   end
 
   @doc "Renders lines with word wrapping."

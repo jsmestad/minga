@@ -31,6 +31,8 @@ defmodule Minga.Editor.Window do
 
   alias Minga.Buffer.Document
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.FoldMap
+  alias Minga.Editor.FoldRange
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
   alias Minga.Popup.Active, as: PopupActive
@@ -55,6 +57,8 @@ defmodule Minga.Editor.Window do
           buffer: pid(),
           viewport: Viewport.t(),
           cursor: Document.position(),
+          fold_map: FoldMap.t(),
+          fold_ranges: [FoldRange.t()],
           popup_meta: PopupActive.t() | nil,
           dirty_lines: :all | %{optional(non_neg_integer()) => true},
           cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
@@ -74,6 +78,8 @@ defmodule Minga.Editor.Window do
     :buffer,
     :viewport,
     cursor: {0, 0},
+    fold_map: %FoldMap{folds: []},
+    fold_ranges: [],
     popup_meta: nil,
     dirty_lines: %{},
     cached_gutter: %{},
@@ -156,6 +162,82 @@ defmodule Minga.Editor.Window do
   @spec popup?(t()) :: boolean()
   def popup?(%__MODULE__{popup_meta: nil}), do: false
   def popup?(%__MODULE__{popup_meta: %PopupActive{}}), do: true
+
+  # ── Fold operations ────────────────────────────────────────────────────────
+
+  @doc "Returns true if this window has any active folds."
+  @spec has_folds?(t()) :: boolean()
+  def has_folds?(%__MODULE__{fold_map: fm}), do: not FoldMap.empty?(fm)
+
+  @doc "Toggles the fold at the given buffer line using the window's available fold ranges."
+  @spec toggle_fold(t(), non_neg_integer()) :: t()
+  def toggle_fold(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    %{window | fold_map: FoldMap.toggle(fm, line, ranges)}
+    |> invalidate()
+  end
+
+  @doc "Folds the range containing the given buffer line."
+  @spec fold_at(t(), non_neg_integer()) :: t()
+  def fold_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    case Enum.find(ranges, &FoldRange.contains?(&1, line)) do
+      nil -> window
+      range -> %{window | fold_map: FoldMap.fold(fm, range)} |> invalidate()
+    end
+  end
+
+  @doc "Unfolds the range containing the given buffer line."
+  @spec unfold_at(t(), non_neg_integer()) :: t()
+  def unfold_at(%__MODULE__{fold_map: fm} = window, line) do
+    new_fm = FoldMap.unfold_at(fm, line)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm} |> invalidate()
+    end
+  end
+
+  @doc "Folds all available ranges."
+  @spec fold_all(t()) :: t()
+  def fold_all(%__MODULE__{fold_ranges: ranges} = window) do
+    %{window | fold_map: FoldMap.fold_all(FoldMap.new(), ranges)}
+    |> invalidate()
+  end
+
+  @doc "Unfolds all folds."
+  @spec unfold_all(t()) :: t()
+  def unfold_all(%__MODULE__{} = window) do
+    %{window | fold_map: FoldMap.unfold_all(window.fold_map)}
+    |> invalidate()
+  end
+
+  @doc "Updates the available fold ranges (from a provider). Preserves existing folds that still exist in the new ranges."
+  @spec set_fold_ranges(t(), [FoldRange.t()]) :: t()
+  def set_fold_ranges(%__MODULE__{fold_map: fm} = window, new_ranges) do
+    # Keep existing folds that still match a range in the new set
+    surviving_folds =
+      Enum.filter(FoldMap.folds(fm), fn old_fold ->
+        Enum.any?(new_ranges, fn new_range ->
+          new_range.start_line == old_fold.start_line and
+            new_range.end_line == old_fold.end_line
+        end)
+      end)
+
+    new_fm = FoldMap.from_ranges(surviving_folds)
+    %{window | fold_ranges: new_ranges, fold_map: new_fm}
+  end
+
+  @doc "Unfolds any folds that contain the given lines (used by search auto-unfold)."
+  @spec unfold_containing(t(), [non_neg_integer()]) :: t()
+  def unfold_containing(%__MODULE__{fold_map: fm} = window, lines) do
+    new_fm = FoldMap.unfold_containing(fm, lines)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm} |> invalidate()
+    end
+  end
 
   # ── Dirty-line tracking ───────────────────────────────────────────────────
 
