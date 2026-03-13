@@ -43,9 +43,15 @@ defmodule Minga.Agent.Notifier do
 
   @doc """
   Clears attention indicators (e.g., when user focuses the agent panel).
+
+  Tab bar badge and terminal title prefix are cleared automatically by
+  `EditorState.switch_tab/2` when the user switches to the agent tab.
+  This function resets the debounce timer so new notifications can fire
+  immediately after the user returns.
   """
   @spec clear_attention() :: :ok
   def clear_attention do
+    Process.delete(:last_notification_at)
     :ok
   end
 

@@ -138,6 +138,7 @@ defmodule Minga.Theme.Catppuccin do
         inactive_bg: p.mantle,
         separator_fg: p.surface0,
         modified_fg: p.peach,
+        attention_fg: p.red,
         bg: p.mantle
       }
     }

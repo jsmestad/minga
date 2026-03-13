@@ -290,4 +290,36 @@ defmodule Minga.Editor.State.TabBarTest do
       assert TabBar.active(tb).label == "Solo"
     end
   end
+
+  describe "any_attention?/1" do
+    test "returns false when no tabs have attention" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      refute TabBar.any_attention?(tb)
+    end
+
+    test "returns true when a tab has attention" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      tb = TabBar.update_tab(tb, agent.id, &Tab.set_attention(&1, true))
+      assert TabBar.any_attention?(tb)
+    end
+  end
+
+  describe "set_attention_by_session/3" do
+    test "sets attention on the matching tab" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, agent} = TabBar.add(tb, :agent, "Agent")
+      fake_pid = self()
+      tb = TabBar.update_tab(tb, agent.id, &Tab.set_session(&1, fake_pid))
+
+      tb = TabBar.set_attention_by_session(tb, fake_pid, true)
+      assert Enum.find(tb.tabs, &(&1.id == agent.id)).attention == true
+    end
+
+    test "returns unchanged when no tab matches" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      tb2 = TabBar.set_attention_by_session(tb, self(), true)
+      assert tb2 == tb
+    end
+  end
 end

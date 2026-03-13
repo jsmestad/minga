@@ -79,10 +79,14 @@ defmodule Minga.Editor.TabBarRenderer do
       icon = tab_icon(tab)
       label = tab_label(tab)
       dirty = tab_dirty_marker(tab, colors)
+      attention = if tab.attention and not is_active, do: " !", else: ""
       number = tab_number(position)
 
-      text = " #{number}#{icon} #{label}#{dirty} "
+      text = " #{number}#{icon} #{label}#{dirty}#{attention} "
       width = Unicode.display_width(text)
+
+      # Override color for attention tabs (not active) to make the badge visible
+      fg = if tab.attention and not is_active, do: colors.attention_fg, else: fg
 
       %{text: text, fg: fg, bg: bg, tab_id: tab.id, width: width}
     end)
@@ -295,6 +299,7 @@ defmodule Minga.Editor.TabBarRenderer do
       inactive_bg: ml.bar_bg,
       separator_fg: ml.bar_fg,
       modified_fg: 0xDA8548,
+      attention_fg: 0xFF6C6B,
       bg: ml.bar_bg
     }
   end

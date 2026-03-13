@@ -64,7 +64,8 @@ defmodule Minga.Editor.State.Tab do
           kind: kind(),
           label: String.t(),
           context: context(),
-          session: pid() | nil
+          session: pid() | nil,
+          attention: boolean()
         }
 
   @enforce_keys [:id, :kind]
@@ -72,7 +73,8 @@ defmodule Minga.Editor.State.Tab do
             kind: nil,
             label: "",
             context: %{},
-            session: nil
+            session: nil,
+            attention: false
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -112,5 +114,11 @@ defmodule Minga.Editor.State.Tab do
   @spec set_session(t(), pid() | nil) :: t()
   def set_session(%__MODULE__{} = tab, pid) do
     %{tab | session: pid}
+  end
+
+  @doc "Sets the attention flag (agent needs user input)."
+  @spec set_attention(t(), boolean()) :: t()
+  def set_attention(%__MODULE__{} = tab, value) when is_boolean(value) do
+    %{tab | attention: value}
   end
 end

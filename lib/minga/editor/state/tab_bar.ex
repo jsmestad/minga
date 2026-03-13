@@ -272,4 +272,20 @@ defmodule Minga.Editor.State.TabBar do
         %{tb | active_id: next_tab.id}
     end
   end
+
+  @doc "Returns true if any tab has its attention flag set."
+  @spec any_attention?(t()) :: boolean()
+  def any_attention?(%__MODULE__{tabs: tabs}) do
+    Enum.any?(tabs, & &1.attention)
+  end
+
+  @doc "Sets the attention flag on the tab matching the given session pid."
+  @spec set_attention_by_session(t(), pid(), boolean()) :: t()
+  def set_attention_by_session(%__MODULE__{} = tb, session_pid, value)
+      when is_pid(session_pid) and is_boolean(value) do
+    case find_by_session(tb, session_pid) do
+      %Tab{id: id} -> update_tab(tb, id, &Tab.set_attention(&1, value))
+      nil -> tb
+    end
+  end
 end

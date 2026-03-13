@@ -153,6 +153,7 @@ defmodule Minga.Theme.OneDark do
         inactive_bg: @ui_bg,
         separator_fg: @syntax_guide,
         modified_fg: @hue_6_2,
+        attention_fg: @hue_5,
         bg: @ui_bg
       }
     }

@@ -226,6 +226,7 @@ defmodule Minga.Theme do
       :inactive_bg,
       :separator_fg,
       :modified_fg,
+      :attention_fg,
       :bg
     ]
     defstruct [
@@ -235,6 +236,7 @@ defmodule Minga.Theme do
       :inactive_bg,
       :separator_fg,
       :modified_fg,
+      :attention_fg,
       :bg
     ]
 
@@ -245,6 +247,7 @@ defmodule Minga.Theme do
             inactive_bg: Minga.Theme.color(),
             separator_fg: Minga.Theme.color(),
             modified_fg: Minga.Theme.color(),
+            attention_fg: Minga.Theme.color(),
             bg: Minga.Theme.color()
           }
   end
