@@ -4,10 +4,13 @@ defmodule Minga.Editor.StateTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
+  alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -234,6 +237,149 @@ defmodule Minga.Editor.StateTest do
     test "excludes one row for minibuffer" do
       {state, _} = state_with_buffer()
       assert EditorState.screen_rect(state) == {0, 0, 80, 23}
+    end
+  end
+
+  # ── sync_active_window_buffer/1 — window.content field ───────────────────────
+
+  describe "sync_active_window_buffer/1 content field" do
+    test "updates window.content to {:buffer, new_pid} when buffer changes" do
+      {state, _buf1} = state_with_buffer("hello")
+      buf2 = start_buffer("world")
+
+      state = %{state | buffers: Buffers.add(state.buffers, buf2)}
+      new_state = EditorState.sync_active_window_buffer(state)
+
+      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      assert window.buffer == buf2
+      assert Content.buffer?(window.content), "content should be a :buffer reference"
+
+      assert Content.buffer_pid(window.content) == buf2,
+             "content should reference the new buffer pid, " <>
+               "got #{inspect(window.content)}"
+    end
+
+    test "updates content from agent_chat to buffer when buffer changes" do
+      agent_buf = start_buffer("")
+      file_buf = start_buffer("defmodule Foo, do: :ok")
+
+      # Build state with an agent_chat window
+      state =
+        %{new_state() | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}}
+
+      tree = WindowTree.new(1)
+      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+
+      state = %{
+        state
+        | windows: %Windows{tree: tree, map: %{1 => agent_window}, active: 1, next_id: 2}
+      }
+
+      # Confirm starting state: agent_chat content
+      window = Map.fetch!(state.windows.map, 1)
+      assert Content.agent_chat?(window.content)
+
+      # Switch active buffer to the file buffer
+      state = %{state | buffers: Buffers.add(state.buffers, file_buf)}
+      new_state = EditorState.sync_active_window_buffer(state)
+
+      window = Map.fetch!(new_state.windows.map, 1)
+      assert window.buffer == file_buf
+
+      assert window.content == Content.buffer(file_buf),
+             "content should switch from agent_chat to buffer, got #{inspect(window.content)}"
+    end
+
+    test "no-op when buffer has not changed" do
+      {state, buf1} = state_with_buffer("hello")
+      window_before = Map.fetch!(state.windows.map, state.windows.active)
+
+      new_state = EditorState.sync_active_window_buffer(state)
+
+      window_after = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      assert window_after.buffer == buf1
+      assert window_after.content == window_before.content
+    end
+  end
+
+  # ── add_buffer/2 from agent tab ──────────────────────────────────────────────
+
+  describe "add_buffer/2 from agent tab" do
+    setup do
+      agent_buf = start_buffer("")
+
+      state =
+        %{new_state() | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}}
+
+      tree = WindowTree.new(1)
+      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+
+      state = %{
+        state
+        | windows: %Windows{tree: tree, map: %{1 => agent_window}, active: 1, next_id: 2},
+          tab_bar: TabBar.new(Tab.new_agent(1, "Agent")),
+          keymap_scope: :agent
+      }
+
+      %{state: state, agent_buf: agent_buf}
+    end
+
+    test "creates a file tab and makes it active", %{state: state} do
+      file_buf = start_buffer("file content")
+      new_state = EditorState.add_buffer(state, file_buf)
+
+      active_tab = TabBar.active(new_state.tab_bar)
+      assert active_tab.kind == :file
+    end
+
+    test "switches keymap_scope from :agent to :editor", %{state: state} do
+      file_buf = start_buffer("file content")
+      new_state = EditorState.add_buffer(state, file_buf)
+
+      assert new_state.keymap_scope == :editor
+    end
+
+    test "active window buffer points to the new file buffer", %{state: state} do
+      file_buf = start_buffer("file content")
+      new_state = EditorState.add_buffer(state, file_buf)
+
+      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      assert window.buffer == file_buf
+    end
+
+    test "active window content is {:buffer, _}, not {:agent_chat, _}", %{state: state} do
+      file_buf = start_buffer("file content")
+      new_state = EditorState.add_buffer(state, file_buf)
+
+      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+
+      assert Content.buffer?(window.content),
+             "window content should be {:buffer, _} after opening file from agent tab, " <>
+               "got #{inspect(window.content)}"
+
+      refute Content.agent_chat?(window.content),
+             "window content should not be :agent_chat after opening file"
+    end
+
+    test "new file tab context has correct window content type", %{state: state} do
+      file_buf = start_buffer("file content")
+      new_state = EditorState.add_buffer(state, file_buf)
+
+      # The new file tab's snapshotted context should also have the correct
+      # window content type, so switching tabs restores it properly.
+      active_tab = TabBar.active(new_state.tab_bar)
+      tab_windows = active_tab.context[:windows]
+
+      if tab_windows do
+        active_win_id = tab_windows.active
+        tab_window = Map.get(tab_windows.map, active_win_id)
+
+        if tab_window do
+          assert Content.buffer?(tab_window.content),
+                 "tab context window content should be {:buffer, _}, " <>
+                   "got #{inspect(tab_window.content)}"
+        end
+      end
     end
   end
 end

@@ -326,7 +326,17 @@ defmodule Minga.Editor.State do
         # different content, and cached draws from the old buffer are
         # completely wrong. Also reset tracking fields so
         # detect_invalidation forces a full redraw on the next frame.
-        window = %{Window.invalidate(window) | buffer: buffers.active}
+        #
+        # Both `buffer` and `content` must be updated. The render
+        # pipeline checks `Content.agent_chat?(window.content)` to
+        # decide rendering paths, so a stale content tag causes the
+        # window to be routed to the wrong renderer (e.g., blank
+        # screen when opening a file from the agent tab).
+        window = %{
+          Window.invalidate(window)
+          | buffer: buffers.active,
+            content: Content.buffer(buffers.active)
+        }
 
         %{state | windows: %{ws | map: Map.put(windows, id, window)}}
 
