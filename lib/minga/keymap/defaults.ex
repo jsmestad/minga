@@ -47,6 +47,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}, {?p, @none}], :buffer_prev, "Previous buffer"},
     {[{?b, @none}, {?d, @none}], :kill_buffer, "Kill buffer"},
     {[{?b, @none}, {?m, @none}], :view_messages, "View messages"},
+    {[{?b, @none}, {?W, @none}], :view_warnings, "View warnings"},
     {[{?b, @none}, {?s, @none}], :view_scratch, "Switch to scratch"},
     {[{?b, @none}, {?N, @none}], :new_buffer, "New empty buffer"},
 

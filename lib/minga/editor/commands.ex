@@ -425,6 +425,7 @@ defmodule Minga.Editor.Commands do
     do: BufferManagement.execute(state, :toggle_wrap)
 
   def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
+  def execute(state, :view_warnings), do: BufferManagement.execute(state, :view_warnings)
   def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
   def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
@@ -438,7 +439,7 @@ defmodule Minga.Editor.Commands do
         %{state | status_msg: "Config reloaded"}
 
       {:error, msg} ->
-        Minga.Editor.log_to_messages("Config reload error: #{msg}")
+        Minga.Log.warning(:config, "Config reload error: #{msg}")
         %{state | status_msg: "Config reload error: #{msg}"}
     end
   end
@@ -626,7 +627,7 @@ defmodule Minga.Editor.Commands do
         %{state | status_msg: "Formatted"}
 
       {:error, msg} ->
-        Minga.Editor.log_to_messages("Formatter failed: #{buf_name} (#{msg})")
+        Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
         %{state | status_msg: "Format error: #{msg}"}
     end
   end

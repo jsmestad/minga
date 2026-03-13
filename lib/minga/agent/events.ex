@@ -20,6 +20,7 @@ defmodule Minga.Agent.Events do
           :render
           | {:render, pos_integer()}
           | {:log_message, String.t()}
+          | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
 
@@ -171,7 +172,7 @@ defmodule Minga.Agent.Events do
 
   def handle(state, {:error, message}) do
     state = AgentAccess.update_agent(state, &AgentState.set_error(&1, message))
-    {state, [:render, {:log_message, "Agent error: #{message}"}]}
+    {state, [:render, {:log_warning, "Agent error: #{message}"}]}
   end
 
   def handle(state, :spinner_tick) do
