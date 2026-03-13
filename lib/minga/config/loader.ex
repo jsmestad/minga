@@ -193,7 +193,16 @@ defmodule Minga.Config.Loader do
   @spec apply_log_level() :: :ok
   defp apply_log_level do
     level = Options.get(:log_level)
-    Logger.configure(level: level)
+
+    # Only apply the Minga log level if it is more restrictive than what
+    # Mix config already set. This prevents the default :info from
+    # overriding config/test.exs {:logger, level: :warning}.
+    current = Logger.level()
+
+    if Logger.compare_levels(level, current) == :gt do
+      Logger.configure(level: level)
+    end
+
     :ok
   rescue
     # Options agent may not be running yet (e.g., during tests)

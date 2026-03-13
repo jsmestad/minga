@@ -20,6 +20,15 @@ defmodule Minga.Agent.Tools.Find do
   """
   @spec execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}) when is_binary(pattern) and is_binary(path) do
+    unless File.dir?(path) do
+      {:error, "Directory does not exist: #{path}"}
+    else
+      do_execute(pattern, path, opts)
+    end
+  end
+
+  @spec do_execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
+  defp do_execute(pattern, path, opts) do
     type = Map.get(opts, "type", "file")
     max_depth = Map.get(opts, "max_depth", 10)
 

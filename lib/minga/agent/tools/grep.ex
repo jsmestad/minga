@@ -21,6 +21,15 @@ defmodule Minga.Agent.Tools.Grep do
   """
   @spec execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(pattern, path, opts \\ %{}) when is_binary(pattern) and is_binary(path) do
+    unless File.dir?(path) do
+      {:error, "Directory does not exist: #{path}"}
+    else
+      do_execute(pattern, path, opts)
+    end
+  end
+
+  @spec do_execute(String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
+  defp do_execute(pattern, path, opts) do
     glob = Map.get(opts, "glob")
     case_sensitive = Map.get(opts, "case_sensitive", true)
     context_lines = Map.get(opts, "context_lines", 0)
