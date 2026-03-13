@@ -29,6 +29,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Diagnostics
   alias Minga.Editor.Commands.Editing
   alias Minga.Editor.Commands.Eval
+  alias Minga.Editor.Commands.Folding
   alias Minga.Editor.Commands.Git, as: GitCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Marks
@@ -405,6 +406,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, :project_add), do: Project.execute(state, :project_add)
   def execute(state, :project_remove), do: Project.execute(state, :project_remove)
   def execute(state, :project_recent_files), do: Project.execute(state, :project_recent_files)
+
+  # ── Folding ───────────────────────────────────────────────────────────────
+
+  def execute(state, :fold_toggle), do: Folding.execute(state, :fold_toggle)
+  def execute(state, :fold_close), do: Folding.execute(state, :fold_close)
+  def execute(state, :fold_open), do: Folding.execute(state, :fold_open)
+  def execute(state, :fold_close_all), do: Folding.execute(state, :fold_close_all)
+  def execute(state, :fold_open_all), do: Folding.execute(state, :fold_open_all)
 
   # ── Buffer management ─────────────────────────────────────────────────────
 

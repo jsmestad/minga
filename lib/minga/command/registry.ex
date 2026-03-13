@@ -96,7 +96,12 @@ defmodule Minga.Command.Registry do
     {:agent_pick_model, "Pick AI agent model"},
     {:agent_cycle_model, "Cycle AI agent model"},
     {:agent_summarize, "Summarize session to context artifact"},
-    {:agent_cycle_thinking, "Cycle AI thinking level"}
+    {:agent_cycle_thinking, "Cycle AI thinking level"},
+    {:fold_toggle, "Toggle fold at cursor (za)"},
+    {:fold_close, "Close fold at cursor (zc)"},
+    {:fold_open, "Open fold at cursor (zo)"},
+    {:fold_close_all, "Close all folds (zM)"},
+    {:fold_open_all, "Open all folds (zR)"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────
