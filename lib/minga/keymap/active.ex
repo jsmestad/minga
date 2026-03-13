@@ -1,14 +1,16 @@
 defmodule Minga.Keymap.Active do
   @moduledoc """
-  Mutable keymap store backed by an Agent.
+  Mutable keymap store backed by ETS for lock-free reads.
 
   Holds the active leader trie, per-mode binding overrides, filetype-scoped
   bindings, and per-scope overrides. Initialized from `Minga.Keymap.Defaults`
   on startup, then mutated by user config via `bind/4` and `bind/5`.
 
-  The store is the single source of truth for keybindings at runtime. Mode
-  handlers read from here instead of `Defaults` directly, so user overrides
-  take effect immediately.
+  Backed by ETS with `read_concurrency: true` so keystroke processing reads
+  bindings without a GenServer round-trip. The GenServer exists only to own
+  the ETS table lifecycle. Writes go directly to ETS (no serialization
+  needed since binds only happen during config evaluation, which is
+  single-threaded).
 
   ## Binding modes
 
@@ -33,7 +35,7 @@ defmodule Minga.Keymap.Active do
   as the mode to target a specific scope.
   """
 
-  use Agent
+  use GenServer
 
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
@@ -53,38 +55,35 @@ defmodule Minga.Keymap.Active do
   @typedoc "Per-mode binding tries for insert, visual, operator_pending, command."
   @type mode_tries :: %{atom() => Bindings.node_t()}
 
-  @typedoc "Store state."
-  @type state :: %{
-          leader_trie: Bindings.node_t(),
-          normal_overrides: %{Bindings.key() => {atom(), String.t()}},
-          scope_overrides: scope_overrides(),
-          filetype_tries: filetype_tries(),
-          mode_tries: mode_tries()
-        }
+  # ETS keys
+  @leader_trie_key :leader_trie
+  @normal_overrides_key :normal_overrides
+  @scope_overrides_key :scope_overrides
+  @filetype_tries_key :filetype_tries
+  @mode_tries_key :mode_tries
 
-  # ── Client API ──────────────────────────────────────────────────────────────
+  # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
-  @doc "Starts the keymap store."
-  @spec start_link(keyword()) :: Agent.on_start()
+  @doc "Starts the keymap store and creates the backing ETS table."
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-
-    Agent.start_link(
-      fn -> initial_state() end,
-      name: name
-    )
+    GenServer.start_link(__MODULE__, name, name: name)
   end
 
-  @spec initial_state() :: state()
-  defp initial_state do
-    %{
-      leader_trie: Defaults.leader_trie(),
-      normal_overrides: %{},
-      scope_overrides: %{},
-      filetype_tries: %{},
-      mode_tries: %{}
-    }
+  @impl GenServer
+  def init(name) do
+    table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
+    seed_defaults(table)
+    {:ok, %{table: table}}
   end
+
+  @impl GenServer
+  def handle_call(:table_name, _from, %{table: table} = state) do
+    {:reply, table, state}
+  end
+
+  # ── Client API (reads go directly to ETS) ───────────────────────────────────
 
   @doc """
   Returns the current leader trie (defaults + user overrides).
@@ -92,7 +91,10 @@ defmodule Minga.Keymap.Active do
   @spec leader_trie() :: Bindings.node_t()
   @spec leader_trie(GenServer.server()) :: Bindings.node_t()
   def leader_trie, do: leader_trie(__MODULE__)
-  def leader_trie(server), do: Agent.get(server, & &1.leader_trie)
+
+  def leader_trie(server) do
+    ets_get(server, @leader_trie_key, Defaults.leader_trie())
+  end
 
   @doc """
   Returns normal-mode binding overrides as a map.
@@ -102,7 +104,7 @@ defmodule Minga.Keymap.Active do
   @spec normal_overrides() :: %{Bindings.key() => {atom(), String.t()}}
   @spec normal_overrides(GenServer.server()) :: %{Bindings.key() => {atom(), String.t()}}
   def normal_overrides, do: normal_overrides(__MODULE__)
-  def normal_overrides(server), do: Agent.get(server, & &1.normal_overrides)
+  def normal_overrides(server), do: ets_get(server, @normal_overrides_key, %{})
 
   @doc """
   Returns the merged normal-mode bindings (defaults + user overrides).
@@ -126,9 +128,8 @@ defmodule Minga.Keymap.Active do
   def mode_trie(mode), do: mode_trie(__MODULE__, mode)
 
   def mode_trie(server, mode) when is_atom(mode) do
-    Agent.get(server, fn state ->
-      Map.get(state.mode_tries, mode, Bindings.new())
-    end)
+    tries = ets_get(server, @mode_tries_key, %{})
+    Map.get(tries, mode, Bindings.new())
   end
 
   @doc """
@@ -141,9 +142,8 @@ defmodule Minga.Keymap.Active do
   def filetype_trie(filetype), do: filetype_trie(__MODULE__, filetype)
 
   def filetype_trie(server, filetype) when is_atom(filetype) do
-    Agent.get(server, fn state ->
-      Map.get(state.filetype_tries, filetype, Bindings.new())
-    end)
+    tries = ets_get(server, @filetype_tries_key, %{})
+    Map.get(tries, filetype, Bindings.new())
   end
 
   @doc """
@@ -152,7 +152,7 @@ defmodule Minga.Keymap.Active do
   @spec scope_overrides() :: scope_overrides()
   @spec scope_overrides(GenServer.server()) :: scope_overrides()
   def scope_overrides, do: scope_overrides(__MODULE__)
-  def scope_overrides(server), do: Agent.get(server, & &1.scope_overrides)
+  def scope_overrides(server), do: ets_get(server, @scope_overrides_key, %{})
 
   @doc """
   Returns the override trie for a specific scope and vim state.
@@ -165,11 +165,10 @@ defmodule Minga.Keymap.Active do
   def scope_trie(scope, vim_state), do: scope_trie(__MODULE__, scope, vim_state)
 
   def scope_trie(server, scope, vim_state) do
-    Agent.get(server, fn state ->
-      state.scope_overrides
-      |> Map.get(scope, %{})
-      |> Map.get(vim_state, Bindings.new())
-    end)
+    server
+    |> ets_get(@scope_overrides_key, %{})
+    |> Map.get(scope, %{})
+    |> Map.get(vim_state, Bindings.new())
   end
 
   # ── Bind API ────────────────────────────────────────────────────────────────
@@ -247,7 +246,45 @@ defmodule Minga.Keymap.Active do
   def reset, do: reset(__MODULE__)
 
   def reset(server) do
-    Agent.update(server, fn _ -> initial_state() end)
+    table = table_name(server)
+    :ets.delete_all_objects(table)
+    seed_defaults(table)
+    :ok
+  end
+
+  # ── Private: ETS helpers ────────────────────────────────────────────────────
+
+  @spec table_name(GenServer.server()) :: atom()
+  defp table_name(name) when is_atom(name), do: :"#{name}_ets"
+  defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
+
+  @spec ets_get(GenServer.server(), atom(), term()) :: term()
+  defp ets_get(server, key, default) do
+    table = table_name(server)
+
+    case :ets.lookup(table, key) do
+      [{^key, value}] -> value
+      [] -> default
+    end
+  end
+
+  @spec ets_update(GenServer.server(), atom(), term(), (term() -> term())) :: :ok
+  defp ets_update(server, key, default, fun) do
+    table = table_name(server)
+    current = ets_get(server, key, default)
+    :ets.insert(table, {key, fun.(current)})
+    :ok
+  end
+
+  @spec seed_defaults(:ets.table()) :: true
+  defp seed_defaults(table) do
+    :ets.insert(table, [
+      {@leader_trie_key, Defaults.leader_trie()},
+      {@normal_overrides_key, %{}},
+      {@scope_overrides_key, %{}},
+      {@filetype_tries_key, %{}},
+      {@mode_tries_key, %{}}
+    ])
   end
 
   # ── Private: bind dispatch ──────────────────────────────────────────────────
@@ -263,15 +300,15 @@ defmodule Minga.Keymap.Active do
 
   # Normal mode: leader sequences (SPC + more keys)
   defp do_bind(server, :normal, [{32, 0} | rest], command, description) when rest != [] do
-    Agent.update(server, fn %{leader_trie: trie} = state ->
-      %{state | leader_trie: Bindings.bind(trie, rest, command, description)}
+    ets_update(server, @leader_trie_key, Defaults.leader_trie(), fn trie ->
+      Bindings.bind(trie, rest, command, description)
     end)
   end
 
   # Normal mode: single-key binding
   defp do_bind(server, :normal, [single_key], command, description) do
-    Agent.update(server, fn %{normal_overrides: overrides} = state ->
-      %{state | normal_overrides: Map.put(overrides, single_key, {command, description})}
+    ets_update(server, @normal_overrides_key, %{}, fn overrides ->
+      Map.put(overrides, single_key, {command, description})
     end)
   end
 
@@ -284,22 +321,22 @@ defmodule Minga.Keymap.Active do
   # Insert, visual, operator_pending, command modes: store in per-mode tries
   defp do_bind(server, mode, keys, command, description)
        when mode in [:insert, :visual, :operator_pending, :command] do
-    Agent.update(server, fn %{mode_tries: tries} = state ->
+    ets_update(server, @mode_tries_key, %{}, fn tries ->
       trie = Map.get(tries, mode, Bindings.new())
       updated = Bindings.bind(trie, keys, command, description)
-      %{state | mode_tries: Map.put(tries, mode, updated)}
+      Map.put(tries, mode, updated)
     end)
   end
 
   # Scope-specific bindings: {scope, vim_state} tuple
   defp do_bind(server, {scope, vim_state}, keys, command, description)
        when is_atom(scope) and is_atom(vim_state) do
-    Agent.update(server, fn %{scope_overrides: overrides} = state ->
+    ets_update(server, @scope_overrides_key, %{}, fn overrides ->
       scope_map = Map.get(overrides, scope, %{})
       trie = Map.get(scope_map, vim_state, Bindings.new())
       updated = Bindings.bind(trie, keys, command, description)
       new_scope_map = Map.put(scope_map, vim_state, updated)
-      %{state | scope_overrides: Map.put(overrides, scope, new_scope_map)}
+      Map.put(overrides, scope, new_scope_map)
     end)
   end
 
@@ -315,14 +352,12 @@ defmodule Minga.Keymap.Active do
   defp bind_filetype(server, filetype, key_str, command, description) do
     case KeyParser.parse(key_str) do
       {:ok, keys} ->
-        # Strip the SPC m prefix if present (user writes "SPC m t" but we
-        # store just the sub-keys under the filetype trie)
         sub_keys = strip_spc_m_prefix(keys)
 
-        Agent.update(server, fn %{filetype_tries: tries} = state ->
+        ets_update(server, @filetype_tries_key, %{}, fn tries ->
           trie = Map.get(tries, filetype, Bindings.new())
           updated = Bindings.bind(trie, sub_keys, command, description)
-          %{state | filetype_tries: Map.put(tries, filetype, updated)}
+          Map.put(tries, filetype, updated)
         end)
 
       {:error, reason} ->
