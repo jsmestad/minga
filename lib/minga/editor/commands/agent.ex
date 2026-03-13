@@ -495,11 +495,17 @@ defmodule Minga.Editor.Commands.Agent do
     AgentSession.restart_session(state, "Provider: #{provider}")
   end
 
-  @doc "Sets the agent model and restarts the session."
+  @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
     state = update_agent(state, &AgentState.set_model_name(&1, model))
-    AgentSession.restart_session(state, "Model: #{model}")
+
+    if AgentAccess.session(state) do
+      Session.set_model(AgentAccess.session(state), model)
+      Session.add_system_message(AgentAccess.session(state), "Model: #{model}")
+    end
+
+    %{state | status_msg: "Model: #{model}"}
   end
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────

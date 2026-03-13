@@ -156,6 +156,12 @@ defmodule Minga.Agent.Providers.Native do
     GenServer.call(pid, :cycle_model)
   end
 
+  @impl Minga.Agent.Provider
+  @spec set_model(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def set_model(pid, model) when is_binary(model) do
+    GenServer.call(pid, {:set_model, model})
+  end
+
   @doc "Continues from an interrupted stream, asking the model to pick up where it left off."
   @spec continue(GenServer.server()) :: :ok | {:error, term()}
   def continue(pid) do
@@ -440,10 +446,7 @@ defmodule Minga.Agent.Providers.Native do
       new_state = %{
         state
         | model: next_model,
-          thinking_level: next_thinking || state.thinking_level,
-          context: ReqLLM.Context.new(),
-          tools: Tools.all(project_root: state.project_root),
-          system_prompt: build_system_prompt(state.project_root)
+          thinking_level: next_thinking || state.thinking_level
       }
 
       total = length(model_list)
@@ -451,6 +454,11 @@ defmodule Minga.Agent.Providers.Native do
 
       {:reply, {:ok, %{"model" => next_model, "index" => index + 1, "total" => total}}, new_state}
     end
+  end
+
+  def handle_call({:set_model, model}, _from, state) do
+    Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
+    {:reply, :ok, %{state | model: model}}
   end
 
   @impl GenServer

@@ -85,11 +85,15 @@ defmodule Minga.Agent.Provider do
   @doc "Cycles to the next model in the configured model rotation."
   @callback cycle_model(provider()) :: {:ok, map()} | {:error, term()}
 
+  @doc "Sets the model without resetting conversation context."
+  @callback set_model(provider(), String.t()) :: :ok | {:error, term()}
+
   @optional_callbacks [
     get_available_models: 1,
     get_commands: 1,
     set_thinking_level: 2,
     cycle_thinking_level: 1,
-    cycle_model: 1
+    cycle_model: 1,
+    set_model: 2
   ]
 end

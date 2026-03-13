@@ -247,6 +247,12 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :cycle_model, 10_000)
   end
 
+  @doc "Sets the model without resetting conversation context."
+  @spec set_model(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def set_model(session, model) when is_binary(model) do
+    GenServer.call(session, {:set_model, model})
+  end
+
   @doc "Toggles the collapsed state of a tool call message."
   @spec toggle_tool_collapse(GenServer.server(), non_neg_integer()) :: :ok
   def toggle_tool_collapse(session, message_index) do
@@ -581,6 +587,16 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:cycle_model, _from, state) do
     result = dispatch_optional(state.provider_module, :cycle_model, [state.provider])
+    {:reply, result, state}
+  end
+
+  def handle_call({:set_model, _model}, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call({:set_model, model}, _from, state) do
+    result = dispatch_optional(state.provider_module, :set_model, [state.provider, model])
+    state = %{state | model_name: model}
     {:reply, result, state}
   end
 
