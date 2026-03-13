@@ -48,6 +48,48 @@ The more ambitious version: each agent session gets its own fork of the buffer. 
 
 ---
 
+## Performance Reality Check
+
+A natural question: is in-memory editing meaningfully faster than filesystem I/O on a modern NVMe SSD? The honest answer: barely, and that's not the reason to do this.
+
+### Why the raw I/O gap is small
+
+Modern SSDs are fast, but the OS page cache is faster. When an agent calls `File.read("lib/minga/editor.ex")`, that file is almost certainly hot in the kernel's page cache. The syscall copies bytes from kernel memory to userspace. It's not waiting on a disk platter or even an SSD chip. Actual latencies on a warm cache:
+
+| Operation | Filesystem (page cache hit) | Buffer (GenServer call) |
+|-----------|---------------------------|------------------------|
+| Read a 10KB file | ~10-30µs (4 syscalls + memcpy) | ~2-5µs (message send + reply) |
+| String search/replace | ~5-10µs (same either way) | ~5-10µs |
+| Write result back | ~10-30µs (3 syscalls, async writeback) | 0µs (just mutated state) |
+| **Single edit total** | **~25-70µs** | **~7-15µs** |
+
+That's 3-5x faster per operation, but the absolute numbers are microseconds. Nobody notices 50 microseconds. For a single edit, the performance argument is irrelevant.
+
+Even writes are deceptive. `File.write/2` without `fsync` writes to the page cache and returns immediately. The kernel flushes to SSD asynchronously. So Elixir's write is already effectively a memory operation for latency purposes.
+
+### Where redundant work matters more than raw speed
+
+**Batching.** An agent making 20 edits to one file today does 20 full read-modify-write cycles (20 `File.read` calls, 20 `String.replace` calls, 20 `File.write` calls). Through the buffer, that's one `apply_text_edits/2` call with a list of 20 edits. One GenServer message, one undo entry, one version bump. The win isn't "memory is faster than SSD." It's "1 round-trip vs 20."
+
+**File watcher noise.** Each `File.write` triggers a filesystem notification, which `FileWatcher` picks up, which fires a "file changed on disk" check, which may trigger a buffer reload or auto-reload. Twenty writes in quick succession means twenty watcher events competing with the agent's next edit. Buffer edits produce zero filesystem events.
+
+**Syscall overhead compounds.** A single `File.write` involves 3 syscalls (open, write, close), allocates a file descriptor, and updates directory metadata. One edit? Trivial. An agent rewriting 15 files in a refactoring pass, 20 edits each? That's 900 syscalls. The buffer path does zero.
+
+### The real performance gap: Phase 2, not Phase 1
+
+The strong performance argument lives in buffer forking vs git worktrees. Forking a `Document` struct (copying two binaries and a few integers into a new process) takes microseconds. Creating a git worktree (cloning a directory tree, writing thousands of files, cold `_build` and `deps` caches on first build) takes seconds to minutes. That's the performance gap worth talking about.
+
+### The actual argument for Phase 1 is correctness and UX, not speed
+
+1. **Undo works.** Agent edits go on the undo stack. `u` rolls them back. Today you need `git checkout`.
+2. **Instant visibility.** Edits appear in the editor the same frame they're applied. No reload, no file watcher race.
+3. **Tree-sitter stays in sync.** Incremental reparse via `EditDelta` instead of a full reparse after noticing the file changed on disk.
+4. **No race conditions.** The GenServer mailbox serializes access. Two things editing the same buffer is just two messages in a queue, not two processes fighting over a file descriptor.
+
+Performance is a cherry on top, not the sundae.
+
+---
+
 ## Phase 1: Route Agent Tools Through Buffers
 
 This is the 80/20 move. One agent, same buffer, instant edits.
