@@ -21,6 +21,7 @@ defmodule Minga.Agent.Session do
 
   use GenServer
 
+  alias Minga.Agent.Branch
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Message
@@ -56,7 +57,8 @@ defmodule Minga.Agent.Session do
           pending_approval: pending_approval(),
           model_name: String.t(),
           provider_name: String.t(),
-          save_timer: reference() | nil
+          save_timer: reference() | nil,
+          branches: [Branch.t()]
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -265,6 +267,25 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :toggle_all_tool_collapses)
   end
 
+  @doc "Branches the conversation at the given turn index."
+  @spec branch_at(GenServer.server(), non_neg_integer()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def branch_at(session, turn_index) when is_integer(turn_index) do
+    GenServer.call(session, {:branch_at, turn_index})
+  end
+
+  @doc "Lists all conversation branches."
+  @spec list_branches(GenServer.server()) :: {:ok, String.t()}
+  def list_branches(session) do
+    GenServer.call(session, :list_branches)
+  end
+
+  @doc "Switches to a named branch, replacing the current messages."
+  @spec switch_branch(GenServer.server(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def switch_branch(session, branch_index) when is_integer(branch_index) do
+    GenServer.call(session, {:switch_branch, branch_index})
+  end
+
   @doc "Appends a system message to the conversation and notifies subscribers."
   @spec add_system_message(GenServer.server(), String.t(), Message.system_level()) :: :ok
   def add_system_message(session, text, level \\ :info) do
@@ -311,7 +332,8 @@ defmodule Minga.Agent.Session do
       model_name: model_name,
       provider_name: provider_name,
       save_timer: nil,
-      created_at: DateTime.utc_now()
+      created_at: DateTime.utc_now(),
+      branches: []
     }
 
     # Start provider asynchronously so init doesn't block
@@ -634,6 +656,40 @@ defmodule Minga.Agent.Session do
     state = %{state | messages: messages}
     state = notify_messages_changed(state)
     {:reply, :ok, state}
+  end
+
+  def handle_call({:branch_at, turn_index}, _from, state) do
+    branch_name = "branch-#{length(state.branches) + 1}"
+
+    case Branch.branch_at(state.messages, turn_index, branch_name, state.branches) do
+      {:ok, truncated, branches} ->
+        state = %{state | messages: truncated, branches: branches}
+        state = notify_messages_changed(state)
+
+        {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
+         state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:list_branches, _from, state) do
+    {:reply, {:ok, Branch.list(state.branches)}, state}
+  end
+
+  def handle_call({:switch_branch, branch_index}, _from, state) do
+    idx = branch_index - 1
+
+    case Enum.at(state.branches, idx) do
+      nil ->
+        {:reply, {:error, "Branch #{branch_index} not found. Use /branches to list."}, state}
+
+      branch ->
+        state = %{state | messages: branch.messages}
+        state = notify_messages_changed(state)
+        {:reply, :ok, state}
+    end
   end
 
   @impl GenServer

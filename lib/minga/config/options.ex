@@ -108,6 +108,7 @@ defmodule Minga.Config.Options do
           | :agent_notify_on
           | :agent_system_prompt
           | :agent_append_system_prompt
+          | :agent_diff_size_threshold
           | :font_family
           | :font_size
           | :font_weight
@@ -175,6 +176,7 @@ defmodule Minga.Config.Options do
     {:agent_notify_on, :any, [:approval, :complete, :error]},
     {:agent_system_prompt, :string, ""},
     {:agent_append_system_prompt, :string, ""},
+    {:agent_diff_size_threshold, :pos_integer, 1_048_576},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
