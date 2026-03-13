@@ -10,6 +10,7 @@ defmodule Minga.Agent.SlashCommand do
 
   alias Minga.Agent.Credentials
   alias Minga.Agent.Instructions
+  alias Minga.Agent.Memory
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SessionExport
@@ -23,46 +24,66 @@ defmodule Minga.Agent.SlashCommand do
   @typedoc "Editor state (same as EditorState.t())."
   @type state :: map()
 
+  alias Minga.Agent.SlashCommand.Command
+
   @typedoc "A registered slash command."
-  @type command :: %{name: String.t(), description: String.t()}
+  @type command :: Command.t()
 
   @commands [
-    %{name: "clear", description: "Start a fresh session"},
-    %{name: "new", description: "Start a fresh session (alias for /clear)"},
-    %{name: "stop", description: "Abort the current agent operation"},
-    %{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
-    %{name: "thinking", description: "Set thinking level: /thinking [off|low|medium|high]"},
-    %{name: "model", description: "Set the model: /model <name>"},
-    %{name: "help", description: "Show available slash commands"},
-    %{name: "sessions", description: "Browse and switch between sessions"},
-    %{
+    %Command{name: "clear", description: "Start a fresh session"},
+    %Command{name: "new", description: "Start a fresh session (alias for /clear)"},
+    %Command{name: "stop", description: "Abort the current agent operation"},
+    %Command{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
+    %Command{
+      name: "thinking",
+      description: "Set thinking level: /thinking [off|low|medium|high]"
+    },
+    %Command{name: "model", description: "Set the model: /model <name>"},
+    %Command{name: "help", description: "Show available slash commands"},
+    %Command{name: "sessions", description: "Browse and switch between sessions"},
+    %Command{
       name: "auth",
       description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
     },
-    %{
+    %Command{
       name: "instructions",
       description: "Show which AGENTS.md instruction files are loaded"
     },
-    %{
+    %Command{
       name: "system-prompt",
       description: "Show the current assembled system prompt"
     },
-    %{
+    %Command{
       name: "budget",
       description: "Show or set session cost budget: /budget, /budget <amount>, /budget off"
     },
-    %{name: "compact", description: "Compact conversation context (summarize older turns)"},
-    %{name: "continue", description: "Continue from an interrupted stream response"},
-    %{name: "export", description: "Export session to Markdown (default) or HTML (/export html)"},
-    %{name: "skills", description: "List all available skills"},
-    %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
-    %{
+    %Command{
+      name: "compact",
+      description: "Compact conversation context (summarize older turns)"
+    },
+    %Command{name: "continue", description: "Continue from an interrupted stream response"},
+    %Command{
+      name: "export",
+      description: "Export session to Markdown (default) or HTML (/export html)"
+    },
+    %Command{name: "skills", description: "List all available skills"},
+    %Command{
+      name: "skill",
+      description: "Activate a skill: /skill:name, deactivate: /skill:off:name"
+    },
+    %Command{
       name: "summarize",
       description: "Generate a context artifact from this session for future use"
     },
-    %{name: "branch", description: "Branch at a turn: /branch <turn_number>"},
-    %{name: "branches", description: "List all conversation branches"},
-    %{name: "switch", description: "Switch to a branch: /switch <branch_number>"}
+    %Command{
+      name: "remember",
+      description: "Save a learning to persistent memory: /remember <text>"
+    },
+    %Command{name: "memory", description: "Show the current memory file contents"},
+    %Command{name: "forget", description: "Clear the persistent memory file"},
+    %Command{name: "branch", description: "Branch at a turn: /branch <turn_number>"},
+    %Command{name: "branches", description: "List all conversation branches"},
+    %Command{name: "switch", description: "Switch to a branch: /switch <branch_number>"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -119,6 +140,9 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
+  defp dispatch(state, "remember", args), do: do_remember(state, args)
+  defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
+  defp dispatch(state, "forget", _args), do: do_forget(state)
   defp dispatch(state, "branch", args), do: do_branch(state, args)
   defp dispatch(state, "branches", _args), do: do_branches(state)
   defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
@@ -554,6 +578,32 @@ defmodule Minga.Agent.SlashCommand do
       end
     else
       {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_remember(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_remember(_state, ""), do: {:error, "Usage: /remember <text to remember>"}
+
+  defp do_remember(state, text) do
+    case Memory.append(text) do
+      :ok ->
+        {:ok, emit_system_message(state, "Saved to memory: #{String.trim(text)}")}
+
+      {:error, reason} ->
+        {:error, "Failed to save memory: #{inspect(reason)}"}
+    end
+  end
+
+  @spec do_memory(state()) :: state()
+  defp do_memory(state) do
+    emit_system_message(state, Memory.summary())
+  end
+
+  @spec do_forget(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_forget(state) do
+    case Memory.clear() do
+      :ok -> {:ok, emit_system_message(state, "Memory cleared.")}
+      {:error, reason} -> {:error, "Failed to clear memory: #{inspect(reason)}"}
     end
   end
 

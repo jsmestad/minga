@@ -96,6 +96,7 @@ defmodule Minga.Config.Options do
           | :agent_model
           | :agent_tool_approval
           | :agent_destructive_tools
+          | :agent_tool_permissions
           | :agent_session_retention_days
           | :agent_panel_split
           | :startup_view
@@ -139,6 +140,7 @@ defmodule Minga.Config.Options do
            | :theme_atom
            | :string_or_nil
            | :string_list
+           | :map_or_nil
            | :float_or_nil
 
   @typedoc "ETS table reference used for reads and writes."
@@ -168,6 +170,7 @@ defmodule Minga.Config.Options do
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
     {:agent_destructive_tools, :string_list,
      ["write_file", "edit_file", "multi_edit_file", "shell"]},
+    {:agent_tool_permissions, :map_or_nil, nil},
     {:agent_session_retention_days, :pos_integer, 30},
     {:agent_panel_split, :pos_integer, 65},
     {:startup_view, {:enum, [:agent, :editor]}, :agent},
@@ -432,6 +435,13 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:string_list, name, value) do
     {:error, "#{name} must be a list of strings, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:map_or_nil, _name, nil), do: :ok
+  defp validate_type(:map_or_nil, _name, value) when is_map(value), do: :ok
+
+  defp validate_type(:map_or_nil, name, value) do
+    {:error, "#{name} must be a map or nil, got: #{inspect(value)}"}
   end
 
   defp validate_type(:float_or_nil, _name, nil), do: :ok

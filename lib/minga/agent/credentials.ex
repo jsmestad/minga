@@ -20,12 +20,20 @@ defmodule Minga.Agent.Credentials do
   @typedoc "Source where a key was found."
   @type key_source :: :env | :file | nil
 
+  defmodule ProviderStatus do
+    @moduledoc false
+    @enforce_keys [:provider, :configured]
+    defstruct [:provider, :configured, :source]
+
+    @type t :: %__MODULE__{
+            provider: String.t(),
+            configured: boolean(),
+            source: :env | :file | :local | nil
+          }
+  end
+
   @typedoc "Status entry for a single provider."
-  @type provider_status :: %{
-          provider: provider(),
-          configured: boolean(),
-          source: key_source()
-        }
+  @type provider_status :: ProviderStatus.t()
 
   @credentials_filename "credentials.json"
 
@@ -33,8 +41,15 @@ defmodule Minga.Agent.Credentials do
   @env_vars %{
     "anthropic" => "ANTHROPIC_API_KEY",
     "openai" => "OPENAI_API_KEY",
-    "google" => "GOOGLE_API_KEY"
+    "google" => "GOOGLE_API_KEY",
+    "openrouter" => "OPENROUTER_API_KEY",
+    "groq" => "GROQ_API_KEY"
   }
+
+  # Ollama doesn't use an API key; it's auto-detected when the local server
+  # is running. We store the host URL instead.
+  @ollama_host_var "OLLAMA_HOST"
+  @ollama_default_host "http://localhost:11434"
 
   @known_providers Map.keys(@env_vars)
 
@@ -107,22 +122,33 @@ defmodule Minga.Agent.Credentials do
   end
 
   @doc """
-  Returns the auth status for all known providers.
+  Returns the auth status for all known providers plus Ollama.
 
   Each entry shows whether a key is configured and where it was found
   (`:env`, `:file`, or `nil`). Keys themselves are never exposed.
   """
   @spec status() :: [provider_status()]
   def status do
-    Enum.map(@known_providers, fn provider ->
-      case resolve(provider) do
-        {:ok, _key, source} ->
-          %{provider: provider, configured: true, source: source}
+    standard =
+      Enum.map(@known_providers, fn provider ->
+        case resolve(provider) do
+          {:ok, _key, source} ->
+            %ProviderStatus{provider: provider, configured: true, source: source}
 
-        :error ->
-          %{provider: provider, configured: false, source: nil}
-      end
-    end)
+          :error ->
+            %ProviderStatus{provider: provider, configured: false, source: nil}
+        end
+      end)
+
+    ollama_up = ollama_available?()
+
+    ollama_status = %ProviderStatus{
+      provider: "ollama",
+      configured: ollama_up,
+      source: if(ollama_up, do: :local, else: nil)
+    }
+
+    standard ++ [ollama_status]
   end
 
   @doc """
@@ -153,6 +179,38 @@ defmodule Minga.Agent.Credentials do
   @spec env_var_for(provider()) :: String.t() | nil
   def env_var_for(provider) when is_binary(provider) do
     Map.get(@env_vars, String.downcase(provider))
+  end
+
+  @doc """
+  Returns the Ollama host URL. Checks `OLLAMA_HOST` env var first,
+  then falls back to the default localhost URL.
+  """
+  @spec ollama_host() :: String.t()
+  def ollama_host do
+    System.get_env(@ollama_host_var) || @ollama_default_host
+  end
+
+  @doc """
+  Returns true if Ollama appears to be running locally.
+
+  Makes a quick HTTP request to the Ollama API tags endpoint.
+  Returns false on connection errors or timeouts.
+  """
+  @spec ollama_available?() :: boolean()
+  # NOTE: This check blocks the calling process for up to 2 seconds when Ollama
+  # isn't running. Called during resolve_auto/0 and status/0, so agent startup
+  # may be delayed by that amount if Ollama is unreachable.
+  def ollama_available? do
+    host = ollama_host()
+
+    case :httpc.request(:get, {~c"#{host}/api/tags", []}, [{:timeout, 2000}], []) do
+      {:ok, {{_, 200, _}, _, _}} -> true
+      _ -> false
+    end
+  rescue
+    ArgumentError -> false
+  catch
+    :exit, _ -> false
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

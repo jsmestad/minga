@@ -38,6 +38,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Event
   alias Minga.Agent.Instructions
   alias Minga.Agent.InternalState
+  alias Minga.Agent.Memory
   alias Minga.Agent.ModelCatalog
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Retry
@@ -873,27 +874,73 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_approval(provider_pid, tool_call, available_tools, :none) do
+  defp execute_with_approval(provider_pid, tool_call, available_tools, mode) do
+    # Per-tool permissions override the global approval mode.
+    case tool_permission(tool_call.name) do
+      :allow ->
+        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+        {result, is_error, mode}
+
+      :deny ->
+        {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode}
+
+      :ask ->
+        request_approval(provider_pid, tool_call, available_tools)
+
+      nil ->
+        # No per-tool override; fall through to global approval mode.
+        execute_with_global_mode(provider_pid, tool_call, available_tools, mode)
+    end
+  end
+
+  @spec execute_with_global_mode(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
+          {String.t(), boolean(), approval_mode()}
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :none) do
     {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :none}
   end
 
-  defp execute_with_approval(provider_pid, tool_call, available_tools, :approve_all) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :approve_all) do
     {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :approve_all}
   end
 
-  defp execute_with_approval(provider_pid, tool_call, available_tools, :ask_all) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask_all) do
     request_approval(provider_pid, tool_call, available_tools)
   end
 
-  defp execute_with_approval(provider_pid, tool_call, available_tools, :ask) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask) do
     if Tools.destructive?(tool_call.name) do
       request_approval(provider_pid, tool_call, available_tools)
     else
       {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
       {result, is_error, :ask}
     end
+  end
+
+  # Looks up per-tool permission from config. Returns :allow, :deny, :ask, or nil
+  # (no override for this tool).
+  @spec tool_permission(String.t()) :: :allow | :deny | :ask | nil
+  defp tool_permission(tool_name) do
+    case Options.get(:agent_tool_permissions) do
+      nil ->
+        nil
+
+      permissions when is_map(permissions) ->
+        case Map.get(permissions, tool_name) do
+          :allow -> :allow
+          :deny -> :deny
+          :ask -> :ask
+          "allow" -> :allow
+          "deny" -> :deny
+          "ask" -> :ask
+          _ -> nil
+        end
+    end
+  rescue
+    ArgumentError -> nil
+  catch
+    :exit, _ -> nil
   end
 
   @spec approval_mode_from_config() :: approval_mode()
@@ -1223,11 +1270,12 @@ defmodule Minga.Agent.Providers.Native do
   defp build_system_prompt(project_root, active_skills \\ []) do
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
+    memory = Memory.for_prompt()
     skills_section = Skills.format_for_prompt(active_skills)
     append = read_config_string(:agent_append_system_prompt)
 
     parts =
-      [base, instructions, skills_section, append]
+      [base, instructions, memory, skills_section, append]
       |> Enum.reject(&(is_nil(&1) or &1 == ""))
       |> Enum.join("\n\n")
 
