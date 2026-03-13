@@ -35,6 +35,8 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
+  alias Minga.Editor.FoldMap
+  alias Minga.Editor.FoldMap.VisibleLines
   alias Minga.Editor.Layout
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -125,7 +127,8 @@ defmodule Minga.Editor.RenderPipeline do
       :preview_matches,
       :line_number_style,
       :wrap_on,
-      :buf_version
+      :buf_version,
+      visible_line_map: nil
     ]
 
     @type t :: %__MODULE__{
@@ -146,7 +149,8 @@ defmodule Minga.Editor.RenderPipeline do
             preview_matches: list(),
             line_number_style: atom(),
             wrap_on: boolean(),
-            buf_version: non_neg_integer()
+            buf_version: non_neg_integer(),
+            visible_line_map: [Minga.Editor.FoldMap.VisibleLines.line_entry()] | nil
           }
   end
 
@@ -373,14 +377,56 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Viewport from Layout content rect
     wrap_on = wrap_enabled?(window.buffer)
+    fold_map = window.fold_map
     viewport = Viewport.new(content_height, content_width, 0)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, window.buffer)
-    {first_line, _last_line} = Viewport.visible_range(viewport)
+
+    # When folds are active, scroll in visible-line coordinates.
+    # The cursor's buffer line must be mapped to visible-line space
+    # so the viewport doesn't try to scroll to a hidden line.
+    visible_cursor_line =
+      if FoldMap.empty?(fold_map) do
+        cursor_line
+      else
+        FoldMap.buffer_to_visible(fold_map, cursor_line)
+      end
+
+    viewport = Viewport.scroll_to_cursor(viewport, {visible_cursor_line, 0}, window.buffer)
     visible_rows = Viewport.content_rows(viewport)
 
-    # Fetch buffer data
-    fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
-    snapshot = BufferServer.render_snapshot(window.buffer, first_line, fetch_rows)
+    # Map viewport visible range back to buffer lines
+    {vis_first, _vis_last} = Viewport.visible_range(viewport)
+
+    first_line =
+      if FoldMap.empty?(fold_map) do
+        vis_first
+      else
+        FoldMap.visible_to_buffer(fold_map, vis_first)
+      end
+
+    # Compute which buffer lines are visible at each screen row
+    line_count_approx = BufferServer.line_count(window.buffer)
+
+    visible_line_map =
+      VisibleLines.compute(fold_map, first_line, visible_rows, line_count_approx)
+
+    # Fetch buffer data: need to cover all visible buffer lines
+    {fetch_first, fetch_count} =
+      case visible_line_map do
+        nil ->
+          fetch_rows = if wrap_on, do: visible_rows + div(visible_rows, 2), else: visible_rows
+          {first_line, fetch_rows}
+
+        entries ->
+          case VisibleLines.buffer_range(entries) do
+            nil ->
+              {first_line, visible_rows}
+
+            {buf_first, buf_last} ->
+              {buf_first, buf_last - buf_first + 1}
+          end
+      end
+
+    snapshot = BufferServer.render_snapshot(window.buffer, fetch_first, fetch_count)
     lines = snapshot.lines
     line_count = snapshot.line_count
 
@@ -425,7 +471,8 @@ defmodule Minga.Editor.RenderPipeline do
       preview_matches: preview_matches,
       line_number_style: line_number_style,
       wrap_on: wrap_on,
-      buf_version: snapshot.version
+      buf_version: snapshot.version,
+      visible_line_map: visible_line_map
     }
   end
 
@@ -535,12 +582,17 @@ defmodule Minga.Editor.RenderPipeline do
       row_off: row_off,
       col_off: col_off,
       window: window,
-      buffer: window.buffer
+      buffer: window.buffer,
+      visible_line_map: scroll.visible_line_map,
+      fold_map: window.fold_map
     }
 
     {gutter_draws, line_draws, rows_used, window} =
       if wrap_on do
-        {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, line_opts)
+        # Wrapping and folding are mutually exclusive for now.
+        # Strip fold-specific keys so the type matches line_render_opts.
+        wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
+        {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
         {g, l, r, window}
       else
         ContentHelpers.render_lines_nowrap(lines, line_opts)
@@ -561,7 +613,16 @@ defmodule Minga.Editor.RenderPipeline do
     # Build WindowFrame
     buf_cursor =
       if is_active do
-        cr = cursor_line - viewport.top + row_off
+        # When folds are active, viewport.top is in visible-line coordinates.
+        # Convert cursor_line from buffer to visible for correct screen position.
+        visible_cursor =
+          if FoldMap.empty?(window.fold_map) do
+            cursor_line
+          else
+            FoldMap.buffer_to_visible(window.fold_map, cursor_line)
+          end
+
+        cr = visible_cursor - viewport.top + row_off
         cc = gutter_w + cursor_col - viewport.left + col_off
         Cursor.new(cr, cc, Modeline.cursor_shape(state.vim.mode))
       else
