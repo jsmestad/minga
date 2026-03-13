@@ -287,41 +287,128 @@ defmodule Minga.TreeSitter do
     # Set the language first so queries are associated with it
     ParserManager.set_language(name)
 
-    case Keyword.get(opts, :highlights) do
-      nil ->
-        :ok
-
-      path ->
-        case File.read(Path.expand(path)) do
-          {:ok, query} ->
-            ParserManager.set_highlight_query(query)
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :editor,
-              "Could not read highlights for #{name}: #{inspect(reason)}"
-            )
-        end
-    end
-
-    case Keyword.get(opts, :injections) do
-      nil ->
-        :ok
-
-      path ->
-        case File.read(Path.expand(path)) do
-          {:ok, query} ->
-            ParserManager.set_injection_query(query)
-
-          {:error, reason} ->
-            Minga.Log.warning(
-              :editor,
-              "Could not read injections for #{name}: #{inspect(reason)}"
-            )
-        end
-    end
+    send_query(name, opts, :highlights, &ParserManager.set_highlight_query/1)
+    send_query(name, opts, :injections, &ParserManager.set_injection_query/1)
 
     :ok
+  end
+
+  @spec send_query(String.t(), keyword(), atom(), (String.t() -> :ok)) :: :ok
+  defp send_query(name, opts, query_type, send_fn) do
+    case Keyword.get(opts, query_type) do
+      nil ->
+        :ok
+
+      path ->
+        case File.read(Path.expand(path)) do
+          {:ok, query} ->
+            resolved = resolve_query_inherits(query, query_type)
+            send_fn.(resolved)
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "Could not read #{query_type} for #{name}: #{inspect(reason)}"
+            )
+        end
+    end
+  end
+
+  # ── Private: Query inheritance resolution ──────────────────────────────────
+
+  @doc false
+  @spec resolve_query_inherits(String.t(), atom()) :: String.t()
+  def resolve_query_inherits(query, query_type) do
+    resolve_query_inherits(query, query_type, 0)
+  end
+
+  @max_inherit_depth 8
+
+  @spec resolve_query_inherits(String.t(), atom(), non_neg_integer()) :: String.t()
+  defp resolve_query_inherits(query, _query_type, depth) when depth > @max_inherit_depth do
+    Minga.Log.warning(:editor, "Query inheritance depth exceeded #{@max_inherit_depth} levels")
+    query
+  end
+
+  defp resolve_query_inherits(query, query_type, depth) do
+    case parse_inherits_directive(query) do
+      {:ok, parents, rest} ->
+        parent_queries =
+          Enum.map_join(parents, "\n", fn parent ->
+            resolve_parent_query(parent, query_type, depth)
+          end)
+
+        parent_queries <> "\n" <> rest
+
+      :no_inherits ->
+        query
+    end
+  end
+
+  @spec resolve_parent_query(String.t(), atom(), non_neg_integer()) :: String.t()
+  defp resolve_parent_query(parent, query_type, depth) do
+    case read_builtin_query(parent, query_type) do
+      {:ok, parent_query} ->
+        resolve_query_inherits(parent_query, query_type, depth + 1)
+
+      :error ->
+        Minga.Log.warning(:editor, "Could not find parent query '#{parent}' for inheritance")
+        ""
+    end
+  end
+
+  @spec parse_inherits_directive(String.t()) ::
+          {:ok, [String.t()], String.t()} | :no_inherits
+  defp parse_inherits_directive(query) do
+    case String.split(query, "\n", parts: 2) do
+      [first_line, rest] ->
+        case String.trim(first_line) do
+          "; inherits: " <> parents_str ->
+            parents =
+              parents_str
+              |> String.split(",")
+              |> Enum.map(&String.trim/1)
+              |> Enum.reject(&(&1 == ""))
+
+            {:ok, parents, rest}
+
+          _ ->
+            :no_inherits
+        end
+
+      _ ->
+        :no_inherits
+    end
+  end
+
+  @spec read_builtin_query(String.t(), atom()) :: {:ok, String.t()} | :error
+  defp read_builtin_query(language, query_type) do
+    filename =
+      case query_type do
+        :highlights -> "highlights.scm"
+        :injections -> "injections.scm"
+        :locals -> "locals.scm"
+        :folds -> "folds.scm"
+      end
+
+    # Look in priv/queries first (built-in), then user overrides
+    paths = [
+      Path.join([Application.app_dir(:minga, "priv"), "queries", language, filename]),
+      Path.join([priv_queries_dir(), language, filename])
+    ]
+
+    Enum.find_value(paths, :error, fn path ->
+      case File.read(path) do
+        {:ok, content} -> {:ok, content}
+        {:error, _} -> nil
+      end
+    end)
+  end
+
+  @spec priv_queries_dir() :: String.t()
+  defp priv_queries_dir do
+    config_home = System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config")
+    Path.join([config_home, "minga", "queries"])
   end
 
   # ── Private: Filetype registration ─────────────────────────────────────────
