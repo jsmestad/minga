@@ -25,6 +25,9 @@ defmodule Minga.Popup.Lifecycle do
      from the map, and returns focus to the previously active window.
   """
 
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.DisplayList
+  alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
@@ -118,6 +121,104 @@ defmodule Minga.Popup.Lifecycle do
     end
   end
 
+  @doc """
+  Renders floating popup overlays for all float-mode popup windows.
+
+  Called by the render pipeline's Chrome stage. Returns a list of
+  `DisplayList.Overlay` structs, one per float popup. Split-mode
+  popups are rendered as normal windows and are not included here.
+  """
+  @spec render_float_overlays(state()) :: [DisplayList.Overlay.t()]
+  def render_float_overlays(state) do
+    state.windows.map
+    |> Enum.filter(fn {_id, w} -> float_popup?(w) end)
+    |> Enum.map(fn {_id, window} -> render_float_overlay(state, window) end)
+  end
+
+  @spec float_popup?(Window.t()) :: boolean()
+  defp float_popup?(%Window{popup_meta: %PopupActive{rule: %Rule{display: :float}}}), do: true
+  defp float_popup?(_), do: false
+
+  @spec render_float_overlay(state(), Window.t()) :: DisplayList.Overlay.t()
+  defp render_float_overlay(state, window) do
+    rule = window.popup_meta.rule
+    vp = state.viewport
+    theme = state.theme.popup
+
+    # Build content draws from the buffer
+    content = build_float_content(window.buffer, rule, vp, theme)
+
+    # Build the floating window spec
+    spec = %FloatingWindow.Spec{
+      title: buffer_title(window.buffer),
+      content: content,
+      width: float_width(rule),
+      height: float_height(rule),
+      position: :center,
+      border: rule.border,
+      theme: theme,
+      viewport: {vp.rows, vp.cols}
+    }
+
+    draws = FloatingWindow.render(spec)
+    %DisplayList.Overlay{draws: draws}
+  end
+
+  @spec build_float_content(pid(), Rule.t(), Viewport.t(), map()) :: [DisplayList.draw()]
+  defp build_float_content(buffer_pid, rule, vp, theme) do
+    # Compute interior dimensions to know how many lines to fetch
+    spec = %FloatingWindow.Spec{
+      title: nil,
+      width: float_width(rule),
+      height: float_height(rule),
+      border: rule.border,
+      theme: theme,
+      viewport: {vp.rows, vp.cols}
+    }
+
+    {interior_h, interior_w} = FloatingWindow.interior_size(spec)
+
+    # Fetch buffer lines (with a short timeout to avoid blocking the render)
+    lines =
+      if is_pid(buffer_pid) and Process.alive?(buffer_pid) do
+        try do
+          snapshot = BufferServer.render_snapshot(buffer_pid, 0, interior_h)
+          snapshot.lines
+        catch
+          :exit, _ -> []
+        end
+      else
+        []
+      end
+
+    # Convert lines to draw tuples (relative to interior origin)
+    lines
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, row} ->
+      if row < interior_h do
+        text = String.slice(line, 0, interior_w)
+        [DisplayList.draw(row, 0, text, fg: theme.fg, bg: theme.bg)]
+      else
+        []
+      end
+    end)
+  end
+
+  @spec buffer_title(pid()) :: String.t() | nil
+  defp buffer_title(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: BufferServer.buffer_name(pid), else: nil
+  end
+
+  defp buffer_title(_), do: nil
+
+  @spec float_width(Rule.t()) :: FloatingWindow.Spec.size()
+  defp float_width(%Rule{width: nil, size: size}), do: size
+  defp float_width(%Rule{width: w}), do: w
+
+  @spec float_height(Rule.t()) :: FloatingWindow.Spec.size()
+  defp float_height(%Rule{height: nil, size: size}), do: size
+  defp float_height(%Rule{height: h}), do: h
+
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec apply_rule(state(), Rule.t(), pid()) :: state()
@@ -173,10 +274,34 @@ defmodule Minga.Popup.Lifecycle do
     end
   end
 
-  # Float display mode is a placeholder until #343 lands.
-  # For now, fall back to split behavior.
-  defp apply_rule(state, %Rule{display: :float} = rule, buffer_pid) do
-    apply_rule(state, %{rule | display: :split}, buffer_pid)
+  defp apply_rule(%{windows: ws} = state, %Rule{display: :float} = rule, buffer_pid) do
+    # Snapshot current layout for restore (tree stays unchanged for floats)
+    previous_tree = ws.tree
+    previous_active = ws.active
+
+    # Create the popup window (not added to the tree, only the map)
+    next_id = ws.next_id
+    {rows, cols} = viewport_size(state)
+    popup_window = Window.new(next_id, buffer_pid, rows, cols)
+
+    # Attach popup metadata
+    active = PopupActive.new(rule, next_id, previous_tree, previous_active)
+    popup_window = %{popup_window | popup_meta: active}
+
+    # Add window to map but NOT to the tree (floats overlay the layout)
+    new_map = Map.put(ws.map, next_id, popup_window)
+    new_windows = %{ws | map: new_map, next_id: next_id + 1}
+    state = %{state | windows: new_windows}
+
+    # Optionally switch focus to the popup
+    state =
+      if rule.focus do
+        %{state | windows: %{state.windows | active: next_id}}
+      else
+        state
+      end
+
+    Layout.invalidate(state)
   end
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()

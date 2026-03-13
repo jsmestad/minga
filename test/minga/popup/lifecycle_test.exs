@@ -1,6 +1,7 @@
 defmodule Minga.Popup.LifecycleTest do
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
@@ -216,6 +217,88 @@ defmodule Minga.Popup.LifecycleTest do
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
 
       assert Lifecycle.active_is_popup?(with_popup)
+    end
+  end
+
+  describe "float display mode" do
+    test "float popup adds window to map but not tree", %{state: state, popup_buf: popup_buf} do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+
+      # Window map has 2 entries (main + popup)
+      assert map_size(with_popup.windows.map) == 2
+
+      # Tree still only has the original leaf (no split was created)
+      assert with_popup.windows.tree == WindowTree.new(1)
+    end
+
+    test "float popup focuses the new window when focus: true", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+
+      assert with_popup.windows.active == 2
+    end
+
+    test "float popup does not steal focus when focus: false", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: false))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+
+      assert with_popup.windows.active == 1
+    end
+
+    test "closing a float popup removes window and restores focus", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+
+      restored = Lifecycle.close_popup(with_popup, 2)
+
+      assert map_size(restored.windows.map) == 1
+      assert restored.windows.active == 1
+      assert restored.windows.tree == WindowTree.new(1)
+    end
+
+    test "float popup has popup_meta with the rule", %{state: state, popup_buf: popup_buf} do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, border: :double))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+
+      popup_window = with_popup.windows.map[2]
+      assert Window.popup?(popup_window)
+      assert popup_window.popup_meta.rule.display == :float
+      assert popup_window.popup_meta.rule.border == :double
+    end
+
+    test "render_float_overlays returns overlays for float popups", %{state: state} do
+      {:ok, real_buf} = BufferServer.start_link(content: "hello world", buffer_name: "*Help*")
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", real_buf)
+
+      overlays = Lifecycle.render_float_overlays(with_popup)
+      assert length(overlays) == 1
+      [overlay] = overlays
+      assert is_list(overlay.draws)
+      assert overlay.draws != []
+
+      GenServer.stop(real_buf)
+    end
+
+    test "render_float_overlays returns empty for split-only popups", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", display: :split, side: :bottom))
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+
+      overlays = Lifecycle.render_float_overlays(with_popup)
+      assert overlays == []
     end
   end
 end
