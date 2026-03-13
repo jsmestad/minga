@@ -95,6 +95,12 @@ defmodule Minga.Editor do
     GenServer.cast(server, {:log_to_warnings, text})
   end
 
+  @doc "Send an async message to the Editor GenServer. Used by background tasks."
+  @spec cast(term(), GenServer.server()) :: :ok
+  def cast(msg, server \\ __MODULE__) do
+    GenServer.cast(server, msg)
+  end
+
   # ── Server Callbacks ─────────────────────────────────────────────────────────
 
   @impl true
@@ -213,6 +219,15 @@ defmodule Minga.Editor do
   def handle_cast({:log_to_warnings, text}, state) do
     state = WarningLog.log(state, text)
     {:noreply, maybe_schedule_warning_popup(state)}
+  end
+
+  def handle_cast({:extension_updates_available, updates}, state) do
+    alias Minga.Mode.ExtensionConfirmState
+
+    ms = %ExtensionConfirmState{updates: updates}
+    new_state = %{state | vim: %{state.vim | mode: :extension_confirm, mode_state: ms}}
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
   end
 
   def handle_cast(:render, state) do

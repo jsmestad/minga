@@ -581,8 +581,8 @@ defmodule Minga.Editor.Commands do
   def execute(state, :extension_update_all) do
     alias Minga.Extension.Updater
 
-    Task.start(fn -> Updater.update_all() end)
-    %{state | status_msg: "Updating extensions..."}
+    Task.start(fn -> Updater.check_all() end)
+    %{state | status_msg: "Checking for extension updates..."}
   end
 
   def execute(state, {:execute_ex_command, {:extension_update, []}}) do
@@ -591,6 +591,25 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :extension_update) do
     PickerUI.open(state, Minga.Picker.ExtensionSource)
+  end
+
+  def execute(state, :apply_extension_updates) do
+    alias Minga.Extension.Updater
+
+    ms = state.vim.mode_state
+    Task.start(fn -> Updater.apply_accepted(ms) end)
+
+    %{state | status_msg: "Applying extension updates..."}
+  end
+
+  def execute(state, :extension_confirm_details) do
+    alias Minga.Extension.Updater
+
+    ms = state.vim.mode_state
+    update = Enum.at(ms.updates, ms.current)
+    details = Updater.details(update.name)
+    Minga.Editor.log_to_messages(details)
+    state
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)

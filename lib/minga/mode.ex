@@ -39,6 +39,7 @@ defmodule Minga.Mode do
           | :search
           | :search_prompt
           | :substitute_confirm
+          | :extension_confirm
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -62,6 +63,7 @@ defmodule Minga.Mode do
           | Minga.Mode.SearchState.t()
           | Minga.Mode.SearchPromptState.t()
           | Minga.Mode.SubstituteConfirmState.t()
+          | Minga.Mode.ExtensionConfirmState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -125,6 +127,7 @@ defmodule Minga.Mode do
   def display(:search_prompt), do: "-- SEARCH PROJECT --"
   def display(:eval), do: "-- EVAL --"
   def display(:substitute_confirm), do: "-- SUBSTITUTE --"
+  def display(:extension_confirm), do: "-- UPDATE --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -151,6 +154,14 @@ defmodule Minga.Mode do
     "replace with #{s.replacement}? [y/n/a/q] (#{current} of #{total})"
   end
 
+  def display(:extension_confirm, %Minga.Mode.ExtensionConfirmState{} = s) do
+    current = s.current + 1
+    total = length(s.updates)
+    update = Enum.at(s.updates, s.current)
+    label = format_update_label(update)
+    "#{label} [Y/n/d] (#{current} of #{total})"
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -166,6 +177,7 @@ defmodule Minga.Mode do
   defp mode_module(:search), do: Minga.Mode.Search
   defp mode_module(:search_prompt), do: Minga.Mode.SearchPrompt
   defp mode_module(:substitute_confirm), do: Minga.Mode.SubstituteConfirm
+  defp mode_module(:extension_confirm), do: Minga.Mode.ExtensionConfirm
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do
@@ -192,4 +204,17 @@ defmodule Minga.Mode do
 
   @spec reset_count(state()) :: state()
   defp reset_count(%_{} = state), do: %{state | count: nil}
+
+  @spec format_update_label(Minga.Mode.ExtensionConfirmState.update_entry()) :: String.t()
+  defp format_update_label(%{pinned: true, name: name}) do
+    "#{name}: pinned, skipped"
+  end
+
+  defp format_update_label(%{source_type: :git} = u) do
+    "#{u.name}: #{u.old_ref} → #{u.new_ref} (#{u.commit_count} commits on #{u.branch})"
+  end
+
+  defp format_update_label(%{source_type: :hex} = u) do
+    "#{u.name}: #{u.old_ref} → #{u.new_ref}"
+  end
 end

@@ -35,7 +35,7 @@ defmodule Minga.Picker.ExtensionSource do
     alias Minga.Extension.Updater
 
     Task.start(fn ->
-      Updater.update_single(name)
+      Updater.check_single(name)
     end)
 
     %{state | status_msg: "Checking #{name} for updates..."}
