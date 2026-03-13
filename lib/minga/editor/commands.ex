@@ -579,8 +579,10 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :extension_update_all) do
-    Task.start(fn -> do_extension_update_all() end)
-    %{state | status_msg: "Checking for extension updates..."}
+    alias Minga.Extension.Updater
+
+    Task.start(fn -> Updater.update_all() end)
+    %{state | status_msg: "Updating extensions..."}
   end
 
   def execute(state, {:execute_ex_command, {:extension_update, []}}) do
@@ -588,8 +590,7 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :extension_update) do
-    Task.start(fn -> do_extension_update_all() end)
-    %{state | status_msg: "Checking for extension updates..."}
+    PickerUI.open(state, Minga.Picker.ExtensionSource)
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
@@ -845,76 +846,5 @@ defmodule Minga.Editor.Commands do
       {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
       _ -> "unknown"
     end
-  end
-
-  @spec do_extension_update_all() :: :ok
-  defp do_extension_update_all do
-    entries = Minga.Extension.Registry.all()
-    git_entries = Enum.filter(entries, fn {_, e} -> e.source_type == :git end)
-    hex_entries = Enum.filter(entries, fn {_, e} -> e.source_type == :hex end)
-
-    results = check_git_updates(git_entries)
-
-    if hex_entries != [] do
-      Minga.Editor.log_to_messages(
-        "Hex extensions use Mix.install cache. Run :ConfigReload to pick up version changes."
-      )
-    end
-
-    report_update_results(results)
-  end
-
-  @spec check_git_updates([{atom(), Minga.Extension.Entry.t()}]) :: [
-          {:ok, Minga.Extension.Git.update_info()}
-          | {:up_to_date, atom()}
-          | {:error, atom(), String.t()}
-        ]
-  defp check_git_updates(git_entries) do
-    Enum.map(git_entries, fn {name, entry} ->
-      case Minga.Extension.Git.fetch_updates(name, entry.git) do
-        {:ok, info} -> {:ok, info}
-        :up_to_date -> {:up_to_date, name}
-        {:error, reason} -> {:error, name, reason}
-      end
-    end)
-  end
-
-  @spec report_update_results([term()]) :: :ok
-  defp report_update_results(results) do
-    updates = Enum.filter(results, &match?({:ok, _}, &1))
-    up_to_date = Enum.filter(results, &match?({:up_to_date, _}, &1))
-    errors = Enum.filter(results, &match?({:error, _, _}, &1))
-
-    messages = []
-
-    messages =
-      if updates != [] do
-        lines =
-          Enum.map(updates, fn {:ok, info} ->
-            "  #{info.name}: #{info.old_ref} -> #{info.new_ref} (#{info.commit_count} commits on #{info.branch})"
-          end)
-
-        messages ++ ["Updates available:" | lines] ++ ["Run :ConfigReload to apply."]
-      else
-        messages ++ ["All git extensions are up to date."]
-      end
-
-    messages =
-      if errors != [] do
-        error_lines = Enum.map(errors, fn {:error, name, reason} -> "  #{name}: #{reason}" end)
-        messages ++ ["Errors:" | error_lines]
-      else
-        messages
-      end
-
-    msg = Enum.join(messages, "\n")
-    Minga.Editor.log_to_messages(msg)
-
-    if up_to_date != [] do
-      count = length(up_to_date)
-      Minga.Log.debug(:config, "#{count} extension(s) already up to date")
-    end
-
-    :ok
   end
 end
