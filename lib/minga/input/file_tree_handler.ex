@@ -15,6 +15,7 @@ defmodule Minga.Input.FileTreeHandler do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
+  alias Minga.Input
   alias Minga.Keymap.Scope
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -85,7 +86,7 @@ defmodule Minga.Input.FileTreeHandler do
   @spec handle_file_tree_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
   defp handle_file_tree_key(state, cp, mods) do
-    if key_sequence_pending?(state) do
+    if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}
     else
       key = {cp, mods}
@@ -208,14 +209,4 @@ defmodule Minga.Input.FileTreeHandler do
 
   # ── Shared helpers ──────────────────────────────────────────────────────
 
-  @spec key_sequence_pending?(EditorState.t()) :: boolean()
-  defp key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
-    do: true
-
-  defp key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
-
-  defp key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
-    do: true
-
-  defp key_sequence_pending?(_state), do: false
 end
