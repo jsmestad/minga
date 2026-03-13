@@ -63,6 +63,7 @@ defmodule Minga.Config.OptionsTest do
                agent_max_cost: nil,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
+               agent_diff_size_threshold: 1_048_576,
                whichkey_layout: :bottom,
                font_family: "Menlo",
                font_size: 13,

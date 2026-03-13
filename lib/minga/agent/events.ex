@@ -58,9 +58,12 @@ defmodule Minga.Agent.Events do
     {state, [:render | effects]}
   end
 
+  # Text deltas use a 1ms render delay so streaming text appears with
+  # minimal latency. The throttle guard in schedule_render coalesces
+  # multiple deltas arriving in the same millisecond into one render.
   def handle(state, {:text_delta, _delta}) do
     state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
-    {state, [{:render, 16}]}
+    {state, [{:render, 1}]}
   end
 
   def handle(state, {:thinking_delta, _delta}) do

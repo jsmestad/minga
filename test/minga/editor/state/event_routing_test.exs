@@ -74,7 +74,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
 
       {_new_state, effects} = AgentEvents.handle(state, {:text_delta, "hello"})
 
-      assert {:render, 16} in effects
+      assert {:render, 1} in effects
     end
 
     test "thinking_delta triggers throttled render" do

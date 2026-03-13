@@ -108,6 +108,7 @@ defmodule Minga.Config.Options do
           | :agent_notify_on
           | :agent_system_prompt
           | :agent_append_system_prompt
+          | :agent_diff_size_threshold
           | :agent_max_turns
           | :agent_max_cost
           | :font_family
@@ -179,6 +180,7 @@ defmodule Minga.Config.Options do
     {:agent_notify_on, :any, [:approval, :complete, :error]},
     {:agent_system_prompt, :string, ""},
     {:agent_append_system_prompt, :string, ""},
+    {:agent_diff_size_threshold, :pos_integer, 1_048_576},
     {:agent_max_turns, :pos_integer, 100},
     {:agent_max_cost, :float_or_nil, nil},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},

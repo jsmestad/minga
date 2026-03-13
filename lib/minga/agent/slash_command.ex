@@ -59,7 +59,10 @@ defmodule Minga.Agent.SlashCommand do
     %{
       name: "summarize",
       description: "Generate a context artifact from this session for future use"
-    }
+    },
+    %{name: "branch", description: "Branch at a turn: /branch <turn_number>"},
+    %{name: "branches", description: "List all conversation branches"},
+    %{name: "switch", description: "Switch to a branch: /switch <branch_number>"}
   ]
 
   @doc "Returns the list of all registered slash commands."
@@ -116,6 +119,9 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
+  defp dispatch(state, "branch", args), do: do_branch(state, args)
+  defp dispatch(state, "branches", _args), do: do_branches(state)
+  defp dispatch(state, "switch", args), do: do_switch_branch(state, args)
 
   # /skill:name activates, /skill:off:name deactivates
   defp dispatch(state, cmd, _args) when is_binary(cmd) do
@@ -548,6 +554,61 @@ defmodule Minga.Agent.SlashCommand do
       end
     else
       {:error, "No active agent session"}
+    end
+  end
+
+  @spec do_branch(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_branch(_state, ""), do: {:error, "Usage: /branch <turn_number>"}
+
+  defp do_branch(state, args) do
+    with {:ok, session} <- require_session(state),
+         {:ok, turn_index} <- parse_int(args, "Invalid turn number. Use /branch <number>"),
+         {:ok, message} <- Session.branch_at(session, turn_index) do
+      {:ok, emit_system_message(state, message)}
+    end
+  end
+
+  @spec do_branches(state()) :: {:ok, state()}
+  defp do_branches(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      {:ok, listing} = Session.list_branches(session)
+      {:ok, emit_system_message(state, "Branches:\n#{listing}")}
+    else
+      {:ok, emit_system_message(state, "No active agent session")}
+    end
+  end
+
+  @spec do_switch_branch(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_switch_branch(_state, ""), do: {:error, "Usage: /switch <branch_number>"}
+
+  defp do_switch_branch(state, args) do
+    with {:ok, session} <- require_session(state),
+         {:ok, idx} <- parse_int(args, "Invalid branch number. Use /branches to list.") do
+      case Session.switch_branch(session, idx) do
+        :ok -> {:ok, emit_system_message(state, "Switched to branch #{idx}.")}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @spec require_session(state()) :: {:ok, pid()} | {:error, String.t()}
+  defp require_session(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      {:ok, session}
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec parse_int(String.t(), String.t()) :: {:ok, integer()} | {:error, String.t()}
+  defp parse_int(str, error_message) do
+    case Integer.parse(String.trim(str)) do
+      {n, _} -> {:ok, n}
+      :error -> {:error, error_message}
     end
   end
 
