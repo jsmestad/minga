@@ -55,6 +55,7 @@ pub const OP_SET_HIGHLIGHT_QUERY: u8 = 0x22;
 pub const OP_LOAD_GRAMMAR: u8 = 0x23;
 pub const OP_SET_INJECTION_QUERY: u8 = 0x24;
 pub const OP_QUERY_LANGUAGE_AT: u8 = 0x25;
+pub const OP_SET_FOLD_QUERY: u8 = 0x28;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -65,6 +66,9 @@ pub const OP_INJECTION_RANGES: u8 = 0x34;
 
 // Text measurement responses (Zig → BEAM)
 pub const OP_TEXT_WIDTH: u8 = 0x35;
+
+// Fold responses (Zig → BEAM)
+pub const OP_FOLD_RANGES: u8 = 0x36;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -226,6 +230,7 @@ pub const RenderCommand = union(enum) {
     parse_buffer: ParseBuffer,
     set_highlight_query: []const u8,
     set_injection_query: []const u8,
+    set_fold_query: []const u8,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
 };
@@ -556,6 +561,13 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 4 + query_len) return error.Malformed;
             return .{ .set_injection_query = rest[4 .. 4 + query_len] };
         },
+        OP_SET_FOLD_QUERY => {
+            // query_len:4, query (same wire format as set_highlight_query)
+            if (rest.len < 4) return error.Malformed;
+            const query_len = std.mem.readInt(u32, rest[0..4], .big);
+            if (rest.len < 4 + query_len) return error.Malformed;
+            return .{ .set_fold_query = rest[4 .. 4 + query_len] };
+        },
         OP_LOAD_GRAMMAR => {
             // name_len:2, name, path_len:2, path
             if (rest.len < 2) return error.Malformed;
@@ -673,7 +685,7 @@ pub fn commandSize(payload: []const u8) usize {
             const source_len = std.mem.readInt(u32, payload[5..9], .big);
             break :blk 9 + source_len;
         },
-        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY => blk: {
+        OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY => blk: {
             if (payload.len < 5) break :blk payload.len;
             const query_len = std.mem.readInt(u32, payload[1..5], .big);
             break :blk 5 + query_len;
@@ -803,6 +815,32 @@ pub fn encodeInjectionRanges(allocator: std.mem.Allocator, ranges: []const Injec
         std.mem.writeInt(u16, buf[off + 8 ..][0..2], @intCast(r.language.len), .big);
         @memcpy(buf[off + 10 .. off + 10 + r.language.len], r.language);
         off += 10 + r.language.len;
+    }
+
+    return buf;
+}
+
+/// A fold range for protocol encoding: start_line .. end_line (0-indexed).
+pub const FoldRange = struct {
+    start_line: u32,
+    end_line: u32,
+};
+
+/// Encodes fold_ranges: opcode(1) + version(4) + count(4) + (start_line:4, end_line:4) for each
+pub fn encodeFoldRanges(allocator: std.mem.Allocator, version: u32, ranges: []const FoldRange) ![]u8 {
+    const header_size = 1 + 4 + 4; // opcode + version + count
+    const range_size = 8; // start_line:4 + end_line:4
+    const total = header_size + ranges.len * range_size;
+    const buf = try allocator.alloc(u8, total);
+
+    buf[0] = OP_FOLD_RANGES;
+    std.mem.writeInt(u32, buf[1..5], version, .big);
+    std.mem.writeInt(u32, buf[5..9], @intCast(ranges.len), .big);
+
+    for (ranges, 0..) |r, i| {
+        const off = header_size + i * range_size;
+        std.mem.writeInt(u32, buf[off..][0..4], r.start_line, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], r.end_line, .big);
     }
 
     return buf;

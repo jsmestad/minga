@@ -389,6 +389,25 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  def handle_info({tag, {:fold_ranges, _version, ranges}}, state)
+      when tag in [:minga_highlight, :minga_input] do
+    fold_ranges =
+      Enum.map(ranges, fn {start_line, end_line} ->
+        Minga.Editor.FoldRange.new!(start_line, end_line)
+      end)
+
+    new_state =
+      case EditorState.active_window_struct(state) do
+        nil ->
+          state
+
+        %Window{id: id} ->
+          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+      end
+
+    {:noreply, new_state}
+  end
+
   def handle_info({tag, {:grammar_loaded, true, name}}, state)
       when tag in [:minga_highlight, :minga_input] do
     Minga.Log.info(:editor, "Grammar loaded: #{name}")

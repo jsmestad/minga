@@ -67,6 +67,7 @@ defmodule Minga.Port.Protocol do
   @op_load_grammar 0x23
   @op_set_injection_query 0x24
   @op_query_language_at 0x25
+  @op_set_fold_query 0x28
 
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
@@ -75,6 +76,7 @@ defmodule Minga.Port.Protocol do
   @op_language_at_response 0x33
   @op_injection_ranges 0x34
   @op_text_width 0x35
+  @op_fold_ranges 0x36
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -149,6 +151,8 @@ defmodule Minga.Port.Protocol do
              [%{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}]}
           | {:language_at_response, request_id :: non_neg_integer(), language :: String.t()}
           | {:text_width, request_id :: non_neg_integer(), width :: non_neg_integer()}
+          | {:fold_ranges, version :: non_neg_integer(),
+             [{start_line :: non_neg_integer(), end_line :: non_neg_integer()}]}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -418,6 +422,12 @@ defmodule Minga.Port.Protocol do
     <<@op_set_injection_query, byte_size(query)::32, query::binary>>
   end
 
+  @doc "Encodes a set_fold_query command."
+  @spec encode_set_fold_query(String.t()) :: binary()
+  def encode_set_fold_query(query) when is_binary(query) do
+    <<@op_set_fold_query, byte_size(query)::32, query::binary>>
+  end
+
   @doc "Encodes a load_grammar command."
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
@@ -520,6 +530,13 @@ defmodule Minga.Port.Protocol do
 
   def decode_event(<<@op_text_width, request_id::32, width::16>>) do
     {:ok, {:text_width, request_id, width}}
+  end
+
+  def decode_event(<<@op_fold_ranges, version::32, count::32, rest::binary>>) do
+    case decode_fold_ranges(rest, count, []) do
+      {:ok, ranges} -> {:ok, {:fold_ranges, version, ranges}}
+      :error -> {:error, :malformed}
+    end
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
@@ -657,6 +674,22 @@ defmodule Minga.Port.Protocol do
   end
 
   defp decode_spans(_rest, _remaining, _acc), do: :error
+
+  @spec decode_fold_ranges(binary(), non_neg_integer(), [
+          {non_neg_integer(), non_neg_integer()}
+        ]) ::
+          {:ok, [{non_neg_integer(), non_neg_integer()}]} | :error
+  defp decode_fold_ranges(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_fold_ranges(
+         <<start_line::32, end_line::32, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    decode_fold_ranges(rest, remaining - 1, [{start_line, end_line} | acc])
+  end
+
+  defp decode_fold_ranges(_rest, _remaining, _acc), do: :error
 
   @spec decode_names(binary(), non_neg_integer(), [String.t()]) :: {:ok, [String.t()]} | :error
   defp decode_names(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}

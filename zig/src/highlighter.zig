@@ -26,12 +26,13 @@ pub const HighlightResult = struct {
 /// Compiled-in grammar language function type.
 const LanguageFn = *const fn () callconv(.c) ?*const c.TSLanguage;
 
-/// Built-in grammar entry with optional embedded highlight and injection queries.
+/// Built-in grammar entry with optional embedded highlight, injection, and fold queries.
 const BuiltinGrammar = struct {
     name: []const u8,
     func: LanguageFn,
     query: ?[]const u8 = null,
     injection_query: ?[]const u8 = null,
+    fold_query: ?[]const u8 = null,
 };
 
 pub const InjectionRange = protocol.InjectionRange;
@@ -44,12 +45,14 @@ pub const Highlighter = struct {
     tree: ?*c.TSTree = null,
     query: ?*c.TSQuery = null,
     injection_query: ?*c.TSQuery = null,
+    fold_query: ?*c.TSQuery = null,
     current_language: ?*const c.TSLanguage = null,
     current_language_name: ?[]const u8 = null,
     current_source: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -72,6 +75,7 @@ pub const Highlighter = struct {
             .languages = .empty,
             .query_cache = .empty,
             .injection_query_cache = .empty,
+            .fold_query_cache = .empty,
             .allocator = allocator,
         };
 
@@ -101,6 +105,9 @@ pub const Highlighter = struct {
             }
             if (entry.injection_query) |inj_source| {
                 self.prewarmOne(entry.name, inj_source, &self.injection_query_cache);
+            }
+            if (entry.fold_query) |fold_source| {
+                self.prewarmOne(entry.name, fold_source, &self.fold_query_cache);
             }
         }
         self.prewarm_done.store(true, .release);
@@ -166,6 +173,13 @@ pub const Highlighter = struct {
         }
         self.injection_query_cache.deinit(self.allocator);
 
+        // Free all cached fold queries
+        var fqit = self.fold_query_cache.iterator();
+        while (fqit.next()) |entry| {
+            c.ts_query_delete(entry.value_ptr.*);
+        }
+        self.fold_query_cache.deinit(self.allocator);
+
         if (self.injection_ranges.len > 0) {
             self.allocator.free(self.injection_ranges);
         }
@@ -225,6 +239,25 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, inj_source.ptr, @intCast(inj_source.len), &err_off, &err_type)) |compiled| {
                                 self.injection_query = compiled;
                                 self.injection_query_cache.put(self.allocator, entry.name, compiled) catch {};
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fold query
+            if (self.fold_query_cache.get(name)) |cached| {
+                self.fold_query = cached;
+            } else {
+                self.fold_query = null;
+                inline for (builtin_grammars) |entry| {
+                    if (std.mem.eql(u8, entry.name, name)) {
+                        if (entry.fold_query) |fold_source| {
+                            var err_off: u32 = 0;
+                            var err_type: c.TSQueryError = c.TSQueryErrorNone;
+                            if (c.ts_query_new(lang, fold_source.ptr, @intCast(fold_source.len), &err_off, &err_type)) |compiled| {
+                                self.fold_query = compiled;
+                                self.fold_query_cache.put(self.allocator, entry.name, compiled) catch {};
                             }
                         }
                     }
@@ -302,6 +335,83 @@ pub const Highlighter = struct {
 
         self.injection_query = new_query;
         self.injection_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    /// Compile a fold query (.scm source) for the current language.
+    /// Caches the compiled query so subsequent `setLanguage` calls restore it.
+    pub fn setFoldQuery(self: *Highlighter, source: []const u8) !void {
+        const lang = self.current_language orelse return error.NoLanguageSet;
+        const name = self.current_language_name orelse return error.NoLanguageSet;
+
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+
+        if (self.fold_query_cache.get(name)) |cached| {
+            self.fold_query = cached;
+            return;
+        }
+
+        var error_offset: u32 = 0;
+        var error_type: c.TSQueryError = c.TSQueryErrorNone;
+
+        const new_query = c.ts_query_new(
+            lang,
+            source.ptr,
+            @intCast(source.len),
+            &error_offset,
+            &error_type,
+        ) orelse {
+            std.log.warn("Fold query compile error at offset {d}, type {d}", .{
+                error_offset, error_type,
+            });
+            return error.QueryCompileFailed;
+        };
+
+        self.fold_query = new_query;
+        self.fold_query_cache.put(self.allocator, name, new_query) catch {};
+    }
+
+    /// A single fold range: start_line .. end_line (0-indexed).
+    pub const FoldRange = protocol.FoldRange;
+
+    /// Run the fold query against the current tree and return fold ranges.
+    /// Returns null if no fold query is set or no tree exists.
+    /// Caller owns the returned slice and must free it.
+    pub fn runFoldQuery(self: *Highlighter, alloc: std.mem.Allocator) !?[]FoldRange {
+        const fq = self.fold_query orelse return null;
+        const tree = self.tree orelse return null;
+
+        const root = c.ts_tree_root_node(tree);
+        const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(cursor);
+        c.ts_query_cursor_exec(cursor, fq, root);
+
+        var ranges: std.ArrayListUnmanaged(FoldRange) = .empty;
+        errdefer ranges.deinit(alloc);
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..@intCast(match.capture_count)];
+            for (captures) |cap| {
+                const node = cap.node;
+                const start_line: u32 = @intCast(c.ts_node_start_point(node).row);
+                const end_line: u32 = @intCast(c.ts_node_end_point(node).row);
+                // Only include folds spanning multiple lines.
+                if (end_line > start_line) {
+                    try ranges.append(alloc, .{
+                        .start_line = start_line,
+                        .end_line = end_line,
+                    });
+                }
+            }
+        }
+
+        if (ranges.items.len == 0) {
+            ranges.deinit(alloc);
+            return null;
+        }
+
+        return try ranges.toOwnedSlice(alloc);
     }
 
     /// Parse source text. Full re-parse (no incremental).
@@ -975,46 +1085,51 @@ fn qlInj(comptime name: []const u8) ?[]const u8 {
     return comptime query_loader.resolve(name, .injections);
 }
 
+/// Helper to resolve a fold query via the query_loader.
+fn qlFold(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .folds);
+}
+
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir") },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir"), .fold_query = qlFold("elixir") },
     .{ .name = "heex", .func = tree_sitter_heex },
-    .{ .name = "json", .func = tree_sitter_json, .query = ql("json") },
-    .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml") },
-    .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml") },
-    .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown") },
+    .{ .name = "json", .func = tree_sitter_json, .query = ql("json"), .fold_query = qlFold("json") },
+    .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml"), .fold_query = qlFold("yaml") },
+    .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml"), .fold_query = qlFold("toml") },
+    .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown"), .fold_query = qlFold("markdown") },
     .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = ql("markdown_inline"), .injection_query = qlInj("markdown_inline") },
-    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby") },
-    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript") },
-    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript") },
-    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx") },
-    .{ .name = "go", .func = tree_sitter_go, .query = ql("go") },
-    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust") },
-    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig") },
-    .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang") },
-    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash") },
-    .{ .name = "c", .func = tree_sitter_c, .query = ql("c") },
-    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp") },
-    .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html") },
-    .{ .name = "css", .func = tree_sitter_css, .query = ql("css") },
-    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua") },
-    .{ .name = "python", .func = tree_sitter_python, .query = ql("python") },
-    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin") },
-    .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam") },
-    .{ .name = "java", .func = tree_sitter_java, .query = ql("java") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby"), .fold_query = qlFold("ruby") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript"), .fold_query = qlFold("javascript") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript"), .fold_query = qlFold("typescript") },
+    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx"), .fold_query = qlFold("tsx") },
+    .{ .name = "go", .func = tree_sitter_go, .query = ql("go"), .fold_query = qlFold("go") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust"), .fold_query = qlFold("rust") },
+    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig"), .fold_query = qlFold("zig") },
+    .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang"), .fold_query = qlFold("erlang") },
+    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash"), .fold_query = qlFold("bash") },
+    .{ .name = "c", .func = tree_sitter_c, .query = ql("c"), .fold_query = qlFold("c") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp"), .fold_query = qlFold("cpp") },
+    .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html"), .fold_query = qlFold("html") },
+    .{ .name = "css", .func = tree_sitter_css, .query = ql("css"), .fold_query = qlFold("css") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua"), .fold_query = qlFold("lua") },
+    .{ .name = "python", .func = tree_sitter_python, .query = ql("python"), .fold_query = qlFold("python") },
+    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin"), .fold_query = qlFold("kotlin") },
+    .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam"), .fold_query = qlFold("gleam") },
+    .{ .name = "java", .func = tree_sitter_java, .query = ql("java"), .fold_query = qlFold("java") },
     .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp") },
-    .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php") },
+    .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php"), .fold_query = qlFold("php") },
     .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = ql("dockerfile") },
     .{ .name = "hcl", .func = tree_sitter_hcl, .query = ql("hcl") },
-    .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss") },
+    .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss"), .fold_query = qlFold("scss") },
     .{ .name = "graphql", .func = tree_sitter_graphql, .query = ql("graphql") },
-    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix") },
-    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml") },
-    .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell") },
-    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix"), .fold_query = qlFold("nix") },
+    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml"), .fold_query = qlFold("ocaml") },
+    .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell"), .fold_query = qlFold("haskell") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala"), .fold_query = qlFold("scala") },
     .{ .name = "r", .func = tree_sitter_r, .query = ql("r") },
-    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart") },
-    .{ .name = "make", .func = tree_sitter_make, .query = ql("make") },
-    .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff") },
+    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart"), .fold_query = qlFold("dart") },
+    .{ .name = "make", .func = tree_sitter_make, .query = ql("make"), .fold_query = qlFold("make") },
+    .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff"), .fold_query = qlFold("diff") },
     .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
 };
 
