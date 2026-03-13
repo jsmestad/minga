@@ -149,6 +149,14 @@ jobs:
       - run: mix deps.get --only prod
       - run: mix release minga
 
+      - name: Smoke test
+        run: |
+          binary="burrito_out/${{ matrix.artifact }}"
+          chmod +x "$binary"
+          version=$("$binary" --version 2>&1 || true)
+          echo "Binary output: $version"
+          echo "$version" | grep -q "minga"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -279,16 +287,13 @@ jobs:
               f.write(textwrap.dedent(formula).lstrip())
           PYEOF
 
-          # Download .dmg for cask hash (may not exist for TUI-only releases)
+          # Generate cask only if a .dmg exists in the release (skipped for TUI-only releases)
           dmg_url="https://github.com/jsmestad/minga/releases/download/v${version}/Minga.dmg"
-          dmg_sha="PLACEHOLDER"
           if curl -fSL -o Minga.dmg "$dmg_url" 2>/dev/null; then
             dmg_sha=$(sha256sum Minga.dmg | cut -d' ' -f1)
-          fi
-          export DMG_SHA="$dmg_sha"
+            export DMG_SHA="$dmg_sha"
 
-          # Generate cask
-          python3 << 'PYEOF'
+            python3 << 'PYEOF'
           import os, textwrap
           v = os.environ["VERSION"].lstrip("v")
           dmg_sha = os.environ["DMG_SHA"]
@@ -313,6 +318,9 @@ jobs:
           with open("homebrew-tap/Casks/minga-mac.rb", "w") as f:
               f.write(textwrap.dedent(cask).lstrip())
           PYEOF
+          else
+            echo "No .dmg found in release, skipping cask update"
+          fi
 
       - name: Commit and push
         run: |
