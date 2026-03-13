@@ -37,13 +37,16 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Instructions
+  alias Minga.Agent.InternalState
   alias Minga.Agent.ModelCatalog
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Retry
   alias Minga.Agent.Skills
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
+  alias Minga.Agent.Tools.Notebook
   alias Minga.Agent.Tools.Shell
+  alias Minga.Agent.Tools.Todo
   alias Minga.Config.Options
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse
@@ -125,6 +128,7 @@ defmodule Minga.Agent.Providers.Native do
           interrupted: boolean(),
           last_user_prompt: String.t() | nil,
           active_skills: [Skills.skill()],
+          internal_state: InternalState.t(),
           max_turns: pos_integer(),
           max_cost: float() | nil,
           session_cost: float()
@@ -221,7 +225,10 @@ defmodule Minga.Agent.Providers.Native do
     max_cost = Keyword.get(opts, :max_cost, :not_set)
     max_cost = if max_cost == :not_set, do: read_config_max_cost(), else: max_cost
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
-    tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
+    provider_pid = self()
+    base_tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
+    internal_tools = build_internal_tools(provider_pid)
+    tools = base_tools ++ internal_tools
     system_prompt = build_system_prompt(project_root)
     context = Context.new([Context.system(system_prompt)])
 
@@ -245,6 +252,7 @@ defmodule Minga.Agent.Providers.Native do
       interrupted: false,
       last_user_prompt: nil,
       active_skills: [],
+      internal_state: InternalState.new(),
       max_turns: max_turns,
       max_cost: max_cost,
       session_cost: 0.0
@@ -517,6 +525,15 @@ defmodule Minga.Agent.Providers.Native do
   def handle_call({:set_model, model}, _from, state) do
     Minga.Log.info(:agent, "[Agent.Native] model set to #{model}")
     {:reply, :ok, %{state | model: model}}
+  end
+
+  def handle_call({:update_internal_state, fun}, _from, state) when is_function(fun, 1) do
+    new_internal = fun.(state.internal_state)
+    {:reply, :ok, %{state | internal_state: new_internal}}
+  end
+
+  def handle_call(:get_internal_state, _from, state) do
+    {:reply, {:ok, state.internal_state}, state}
   end
 
   def handle_call(:get_budget, _from, state) do
@@ -1124,6 +1141,82 @@ defmodule Minga.Agent.Providers.Native do
     _ -> true
   catch
     :exit, _ -> true
+  end
+
+  # Builds tools that interact with the provider's internal state (todo, notebook).
+  # These are created in init with a closure over the provider PID.
+  #
+  # NOTE: Tool callbacks close over `provider_pid` and make GenServer.call back
+  # to the provider. This works because tools run in a spawned Task, not in the
+  # provider's own process. If the provider ever awaits the task synchronously
+  # (blocking its mailbox), these calls will deadlock.
+  @spec build_internal_tools(pid()) :: [ReqLLM.Tool.t()]
+  defp build_internal_tools(provider_pid) do
+    [
+      ReqLLM.Tool.new!(
+        name: "todo_write",
+        description: """
+        Create or update a task checklist for tracking multi-step work.
+        Each task has a description and status (pending, in_progress, done).
+        Use this to plan before executing, and update status as you complete tasks.
+        """,
+        parameter_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "tasks" => %{
+              "type" => "array",
+              "description" => "List of tasks",
+              "items" => %{
+                "type" => "object",
+                "properties" => %{
+                  "id" => %{"type" => "string", "description" => "Short task ID"},
+                  "description" => %{"type" => "string", "description" => "What to do"},
+                  "status" => %{
+                    "type" => "string",
+                    "enum" => ["pending", "in_progress", "done"],
+                    "description" => "Task status (default: pending)"
+                  }
+                },
+                "required" => ["description"]
+              }
+            }
+          },
+          "required" => ["tasks"]
+        },
+        callback: fn args -> Todo.write(provider_pid, args["tasks"] || []) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "todo_read",
+        description: "Read the current task checklist to see what's done and what remains.",
+        parameter_schema: %{"type" => "object", "properties" => %{}},
+        callback: fn _args -> Todo.read(provider_pid) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "notebook_write",
+        description: """
+        Write planning notes, intermediate reasoning, or working state to a
+        scratchpad. Content is not shown to the user. Use this for complex
+        multi-step reasoning or to track state across tool calls.
+        """,
+        parameter_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "content" => %{
+              "type" => "string",
+              "description" => "The content to write to the notebook (replaces previous content)"
+            }
+          },
+          "required" => ["content"]
+        },
+        callback: fn args -> Notebook.write(provider_pid, args["content"] || "") end
+      ),
+      ReqLLM.Tool.new!(
+        name: "notebook_read",
+        description: "Read the current scratchpad notes.",
+        parameter_schema: %{"type" => "object", "properties" => %{}},
+        callback: fn _args -> Notebook.read(provider_pid) end
+      )
+    ]
   end
 
   @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
