@@ -287,20 +287,26 @@ defmodule Minga.Extension.Supervisor do
 
   @spec compile_and_find_extension([String.t()]) :: {:ok, module()} | {:error, String.t()}
   defp compile_and_find_extension(files) do
-    modules =
-      Enum.flat_map(files, fn file ->
-        file
-        |> Code.compile_file()
-        |> Enum.map(&elem(&1, 0))
+    {result, diagnostics} =
+      Code.with_diagnostics(fn ->
+        modules =
+          Enum.flat_map(files, fn file ->
+            file
+            |> Code.compile_file()
+            |> Enum.map(&elem(&1, 0))
+          end)
+
+        case Enum.find(modules, &implements_extension?/1) do
+          nil ->
+            {:error, "no module implementing Minga.Extension behaviour found"}
+
+          mod ->
+            {:ok, mod}
+        end
       end)
 
-    case Enum.find(modules, &implements_extension?/1) do
-      nil ->
-        {:error, "no module implementing Minga.Extension behaviour found"}
-
-      mod ->
-        {:ok, mod}
-    end
+    log_diagnostics(diagnostics)
+    result
   rescue
     e in [SyntaxError, TokenMissingError, CompileError] ->
       {:error, "compile error: #{Exception.message(e)}"}
@@ -310,6 +316,32 @@ defmodule Minga.Extension.Supervisor do
   catch
     kind, reason ->
       {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
+  end
+
+  @spec log_diagnostics([map()]) :: :ok
+  defp log_diagnostics([]), do: :ok
+
+  defp log_diagnostics(diagnostics) do
+    for diag <- diagnostics do
+      file = Map.get(diag, :file, "unknown")
+      line = Map.get(diag, :position, "?")
+      message = Map.get(diag, :message, "")
+      severity = Map.get(diag, :severity, :warning)
+      short_file = Path.basename(file)
+
+      case severity do
+        :warning ->
+          Minga.Log.warning(:editor, "[ext] #{short_file}:#{line}: #{message}")
+
+        :error ->
+          Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{line}: #{message}")
+
+        _ ->
+          Minga.Log.debug(:editor, "[ext] #{short_file}:#{line}: #{message}")
+      end
+    end
+
+    :ok
   end
 
   @spec implements_extension?(module()) :: boolean()
