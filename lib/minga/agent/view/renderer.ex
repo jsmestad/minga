@@ -250,23 +250,22 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   @doc """
-  Renders agent chat with the sidebar (file viewer/dashboard) within a
-  bounded window rect.
+  Renders agent chat with the sidebar (file viewer/dashboard).
 
-  Used when the agent chat is the sole window (full-screen agent mode).
-  Produces the two-column layout: chat+input on the left, file
-  viewer/dashboard on the right, with a vertical separator. Does not
-  render title bar or modeline (those are handled by the pipeline's
-  chrome layer).
+  The pipeline provides two rects: `content_rect` for the chat+input area
+  (left column) and `sidebar_rect` for the file viewer/dashboard
+  (right column). A vertical separator is drawn in the 1-col gap
+  between them. Does not render title bar or modeline (those are
+  handled by the pipeline's chrome layer).
 
-  Returns a flat list of draw commands positioned within the given rect.
+  Returns a flat list of draw commands positioned within the given rects.
   """
-  @spec render_with_sidebar(state(), rect()) :: [DisplayList.draw()]
-  def render_with_sidebar(%EditorState{} = state, {row_off, col_off, width, height}) do
+  @spec render_with_sidebar(state(), rect(), rect()) :: [DisplayList.draw()]
+  def render_with_sidebar(%EditorState{} = state, content_rect, sidebar_rect) do
     input = extract_input(state)
 
-    chat_width_pct = input.agentic.chat_width_pct
-    chat_width = max(div(width * chat_width_pct, 100), 20)
+    {row_off, col_off, chat_width, height} = content_rect
+    {_sr, sidebar_col, sidebar_width, sidebar_height} = sidebar_rect
 
     input_height =
       compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
@@ -274,8 +273,6 @@ defmodule Minga.Agent.View.Renderer do
     chat_height = max(height - input_height, 1)
     input_row = row_off + chat_height
     separator_col = col_off + chat_width
-    viewer_col = separator_col + 1
-    viewer_width = max(width - chat_width - 1, 10)
 
     {chat_commands, _metrics} =
       render_chat_from_input(input, {row_off, col_off, chat_width, chat_height})
@@ -286,19 +283,21 @@ defmodule Minga.Agent.View.Renderer do
     viewer_commands =
       render_file_viewer_from_input(
         input,
-        {row_off, viewer_col, viewer_width, height}
+        {row_off, sidebar_col, sidebar_width, sidebar_height}
       )
 
     input_commands = render_input_from_input(input, input_row, chat_width)
 
+    total_width = chat_width + 1 + sidebar_width
+
     overlays =
       if input.agentic.help_visible do
-        render_help_overlay(input, width, height)
+        render_help_overlay(input, total_width, height)
       else
         []
       end
 
-    toast_cmds = render_toast_overlay(input, width)
+    toast_cmds = render_toast_overlay(input, total_width)
 
     chat_commands ++
       separator_commands ++ viewer_commands ++ input_commands ++ overlays ++ toast_cmds

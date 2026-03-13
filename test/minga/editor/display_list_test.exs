@@ -2,7 +2,7 @@ defmodule Minga.Editor.DisplayListTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
+  alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
   alias Minga.Port.Protocol
 
   describe "draw/4" do
@@ -119,7 +119,7 @@ defmodule Minga.Editor.DisplayListTest do
 
   describe "to_commands/1" do
     test "produces clear, cursor_shape, cursor, and batch_end" do
-      frame = %Frame{cursor: {5, 10}, cursor_shape: :beam}
+      frame = %Frame{cursor: Cursor.new(5, 10, :beam)}
       commands = DisplayList.to_commands(frame)
 
       assert hd(commands) == Protocol.encode_clear()
@@ -135,7 +135,7 @@ defmodule Minga.Editor.DisplayListTest do
         lines: %{0 => [{0, "hello", [fg: 0xFF0000]}]}
       }
 
-      frame = %Frame{cursor: {0, 0}, cursor_shape: :block, windows: [wf]}
+      frame = %Frame{cursor: Cursor.new(0, 0, :block), windows: [wf]}
       commands = DisplayList.to_commands(frame)
 
       # The draw should be at row 10+0=10, col 20+0=20
@@ -145,8 +145,7 @@ defmodule Minga.Editor.DisplayListTest do
 
     test "encodes splash draws directly" do
       frame = %Frame{
-        cursor: {0, 0},
-        cursor_shape: :block,
+        cursor: Cursor.new(0, 0, :block),
         splash: [{0, 0, "Welcome", []}]
       }
 
@@ -159,8 +158,7 @@ defmodule Minga.Editor.DisplayListTest do
       overlay = %Overlay{draws: [{5, 0, "popup", [fg: 0xFFFF00]}]}
 
       frame = %Frame{
-        cursor: {0, 0},
-        cursor_shape: :block,
+        cursor: Cursor.new(0, 0, :block),
         overlays: [overlay]
       }
 
@@ -173,8 +171,7 @@ defmodule Minga.Editor.DisplayListTest do
       region_cmd = Protocol.encode_define_region(1, 0, :editor, 0, 0, 80, 24, 0)
 
       frame = %Frame{
-        cursor: {0, 0},
-        cursor_shape: :block,
+        cursor: Cursor.new(0, 0, :block),
         regions: [region_cmd]
       }
 
@@ -188,8 +185,7 @@ defmodule Minga.Editor.DisplayListTest do
       expected_binary = Protocol.encode_draw(5, 10, "hello world", style)
 
       frame = %Frame{
-        cursor: {0, 0},
-        cursor_shape: :block,
+        cursor: Cursor.new(0, 0, :block),
         minibuffer: [{5, 10, "hello world", style}]
       }
 

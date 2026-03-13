@@ -56,6 +56,33 @@ defmodule Minga.Editor.DisplayList do
 
   # ── Frame components ───────────────────────────────────────────────────────
 
+  defmodule Cursor do
+    @moduledoc """
+    Cursor state: position and shape as a single unit.
+
+    Used by `WindowFrame` (optional, nil for non-active windows) and
+    `Frame` (always present). Bundling position and shape prevents
+    them from getting out of sync.
+    """
+
+    @enforce_keys [:row, :col, :shape]
+    defstruct [:row, :col, :shape]
+
+    @type shape :: :block | :beam | :underline
+
+    @type t :: %__MODULE__{
+            row: non_neg_integer(),
+            col: non_neg_integer(),
+            shape: shape()
+          }
+
+    @doc "Creates a cursor at the given position with the given shape."
+    @spec new(non_neg_integer(), non_neg_integer(), shape()) :: t()
+    def new(row, col, shape) when is_integer(row) and is_integer(col) do
+      %__MODULE__{row: row, col: col, shape: shape}
+    end
+  end
+
   defmodule WindowFrame do
     @moduledoc """
     Display data for a single editor window.
@@ -66,6 +93,7 @@ defmodule Minga.Editor.DisplayList do
     """
 
     alias Minga.Editor.DisplayList
+    alias Minga.Editor.DisplayList.Cursor
     alias Minga.Editor.Layout
 
     @enforce_keys [:rect]
@@ -82,7 +110,7 @@ defmodule Minga.Editor.DisplayList do
             lines: DisplayList.render_layer(),
             tilde_lines: DisplayList.render_layer(),
             modeline: DisplayList.render_layer(),
-            cursor: {non_neg_integer(), non_neg_integer()} | nil
+            cursor: Cursor.t() | nil
           }
   end
 
@@ -112,11 +140,10 @@ defmodule Minga.Editor.DisplayList do
     """
 
     alias Minga.Editor.DisplayList
-    alias Minga.Editor.DisplayList.{Overlay, WindowFrame}
+    alias Minga.Editor.DisplayList.{Cursor, Overlay, WindowFrame}
 
-    @enforce_keys [:cursor, :cursor_shape]
-    defstruct cursor: {0, 0},
-              cursor_shape: :block,
+    @enforce_keys [:cursor]
+    defstruct cursor: nil,
               tab_bar: [],
               windows: [],
               file_tree: [],
@@ -131,8 +158,7 @@ defmodule Minga.Editor.DisplayList do
               window_bg: nil
 
     @type t :: %__MODULE__{
-            cursor: {non_neg_integer(), non_neg_integer()},
-            cursor_shape: :block | :beam | :underline,
+            cursor: Cursor.t(),
             tab_bar: [DisplayList.draw()],
             windows: [WindowFrame.t()],
             file_tree: [DisplayList.draw()],
@@ -273,8 +299,8 @@ defmodule Minga.Editor.DisplayList do
       draws_to_commands(all_draws) ++
       draws_to_commands(overlay_draws) ++
       [
-        Protocol.encode_cursor_shape(frame.cursor_shape),
-        Protocol.encode_cursor(elem(frame.cursor, 0), elem(frame.cursor, 1)),
+        Protocol.encode_cursor_shape(frame.cursor.shape),
+        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
         Protocol.encode_batch_end()
       ]
   end

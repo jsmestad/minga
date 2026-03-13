@@ -10,7 +10,7 @@ defmodule Minga.Editor.RenderPipelineTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Frame, WindowFrame}
+  alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.RenderPipeline.{Chrome, WindowScroll}
@@ -170,9 +170,10 @@ defmodule Minga.Editor.RenderPipelineTest do
       {frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
 
       assert [%WindowFrame{} | _] = frames
-      assert {row, col} = cursor_info
+      assert %Cursor{row: row, col: col, shape: shape} = cursor_info
       assert is_integer(row)
       assert is_integer(col)
+      assert shape in [:block, :beam, :underline]
       assert %EditorState{} = state
     end
 
@@ -271,9 +272,8 @@ defmodule Minga.Editor.RenderPipelineTest do
 
       frame = RenderPipeline.compose_windows(frames, chrome, cursor_info, state)
 
-      assert %Frame{} = frame
-      assert is_tuple(frame.cursor)
-      assert frame.cursor_shape in [:block, :beam, :underline]
+      assert %Frame{cursor: %Cursor{}} = frame
+      assert frame.cursor.shape in [:block, :beam, :underline]
     end
 
     test "frame windows have modeline injected" do
@@ -306,8 +306,7 @@ defmodule Minga.Editor.RenderPipelineTest do
   describe "emit/2" do
     test "converts frame to commands and sends to port_manager" do
       frame = %Frame{
-        cursor: {0, 0},
-        cursor_shape: :block,
+        cursor: Cursor.new(0, 0, :block),
         splash: [DisplayList.draw(0, 0, "hello")]
       }
 
