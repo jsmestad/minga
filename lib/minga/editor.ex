@@ -375,8 +375,15 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({tag, {:grammar_loaded, _success, _name}}, state)
+  def handle_info({tag, {:grammar_loaded, true, name}}, state)
       when tag in [:minga_highlight, :minga_input] do
+    Minga.Log.info(:editor, "Grammar loaded: #{name}")
+    {:noreply, state}
+  end
+
+  def handle_info({tag, {:grammar_loaded, false, name}}, state)
+      when tag in [:minga_highlight, :minga_input] do
+    Minga.Log.warning(:editor, "Grammar failed to load: #{name}")
     {:noreply, state}
   end
 

@@ -63,16 +63,50 @@ defmodule Minga.Agent.Providers.Native do
 
   @thinking_cycle ["off", "low", "medium", "high"]
 
+  defmodule LoopCtx do
+    @moduledoc false
+    @enforce_keys [
+      :provider_pid,
+      :model,
+      :tools,
+      :thinking_level,
+      :max_tokens,
+      :max_retries,
+      :llm_client,
+      :max_turns,
+      :max_cost
+    ]
+    defstruct [
+      :provider_pid,
+      :model,
+      :tools,
+      :thinking_level,
+      :max_tokens,
+      :max_retries,
+      :llm_client,
+      :max_turns,
+      :max_cost,
+      turn_count: 0,
+      session_cost: 0.0
+    ]
+
+    @type t :: %__MODULE__{
+            provider_pid: pid(),
+            model: String.t(),
+            tools: [ReqLLM.Tool.t()],
+            thinking_level: String.t(),
+            max_tokens: pos_integer(),
+            max_retries: non_neg_integer(),
+            llm_client: term(),
+            max_turns: pos_integer(),
+            max_cost: float() | nil,
+            turn_count: non_neg_integer(),
+            session_cost: float()
+          }
+  end
+
   @typedoc "Captures the immutable parameters for one agent turn loop invocation."
-  @type loop_ctx :: %{
-          provider_pid: pid(),
-          model: String.t(),
-          tools: [ReqLLM.Tool.t()],
-          thinking_level: String.t(),
-          max_tokens: pos_integer(),
-          max_retries: non_neg_integer(),
-          llm_client: llm_client()
-        }
+  @type loop_ctx :: LoopCtx.t()
 
   @typedoc "Function that performs the LLM streaming call."
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
@@ -94,7 +128,10 @@ defmodule Minga.Agent.Providers.Native do
           interrupted: boolean(),
           last_user_prompt: String.t() | nil,
           active_skills: [Skills.skill()],
-          internal_state: InternalState.t()
+          internal_state: InternalState.t(),
+          max_turns: pos_integer(),
+          max_cost: float() | nil,
+          session_cost: float()
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -184,6 +221,9 @@ defmodule Minga.Agent.Providers.Native do
 
     max_tokens = Keyword.get(opts, :max_tokens) || read_config_max_tokens()
     max_retries = Keyword.get(opts, :max_retries) || read_config_max_retries()
+    max_turns = Keyword.get(opts, :max_turns) || read_config_max_turns()
+    max_cost = Keyword.get(opts, :max_cost, :not_set)
+    max_cost = if max_cost == :not_set, do: read_config_max_cost(), else: max_cost
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     provider_pid = self()
     base_tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
@@ -212,7 +252,10 @@ defmodule Minga.Agent.Providers.Native do
       interrupted: false,
       last_user_prompt: nil,
       active_skills: [],
-      internal_state: InternalState.new()
+      internal_state: InternalState.new(),
+      max_turns: max_turns,
+      max_cost: max_cost,
+      session_cost: 0.0
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -241,25 +284,37 @@ defmodule Minga.Agent.Providers.Native do
     # Notify subscriber that agent is starting
     notify(state.subscriber, %Event.AgentStart{})
 
-    # Spawn the agent turn loop in a linked task
-    lctx = %{
-      provider_pid: self(),
-      model: state.model,
-      tools: state.tools,
-      thinking_level: state.thinking_level,
-      max_tokens: state.max_tokens,
-      max_retries: state.max_retries,
-      llm_client: state.llm_client
-    }
+    # Check cost budget before starting
+    if over_budget?(state) do
+      notify(state.subscriber, %Event.Error{
+        message: cost_limit_message(state.session_cost, state.max_cost)
+      })
 
-    task =
-      Task.async(fn ->
-        run_agent_loop(lctx, context)
-      end)
+      {:reply, {:error, :cost_limit_reached}, %{state | context: context}}
+    else
+      # Spawn the agent turn loop in a linked task
+      lctx = %LoopCtx{
+        provider_pid: self(),
+        model: state.model,
+        tools: state.tools,
+        thinking_level: state.thinking_level,
+        max_tokens: state.max_tokens,
+        max_retries: state.max_retries,
+        llm_client: state.llm_client,
+        max_turns: state.max_turns,
+        max_cost: state.max_cost,
+        session_cost: state.session_cost
+      }
 
-    state = %{state | task: task}
+      task =
+        Task.async(fn ->
+          run_agent_loop(lctx, context)
+        end)
 
-    {:reply, :ok, state}
+      state = %{state | task: task}
+
+      {:reply, :ok, state}
+    end
   end
 
   def handle_call(:abort, _from, %{task: nil} = state) do
@@ -291,14 +346,17 @@ defmodule Minga.Agent.Providers.Native do
 
     notify(state.subscriber, %Event.AgentStart{})
 
-    lctx = %{
+    lctx = %LoopCtx{
       provider_pid: self(),
       model: state.model,
       tools: state.tools,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
-      llm_client: state.llm_client
+      llm_client: state.llm_client,
+      max_turns: state.max_turns,
+      max_cost: state.max_cost,
+      session_cost: state.session_cost
     }
 
     task = Task.async(fn -> run_agent_loop(lctx, context) end)
@@ -353,7 +411,7 @@ defmodule Minga.Agent.Providers.Native do
     system_prompt = build_system_prompt(state.project_root)
     context = Context.new([Context.system(system_prompt)])
 
-    state = %{state | context: context, task: nil, streaming: false}
+    state = %{state | context: context, task: nil, streaming: false, session_cost: 0.0}
     Minga.Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
@@ -478,6 +536,26 @@ defmodule Minga.Agent.Providers.Native do
     {:reply, {:ok, state.internal_state}, state}
   end
 
+  def handle_call(:get_budget, _from, state) do
+    budget = %{
+      session_cost: state.session_cost,
+      max_cost: state.max_cost,
+      max_turns: state.max_turns
+    }
+
+    {:reply, {:ok, budget}, state}
+  end
+
+  def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
+    Minga.Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
+    {:reply, :ok, %{state | max_cost: amount + 0.0}}
+  end
+
+  def handle_call({:set_max_cost, nil}, _from, state) do
+    Minga.Log.info(:agent, "[Agent.Native] cost budget disabled")
+    {:reply, :ok, %{state | max_cost: nil}}
+  end
+
   @impl GenServer
   def handle_info({:agent_event, event}, state) do
     # Forwarded from the task
@@ -488,6 +566,10 @@ defmodule Minga.Agent.Providers.Native do
   def handle_info({:agent_context_update, context}, state) do
     # Task finished a turn and is sending us the updated context
     {:noreply, %{state | context: context}}
+  end
+
+  def handle_info({:agent_turn_cost, cost}, state) when is_number(cost) do
+    {:noreply, %{state | session_cost: state.session_cost + cost}}
   end
 
   def handle_info({:stream_interrupted, _partial_text}, state) do
@@ -504,6 +586,16 @@ defmodule Minga.Agent.Providers.Native do
     # Stream was interrupted but partial response was preserved
     Process.demonitor(ref, [:flush])
     {:noreply, %{state | task: nil, streaming: false, interrupted: true}}
+  end
+
+  def handle_info({ref, {:error, :turn_limit_reached}}, %{task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | task: nil, streaming: false, interrupted: true}}
+  end
+
+  def handle_info({ref, {:error, :cost_limit_reached}}, %{task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | task: nil, streaming: false}}
   end
 
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
@@ -535,6 +627,44 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec run_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp run_agent_loop(lctx, context) do
+    case check_safety_limits(lctx) do
+      :ok ->
+        do_agent_loop(lctx, context)
+
+      {:turn_limit, message} ->
+        send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: "\n\n⚠️ #{message}"}})
+
+        send(
+          lctx.provider_pid,
+          {:agent_event, %Event.TurnLimitReached{current: lctx.turn_count, limit: lctx.max_turns}}
+        )
+
+        send(lctx.provider_pid, {:agent_event, %Event.AgentEnd{usage: nil}})
+        {:error, :turn_limit_reached}
+
+      {:cost_limit, message} ->
+        send(lctx.provider_pid, {:agent_event, %Event.TextDelta{delta: "\n\n⚠️ #{message}"}})
+        send(lctx.provider_pid, {:agent_event, %Event.AgentEnd{usage: nil}})
+        {:error, :cost_limit_reached}
+    end
+  end
+
+  @spec check_safety_limits(loop_ctx()) ::
+          :ok | {:turn_limit, String.t()} | {:cost_limit, String.t()}
+  defp check_safety_limits(%LoopCtx{turn_count: tc, max_turns: mt}) when tc >= mt do
+    {:turn_limit, "Turn limit reached (#{tc}/#{mt}). Use /continue to resume."}
+  end
+
+  defp check_safety_limits(%LoopCtx{} = lctx) do
+    if over_budget?(lctx) do
+      {:cost_limit, cost_limit_message(lctx.session_cost, lctx.max_cost)}
+    else
+      :ok
+    end
+  end
+
+  @spec do_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
+  defp do_agent_loop(lctx, context) do
     # Check if context needs compaction before the API call
     context = maybe_compact_context(lctx, context)
 
@@ -669,15 +799,18 @@ defmodule Minga.Agent.Providers.Native do
     updated_context = Context.append(context, Context.assistant(text))
     send(lctx.provider_pid, {:agent_context_update, updated_context})
 
+    normalized = normalize_usage(usage, lctx.model)
+    report_turn_cost(lctx, normalized)
+
     send(
       lctx.provider_pid,
-      {:agent_event, %Event.AgentEnd{usage: normalize_usage(usage, lctx.model)}}
+      {:agent_event, %Event.AgentEnd{usage: normalized}}
     )
 
     :ok
   end
 
-  defp dispatch_result(lctx, context, tool_calls, text, _usage) do
+  defp dispatch_result(lctx, context, tool_calls, text, usage) do
     # Has tool calls: execute tools and continue the loop
     reqllm_tool_calls =
       Enum.map(tool_calls, fn tc ->
@@ -690,7 +823,18 @@ defmodule Minga.Agent.Providers.Native do
     context = execute_tools(lctx.provider_pid, context, tool_calls, lctx.tools)
     send(lctx.provider_pid, {:agent_context_update, context})
 
-    # Continue the loop with updated context
+    # Track cost from this turn and increment turn count for safety checks
+    normalized = normalize_usage(usage, lctx.model)
+    turn_cost = turn_cost_from_usage(normalized)
+    report_turn_cost(lctx, normalized)
+
+    lctx = %{
+      lctx
+      | turn_count: lctx.turn_count + 1,
+        session_cost: lctx.session_cost + turn_cost
+    }
+
+    # Continue the loop with updated context and incremented turn count
     run_agent_loop(lctx, context)
   end
 
@@ -799,7 +943,7 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @file_tools ~w(edit_file write_file)
+  @file_tools ~w(edit_file multi_edit_file write_file)
 
   @spec capture_file_before(map()) :: String.t() | nil
   defp capture_file_before(%{name: name, arguments: %{"path" => path}})
@@ -1008,7 +1152,6 @@ defmodule Minga.Agent.Providers.Native do
   # (blocking its mailbox), these calls will deadlock.
   @spec build_internal_tools(pid()) :: [ReqLLM.Tool.t()]
   defp build_internal_tools(provider_pid) do
-
     [
       ReqLLM.Tool.new!(
         name: "todo_write",
@@ -1096,9 +1239,10 @@ defmodule Minga.Agent.Providers.Native do
 
   ## Available tools
 
-  - read_file: Read file contents
+  - read_file: Read file contents. Supports offset and limit for partial reads of large files.
   - write_file: Create or overwrite files (creates parent directories automatically)
   - edit_file: Make surgical edits (find exact text and replace). Read the file first to get exact text.
+  - multi_edit_file: Apply multiple edits to one file in a single call. More efficient than calling edit_file N times.
   - list_directory: List files and directories at a path
   - find: Find files by name or glob pattern. Prefer this over shell + find.
   - grep: Search file contents for a pattern. Returns file:line:content. Prefer this over shell + grep.
@@ -1234,6 +1378,58 @@ defmodule Minga.Agent.Providers.Native do
   catch
     :exit, _ -> []
   end
+
+  @default_max_turns 100
+
+  @spec read_config_max_turns() :: pos_integer()
+  defp read_config_max_turns do
+    Options.get(:agent_max_turns)
+  rescue
+    ArgumentError -> @default_max_turns
+  catch
+    :exit, _ -> @default_max_turns
+  end
+
+  @spec read_config_max_cost() :: float() | nil
+  defp read_config_max_cost do
+    Options.get(:agent_max_cost)
+  rescue
+    ArgumentError -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  # Works with both LoopCtx and state since both have max_cost/session_cost fields.
+  @spec over_budget?(LoopCtx.t() | state()) :: boolean()
+  defp over_budget?(%{max_cost: nil}), do: false
+
+  defp over_budget?(%{max_cost: max_cost, session_cost: session_cost})
+       when is_number(max_cost) do
+    session_cost >= max_cost
+  end
+
+  @spec cost_limit_message(float(), float() | nil) :: String.t()
+  defp cost_limit_message(session_cost, max_cost) do
+    formatted_spent = :erlang.float_to_binary(session_cost, decimals: 2)
+    formatted_limit = :erlang.float_to_binary(max_cost || 0.0, decimals: 2)
+
+    "Session cost limit reached ($#{formatted_spent} / $#{formatted_limit}). " <>
+      "Raise the limit with /budget <amount> or start a new session."
+  end
+
+  @spec turn_cost_from_usage(Event.token_usage() | nil) :: float()
+  defp turn_cost_from_usage(nil), do: 0.0
+  defp turn_cost_from_usage(%{cost: cost}) when is_number(cost), do: cost
+
+  @spec report_turn_cost(loop_ctx(), Event.token_usage() | nil) :: :ok
+  defp report_turn_cost(_lctx, nil), do: :ok
+
+  defp report_turn_cost(lctx, %{cost: cost}) when is_number(cost) and cost > 0 do
+    send(lctx.provider_pid, {:agent_turn_cost, cost})
+    :ok
+  end
+
+  defp report_turn_cost(_lctx, _usage), do: :ok
 
   # Finds the next entry in the cycle after the current model.
   @spec next_in_cycle([String.t()], String.t()) :: String.t()

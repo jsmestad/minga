@@ -143,6 +143,7 @@ Current status and planned features. Updated as development progresses.
 | Doom One color theme | ✅ | Built-in default theme |
 | User-overridable queries | ✅ | `~/.config/minga/queries/{lang}/highlights.scm` |
 | Runtime grammar loading | ✅ | `dlopen` for user grammars |
+| Extension grammar compilation | ✅ | `Minga.TreeSitter.register_grammar/3` compiles grammar C sources via system compiler, caches at `~/.local/share/minga/grammars/`, registers filetype + highlight queries (#427) |
 | Background query pre-compilation | ✅ | All 39 query sets compiled on startup |
 | Per-buffer highlight cache | ✅ | Instant switching between files |
 | Additional themes | ✅ | 7 built-in: Doom One, Catppuccin ×4, One Dark/Light |

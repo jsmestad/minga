@@ -159,7 +159,9 @@ defmodule Minga.Filetype do
   def detect(file_path) when is_binary(file_path) do
     basename = Path.basename(file_path)
 
-    with :miss <- lookup_filename(basename),
+    with :miss <- lookup_registry_filename(basename),
+         :miss <- lookup_registry_extension(basename),
+         :miss <- lookup_filename(basename),
          :miss <- lookup_extension(basename),
          :miss <- detect_env_pattern(basename) do
       :text
@@ -193,6 +195,32 @@ defmodule Minga.Filetype do
   def shebang_interpreters, do: @shebang_interpreters
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec lookup_registry_filename(String.t()) :: filetype() | :miss
+  defp lookup_registry_filename(basename) do
+    case Minga.Filetype.Registry.lookup_filename(basename) do
+      nil -> :miss
+      filetype -> filetype
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  @spec lookup_registry_extension(String.t()) :: filetype() | :miss
+  defp lookup_registry_extension(basename) do
+    case Path.extname(basename) do
+      "" ->
+        :miss
+
+      "." <> ext ->
+        case Minga.Filetype.Registry.lookup_extension(String.downcase(ext)) do
+          nil -> :miss
+          filetype -> filetype
+        end
+    end
+  rescue
+    ArgumentError -> :miss
+  end
 
   @spec lookup_filename(String.t()) :: filetype() | :miss
   defp lookup_filename(basename) do
