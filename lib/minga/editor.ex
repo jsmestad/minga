@@ -120,6 +120,18 @@ defmodule Minga.Editor do
         log_message(state, "Editor started")
       end
 
+    # Flush any log messages that arrived while the Editor was down
+    # (e.g., supervisor crash reports from a previous Editor crash).
+    # Must happen after *Messages* buffer is ready but before we return.
+    flushed = Minga.LoggerHandler.flush_buffer()
+
+    state =
+      if flushed > 0 do
+        log_message(state, "Replayed #{flushed} message(s) from before restart")
+      else
+        state
+      end
+
     state = Startup.apply_config_options(state)
     Minga.Diagnostics.subscribe()
 

@@ -34,6 +34,11 @@ defmodule Minga.Application do
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_type, _args) do
+    # Create the log buffer ETS table owned by the supervisor process.
+    # This table survives Editor crashes so the LoggerHandler can queue
+    # messages while the Editor is restarting. The Editor flushes it on init.
+    Minga.LoggerHandler.ensure_buffer_table()
+
     base_children = [
       Minga.Config.Options,
       Minga.Keymap.Active,
