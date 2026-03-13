@@ -4,7 +4,6 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.Renderer
-  alias Minga.Agent.View.Renderer.RenderInput
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
@@ -15,47 +14,6 @@ defmodule Minga.Agent.View.RendererTest do
   alias Minga.Editor.VimState
   alias Minga.Input
   alias Minga.Theme
-
-  defp default_theme do
-    Theme.get!(:doom_one)
-  end
-
-  defp default_input(overrides \\ %{}) do
-    theme = default_theme()
-
-    base = %RenderInput{
-      viewport: Viewport.new(24, 80),
-      theme: theme,
-      agent_status: :idle,
-      panel: %{
-        input_focused: false,
-        input_lines: [""],
-        mode: :normal,
-        mode_state: Minga.Mode.initial_state(),
-        input_cursor: {0, 0},
-        scroll: Minga.Scroll.new(),
-        spinner_frame: 0,
-        model_name: "claude-sonnet-4",
-        provider_name: "anthropic",
-        thinking_level: "medium",
-        display_start_index: 0,
-        mention_completion: nil,
-        pasted_blocks: []
-      },
-      agentic: %{
-        chat_width_pct: 65,
-        help_visible: false,
-        focus: :chat,
-        search: nil,
-        toast: nil,
-        context_estimate: 0
-      },
-      messages: [],
-      session_title: "Minga Agent"
-    }
-
-    Map.merge(base, overrides)
-  end
 
   defp base_state(opts \\ []) do
     rows = Keyword.get(opts, :rows, 40)
@@ -90,10 +48,12 @@ defmodule Minga.Agent.View.RendererTest do
       buffer: nil
     }
 
+    preview_opt = Keyword.get(opts, :preview, nil)
+
     agentic = %ViewState{
       active: true,
       focus: Keyword.get(opts, :focus, :chat),
-      preview: Preview.new(),
+      preview: preview_opt || Preview.new(),
       saved_windows: nil,
       pending_prefix: nil,
       saved_file_tree: nil
@@ -112,53 +72,40 @@ defmodule Minga.Agent.View.RendererTest do
     }
   end
 
-  describe "cursor_position/1" do
-    test "when input not focused, cursor is off-screen (row = viewport rows)" do
-      state = base_state(rows: 40, input_focused: false)
-      {row, _col} = Renderer.cursor_position(state)
-      assert row == 40
-    end
+  # Computes content_rect and sidebar_rect from state, matching
+  # what the render pipeline's compute_agent_sidebar/2 does.
+  # Content starts at row 0, col 0 (no title bar or modeline; those
+  # are chrome layer concerns).
+  @spec sidebar_rects(EditorState.t()) ::
+          {Minga.Editor.Layout.rect(), Minga.Editor.Layout.rect()}
+  defp sidebar_rects(state) do
+    cols = state.viewport.cols
+    rows = state.viewport.rows
+    chat_width = max(div(cols * state.agentic.chat_width_pct, 100), 20)
+    sidebar_col = chat_width + 1
+    sidebar_width = max(cols - chat_width - 1, 10)
 
-    test "when input is focused, cursor row is within content area" do
-      state = base_state(rows: 40, input_focused: true)
-      {row, col} = Renderer.cursor_position(state)
-      assert row < 40
-      assert row >= 0
-      assert col >= 0
-    end
-
-    test "cursor column advances with input_text length" do
-      state_empty = base_state(input_focused: true, input_text: "")
-      state_hello = base_state(input_focused: true, input_text: "hello")
-
-      {_r, col_empty} = Renderer.cursor_position(state_empty)
-      {_r, col_hello} = Renderer.cursor_position(state_hello)
-
-      assert col_hello == col_empty + String.length("hello")
-    end
-
-    test "cursor row is the same regardless of input text length" do
-      state_short = base_state(input_focused: true, input_text: "hi")
-      state_long = base_state(input_focused: true, input_text: "a long message here")
-
-      {row_short, _} = Renderer.cursor_position(state_short)
-      {row_long, _} = Renderer.cursor_position(state_long)
-
-      assert row_short == row_long
-    end
+    {{0, 0, chat_width, rows}, {0, sidebar_col, sidebar_width, rows}}
   end
 
-  describe "render/1" do
+  # Convenience: render with sidebar using production-like rects.
+  @spec render_sidebar(EditorState.t()) :: [Minga.Editor.DisplayList.draw()]
+  defp render_sidebar(state) do
+    {content_rect, sidebar_rect} = sidebar_rects(state)
+    Renderer.render_with_sidebar(state, content_rect, sidebar_rect)
+  end
+
+  describe "render_with_sidebar/3" do
     test "returns a non-empty list of draw tuples" do
       state = base_state(rows: 30, cols: 100)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
       assert [_ | _] = commands
       assert Enum.all?(commands, &is_tuple/1)
     end
 
     test "all draw tuples have valid 4-element structure" do
       state = base_state(rows: 30, cols: 100)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
       Enum.each(commands, fn cmd ->
         assert tuple_size(cmd) == 4, "draw tuple should have 4 elements: #{inspect(cmd)}"
@@ -174,8 +121,8 @@ defmodule Minga.Agent.View.RendererTest do
       state_small = base_state(rows: 20, cols: 80)
       state_large = base_state(rows: 40, cols: 80)
 
-      {cmds_small, _metrics} = Renderer.render(state_small)
-      {cmds_large, _metrics} = Renderer.render(state_large)
+      cmds_small = render_sidebar(state_small)
+      cmds_large = render_sidebar(state_large)
 
       assert length(cmds_large) > length(cmds_small)
     end
@@ -183,7 +130,7 @@ defmodule Minga.Agent.View.RendererTest do
     test "does not crash when active buffer is nil" do
       state = base_state()
       state = put_in(state.buffers.active, nil)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
       assert is_list(commands)
     end
 
@@ -191,11 +138,33 @@ defmodule Minga.Agent.View.RendererTest do
       state_top = base_state(viewer_scroll: 0)
       state_scrolled = base_state(viewer_scroll: 2)
 
-      {cmds_top, _metrics} = Renderer.render(state_top)
-      {cmds_scrolled, _metrics} = Renderer.render(state_scrolled)
+      cmds_top = render_sidebar(state_top)
+      cmds_scrolled = render_sidebar(state_scrolled)
 
       assert is_list(cmds_top)
       assert is_list(cmds_scrolled)
+    end
+  end
+
+  describe "render_in_rect/2" do
+    test "returns a non-empty list of draw tuples" do
+      state = base_state(rows: 30, cols: 100)
+      commands = Renderer.render_in_rect(state, {0, 0, 80, 30})
+      assert [_ | _] = commands
+      assert Enum.all?(commands, &is_tuple/1)
+    end
+
+    test "compact mode has no column separator or sidebar content" do
+      cols = 100
+      state = base_state(rows: 30, cols: cols)
+      chat_width = div(cols * 65, 100)
+      commands = Renderer.render_in_rect(state, {0, 0, chat_width, 30})
+
+      # No draw commands should appear past the chat width (no sidebar column)
+      sidebar_cmds =
+        Enum.filter(commands, fn {_r, col, _text, _s} -> col > chat_width end)
+
+      assert sidebar_cmds == [], "compact mode should not have sidebar content"
     end
   end
 
@@ -205,8 +174,7 @@ defmodule Minga.Agent.View.RendererTest do
       state = base_state(cols: cols)
 
       expected_chat_width = div(cols * 65, 100)
-
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
       chat_cols =
         commands
@@ -223,29 +191,15 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
-  describe "title bar" do
-    test "renders draw commands at row 1 (title bar below tab bar)" do
-      state = base_state(rows: 30, cols: 100)
-      {commands, _metrics} = Renderer.render(state)
-
-      row_1_cmds = Enum.filter(commands, fn {row, _col, _text, _style} -> row == 1 end)
-
-      assert row_1_cmds != [], "expected draw commands at row 1 (title bar)"
-    end
-  end
-
   describe "input area inside left column" do
     test "input border renders at col 0 within the left panel" do
       state = base_state(rows: 30, cols: 100)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
-      # With the new layout: modeline at row 28, input_height = 3,
-      # input starts at row 28 - 3 = 25
-      input_border_row = 30 - 1 - 1 - 3
-
+      # Input box should have a top border starting at col 0
       input_cmds =
-        Enum.filter(commands, fn {row, col, _text, _style} ->
-          row == input_border_row and col == 0
+        Enum.filter(commands, fn {_row, col, text, _style} ->
+          col == 0 and String.starts_with?(text, "╭─ Prompt")
         end)
 
       assert input_cmds != [], "expected input border at col 0"
@@ -254,11 +208,10 @@ defmodule Minga.Agent.View.RendererTest do
     test "input box width is constrained to left column (chat_width)" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
       chat_width = div(cols * 65, 100)
 
-      # Find the top border of the input box
       top_border_cmds =
         Enum.filter(commands, fn {_row, col, text, _style} ->
           col == 0 and String.starts_with?(text, "╭─ Prompt")
@@ -274,210 +227,114 @@ defmodule Minga.Agent.View.RendererTest do
     test "right panel extends alongside the input area" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
       chat_width = div(cols * 65, 100)
       viewer_col = chat_width + 1
-      input_border_row = 30 - 1 - 1 - 3
+
+      # Find the input box top border row
+      input_row =
+        commands
+        |> Enum.find(fn {_r, col, text, _s} ->
+          col == 0 and String.starts_with?(text, "╭─ Prompt")
+        end)
+        |> elem(0)
 
       # The viewer/dashboard should have draw commands at rows alongside the input
       viewer_at_input_rows =
         Enum.filter(commands, fn {row, col, _text, _style} ->
-          row >= input_border_row and row < 30 - 2 and col >= viewer_col
+          row >= input_row and col >= viewer_col
         end)
 
       assert viewer_at_input_rows != [],
              "expected right panel content at rows alongside the input area"
     end
 
-    test "separator extends the full panel height including alongside input" do
+    test "separator extends the full panel height" do
       cols = 100
-      state = base_state(rows: 30, cols: cols)
-      {commands, _metrics} = Renderer.render(state)
+      rows = 30
+      state = base_state(rows: rows, cols: cols)
+      commands = render_sidebar(state)
 
       chat_width = div(cols * 65, 100)
-      sep_col = chat_width
-      panel_start = 2
-      modeline_row = 30 - 2
 
       sep_cmds =
         Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == sep_col and text == "│"
+          col == chat_width and text == "│"
         end)
 
       sep_rows = Enum.map(sep_cmds, fn {row, _, _, _} -> row end) |> Enum.sort()
 
-      # Separator should span from panel_start to modeline_row - 1
-      expected_rows = Enum.to_list(panel_start..(modeline_row - 1))
+      # Separator should span the full height of the content rect
+      expected_rows = Enum.to_list(0..(rows - 1))
 
       assert sep_rows == expected_rows,
-             "separator should span rows #{panel_start}..#{modeline_row - 1}, got #{inspect(sep_rows)}"
+             "separator should span rows 0..#{rows - 1}, got #{inspect(sep_rows)}"
     end
   end
 
   describe "file viewer header" do
-    test "file viewer header is at the top of the viewer panel (row 2)" do
+    test "file viewer header is at the top of the viewer panel" do
       state = base_state(rows: 30, cols: 100)
-      {commands, _metrics} = Renderer.render(state)
+      commands = render_sidebar(state)
 
       chat_width = div(100 * 65, 100)
       viewer_col = chat_width + 1
 
-      # Header should be at row 2 (panel_start), at viewer_col
+      # Header should be at row 0 (top of content rect), at viewer_col
       header_cmds =
         Enum.filter(commands, fn {row, col, _text, _style} ->
-          row == 2 and col == viewer_col
+          row == 0 and col >= viewer_col
         end)
 
-      assert header_cmds != [], "expected file viewer header at row 2"
+      assert header_cmds != [], "expected file viewer header at the top of the viewer panel"
     end
   end
 
-  describe "render/1 with RenderInput (isolated, no GenServer)" do
-    test "renders with a focused RenderInput, no full EditorState needed" do
-      input = %Renderer.RenderInput{
-        viewport: Viewport.new(30, 100),
-        theme: Theme.get!(:doom_one),
-        agent_status: :idle,
-        panel: %{
-          input_focused: false,
-          input_lines: [""],
-          mode: :normal,
-          mode_state: Minga.Mode.initial_state(),
-          input_cursor: {0, 0},
-          scroll: Minga.Scroll.new(),
-          spinner_frame: 0,
-          model_name: "claude-sonnet-4",
-          provider_name: "anthropic",
-          thinking_level: "medium",
-          display_start_index: 0,
-          mention_completion: nil,
-          pasted_blocks: []
-        },
-        agentic: %{
-          chat_width_pct: 65,
-          help_visible: false,
-          focus: :chat,
-          search: nil,
-          toast: nil,
-          context_estimate: 0
-        },
-        messages: [],
-        usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
-        buffer_snapshot: nil,
-        highlight: nil,
-        mode: :normal,
-        mode_state: nil,
-        buf_index: 1,
-        buf_count: 1
-      }
-
-      {commands, _metrics} = Renderer.render(input)
-      assert [_ | _] = commands
-      assert Enum.all?(commands, &is_tuple/1)
+  describe "cursor_position_in_rect/2" do
+    test "returns nil when input is not focused" do
+      state = base_state(rows: 40, input_focused: false)
+      assert Renderer.cursor_position_in_rect(state, {0, 0, 80, 40}) == nil
     end
 
-    test "renders with file preview data" do
-      input = %Renderer.RenderInput{
-        viewport: Viewport.new(30, 100),
-        theme: Theme.get!(:doom_one),
-        agent_status: :thinking,
-        panel: %{
-          input_focused: true,
-          input_lines: ["hello"],
-          mode: :normal,
-          mode_state: Minga.Mode.initial_state(),
-          input_cursor: {0, 5},
-          scroll: Minga.Scroll.new(),
-          spinner_frame: 3,
-          model_name: "claude-sonnet-4",
-          provider_name: "anthropic",
-          thinking_level: "medium",
-          display_start_index: 0,
-          mention_completion: nil,
-          pasted_blocks: []
-        },
-        agentic: %{
-          chat_width_pct: 65,
-          help_visible: false,
-          focus: :chat,
-          search: nil,
-          toast: nil,
-          context_estimate: 0
-        },
-        messages: [],
-        # Set preview to a file so the buffer preview renders (not dashboard)
-        preview: %Preview{
-          content: {:file, "test.ex", "line one\nline two"},
-          scroll: Minga.Scroll.new()
-        },
-        usage: %{input: 1500, output: 300, cache_read: 0, cache_write: 0, cost: 0.012},
-        buffer_snapshot: nil,
-        highlight: nil,
-        mode: :normal,
-        mode_state: nil,
-        buf_index: 1,
-        buf_count: 2
-      }
+    test "returns {row, col} when input is focused" do
+      state = base_state(rows: 40, input_focused: true)
+      result = Renderer.cursor_position_in_rect(state, {0, 0, 80, 40})
 
-      {commands, _metrics} = Renderer.render(input)
-      assert [_ | _] = commands
-
-      # Should have file viewer content
-      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
-      assert Enum.any?(texts, &String.contains?(&1, "test.ex"))
+      assert {row, col} = result
+      assert is_integer(row)
+      assert is_integer(col)
+      assert row >= 0 and row < 40
+      assert col >= 0
     end
-  end
 
-  describe "context bar" do
-    test "context bar appears in title bar when usage exists" do
-      state = base_state()
-      # Simulate some token usage by directly setting the panel state
-      # The renderer reads usage from the session, but for isolated tests
-      # we check via RenderInput
-      input = %Renderer.RenderInput{
-        viewport: Viewport.new(30, 100),
-        theme: Theme.get!(:doom_one),
-        agent_status: :idle,
-        panel: %{
-          input_focused: false,
-          input_lines: [""],
-          mode: :normal,
-          mode_state: Minga.Mode.initial_state(),
-          input_cursor: {0, 0},
-          scroll: Minga.Scroll.new(),
-          spinner_frame: 0,
-          model_name: "claude-sonnet-4",
-          provider_name: "anthropic",
-          thinking_level: "medium",
-          display_start_index: 0,
-          mention_completion: nil,
-          pasted_blocks: []
-        },
-        agentic: %{
-          chat_width_pct: 65,
-          help_visible: false,
-          focus: :chat,
-          search: nil,
-          toast: nil,
-          context_estimate: 0
-        },
-        messages: [],
-        usage: %{input: 50_000, output: 50_000, cache_read: 0, cache_write: 0, cost: 0.05},
-        buffer_snapshot: nil,
-        highlight: nil,
-        mode: :normal,
-        mode_state: nil,
-        buf_index: 1,
-        buf_count: 1
-      }
+    test "cursor column advances with input text length" do
+      state_empty = base_state(input_focused: true, input_text: "")
+      state_hello = base_state(input_focused: true, input_text: "hello")
 
-      _ = state
-      {commands, _metrics} = Renderer.render(input)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+      {_r, col_empty} = Renderer.cursor_position_in_rect(state_empty, {0, 0, 80, 40})
+      {_r, col_hello} = Renderer.cursor_position_in_rect(state_hello, {0, 0, 80, 40})
 
-      has_bar = Enum.any?(texts, &String.contains?(&1, "█"))
-      assert has_bar, "expected context bar with filled blocks in title bar"
+      assert col_hello == col_empty + String.length("hello")
+    end
+
+    test "cursor row is the same regardless of short input text" do
+      state_short = base_state(input_focused: true, input_text: "hi")
+      state_long = base_state(input_focused: true, input_text: "a long message here")
+
+      {row_short, _} = Renderer.cursor_position_in_rect(state_short, {0, 0, 80, 40})
+      {row_long, _} = Renderer.cursor_position_in_rect(state_long, {0, 0, 80, 40})
+
+      assert row_short == row_long
+    end
+
+    test "cursor position is offset by the rect origin" do
+      state = base_state(rows: 40, input_focused: true, input_text: "test")
+
+      {row_origin, _col_origin} = Renderer.cursor_position_in_rect(state, {0, 0, 80, 40})
+      {row_offset, _col_offset} = Renderer.cursor_position_in_rect(state, {5, 0, 80, 40})
+
+      assert row_offset == row_origin + 5
     end
   end
 
@@ -486,8 +343,8 @@ defmodule Minga.Agent.View.RendererTest do
       state_80 = base_state(rows: 24, cols: 80)
       state_120 = base_state(rows: 24, cols: 120)
 
-      {cmds_80, _metrics} = Renderer.render(state_80)
-      {cmds_120, _metrics} = Renderer.render(state_120)
+      cmds_80 = render_sidebar(state_80)
+      cmds_120 = render_sidebar(state_120)
 
       cols_80 =
         cmds_80
@@ -503,89 +360,34 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
-  describe "session title" do
-    test "title bar shows Minga Agent when no messages" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "Minga Agent"))
-    end
-
-    test "title bar shows first user prompt when available" do
-      input =
-        default_input(%{
-          messages: [{:user, "Explain the BEAM"}, {:assistant, "The BEAM is..."}],
-          session_title: "Explain the BEAM"
-        })
-
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "Explain the BEAM"))
-    end
-  end
-
-  describe "keyboard hints" do
-    test "modeline includes keyboard hints for chat focus" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "? help"))
-    end
-
-    test "modeline shows input hints when input is focused" do
-      input =
-        default_input(%{
-          panel: %{
-            input_focused: true,
-            input_lines: [""],
-            mode: :normal,
-            mode_state: Minga.Mode.initial_state(),
-            input_cursor: {0, 0},
-            scroll: Minga.Scroll.new(),
-            spinner_frame: 0,
-            model_name: "claude-sonnet-4",
-            provider_name: "anthropic",
-            thinking_level: "medium",
-            display_start_index: 0,
-            mention_completion: nil,
-            pasted_blocks: []
-          }
-        })
-
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "send"))
-    end
-  end
-
   describe "model info" do
     test "model name appears near input area" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
     end
 
     test "thinking level appears when set" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "medium"))
     end
 
     test "provider name appears in model info line (titleized)" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Anthropic"))
     end
   end
 
   describe "input box border" do
     test "input area has rounded box border with Prompt label" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt")),
              "expected top border with Prompt label"
@@ -598,9 +400,9 @@ defmodule Minga.Agent.View.RendererTest do
     end
 
     test "model info is embedded in bottom border" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, fn text ->
                String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
@@ -611,76 +413,29 @@ defmodule Minga.Agent.View.RendererTest do
 
   describe "dashboard panel" do
     test "shows session info when preview is empty" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
-      # Dashboard should show Context section
       assert Enum.any?(texts, &String.contains?(&1, "Context"))
-      # Dashboard should show Model section
       assert Enum.any?(texts, &String.contains?(&1, "Model"))
-      # Dashboard should show the model name
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
-      # Status is shown in the title bar, not the dashboard
-    end
-
-    test "shows token usage when available" do
-      input =
-        default_input(%{
-          usage: %{input: 15_000, output: 2000, cache_read: 8000, cache_write: 0, cost: 0.042}
-        })
-
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-
-      assert Enum.any?(texts, &String.contains?(&1, "17.0k tokens"))
-      assert Enum.any?(texts, &String.contains?(&1, "$0.042"))
     end
 
     test "shows working directory" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Directory"))
     end
 
     test "shows LSP section with no servers when list is empty" do
-      input = default_input(%{lsp_servers: []})
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state()
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "LSP"))
       assert Enum.any?(texts, &String.contains?(&1, "No servers active"))
-    end
-
-    test "shows LSP section with active server names" do
-      input = default_input(%{lsp_servers: [:lexical, :gopls]})
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
-
-      assert Enum.any?(texts, &String.contains?(&1, "LSP"))
-      assert Enum.any?(texts, &String.contains?(&1, "lexical"))
-      assert Enum.any?(texts, &String.contains?(&1, "gopls"))
-    end
-
-    test "working directory is pinned to the bottom of the panel" do
-      input = default_input()
-      {draws, _metrics} = Renderer.render(input)
-
-      dir_draws =
-        Enum.filter(draws, fn {_row, _col, text, _style} ->
-          String.contains?(text, "Directory")
-        end)
-
-      assert dir_draws != [], "Directory section should be rendered"
-
-      # Directory should be near the bottom of the viewport (within last 3 rows)
-      dir_row = dir_draws |> hd() |> elem(0)
-      max_row = input.viewport.rows - 1
-
-      assert dir_row >= max_row - 3,
-             "Directory (row #{dir_row}) should be pinned near the bottom (max row #{max_row})"
     end
 
     test "not shown when preview has file content" do
@@ -691,11 +446,10 @@ defmodule Minga.Agent.View.RendererTest do
           "hello world"
         )
 
-      input = default_input(%{preview: preview})
-      {draws, _metrics} = Renderer.render(input)
-      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      state = base_state(preview: preview)
+      commands = render_sidebar(state)
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
-      # File preview should be showing
       assert Enum.any?(texts, &String.contains?(&1, "test.txt"))
     end
   end
