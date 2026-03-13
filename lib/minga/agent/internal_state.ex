@@ -32,7 +32,6 @@ defmodule Minga.Agent.InternalState do
           notebook: String.t()
         }
 
-  @enforce_keys []
   defstruct todos: [], notebook: ""
 
   @doc "Creates a new empty internal state."

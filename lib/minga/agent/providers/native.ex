@@ -44,7 +44,9 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Skills
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
+  alias Minga.Agent.Tools.Notebook
   alias Minga.Agent.Tools.Shell
+  alias Minga.Agent.Tools.Todo
   alias Minga.Config.Options
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse
@@ -997,13 +999,15 @@ defmodule Minga.Agent.Providers.Native do
     :exit, _ -> true
   end
 
-  @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
   # Builds tools that interact with the provider's internal state (todo, notebook).
   # These are created in init with a closure over the provider PID.
+  #
+  # NOTE: Tool callbacks close over `provider_pid` and make GenServer.call back
+  # to the provider. This works because tools run in a spawned Task, not in the
+  # provider's own process. If the provider ever awaits the task synchronously
+  # (blocking its mailbox), these calls will deadlock.
   @spec build_internal_tools(pid()) :: [ReqLLM.Tool.t()]
   defp build_internal_tools(provider_pid) do
-    alias Minga.Agent.Tools.Notebook
-    alias Minga.Agent.Tools.Todo
 
     [
       ReqLLM.Tool.new!(
@@ -1072,6 +1076,7 @@ defmodule Minga.Agent.Providers.Native do
     ]
   end
 
+  @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
   defp build_system_prompt(project_root, active_skills \\ []) do
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
