@@ -47,6 +47,10 @@ defmodule Minga.Agent.SlashCommand do
       name: "system-prompt",
       description: "Show the current assembled system prompt"
     },
+    %{
+      name: "budget",
+      description: "Show or set session cost budget: /budget, /budget <amount>, /budget off"
+    },
     %{name: "compact", description: "Compact conversation context (summarize older turns)"},
     %{name: "continue", description: "Continue from an interrupted stream response"},
     %{name: "export", description: "Export session to Markdown (default) or HTML (/export html)"},
@@ -105,6 +109,7 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
   defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
+  defp dispatch(state, "budget", args), do: do_budget(state, args)
   defp dispatch(state, "compact", _args), do: do_compact(state)
   defp dispatch(state, "continue", _args), do: do_continue(state)
   defp dispatch(state, "export", "html"), do: do_export(state, :html)
@@ -460,6 +465,74 @@ defmodule Minga.Agent.SlashCommand do
     else
       {:error, "No active agent session"}
     end
+  end
+
+  @spec do_budget(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_budget(state, "") do
+    with {:ok, provider} <- require_provider(state),
+         {:ok, budget} <- GenServer.call(provider, :get_budget) do
+      {:ok, emit_system_message(state, format_budget_status(budget))}
+    end
+  end
+
+  defp do_budget(state, "off") do
+    with {:ok, provider} <- require_provider(state) do
+      :ok = GenServer.call(provider, {:set_max_cost, nil})
+      {:ok, emit_system_message(state, "Cost budget disabled.")}
+    end
+  end
+
+  defp do_budget(state, amount_str) do
+    with {:ok, provider} <- require_provider(state),
+         {amount, _} when amount > 0 <-
+           Float.parse(String.trim(amount_str) |> String.trim_leading("$")) do
+      :ok = GenServer.call(provider, {:set_max_cost, amount})
+      formatted = :erlang.float_to_binary(amount, decimals: 2)
+      {:ok, emit_system_message(state, "Cost budget set to $#{formatted} for this session.")}
+    else
+      {:error, _} = err -> err
+      _ -> {:error, "Invalid amount. Use /budget <number> (e.g., /budget 5.00)"}
+    end
+  end
+
+  @spec require_provider(state()) :: {:ok, pid()} | {:error, String.t()}
+  defp require_provider(state) do
+    session = AgentAccess.session(state)
+
+    if is_pid(session) do
+      {:ok, get_provider(session)}
+    else
+      {:error, "No active agent session"}
+    end
+  end
+
+  @spec format_budget_status(map()) :: String.t()
+  defp format_budget_status(budget) do
+    spent = :erlang.float_to_binary(budget.session_cost, decimals: 2)
+
+    limit_text =
+      case budget.max_cost do
+        nil -> "no limit"
+        amount -> "$#{:erlang.float_to_binary(amount + 0.0, decimals: 2)}"
+      end
+
+    "Session budget:\n" <>
+      "  Spent: $#{spent}\n" <>
+      "  Limit: #{limit_text}\n" <>
+      "  Max turns per prompt: #{budget.max_turns}\n\n" <>
+      "Use /budget <amount> to set a limit, /budget off to disable."
+  end
+
+  # Gets the provider pid from the session. Used for direct GenServer calls
+  # to provider-specific features (budget, etc.) that aren't in the Provider behaviour.
+  # TODO: Consider adding get_budget/1 and set_budget/2 to the Provider behaviour
+  # so slash commands don't need to reach past the Session abstraction.
+  @spec get_provider(pid()) :: pid() | nil
+  defp get_provider(session_pid) do
+    # The session stores the provider pid in its state. We need to access it.
+    # Since Session doesn't expose this directly, we'll use the session's internal
+    # forwarding. For now, we add a get_provider call to Session.
+    Session.get_provider(session_pid)
   end
 
   defp do_compact(state) do

@@ -9,20 +9,21 @@ defmodule Minga.Agent.Tools do
 
   ## Available tools
 
-  | Tool             | Description                                              |
-  |------------------|----------------------------------------------------------|
-  | `read_file`      | Read the contents of a file                              |
-  | `write_file`     | Write content to a file (creates or overwrites)          |
-  | `edit_file`      | Replace exact text in a file                             |
-  | `list_directory` | List files and directories at a path                     |
-  | `find`           | Find files by name/glob pattern                          |
-  | `grep`           | Search file contents for a pattern                       |
-  | `shell`          | Run a shell command in the project root                  |
-  | `git_status`     | Show changed files with structured status (read-only)    |
-  | `git_diff`       | Show unified diff for files or all changes (read-only)   |
-  | `git_log`        | Show recent commits with structured output (read-only)   |
-  | `git_stage`      | Stage files for commit (destructive)                     |
-  | `git_commit`     | Create a commit with a message (destructive)             |
+  | Tool              | Description                                          |
+  |-------------------|------------------------------------------------------|
+  | `read_file`       | Read file contents (supports offset/limit for slices)|
+  | `write_file`      | Write content to a file (creates or overwrites)      |
+  | `edit_file`       | Replace exact text in a file                         |
+  | `multi_edit_file` | Apply multiple edits to one file in a single call    |
+  | `list_directory`  | List files and directories at a path                 |
+  | `find`            | Find files by name/glob pattern                      |
+  | `grep`            | Search file contents for a pattern                   |
+  | `shell`           | Run a shell command in the project root              |
+  | `git_status`      | Show changed files with structured status (read-only)|
+  | `git_diff`        | Show unified diff for files or all changes (read-only)|
+  | `git_log`         | Show recent commits with structured output (read-only)|
+  | `git_stage`       | Stage files for commit (destructive)                 |
+  | `git_commit`      | Create a commit with a message (destructive)         |
   """
 
   alias Minga.Agent.Tools.EditFile
@@ -30,6 +31,7 @@ defmodule Minga.Agent.Tools do
   alias Minga.Agent.Tools.Git, as: GitTools
   alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
+  alias Minga.Agent.Tools.MultiEditFile
   alias Minga.Agent.Tools.ReadFile
   alias Minga.Agent.Tools.Shell
   alias Minga.Agent.Tools.Subagent
@@ -40,7 +42,7 @@ defmodule Minga.Agent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [project_root: String.t()]
 
-  @default_destructive_tools ~w(write_file edit_file shell git_stage git_commit)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit)
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -79,6 +81,7 @@ defmodule Minga.Agent.Tools do
       read_file(root),
       write_file(root),
       edit_file(root),
+      multi_edit_file(root),
       list_directory(root),
       find(root),
       grep(root),
@@ -100,7 +103,8 @@ defmodule Minga.Agent.Tools do
       name: "read_file",
       description: """
       Read the contents of a file. Returns the file content as a string.
-      Use this to examine files before editing them.
+      Use this to examine files before editing them. Supports optional
+      offset and limit for partial reads of large files.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -108,15 +112,33 @@ defmodule Minga.Agent.Tools do
           "path" => %{
             "type" => "string",
             "description" => "Path to the file, relative to the project root"
+          },
+          "offset" => %{
+            "type" => "integer",
+            "description" =>
+              "Line number to start reading from (1-indexed). Omit to read from the beginning."
+          },
+          "limit" => %{
+            "type" => "integer",
+            "description" => "Maximum number of lines to return. Omit to read to end of file."
           }
         },
         "required" => ["path"]
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
-        ReadFile.execute(path)
+        opts = build_read_opts(args)
+        ReadFile.execute(path, opts)
       end
     )
+  end
+
+  @spec build_read_opts(map()) :: ReadFile.read_opts()
+  defp build_read_opts(args) do
+    opts = []
+    opts = if args["offset"], do: [{:offset, args["offset"]} | opts], else: opts
+    opts = if args["limit"], do: [{:limit, args["limit"]} | opts], else: opts
+    opts
   end
 
   @spec write_file(String.t()) :: Tool.t()
@@ -178,6 +200,52 @@ defmodule Minga.Agent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
         EditFile.execute(path, args["old_text"], args["new_text"])
+      end
+    )
+  end
+
+  @spec multi_edit_file(String.t()) :: Tool.t()
+  defp multi_edit_file(root) do
+    Tool.new!(
+      name: "multi_edit_file",
+      description: """
+      Apply multiple edits to a single file in one call. Each edit is a
+      find-and-replace pair. More efficient than calling edit_file multiple
+      times on the same file. Edits are applied in order. Failed edits
+      (text not found, ambiguous) are reported but don't block other edits.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "Path to the file, relative to the project root"
+          },
+          "edits" => %{
+            "type" => "array",
+            "description" => "List of edits to apply in order",
+            "items" => %{
+              "type" => "object",
+              "properties" => %{
+                "old_text" => %{
+                  "type" => "string",
+                  "description" => "The exact text to find"
+                },
+                "new_text" => %{
+                  "type" => "string",
+                  "description" => "The replacement text"
+                }
+              },
+              "required" => ["old_text", "new_text"]
+            }
+          }
+        },
+        "required" => ["path", "edits"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        edits = args["edits"] || []
+        MultiEditFile.execute(path, edits)
       end
     )
   end

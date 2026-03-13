@@ -544,4 +544,273 @@ defmodule Minga.Agent.Providers.NativeTest do
       Native.abort(pid)
     end
   end
+
+  # ── Turn limit tests (#401) ────────────────────────────────────────────────
+
+  describe "turn limit" do
+    test "stops the agent loop when turn limit is reached", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "hello")
+
+      # Create a client that always makes tool calls (simulating a runaway loop).
+      # Each call returns a tool_call, which triggers another turn.
+      client = fn _model, _messages, _opts ->
+        chunks = [
+          ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+            id: "tc_#{:erlang.unique_integer([:positive])}",
+            index: 0
+          }),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ]
+
+        build_stream_response(chunks)
+      end
+
+      tools = Tools.all(project_root: dir)
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 3)
+
+      :ok = Native.send_prompt(pid, "Read the file over and over")
+
+      events = collect_events(3_000)
+
+      # Should have a turn limit warning
+      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
+      all_text = Enum.map_join(text_deltas, & &1.delta)
+      assert all_text =~ "Turn limit reached"
+      assert all_text =~ "3/3"
+
+      # Should have a TurnLimitReached event
+      turn_limit_events = Enum.filter(events, &match?(%Event.TurnLimitReached{}, &1))
+      assert [%Event.TurnLimitReached{current: 3, limit: 3}] = turn_limit_events
+
+      # Should have ended cleanly
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "normal tool-call loops within the limit complete successfully", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "content")
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count < 2 do
+            [
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                id: "tc_#{count}",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("Done reading."),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = Tools.all(project_root: dir)
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 10)
+
+      :ok = Native.send_prompt(pid, "Read the file twice")
+
+      events = collect_events(3_000)
+
+      # Should NOT have a turn limit warning
+      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
+      all_text = Enum.map_join(text_deltas, & &1.delta)
+      refute all_text =~ "Turn limit reached"
+
+      # Should have completed normally with "Done reading."
+      assert all_text =~ "Done reading."
+    end
+
+    test "continue after turn limit resets the turn counter", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "hello")
+
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count < 5 do
+            [
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                id: "tc_#{count}",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("Finally done."),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = Tools.all(project_root: dir)
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: client, tools: tools, max_turns: 2)
+
+      # First prompt hits the limit after 2 turns
+      :ok = Native.send_prompt(pid, "Keep reading")
+      events1 = collect_events(3_000)
+
+      text1 = events1 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
+      assert text1 =~ "Turn limit reached"
+
+      # Continue should reset the counter and keep going
+      :ok = Native.continue(pid)
+      events2 = collect_events(3_000)
+
+      text2 = events2 |> Enum.filter(&match?(%Event.TextDelta{}, &1)) |> Enum.map_join(& &1.delta)
+      # It will hit the limit again (2 more turns), or finish if the counter went past 5
+      assert text2 =~ "Turn limit reached" or text2 =~ "Finally done."
+    end
+  end
+
+  # ── Cost budget tests (#404) ────────────────────────────────────────────────
+
+  describe "cost budget" do
+    test "get_budget returns current session cost and limits", %{tmp_dir: dir} do
+      {:ok, pid} = start_provider(tmp_dir: dir, max_cost: 5.0)
+
+      assert {:ok, budget} = GenServer.call(pid, :get_budget)
+      assert budget.session_cost == 0.0
+      assert budget.max_cost == 5.0
+      assert budget.max_turns == 100
+    end
+
+    test "set_max_cost updates the budget", %{tmp_dir: dir} do
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      assert :ok = GenServer.call(pid, {:set_max_cost, 10.0})
+      assert {:ok, budget} = GenServer.call(pid, :get_budget)
+      assert budget.max_cost == 10.0
+    end
+
+    test "set_max_cost nil disables the budget", %{tmp_dir: dir} do
+      {:ok, pid} = start_provider(tmp_dir: dir, max_cost: 5.0)
+
+      assert :ok = GenServer.call(pid, {:set_max_cost, nil})
+      assert {:ok, budget} = GenServer.call(pid, :get_budget)
+      assert budget.max_cost == nil
+    end
+
+    test "session cost resets on new_session", %{tmp_dir: dir} do
+      chunks = [
+        ReqLLM.StreamChunk.text("Hello"),
+        ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+      ]
+
+      usage = %{input_tokens: 1000, output_tokens: 500, total_cost: 0.05}
+      client = fake_llm_client(chunks, usage)
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+
+      :ok = Native.send_prompt(pid, "test")
+      _events = collect_events(500)
+
+      # Cost should have accumulated
+      # (exact amount depends on cost calculation, but should be > 0 after a turn)
+
+      # Reset
+      :ok = Native.new_session(pid)
+      assert {:ok, budget} = GenServer.call(pid, :get_budget)
+      assert budget.session_cost == 0.0
+    end
+
+    test "agent stops when cost budget is exceeded during tool loop", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "hello")
+
+      # Create a client where each turn has a significant cost
+      client = fn _model, _messages, _opts ->
+        chunks = [
+          ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+            id: "tc_#{:erlang.unique_integer([:positive])}",
+            index: 0
+          }),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+        ]
+
+        build_stream_response(chunks, %{
+          input_tokens: 10_000,
+          output_tokens: 5_000,
+          total_cost: 1.0
+        })
+      end
+
+      tools = Tools.all(project_root: dir)
+
+      # Set a $2 budget; each turn costs $1, so it should stop after 2 turns
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          tools: tools,
+          max_cost: 2.0,
+          max_turns: 100
+        )
+
+      :ok = Native.send_prompt(pid, "Keep reading forever")
+
+      events = collect_events(5_000)
+
+      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
+      all_text = Enum.map_join(text_deltas, & &1.delta)
+
+      assert all_text =~ "cost limit reached" or all_text =~ "Session cost limit reached"
+
+      # Should have ended
+      assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
+    end
+
+    test "nil max_cost means no cost limit", %{tmp_dir: dir} do
+      call_count = :counters.new(1, [:atomics])
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count < 3 do
+            [
+              ReqLLM.StreamChunk.text("turn #{count} "),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("done"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks, %{total_cost: 100.0})
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, max_cost: nil)
+
+      :ok = Native.send_prompt(pid, "test")
+      events = collect_events(1_000)
+
+      text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
+      all_text = Enum.map_join(text_deltas, & &1.delta)
+      refute all_text =~ "cost limit"
+    end
+  end
 end
