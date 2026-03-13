@@ -67,6 +67,9 @@ defmodule Minga.Keymap.Defaults do
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
     {[{?h, @none}, {?r, @none}], :reload_config, "Reload config"},
     {[{?h, @none}, {?t, @none}], :theme_picker, "Pick theme"},
+    {[{?h, @none}, {?e, @none}, {?l, @none}], :extension_list, "List extensions"},
+    {[{?h, @none}, {?e, @none}, {?u, @none}], :extension_update_all, "Update all extensions"},
+    {[{?h, @none}, {?e, @none}, {?U, @none}], :extension_update, "Update extension"},
 
     # ── Code ────────────────────────────────────────────────────────────────────
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
@@ -137,6 +140,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},
     {[{?h, @none}], "+help"},
+    {[{?h, @none}, {?e, @none}], "+extensions"},
     {[{?o, @none}], "+open"},
     {[{?a, @none}], "+ai"},
     {[{?t, @none}], "+toggle"},

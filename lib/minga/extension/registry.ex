@@ -2,23 +2,18 @@ defmodule Minga.Extension.Registry do
   @moduledoc """
   Agent-based registry for declared extensions.
 
-  Tracks which extensions have been declared in config, their paths,
-  config options, runtime status, and supervisor pids. Other modules
-  query this registry to list, start, or stop extensions.
+  Tracks which extensions have been declared in config, their source
+  (path, git, or hex), config options, runtime status, and supervisor
+  pids. Other modules query this registry to list, start, or stop
+  extensions.
   """
 
   use Agent
 
-  alias Minga.Extension
+  alias Minga.Extension.Entry
 
   @typedoc "Registry entry for a single extension."
-  @type entry :: %{
-          module: module() | nil,
-          path: String.t(),
-          config: keyword(),
-          status: Extension.extension_status(),
-          pid: pid() | nil
-        }
+  @type entry :: Entry.t()
 
   @typedoc "Internal state: extension name → entry."
   @type state :: %{atom() => entry()}
@@ -33,7 +28,7 @@ defmodule Minga.Extension.Registry do
   end
 
   @doc """
-  Registers an extension declaration.
+  Registers a path-based extension declaration.
 
   Called by the config DSL when `extension :name, path: "..."` is evaluated.
   The extension is not started yet; it's just recorded for later loading.
@@ -45,15 +40,37 @@ defmodule Minga.Extension.Registry do
 
   def register(server, name, path, config)
       when is_atom(name) and is_binary(path) and is_list(config) do
-    entry = %{
-      module: nil,
-      path: path,
-      config: config,
-      status: :stopped,
-      pid: nil
-    }
+    Agent.update(server, &Map.put(&1, name, Entry.from_path(path, config)))
+  end
 
-    Agent.update(server, &Map.put(&1, name, entry))
+  @doc """
+  Registers a git-based extension declaration.
+
+  Called by the config DSL when `extension :name, git: "..."` is evaluated.
+  """
+  @spec register_git(atom(), String.t(), keyword()) :: :ok
+  @spec register_git(GenServer.server(), atom(), String.t(), keyword()) :: :ok
+  def register_git(name, url, opts) when is_atom(name) and is_binary(url),
+    do: register_git(__MODULE__, name, url, opts)
+
+  def register_git(server, name, url, opts)
+      when is_atom(name) and is_binary(url) and is_list(opts) do
+    Agent.update(server, &Map.put(&1, name, Entry.from_git(url, opts)))
+  end
+
+  @doc """
+  Registers a hex-based extension declaration.
+
+  Called by the config DSL when `extension :name, hex: "..."` is evaluated.
+  """
+  @spec register_hex(atom(), String.t(), keyword()) :: :ok
+  @spec register_hex(GenServer.server(), atom(), String.t(), keyword()) :: :ok
+  def register_hex(name, package, opts) when is_atom(name) and is_binary(package),
+    do: register_hex(__MODULE__, name, package, opts)
+
+  def register_hex(server, name, package, opts)
+      when is_atom(name) and is_binary(package) and is_list(opts) do
+    Agent.update(server, &Map.put(&1, name, Entry.from_hex(package, opts)))
   end
 
   @doc "Removes an extension from the registry."
@@ -97,7 +114,7 @@ defmodule Minga.Extension.Registry do
   defp apply_updates(state, name, updates) do
     case Map.fetch(state, name) do
       {:ok, entry} ->
-        updated = Enum.reduce(updates, entry, fn {k, v}, acc -> Map.put(acc, k, v) end)
+        updated = struct!(entry, updates)
         Map.put(state, name, updated)
 
       :error ->

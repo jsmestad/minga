@@ -876,29 +876,116 @@ def init(config) do
 end
 ```
 
-### Loading an extension
+### Loading extensions
 
-Declare extensions in your config file with a local path:
+Extensions can be loaded from three sources: local paths, git repositories, and Hex packages. Declare them in your config file:
 
 ```elixir
 # ~/.config/minga/config.exs
 use Minga.Config
 
+# Local path (for development or private extensions)
 extension :minga_todo, path: "~/code/minga_todo"
+
+# Git repository (bleeding-edge or private repos)
+extension :minga_snippets, git: "https://github.com/user/minga-snippets"
+
+# Hex package (published, versioned extensions)
+extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
+```
+
+Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source option) are passed to the extension's `init/1` callback.
+
+### Local path extensions
+
+Point at a directory containing `.ex` files. The directory is compiled at startup. This is the best option when you're developing an extension or using something that isn't published anywhere.
+
+```elixir
+extension :my_ext, path: "~/code/my_ext"
 extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --stdin"
 ```
 
-Extra keyword options (everything except `:path`) are passed to the extension's `init/1` callback.
+Path extensions don't have an update mechanism. You manage the directory yourself (git pull, etc.).
+
+### Git extensions
+
+Git extensions are cloned to `~/.local/share/minga/extensions/{name}/` on first load. Subsequent startups use the cached checkout without touching the network, so the editor boots reliably even when GitHub is down.
+
+```elixir
+# Track the default branch (main). Stays on last-fetched commit until you update.
+extension :snippets, git: "https://github.com/user/minga-snippets"
+
+# Track a specific branch
+extension :snippets, git: "https://github.com/user/minga-snippets", branch: "develop"
+
+# Pin to a tag or commit hash (updates are skipped for pinned extensions)
+extension :snippets, git: "https://github.com/user/minga-snippets", ref: "v1.0.0"
+extension :snippets, git: "https://github.com/user/minga-snippets", ref: "abc1234"
+```
+
+Both HTTPS and SSH URLs work (`git@github.com:user/repo.git`).
+
+Omitting both `branch:` and `ref:` defaults to whatever the remote's default branch is (usually `main`).
+
+### Hex extensions
+
+Hex extensions are fetched and compiled via `Mix.install/2`, the same mechanism Livebook uses for notebook dependencies. This handles dependency resolution (including transitive deps), downloading, compilation, and code path setup.
+
+```elixir
+# Latest stable release
+extension :tools, hex: "minga_tools"
+
+# Version constraint (standard Elixir/Hex semver syntax)
+extension :tools, hex: "minga_tools", version: "~> 0.3"
+extension :tools, hex: "minga_tools", version: ">= 1.0.0 and < 2.0.0"
+extension :tools, hex: "minga_tools", version: "== 0.3.1"
+```
+
+Omitting `version:` fetches the latest stable release.
+
+All hex extensions are installed in a single `Mix.install/2` call at startup. The results are cached (keyed on the dep list hash), so the second boot with the same extensions skips all network and compilation work. The cache lives at `~/.cache/mix/installs/`.
 
 ### Listing extensions
 
-Run `:extensions` (or `:ext`) in command mode to see all loaded extensions with their name, version, and status:
+`SPC h e l` or `:extensions` (`:ext`) in command mode lists all loaded extensions with their source type:
 
 ```
 Extensions:
-  minga_todo v0.1.0 [running]
-  my_formatter v0.2.0 [running]
+  minga_todo v0.1.0 [running] (path: ~/code/minga_todo)
+  snippets v0.2.0 [running] (git: https://github.com/user/minga-snippets)
+  tools v0.3.1 [running] (hex: minga_tools)
 ```
+
+### Updating extensions
+
+Extensions don't auto-update on startup. You control when updates happen.
+
+**Update all extensions:** Press `SPC h e u` (or run `:ExtUpdateAll`). Minga fetches remote changes for all git extensions in the background, then shows a confirmation dialog stepping through each available update:
+
+```
+snippets: abc1234 → def5678 (3 commits on main) [Y/n/d] (1 of 2)
+```
+
+The confirmation dialog supports three keys:
+
+| Key | Action |
+|-----|--------|
+| `Y` | Accept this update and advance to the next |
+| `n` | Skip this update and advance |
+| `d` | Show details (recent git commit log) in *Messages* |
+| `q` / `Escape` | Stop early, apply whatever you've accepted so far |
+
+Pinned extensions (`ref: "v1.0.0"`) are shown as "pinned, skipped" and cannot be updated.
+
+After you confirm, accepted updates are applied in the background: git repos are fast-forwarded, extensions are recompiled and restarted. Results appear in `*Messages*` (`SPC b m`).
+
+**Update a single extension:** Press `SPC h e U` (or run `:ExtUpdate`). A picker opens listing all extensions. Select one to check and update just that extension.
+
+**Hex extensions:** Hex packages are cached by `Mix.install/2`. To pick up version changes, update the version constraint in your config and run `SPC h r` (config reload), which calls `Mix.install/2` with `force: true` to re-resolve and recompile.
+
+### Rollback on failure
+
+If an extension fails to compile after a git update, Minga automatically rolls back to the previous commit using the git reflog. The error is reported in `*Messages*` and the extension stays at its last working version. Other extensions continue updating normally.
 
 ### Crash isolation
 
@@ -909,6 +996,8 @@ Each extension runs under its own supervisor. If an extension process crashes, i
 - Extensions are compiled and started after all config files are evaluated
 - `SPC h r` stops all extensions, reloads config, then restarts them
 - Extension state is lost on reload (the process restarts fresh)
+- Git extensions cache at `~/.local/share/minga/extensions/`
+- Hex extensions cache at `~/.cache/mix/installs/`
 
 ## Full example
 
@@ -975,7 +1064,8 @@ end
 
 # ── Extensions ───────────────────────────────────────────────────────
 extension :minga_todo, path: "~/code/minga_todo"
-extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --stdin"
+extension :snippets, git: "https://github.com/user/minga-snippets", branch: "main"
+extension :tools, hex: "minga_tools", version: "~> 0.3"
 ```
 
 ## Further reading
@@ -991,4 +1081,7 @@ extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --st
 - [`Minga.Formatter`](https://jsmestad.github.io/minga/Minga.Formatter.html): formatter execution and default formatter registry
 - [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html): extension behaviour and lifecycle
 - [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html): extension process management
+- [`Minga.Extension.Git`](https://jsmestad.github.io/minga/Minga.Extension.Git.html): git clone, fetch, update, and rollback
+- [`Minga.Extension.Hex`](https://jsmestad.github.io/minga/Minga.Extension.Hex.html): Hex package resolution via Mix.install
+- [`Minga.Extension.Updater`](https://jsmestad.github.io/minga/Minga.Extension.Updater.html): update orchestration with confirmation and rollback
 - [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html): deep dive on how the BEAM enables Emacs-level extensibility

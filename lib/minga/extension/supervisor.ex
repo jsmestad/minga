@@ -15,6 +15,8 @@ defmodule Minga.Extension.Supervisor do
 
   use DynamicSupervisor
 
+  alias Minga.Extension.Git, as: ExtGit
+  alias Minga.Extension.Hex, as: ExtHex
   alias Minga.Extension.Registry, as: ExtRegistry
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -29,15 +31,29 @@ defmodule Minga.Extension.Supervisor do
   @doc """
   Starts all extensions declared in the registry.
 
-  Compiles each extension from its declared path, validates the behaviour,
-  and starts its child_spec. Errors are logged and stored in the registry
-  as `:load_error` status without affecting other extensions.
+  Processes extensions in order:
+  1. Install all hex extensions via a single Mix.install/2 call
+  2. Clone/checkout all git extensions to local cache
+  3. Compile and start all extensions (path, git, hex)
+
+  Errors at any stage are logged to *Messages* and stored in the
+  registry as `:load_error` without affecting other extensions.
   """
   @spec start_all() :: :ok
   @spec start_all(GenServer.server(), GenServer.server()) :: :ok
   def start_all, do: start_all(__MODULE__, ExtRegistry)
 
   def start_all(supervisor, registry) do
+    # Step 1: Install hex extensions (single Mix.install call)
+    case ExtHex.install_all(registry) do
+      :ok -> :ok
+      {:error, msg} -> Minga.Log.warning(:config, msg)
+    end
+
+    # Step 2: Resolve git extensions to local paths
+    resolve_git_extensions(registry)
+
+    # Step 3: Start all extensions
     for {name, entry} <- ExtRegistry.all(registry) do
       start_extension(supervisor, registry, name, entry)
     end
@@ -65,34 +81,64 @@ defmodule Minga.Extension.Supervisor do
   @doc """
   Starts a single extension by name.
 
-  Compiles the module from path, validates the behaviour, calls `init/1`,
-  and starts the child_spec under this supervisor.
+  For path extensions, compiles the module from the local directory.
+  Git and hex extensions must be resolved to a local path or loaded
+  via Mix.install before calling this function.
   """
   @spec start_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
           {:ok, pid()} | {:error, term()}
+  def start_extension(supervisor, registry, name, %{source_type: :git} = entry) do
+    # Git extensions are resolved to a local path in resolve_git_extensions/1.
+    # If the path was set, compile from there. Otherwise it failed to clone.
+    if entry.path do
+      start_from_path(supervisor, registry, name, entry)
+    else
+      {:error, :clone_failed}
+    end
+  end
+
+  def start_extension(supervisor, registry, name, %{source_type: :hex} = entry) do
+    # Hex extensions are loaded via Mix.install in start_all/2.
+    # Find the module implementing the Extension behaviour from the
+    # newly available code paths.
+    find_and_start_hex_extension(supervisor, registry, name, entry)
+  end
+
   def start_extension(supervisor, registry, name, entry) do
+    start_from_path(supervisor, registry, name, entry)
+  end
+
+  @spec start_from_path(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_from_path(supervisor, registry, name, entry) do
     with {:ok, module} <- compile_extension(entry.path),
          :ok <- validate_behaviour(module, name),
          {:ok, _state} <- call_init(module, entry.config) do
-      child_spec = module.child_spec(entry.config)
-
-      case DynamicSupervisor.start_child(supervisor, child_spec) do
-        {:ok, pid} ->
-          ExtRegistry.update(registry, name, module: module, status: :running, pid: pid)
-          Minga.Log.info(:config, "Extension #{name} started (#{module})")
-          {:ok, pid}
-
-        {:error, reason} ->
-          msg = "Extension #{name} failed to start: #{inspect(reason)}"
-          Minga.Log.warning(:config, msg)
-          ExtRegistry.update(registry, name, module: module, status: :load_error, pid: nil)
-          {:error, reason}
-      end
+      start_child(supervisor, registry, name, module, entry.config)
     else
       {:error, reason} ->
         msg = "Extension #{name} load error: #{inspect(reason)}"
         Minga.Log.warning(:config, msg)
         ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        {:error, reason}
+    end
+  end
+
+  @spec start_child(GenServer.server(), GenServer.server(), atom(), module(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_child(supervisor, registry, name, module, config) do
+    child_spec = module.child_spec(config)
+
+    case DynamicSupervisor.start_child(supervisor, child_spec) do
+      {:ok, pid} ->
+        ExtRegistry.update(registry, name, module: module, status: :running, pid: pid)
+        Minga.Log.info(:config, "Extension #{name} started (#{module})")
+        {:ok, pid}
+
+      {:error, reason} ->
+        msg = "Extension #{name} failed to start: #{inspect(reason)}"
+        Minga.Log.warning(:config, msg)
+        ExtRegistry.update(registry, name, module: module, status: :load_error, pid: nil)
         {:error, reason}
     end
   end
@@ -150,6 +196,66 @@ defmodule Minga.Extension.Supervisor do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec resolve_git_extensions(GenServer.server()) :: :ok
+  defp resolve_git_extensions(registry) do
+    for {name, entry} <- ExtRegistry.all(registry), entry.source_type == :git do
+      case ExtGit.ensure_cloned(name, entry.git) do
+        {:ok, local_path} ->
+          ExtRegistry.update(registry, name, path: local_path)
+
+        {:error, reason} ->
+          Minga.Log.warning(:config, "Extension #{name}: #{reason}")
+          ExtRegistry.update(registry, name, status: :load_error)
+      end
+    end
+
+    :ok
+  end
+
+  @spec find_and_start_hex_extension(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry()
+        ) :: {:ok, pid()} | {:error, term()}
+  defp find_and_start_hex_extension(supervisor, registry, name, entry) do
+    package_atom = String.to_atom(entry.hex.package)
+
+    case Application.ensure_all_started(package_atom) do
+      {:ok, _} -> :ok
+      {:error, _} -> :ok
+    end
+
+    # Search loaded modules for one implementing the Extension behaviour.
+    # The convention is the package name maps to a module like MingaSnippets.
+    with {:ok, module} <- find_extension_module(package_atom),
+         :ok <- validate_behaviour(module, name),
+         {:ok, _state} <- call_init(module, entry.config) do
+      start_child(supervisor, registry, name, module, entry.config)
+    else
+      {:error, reason} ->
+        msg = "Extension #{name} load error: #{inspect(reason)}"
+        Minga.Log.warning(:config, msg)
+        ExtRegistry.update(registry, name, status: :load_error, pid: nil)
+        {:error, reason}
+    end
+  end
+
+  @spec find_extension_module(atom()) :: {:ok, module()} | {:error, String.t()}
+  defp find_extension_module(package_atom) do
+    # Try the application's modules for one implementing Minga.Extension
+    case :application.get_key(package_atom, :modules) do
+      {:ok, modules} ->
+        case Enum.find(modules, &implements_extension?/1) do
+          nil -> {:error, "no module implementing Minga.Extension found in #{package_atom}"}
+          mod -> {:ok, mod}
+        end
+
+      :undefined ->
+        {:error, "application #{package_atom} not found after Mix.install"}
+    end
+  end
 
   @spec compile_extension(String.t()) :: {:ok, module()} | {:error, String.t()}
   defp compile_extension(path) do

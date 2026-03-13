@@ -14,6 +14,7 @@ defmodule Minga.MixProject do
       aliases: aliases(),
       compilers: Mix.compilers() ++ [:minga_zig],
       dialyzer: [plt_add_apps: [:mix, :credo]],
+      consolidate_protocols: Mix.env() != :prod,
       releases: releases(),
 
       # Docs
@@ -184,7 +185,19 @@ defmodule Minga.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [
+        :logger,
+        # Mix + Hex support for runtime extension installation via Mix.install/2
+        :mix,
+        :inets,
+        :ssl,
+        :public_key,
+        # OTP build tools that extension deps may need at compile time
+        :parsetools,
+        :compiler,
+        :syntax_tools,
+        :xmerl
+      ],
       mod: {Minga.Application, []}
     ]
   end

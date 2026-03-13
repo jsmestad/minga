@@ -546,9 +546,15 @@ defmodule Minga.Editor.Commands do
     do: Diagnostics.execute(state, :lsp_info)
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
+    execute(state, :extension_list)
+  end
+
+  def execute(state, :extension_list) do
+    alias Minga.Extension.Registry, as: ExtRegistry
     alias Minga.Extension.Supervisor, as: ExtSupervisor
 
     extensions = ExtSupervisor.list_extensions()
+    all_entries = ExtRegistry.all()
 
     msg =
       case extensions do
@@ -558,13 +564,52 @@ defmodule Minga.Editor.Commands do
         exts ->
           lines =
             Enum.map(exts, fn {name, version, status} ->
-              "  #{name} v#{version} [#{status}]"
+              source_label = format_source_label(name, all_entries)
+              "  #{name} v#{version} [#{status}] (#{source_label})"
             end)
 
           ["Extensions:" | lines] |> Enum.join("\n")
       end
 
     %{state | status_msg: msg}
+  end
+
+  def execute(state, {:execute_ex_command, {:extension_update_all, []}}) do
+    execute(state, :extension_update_all)
+  end
+
+  def execute(state, :extension_update_all) do
+    alias Minga.Extension.Updater
+
+    Task.start(fn -> Updater.check_all() end)
+    %{state | status_msg: "Checking for extension updates..."}
+  end
+
+  def execute(state, {:execute_ex_command, {:extension_update, []}}) do
+    execute(state, :extension_update)
+  end
+
+  def execute(state, :extension_update) do
+    PickerUI.open(state, Minga.Picker.ExtensionSource)
+  end
+
+  def execute(state, :apply_extension_updates) do
+    alias Minga.Extension.Updater
+
+    ms = state.vim.mode_state
+    Task.start(fn -> Updater.apply_accepted(ms) end)
+
+    %{state | status_msg: "Applying extension updates..."}
+  end
+
+  def execute(state, :extension_confirm_details) do
+    alias Minga.Extension.Updater
+
+    ms = state.vim.mode_state
+    update = Enum.at(ms.updates, ms.current)
+    details = Updater.details(update.name)
+    Minga.Editor.log_to_messages(details)
+    state
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
@@ -808,5 +853,17 @@ defmodule Minga.Editor.Commands do
     KeymapActive.filetype_trie(filetype)
   catch
     :exit, _ -> Bindings.new()
+  end
+
+  # ── Extension management helpers ───────────────────────────────────────────
+
+  @spec format_source_label(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
+  defp format_source_label(name, all_entries) do
+    case List.keyfind(all_entries, name, 0) do
+      {_, %{source_type: :path, path: path}} -> "path: #{path}"
+      {_, %{source_type: :git, git: %{url: url}}} -> "git: #{url}"
+      {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
+      _ -> "unknown"
+    end
   end
 end
