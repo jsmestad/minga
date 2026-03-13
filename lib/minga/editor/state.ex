@@ -82,7 +82,7 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             agent: %AgentState{},
-            agentic: Minga.Agent.View.State.new()
+            agentic: ViewState.new()
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -117,7 +117,7 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
-          agentic: Minga.Agent.View.State.t()
+          agentic: ViewState.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
