@@ -12,6 +12,14 @@ defmodule Minga.LoggerHandler do
   3. Redirects the `:standard_error` IO device to the same log file so that
      raw BEAM warnings (e.g. `IO.warn/2`) don't corrupt the TUI either
 
+  ## Crash recovery
+
+  When the Editor GenServer is down (e.g., mid-restart after a crash), log
+  messages are buffered in an ETS table owned by the Application supervisor.
+  The Editor calls `flush_buffer/0` during `init/1` to replay them into
+  `*Messages*`. The buffer is capped at `@max_buffered` entries to prevent
+  unbounded growth during crash loops.
+
   ## Installation
 
   Called from `Minga.Editor.init/1` after the `*Messages*` buffer is ready:
@@ -25,6 +33,26 @@ defmodule Minga.LoggerHandler do
   @file_handler_id :minga_file
   @log_dir Path.expand("~/.local/share/minga")
   @log_file "minga.log"
+  @buffer_table :minga_log_buffer
+  @max_buffered 50
+
+  @doc """
+  Creates the ETS buffer table if it doesn't already exist.
+
+  Called from `Minga.Application.start/2` so the table is owned by the
+  supervisor process and survives Editor crashes.
+  """
+  @spec ensure_buffer_table() :: :ok
+  def ensure_buffer_table do
+    case :ets.whereis(@buffer_table) do
+      :undefined ->
+        :ets.new(@buffer_table, [:named_table, :ordered_set, :public])
+        :ok
+
+      _ref ->
+        :ok
+    end
+  end
 
   @doc """
   Install the custom handlers and redirect stderr to a log file.
@@ -71,6 +99,39 @@ defmodule Minga.LoggerHandler do
     :ok
   end
 
+  @doc """
+  Flush buffered log messages into the Editor.
+
+  Called from `Editor.init/1` after `*Messages*` is ready. Replays all
+  buffered messages in order, then clears the buffer. Messages that arrived
+  while the Editor was down (e.g., supervisor crash reports) will appear
+  in `*Messages*` as if they'd been logged normally.
+  """
+  @spec flush_buffer() :: non_neg_integer()
+  def flush_buffer do
+    case :ets.whereis(@buffer_table) do
+      :undefined ->
+        0
+
+      _ref ->
+        entries = :ets.tab2list(@buffer_table)
+        :ets.delete_all_objects(@buffer_table)
+        Enum.each(entries, &replay_entry/1)
+        length(entries)
+    end
+  end
+
+  @spec replay_entry({integer(), String.t(), atom()}) :: :ok
+  defp replay_entry({_key, text, level}) do
+    Minga.Editor.log_to_messages(text)
+
+    if level in [:warning, :error] do
+      Minga.Editor.log_to_warnings(text)
+    end
+
+    :ok
+  end
+
   # ── :logger handler callbacks (OTP 21+) ────────────────────────────────────
 
   @doc false
@@ -93,7 +154,7 @@ defmodule Minga.LoggerHandler do
 
     case Process.whereis(Minga.Editor) do
       nil ->
-        :ok
+        buffer_message(text, level)
 
       _pid ->
         Minga.Editor.log_to_messages(text)
@@ -101,6 +162,46 @@ defmodule Minga.LoggerHandler do
         if level in [:warning, :error] do
           Minga.Editor.log_to_warnings(text)
         end
+    end
+  end
+
+  # ── Buffer for messages during Editor downtime ─────────────────────────────
+
+  @spec buffer_message(String.t(), atom()) :: :ok
+  defp buffer_message(text, level) do
+    case :ets.whereis(@buffer_table) do
+      :undefined ->
+        :ok
+
+      _ref ->
+        key = System.monotonic_time(:nanosecond)
+        :ets.insert(@buffer_table, {key, text, level})
+        maybe_trim_buffer()
+    end
+  end
+
+  @spec maybe_trim_buffer() :: :ok
+  defp maybe_trim_buffer do
+    size = :ets.info(@buffer_table, :size)
+
+    if size > @max_buffered do
+      delete_oldest(size - @max_buffered)
+    end
+
+    :ok
+  end
+
+  @spec delete_oldest(non_neg_integer()) :: :ok
+  defp delete_oldest(0), do: :ok
+
+  defp delete_oldest(remaining) do
+    case :ets.first(@buffer_table) do
+      :"$end_of_table" ->
+        :ok
+
+      key ->
+        :ets.delete(@buffer_table, key)
+        delete_oldest(remaining - 1)
     end
   end
 
