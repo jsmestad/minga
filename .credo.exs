@@ -8,7 +8,7 @@
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
       plugins: [],
-      requires: ["lib/minga/credo/"],
+      requires: ["credo/checks/*.exs"],
       checks: %{
         enabled: [
           # ── Consistency ────────────────────────────────────────────────────
