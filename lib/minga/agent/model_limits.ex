@@ -53,6 +53,44 @@ defmodule Minga.Agent.ModelLimits do
     Map.get(@limits, model_name) || prefix_match(model_name)
   end
 
+  # Models known to support vision (image input). Most modern large models
+  # support it, but some specialized or older models do not.
+  @vision_models MapSet.new([
+                   "claude-sonnet-4",
+                   "claude-opus-4",
+                   "claude-3-7-sonnet",
+                   "claude-3-5-sonnet",
+                   "claude-3-5-haiku",
+                   "claude-3-opus",
+                   "claude-3-sonnet",
+                   "claude-3-haiku",
+                   "gpt-4o",
+                   "gpt-4o-mini",
+                   "gpt-4-turbo",
+                   "o1",
+                   "o3",
+                   "o4-mini",
+                   "gemini-2.5-pro",
+                   "gemini-2.5-flash",
+                   "gemini-2.0-flash",
+                   "gemini-1.5-pro",
+                   "gemini-1.5-flash"
+                 ])
+
+  @doc """
+  Returns true if the model supports image/vision input.
+
+  Uses prefix matching so "claude-sonnet-4-20250514" matches "claude-sonnet-4".
+  Returns true for unknown models (safer to try and let the API reject it
+  than to block the user).
+  """
+  @spec vision_capable?(String.t()) :: boolean()
+  def vision_capable?(model_name) when is_binary(model_name) do
+    MapSet.member?(@vision_models, model_name) or
+      Enum.any?(@vision_models, &String.starts_with?(model_name, &1)) or
+      not Map.has_key?(@limits, model_name)
+  end
+
   # Sorted by key length descending so "gpt-4o" matches before "gpt-4".
   @sorted_limits @limits |> Enum.sort_by(fn {k, _} -> -String.length(k) end)
 

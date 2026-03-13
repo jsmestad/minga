@@ -401,6 +401,22 @@ defmodule Minga.Agent.ChatRenderer do
     [header | content] ++ [spacer]
   end
 
+  defp message_lines({:user, text, attachments}, at, width, _theme) do
+    header = {[{"▎ You", [fg: at.user_label, bold: true]}], :text, at.panel_bg}
+    content = text_to_lines(text, at, width, at.user_border)
+
+    attachment_lines =
+      Enum.map(attachments, fn %{filename: name, size_kb: kb} ->
+        indicator = "▎ 📎 #{name} (#{kb}KB)"
+
+        {[{String.slice(indicator, 0, width), [fg: at.user_border, italic: true]}], :text,
+         at.panel_bg}
+      end)
+
+    spacer = {[{"", []}], :empty, at.panel_bg}
+    [header | content] ++ attachment_lines ++ [spacer]
+  end
+
   defp message_lines({:assistant, text}, at, width, theme) do
     header = {[{"▎ Agent", [fg: at.assistant_label, bold: true]}], :text, at.panel_bg}
 

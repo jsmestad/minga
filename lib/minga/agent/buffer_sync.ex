@@ -55,6 +55,10 @@ defmodule Minga.Agent.BufferSync do
   end
 
   @spec message_to_markdown(term()) :: String.t()
+  defp message_to_markdown({:user, text, _attachments}) do
+    message_to_markdown({:user, text})
+  end
+
   defp message_to_markdown({:user, text}) do
     "## You\n\n#{text}"
   end
