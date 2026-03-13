@@ -69,3 +69,4 @@ The shared layer is the **interaction model**, not the data structure:
 - **VimState substruct extracted** (PR #386): 8 vim-specific fields (mode, mode_state, reg, marks, last_jump_pos, last_find_char, change_recorder, macro_recorder) moved into `Minga.Editor.VimState`. Creates the CUA (#306) swap boundary.
 - Shared `key_sequence_pending?/1` extracted to `Minga.Input` (was duplicated in AgentPanel and FileTreeHandler)
 - **EditorState field boundary documented**: `@per_tab_fields` module attribute is the single source of truth for which fields are saved/restored on tab switch. `snapshot_tab_fields/1` and `restore_tab_context/1` derive from it automatically.
+- **Agent state ownership clarified**: `agent`/`agentic` are NOT in `@per_tab_fields`. The Session GenServer is the source of truth. `rebuild_agent_from_session/2` queries the Session on tab switch. Background events update only `Tab.agent_status` for tab bar rendering.

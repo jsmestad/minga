@@ -109,6 +109,19 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :usage)
   end
 
+  @typedoc "Snapshot of session state needed by the editor for rendering."
+  @type editor_snapshot :: %{
+          status: status(),
+          pending_approval: map() | nil,
+          error: String.t() | nil
+        }
+
+  @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
+  @spec editor_snapshot(GenServer.server()) :: editor_snapshot()
+  def editor_snapshot(session) do
+    GenServer.call(session, :editor_snapshot)
+  end
+
   @doc """
   Responds to a pending tool approval.
 
@@ -411,6 +424,16 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:usage, _from, state) do
     {:reply, state.total_usage, state}
+  end
+
+  def handle_call(:editor_snapshot, _from, state) do
+    snapshot = %{
+      status: state.status,
+      pending_approval: state.pending_approval,
+      error: state.error_message
+    }
+
+    {:reply, snapshot, state}
   end
 
   def handle_call(:metadata, _from, state) do

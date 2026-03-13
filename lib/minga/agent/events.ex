@@ -15,6 +15,8 @@ defmodule Minga.Agent.Events do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
 
   @type effect ::
           :render
@@ -49,6 +51,9 @@ defmodule Minga.Agent.Events do
         _ ->
           AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
       end
+
+    # Sync the tab's agent_status for tab bar rendering
+    state = sync_tab_agent_status(state, status)
 
     {state, [:render | effects]}
   end
@@ -213,6 +218,24 @@ defmodule Minga.Agent.Events do
     case Preview.diff_review(AgentAccess.agentic(state).preview) do
       %DiffReview{path: ^path} = review -> review
       _ -> nil
+    end
+  end
+
+  # Syncs the agent_status field on the current agent tab so the tab bar
+  # can render status indicators without querying the Session process.
+  @spec sync_tab_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
+  defp sync_tab_agent_status(%{tab_bar: nil} = state, _status), do: state
+
+  defp sync_tab_agent_status(state, status) do
+    session = AgentAccess.session(state)
+
+    case session && TabBar.find_by_session(state.tab_bar, session) do
+      %Tab{id: id} ->
+        tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        %{state | tab_bar: tb}
+
+      _ ->
+        state
     end
   end
 end

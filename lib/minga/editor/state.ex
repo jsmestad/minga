@@ -27,6 +27,7 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
+  alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
@@ -793,6 +794,11 @@ defmodule Minga.Editor.State do
 
       state = restore_tab_context(state, target.context)
 
+      # If switching to an agent tab, rebuild agent state from the
+      # Session process (the source of truth for status, pending
+      # approval, and error).
+      state = rebuild_agent_from_session(state, target)
+
       # Clear attention flag on the tab we're switching to.
       state = %{
         state
@@ -875,4 +881,37 @@ defmodule Minga.Editor.State do
   def set_tab_session(%__MODULE__{tab_bar: tb} = state, tab_id, session_pid) do
     %{state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
   end
+
+  # Rebuilds state.agent from the Session process when switching to an
+  # agent tab. The Session is the source of truth for status, pending
+  # approval, and error. The editor's agent field is a rendering cache,
+  # not a source of truth.
+  @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
+  defp rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
+       when is_pid(session_pid) do
+    snapshot =
+      try do
+        AgentSession.editor_snapshot(session_pid)
+      catch
+        :exit, _ -> nil
+      end
+
+    if snapshot do
+      AgentAccess.update_agent(state, fn agent ->
+        %{
+          agent
+          | session: session_pid,
+            status: snapshot.status,
+            pending_approval: snapshot.pending_approval,
+            error: snapshot.error
+        }
+      end)
+    else
+      AgentAccess.update_agent(state, fn agent ->
+        %{agent | session: session_pid}
+      end)
+    end
+  end
+
+  defp rebuild_agent_from_session(state, _tab), do: state
 end
