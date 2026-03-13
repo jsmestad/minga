@@ -72,7 +72,8 @@ defmodule Minga.Agent.Memory do
         nil
 
       content ->
-        # Rough token estimate: ~4 chars per token
+        # Rough token estimate: ~4 chars per token. Can be off by 2x for
+        # code-heavy content, but good enough for a size warning.
         estimated_tokens = div(String.length(content), 4)
 
         warning =

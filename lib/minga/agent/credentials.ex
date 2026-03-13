@@ -20,12 +20,20 @@ defmodule Minga.Agent.Credentials do
   @typedoc "Source where a key was found."
   @type key_source :: :env | :file | nil
 
+  defmodule ProviderStatus do
+    @moduledoc false
+    @enforce_keys [:provider, :configured]
+    defstruct [:provider, :configured, :source]
+
+    @type t :: %__MODULE__{
+            provider: String.t(),
+            configured: boolean(),
+            source: :env | :file | :local | nil
+          }
+  end
+
   @typedoc "Status entry for a single provider."
-  @type provider_status :: %{
-          provider: provider(),
-          configured: boolean(),
-          source: key_source()
-        }
+  @type provider_status :: ProviderStatus.t()
 
   @credentials_filename "credentials.json"
 
@@ -125,17 +133,19 @@ defmodule Minga.Agent.Credentials do
       Enum.map(@known_providers, fn provider ->
         case resolve(provider) do
           {:ok, _key, source} ->
-            %{provider: provider, configured: true, source: source}
+            %ProviderStatus{provider: provider, configured: true, source: source}
 
           :error ->
-            %{provider: provider, configured: false, source: nil}
+            %ProviderStatus{provider: provider, configured: false, source: nil}
         end
       end)
 
-    ollama_status = %{
+    ollama_up = ollama_available?()
+
+    ollama_status = %ProviderStatus{
       provider: "ollama",
-      configured: ollama_available?(),
-      source: if(ollama_available?(), do: :local, else: nil)
+      configured: ollama_up,
+      source: if(ollama_up, do: :local, else: nil)
     }
 
     standard ++ [ollama_status]
@@ -187,6 +197,9 @@ defmodule Minga.Agent.Credentials do
   Returns false on connection errors or timeouts.
   """
   @spec ollama_available?() :: boolean()
+  # NOTE: This check blocks the calling process for up to 2 seconds when Ollama
+  # isn't running. Called during resolve_auto/0 and status/0, so agent startup
+  # may be delayed by that amount if Ollama is unreachable.
   def ollama_available? do
     host = ollama_host()
 
@@ -195,7 +208,7 @@ defmodule Minga.Agent.Credentials do
       _ -> false
     end
   rescue
-    _ -> false
+    ArgumentError -> false
   catch
     :exit, _ -> false
   end

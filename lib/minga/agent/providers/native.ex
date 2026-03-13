@@ -777,7 +777,7 @@ defmodule Minga.Agent.Providers.Native do
         end
     end
   rescue
-    _ -> nil
+    ArgumentError -> nil
   catch
     :exit, _ -> nil
   end
