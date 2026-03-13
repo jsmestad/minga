@@ -68,6 +68,8 @@ defmodule Minga.Port.Protocol do
   @op_set_injection_query 0x24
   @op_query_language_at 0x25
   @op_set_fold_query 0x28
+  @op_set_indent_query 0x29
+  @op_request_indent 0x2A
 
   # Highlight responses (Zig → BEAM)
   @op_highlight_spans 0x30
@@ -77,6 +79,7 @@ defmodule Minga.Port.Protocol do
   @op_injection_ranges 0x34
   @op_text_width 0x35
   @op_fold_ranges 0x36
+  @op_indent_result 0x37
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -153,6 +156,8 @@ defmodule Minga.Port.Protocol do
           | {:text_width, request_id :: non_neg_integer(), width :: non_neg_integer()}
           | {:fold_ranges, version :: non_neg_integer(),
              [{start_line :: non_neg_integer(), end_line :: non_neg_integer()}]}
+          | {:indent_result, request_id :: non_neg_integer(), line :: non_neg_integer(),
+             indent_level :: integer()}
           | {:log_message, level :: String.t(), text :: String.t()}
 
   @typedoc "Cursor shape."
@@ -428,6 +433,19 @@ defmodule Minga.Port.Protocol do
     <<@op_set_fold_query, byte_size(query)::32, query::binary>>
   end
 
+  @doc "Encodes a set_indent_query command."
+  @spec encode_set_indent_query(String.t()) :: binary()
+  def encode_set_indent_query(query) when is_binary(query) do
+    <<@op_set_indent_query, byte_size(query)::32, query::binary>>
+  end
+
+  @doc "Encodes a request_indent command: request_id(4) + line(4)."
+  @spec encode_request_indent(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_request_indent(request_id, line)
+      when is_integer(request_id) and is_integer(line) do
+    <<@op_request_indent, request_id::32, line::32>>
+  end
+
   @doc "Encodes a load_grammar command."
   @spec encode_load_grammar(String.t(), String.t()) :: binary()
   def encode_load_grammar(name, path) when is_binary(name) and is_binary(path) do
@@ -537,6 +555,10 @@ defmodule Minga.Port.Protocol do
       {:ok, ranges} -> {:ok, {:fold_ranges, version, ranges}}
       :error -> {:error, :malformed}
     end
+  end
+
+  def decode_event(<<@op_indent_result, request_id::32, line::32, indent_level::32-signed>>) do
+    {:ok, {:indent_result, request_id, line, indent_level}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do

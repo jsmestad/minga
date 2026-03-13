@@ -2,21 +2,10 @@
   (block)
   (switch_expression)
   (initializer_list)
-] @indent.begin
-
-(block
-  "}" @indent.end)
+] @indent
 
 [
-  "("
-  ")"
-  "["
-  "]"
-  "{"
   "}"
-] @indent.branch
-
-[
-  (comment)
-  (multiline_string)
-] @indent.ignore
+  "]"
+  ")"
+] @outdent
