@@ -144,7 +144,11 @@ Current status and planned features. Updated as development progresses.
 | User-overridable queries | ✅ | `~/.config/minga/queries/{lang}/highlights.scm` |
 | Runtime grammar loading | ✅ | `dlopen` for user grammars |
 | Extension grammar compilation | ✅ | `Minga.TreeSitter.register_grammar/3` compiles grammar C sources via system compiler, caches at `~/.local/share/minga/grammars/`, registers filetype + highlight queries (#427) |
-| Background query pre-compilation | ✅ | All 39 query sets compiled on startup |
+| Query inheritance (`; inherits:`) | ✅ | nvim-treesitter convention, resolved at compile time (#439) |
+| Buffer folding (`folds.scm`) | ✅ | `za`/`zc`/`zo`/`zM`/`zR`, fold-aware viewport + gutter, 30 languages (#440) |
+| Auto-indent (`indents.scm`) | ✅ | Enter/o/O auto-indent with per-language triggers, 22 languages (#441) |
+| Structural text objects (`textobjects.scm`) | ✅ | `if`/`af` (function), `ic`/`ac` (class), `ia`/`aa` (parameter), `ib`/`ab` (block), 19 languages (#442) |
+| Background query pre-compilation | ✅ | All query sets (highlights, injections, folds, indents, textobjects) compiled on startup |
 | Per-buffer highlight cache | ✅ | Instant switching between files |
 | Additional themes | ✅ | 7 built-in: Doom One, Catppuccin ×4, One Dark/Light |
 | Theme switching at runtime | 📋 | Static via config; runtime picker planned |
