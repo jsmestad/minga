@@ -306,12 +306,15 @@ defmodule Minga.Agent.Session do
     {:reply, {:error, :provider_not_ready}, state}
   end
 
-  def handle_call({:send_prompt, text}, _from, state) do
-    # Add user message to conversation
-    state = %{state | messages: state.messages ++ [Message.user(text)]}
+  def handle_call({:send_prompt, content}, _from, state) do
+    # Add user message to conversation.
+    # Content may be a plain string or a list of ContentPart structs
+    # (when images are attached via @image.png mentions).
+    {user_msg, send_content} = build_user_message(content)
+    state = %{state | messages: state.messages ++ [user_msg]}
     state = notify_messages_changed(state)
 
-    case state.provider_module.send_prompt(state.provider, text) do
+    case state.provider_module.send_prompt(state.provider, send_content) do
       :ok ->
         {:reply, :ok, state}
 
@@ -849,6 +852,40 @@ defmodule Minga.Agent.Session do
     end)
   end
 
+  # When content is a ContentPart list (images attached), extract the text
+  # for the chat message and pass the full parts to the provider.
+  @spec build_user_message(String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          {Message.t(), String.t() | [ReqLLM.Message.ContentPart.t()]}
+  defp build_user_message(content) when is_binary(content) do
+    {Message.user(content), content}
+  end
+
+  defp build_user_message(parts) when is_list(parts) do
+    text =
+      parts
+      |> Enum.filter(&(&1.type == :text))
+      |> Enum.map_join("", & &1.text)
+
+    attachments =
+      parts
+      |> Enum.filter(&(&1.type in [:image, :image_url]))
+      |> Enum.map(fn part ->
+        filename = get_in(part.metadata || %{}, [:filename]) || "image"
+        size_display = get_in(part.metadata || %{}, [:size_display]) || "?"
+        %{filename: filename, size_kb: parse_size_kb(size_display)}
+      end)
+
+    {Message.user(text, attachments), parts}
+  end
+
+  @spec parse_size_kb(String.t()) :: non_neg_integer()
+  defp parse_size_kb(display) do
+    case Integer.parse(String.replace(display, "KB", "")) do
+      {kb, _} -> kb
+      :error -> 0
+    end
+  end
+
   @doc false
   @spec notify_messages_changed(state()) :: state()
   defp notify_messages_changed(state) do
@@ -958,6 +995,7 @@ defmodule Minga.Agent.Session do
   defp first_user_prompt(messages) do
     Enum.find_value(messages, fn
       {:user, text} when is_binary(text) -> text
+      {:user, text, _attachments} when is_binary(text) -> text
       _ -> nil
     end)
   end

@@ -409,8 +409,9 @@ defmodule Minga.Agent.View.Renderer do
 
   @spec session_title([term()]) :: String.t()
   defp session_title(messages) do
-    case Enum.find(messages, fn msg -> match?({:user, _}, msg) end) do
+    case Enum.find(messages, fn msg -> match?({:user, _}, msg) or match?({:user, _, _}, msg) end) do
       {:user, text} -> truncate_title(text)
+      {:user, text, _attachments} -> truncate_title(text)
       nil -> "Minga Agent"
     end
   end

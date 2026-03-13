@@ -41,6 +41,7 @@ defmodule Minga.Agent.FileMention do
           anchor_col: non_neg_integer()
         }
 
+  alias Minga.Agent.ModelLimits
   alias ReqLLM.Message.ContentPart
 
   @max_candidates 10
@@ -106,10 +107,36 @@ defmodule Minga.Agent.FileMention do
   @spec resolve_prompt(String.t(), String.t()) ::
           {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
   def resolve_prompt(text, project_root) do
+    resolve_prompt(text, project_root, [])
+  end
+
+  @doc """
+  Resolves mentions with options.
+
+  Options:
+    - `:model` — the model string for vision capability checking
+  """
+  @spec resolve_prompt(String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
+  def resolve_prompt(text, project_root, opts) do
     mentions = extract_mentions(text)
 
     if mentions == [] do
       {:ok, text}
+    else
+      maybe_check_vision(mentions, text, project_root, opts)
+    end
+  end
+
+  @spec maybe_check_vision([mention()], String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:ok, [ContentPart.t()]} | {:error, String.t()}
+  defp maybe_check_vision(mentions, text, project_root, opts) do
+    has_images = Enum.any?(mentions, fn %{path: path} -> image_path?(path) end)
+    model = Keyword.get(opts, :model)
+
+    if has_images and model != nil and not ModelLimits.vision_capable?(model) do
+      {:error,
+       "Model #{model} does not support image input. Use a vision-capable model (Claude, GPT-4o, Gemini)."}
     else
       resolve_all(mentions, text, project_root)
     end

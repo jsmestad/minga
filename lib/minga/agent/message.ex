@@ -21,9 +21,13 @@ defmodule Minga.Agent.Message do
           cost: float()
         }
 
+  @typedoc "Image attachment metadata for display in chat."
+  @type image_attachment :: %{filename: String.t(), size_kb: non_neg_integer()}
+
   @typedoc "A single conversation message."
   @type t ::
           {:user, String.t()}
+          | {:user, String.t(), [image_attachment()]}
           | {:assistant, String.t()}
           | {:thinking, String.t(), boolean()}
           | {:tool_call, tool_call()}
@@ -47,6 +51,13 @@ defmodule Minga.Agent.Message do
   @spec user(String.t()) :: t()
   def user(text) when is_binary(text), do: {:user, text}
 
+  @doc "Creates a new user message with image attachments."
+  @spec user(String.t(), [image_attachment()]) :: t()
+  def user(text, []) when is_binary(text), do: {:user, text}
+
+  def user(text, attachments) when is_binary(text) and is_list(attachments),
+    do: {:user, text, attachments}
+
   @doc "Creates a new assistant message (initially empty)."
   @spec assistant(String.t()) :: t()
   def assistant(text \\ ""), do: {:assistant, text}
@@ -64,6 +75,7 @@ defmodule Minga.Agent.Message do
   @doc "Extracts the plain text content of a message for clipboard copy."
   @spec text(t()) :: String.t()
   def text({:user, t}), do: t
+  def text({:user, t, _attachments}), do: t
   def text({:assistant, t}), do: t
   def text({:thinking, t, _collapsed}), do: t
   def text({:tool_call, tc}), do: "#{tc.name}: #{tc.result}"

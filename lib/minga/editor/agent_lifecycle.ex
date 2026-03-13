@@ -169,6 +169,7 @@ defmodule Minga.Editor.AgentLifecycle do
   defp first_user_message(messages) do
     Enum.find_value(messages, fn
       {:user, text} -> text
+      {:user, text, _attachments} -> text
       _ -> nil
     end)
   end

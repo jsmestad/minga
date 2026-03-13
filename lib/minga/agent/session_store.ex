@@ -155,6 +155,7 @@ defmodule Minga.Agent.SessionStore do
   end
 
   @spec serialize_message(Minga.Agent.Message.t()) :: map()
+  defp serialize_message({:user, text, _attachments}), do: %{"type" => "user", "text" => text}
   defp serialize_message({:user, text}), do: %{"type" => "user", "text" => text}
   defp serialize_message({:assistant, text}), do: %{"type" => "assistant", "text" => text}
 
