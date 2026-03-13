@@ -116,12 +116,20 @@ defmodule Minga.Git do
     Path.relative_to(Path.expand(file_path), Path.expand(git_root))
   end
 
+  defmodule StatusEntry do
+    @moduledoc false
+    @enforce_keys [:path, :status, :staged]
+    defstruct [:path, :status, :staged]
+
+    @type t :: %__MODULE__{
+            path: String.t(),
+            status: :added | :modified | :deleted | :renamed | :copied | :untracked | :unknown,
+            staged: boolean()
+          }
+  end
+
   @typedoc "A structured status entry for one file."
-  @type status_entry :: %{
-          path: String.t(),
-          status: :added | :modified | :deleted | :renamed | :copied | :untracked | :unknown,
-          staged: boolean()
-        }
+  @type status_entry :: StatusEntry.t()
 
   @doc """
   Returns a structured list of changed files with their status.
@@ -148,7 +156,7 @@ defmodule Minga.Git do
         {:error, "git status failed: #{String.trim(output)}"}
     end
   rescue
-    e -> {:error, "git status error: #{Exception.message(e)}"}
+    e in [ErlangError, ArgumentError] -> {:error, "git status error: #{Exception.message(e)}"}
   end
 
   @doc """
@@ -171,17 +179,25 @@ defmodule Minga.Git do
       {output, _} -> {:error, "git diff failed: #{String.trim(output)}"}
     end
   rescue
-    e -> {:error, "git diff error: #{Exception.message(e)}"}
+    e in [ErlangError, ArgumentError] -> {:error, "git diff error: #{Exception.message(e)}"}
+  end
+
+  defmodule LogEntry do
+    @moduledoc false
+    @enforce_keys [:hash, :short_hash, :author, :date, :message]
+    defstruct [:hash, :short_hash, :author, :date, :message]
+
+    @type t :: %__MODULE__{
+            hash: String.t(),
+            short_hash: String.t(),
+            author: String.t(),
+            date: String.t(),
+            message: String.t()
+          }
   end
 
   @typedoc "A structured log entry."
-  @type log_entry :: %{
-          hash: String.t(),
-          short_hash: String.t(),
-          author: String.t(),
-          date: String.t(),
-          message: String.t()
-        }
+  @type log_entry :: LogEntry.t()
 
   @doc """
   Returns recent commits as structured entries.
@@ -214,7 +230,7 @@ defmodule Minga.Git do
         {:error, "git log failed: #{String.trim(output)}"}
     end
   rescue
-    e -> {:error, "git log error: #{Exception.message(e)}"}
+    e in [ErlangError, ArgumentError] -> {:error, "git log error: #{Exception.message(e)}"}
   end
 
   @doc """
@@ -235,7 +251,7 @@ defmodule Minga.Git do
       {output, _} -> {:error, "git add failed: #{String.trim(output)}"}
     end
   rescue
-    e -> {:error, "git add error: #{Exception.message(e)}"}
+    e in [ErlangError, ArgumentError] -> {:error, "git add error: #{Exception.message(e)}"}
   end
 
   @doc """
@@ -263,7 +279,7 @@ defmodule Minga.Git do
         {:error, "git commit failed: #{String.trim(output)}"}
     end
   rescue
-    e -> {:error, "git commit error: #{Exception.message(e)}"}
+    e in [ErlangError, ArgumentError] -> {:error, "git commit error: #{Exception.message(e)}"}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -279,7 +295,7 @@ defmodule Minga.Git do
     {status, staged} = interpret_status_codes(index_status, worktree_status)
 
     if status do
-      %{path: path, status: status, staged: staged}
+      %StatusEntry{path: path, status: status, staged: staged}
     else
       nil
     end
@@ -297,13 +313,17 @@ defmodule Minga.Git do
   defp interpret_status_codes("C", _), do: {:copied, true}
   defp interpret_status_codes(" ", "M"), do: {:modified, false}
   defp interpret_status_codes(" ", "D"), do: {:deleted, false}
-  defp interpret_status_codes(_, _), do: {:unknown, false}
+  defp interpret_status_codes(idx, wt) do
+    require Logger
+    Logger.warning("[Git] unexpected status codes: index=#{inspect(idx)} worktree=#{inspect(wt)}")
+    {:unknown, false}
+  end
 
   @spec parse_log_line(String.t()) :: log_entry() | nil
   defp parse_log_line(line) do
     case String.split(line, <<0x1F>>) do
       [hash, short_hash, author, date, message] ->
-        %{
+        %LogEntry{
           hash: hash,
           short_hash: short_hash,
           author: author,

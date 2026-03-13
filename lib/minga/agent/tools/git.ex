@@ -24,25 +24,12 @@ defmodule Minga.Agent.Tools.Git do
         staged = Enum.filter(entries, & &1.staged)
         unstaged = Enum.reject(entries, & &1.staged)
 
-        parts = []
-
         parts =
-          if staged != [] do
-            header = "Staged changes:"
-            lines = Enum.map_join(staged, "\n", &format_status_entry/1)
-            parts ++ [header <> "\n" <> lines]
-          else
-            parts
-          end
-
-        parts =
-          if unstaged != [] do
-            header = "Unstaged changes:"
-            lines = Enum.map_join(unstaged, "\n", &format_status_entry/1)
-            parts ++ [header <> "\n" <> lines]
-          else
-            parts
-          end
+          [
+            if(staged != [], do: "Staged changes:\n" <> Enum.map_join(staged, "\n", &format_status_entry/1)),
+            if(unstaged != [], do: "Unstaged changes:\n" <> Enum.map_join(unstaged, "\n", &format_status_entry/1))
+          ]
+          |> Enum.reject(&is_nil/1)
 
         {:ok, Enum.join(parts, "\n\n")}
 
@@ -104,6 +91,10 @@ defmodule Minga.Agent.Tools.Git do
 
   @doc """
   Creates a commit with the given message.
+
+  NOTE: This does not verify git identity. When the agent commits code, it
+  uses whatever git identity is currently configured. The git-identity skill
+  is a human workflow tool and cannot be automated here.
   """
   @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def commit(project_root, message) do
