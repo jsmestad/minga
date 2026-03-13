@@ -11,12 +11,20 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   @typedoc "A single edit operation."
   @type edit :: %{String.t() => String.t()}
 
+  defmodule EditResult do
+    @moduledoc false
+    @enforce_keys [:index, :status, :message]
+    defstruct [:index, :status, :message]
+
+    @type t :: %__MODULE__{
+            index: non_neg_integer(),
+            status: :ok | :error,
+            message: String.t()
+          }
+  end
+
   @typedoc "Result of a single edit within the batch."
-  @type edit_result :: %{
-          index: non_neg_integer(),
-          status: :ok | :error,
-          message: String.t()
-        }
+  @type edit_result :: EditResult.t()
 
   @doc """
   Applies a list of edits to the file at `path`.
@@ -67,7 +75,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   @spec apply_single_edit(String.t(), String.t(), String.t(), non_neg_integer()) ::
           {:ok, String.t(), edit_result()} | {:error, edit_result()}
   defp apply_single_edit(_content, "", _new_text, index) do
-    {:error, %{index: index, status: :error, message: "old_text is empty"}}
+    {:error, %EditResult{index: index, status: :error, message: "old_text is empty"}}
   end
 
   defp apply_single_edit(content, old_text, new_text, index) do
@@ -76,15 +84,15 @@ defmodule Minga.Agent.Tools.MultiEditFile do
 
     case occurrence_count do
       0 ->
-        {:error, %{index: index, status: :error, message: "old_text not found"}}
+        {:error, %EditResult{index: index, status: :error, message: "old_text not found"}}
 
       1 ->
         updated = String.replace(content, old_text, new_text, global: false)
-        {:ok, updated, %{index: index, status: :ok, message: "applied"}}
+        {:ok, updated, %EditResult{index: index, status: :ok, message: "applied"}}
 
       n ->
         {:error,
-         %{index: index, status: :error, message: "old_text found #{n} times (ambiguous)"}}
+         %EditResult{index: index, status: :error, message: "old_text found #{n} times (ambiguous)"}}
     end
   end
 

@@ -51,10 +51,6 @@ defmodule Minga.Agent.Tools.ReadFile do
 
   @spec validate_and_read(String.t(), String.t(), pos_integer() | nil, pos_integer() | nil) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp validate_and_read(path, content, _offset, _limit) when not is_binary(content) do
-    {:error, "#{path} is a binary file, not a text file"}
-  end
-
   defp validate_and_read(path, content, nil, nil) do
     # No offset/limit: original behavior
     case String.valid?(content) do
@@ -89,6 +85,16 @@ defmodule Minga.Agent.Tools.ReadFile do
     # offset is 1-indexed; convert to 0-indexed for Enum.slice
     start_idx = max((offset || 1) - 1, 0)
 
+    if start_idx >= total_lines do
+      {:ok, "[offset #{start_idx + 1} is beyond end of file (#{total_lines} lines)]"}
+    else
+      read_partial_slice(all_lines, total_lines, start_idx, limit)
+    end
+  end
+
+  @spec read_partial_slice([String.t()], non_neg_integer(), non_neg_integer(), pos_integer() | nil) ::
+          {:ok, String.t()}
+  defp read_partial_slice(all_lines, total_lines, start_idx, limit) do
     sliced =
       case limit do
         nil -> Enum.slice(all_lines, start_idx..-1//1)

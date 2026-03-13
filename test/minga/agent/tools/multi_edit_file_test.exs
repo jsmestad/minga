@@ -117,14 +117,10 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
     test "does not write file when all edits fail", %{tmp_dir: dir} do
       path = Path.join(dir, "test.txt")
       File.write!(path, "original content")
-      _original_mtime = File.stat!(path).mtime
 
       edits = [
         %{"old_text" => "nonexistent", "new_text" => "replacement"}
       ]
-
-      # Small sleep to ensure mtime would differ
-      Process.sleep(10)
 
       assert {:ok, _} = MultiEditFile.execute(path, edits)
 

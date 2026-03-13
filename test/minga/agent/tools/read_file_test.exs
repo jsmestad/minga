@@ -91,10 +91,9 @@ defmodule Minga.Agent.Tools.ReadFileTest do
       refute result =~ "line 4\n"
     end
 
-    test "offset beyond file length returns empty slice", %{path: path} do
+    test "offset beyond file length returns clear message", %{path: path} do
       assert {:ok, result} = ReadFile.execute(path, offset: 200)
-      assert result =~ "[lines 200-"
-      assert result =~ "of 100]"
+      assert result =~ "offset 200 is beyond end of file (100 lines)"
     end
 
     test "full file is returned when no offset/limit", %{path: path} do
