@@ -16,11 +16,19 @@ defmodule Minga.Agent.ProviderResolver do
   alias Minga.Agent.Credentials
   alias Minga.Config.Options, as: ConfigOptions
 
+  defmodule Resolved do
+    @moduledoc false
+    @enforce_keys [:module, :name]
+    defstruct [:module, :name]
+
+    @type t :: %__MODULE__{
+            module: module(),
+            name: String.t()
+          }
+  end
+
   @typedoc "Resolved provider information."
-  @type resolved :: %{
-          module: module(),
-          name: String.t()
-        }
+  @type resolved :: Resolved.t()
 
   @doc """
   Resolves the provider module based on the current config.
@@ -39,11 +47,11 @@ defmodule Minga.Agent.ProviderResolver do
   """
   @spec resolve(:auto | :native | :pi_rpc) :: resolved()
   def resolve(:native) do
-    %{module: Minga.Agent.Providers.Native, name: "native"}
+    %Resolved{module: Minga.Agent.Providers.Native, name: "native"}
   end
 
   def resolve(:pi_rpc) do
-    %{module: Minga.Agent.Providers.PiRpc, name: "pi_rpc"}
+    %Resolved{module: Minga.Agent.Providers.PiRpc, name: "pi_rpc"}
   end
 
   def resolve(:auto) do
@@ -61,15 +69,15 @@ defmodule Minga.Agent.ProviderResolver do
 
   @spec resolve_auto(boolean(), boolean()) :: resolved()
   defp resolve_auto(true, _pi_available) do
-    %{module: Minga.Agent.Providers.Native, name: "native (auto)"}
+    %Resolved{module: Minga.Agent.Providers.Native, name: "native (auto)"}
   end
 
   defp resolve_auto(false, true) do
-    %{module: Minga.Agent.Providers.PiRpc, name: "pi_rpc (auto, no API keys)"}
+    %Resolved{module: Minga.Agent.Providers.PiRpc, name: "pi_rpc (auto, no API keys)"}
   end
 
   defp resolve_auto(false, false) do
-    %{module: Minga.Agent.Providers.Native, name: "native (auto, no credentials)"}
+    %Resolved{module: Minga.Agent.Providers.Native, name: "native (auto, no credentials)"}
   end
 
   @doc """
@@ -86,7 +94,7 @@ defmodule Minga.Agent.ProviderResolver do
   defp has_native_credentials? do
     Credentials.any_configured?()
   rescue
-    _ -> false
+    ArgumentError -> false
   catch
     :exit, _ -> false
   end
@@ -101,7 +109,7 @@ defmodule Minga.Agent.ProviderResolver do
     ConfigOptions.get(:agent_provider)
   rescue
     # ConfigOptions agent may not be running (e.g. in tests)
-    _ -> :auto
+    ArgumentError -> :auto
   catch
     :exit, _ -> :auto
   end
@@ -110,7 +118,7 @@ defmodule Minga.Agent.ProviderResolver do
   defp read_config_model do
     ConfigOptions.get(:agent_model)
   rescue
-    _ -> nil
+    ArgumentError -> nil
   catch
     :exit, _ -> nil
   end
