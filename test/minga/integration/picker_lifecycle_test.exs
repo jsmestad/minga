@@ -4,7 +4,6 @@ defmodule Minga.Integration.PickerLifecycleTest do
   Covers the buffer picker (SPC b b), command palette (SPC :), and
   general picker interactions.
 
-  Ticket: #447
   """
   use Minga.Test.EditorCase, async: true
 

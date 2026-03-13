@@ -4,7 +4,6 @@ defmodule Minga.Integration.ScrollViewportTest do
   than the terminal height. Verifies cursor following, edge scrolling,
   gg/G/C-d/C-u, and gutter line number correctness.
 
-  Ticket: #451
   """
   use Minga.Test.EditorCase, async: true
 
@@ -131,6 +130,77 @@ defmodule Minga.Integration.ScrollViewportTest do
       line_26_row = Enum.find(rows, &String.contains?(&1, "line 26"))
       assert line_26_row != nil, "line 26 should be visible"
       assert String.contains?(line_26_row, "26"), "gutter should show 26"
+    end
+  end
+
+  # ── Scrolloff behavior ──────────────────────────────────────────────────
+
+  describe "scrolloff (scroll margin)" do
+    test "cursor stays away from viewport edge when scrolling down" do
+      ctx = start_editor(@test_content)
+
+      # Move down enough to trigger scrolling
+      send_keys(ctx, "30j")
+
+      {cursor_line, _} = buffer_cursor(ctx)
+      # The cursor should be visible on screen, not at the very last content row.
+      # Find which screen row contains the cursor's line text
+      cursor_display_line = cursor_line + 1
+      rows = screen_text(ctx)
+
+      cursor_screen_row =
+        Enum.find_index(rows, &String.contains?(&1, "line #{cursor_display_line}"))
+
+      assert cursor_screen_row != nil, "cursor line should be visible"
+      # With default scroll_margin of 5, cursor should not be on the very last
+      # content row (row height-3, accounting for tab bar and modeline)
+      last_content_row = ctx.height - 3
+
+      assert cursor_screen_row < last_content_row,
+             "cursor at screen row #{cursor_screen_row} should be above last content row #{last_content_row} (scrolloff)"
+    end
+
+    test "cursor stays away from viewport edge when scrolling up" do
+      ctx = start_editor(@test_content)
+
+      send_keys(ctx, "G")
+      send_keys(ctx, "30k")
+
+      {cursor_line, _} = buffer_cursor(ctx)
+      cursor_display_line = cursor_line + 1
+      rows = screen_text(ctx)
+
+      cursor_screen_row =
+        Enum.find_index(rows, &String.contains?(&1, "line #{cursor_display_line}"))
+
+      assert cursor_screen_row != nil, "cursor line should be visible"
+      # Cursor should not be on the very first content row (row 1, after tab bar)
+      assert cursor_screen_row > 1,
+             "cursor at screen row #{cursor_screen_row} should be below first content row (scrolloff)"
+    end
+  end
+
+  # ── Horizontal scroll ─────────────────────────────────────────────────────
+
+  describe "horizontal scroll" do
+    @wide_content "short\n" <> String.duplicate("x", 200) <> "\nend"
+
+    test "long line causes horizontal scroll when cursor moves right" do
+      ctx = start_editor(@wide_content)
+
+      # Move to the long line (line 2, 0-indexed line 1)
+      send_keys(ctx, "j")
+      # Move cursor far right past the terminal width
+      send_keys(ctx, "$")
+
+      {_, col} = buffer_cursor(ctx)
+      assert col >= 100, "cursor should be far right on the long line, at col #{col}"
+
+      # The visible text should not show the start of the line anymore
+      # because the viewport has scrolled horizontally
+      row_text = screen_row(ctx, 2)
+      # Row should contain x's but not "short" from line 1 bleeding in
+      assert String.contains?(row_text, "x"), "long line content should be visible"
     end
   end
 

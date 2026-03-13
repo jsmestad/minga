@@ -4,7 +4,6 @@ defmodule Minga.Integration.CommandModeTest do
   error handling, and clean focus return. Uses HeadlessPort screen capture
   with snapshot assertions.
 
-  Ticket: #448
   """
   use Minga.Test.EditorCase, async: true
 

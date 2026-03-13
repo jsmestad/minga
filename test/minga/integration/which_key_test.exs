@@ -3,7 +3,6 @@ defmodule Minga.Integration.WhichKeyTest do
   Integration tests for the which-key popup: appearance after timeout,
   correct keybinding labels, nested prefix navigation, and clean dismissal.
 
-  Ticket: #452
   """
   use Minga.Test.EditorCase, async: true
 

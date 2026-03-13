@@ -3,7 +3,6 @@ defmodule Minga.Integration.WindowSplitsTest do
   Integration tests for window splitting: vertical/horizontal splits,
   navigation between panes, closing splits, and layout correctness.
 
-  Ticket: #450
   """
   use Minga.Test.EditorCase, async: true
 

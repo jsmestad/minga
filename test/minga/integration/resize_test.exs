@@ -3,7 +3,6 @@ defmodule Minga.Integration.ResizeTest do
   Integration tests for terminal resize: layout recompute, cursor clamp,
   modeline/minibuffer repositioning, and gutter adjustment.
 
-  Ticket: #455
   """
   use Minga.Test.EditorCase, async: true
 

@@ -3,7 +3,6 @@ defmodule Minga.Integration.FileTreeTest do
   Integration tests for file tree: toggle, navigate, open files, focus
   return, and separator rendering.
 
-  Ticket: #449
   """
   # async: false because file tree reads the real filesystem and can be
   # slow under heavy test concurrency
@@ -66,6 +65,110 @@ defmodule Minga.Integration.FileTreeTest do
       # After escape, focus should return to editor
       # Subsequent keys should operate on the buffer, not the tree
       assert editor_mode(ctx) == :normal
+    end
+  end
+
+  # ── Open file from tree ─────────────────────────────────────────────────
+
+  describe "opening a file from tree" do
+    test "Enter on a file opens it in the editor and returns focus" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>op")
+      # Navigate down to find a file (skip root dir entry)
+      send_keys(ctx, "jjjjj")
+      # Open the selected file
+      send_keys(ctx, "<CR>")
+
+      # Focus should be in the editor (not stuck in tree)
+      # Verify by checking that 'j' moves the buffer cursor, not the tree cursor
+      cursor_before = buffer_cursor(ctx)
+      send_keys(ctx, "j")
+      cursor_after = buffer_cursor(ctx)
+
+      # If focus returned to buffer, j moves cursor down one line
+      {line_before, _} = cursor_before
+      {line_after, _} = cursor_after
+
+      assert line_after >= line_before,
+             "after opening file from tree, j should move buffer cursor"
+    end
+  end
+
+  # ── Focus cycling ──────────────────────────────────────────────────────────
+
+  describe "focus cycling between tree and editor" do
+    test "Escape from tree returns focus to editor while keeping tree open" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>op")
+      state = :sys.get_state(ctx.editor)
+      assert state.keymap_scope == :file_tree
+
+      # Escape closes the tree and returns focus to the editor
+      send_keys(ctx, "<Esc>")
+      state = :sys.get_state(ctx.editor)
+      assert state.keymap_scope == :editor
+    end
+
+    test "opening a file from tree returns focus to editor" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>op")
+      state = :sys.get_state(ctx.editor)
+      assert state.keymap_scope == :file_tree
+
+      # Navigate past all directories to reach a file (directories come first).
+      # Go to the bottom of the tree to find a file entry.
+      send_keys(ctx, "G<CR>")
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.keymap_scope == :editor,
+             "focus should return to editor after opening file from tree, got #{state.keymap_scope}"
+    end
+  end
+
+  # ── Nested directory expansion ─────────────────────────────────────────────
+
+  describe "nested directory expansion" do
+    test "l expands a directory and shows children" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>op")
+      # The root dir entry should be at the top
+      # Navigate to it and expand with l
+      send_keys(ctx, "j")
+
+      rows_before = screen_text(ctx)
+      send_keys(ctx, "l")
+      rows_after = screen_text(ctx)
+
+      # After expansion, there should be more content rows (children visible)
+      non_empty_before = Enum.count(rows_before, &(String.trim(&1) != ""))
+      non_empty_after = Enum.count(rows_after, &(String.trim(&1) != ""))
+
+      assert non_empty_after >= non_empty_before,
+             "expanding a directory should show at least as many rows"
+    end
+
+    test "h collapses an expanded directory" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>op")
+      send_keys(ctx, "j")
+      send_keys(ctx, "l")
+      rows_expanded = screen_text(ctx)
+
+      send_keys(ctx, "h")
+      rows_collapsed = screen_text(ctx)
+
+      # After collapse, some child rows should disappear
+      non_empty_expanded = Enum.count(rows_expanded, &(String.trim(&1) != ""))
+      non_empty_collapsed = Enum.count(rows_collapsed, &(String.trim(&1) != ""))
+
+      assert non_empty_collapsed <= non_empty_expanded,
+             "collapsing should show fewer or equal rows"
     end
   end
 

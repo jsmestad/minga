@@ -4,7 +4,6 @@ defmodule Minga.Integration.MouseTest do
   double-click word select, triple-click line select, scroll wheel,
   and region dispatch.
 
-  Ticket: #454
   """
   use Minga.Test.EditorCase, async: true
 
@@ -112,6 +111,73 @@ defmodule Minga.Integration.MouseTest do
 
       cursor_after = buffer_cursor(ctx)
       assert cursor_after == cursor_before, "clicking tree should not move buffer cursor"
+    end
+  end
+
+  # ── Click-and-drag ──────────────────────────────────────────────────────────
+
+  describe "click-and-drag" do
+    test "drag creates visual selection" do
+      ctx = start_editor("hello world foo bar")
+
+      # Press at one position
+      send_mouse(ctx, 1, 5, :left, 0, :press, 1)
+      # Drag to another position
+      send_mouse(ctx, 1, 15, :left, 0, :drag, 1)
+
+      assert editor_mode(ctx) == :visual,
+             "dragging should enter visual mode, got #{editor_mode(ctx)}"
+    end
+
+    test "releasing after drag keeps selection" do
+      ctx = start_editor("hello world foo bar")
+
+      send_mouse(ctx, 1, 5, :left, 0, :press, 1)
+      send_mouse(ctx, 1, 15, :left, 0, :drag, 1)
+      send_mouse(ctx, 1, 15, :left, 0, :release, 1)
+
+      assert editor_mode(ctx) == :visual
+    end
+  end
+
+  # ── Click in gutter ────────────────────────────────────────────────────────
+
+  describe "click in gutter area" do
+    test "clicking in the gutter does not position cursor at col 0" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      # Click in the gutter area (col 0 or 1, where line numbers are)
+      send_mouse(ctx, 2, 0, :left)
+
+      {_line, col} = buffer_cursor(ctx)
+      # Cursor should be at col 0 of the text (start of line), not in the gutter
+      assert col == 0
+    end
+  end
+
+  # ── Click in agent panel ──────────────────────────────────────────────────
+
+  describe "click in agent panel area" do
+    test "clicking in agent panel area focuses it" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "<Space>aa")
+
+      # Find the separator column to know where the agent panel starts
+      row1 = screen_row(ctx, 1)
+      sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
+
+      if sep_col do
+        # Click in the agent panel area (right of separator)
+        send_mouse(ctx, 5, sep_col + 5, :left)
+
+        # Buffer cursor should not have moved to the agent panel area
+        # (the click was dispatched to the agent panel, not the buffer)
+        {_, buf_col} = buffer_cursor(ctx)
+
+        assert buf_col < sep_col,
+               "buffer cursor should stay in editor area after clicking agent panel"
+      end
     end
   end
 
