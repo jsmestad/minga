@@ -30,6 +30,7 @@ Minga splits the editor into **two OS processes** with completely isolated memor
 │                                 │
 │  Command.Registry               │
 │  Filetype.Registry              │
+│  Grammar.Registry (ETS)         │
 │  FileWatcher                    │
 └─────────────────────────────────┘
 ```

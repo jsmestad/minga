@@ -55,7 +55,45 @@ defmodule Minga.Highlight.Grammar do
   @type language :: String.t()
 
   @doc """
+  Initializes the dynamic language registry ETS table.
+
+  Called once at application startup. The table stores runtime-registered
+  filetype-to-language mappings from extensions. Lookups check this table
+  first, then fall back to the compile-time map.
+  """
+  @spec init_registry() :: :ok
+  def init_registry do
+    :ets.new(:minga_grammar_registry, [:named_table, :set, :public, read_concurrency: true])
+    :ok
+  rescue
+    ArgumentError ->
+      # Table already exists (e.g., during hot reload)
+      :ok
+  end
+
+  @doc """
+  Registers a dynamic filetype-to-language mapping.
+
+  Extensions call this to make their grammar available for syntax
+  highlighting. The mapping is checked before the compile-time defaults,
+  so extensions can override built-in grammars.
+
+  ## Examples
+
+      Minga.Highlight.Grammar.register_language(:org, "org")
+      Minga.Highlight.Grammar.register_language(:astro, "astro")
+  """
+  @spec register_language(atom(), String.t()) :: :ok
+  def register_language(filetype, language) when is_atom(filetype) and is_binary(language) do
+    :ets.insert(:minga_grammar_registry, {filetype, language})
+    :ok
+  end
+
+  @doc """
   Returns the tree-sitter language name for a filetype atom.
+
+  Checks the dynamic registry (populated by extensions) first, then
+  falls back to the compile-time mapping.
 
   ## Examples
 
@@ -70,9 +108,9 @@ defmodule Minga.Highlight.Grammar do
   """
   @spec language_for_filetype(atom()) :: {:ok, language()} | :unsupported
   def language_for_filetype(filetype) when is_atom(filetype) do
-    case Map.get(@filetype_to_language, filetype) do
-      nil -> :unsupported
-      lang -> {:ok, lang}
+    case lookup_dynamic(filetype) do
+      {:ok, lang} -> {:ok, lang}
+      :miss -> lookup_static(filetype)
     end
   end
 
@@ -154,11 +192,43 @@ defmodule Minga.Highlight.Grammar do
     Path.join(config_dir, "#{name}.#{ext}")
   end
 
-  @doc "Returns the full filetype-to-language mapping."
+  @doc """
+  Returns the full filetype-to-language mapping, including dynamic registrations.
+  """
   @spec supported_languages() :: %{atom() => language()}
-  def supported_languages, do: @filetype_to_language
+  def supported_languages do
+    dynamic =
+      try do
+        :ets.tab2list(:minga_grammar_registry)
+        |> Map.new()
+      rescue
+        ArgumentError -> %{}
+      end
+
+    Map.merge(@filetype_to_language, dynamic)
+  end
 
   # ── Private ──
+
+  @spec lookup_dynamic(atom()) :: {:ok, language()} | :miss
+  defp lookup_dynamic(filetype) do
+    case :ets.lookup(:minga_grammar_registry, filetype) do
+      [{^filetype, lang}] -> {:ok, lang}
+      [] -> :miss
+    end
+  rescue
+    ArgumentError ->
+      # Table doesn't exist yet (e.g., during early startup or tests)
+      :miss
+  end
+
+  @spec lookup_static(atom()) :: {:ok, language()} | :unsupported
+  defp lookup_static(filetype) do
+    case Map.get(@filetype_to_language, filetype) do
+      nil -> :unsupported
+      lang -> {:ok, lang}
+    end
+  end
 
   @spec priv_query_path(language()) :: String.t()
   defp priv_query_path(language) do

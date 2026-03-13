@@ -48,7 +48,7 @@ defmodule Minga.Config.OptionsTest do
                agent_provider: :auto,
                agent_model: nil,
                agent_tool_approval: :destructive,
-               agent_destructive_tools: ["write_file", "edit_file", "shell"],
+               agent_destructive_tools: ["write_file", "edit_file", "multi_edit_file", "shell"],
                agent_session_retention_days: 30,
                agent_panel_split: 65,
                startup_view: :agent,
@@ -59,6 +59,8 @@ defmodule Minga.Config.OptionsTest do
                agent_prompt_cache: true,
                agent_notifications: true,
                agent_notify_on: [:approval, :complete, :error],
+               agent_max_turns: 100,
+               agent_max_cost: nil,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                agent_tool_permissions: nil,
@@ -314,7 +316,12 @@ defmodule Minga.Config.OptionsTest do
 
   describe "agent_destructive_tools" do
     test "defaults to write_file, edit_file, shell", %{server: s} do
-      assert Options.get(s, :agent_destructive_tools) == ["write_file", "edit_file", "shell"]
+      assert Options.get(s, :agent_destructive_tools) == [
+               "write_file",
+               "edit_file",
+               "multi_edit_file",
+               "shell"
+             ]
     end
 
     test "accepts a custom list of strings", %{server: s} do

@@ -30,6 +30,7 @@ defmodule Minga.Application do
 
   alias Minga.Agent.SessionStore
   alias Minga.Config.Options
+  alias Minga.Highlight.Grammar
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
@@ -38,19 +39,20 @@ defmodule Minga.Application do
     # This table survives Editor crashes so the LoggerHandler can queue
     # messages while the Editor is restarting. The Editor flushes it on init.
     Minga.LoggerHandler.ensure_buffer_table()
+    Grammar.init_registry()
 
     base_children = [
       Minga.Config.Options,
       Minga.Keymap.Active,
       Minga.Config.Hooks,
       Minga.Config.Advice,
-      Minga.Config.Loader,
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
       Minga.Extension.Registry,
       Minga.Extension.Supervisor,
+      Minga.Config.Loader,
       Minga.Diagnostics,
       Minga.LSP.Supervisor,
       Minga.Project,
