@@ -1,6 +1,6 @@
 # Editor Architecture Refactor
 
-**Status:** Surface layer fully deleted. Agent state on EditorState. Window-level content hosting active.
+**Status:** Complete. All planned refactoring work is done.
 **Updated:** 2026-03-12
 
 ## The One Rule
@@ -61,20 +61,12 @@ The shared layer is the **interaction model**, not the data structure:
 - Tab contexts store per-tab fields directly as flat maps
 - `surface_module` and `surface_state` removed from EditorState
 
-## Remaining Work
-
-### VimState substruct extraction
-Extract vim-specific fields (mode, mode_state, reg, marks, last_jump_pos, last_find_char, change_recorder, macro_recorder) from EditorState into a `Minga.Editor.VimState` substruct. This creates the clean boundary for CUA (#306): swap `state.vim` with a different editing model's state struct. Currently these 8 fields are flat on EditorState, touching ~60 call sites.
-
-### Agent panel consolidation
-The bottom agent panel (`AgentPanel` handler, 276 lines) and the window-based agent split (`AgentChatNav` handler, 175 lines) coexist as separate input paths. The panel handles prompt input (insert mode keys, arrow keys, @-mention triggers) and chat navigation when the bottom panel is visible. The split pane handles chat navigation via Mode FSM when agent chat is in a window split.
-
-Prompt input should work identically regardless of where the agent UI is displayed (panel or split). Currently the panel has hardcoded Ctrl+D/U for scrolling, Enter for submit, etc. that duplicate what the scope trie and Mode FSM already provide. The consolidation path:
-1. Move prompt input handling to a shared module (both panel and split use it)
-2. Remove scroll/nav reimplementations from AgentPanel (use AgentChatNav's Mode FSM path)
-3. Eventually: bottom panel becomes "just another window position" for the agent split
-
-### EditorState field reduction
-EditorState is still large (40+ fields). Some fields are per-tab (saved/restored on tab switch), others are global (theme, port_manager, tab_bar). The per-tab fields could be grouped into a substruct to make the boundary explicit. This is lower priority since the flat map approach works and the Surface overhead is gone.
-
-Agent state (`agent`, `agentic`) is NOT snapshotted per-tab. The Session GenServer is the source of truth for session state (status, messages, pending approval, error). When switching to an agent tab, `EditorState.rebuild_agent_from_session/2` queries the Session process to populate the editor's local agent fields. Background agent events update only `Tab.agent_status` for tab bar rendering; the Session process accumulates the real state independently.
+### Phase G: Cleanup and consolidation (PRs #365-#367, #386, #388)
+- Stale Surface/Phase comment cleanup
+- Legacy "agentic view" naming → "agent split pane"
+- Dead AgentView modules deleted (help.ex, mouse.ex: -593 lines)
+- Panel insert mode consolidated via agent scope trie (-86 lines)
+- **VimState substruct extracted** (PR #386): 8 vim-specific fields (mode, mode_state, reg, marks, last_jump_pos, last_find_char, change_recorder, macro_recorder) moved into `Minga.Editor.VimState`. Creates the CUA (#306) swap boundary.
+- Shared `key_sequence_pending?/1` extracted to `Minga.Input` (was duplicated in AgentPanel and FileTreeHandler)
+- **EditorState field boundary documented**: `@per_tab_fields` module attribute is the single source of truth for which fields are saved/restored on tab switch. `snapshot_tab_fields/1` and `restore_tab_context/1` derive from it automatically.
+- **Agent state ownership clarified**: `agent`/`agentic` are NOT in `@per_tab_fields`. The Session GenServer is the source of truth. `rebuild_agent_from_session/2` queries the Session on tab switch. Background events update only `Tab.agent_status` for tab bar rendering.

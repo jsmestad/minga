@@ -2,14 +2,22 @@ defmodule Minga.Editor.State do
   @moduledoc """
   Internal state for the Editor GenServer.
 
-  Holds references to the buffer list, port manager, viewport, modal FSM
-  state, which-key popup state, and the yank register.
+  ## Field categories
+
+  EditorState fields fall into two categories:
+
+  **Per-tab fields** are saved/restored when switching tabs. Each tab
+  carries a snapshot of these fields so switching tabs restores the
+  full editing context. See `@per_tab_fields` for the canonical list.
+
+  **Global fields** are shared across all tabs and never snapshotted:
+  `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
+  `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
+  `tab_bar_click_regions`, `agent`, `agentic`, `picker_ui`, `whichkey`.
 
   ## Composed sub-structs
 
-  Related fields are grouped into internal sub-structs to keep the top-level
-  struct manageable:
-
+  * `Minga.Editor.VimState`           — modal FSM, registers, marks, recording
   * `Minga.Editor.State.Buffers`      — buffer list, active buffer, special buffers
   * `Minga.Editor.State.Picker`       — picker instance, source, restore index
   * `Minga.Editor.State.WhichKey`     — which-key popup node, timer, visibility
@@ -53,6 +61,27 @@ defmodule Minga.Editor.State do
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
+
+  # Fields saved/restored per-tab. Adding a per-tab field? Add it here,
+  # and snapshot_tab_fields/1 + restore_tab_context/1 will pick it up
+  # automatically.
+  @per_tab_fields [
+    :keymap_scope,
+    :buffers,
+    :windows,
+    :file_tree,
+    :viewport,
+    :mouse,
+    :highlight,
+    :lsp,
+    :completion,
+    :completion_trigger,
+    :git_buffers,
+    :injection_ranges,
+    :search,
+    :pending_conflict,
+    :vim
+  ]
 
   @enforce_keys [:port_manager, :viewport]
   defstruct port_manager: nil,
@@ -526,23 +555,7 @@ defmodule Minga.Editor.State do
 
   @spec snapshot_tab_fields(t()) :: Tab.context()
   defp snapshot_tab_fields(state) do
-    %{
-      keymap_scope: state.keymap_scope,
-      buffers: state.buffers,
-      windows: state.windows,
-      file_tree: state.file_tree,
-      viewport: state.viewport,
-      mouse: state.mouse,
-      highlight: state.highlight,
-      lsp: state.lsp,
-      completion: state.completion,
-      completion_trigger: state.completion_trigger,
-      git_buffers: state.git_buffers,
-      injection_ranges: state.injection_ranges,
-      search: state.search,
-      pending_conflict: state.pending_conflict,
-      vim: state.vim
-    }
+    Map.take(state, @per_tab_fields)
   end
 
   @doc """
@@ -567,22 +580,9 @@ defmodule Minga.Editor.State do
       end
 
     # Restore all per-tab fields from the context
-    state
-    |> maybe_restore(:keymap_scope, context)
-    |> maybe_restore(:buffers, context)
-    |> maybe_restore(:windows, context)
-    |> maybe_restore(:file_tree, context)
-    |> maybe_restore(:viewport, context)
-    |> maybe_restore(:mouse, context)
-    |> maybe_restore(:highlight, context)
-    |> maybe_restore(:lsp, context)
-    |> maybe_restore(:completion, context)
-    |> maybe_restore(:completion_trigger, context)
-    |> maybe_restore(:git_buffers, context)
-    |> maybe_restore(:injection_ranges, context)
-    |> maybe_restore(:search, context)
-    |> maybe_restore(:pending_conflict, context)
-    |> maybe_restore(:vim, context)
+    Enum.reduce(@per_tab_fields, state, fn field, acc ->
+      maybe_restore(acc, field, context)
+    end)
   end
 
   # Builds a file-tab context for a brand-new tab. Returns the flat format
