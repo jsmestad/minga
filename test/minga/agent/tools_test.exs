@@ -43,10 +43,12 @@ defmodule Minga.Agent.ToolsTest do
       assert "read_file" in names
       assert "write_file" in names
       assert "edit_file" in names
+      assert "multi_edit_file" in names
       assert "list_directory" in names
       assert "find" in names
       assert "grep" in names
       assert "shell" in names
+      assert "subagent" in names
     end
 
     test "all tools have descriptions and callbacks", %{tmp_dir: dir} do
