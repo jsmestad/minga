@@ -109,6 +109,108 @@ defmodule Minga.Agent.Providers.NativeTest do
     end
   end
 
+  describe "set_model" do
+    test "updates the model without resetting context", %{tmp_dir: dir} do
+      # Track what messages the LLM client receives on each call.
+      # The client runs inside a Task, so we send to the test pid explicitly.
+      test_pid = self()
+      calls = :counters.new(1, [:atomics])
+      messages_ref = make_ref()
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(calls, 1)
+        :counters.add(calls, 1, 1)
+        send(test_pid, {messages_ref, count, messages})
+
+        chunks = [
+          ReqLLM.StreamChunk.text("Response #{count}"),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+        ]
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
+
+      # First prompt builds context
+      :ok = Native.send_prompt(pid, "Hello")
+      _events = collect_events(500)
+
+      # Switch model
+      assert :ok = Native.set_model(pid, "anthropic:claude-opus-4-20250514")
+
+      # Verify model changed
+      assert {:ok, state} = Native.get_state(pid)
+      assert state.model.id == "anthropic:claude-opus-4-20250514"
+
+      # Second prompt should carry the conversation context from the first
+      :ok = Native.send_prompt(pid, "Follow up")
+      _events = collect_events(500)
+
+      # The second LLM call (count=1) should have received prior messages
+      assert_received {^messages_ref, 1, messages}
+
+      # Should have at least: system prompt, user "Hello", assistant "Response 0", user "Follow up"
+      assert length(messages) >= 4
+    end
+
+    test "returns the model in get_state after set_model", %{tmp_dir: dir} do
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      assert :ok = Native.set_model(pid, "openai:gpt-4o")
+
+      assert {:ok, state} = Native.get_state(pid)
+      assert state.model.id == "openai:gpt-4o"
+    end
+  end
+
+  describe "cycle_model preserves context" do
+    test "conversation history survives model cycling", %{tmp_dir: dir} do
+      test_pid = self()
+      calls = :counters.new(1, [:atomics])
+      messages_ref = make_ref()
+
+      client = fn model, messages, _opts ->
+        count = :counters.get(calls, 1)
+        :counters.add(calls, 1, 1)
+        send(test_pid, {messages_ref, count, model, messages})
+
+        chunks = [
+          ReqLLM.StreamChunk.text("Response #{count}"),
+          ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+        ]
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: client,
+          model: "anthropic:claude-sonnet-4-20250514"
+        )
+
+      # Build some conversation context
+      :ok = Native.send_prompt(pid, "First message")
+      _events = collect_events(500)
+
+      # Use set_model to switch (cycle_model requires agent_models config;
+      # set_model uses the same state update path without config lookup)
+      assert :ok = Native.set_model(pid, "anthropic:claude-opus-4-20250514")
+
+      # Send another prompt; context should be preserved
+      :ok = Native.send_prompt(pid, "Second message after model switch")
+      _events = collect_events(500)
+
+      # Verify the second call used the new model
+      assert_received {^messages_ref, 1, model, messages}
+      assert model == "anthropic:claude-opus-4-20250514"
+
+      # Verify prior conversation was included
+      assert length(messages) >= 4
+    end
+  end
+
   describe "new_session" do
     test "resets conversation context", %{tmp_dir: dir} do
       {:ok, pid} = start_provider(tmp_dir: dir)
