@@ -95,8 +95,8 @@ BEAM processes are organized into supervision trees that encode dependency relat
 
 ```
 Minga.Supervisor (rest_for_one)
-├── Config.Options           ← typed option registry
-├── Keymap.Active            ← mutable keymap store (Agent)
+├── Config.Options           ← typed option registry (ETS, read_concurrency)
+├── Keymap.Active            ← mutable keymap store (ETS, read_concurrency)
 ├── Config.Hooks             ← lifecycle hook registry (Agent)
 ├── Config.Advice            ← before/after command advice (ETS, read_concurrency)
 ├── Config.Loader            ← config file discovery and evaluation
@@ -109,7 +109,7 @@ Minga.Supervisor (rest_for_one)
 ├── Command.Registry         ← rebuilt from module attributes on restart
 ├── Extension.Registry       ← extension metadata store
 ├── Extension.Supervisor     ← DynamicSupervisor for extension processes
-├── Diagnostics              ← source-agnostic diagnostic aggregation
+├── Diagnostics              ← source-agnostic diagnostic aggregation (ETS reads, GenServer writes)
 ├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
 ├── Agent.Supervisor         ← DynamicSupervisor for agent session process trees
 │    └── Agent.Session       ← one per active agent session (provider, conversation, tools)
