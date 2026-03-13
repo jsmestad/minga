@@ -150,12 +150,13 @@ defmodule Minga.Mode.Visual do
     {:execute, :word_end_big, state}
   end
 
-  # Paragraph motions
-  def handle_key({?{, 0}, state) do
+  # Paragraph motions (guarded: only fire when no text object modifier is
+  # pending, so vi{ / vi} can dispatch to the brace text object handler).
+  def handle_key({?{, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute, :paragraph_backward, state}
   end
 
-  def handle_key({?}, 0}, state) do
+  def handle_key({?}, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute, :paragraph_forward, state}
   end
 

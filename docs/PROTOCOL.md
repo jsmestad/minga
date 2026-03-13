@@ -79,6 +79,10 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x33` | language_at_response | 7 + name_len | Language at a byte offset |
 | `0x34` | injection_ranges | 3 + variable | Injection language regions |
 | `0x35` | text_width | 7 | Display width of measured text |
+| `0x36` | fold_ranges | variable | Fold range results from tree-sitter |
+| `0x37` | indent_result | 13 | Indent level result for a line |
+| `0x38` | textobject_result | variable | Text object range result (or nil) |
+| `0x39` | textobject_positions | 9 + count × 9 | Proactive text object position cache |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -543,6 +547,39 @@ name:       [name_len]u8  language name for this region
 ```
 
 **Behavior:** Sent after `highlight_spans` when the parse found embedded language regions (e.g., JSON inside a Markdown fenced code block). The BEAM can use these ranges for injection-aware features like line comment toggling.
+
+### `0x39` textobject_positions
+
+Proactive cache of all `.around` text object positions in the current file, sent after each parse (initial and incremental). The BEAM caches these per-window for `]f`/`[f`-style navigation with zero per-keystroke IPC.
+
+```
+opcode:  u8  = 0x39
+version: u32           parse version counter
+count:   u32           number of entries
+entries: [count × 9]   array of position entries
+```
+
+Each entry:
+```
+type_id: u8   text object type (see table below)
+row:     u32  0-indexed line number
+col:     u32  0-indexed byte column
+```
+
+Total size: 9 + count × 9 bytes.
+
+**Type ID values:**
+
+| Value | Type |
+|-------|------|
+| `0x00` | function |
+| `0x01` | class |
+| `0x02` | parameter |
+| `0x03` | block |
+| `0x04` | comment |
+| `0x05` | test |
+
+**Behavior:** The Zig parser runs the `textobjects.scm` query against the parse tree and collects the start positions of all `.around` captures (e.g., `@function.around`, `@class.around`). Entries are sorted by (row, col) before sending. The BEAM decodes them into a `%{atom => [{row, col}]}` map and stores them on the active window struct. Navigation commands (`]f`, `[f`, etc.) scan this cached data with no further IPC to Zig.
 
 ---
 
