@@ -6,9 +6,9 @@ defmodule Minga.Popup.LifecycleTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Mode
   alias Minga.Popup.Lifecycle
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
@@ -30,8 +30,7 @@ defmodule Minga.Popup.LifecycleTest do
     state = %EditorState{
       port_manager: nil,
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{
         tree: WindowTree.new(1),

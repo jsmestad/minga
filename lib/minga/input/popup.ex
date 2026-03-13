@@ -28,7 +28,7 @@ defmodule Minga.Input.Popup do
 
       meta ->
         # Only intercept the quit key in normal mode (not insert mode)
-        if state.mode == :normal and matches_quit_key?(meta.rule.quit_key, codepoint) do
+        if state.vim.mode == :normal and matches_quit_key?(meta.rule.quit_key, codepoint) do
           {:handled, Lifecycle.close_active_popup(state)}
         else
           {:passthrough, state}

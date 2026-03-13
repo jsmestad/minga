@@ -5,10 +5,10 @@ defmodule Minga.Input.PopupTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input.Popup, as: PopupHandler
-  alias Minga.Mode
   alias Minga.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
 
@@ -30,11 +30,12 @@ defmodule Minga.Input.PopupTest do
     active = PopupActive.new(rule, 2, WindowTree.new(1), 1)
     popup_window = %{Window.new(2, popup_buf, 24, 80) | popup_meta: active}
 
+    vim = %VimState{VimState.new() | mode: mode}
+
     %EditorState{
       port_manager: nil,
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: mode,
-      mode_state: Mode.initial_state(),
+      vim: vim,
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{
         tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 16},
@@ -52,8 +53,7 @@ defmodule Minga.Input.PopupTest do
     %EditorState{
       port_manager: nil,
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{
         tree: WindowTree.new(1),
