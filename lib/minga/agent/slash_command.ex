@@ -49,7 +49,7 @@ defmodule Minga.Agent.SlashCommand do
     },
     %{name: "compact", description: "Compact conversation context (summarize older turns)"},
     %{name: "continue", description: "Continue from an interrupted stream response"},
-    %{name: "export", description: "Export current session to a Markdown file"},
+    %{name: "export", description: "Export session to Markdown (default) or HTML (/export html)"},
     %{name: "skills", description: "List all available skills"},
     %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
     %{
@@ -107,7 +107,8 @@ defmodule Minga.Agent.SlashCommand do
   defp dispatch(state, "system-prompt", _args), do: {:ok, do_system_prompt(state)}
   defp dispatch(state, "compact", _args), do: do_compact(state)
   defp dispatch(state, "continue", _args), do: do_continue(state)
-  defp dispatch(state, "export", _args), do: do_export(state)
+  defp dispatch(state, "export", "html"), do: do_export(state, :html)
+  defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
 
@@ -358,8 +359,8 @@ defmodule Minga.Agent.SlashCommand do
     end
   end
 
-  @spec do_export(state()) :: {:ok, state()} | {:error, String.t()}
-  defp do_export(state) do
+  @spec do_export(state(), :markdown | :html) :: {:ok, state()} | {:error, String.t()}
+  defp do_export(state, format) do
     session = AgentAccess.session(state)
 
     if is_pid(session) do
@@ -369,7 +370,11 @@ defmodule Minga.Agent.SlashCommand do
       model = read_config_string(:agent_model)
       model = if model == "", do: "unknown", else: model
 
-      case SessionExport.export_to_file(messages, project_root: root, model: model) do
+      case SessionExport.export_to_file(messages,
+             project_root: root,
+             model: model,
+             format: format
+           ) do
         {:ok, path} ->
           relative = Path.relative_to(path, root)
           {:ok, emit_system_message(state, "Session exported to ./#{relative}")}

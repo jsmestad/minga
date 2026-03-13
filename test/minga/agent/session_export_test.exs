@@ -114,6 +114,43 @@ defmodule Minga.Agent.SessionExportTest do
     end
   end
 
+  describe "to_html/2" do
+    test "wraps markdown in a self-contained HTML page" do
+      messages = [
+        user_msg("What is 2+2?"),
+        assistant_msg("The answer is 4.")
+      ]
+
+      assert {:ok, html, filename} = SessionExport.to_html(messages, model: "claude-sonnet-4")
+      assert html =~ "<!DOCTYPE html>"
+      assert html =~ "<title>Minga Session Export"
+      assert html =~ "claude-sonnet-4"
+      assert html =~ "<style>"
+      assert html =~ "What is 2+2?"
+      assert html =~ "The answer is 4."
+      assert filename =~ ".html"
+      refute filename =~ ".md"
+    end
+
+    test "escapes HTML in user content" do
+      messages = [
+        user_msg("Use <div> tags & \"quotes\""),
+        assistant_msg("Sure!")
+      ]
+
+      assert {:ok, html, _} = SessionExport.to_html(messages, [])
+      assert html =~ "&lt;div&gt;"
+      assert html =~ "&amp;"
+      assert html =~ "&quot;quotes&quot;"
+    end
+
+    test "includes dark mode support" do
+      messages = [user_msg("test"), assistant_msg("ok")]
+      assert {:ok, html, _} = SessionExport.to_html(messages, [])
+      assert html =~ "prefers-color-scheme: dark"
+    end
+  end
+
   describe "export_to_file/2" do
     test "writes markdown file to project root", %{tmp_dir: dir} do
       messages = [
@@ -124,9 +161,27 @@ defmodule Minga.Agent.SessionExportTest do
       assert {:ok, path} = SessionExport.export_to_file(messages, project_root: dir)
       assert File.exists?(path)
       assert String.starts_with?(path, dir)
+      assert String.ends_with?(path, ".md")
 
       content = File.read!(path)
       assert content =~ "# Minga Session Export"
+      assert content =~ "Hello"
+    end
+
+    test "writes HTML file when format: :html", %{tmp_dir: dir} do
+      messages = [
+        user_msg("Hello"),
+        assistant_msg("Hi!")
+      ]
+
+      assert {:ok, path} =
+               SessionExport.export_to_file(messages, project_root: dir, format: :html)
+
+      assert File.exists?(path)
+      assert String.ends_with?(path, ".html")
+
+      content = File.read!(path)
+      assert content =~ "<!DOCTYPE html>"
       assert content =~ "Hello"
     end
 
