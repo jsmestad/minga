@@ -175,6 +175,44 @@ defmodule Minga.API do
     GenServer.call(editor, {:api_execute_command, command})
   end
 
+  # ── Fold operations ─────────────────────────────────────────────────────────
+
+  @doc """
+  Toggles the fold at the cursor line in the active window.
+  """
+  @spec fold_toggle(editor()) :: :ok
+  def fold_toggle(editor \\ @default_editor) do
+    execute(:fold_toggle, editor)
+  end
+
+  @doc """
+  Folds all available ranges in the active window.
+  """
+  @spec fold_all(editor()) :: :ok
+  def fold_all(editor \\ @default_editor) do
+    execute(:fold_close_all, editor)
+  end
+
+  @doc """
+  Unfolds all folds in the active window.
+  """
+  @spec unfold_all(editor()) :: :ok
+  def unfold_all(editor \\ @default_editor) do
+    execute(:fold_open_all, editor)
+  end
+
+  @doc """
+  Sets the available fold ranges for the active window.
+
+  Extensions call this to provide fold ranges computed from their own
+  logic (e.g., org-mode heading ranges). The editor will preserve any
+  existing folds that match the new ranges.
+  """
+  @spec set_fold_ranges([Minga.Editor.FoldRange.t()], editor()) :: :ok
+  def set_fold_ranges(ranges, editor \\ @default_editor) when is_list(ranges) do
+    GenServer.call(editor, {:api_set_fold_ranges, ranges})
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   @spec with_buffer(editor(), (pid() -> result)) :: result | {:error, :no_buffer}

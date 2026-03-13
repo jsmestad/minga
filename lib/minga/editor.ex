@@ -217,6 +217,20 @@ defmodule Minga.Editor do
     {:reply, :ok, new_state}
   end
 
+  def handle_call({:api_set_fold_ranges, ranges}, _from, state) do
+    new_state =
+      case EditorState.active_window_struct(state) do
+        nil ->
+          state
+
+        %Window{id: id} ->
+          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, ranges))
+      end
+
+    new_state = Renderer.render(new_state)
+    {:reply, :ok, new_state}
+  end
+
   def handle_call({:api_log_message, text}, _from, state) do
     new_state = log_message(state, text)
     {:reply, :ok, new_state}
