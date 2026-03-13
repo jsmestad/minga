@@ -10,7 +10,15 @@ defmodule Minga.Picker.BufferSourceTest do
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferServer.start_link(opts)
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+    on_exit(fn ->
+      try do
+        GenServer.stop(pid)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
+
     pid
   end
 
