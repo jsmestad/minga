@@ -1,6 +1,6 @@
 # 🥨 Minga
 
-[Documentation](https://jsmestad.github.io/minga/) | [Configuration Guide](https://jsmestad.github.io/minga/configuration.html) | [Roadmap](https://jsmestad.github.io/minga/roadmap.html)
+[Getting Started](https://jsmestad.github.io/minga/getting-started.html) | [Configuration](https://jsmestad.github.io/minga/configuration.html) | [Architecture](https://jsmestad.github.io/minga/architecture.html) | [Roadmap](https://jsmestad.github.io/minga/roadmap.html)
 
 **A modal text editor where every component is isolated, concurrent, and inspectable.**
 
@@ -115,6 +115,7 @@ The BEAM side is a set of GenServers (one per buffer, one for the editor orchest
 - **[For AI-assisted developers](docs/FOR-AI-CODERS.md):** Using Claude Code, Cursor, Copilot, or Aider? Your editor wasn't designed for concurrent autonomous agents. Minga was.
 - **[For Neovim users](docs/FOR-NEOVIM-USERS.md):** Same modal editing, better runtime. Why the BEAM solves problems Neovim can't fix without a rewrite.
 - **[For Emacs users](docs/FOR-EMACS-USERS.md):** Same depth of customization, none of the single-threaded pain. Elixir is Minga's Elisp.
+- **[For pi users](docs/FOR-PI-USERS.md):** Minga embeds pi as a supervised Port. Everything you like about pi, plus an editor that was built for it.
 
 ## Contributing
 

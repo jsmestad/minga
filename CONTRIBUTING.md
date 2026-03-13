@@ -31,7 +31,7 @@ mix dialyzer                      # Typespec consistency
 
 ## Project Layout
 
-See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and conventions. The highlights:
+See `AGENTS.md` (in the repo root) for the full project structure, coding standards, and conventions. The highlights:
 
 - **`@spec` on every public function** — Elixir 1.19's type system is strict
 - **Pattern matching over `if`/`cond`** — multi-clause functions preferred
@@ -46,7 +46,7 @@ See [AGENTS.md](AGENTS.md) for the full project structure, coding standards, and
 | [ROADMAP.md](ROADMAP.md) | Feature grid — what's done, what's planned |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Optimization roadmap with BEAM-specific techniques |
-| [AGENTS.md](AGENTS.md) | Coding standards, project structure, how to add features |
+| `AGENTS.md` | Coding standards, project structure, how to add features |
 
 ## How to Add Things
 

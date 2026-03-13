@@ -22,32 +22,68 @@ defmodule Minga.MixProject do
       docs: [
         main: "readme",
         extras: [
+          # Overview
           "README.md",
           "CHANGELOG.md",
           "ROADMAP.md",
+          # Getting Started
+          "docs/GETTING-STARTED.md",
+          # Using Minga
           "docs/CONFIGURATION.md",
+          "docs/KEYMAP-SCOPES.md",
+          "docs/AGENTIC-KEYMAP.md",
+          "docs/PROJECTS.md",
+          # Architecture
           "docs/ARCHITECTURE.md",
           "docs/DIAGRAMS.md",
+          "docs/PROTOCOL.md",
+          "docs/RENDERING_GAPS.md",
           "docs/PERFORMANCE.md",
+          # Agent System
+          "docs/FOR-AI-CODERS.md",
+          "docs/BUFFER-AWARE-AGENTS.md",
+          # Extending Minga
           "docs/EXTENSIBILITY.md",
-          "docs/PROJECTS.md",
+          # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
-          "docs/FOR-AI-CODERS.md"
+          "docs/FOR-PI-USERS.md",
+          # Development
+          "CONTRIBUTING.md",
+          "docs/RELEASING.md"
         ],
         groups_for_extras: [
-          Guides: [
+          "Getting Started": [
+            "docs/GETTING-STARTED.md"
+          ],
+          "Using Minga": [
             "docs/CONFIGURATION.md",
+            "docs/KEYMAP-SCOPES.md",
+            "docs/AGENTIC-KEYMAP.md",
+            "docs/PROJECTS.md"
+          ],
+          Architecture: [
             "docs/ARCHITECTURE.md",
             "docs/DIAGRAMS.md",
-            "docs/PERFORMANCE.md",
-            "docs/EXTENSIBILITY.md",
-            "docs/PROJECTS.md"
+            "docs/PROTOCOL.md",
+            "docs/RENDERING_GAPS.md",
+            "docs/PERFORMANCE.md"
+          ],
+          "Agent System": [
+            "docs/FOR-AI-CODERS.md",
+            "docs/BUFFER-AWARE-AGENTS.md"
+          ],
+          "Extending Minga": [
+            "docs/EXTENSIBILITY.md"
           ],
           "Coming From...": [
             "docs/FOR-NEOVIM-USERS.md",
             "docs/FOR-EMACS-USERS.md",
-            "docs/FOR-AI-CODERS.md"
+            "docs/FOR-PI-USERS.md"
+          ],
+          Development: [
+            "CONTRIBUTING.md",
+            "docs/RELEASING.md"
           ]
         ],
         before_closing_body_tag: %{
