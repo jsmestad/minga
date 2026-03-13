@@ -33,11 +33,13 @@ defmodule Minga.Editor do
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
+  alias Minga.Editor.WarningLog
   alias Minga.Editor.Window
   alias Minga.FileTree
 
   alias Minga.Input
   alias Minga.Mode
+  alias Minga.Popup.Lifecycle, as: PopupLifecycle
 
   alias Minga.Port.Manager, as: PortManager
 
@@ -83,6 +85,12 @@ defmodule Minga.Editor do
     # Use cast (not call) to avoid deadlocking when Logger is invoked from
     # inside the Editor GenServer itself.
     GenServer.cast(server, {:log_to_messages, text})
+  end
+
+  @doc "Log a warning/error to the *Warnings* buffer with auto-popup. Used by the custom Logger handler."
+  @spec log_to_warnings(String.t(), GenServer.server()) :: :ok
+  def log_to_warnings(text, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_to_warnings, text})
   end
 
   # ── Server Callbacks ─────────────────────────────────────────────────────────
@@ -192,6 +200,11 @@ defmodule Minga.Editor do
   @spec handle_cast(term(), state()) :: {:noreply, state()}
   def handle_cast({:log_to_messages, text}, state) do
     {:noreply, log_message(state, text)}
+  end
+
+  def handle_cast({:log_to_warnings, text}, state) do
+    state = WarningLog.log(state, text)
+    {:noreply, maybe_schedule_warning_popup(state)}
   end
 
   def handle_cast(:render, state) do
@@ -381,6 +394,13 @@ defmodule Minga.Editor do
   def handle_info(:debounced_render, state) do
     state = Renderer.render(state)
     {:noreply, %{state | render_timer: nil}}
+  end
+
+  # Warning popup debounce timer fired — open the *Warnings* popup if not
+  # already visible.
+  def handle_info(:warning_popup_timeout, state) do
+    state = %{state | warning_popup_timer: nil}
+    {:noreply, open_warnings_popup_if_needed(state)}
   end
 
   # ── Agent events ──────────────────────────────────────────────────────────
@@ -604,6 +624,62 @@ defmodule Minga.Editor do
 
   @spec log_message(state(), String.t()) :: state()
   defp log_message(state, text), do: MessageLog.log(state, text)
+
+  # ── Warning popup debounce ───────────────────────────────────────────────
+
+  @warning_popup_debounce_ms 200
+
+  @spec maybe_schedule_warning_popup(state()) :: state()
+  defp maybe_schedule_warning_popup(%{warning_popup_timer: ref} = state) when is_reference(ref) do
+    # Timer already running; the pending timeout will open the popup.
+    state
+  end
+
+  defp maybe_schedule_warning_popup(state) do
+    ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
+    %{state | warning_popup_timer: ref}
+  end
+
+  @spec open_warnings_popup_if_needed(state()) :: state()
+  defp open_warnings_popup_if_needed(%{buffers: %{warnings: nil}} = state), do: state
+
+  defp open_warnings_popup_if_needed(state) do
+    warnings_buf = state.buffers.warnings
+
+    # Check if *Warnings* is already visible in any window
+    already_visible =
+      Enum.any?(state.windows.map, fn {_id, win} ->
+        win.buffer == warnings_buf
+      end)
+
+    if already_visible do
+      # Scroll the warnings window to the end so the latest entry is visible
+      scroll_warnings_to_end(state, warnings_buf)
+    else
+      open_warnings_popup(state, warnings_buf)
+    end
+  end
+
+  @spec open_warnings_popup(state(), pid()) :: state()
+  defp open_warnings_popup(state, warnings_buf) do
+    case PopupLifecycle.open_popup(state, "*Warnings*", warnings_buf) do
+      {:ok, new_state} -> schedule_render(new_state, 16)
+      :no_match -> state
+    end
+  end
+
+  @spec scroll_warnings_to_end(state(), pid()) :: state()
+  defp scroll_warnings_to_end(state, warnings_buf) do
+    case Enum.find(state.windows.map, fn {_id, win} -> win.buffer == warnings_buf end) do
+      {_id, _win} ->
+        # The popup rule has focus: true, which means the user's cursor is there.
+        # Just trigger a render so the viewport catches up to the appended content.
+        schedule_render(state, 16)
+
+      nil ->
+        state
+    end
+  end
 
   # ── Window resize ────────────────────────────────────────────────────────
 

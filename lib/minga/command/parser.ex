@@ -122,6 +122,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-cycle-model"), do: {:agent_cycle_model, []}
   defp do_parse("agent-summarize"), do: {:agent_summarize, []}
   defp do_parse("agent-thinking"), do: {:agent_cycle_thinking, []}
+  defp do_parse("warnings"), do: {:view_warnings, []}
   defp do_parse("vsplit"), do: {:split_vertical, []}
   defp do_parse("vs"), do: {:split_vertical, []}
   defp do_parse("split"), do: {:split_horizontal, []}

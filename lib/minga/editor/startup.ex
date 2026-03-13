@@ -48,7 +48,7 @@ defmodule Minga.Editor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    {messages_buf, scratch_buf} = start_special_buffers()
+    {messages_buf, warnings_buf, scratch_buf} = start_special_buffers()
 
     {active_buf, buffers} =
       case {buffer, scratch_buf} do
@@ -74,6 +74,7 @@ defmodule Minga.Editor.Startup do
         list: buffers,
         active_index: 0,
         messages: messages_buf,
+        warnings: warnings_buf,
         scratch: scratch_buf
       },
       port_manager: port_manager,
@@ -223,23 +224,12 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Starts the *Messages* and *scratch* special buffers.
+  Starts the *Messages*, *Warnings*, and *scratch* special buffers.
   """
-  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
+  @spec start_special_buffers() :: {pid() | nil, pid() | nil, pid() | nil}
   def start_special_buffers do
-    messages_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: "",
-              buffer_name: "*Messages*",
-              read_only: true,
-              unlisted: true,
-              persistent: true}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
+    messages_buf = start_special_buffer("*Messages*", content: "", read_only: true)
+    warnings_buf = start_special_buffer("*Warnings*", content: "", read_only: true)
 
     scratch_filetype = ConfigOptions.get(:scratch_filetype)
 
@@ -247,20 +237,20 @@ defmodule Minga.Editor.Startup do
       "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
 
     scratch_buf =
-      case DynamicSupervisor.start_child(
-             Minga.Buffer.Supervisor,
-             {BufferServer,
-              content: scratch_content,
-              buffer_name: "*scratch*",
-              unlisted: true,
-              persistent: true,
-              filetype: scratch_filetype}
-           ) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
+      start_special_buffer("*scratch*", content: scratch_content, filetype: scratch_filetype)
 
-    {messages_buf, scratch_buf}
+    {messages_buf, warnings_buf, scratch_buf}
+  end
+
+  @spec start_special_buffer(String.t(), keyword()) :: pid() | nil
+  defp start_special_buffer(name, opts) do
+    child_opts =
+      [buffer_name: name, unlisted: true, persistent: true] ++ opts
+
+    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {BufferServer, child_opts}) do
+      {:ok, pid} -> pid
+      _ -> nil
+    end
   end
 
   @doc """

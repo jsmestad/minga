@@ -92,8 +92,15 @@ defmodule Minga.LoggerHandler do
     text = format_message(level, msg, meta)
 
     case Process.whereis(Minga.Editor) do
-      nil -> :ok
-      _pid -> Minga.Editor.log_to_messages(text)
+      nil ->
+        :ok
+
+      _pid ->
+        Minga.Editor.log_to_messages(text)
+
+        if level in [:warning, :error] do
+          Minga.Editor.log_to_warnings(text)
+        end
     end
   end
 
