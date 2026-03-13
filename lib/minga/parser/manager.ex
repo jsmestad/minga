@@ -66,6 +66,20 @@ defmodule Minga.Parser.Manager do
     GenServer.call(server, {:subscribe, self()})
   end
 
+  @doc """
+  Loads a tree-sitter grammar from a shared library into the parser.
+
+  Sends the `load_grammar` protocol message and returns immediately.
+  The parser responds asynchronously with a `grammar_loaded` event
+  that is broadcast to subscribers.
+  """
+  @spec load_grammar(String.t(), String.t(), GenServer.server()) :: :ok
+  def load_grammar(name, lib_path, server \\ __MODULE__)
+      when is_binary(name) and is_binary(lib_path) do
+    commands = [Protocol.encode_load_grammar(name, lib_path)]
+    send_commands(server, commands)
+  end
+
   # ── Server Callbacks ──
 
   @impl true
