@@ -413,6 +413,59 @@ defmodule Minga.Test.EditorCase do
     raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.mode}"
   end
 
+  # ── Mouse and resize helpers ─────────────────────────────────────────────────
+
+  @doc """
+  Sends a mouse event to the editor and waits for the next rendered frame.
+  `button` is an atom like `:left`, `:right`, `:middle`, `:wheel_up`, `:wheel_down`.
+  `event_type` is `:press`, `:release`, or `:drag`.
+  """
+  @spec send_mouse(
+          editor_ctx(),
+          non_neg_integer(),
+          non_neg_integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: :ok
+  def send_mouse(
+        %{editor: editor, port: port},
+        row,
+        col,
+        button,
+        mods \\ 0,
+        event_type \\ :press,
+        click_count \\ 1
+      ) do
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
+  end
+
+  @doc """
+  Sends a resize event to the editor and waits for the next rendered frame.
+  Updates the HeadlessPort grid dimensions first, then triggers the editor resize.
+  """
+  @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
+  def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
+    HeadlessPort.resize(port, new_width, new_height)
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:resize, new_width, new_height}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    %{ctx | width: new_width, height: new_height}
+  end
+
+  @doc "Returns true if any screen row contains the given text."
+  @spec screen_contains?(editor_ctx(), String.t()) :: boolean()
+  def screen_contains?(ctx, text) do
+    screen_text(ctx)
+    |> Enum.any?(fn row -> String.contains?(row, text) end)
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────────
   @ctrl 0x02
   @spec parse_key_sequence(String.t()) :: [{non_neg_integer(), non_neg_integer()}]

@@ -197,12 +197,4 @@ defmodule Minga.Integration.PickerLifecycleTest do
       assert_screen_snapshot(ctx, "picker_cancel_visual")
     end
   end
-
-  # ── Helpers ────────────────────────────────────────────────────────────────
-
-  @doc false
-  defp screen_contains?(ctx, text) do
-    rows = screen_text(ctx)
-    Enum.any?(rows, fn row -> String.contains?(row, text) end)
-  end
 end

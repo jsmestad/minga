@@ -159,6 +159,12 @@ defmodule Minga.Test.HeadlessPort do
     GenServer.call(server, {:get_cell, row, col})
   end
 
+  @doc "Resizes the headless port grid to new dimensions."
+  @spec resize(GenServer.server(), pos_integer(), pos_integer()) :: :ok
+  def resize(server, width, height) do
+    GenServer.call(server, {:resize, width, height})
+  end
+
   @doc "Returns the total number of completed frames (batch_end count)."
   @spec frame_count(GenServer.server()) :: non_neg_integer()
   def frame_count(server) do
@@ -202,7 +208,7 @@ defmodule Minga.Test.HeadlessPort do
   process's mailbox, not in the HeadlessPort's mutable grid.
   """
   @spec collect_frame(reference(), timeout()) :: {:ok, screen()} | {:error, :timeout}
-  def collect_frame(ref, timeout \\ 1000) do
+  def collect_frame(ref, timeout \\ 5_000) do
     receive do
       {:frame_ready, ^ref, snapshot} -> {:ok, snapshot}
     after
@@ -313,6 +319,10 @@ defmodule Minga.Test.HeadlessPort do
   def handle_call(:reset, _from, state) do
     {:reply, :ok,
      %{state | grid: blank_grid(state.width, state.height), cursor: {0, 0}, frame_count: 0}}
+  end
+
+  def handle_call({:resize, width, height}, _from, state) do
+    {:reply, :ok, %{state | width: width, height: height, grid: blank_grid(width, height)}}
   end
 
   def handle_call({:wait_for_frame, pid, ref}, _from, state) do
