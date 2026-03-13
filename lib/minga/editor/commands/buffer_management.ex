@@ -755,11 +755,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # Opens a special buffer (like *Messages* or *scratch*) as a popup if a
   # matching popup rule exists, otherwise falls back to normal buffer switching.
+  # If the buffer is already open in a popup, toggles it closed.
   @spec open_special_buffer(state(), String.t(), pid()) :: state()
   defp open_special_buffer(state, buffer_name, buffer_pid) do
     case find_popup_for_buffer(state, buffer_pid) do
       {:ok, popup_window_id} ->
-        %{state | windows: %{state.windows | active: popup_window_id}}
+        # Toggle: close the existing popup
+        PopupLifecycle.close_popup(state, popup_window_id)
 
       :none ->
         open_special_buffer_new(state, buffer_name, buffer_pid)

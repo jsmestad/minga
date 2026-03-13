@@ -48,6 +48,37 @@ defmodule Minga.Editor.MessagesBufferTest do
       assert String.contains?(all_text, "read-only")
     end
 
+    test "SPC b m toggles the messages popup closed" do
+      ctx = start_editor("hello")
+
+      # Open the messages popup
+      send_keys(ctx, "<SPC>bm")
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "*Messages*")
+
+      # Toggle it closed
+      send_keys(ctx, "<SPC>bm")
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      refute String.contains?(all_text, "*Messages*")
+    end
+
+    test "q dismisses the messages popup" do
+      ctx = start_editor("hello")
+      send_keys(ctx, "<SPC>bm")
+
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "*Messages*")
+
+      # Press q to dismiss
+      send_keys(ctx, "q")
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      refute String.contains?(all_text, "*Messages*")
+    end
+
     test "messages buffer is hidden from buffer picker" do
       ctx = start_editor("hello")
 
