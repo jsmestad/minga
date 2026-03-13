@@ -106,6 +106,8 @@ Now imagine agentic coding tools that don't just suggest, but execute. They spaw
 
 **Minga:** Each AI agent session is its own supervised process tree. It communicates with buffers via message passing. The BEAM's preemptive scheduler guarantees your typing always gets CPU time, even if an agent is burning cycles on a long operation. You can inspect agent state live with `:sys.get_state(agent_pid)`. You can run multiple agents concurrently without any of them affecting your input responsiveness.
 
+Minga is also taking this further than any editor: agent tools are being [wired to edit buffers in-memory](BUFFER-AWARE-AGENTS.md) instead of going through the filesystem. Agent edits will participate in the undo stack, trigger incremental tree-sitter reparses, and appear in the editor instantly. Multiple agents will get their own buffer forks with three-way merge, eliminating the need for git worktrees. Neovim's single-threaded core makes this kind of concurrent buffer access fundamentally difficult; the BEAM's process model makes it natural.
+
 ---
 
 ## What you gain
