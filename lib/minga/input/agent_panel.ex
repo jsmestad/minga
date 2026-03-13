@@ -22,6 +22,7 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Input
   alias Minga.Input.AgentChatNav
   alias Minga.Keymap.Scope
 
@@ -108,7 +109,7 @@ defmodule Minga.Input.AgentPanel do
   end
 
   defp handle_panel_nav(state, cp, mods) do
-    if key_sequence_pending?(state) do
+    if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm(state, cp, mods)}
     else
       case panel_nav_key(state, cp, mods) do
@@ -181,15 +182,4 @@ defmodule Minga.Input.AgentPanel do
       state
     end
   end
-
-  @spec key_sequence_pending?(EditorState.t()) :: boolean()
-  defp key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
-    do: true
-
-  defp key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
-
-  defp key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
-    do: true
-
-  defp key_sequence_pending?(_state), do: false
 end

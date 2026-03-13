@@ -101,4 +101,23 @@ defmodule Minga.Input do
       ModeFSM
     ]
   end
+
+  @doc """
+  Returns true when the vim mode FSM is mid-sequence and should receive
+  the next key before any handler-specific dispatch runs.
+
+  Covers leader key sequences, pending `g` prefix, operator-pending mode,
+  and command-line mode. Used by AgentPanel and FileTreeHandler to decide
+  whether to delegate directly to the Mode FSM.
+  """
+  @spec key_sequence_pending?(map()) :: boolean()
+  def key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
+    do: true
+
+  def key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
+
+  def key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
+    do: true
+
+  def key_sequence_pending?(_state), do: false
 end
