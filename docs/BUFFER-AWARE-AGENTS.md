@@ -86,6 +86,26 @@ Cursor gets Phase 1 "for free" because the AI is a VS Code extension calling the
 
 The combination of Phase 1 (buffer-routed agent edits) and Phase 2 (forked buffers with three-way merge for concurrent agents) doesn't exist anywhere. The closest analogy is Zed's collaboration CRDTs, but applied to AI agents instead of human collaborators, and with three-way merge instead of character-level operational transforms.
 
+### Why hasn't anyone done this?
+
+Not because it's a bad idea. Because the use case didn't exist when the editors were designed.
+
+**Editors are 10-40 years old. Agent editing is 2 years old.** VS Code's architecture was designed in 2015. Neovim inherited Vim's buffer model from the 1990s. Emacs's buffer system is from the 1980s. Zed is newer (2022) but was designed for human collaborative editing, not AI agents. Every one of these editors was built around the assumption that edits arrive at human speed: a few keystrokes per second, maybe a bulk formatter run occasionally. At that rate, filesystem churn is a non-issue. There's nothing to optimize.
+
+**The editors that have agents are VS Code forks.** Cursor and Windsurf inherited Monaco's entire buffer and extension architecture. Redesigning how the buffer layer handles writes means rewriting core Monaco internals in a codebase with millions of lines of TypeScript. It's vastly easier to bolt the AI onto the existing `WorkspaceEdit` API and ship. The existing API works "good enough" for one agent making sequential edits.
+
+**"Good enough" kills the motivation.** For most users today, Cursor's approach is fine. The agent edits a file, it shows up in the editor, undo works. The file watcher occasionally flickers. Sometimes you get a "file changed on disk" dialog. It's annoying, not broken. There's no acute pain driving a buffer architecture rewrite.
+
+**Standalone agents can't do this even if they wanted to.** Claude Code, Aider, pi, OpenCode are not editors. They don't have buffers. There's no "in-memory" to route through. They'd need to either become an editor or deeply integrate with one. That's a fundamental architecture change, not an optimization toggle.
+
+**The multi-agent case barely exists yet.** Almost nobody runs two AI agents concurrently on the same codebase. Cursor is single-agent. Claude Code is single-session. The scenario that makes buffer forking compelling (two agents, same file, concurrent edits) is still a power-user edge case. Editors optimize for the 99% case first.
+
+### Is this actually a big win?
+
+Yes, but the win is forward-looking, not backward-looking. The trajectory is clear: agents are getting faster, more autonomous, and people will run more of them concurrently. The editing pattern is shifting from "human types, agent suggests" to "human directs, multiple agents execute." Every editor will eventually need to deal with this. The ones built on shared-state, single-event-loop architectures (VS Code/Monaco, Neovim's single-threaded core) will have a much harder time retrofitting it than an editor with process isolation and message-passing serialization baked into the foundation.
+
+Minga's position is genuinely unusual: it's being built now, in the agentic era, on a runtime (the BEAM) whose process model is accidentally perfect for this problem. The `Buffer.Server` GenServer already serializes concurrent access. `apply_text_edits/2` already exists for programmatic batch editing. `EditDelta` already tracks incremental changes for tree-sitter sync. Forking a `Document` struct into a new process is a few lines of code. The infrastructure is there. The agent tools are just wired to the wrong layer.
+
 ---
 
 ## Performance Reality Check
