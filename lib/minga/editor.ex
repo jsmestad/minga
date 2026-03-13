@@ -24,6 +24,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.FileWatcherHelpers
+  alias Minga.Editor.FoldRange
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.KeyDispatch
@@ -393,7 +394,7 @@ defmodule Minga.Editor do
       when tag in [:minga_highlight, :minga_input] do
     fold_ranges =
       Enum.map(ranges, fn {start_line, end_line} ->
-        Minga.Editor.FoldRange.new!(start_line, end_line)
+        FoldRange.new!(start_line, end_line)
       end)
 
     new_state =
