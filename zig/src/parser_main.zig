@@ -128,6 +128,9 @@ fn handleCommand(
             if (hl.fold_query != null) {
                 try sendFoldResults(hl, pb.version, stdout, alloc);
             }
+            if (hl.textobject_query != null) {
+                try sendTextobjectPositions(hl, pb.version, stdout, alloc);
+            }
         },
         .edit_buffer => {
             // Handled at dispatch level via handleEditBuffer().
@@ -213,6 +216,25 @@ fn handleEditBuffer(
     if (hl.fold_query != null) {
         try sendFoldResults(hl, decoded.version, stdout, alloc);
     }
+    if (hl.textobject_query != null) {
+        try sendTextobjectPositions(hl, decoded.version, stdout, alloc);
+    }
+}
+
+/// Send textobject positions to stdout.
+fn sendTextobjectPositions(
+    hl: *highlighter_mod.Highlighter,
+    version: u32,
+    stdout: *std.Io.Writer,
+    alloc: std.mem.Allocator,
+) !void {
+    const entries = hl.collectTextobjectPositions(alloc);
+    defer if (entries.len > 0) alloc.free(entries);
+
+    const buf = try protocol.encodeTextobjectPositions(alloc, version, entries);
+    defer alloc.free(buf);
+    try protocol.writeMessage(stdout, buf);
+    try stdout.flush();
 }
 
 /// Send fold range results to stdout.

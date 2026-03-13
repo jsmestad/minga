@@ -95,11 +95,11 @@ defmodule Minga.Mode.Visual do
     {:execute, :move_right, state}
   end
 
-  def handle_key({?w, 0}, state) do
+  def handle_key({?w, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute, :word_forward, state}
   end
 
-  def handle_key({?b, 0}, state) do
+  def handle_key({?b, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute, :word_backward, state}
   end
 
@@ -218,28 +218,104 @@ defmodule Minga.Mode.Visual do
 
   # ── Wrapping (auto-pair) ──────────────────────────────────────────────────────
 
-  # Typing an opening delimiter wraps the visual selection.
-  def handle_key({?(, 0}, state) do
+  # Typing an opening delimiter wraps the visual selection (only when no text
+  # object modifier is pending, to avoid conflicts with vi"/va(/etc.).
+  def handle_key({?(, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute_then_transition, [{:wrap_visual_selection, "(", ")"}], :normal, state}
   end
 
-  def handle_key({?[, 0}, state) do
+  def handle_key({?[, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute_then_transition, [{:wrap_visual_selection, "[", "]"}], :normal, state}
   end
 
   # Note: { and } are paragraph motions in Visual mode, so { wrapping is not
   # available here. Use operator-pending text objects instead (e.g. vi{).
 
-  def handle_key({?", 0}, state) do
+  def handle_key({?", 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute_then_transition, [{:wrap_visual_selection, "\"", "\""}], :normal, state}
   end
 
-  def handle_key({?', 0}, state) do
+  def handle_key({?', 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute_then_transition, [{:wrap_visual_selection, "'", "'"}], :normal, state}
   end
 
-  def handle_key({?`, 0}, state) do
+  def handle_key({?`, 0}, %VisualState{text_object_modifier: nil} = state) do
     {:execute_then_transition, [{:wrap_visual_selection, "`", "`"}], :normal, state}
+  end
+
+  # ── Text object selection ──────────────────────────────────────────────────────
+
+  # `i` enters "inner" text object mode.
+  def handle_key({?i, 0}, %VisualState{text_object_modifier: nil} = state) do
+    {:continue, %{state | text_object_modifier: :inner}}
+  end
+
+  # `a` enters "around" text object mode (only when no modifier set).
+  def handle_key({?a, 0}, %VisualState{text_object_modifier: nil} = state) do
+    {:continue, %{state | text_object_modifier: :around}}
+  end
+
+  # Word text object
+  def handle_key({?w, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, :word}], %{state | text_object_modifier: nil}}
+  end
+
+  # Quote text objects
+  def handle_key({?", 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:quote, "\""}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({?', 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:quote, "'"}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  # Paren text objects
+  def handle_key({paren, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] and paren in [?(, ?)] do
+    {:execute, [{:visual_text_object, modifier, {:paren, "(", ")"}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({bracket, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] and bracket in [?[, ?]] do
+    {:execute, [{:visual_text_object, modifier, {:paren, "[", "]"}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({brace, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] and brace in [?{, ?}] do
+    {:execute, [{:visual_text_object, modifier, {:paren, "{", "}"}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  # Structural text objects (tree-sitter)
+  def handle_key({?f, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:structural, :function}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({?c, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:structural, :class}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({?a, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:structural, :parameter}}],
+     %{state | text_object_modifier: nil}}
+  end
+
+  def handle_key({?b, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] do
+    {:execute, [{:visual_text_object, modifier, {:structural, :block}}],
+     %{state | text_object_modifier: nil}}
   end
 
   # ── Operators ────────────────────────────────────────────────────────────────
@@ -253,6 +329,11 @@ defmodule Minga.Mode.Visual do
   # < — dedent visual selection, return to Normal
   def handle_key({?<, 0}, state) do
     {:execute_then_transition, [:dedent_visual_selection], :normal, state}
+  end
+
+  # = — reindent visual selection, return to Normal
+  def handle_key({?=, 0}, state) do
+    {:execute_then_transition, [:reindent_visual_selection], :normal, state}
   end
 
   # d — delete selection, return to Normal

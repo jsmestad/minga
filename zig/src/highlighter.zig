@@ -697,6 +697,95 @@ pub const Highlighter = struct {
         return best;
     }
 
+    /// Alias for the shared TextobjectEntry type (defined in protocol to avoid circular imports).
+    pub const TextobjectEntry = protocol.TextobjectEntry;
+
+    /// Well-known textobject type IDs (match order in around_types below).
+    pub const TEXTOBJ_FUNCTION: u8 = 0;
+    pub const TEXTOBJ_CLASS: u8 = 1;
+    pub const TEXTOBJ_PARAMETER: u8 = 2;
+    pub const TEXTOBJ_BLOCK: u8 = 3;
+    pub const TEXTOBJ_COMMENT: u8 = 4;
+    pub const TEXTOBJ_TEST: u8 = 5;
+    pub const TEXTOBJ_TYPE_COUNT: u8 = 6;
+
+    const around_types = [_][]const u8{
+        "function.around",
+        "class.around",
+        "parameter.around",
+        "block.around",
+        "comment.around",
+        "test.around",
+    };
+
+    /// Collect all `.around` textobject positions from the current tree.
+    ///
+    /// Returns a flat array of entries sorted by (row, col). Each entry has a
+    /// type_id matching the constants above. Only `.around` captures are
+    /// collected since navigation (`]f`/`[f`) targets the start of the outer
+    /// structure.
+    ///
+    /// Caller owns the returned slice and must free it with `allocator`.
+    pub fn collectTextobjectPositions(self: *Highlighter, allocator: std.mem.Allocator) []TextobjectEntry {
+        const tq = self.textobject_query orelse return &.{};
+        const tree = self.tree orelse return &.{};
+        const root = c.ts_tree_root_node(tree);
+
+        // Map capture index → type_id for .around captures.
+        const cap_count = c.ts_query_capture_count(tq);
+        var cap_to_type: [64]?u8 = .{null} ** 64;
+        var has_any = false;
+
+        for (0..@min(cap_count, 64)) |i| {
+            var name_len: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(tq, @intCast(i), &name_len);
+            if (name_ptr == null) continue;
+            const cap_name = name_ptr[0..name_len];
+
+            for (around_types, 0..) |atype, tidx| {
+                if (std.mem.eql(u8, cap_name, atype)) {
+                    cap_to_type[i] = @intCast(tidx);
+                    has_any = true;
+                    break;
+                }
+            }
+        }
+
+        if (!has_any) return &.{};
+
+        const cursor = c.ts_query_cursor_new() orelse return &.{};
+        defer c.ts_query_cursor_delete(cursor);
+        c.ts_query_cursor_exec(cursor, tq, root);
+
+        var entries = std.ArrayListUnmanaged(TextobjectEntry){};
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            const captures = match.captures[0..@intCast(match.capture_count)];
+            for (captures) |cap| {
+                if (cap.index >= 64) continue;
+                const type_id = cap_to_type[cap.index] orelse continue;
+                const start = c.ts_node_start_point(cap.node);
+                entries.append(allocator, .{
+                    .type_id = type_id,
+                    .row = start.row,
+                    .col = start.column,
+                }) catch continue;
+            }
+        }
+
+        // Sort by (row, col) for binary search on the BEAM side.
+        const items = entries.items;
+        std.mem.sortUnstable(TextobjectEntry, items, {}, struct {
+            fn lessThan(_: void, a: TextobjectEntry, b: TextobjectEntry) bool {
+                if (a.row != b.row) return a.row < b.row;
+                return a.col < b.col;
+            }
+        }.lessThan);
+
+        return entries.toOwnedSlice(allocator) catch &.{};
+    }
+
     /// Find the byte offset where a given line starts in the source.
     fn lineStartByte(source: []const u8, target_line: u32) usize {
         var line: u32 = 0;

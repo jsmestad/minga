@@ -79,6 +79,7 @@ pub const OP_INDENT_RESULT: u8 = 0x37;
 
 // Textobject responses (Zig → BEAM)
 pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
+pub const OP_TEXTOBJECT_POSITIONS: u8 = 0x39;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -934,6 +935,35 @@ pub fn encodeTextobjectResult(buf: *[22]u8, request_id: u32, result: ?Textobject
         buf[5] = 0; // not found
         return 6;
     }
+}
+
+/// A single textobject position for the proactive position cache.
+pub const TextobjectEntry = struct {
+    type_id: u8,
+    row: u32,
+    col: u32,
+};
+
+/// Encodes textobject_positions: opcode(1) + version(4) + count(4) + [type_id(1) + row(4) + col(4)] * count
+pub fn encodeTextobjectPositions(allocator: std.mem.Allocator, version: u32, entries: []const TextobjectEntry) ![]u8 {
+    const entry_size: usize = 9; // type_id(1) + row(4) + col(4)
+    const header_size: usize = 9; // opcode(1) + version(4) + count(4)
+    const total_size = header_size + entries.len * entry_size;
+
+    const buf = try allocator.alloc(u8, total_size);
+    buf[0] = OP_TEXTOBJECT_POSITIONS;
+    std.mem.writeInt(u32, buf[1..5], version, .big);
+    std.mem.writeInt(u32, buf[5..9], @intCast(entries.len), .big);
+
+    var pos: usize = header_size;
+    for (entries) |e| {
+        buf[pos] = e.type_id;
+        std.mem.writeInt(u32, buf[pos + 1 ..][0..4], e.row, .big);
+        std.mem.writeInt(u32, buf[pos + 5 ..][0..4], e.col, .big);
+        pos += entry_size;
+    }
+
+    return buf;
 }
 
 /// Encodes indent_result: opcode(1) + request_id(4) + line(4) + indent_level(4, signed)

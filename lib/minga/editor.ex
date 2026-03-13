@@ -409,6 +409,22 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  def handle_info({tag, {:textobject_positions, _version, positions}}, state)
+      when tag in [:minga_highlight, :minga_input] do
+    new_state =
+      case EditorState.active_window_struct(state) do
+        nil ->
+          state
+
+        %Window{id: id} ->
+          EditorState.update_window(state, id, fn w ->
+            %{w | textobject_positions: positions}
+          end)
+      end
+
+    {:noreply, new_state}
+  end
+
   def handle_info({tag, {:grammar_loaded, true, name}}, state)
       when tag in [:minga_highlight, :minga_input] do
     Minga.Log.info(:editor, "Grammar loaded: #{name}")

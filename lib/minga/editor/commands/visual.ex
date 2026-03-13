@@ -4,6 +4,7 @@ defmodule Minga.Editor.Commands.Visual do
   visual selection.
   """
 
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
@@ -82,5 +83,25 @@ defmodule Minga.Editor.Commands.Visual do
     BufferServer.insert_char(buf, open)
     BufferServer.move_to(buf, {start_line, start_col})
     state
+  end
+
+  def execute(
+        %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms} = vim} = state,
+        {:visual_text_object, modifier, spec}
+      ) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Document.cursor(gb)
+    range = Helpers.compute_text_object_range(gb, cursor, modifier, spec)
+
+    case range do
+      nil ->
+        state
+
+      {start_pos, end_pos} ->
+        # Update visual anchor to start of text object, move cursor to end
+        new_ms = %{ms | visual_anchor: start_pos}
+        BufferServer.move_to(buf, end_pos)
+        %{state | vim: %{vim | mode_state: new_ms}}
+    end
   end
 end

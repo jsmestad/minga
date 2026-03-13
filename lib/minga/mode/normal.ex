@@ -315,7 +315,7 @@ defmodule Minga.Mode.Normal do
     {:transition, :insert, state}
   end
 
-  def handle_key({?a, 0}, state) do
+  def handle_key({?a, 0}, %ModeState{pending_bracket: nil} = state) do
     {:execute_then_transition, [:move_right], :insert, state}
   end
 
@@ -442,6 +442,36 @@ defmodule Minga.Mode.Normal do
   # [c — previous git hunk
   def handle_key({?c, 0}, %ModeState{pending_bracket: :prev} = state) do
     {:execute, :prev_git_hunk, %{state | pending_bracket: nil}}
+  end
+
+  # ]f — next function
+  def handle_key({?f, 0}, %ModeState{pending_bracket: :next} = state) do
+    {:execute, {:goto_next_textobject, :function}, %{state | pending_bracket: nil}}
+  end
+
+  # [f — previous function
+  def handle_key({?f, 0}, %ModeState{pending_bracket: :prev} = state) do
+    {:execute, {:goto_prev_textobject, :function}, %{state | pending_bracket: nil}}
+  end
+
+  # ]t — next type/class
+  def handle_key({?t, 0}, %ModeState{pending_bracket: :next} = state) do
+    {:execute, {:goto_next_textobject, :class}, %{state | pending_bracket: nil}}
+  end
+
+  # [t — previous type/class
+  def handle_key({?t, 0}, %ModeState{pending_bracket: :prev} = state) do
+    {:execute, {:goto_prev_textobject, :class}, %{state | pending_bracket: nil}}
+  end
+
+  # ]a — next argument/parameter
+  def handle_key({?a, 0}, %ModeState{pending_bracket: :next} = state) do
+    {:execute, {:goto_next_textobject, :parameter}, %{state | pending_bracket: nil}}
+  end
+
+  # [a — previous argument/parameter
+  def handle_key({?a, 0}, %ModeState{pending_bracket: :prev} = state) do
+    {:execute, {:goto_prev_textobject, :parameter}, %{state | pending_bracket: nil}}
   end
 
   # Cancel bracket prefix on any unrecognized key
@@ -744,6 +774,12 @@ defmodule Minga.Mode.Normal do
   def handle_key({?<, 0}, %ModeState{count: count} = _state) do
     {:transition, :operator_pending,
      %Minga.Mode.OperatorPendingState{operator: :dedent, op_count: count || 1}}
+  end
+
+  # = — enter operator-pending for reindent
+  def handle_key({?=, 0}, %ModeState{count: count} = _state) do
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :reindent, op_count: count || 1}}
   end
 
   # + — next line first non-blank
