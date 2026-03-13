@@ -1365,7 +1365,6 @@ extern fn tree_sitter_make() ?*const c.TSLanguage;
 extern fn tree_sitter_diff() ?*const c.TSLanguage;
 extern fn tree_sitter_elisp() ?*const c.TSLanguage;
 
-
 /// Helper to resolve a highlight query via the query_loader, which handles
 /// `; inherits:` directives at comptime. All parent queries are prepended
 /// automatically before the query reaches ts_query_new.

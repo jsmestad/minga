@@ -1520,9 +1520,16 @@ test "commandSize: draw_text with 5-byte text is 19 bytes" {
 test "commandSize: draw_text with 0-byte text is 14 bytes" {
     const data = [_]u8{
         OP_DRAW_TEXT,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
         0x00,
         0x00, 0x00, // text_len = 0
     };
@@ -1548,7 +1555,11 @@ test "batch decode: clear + set_cursor + batch_end parsed correctly" {
     // Concatenated batch: clear(1) + set_cursor(5) + batch_end(1) = 7 bytes
     const payload = [_]u8{
         OP_CLEAR,
-        OP_SET_CURSOR, 0x00, 0x05, 0x00, 0x0A,
+        OP_SET_CURSOR,
+        0x00,
+        0x05,
+        0x00,
+        0x0A,
         OP_BATCH_END,
     };
 
@@ -1688,8 +1699,14 @@ test "commandSize: set_language" {
 test "commandSize: parse_buffer" {
     const data = [_]u8{
         OP_PARSE_BUFFER,
-        0x00, 0x00, 0x00, 0x01,
-        0x00, 0x00, 0x00, 0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
     } ++ "abc".*;
     try std.testing.expectEqual(@as(usize, 12), commandSize(&data));
 }
