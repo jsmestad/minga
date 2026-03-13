@@ -94,7 +94,10 @@ defmodule Minga.Theme.DoomOne do
       popup: %Minga.Theme.Popup{
         fg: @base8,
         bg: 0x333333,
-        border_fg: @base6
+        border_fg: @base6,
+        sel_fg: @bg,
+        sel_bg: @blue,
+        title_fg: @blue
       },
       tree: %Minga.Theme.Tree{
         bg: @base3,

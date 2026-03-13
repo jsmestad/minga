@@ -91,7 +91,10 @@ defmodule Minga.Theme.OneDark do
       popup: %Minga.Theme.Popup{
         fg: @mono_1,
         bg: @syntax_guide,
-        border_fg: @mono_2
+        border_fg: @mono_2,
+        sel_fg: @syntax_bg,
+        sel_bg: @hue_2,
+        title_fg: @hue_2
       },
       tree: %Minga.Theme.Tree{
         bg: 0x21252B,
