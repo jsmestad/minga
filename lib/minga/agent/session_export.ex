@@ -14,7 +14,8 @@ defmodule Minga.Agent.SessionExport do
   @type export_opts :: [
           project_root: String.t(),
           model: String.t() | nil,
-          session_id: String.t() | nil
+          session_id: String.t() | nil,
+          format: :markdown | :html
         ]
 
   @doc """
@@ -56,7 +57,28 @@ defmodule Minga.Agent.SessionExport do
   end
 
   @doc """
+  Exports conversation messages to a self-contained HTML string.
+
+  Returns `{:ok, html, filename}` or `{:error, reason}`.
+  """
+  @spec to_html([ReqLLM.Message.t()], export_opts()) ::
+          {:ok, String.t(), String.t()} | {:error, String.t()}
+  def to_html(messages, opts) do
+    case to_markdown(messages, opts) do
+      {:ok, markdown, md_filename} ->
+        html_filename = String.replace(md_filename, ~r/\.md$/, ".html")
+        html = wrap_in_html(markdown, opts)
+        {:ok, html, html_filename}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Exports and writes to a file in the project root.
+
+  When `format: :html` is passed, produces an HTML file instead of Markdown.
 
   Returns `{:ok, path}` or `{:error, reason}`.
   """
@@ -64,11 +86,18 @@ defmodule Minga.Agent.SessionExport do
           {:ok, String.t()} | {:error, String.t()}
   def export_to_file(messages, opts) do
     root = Keyword.get(opts, :project_root, File.cwd!())
+    format = Keyword.get(opts, :format, :markdown)
 
-    case to_markdown(messages, opts) do
-      {:ok, markdown, filename} ->
+    result =
+      case format do
+        :html -> to_html(messages, opts)
+        _ -> to_markdown(messages, opts)
+      end
+
+    case result do
+      {:ok, content, filename} ->
         path = Path.join(root, filename)
-        File.write!(path, markdown)
+        File.write!(path, content)
         {:ok, path}
 
       {:error, reason} ->
@@ -219,5 +248,131 @@ defmodule Minga.Agent.SessionExport do
     :crypto.strong_rand_bytes(4)
     |> Base.hex_encode32(case: :lower, padding: false)
     |> String.slice(0, 6)
+  end
+
+  # ── HTML wrapper ────────────────────────────────────────────────────────────
+
+  @spec wrap_in_html(String.t(), export_opts()) :: String.t()
+  defp wrap_in_html(markdown, opts) do
+    model = Keyword.get(opts, :model, "unknown")
+    date = Date.utc_today() |> Date.to_iso8601()
+
+    # Convert markdown to simple HTML. This is a lightweight conversion
+    # that handles the structures we produce (headings, blockquotes,
+    # code blocks, details/summary, paragraphs, horizontal rules).
+    body_html = markdown_to_html(markdown)
+
+    """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minga Session Export - #{date}</title>
+    <style>
+    :root { color-scheme: light dark; }
+    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1a1a1a; background: #fff; }
+    @media (prefers-color-scheme: dark) { body { color: #e0e0e0; background: #1a1a1a; } blockquote { border-color: #555; background: #222; } pre { background: #222; } details { background: #222; } hr { border-color: #333; } }
+    h1 { font-size: 1.5rem; border-bottom: 1px solid #ddd; padding-bottom: 0.5rem; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; }
+    blockquote { border-left: 3px solid #ccc; margin: 0.5rem 0; padding: 0.5rem 1rem; background: #f9f9f9; }
+    pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; border-radius: 4px; font-size: 0.85rem; }
+    code { font-family: "SF Mono", Monaco, "Cascadia Code", monospace; font-size: 0.9em; }
+    pre code { font-size: inherit; }
+    details { margin: 0.5rem 0; padding: 0.5rem; background: #f9f9f9; border-radius: 4px; }
+    summary { cursor: pointer; font-weight: 600; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 1.5rem 0; }
+    .meta { color: #666; font-size: 0.85rem; }
+    </style>
+    </head>
+    <body>
+    <p class="meta">Model: #{html_escape(model)} | Exported: #{date}</p>
+    #{body_html}
+    </body>
+    </html>
+    """
+  end
+
+  @spec markdown_to_html(String.t()) :: String.t()
+  defp markdown_to_html(markdown) do
+    markdown
+    |> String.split("\n")
+    |> convert_lines([], nil)
+    |> Enum.join("\n")
+  end
+
+  # Line-by-line markdown to HTML conversion. Handles the specific structures
+  # our exporter produces: headings, blockquotes, fenced code blocks,
+  # <details> blocks (passed through), horizontal rules, and paragraphs.
+  @spec convert_lines([String.t()], [String.t()], :blockquote | :code | nil) :: [String.t()]
+  defp convert_lines([], acc, :blockquote), do: Enum.reverse(["</blockquote>" | acc])
+  defp convert_lines([], acc, _ctx), do: Enum.reverse(acc)
+
+  defp convert_lines(["```" <> lang | rest], acc, nil) do
+    trimmed = String.trim(lang)
+    class = if trimmed != "", do: ~s( class="language-#{html_escape(trimmed)}"), else: ""
+    convert_lines(rest, ["<pre><code#{class}>" | acc], :code)
+  end
+
+  defp convert_lines(["```" | rest], acc, :code) do
+    convert_lines(rest, ["</code></pre>" | acc], nil)
+  end
+
+  defp convert_lines([line | rest], acc, :code) do
+    convert_lines(rest, [html_escape(line) | acc], :code)
+  end
+
+  defp convert_lines(["---" | rest], acc, ctx) do
+    acc = if ctx == :blockquote, do: ["</blockquote>" | acc], else: acc
+    convert_lines(rest, ["<hr>" | acc], nil)
+  end
+
+  defp convert_lines(["# " <> text | rest], acc, ctx) do
+    acc = if ctx == :blockquote, do: ["</blockquote>" | acc], else: acc
+    convert_lines(rest, ["<h1>#{html_escape(text)}</h1>" | acc], nil)
+  end
+
+  defp convert_lines(["## " <> text | rest], acc, ctx) do
+    acc = if ctx == :blockquote, do: ["</blockquote>" | acc], else: acc
+    convert_lines(rest, ["<h2>#{html_escape(text)}</h2>" | acc], nil)
+  end
+
+  defp convert_lines(["> " <> text | rest], acc, :blockquote) do
+    convert_lines(rest, [html_escape(text) <> "<br>" | acc], :blockquote)
+  end
+
+  defp convert_lines(["> " <> text | rest], acc, _ctx) do
+    convert_lines(rest, [html_escape(text) <> "<br>", "<blockquote>" | acc], :blockquote)
+  end
+
+  defp convert_lines(["<details>" <> _ = line | rest], acc, ctx) do
+    acc = if ctx == :blockquote, do: ["</blockquote>" | acc], else: acc
+    convert_lines(rest, [line | acc], nil)
+  end
+
+  defp convert_lines(["" | rest], acc, :blockquote) do
+    convert_lines(rest, ["</blockquote>" | acc], nil)
+  end
+
+  defp convert_lines(["" | rest], acc, ctx) do
+    convert_lines(rest, acc, ctx)
+  end
+
+  defp convert_lines([line | rest], acc, ctx) do
+    # Pass through HTML tags (details, summary, etc.) and wrap plain text in <p>
+    if String.starts_with?(line, "<") do
+      convert_lines(rest, [line | acc], ctx)
+    else
+      convert_lines(rest, ["<p>#{html_escape(line)}</p>" | acc], ctx)
+    end
+  end
+
+  @spec html_escape(String.t()) :: String.t()
+  defp html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
   end
 end
