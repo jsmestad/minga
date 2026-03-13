@@ -1,5 +1,7 @@
 defmodule Minga.Editor.StartupTest do
-  use ExUnit.Case, async: true
+  # async: false because the force_editor test mutates Application env,
+  # which races with the first test when run concurrently.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.LayoutPreset
