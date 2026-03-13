@@ -7,6 +7,11 @@ defmodule Minga.Diagnostics do
   (gutter signs, picker, navigation, minibuffer hints) queries this module
   and doesn't know or care where diagnostics came from.
 
+  Backed by ETS with `read_concurrency: true` for lock-free reads on the
+  render path. The GenServer owns the ETS table lifecycle and manages
+  subscriber notifications. Reads go directly to ETS; writes go through
+  the GenServer to serialize subscriber notifications.
+
   Modeled on Neovim's `vim.diagnostic` and Emacs's `flymake`.
 
   ## Producer API
@@ -36,27 +41,22 @@ defmodule Minga.Diagnostics do
 
   alias Minga.Diagnostics.Diagnostic
 
-  defstruct store: %{}, subscribers: []
-
   @typedoc "A diagnostic source identifier (e.g., `:lexical`, `:mix_compile`)."
   @type source :: atom()
 
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."
   @type uri :: String.t()
 
-  @typedoc "Internal state."
-  @type state :: %__MODULE__{
-          store: %{{source(), uri()} => [Diagnostic.t()]},
-          subscribers: [pid()]
-        }
+  @typedoc "Internal state: ETS table reference and subscriber list."
+  @type state :: %{table: :ets.table(), subscribers: [pid()]}
 
   # ── Client API: Lifecycle ──────────────────────────────────────────────────
 
-  @doc "Starts the diagnostics server."
+  @doc "Starts the diagnostics server and creates the backing ETS table."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    GenServer.start_link(__MODULE__, name, name: name)
   end
 
   @doc """
@@ -70,7 +70,7 @@ defmodule Minga.Diagnostics do
     GenServer.call(server, {:subscribe, self()})
   end
 
-  # ── Client API: Producers ──────────────────────────────────────────────────
+  # ── Client API: Producers (writes go through GenServer for subscriber notifications) ──
 
   @doc """
   Publishes diagnostics for a `{source, uri}` pair.
@@ -105,7 +105,7 @@ defmodule Minga.Diagnostics do
     GenServer.call(server, {:clear_source, source})
   end
 
-  # ── Client API: Consumers ──────────────────────────────────────────────────
+  # ── Client API: Consumers (reads go directly to ETS) ───────────────────────
 
   @doc """
   Returns all diagnostics for a URI, merged from all sources, sorted by
@@ -113,7 +113,9 @@ defmodule Minga.Diagnostics do
   """
   @spec for_uri(GenServer.server(), uri()) :: [Diagnostic.t()]
   def for_uri(server \\ __MODULE__, uri) when is_binary(uri) do
-    GenServer.call(server, {:for_uri, uri})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
   end
 
   @doc """
@@ -125,7 +127,16 @@ defmodule Minga.Diagnostics do
           non_neg_integer() => Diagnostic.severity()
         }
   def severity_by_line(server \\ __MODULE__, uri) when is_binary(uri) do
-    GenServer.call(server, {:severity_by_line, uri})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
+    |> Enum.reduce(%{}, fn diag, acc ->
+      line = diag.range.start_line
+
+      Map.update(acc, line, diag.severity, fn existing ->
+        Diagnostic.more_severe(existing, diag.severity)
+      end)
+    end)
   end
 
   @doc """
@@ -136,7 +147,10 @@ defmodule Minga.Diagnostics do
   @spec next(GenServer.server(), uri(), non_neg_integer()) :: Diagnostic.t() | nil
   def next(server \\ __MODULE__, uri, current_line)
       when is_binary(uri) and is_integer(current_line) do
-    GenServer.call(server, {:next, uri, current_line})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
+    |> find_next(current_line)
   end
 
   @doc """
@@ -147,7 +161,10 @@ defmodule Minga.Diagnostics do
   @spec prev(GenServer.server(), uri(), non_neg_integer()) :: Diagnostic.t() | nil
   def prev(server \\ __MODULE__, uri, current_line)
       when is_binary(uri) and is_integer(current_line) do
-    GenServer.call(server, {:prev, uri, current_line})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
+    |> find_prev(current_line)
   end
 
   @doc """
@@ -162,7 +179,12 @@ defmodule Minga.Diagnostics do
           hint: non_neg_integer()
         }
   def count(server \\ __MODULE__, uri) when is_binary(uri) do
-    GenServer.call(server, {:count, uri})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
+    |> Enum.reduce(%{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
+      Map.update!(acc, diag.severity, &(&1 + 1))
+    end)
   end
 
   @doc """
@@ -174,113 +196,77 @@ defmodule Minga.Diagnostics do
   @spec on_line(GenServer.server(), uri(), non_neg_integer()) :: [Diagnostic.t()]
   def on_line(server \\ __MODULE__, uri, line)
       when is_binary(uri) and is_integer(line) do
-    GenServer.call(server, {:on_line, uri, line})
+    server
+    |> table_name()
+    |> merged_for_uri(uri)
+    |> Enum.filter(fn diag -> diag.range.start_line == line end)
   end
 
   # ── Server Callbacks ───────────────────────────────────────────────────────
 
-  @impl true
-  @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
-    {:ok, %__MODULE__{}}
+  @impl GenServer
+  @spec init(atom()) :: {:ok, state()}
+  def init(name) do
+    table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
+    {:ok, %{table: table, subscribers: []}}
   end
 
-  @impl true
-  def handle_call({:subscribe, pid}, _from, %__MODULE__{} = state) when is_pid(pid) do
+  @impl GenServer
+  def handle_call({:subscribe, pid}, _from, state) when is_pid(pid) do
     Process.monitor(pid)
-    {:reply, :ok, %__MODULE__{state | subscribers: [pid | state.subscribers]}}
+    {:reply, :ok, %{state | subscribers: [pid | state.subscribers]}}
   end
 
-  def handle_call({:publish, source, uri, diagnostics}, _from, %__MODULE__{} = state) do
-    new_store = Map.put(state.store, {source, uri}, diagnostics)
+  def handle_call({:publish, source, uri, diagnostics}, _from, state) do
+    :ets.insert(state.table, {{source, uri}, diagnostics})
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, %__MODULE__{state | store: new_store}}
+    {:reply, :ok, state}
   end
 
-  def handle_call({:clear, source, uri}, _from, %__MODULE__{} = state) do
-    new_store = Map.delete(state.store, {source, uri})
+  def handle_call({:clear, source, uri}, _from, state) do
+    :ets.delete(state.table, {source, uri})
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, %__MODULE__{state | store: new_store}}
+    {:reply, :ok, state}
   end
 
-  def handle_call({:clear_source, source}, _from, %__MODULE__{} = state) do
-    {removed, kept} =
-      state.store
-      |> Map.split_with(fn {{src, _uri}, _diags} -> src == source end)
+  def handle_call(:table_name, _from, state) do
+    {:reply, state.table, state}
+  end
 
+  def handle_call({:clear_source, source}, _from, state) do
+    # Find all keys for this source, collect affected URIs, then delete
     affected_uris =
-      removed
-      |> Map.keys()
-      |> Enum.map(fn {_src, uri} -> uri end)
-      |> Enum.uniq()
+      :ets.foldl(
+        fn
+          {{src, uri}, _diags}, acc when src == source -> MapSet.put(acc, uri)
+          _other, acc -> acc
+        end,
+        MapSet.new(),
+        state.table
+      )
 
+    :ets.match_delete(state.table, {{source, :_}, :_})
     Enum.each(affected_uris, &notify_subscribers(state.subscribers, &1))
-    {:reply, :ok, %__MODULE__{state | store: kept}}
+    {:reply, :ok, state}
   end
 
-  def handle_call({:for_uri, uri}, _from, %__MODULE__{} = state) do
-    {:reply, merged_for_uri(state.store, uri), state}
-  end
-
-  def handle_call({:severity_by_line, uri}, _from, %__MODULE__{} = state) do
-    result =
-      state.store
-      |> merged_for_uri(uri)
-      |> Enum.reduce(%{}, fn diag, acc ->
-        line = diag.range.start_line
-
-        Map.update(acc, line, diag.severity, fn existing ->
-          Diagnostic.more_severe(existing, diag.severity)
-        end)
-      end)
-
-    {:reply, result, state}
-  end
-
-  def handle_call({:next, uri, current_line}, _from, %__MODULE__{} = state) do
-    diags = merged_for_uri(state.store, uri)
-    result = find_next(diags, current_line)
-    {:reply, result, state}
-  end
-
-  def handle_call({:prev, uri, current_line}, _from, %__MODULE__{} = state) do
-    diags = merged_for_uri(state.store, uri)
-    result = find_prev(diags, current_line)
-    {:reply, result, state}
-  end
-
-  def handle_call({:count, uri}, _from, %__MODULE__{} = state) do
-    counts =
-      state.store
-      |> merged_for_uri(uri)
-      |> Enum.reduce(%{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
-        Map.update!(acc, diag.severity, &(&1 + 1))
-      end)
-
-    {:reply, counts, state}
-  end
-
-  def handle_call({:on_line, uri, line}, _from, %__MODULE__{} = state) do
-    result =
-      state.store
-      |> merged_for_uri(uri)
-      |> Enum.filter(fn diag -> diag.range.start_line == line end)
-
-    {:reply, result, state}
-  end
-
-  @impl true
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %__MODULE__{} = state) do
-    {:noreply, %__MODULE__{state | subscribers: List.delete(state.subscribers, pid)}}
+  @impl GenServer
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {:noreply, %{state | subscribers: List.delete(state.subscribers, pid)}}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec merged_for_uri(%{{source(), uri()} => [Diagnostic.t()]}, uri()) :: [Diagnostic.t()]
-  defp merged_for_uri(store, uri) do
-    store
-    |> Enum.filter(fn {{_src, u}, _diags} -> u == uri end)
-    |> Enum.flat_map(fn {_key, diags} -> diags end)
+  @spec merged_for_uri(:ets.table(), uri()) :: [Diagnostic.t()]
+  defp merged_for_uri(table, uri) do
+    :ets.foldl(
+      fn
+        {{_src, ^uri}, diags}, acc -> diags ++ acc
+        _other, acc -> acc
+      end,
+      [],
+      table
+    )
     |> Diagnostic.sort()
   end
 
@@ -310,4 +296,8 @@ defmodule Minga.Diagnostics do
   defp notify_subscribers(subscribers, uri) do
     Enum.each(subscribers, &send(&1, {:diagnostics_changed, uri}))
   end
+
+  @spec table_name(GenServer.server()) :: atom()
+  defp table_name(name) when is_atom(name), do: :"#{name}_ets"
+  defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
 end
