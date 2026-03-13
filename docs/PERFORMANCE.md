@@ -446,21 +446,23 @@ The render loop allocates many short-lived binaries per frame that become garbag
 
 ---
 
-## 13. Process Architecture: Consider ETS for Shared Read-Only State
+## 13. Process Architecture: ETS for Shared Read-Only State
 
-### Problem
+### Status: Partially Complete
 
-The Editor process still creates a temporary `Document.new(content)` for motions, copying the full content across processes.
+The three highest-contention GenServer stores have been migrated to ETS with `read_concurrency: true`:
 
-### Fix
+- ✅ **Config.Options** (#156): every render frame and keystroke read options via Agent.get. Now direct ETS lookup. ~4x faster per read.
+- ✅ **Diagnostics** (#155): gutter signs and minibuffer hints read on every frame, serialized behind LSP publish writes. Reads now bypass the GenServer entirely; writes still go through GenServer for subscriber notifications.
+- ✅ **Keymap.Active** (#157): binding lookups on every keystroke went through Agent.get. Now direct ETS lookup.
 
-Best approach: move motions into the Buffer.Server process (see #4).
+### Remaining
 
-Alternative: Use ETS with `{:read_concurrency, true}` for buffer content.
+The Editor process still creates a temporary `Document.new(content)` for motions, copying the full content across processes. Best approach: move motions into the Buffer.Server process (see #4).
 
 ### Impact
 
-**Medium-High.** Most beneficial when combined with #4.
+**Medium-High.** The ETS migrations eliminate all GenServer.call round-trips from the per-keystroke and per-frame hot paths (#159). The remaining buffer content copy is addressed by #4.
 
 ---
 
