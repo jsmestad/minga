@@ -33,7 +33,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Agent.View.ShellRenderer
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.Modeline
+
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
@@ -66,13 +66,11 @@ defmodule Minga.Agent.View.Renderer do
     """
 
     alias Minga.Agent.View.Preview
-    alias Minga.Editor.Viewport
     alias Minga.Highlight
     alias Minga.Theme
 
-    @enforce_keys [:viewport, :theme, :agent_status, :panel, :agentic]
+    @enforce_keys [:theme, :agent_status, :panel, :agentic]
     defstruct [
-      :viewport,
       :theme,
       :agent_status,
       :panel,
@@ -82,17 +80,12 @@ defmodule Minga.Agent.View.Renderer do
       preview: Preview.new(),
       buffer_snapshot: nil,
       highlight: nil,
-      mode: :normal,
-      mode_state: nil,
-      buf_index: 1,
-      buf_count: 1,
       pending_approval: nil,
       session_title: "Minga Agent",
       lsp_servers: []
     ]
 
     @type t :: %__MODULE__{
-            viewport: Viewport.t(),
             theme: Theme.t(),
             agent_status: atom() | nil,
             panel: panel_data(),
@@ -102,10 +95,6 @@ defmodule Minga.Agent.View.Renderer do
             preview: Preview.t(),
             buffer_snapshot: map() | nil,
             highlight: Highlight.t() | nil,
-            mode: atom(),
-            mode_state: term(),
-            buf_index: pos_integer(),
-            buf_count: pos_integer(),
             pending_approval: map() | nil,
             session_title: String.t(),
             lsp_servers: [atom()]
@@ -142,86 +131,6 @@ defmodule Minga.Agent.View.Renderer do
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
-  Renders the full-screen agentic view from a focused `RenderInput`.
-
-  Preferred entry point for the pipeline. No GenServer calls are made;
-  all data is pre-fetched in the input.
-  """
-  @spec render(RenderInput.t()) :: {[DisplayList.draw()], scroll_metrics()}
-  def render(%RenderInput{} = input) do
-    cols = input.viewport.cols
-    rows = input.viewport.rows
-
-    # Compute chat_width first so we can derive inner_width for soft-wrap height.
-    chat_width_pct = input.agentic.chat_width_pct
-    chat_width = max(div(cols * chat_width_pct, 100), 20)
-
-    input_height =
-      compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
-
-    # Tab bar at row 0, title bar at row 1, content starts at row 2.
-    # Modeline at rows-2, minibuffer at rows-1.
-    panel_start = 2
-    modeline_row = rows - 1 - 1
-
-    # The two-column split extends from panel_start to just above the modeline.
-    panel_height = max(modeline_row - panel_start, 1)
-
-    # Left column is split: chat on top, input at bottom.
-    chat_height = max(panel_height - input_height, 1)
-    input_row = panel_start + chat_height
-    separator_col = chat_width
-    viewer_col = chat_width + 1
-    viewer_width = max(cols - viewer_col, 10)
-
-    title_commands = render_title_bar_from_input(input, 1, cols)
-
-    # Left column: chat messages fill the top portion.
-    {chat_commands, chat_metrics} =
-      render_chat_from_input(input, {panel_start, 0, chat_width, chat_height})
-
-    # Separator and right column span the FULL panel height (alongside input).
-    separator_commands =
-      render_separator(separator_col, panel_start, panel_height, input.theme)
-
-    viewer_commands =
-      render_file_viewer_from_input(
-        input,
-        {panel_start, viewer_col, viewer_width, panel_height}
-      )
-
-    # Input area renders within the left column only.
-    input_commands = render_input_from_input(input, input_row, chat_width)
-    modeline_commands = render_modeline_from_input(input, modeline_row, cols)
-
-    base =
-      title_commands ++
-        chat_commands ++
-        separator_commands ++
-        viewer_commands ++
-        input_commands ++
-        modeline_commands
-
-    overlays =
-      if input.agentic.help_visible do
-        render_help_overlay(input, cols, rows)
-      else
-        []
-      end
-
-    toast_cmds = render_toast_overlay(input, cols)
-
-    {base ++ overlays ++ toast_cmds, chat_metrics}
-  end
-
-  # Legacy wrapper: extracts a RenderInput from full EditorState.
-  @spec render(state()) :: {[DisplayList.draw()], scroll_metrics()}
-  def render(%EditorState{} = state) do
-    input = extract_input(state)
-    render(input)
-  end
-
-  @doc """
   Renders agent chat content within a bounded window rect.
 
   Used when the agent chat is hosted in a window pane (window split) rather
@@ -250,20 +159,76 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   @doc """
-  Returns `{row, col}` for where the terminal cursor should be placed.
+  Renders agent chat with the sidebar (file viewer/dashboard).
 
-  When the chat input is focused the cursor sits in the full-width input area.
-  Otherwise the cursor is hidden off-screen.
+  The pipeline provides two rects: `content_rect` for the chat+input area
+  (left column) and `sidebar_rect` for the file viewer/dashboard
+  (right column). A vertical separator is drawn in the 1-col gap
+  between them. Does not render title bar or modeline (those are
+  handled by the pipeline's chrome layer).
+
+  Returns a flat list of draw commands positioned within the given rects.
   """
-  @spec cursor_position(state()) :: {non_neg_integer(), non_neg_integer()}
-  def cursor_position(state) do
-    rows = state.viewport.rows
+  @spec render_with_sidebar(state(), rect(), rect()) :: [DisplayList.draw()]
+  def render_with_sidebar(%EditorState{} = state, content_rect, sidebar_rect) do
+    input = extract_input(state)
+
+    {row_off, col_off, chat_width, height} = content_rect
+    {_sr, sidebar_col, sidebar_width, sidebar_height} = sidebar_rect
+
+    input_height =
+      compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
+
+    chat_height = max(height - input_height, 1)
+    input_row = row_off + chat_height
+    separator_col = col_off + chat_width
+
+    {chat_commands, _metrics} =
+      render_chat_from_input(input, {row_off, col_off, chat_width, chat_height})
+
+    separator_commands =
+      render_separator(separator_col, row_off, height, input.theme)
+
+    viewer_commands =
+      render_file_viewer_from_input(
+        input,
+        {row_off, sidebar_col, sidebar_width, sidebar_height}
+      )
+
+    input_commands = render_input_from_input(input, input_row, chat_width)
+
+    total_width = chat_width + 1 + sidebar_width
+
+    overlays =
+      if input.agentic.help_visible do
+        render_help_overlay(input, total_width, height)
+      else
+        []
+      end
+
+    toast_cmds = render_toast_overlay(input, total_width)
+
+    chat_commands ++
+      separator_commands ++ viewer_commands ++ input_commands ++ overlays ++ toast_cmds
+  end
+
+  @doc """
+  Returns `{row, col}` for the cursor within a bounded content rect.
+
+  Used by the render pipeline to position the cursor in the agent chat
+  input area when the agent is hosted in a window pane. The rect
+  determines the coordinate space.
+
+  Returns nil when input is not focused (cursor hidden).
+  """
+  @spec cursor_position_in_rect(state(), rect()) :: {non_neg_integer(), non_neg_integer()} | nil
+  def cursor_position_in_rect(state, {row_off, _col_off, width, height}) do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused do
-      cols = state.viewport.cols
-      chat_width_pct = AgentAccess.agentic(state).chat_width_pct
-      chat_width = max(div(cols * chat_width_pct, 100), 20)
+      agentic = AgentAccess.agentic(state)
+      chat_width_pct = agentic.chat_width_pct
+      chat_width = max(div(width * chat_width_pct, 100), 20)
       inner_width = input_inner_width(chat_width)
 
       lines = PanelState.input_lines(panel)
@@ -272,25 +237,20 @@ defmodule Minga.Agent.View.Renderer do
       total_visual = InputWrap.visual_line_count(lines, inner_width)
       visible_lines = max(min(total_visual, @max_input_lines), 1)
       input_height = compute_input_height(lines, inner_width)
-      modeline_row = rows - 1 - 1
-      panel_start = 2
-      panel_height = max(modeline_row - panel_start, 1)
-      chat_height = max(panel_height - input_height, 1)
-      input_row = panel_start + chat_height
+      chat_height = max(height - input_height, 1)
+      input_row = row_off + chat_height
 
-      # Map logical cursor to visual position within wrapped lines
       {visual_line, visual_col} =
         InputWrap.logical_to_visual(lines, inner_width, cursor)
 
       scroll = InputWrap.scroll_offset(visual_line, visible_lines, total_visual)
       visible_offset = visual_line - scroll
 
-      # Text starts at input_row + 1 (after top border), col 4 (after "│" + 3 spaces)
       input_text_row = input_row + 1 + min(visible_offset, visible_lines - 1)
       input_col = 1 + 3 + visual_col
       {input_text_row, input_col}
     else
-      {rows, 0}
+      nil
     end
   end
 
@@ -357,7 +317,6 @@ defmodule Minga.Agent.View.Renderer do
       if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
 
     %RenderInput{
-      viewport: state.viewport,
       theme: state.theme,
       agent_status: agent.status,
       panel: %{
@@ -388,10 +347,6 @@ defmodule Minga.Agent.View.Renderer do
       preview: agentic.preview,
       buffer_snapshot: buffer_snapshot,
       highlight: highlight,
-      mode: state.vim.mode,
-      mode_state: state.vim.mode_state,
-      buf_index: state.buffers.active_index + 1,
-      buf_count: length(state.buffers.list),
       pending_approval: agent.pending_approval,
       session_title: session_title(messages),
       lsp_servers: safe_lsp_servers()
@@ -421,71 +376,6 @@ defmodule Minga.Agent.View.Renderer do
     first_line = text |> String.split("\n") |> hd()
     truncated = String.slice(first_line, 0, 50)
     if String.length(truncated) == 50, do: truncated <> "...", else: truncated
-  end
-
-  # ── Title bar ───────────────────────────────────────────────────────────────
-
-  @spec render_title_bar_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
-          [DisplayList.draw()]
-  defp render_title_bar_from_input(input, row, cols) do
-    at = Theme.agent_theme(input.theme)
-    panel = input.panel
-
-    status_icon = status_icon(input.agent_status, panel.spinner_frame)
-    status_fg = status_fg(input.agent_status, at)
-
-    estimate = input.agentic.context_estimate
-    usage_text = format_usage(input.usage)
-    context_text = format_context_bar(input.usage, panel.model_name, estimate)
-
-    left = " #{status_icon} "
-    center = input.session_title
-
-    right_parts = [context_text, usage_text] |> Enum.reject(&(&1 == "")) |> Enum.join("  ")
-    right = if right_parts != "", do: "#{right_parts} ", else: ""
-
-    left_len = String.length(left)
-    center_len = String.length(center)
-    right_len = String.length(right)
-
-    center_start = max(div(cols - center_len, 2), left_len + 3)
-    gap_left = center_start - left_len
-    gap_right = max(cols - center_start - center_len - right_len, 0)
-
-    bar_text =
-      left <>
-        String.duplicate("─", max(gap_left - 1, 1)) <>
-        " " <>
-        center <>
-        " " <>
-        String.duplicate("─", max(gap_right - 1, 1)) <>
-        right
-
-    bar_text = String.slice(bar_text, 0, cols) |> String.pad_trailing(cols)
-
-    cmds = [
-      DisplayList.draw(row, 0, bar_text, fg: at.panel_border, bg: at.header_bg),
-      DisplayList.draw(row, 1, status_icon, fg: status_fg, bg: at.header_bg, bold: true),
-      DisplayList.draw(row, center_start, center,
-        fg: at.header_fg,
-        bg: at.header_bg,
-        bold: true
-      )
-    ]
-
-    # Overlay the context bar with colored segments
-    context_bar_cmds =
-      render_context_bar_overlay(
-        row,
-        cols,
-        right_len,
-        input.usage,
-        panel.model_name,
-        at,
-        estimate
-      )
-
-    cmds ++ context_bar_cmds
   end
 
   # ── Chat panel (messages only) ──────────────────────────────────────────────
@@ -1241,158 +1131,7 @@ defmodule Minga.Agent.View.Renderer do
     visible + 2
   end
 
-  # ── Modeline ────────────────────────────────────────────────────────────────
-
-  @spec render_modeline_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
-          [DisplayList.draw()]
-  defp render_modeline_from_input(input, row, cols) do
-    case input.agentic.search do
-      %{input_active: true} = search ->
-        render_search_prompt(row, cols, search, input.theme)
-
-      %{input_active: false} = search ->
-        # Show match count in modeline when search is confirmed
-        render_search_modeline(row, cols, search, input)
-
-      nil ->
-        render_agent_modeline(row, cols, input)
-    end
-  end
-
-  @spec render_agent_modeline(non_neg_integer(), pos_integer(), RenderInput.t()) :: [
-          DisplayList.draw()
-        ]
-  defp render_agent_modeline(row, cols, input) do
-    {draws, _click_regions} =
-      Modeline.render(
-        row,
-        cols,
-        %{
-          mode: input.mode,
-          mode_state: input.mode_state,
-          mode_override: "AGENT",
-          file_name: "AGENT",
-          filetype: :text,
-          dirty_marker: "",
-          cursor_line: 0,
-          cursor_col: 0,
-          line_count: 0,
-          buf_index: input.buf_index,
-          buf_count: input.buf_count,
-          macro_recording: false,
-          agent_status: input.agent_status,
-          agent_theme_colors: Theme.agent_theme(input.theme)
-        },
-        input.theme
-      )
-
-    at = Theme.agent_theme(input.theme)
-
-    hints =
-      case input.agentic.focus do
-        :chat ->
-          if input.panel.input_focused do
-            "C-c C-c send  Esc cancel  C-c abort"
-          else
-            "i input  ? help  / search  q quit"
-          end
-
-        :file_viewer ->
-          "Tab focus  j/k scroll  ? help  q quit"
-      end
-
-    version_text = " • Minga #{Minga.version()} "
-    hint_text = " #{hints} "
-    right_text = hint_text <> version_text
-    right_col = max(cols - String.length(right_text), 0)
-
-    hint_cmd =
-      DisplayList.draw(row, right_col, hint_text,
-        fg: at.hint_fg,
-        bg: input.theme.modeline.bar_bg
-      )
-
-    version_cmd =
-      DisplayList.draw(row, right_col + String.length(hint_text), version_text,
-        fg: at.hint_fg,
-        bg: input.theme.modeline.bar_bg
-      )
-
-    # Idle dots animation: subtle braille spinner when agent is idle
-    idle_cmds =
-      case input.agent_status do
-        status when status in [:idle, nil] ->
-          frames = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-          frame = Enum.at(frames, rem(input.panel.spinner_frame, length(frames)))
-
-          [
-            DisplayList.draw(row, right_col - 3, " #{frame} ",
-              fg: at.hint_fg,
-              bg: input.theme.modeline.bar_bg
-            )
-          ]
-
-        _active ->
-          []
-      end
-
-    draws ++ idle_cmds ++ [hint_cmd, version_cmd]
-  end
-
-  @spec render_search_prompt(non_neg_integer(), pos_integer(), map(), Theme.t()) :: [
-          DisplayList.draw()
-        ]
-  defp render_search_prompt(row, cols, search, theme) do
-    at = Theme.agent_theme(theme)
-    match_count = length(search.matches)
-    current = search.current + 1
-
-    suffix =
-      if match_count > 0 do
-        " (#{current}/#{match_count})"
-      else
-        ""
-      end
-
-    prompt = "/#{search.query}#{suffix}"
-    padded = String.pad_trailing(prompt, cols)
-    [DisplayList.draw(row, 0, padded, fg: at.text_fg, bg: at.input_bg)]
-  end
-
-  @spec render_search_modeline(non_neg_integer(), pos_integer(), map(), RenderInput.t()) :: [
-          DisplayList.draw()
-        ]
-  defp render_search_modeline(row, cols, search, input) do
-    modeline_cmds = render_agent_modeline(row, cols, input)
-    match_count = length(search.matches)
-    current = search.current + 1
-    indicator = " [#{current}/#{match_count} \"#{search.query}\"]"
-    at = Theme.agent_theme(input.theme)
-    indicator_col = max(cols - String.length(indicator), 0)
-
-    overlay =
-      DisplayList.draw(row, indicator_col, indicator,
-        fg: at.status_thinking,
-        bg: input.theme.modeline.normal_bg
-      )
-
-    modeline_cmds ++ [overlay]
-  end
-
   # ── Helpers ─────────────────────────────────────────────────────────────────
-
-  @spec status_icon(atom() | nil, non_neg_integer()) :: String.t()
-  defp status_icon(:thinking, frame), do: spinner(frame)
-  defp status_icon(:tool_executing, _), do: "⚡"
-  defp status_icon(:error, _), do: "✗"
-  defp status_icon(_, _), do: "◯"
-
-  @spec status_fg(atom() | nil, map()) :: non_neg_integer()
-  defp status_fg(:idle, at), do: at.status_idle
-  defp status_fg(:thinking, at), do: at.status_thinking
-  defp status_fg(:tool_executing, at), do: at.status_tool
-  defp status_fg(:error, at), do: at.status_error
-  defp status_fg(_, at), do: at.status_idle
 
   @spec file_viewer_gutter_width(non_neg_integer()) :: non_neg_integer()
   defp file_viewer_gutter_width(line_count) do
@@ -1407,20 +1146,11 @@ defmodule Minga.Agent.View.Renderer do
   @spec empty_usage() :: map()
   defp empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
 
-  @spec format_usage(map()) :: String.t()
-  defp format_usage(%{input: i, output: o, cost: c}) when i > 0 do
-    "↑#{format_tokens(i)} ↓#{format_tokens(o)} $#{Float.round(c, 3)}"
-  end
-
-  defp format_usage(_), do: ""
-
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
   defp format_tokens(n), do: "#{n}"
 
   # ── Context bar ─────────────────────────────────────────────────────────────
-
-  @context_bar_width 10
 
   @doc false
   @spec context_fill_pct(map(), String.t(), non_neg_integer()) :: non_neg_integer() | nil
@@ -1440,58 +1170,6 @@ defmodule Minga.Agent.View.Renderer do
         used = max(actual, context_estimate)
         min(round(used / n * 100), 100)
     end
-  end
-
-  # Formats the context bar as plain text for title bar layout measurement.
-  @spec format_context_bar(map(), String.t(), non_neg_integer()) :: String.t()
-  defp format_context_bar(usage, model_name, context_estimate) do
-    case context_fill_pct(usage, model_name, context_estimate) do
-      nil -> ""
-      pct -> context_bar_text(pct)
-    end
-  end
-
-  @spec context_bar_text(non_neg_integer()) :: String.t()
-  defp context_bar_text(pct) do
-    filled = div(pct * @context_bar_width, 100)
-    empty = @context_bar_width - filled
-    "Context [#{String.duplicate("█", filled)}#{String.duplicate("░", empty)}] #{pct}%"
-  end
-
-  # Renders colored overlay draw commands for the context bar.
-  # The bar is already placed as plain text in the title bar string;
-  # we overlay it with the correct color based on fill percentage.
-  @spec render_context_bar_overlay(
-          non_neg_integer(),
-          pos_integer(),
-          non_neg_integer(),
-          map(),
-          String.t(),
-          Theme.Agent.t(),
-          non_neg_integer()
-        ) :: [DisplayList.draw()]
-  defp render_context_bar_overlay(row, cols, right_len, usage, model_name, at, context_estimate) do
-    case context_fill_pct(usage, model_name, context_estimate) do
-      nil ->
-        []
-
-      pct ->
-        bar = context_bar_text(pct)
-        bar_col = cols - right_len
-        color = context_color(pct, at)
-        [DisplayList.draw(row, bar_col, bar, fg: color, bg: at.header_bg)]
-    end
-  end
-
-  @spec context_color(non_neg_integer(), Theme.Agent.t()) :: Theme.color()
-  defp context_color(pct, at) when pct > 80, do: at.context_high
-  defp context_color(pct, at) when pct > 50, do: at.context_mid
-  defp context_color(_pct, at), do: at.context_low
-
-  @spec spinner(non_neg_integer()) :: String.t()
-  defp spinner(frame) do
-    chars = ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    Enum.at(chars, rem(frame, length(chars)))
   end
 
   # ── Toast overlay ─────────────────────────────────────────────────────────

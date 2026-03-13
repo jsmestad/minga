@@ -34,7 +34,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Config.Options
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
+  alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
   alias Minga.Editor.Layout
   alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
@@ -47,6 +47,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
@@ -240,6 +241,12 @@ defmodule Minga.Editor.RenderPipeline do
     # Stage 4b: Agent chat window content (rendered separately from buffers)
     agent_chat_frames =
       timed(:agent_content, fn -> build_agent_chat_content(state, layout) end)
+
+    # If the agent chat window set a cursor, use it (overrides buffer cursor).
+    cursor_info =
+      Enum.reduce(agent_chat_frames, cursor_info, fn wf, acc ->
+        if wf.cursor != nil, do: wf.cursor, else: acc
+      end)
 
     window_frames = buffer_frames ++ agent_chat_frames
 
@@ -458,7 +465,7 @@ defmodule Minga.Editor.RenderPipeline do
   cursor position for the active window.
   """
   @spec build_content(state(), %{Window.id() => WindowScroll.t()}) ::
-          {[WindowFrame.t()], {non_neg_integer(), non_neg_integer()} | nil, state()}
+          {[WindowFrame.t()], Cursor.t() | nil, state()}
   def build_content(state, scrolls) do
     {frames, cursor_info, state} =
       Enum.reduce(scrolls, {[], nil, state}, fn {_win_id, scroll}, {frames, cursor_info, st} ->
@@ -471,7 +478,7 @@ defmodule Minga.Editor.RenderPipeline do
   end
 
   @spec build_window_content(state(), WindowScroll.t()) ::
-          {WindowFrame.t(), {non_neg_integer(), non_neg_integer()} | nil, state()}
+          {WindowFrame.t(), Cursor.t() | nil, state()}
   defp build_window_content(state, scroll) do
     %WindowScroll{
       win_layout: win_layout,
@@ -552,27 +559,25 @@ defmodule Minga.Editor.RenderPipeline do
       end
 
     # Build WindowFrame
+    buf_cursor =
+      if is_active do
+        cr = cursor_line - viewport.top + row_off
+        cc = gutter_w + cursor_col - viewport.left + col_off
+        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim.mode))
+      else
+        nil
+      end
+
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
       gutter: DisplayList.draws_to_layer(gutter_draws),
       lines: DisplayList.draws_to_layer(line_draws),
       tilde_lines: DisplayList.draws_to_layer(tilde_draws),
       modeline: %{},
-      cursor:
-        if(is_active,
-          do:
-            {cursor_line - viewport.top + row_off,
-             gutter_w + cursor_col - viewport.left + col_off},
-          else: nil
-        )
+      cursor: buf_cursor
     }
 
-    cursor_info =
-      if is_active do
-        {cursor_line - viewport.top + row_off, gutter_w + cursor_col - viewport.left + col_off}
-      else
-        nil
-      end
+    cursor_info = buf_cursor
 
     # Snapshot tracking fields and prune cache to visible range
     last_visible = first_line + length(lines) - 1
@@ -626,14 +631,34 @@ defmodule Minga.Editor.RenderPipeline do
     end)
   end
 
+  # Minimum sidebar width (cols). Below this threshold, the agent chat
+  # renders in compact mode (chat+input only, no sidebar).
+  @sidebar_min_cols 20
+
   @spec render_agent_chat_window(state(), Window.t(), Layout.window_layout()) :: WindowFrame.t()
   defp render_agent_chat_window(state, _window, win_layout) do
     {row_off, col_off, width, height} = win_layout.content
 
-    # Render agent chat into this rect using ViewRenderer.
-    # render_in_rect/3 draws chat messages, scroll position, and the
-    # prompt input area within the given bounds.
-    draws = ViewRenderer.render_in_rect(state, {row_off, col_off, width, height})
+    # Compute the sidebar split from the content rect and chat_width_pct.
+    # This is an agent-specific layout concern, so it lives here in the
+    # agent content stage (4b), not in the generic Layout module.
+    sidebar = compute_agent_sidebar(state, win_layout.content)
+
+    {draws, chat_rect} =
+      case sidebar do
+        {chat_rect, sidebar_rect} ->
+          {ViewRenderer.render_with_sidebar(state, chat_rect, sidebar_rect), chat_rect}
+
+        nil ->
+          {ViewRenderer.render_in_rect(state, win_layout.content), win_layout.content}
+      end
+
+    # Cursor position within the chat input area.
+    agent_cursor =
+      case ViewRenderer.cursor_position_in_rect(state, chat_rect) do
+        {row, col} -> Cursor.new(row, col, :beam)
+        nil -> nil
+      end
 
     %WindowFrame{
       rect: {row_off, col_off, width, height},
@@ -641,8 +666,25 @@ defmodule Minga.Editor.RenderPipeline do
       lines: DisplayList.draws_to_layer(draws),
       tilde_lines: %{},
       modeline: %{},
-      cursor: nil
+      cursor: agent_cursor
     }
+  end
+
+  # Splits a content rect into chat (left) and sidebar (right) rects
+  # if there's enough horizontal space. Returns {chat_rect, sidebar_rect}
+  # or nil if the sidebar doesn't fit.
+  @spec compute_agent_sidebar(state(), Layout.rect()) :: {Layout.rect(), Layout.rect()} | nil
+  defp compute_agent_sidebar(state, {row, col, width, height}) do
+    chat_width_pct = AgentAccess.agentic(state).chat_width_pct
+    chat_width = max(div(width * chat_width_pct, 100), 20)
+    sidebar_width = width - chat_width - 1
+
+    if sidebar_width >= @sidebar_min_cols do
+      sidebar_col = col + chat_width + 1
+      {{row, col, chat_width, height}, {row, sidebar_col, sidebar_width, height}}
+    else
+      nil
+    end
   end
 
   # ── Stage 5: Chrome ────────────────────────────────────────────────────────
@@ -699,7 +741,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     completion_draws =
       case cursor_info do
-        {cur_row, cur_col} ->
+        %Cursor{row: cur_row, col: cur_col} ->
           CompletionUI.render(
             state.completion,
             %{
@@ -775,31 +817,34 @@ defmodule Minga.Editor.RenderPipeline do
         ComposeHelpers.inject_modeline(wf, chrome.modeline_draws)
       end)
 
-    # Cursor shape
-    cursor_shape =
-      if state.picker_ui.picker do
-        :beam
-      else
-        Modeline.cursor_shape(state.vim.mode)
-      end
-
-    # Cursor position (picker overrides mode overrides buffer position)
+    # Resolve cursor from window frames, overlays, and fallbacks.
+    # Priority (highest first): picker overlay → agent panel → active WindowFrame → fallback.
     {minibuffer_row, _, _, _} = layout.minibuffer
     picker_cursor = ComposeHelpers.find_picker_cursor(chrome.overlays)
 
-    cursor =
-      case picker_cursor do
-        {row, col} -> {row, col}
-        nil -> ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
-      end
+    # Build the final cursor. Priority (highest first):
+    # picker overlay → minibuffer (command/search/eval) → agent panel →
+    # active WindowFrame → fallback.
+    #
+    # Minibuffer modes must override the window frame cursor because the
+    # window frame still carries the buffer cursor from before entering
+    # command/search/eval mode.
+    active_wf_cursor = Enum.find_value(window_frames, fn wf -> wf.cursor end)
+    minibuffer_result = ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
+    minibuffer_mode? = state.vim.mode in [:command, :search, :eval]
 
-    # Agent panel input can steal the cursor
-    {cursor, cursor_shape} =
-      ComposeHelpers.agent_cursor_override_from_layout(state, cursor, cursor_shape, layout)
+    cursor =
+      resolve_frame_cursor(
+        picker_cursor,
+        if(minibuffer_mode?, do: minibuffer_result),
+        ComposeHelpers.agent_cursor_from_layout(state, layout),
+        active_wf_cursor,
+        minibuffer_result,
+        Modeline.cursor_shape(state.vim.mode)
+      )
 
     %Frame{
       cursor: cursor,
-      cursor_shape: cursor_shape,
       tab_bar: chrome.tab_bar,
       windows: window_frames,
       file_tree: chrome.file_tree,
@@ -809,6 +854,26 @@ defmodule Minga.Editor.RenderPipeline do
       overlays: chrome.overlays,
       regions: chrome.regions
     }
+  end
+
+  # Resolves the final frame cursor from the priority chain.
+  # Each argument is checked in order; the first non-nil wins.
+  # Priority: picker → minibuffer → agent panel → window frame → fallback.
+  @spec resolve_frame_cursor(
+          {non_neg_integer(), non_neg_integer()} | nil,
+          {non_neg_integer(), non_neg_integer()} | nil,
+          Cursor.t() | nil,
+          Cursor.t() | nil,
+          {non_neg_integer(), non_neg_integer()},
+          Cursor.shape()
+        ) :: Cursor.t()
+  defp resolve_frame_cursor({row, col}, _, _, _, _, _), do: Cursor.new(row, col, :beam)
+  defp resolve_frame_cursor(nil, {row, col}, _, _, _, _), do: Cursor.new(row, col, :beam)
+  defp resolve_frame_cursor(nil, nil, %Cursor{} = c, _, _, _), do: c
+  defp resolve_frame_cursor(nil, nil, nil, %Cursor{} = c, _, _), do: c
+
+  defp resolve_frame_cursor(nil, nil, nil, nil, {row, col}, shape) do
+    Cursor.new(row, col, shape)
   end
 
   # ── Stage 7: Emit ─────────────────────────────────────────────────────────

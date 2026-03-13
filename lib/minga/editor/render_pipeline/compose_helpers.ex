@@ -11,12 +11,11 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   alias Minga.Agent.PanelState
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Overlay, WindowFrame}
+  alias Minga.Editor.DisplayList.{Cursor, Overlay, WindowFrame}
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Port.Protocol
 
   @type state :: EditorState.t()
 
@@ -50,7 +49,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   @doc "Resolves the final cursor position from mode state or buffer position."
   @spec resolve_cursor(
           state(),
-          {non_neg_integer(), non_neg_integer()} | nil,
+          Cursor.t() | nil,
           non_neg_integer()
         ) :: {non_neg_integer(), non_neg_integer()}
   def resolve_cursor(
@@ -80,7 +79,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
     {minibuffer_row, eval_col}
   end
 
-  def resolve_cursor(_state, {row, col}, _minibuffer_row), do: {row, col}
+  def resolve_cursor(_state, %Cursor{row: row, col: col}, _minibuffer_row), do: {row, col}
   def resolve_cursor(_state, nil, _minibuffer_row), do: {0, 0}
 
   @doc "Finds a cursor position from picker overlays, if any."
@@ -89,21 +88,18 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
     Enum.find_value(overlays, fn %Overlay{cursor: c} -> c end)
   end
 
-  # ── Agent cursor override ─────────────────────────────────────────────────
+  # ── Agent cursor ────────────────────────────────────────────────────────────
 
-  @doc "Overrides cursor position and shape when the agent panel input is focused."
-  @spec agent_cursor_override_from_layout(
-          state(),
-          {non_neg_integer(), non_neg_integer()},
-          atom(),
-          Layout.t()
-        ) ::
-          {{non_neg_integer(), non_neg_integer()}, Protocol.cursor_shape()}
-  def agent_cursor_override_from_layout(
+  @doc """
+  Returns a Cursor for the agent panel (bottom panel) input if focused.
+
+  Returns nil when the agent panel isn't visible, doesn't have focus,
+  or doesn't exist in the layout.
+  """
+  @spec agent_cursor_from_layout(state(), Layout.t()) :: Cursor.t() | nil
+  def agent_cursor_from_layout(
         state,
-        cursor,
-        shape,
-        %{agent_panel: {row, col, _w, h}} = _layout
+        %{agent_panel: {row, col, _w, h}}
       )
       when h > 0 do
     panel = AgentAccess.panel(state)
@@ -113,13 +109,11 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       input_row = row + h - @agent_input_height + 1 + cursor_line
       input_col = col + 2 + cursor_col
 
-      {{input_row, input_col}, ChromeHelpers.input_cursor_shape(state.vim.mode)}
+      Cursor.new(input_row, input_col, ChromeHelpers.input_cursor_shape(state.vim.mode))
     else
-      {cursor, shape}
+      nil
     end
   end
 
-  def agent_cursor_override_from_layout(_state, cursor, shape, _layout) do
-    {cursor, shape}
-  end
+  def agent_cursor_from_layout(_state, _layout), do: nil
 end

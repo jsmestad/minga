@@ -22,7 +22,7 @@ defmodule Minga.Editor.Renderer do
   """
 
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.Frame
+  alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
@@ -64,8 +64,7 @@ defmodule Minga.Editor.Renderer do
     ]
 
     frame = %Frame{
-      cursor: {0, 0},
-      cursor_shape: :block,
+      cursor: Cursor.new(0, 0, :block),
       splash: splash_draws
     }
 
