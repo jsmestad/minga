@@ -555,7 +555,7 @@ defmodule Minga.Agent.SlashCommand do
 
   # Gets the provider pid from the session. Used for direct GenServer calls
   # to provider-specific features (budget, etc.) that aren't in the Provider behaviour.
-  # TODO: Consider adding get_budget/1 and set_budget/2 to the Provider behaviour
+  # Consider adding get_budget/1 and set_budget/2 to the Provider behaviour
   # so slash commands don't need to reach past the Session abstraction.
   @spec get_provider(pid()) :: pid() | nil
   defp get_provider(session_pid) do

@@ -310,8 +310,11 @@ defmodule Minga.Git do
   defp interpret_status_codes(" ", "D"), do: {:deleted, false}
 
   defp interpret_status_codes(idx, wt) do
-    require Logger
-    Logger.warning("[Git] unexpected status codes: index=#{inspect(idx)} worktree=#{inspect(wt)}")
+    Minga.Log.warning(
+      :editor,
+      "[Git] unexpected status codes: index=#{inspect(idx)} worktree=#{inspect(wt)}"
+    )
+
     {:unknown, false}
   end
 
