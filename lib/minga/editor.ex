@@ -52,6 +52,8 @@ defmodule Minga.Editor do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -394,6 +396,9 @@ defmodule Minga.Editor do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
     else
+      # Background tab: update tab metadata only. The Session process
+      # holds the real state; we just need the status for the tab bar.
+      state = update_background_tab_status(state, session_pid, event)
       {:noreply, state}
     end
   end
@@ -426,6 +431,23 @@ defmodule Minga.Editor do
     {state, effects} = Events.handle(state, event)
     apply_effects(state, effects)
   end
+
+  # Updates a background agent tab's metadata from a session event.
+  # The Session process holds the real state; we only track status on
+  # the Tab struct so the tab bar can render status indicators.
+  @spec update_background_tab_status(EditorState.t(), pid(), term()) :: EditorState.t()
+  defp update_background_tab_status(state, session_pid, {:status_changed, status}) do
+    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+      %Tab{id: id} ->
+        tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        %{state | tab_bar: tb}
+
+      _ ->
+        state
+    end
+  end
+
+  defp update_background_tab_status(state, _session_pid, _event), do: state
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 

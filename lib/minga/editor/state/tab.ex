@@ -58,13 +58,17 @@ defmodule Minga.Editor.State.Tab do
           optional(:macro_recorder) => term()
         }
 
+  @typedoc "Agent tab status (nil for file tabs)."
+  @type agent_status :: :idle | :thinking | :tool_executing | :error | nil
+
   @typedoc "A tab."
   @type t :: %__MODULE__{
           id: id(),
           kind: kind(),
           label: String.t(),
           context: context(),
-          session: pid() | nil
+          session: pid() | nil,
+          agent_status: agent_status()
         }
 
   @enforce_keys [:id, :kind]
@@ -72,7 +76,8 @@ defmodule Minga.Editor.State.Tab do
             kind: nil,
             label: "",
             context: %{},
-            session: nil
+            session: nil,
+            agent_status: nil
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -112,5 +117,11 @@ defmodule Minga.Editor.State.Tab do
   @spec set_session(t(), pid() | nil) :: t()
   def set_session(%__MODULE__{} = tab, pid) do
     %{tab | session: pid}
+  end
+
+  @doc "Sets the agent status on a tab (for tab bar rendering)."
+  @spec set_agent_status(t(), agent_status()) :: t()
+  def set_agent_status(%__MODULE__{} = tab, status) do
+    %{tab | agent_status: status}
   end
 end

@@ -79,9 +79,10 @@ defmodule Minga.Editor.TabBarRenderer do
       icon = tab_icon(tab)
       label = tab_label(tab)
       dirty = tab_dirty_marker(tab, colors)
+      status = agent_status_indicator(tab)
       number = tab_number(position)
 
-      text = " #{number}#{icon} #{label}#{dirty} "
+      text = " #{number}#{icon} #{label}#{dirty}#{status} "
       width = Unicode.display_width(text)
 
       %{text: text, fg: fg, bg: bg, tab_id: tab.id, width: width}
@@ -279,6 +280,12 @@ defmodule Minga.Editor.TabBarRenderer do
   end
 
   defp tab_dirty_marker(_, _), do: ""
+
+  @spec agent_status_indicator(Tab.t()) :: String.t()
+  defp agent_status_indicator(%Tab{kind: :agent, agent_status: :thinking}), do: " \u{25CF}"
+  defp agent_status_indicator(%Tab{kind: :agent, agent_status: :tool_executing}), do: " \u{2699}"
+  defp agent_status_indicator(%Tab{kind: :agent, agent_status: :error}), do: " \u{2717}"
+  defp agent_status_indicator(_), do: ""
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
   defp tab_active_buffer(%Tab{context: %{buffers: %{active: buf}}}), do: buf

@@ -75,4 +75,6 @@ Prompt input should work identically regardless of where the agent UI is display
 3. Eventually: bottom panel becomes "just another window position" for the agent split
 
 ### EditorState field reduction
-EditorState is still large (40+ fields). Some fields are per-tab (saved/restored on tab switch), others are global (agent, theme, port_manager). The per-tab fields could be grouped into a substruct to make the boundary explicit. This is lower priority since the flat map approach works and the Surface overhead is gone.
+EditorState is still large (40+ fields). Some fields are per-tab (saved/restored on tab switch), others are global (theme, port_manager, tab_bar). The per-tab fields could be grouped into a substruct to make the boundary explicit. This is lower priority since the flat map approach works and the Surface overhead is gone.
+
+Agent state (`agent`, `agentic`) is NOT snapshotted per-tab. The Session GenServer is the source of truth for session state (status, messages, pending approval, error). When switching to an agent tab, `EditorState.rebuild_agent_from_session/2` queries the Session process to populate the editor's local agent fields. Background agent events update only `Tab.agent_status` for tab bar rendering; the Session process accumulates the real state independently.

@@ -179,4 +179,43 @@ defmodule Minga.Editor.State.EventRoutingTest do
       assert tab.session == new_session
     end
   end
+
+  describe "tab context excludes agent/agentic state" do
+    test "snapshot_tab_context does not include agent or agentic" do
+      %{state: state} = make_state()
+      ctx = EditorState.snapshot_tab_context(state)
+
+      refute Map.has_key?(ctx, :agent)
+      refute Map.has_key?(ctx, :agentic)
+    end
+  end
+
+  describe "Agent.Events.handle/2 — tab status sync" do
+    test "status_changed syncs agent_status on the agent tab" do
+      %{state: state, session: session} = make_state()
+
+      {tb, agent_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+      tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
+      state = %{state | tab_bar: tb}
+
+      {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
+
+      agent_tab = TabBar.get(new_state.tab_bar, agent_tab.id)
+      assert agent_tab.agent_status == :thinking
+    end
+
+    test "status_changed to :idle updates tab status" do
+      %{state: state, session: session} = make_state()
+
+      {tb, agent_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+      tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
+      state = %{state | tab_bar: tb}
+
+      {state, _} = AgentEvents.handle(state, {:status_changed, :thinking})
+      {new_state, _} = AgentEvents.handle(state, {:status_changed, :idle})
+
+      agent_tab = TabBar.get(new_state.tab_bar, agent_tab.id)
+      assert agent_tab.agent_status == :idle
+    end
+  end
 end
