@@ -24,42 +24,44 @@ defmodule Minga.Agent.SlashCommand do
   @typedoc "Editor state (same as EditorState.t())."
   @type state :: map()
 
+  alias Minga.Agent.SlashCommand.Command
+
   @typedoc "A registered slash command."
-  @type command :: %{name: String.t(), description: String.t()}
+  @type command :: Command.t()
 
   @commands [
-    %{name: "clear", description: "Start a fresh session"},
-    %{name: "new", description: "Start a fresh session (alias for /clear)"},
-    %{name: "stop", description: "Abort the current agent operation"},
-    %{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
-    %{name: "thinking", description: "Set thinking level: /thinking [off|low|medium|high]"},
-    %{name: "model", description: "Set the model: /model <name>"},
-    %{name: "help", description: "Show available slash commands"},
-    %{name: "sessions", description: "Browse and switch between sessions"},
-    %{
+    %Command{name: "clear", description: "Start a fresh session"},
+    %Command{name: "new", description: "Start a fresh session (alias for /clear)"},
+    %Command{name: "stop", description: "Abort the current agent operation"},
+    %Command{name: "abort", description: "Abort the current agent operation (alias for /stop)"},
+    %Command{name: "thinking", description: "Set thinking level: /thinking [off|low|medium|high]"},
+    %Command{name: "model", description: "Set the model: /model <name>"},
+    %Command{name: "help", description: "Show available slash commands"},
+    %Command{name: "sessions", description: "Browse and switch between sessions"},
+    %Command{
       name: "auth",
       description: "Manage API keys: /auth, /auth <provider>, /auth revoke <provider>"
     },
-    %{
+    %Command{
       name: "instructions",
       description: "Show which AGENTS.md instruction files are loaded"
     },
-    %{
+    %Command{
       name: "system-prompt",
       description: "Show the current assembled system prompt"
     },
-    %{name: "compact", description: "Compact conversation context (summarize older turns)"},
-    %{name: "continue", description: "Continue from an interrupted stream response"},
-    %{name: "export", description: "Export session to Markdown (default) or HTML (/export html)"},
-    %{name: "skills", description: "List all available skills"},
-    %{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
-    %{
+    %Command{name: "compact", description: "Compact conversation context (summarize older turns)"},
+    %Command{name: "continue", description: "Continue from an interrupted stream response"},
+    %Command{name: "export", description: "Export session to Markdown (default) or HTML (/export html)"},
+    %Command{name: "skills", description: "List all available skills"},
+    %Command{name: "skill", description: "Activate a skill: /skill:name, deactivate: /skill:off:name"},
+    %Command{
       name: "summarize",
       description: "Generate a context artifact from this session for future use"
     },
-    %{name: "remember", description: "Save a learning to persistent memory: /remember <text>"},
-    %{name: "memory", description: "Show the current memory file contents"},
-    %{name: "forget", description: "Clear the persistent memory file"}
+    %Command{name: "remember", description: "Save a learning to persistent memory: /remember <text>"},
+    %Command{name: "memory", description: "Show the current memory file contents"},
+    %Command{name: "forget", description: "Clear the persistent memory file"}
   ]
 
   @doc "Returns the list of all registered slash commands."
