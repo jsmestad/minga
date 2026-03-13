@@ -70,7 +70,7 @@ defmodule Minga.Agent.DiffSnapshot do
   defp read_threshold do
     Options.get(:agent_diff_size_threshold)
   rescue
-    _ -> @default_threshold
+    ArgumentError -> @default_threshold
   catch
     :exit, _ -> @default_threshold
   end
