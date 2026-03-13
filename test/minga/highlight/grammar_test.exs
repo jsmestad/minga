@@ -26,9 +26,10 @@ defmodule Minga.Highlight.GrammarTest do
 
     test "maps all expected filetypes" do
       supported = Grammar.supported_languages()
-      # 40 filetype entries, 39 unique languages (javascript_react → javascript)
-      assert map_size(supported) == 40
-      assert supported |> Map.values() |> Enum.uniq() |> length() == 39
+      # At least 40 compile-time filetype entries (extensions may add more at runtime)
+      assert map_size(supported) >= 40
+      # At least 39 unique languages (javascript_react → javascript share one)
+      assert supported |> Map.values() |> Enum.uniq() |> length() >= 39
     end
   end
 

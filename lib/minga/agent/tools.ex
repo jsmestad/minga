@@ -32,6 +32,7 @@ defmodule Minga.Agent.Tools do
   alias Minga.Agent.Tools.ListDirectory
   alias Minga.Agent.Tools.ReadFile
   alias Minga.Agent.Tools.Shell
+  alias Minga.Agent.Tools.Subagent
   alias Minga.Agent.Tools.WriteFile
   alias Minga.Config.Options
   alias ReqLLM.Tool
@@ -82,6 +83,7 @@ defmodule Minga.Agent.Tools do
       find(root),
       grep(root),
       shell(root),
+      subagent(root),
       git_status(root),
       git_diff(root),
       git_log(root),
@@ -318,6 +320,38 @@ defmodule Minga.Agent.Tools do
       callback: fn args ->
         timeout_secs = min(args["timeout"] || 30, 300)
         Shell.execute(args["command"], root, timeout_secs)
+      end
+    )
+  end
+
+  @spec subagent(String.t()) :: Tool.t()
+  defp subagent(root) do
+    Tool.new!(
+      name: "subagent",
+      description: """
+      Spawn a child agent to work on a subtask independently. The subagent
+      gets its own conversation, tool access, and runs in parallel with the
+      parent. Use this for independent subtasks that can be delegated:
+      refactoring a module, writing tests, updating docs, etc.
+      The subagent's final response text is returned as the tool result.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "task" => %{
+            "type" => "string",
+            "description" => "Description of the task for the subagent to complete"
+          },
+          "model" => %{
+            "type" => "string",
+            "description" =>
+              "Model to use for the subagent (e.g., \"anthropic:claude-sonnet-4-20250514\"). Defaults to the parent's model."
+          }
+        },
+        "required" => ["task"]
+      },
+      callback: fn args ->
+        Subagent.execute(args["task"], project_root: root, model: args["model"])
       end
     )
   end
