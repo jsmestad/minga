@@ -324,25 +324,31 @@ defmodule Minga.Extension.Supervisor do
   defp log_diagnostics(diagnostics) do
     for diag <- diagnostics do
       file = Map.get(diag, :file, "unknown")
-      line = Map.get(diag, :position, "?")
+      position = Map.get(diag, :position, nil)
       message = Map.get(diag, :message, "")
       severity = Map.get(diag, :severity, :warning)
       short_file = Path.basename(file)
+      pos_str = format_position(position)
 
       case severity do
         :warning ->
-          Minga.Log.warning(:editor, "[ext] #{short_file}:#{line}: #{message}")
+          Minga.Log.warning(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
 
         :error ->
-          Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{line}: #{message}")
+          Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{pos_str}: #{message}")
 
         _ ->
-          Minga.Log.debug(:editor, "[ext] #{short_file}:#{line}: #{message}")
+          Minga.Log.debug(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
       end
     end
 
     :ok
   end
+
+  @spec format_position(term()) :: String.t()
+  defp format_position({line, col}) when is_integer(line) and is_integer(col), do: "#{line}:#{col}"
+  defp format_position(line) when is_integer(line), do: "#{line}"
+  defp format_position(_), do: "?"
 
   @spec implements_extension?(module()) :: boolean()
   defp implements_extension?(module) do
