@@ -30,7 +30,6 @@ defmodule Minga.TreeSitterTest do
       case :os.type() do
         {:unix, :darwin} -> assert String.ends_with?(path, ".dylib")
         {:unix, _} -> assert String.ends_with?(path, ".so")
-        {:win32, _} -> assert String.ends_with?(path, ".dll")
       end
     end
   end
@@ -50,15 +49,21 @@ defmodule Minga.TreeSitterTest do
       source_dir = copy_json_grammar(tmp_dir)
 
       assert {:ok, lib_path} = TreeSitter.compile_grammar("test_cache", source_dir)
-      first_mtime = File.stat!(lib_path).mtime
 
-      # Small delay to ensure mtime would differ if recompiled
-      Process.sleep(1100)
+      # Record the library's mtime, then backdate source files so the cache
+      # looks newer than the sources (avoids Process.sleep for mtime gap).
+      {:ok, lib_stat} = File.stat(lib_path, time: :posix)
+
+      for src <- Path.wildcard(Path.join(source_dir, "*.c")) do
+        File.touch!(src, lib_stat.mtime - 2)
+      end
+
+      first_mtime = lib_stat.mtime
 
       assert {:ok, ^lib_path} = TreeSitter.compile_grammar("test_cache", source_dir)
-      second_mtime = File.stat!(lib_path).mtime
+      {:ok, second_stat} = File.stat(lib_path, time: :posix)
 
-      assert first_mtime == second_mtime
+      assert first_mtime == second_stat.mtime
     after
       File.rm(TreeSitter.grammar_lib_path("test_cache"))
     end
@@ -69,6 +74,15 @@ defmodule Minga.TreeSitterTest do
 
       assert {:error, msg} = TreeSitter.compile_grammar("missing", source_dir)
       assert msg =~ "parser.c not found"
+    end
+
+    test "returns error when no C compiler is available", %{tmp_dir: tmp_dir} do
+      source_dir = copy_json_grammar(tmp_dir)
+
+      assert {:error, "no C compiler found"} =
+               TreeSitter.compile_grammar("no_compiler_test", source_dir,
+                 compiler: {:error, "no C compiler found"}
+               )
     end
   end
 
@@ -109,7 +123,6 @@ defmodule Minga.TreeSitterTest do
     case :os.type() do
       {:unix, :darwin} -> "dylib"
       {:unix, _} -> "so"
-      {:win32, _} -> "dll"
     end
   end
 

@@ -203,8 +203,7 @@ defmodule Minga.Filetype do
       filetype -> filetype
     end
   rescue
-    # Registry not started yet (early startup or tests without app)
-    _ -> :miss
+    ArgumentError -> :miss
   end
 
   @spec lookup_registry_extension(String.t()) :: filetype() | :miss
@@ -220,8 +219,7 @@ defmodule Minga.Filetype do
         end
     end
   rescue
-    # Registry not started yet
-    _ -> :miss
+    ArgumentError -> :miss
   end
 
   @spec lookup_filename(String.t()) :: filetype() | :miss

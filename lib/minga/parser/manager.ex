@@ -80,6 +80,30 @@ defmodule Minga.Parser.Manager do
     send_commands(server, commands)
   end
 
+  @doc """
+  Sets the active tree-sitter language for subsequent parse/query commands.
+  """
+  @spec set_language(String.t(), GenServer.server()) :: :ok
+  def set_language(name, server \\ __MODULE__) when is_binary(name) do
+    send_commands(server, [Protocol.encode_set_language(name)])
+  end
+
+  @doc """
+  Sets a custom highlight query for the currently active language.
+  """
+  @spec set_highlight_query(String.t(), GenServer.server()) :: :ok
+  def set_highlight_query(query, server \\ __MODULE__) when is_binary(query) do
+    send_commands(server, [Protocol.encode_set_highlight_query(query)])
+  end
+
+  @doc """
+  Sets a custom injection query for the currently active language.
+  """
+  @spec set_injection_query(String.t(), GenServer.server()) :: :ok
+  def set_injection_query(query, server \\ __MODULE__) when is_binary(query) do
+    send_commands(server, [Protocol.encode_set_injection_query(query)])
+  end
+
   # ── Server Callbacks ──
 
   @impl true

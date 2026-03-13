@@ -353,6 +353,38 @@ The same `Buffer.Server` API that user extensions use (`apply_text_edits/2`, `co
 
 ---
 
+## Runtime grammar loading for extensions
+
+Extensions can ship tree-sitter grammar source files and have Minga compile and load them at runtime, enabling syntax highlighting for new languages without rebuilding the binary.
+
+The entry point is `Minga.TreeSitter.register_grammar/3`:
+
+```elixir
+Minga.TreeSitter.register_grammar(
+  "org",
+  "/path/to/tree-sitter-org/src",
+  highlights: "/path/to/queries/org/highlights.scm",
+  injections: "/path/to/queries/org/injections.scm",
+  filetype_extensions: [".org"],
+  filetype_atom: :org
+)
+```
+
+This single call handles the full pipeline:
+
+1. **Compiles** the grammar's `parser.c` (and optional `scanner.c`) into a platform-appropriate shared library (`.dylib` on macOS, `.so` on Linux) using the system C compiler (`$CC`, or `cc`/`gcc`/`clang`).
+2. **Caches** the compiled library at `~/.local/share/minga/grammars/` (respects `$XDG_DATA_HOME`). Subsequent startups skip recompilation when the cache is newer than sources.
+3. **Loads** the shared library into the parser Port via the `load_grammar` protocol message.
+4. **Sends** highlight and injection queries to the parser.
+5. **Registers** filetype mappings so `Minga.Filetype.detect/1` recognizes the new file extensions.
+6. **Registers** the language in `Minga.Highlight.Grammar` so buffers with the new filetype get syntax highlighting.
+
+Extensions that add new languages should call `register_grammar/3` from their `init/1` callback. If no C compiler is available, a warning is logged and the extension loads without highlighting.
+
+The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over the compiled-in defaults, so extensions can override built-in grammars if needed.
+
+---
+
 ## The bottom line
 
 Elisp's power comes from two things: *it's the same language as the editor* and *everything is mutable at runtime*. Elixir on the BEAM matches both.

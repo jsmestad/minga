@@ -25,9 +25,19 @@ defmodule Minga.TreeSitter do
 
   alias Minga.Highlight.Grammar, as: HLGrammar
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.Port.Protocol
 
-  @grammar_cache_dir Path.expand("~/.local/share/minga/grammars")
+  @doc """
+  Returns the grammar cache directory path.
+
+  Uses `$XDG_DATA_HOME/minga/grammars` if set, otherwise
+  `~/.local/share/minga/grammars`. Resolved at runtime so the path
+  is correct regardless of the build environment.
+  """
+  @spec grammar_cache_dir() :: String.t()
+  def grammar_cache_dir do
+    data_home = System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share")
+    Path.join([data_home, "minga", "grammars"])
+  end
 
   @typedoc "Options for `register_grammar/3`."
   @type register_opt ::
@@ -36,6 +46,7 @@ defmodule Minga.TreeSitter do
           | {:filetype_extensions, [String.t()]}
           | {:filetype_filenames, [String.t()]}
           | {:filetype_atom, atom()}
+          | {:compiler, {:ok, String.t()} | {:error, String.t()}}
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -65,8 +76,9 @@ defmodule Minga.TreeSitter do
   def register_grammar(name, source_dir, opts \\ [])
       when is_binary(name) and is_binary(source_dir) do
     filetype_atom = Keyword.get(opts, :filetype_atom)
+    compiler = Keyword.get(opts, :compiler)
 
-    with {:ok, lib_path} <- ensure_compiled(name, source_dir),
+    with {:ok, lib_path} <- ensure_compiled(name, source_dir, compiler),
          :ok <- load_into_parser(name, lib_path),
          :ok <- send_queries(name, opts),
          :ok <- register_filetype_mappings(name, filetype_atom, opts) do
@@ -81,10 +93,19 @@ defmodule Minga.TreeSitter do
   Returns the path to the compiled library. If a cached library already
   exists and is newer than the source files, returns the cached path
   without recompiling.
+
+  ## Options
+
+  - `:compiler` - override compiler resolution. Pass `{:ok, "/usr/bin/cc"}`
+    to use a specific compiler, or `{:error, "reason"}` to simulate a
+    missing compiler (useful for testing). Defaults to `find_compiler/0`.
   """
-  @spec compile_grammar(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def compile_grammar(name, source_dir) when is_binary(name) and is_binary(source_dir) do
-    ensure_compiled(name, source_dir)
+  @spec compile_grammar(String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def compile_grammar(name, source_dir, opts \\ [])
+      when is_binary(name) and is_binary(source_dir) do
+    compiler = Keyword.get(opts, :compiler)
+    ensure_compiled(name, source_dir, compiler)
   end
 
   @doc """
@@ -93,7 +114,7 @@ defmodule Minga.TreeSitter do
   @spec grammar_lib_path(String.t()) :: String.t()
   def grammar_lib_path(name) when is_binary(name) do
     ext = shared_lib_extension()
-    Path.join(@grammar_cache_dir, "#{name}.#{ext}")
+    Path.join(grammar_cache_dir(), "#{name}.#{ext}")
   end
 
   @doc """
@@ -132,8 +153,9 @@ defmodule Minga.TreeSitter do
 
   # ── Private: Compilation ───────────────────────────────────────────────────
 
-  @spec ensure_compiled(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp ensure_compiled(name, source_dir) do
+  @spec ensure_compiled(String.t(), String.t(), {:ok, String.t()} | {:error, String.t()} | nil) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp ensure_compiled(name, source_dir, compiler) do
     lib_path = grammar_lib_path(name)
     source_dir = Path.expand(source_dir)
     parser_c = Path.join(source_dir, "parser.c")
@@ -142,7 +164,7 @@ defmodule Minga.TreeSitter do
       if cache_valid?(lib_path, source_dir) do
         {:ok, lib_path}
       else
-        do_compile(name, source_dir, lib_path)
+        do_compile(name, source_dir, lib_path, compiler)
       end
     else
       {:error, "parser.c not found in #{source_dir}"}
@@ -163,9 +185,14 @@ defmodule Minga.TreeSitter do
     end
   end
 
-  @spec do_compile(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_compile(name, source_dir, lib_path) do
-    with {:ok, cc} <- find_compiler() do
+  @spec do_compile(
+          String.t(),
+          String.t(),
+          String.t(),
+          {:ok, String.t()} | {:error, String.t()} | nil
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp do_compile(name, source_dir, lib_path, compiler) do
+    with {:ok, cc} <- resolve_compiler(compiler) do
       File.mkdir_p!(Path.dirname(lib_path))
 
       sources = source_c_files(source_dir)
@@ -208,6 +235,11 @@ defmodule Minga.TreeSitter do
     end
   end
 
+  @spec resolve_compiler({:ok, String.t()} | {:error, String.t()} | nil) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp resolve_compiler(nil), do: find_compiler()
+  defp resolve_compiler(result), do: result
+
   @spec find_compiler_in_path() :: {:ok, String.t()} | {:error, String.t()}
   defp find_compiler_in_path do
     Enum.find_value(
@@ -227,7 +259,6 @@ defmodule Minga.TreeSitter do
     case :os.type() do
       {:unix, :darwin} -> "dylib"
       {:unix, _} -> "so"
-      {:win32, _} -> "dll"
     end
   end
 
@@ -241,68 +272,53 @@ defmodule Minga.TreeSitter do
 
   # ── Private: Loading into parser ───────────────────────────────────────────
 
-  @spec load_into_parser(String.t(), String.t()) :: :ok | {:error, String.t()}
+  @spec load_into_parser(String.t(), String.t()) :: :ok
   defp load_into_parser(name, lib_path) do
-    commands = [Protocol.encode_load_grammar(name, lib_path)]
-    ParserManager.send_commands(commands)
-
     # The parser responds asynchronously with grammar_loaded.
     # We don't block here; the response is handled by the Editor
     # via the highlight event subscription.
-    :ok
+    ParserManager.load_grammar(name, lib_path)
   end
 
   # ── Private: Query registration ────────────────────────────────────────────
 
   @spec send_queries(String.t(), keyword()) :: :ok
   defp send_queries(name, opts) do
-    commands = []
-
     # Set the language first so queries are associated with it
-    commands = commands ++ [Protocol.encode_set_language(name)]
+    ParserManager.set_language(name)
 
-    commands =
-      case Keyword.get(opts, :highlights) do
-        nil ->
-          commands
+    case Keyword.get(opts, :highlights) do
+      nil ->
+        :ok
 
-        path ->
-          case File.read(Path.expand(path)) do
-            {:ok, query} ->
-              commands ++ [Protocol.encode_set_highlight_query(query)]
+      path ->
+        case File.read(Path.expand(path)) do
+          {:ok, query} ->
+            ParserManager.set_highlight_query(query)
 
-            {:error, reason} ->
-              Minga.Log.warning(
-                :editor,
-                "Could not read highlights for #{name}: #{inspect(reason)}"
-              )
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "Could not read highlights for #{name}: #{inspect(reason)}"
+            )
+        end
+    end
 
-              commands
-          end
-      end
+    case Keyword.get(opts, :injections) do
+      nil ->
+        :ok
 
-    commands =
-      case Keyword.get(opts, :injections) do
-        nil ->
-          commands
+      path ->
+        case File.read(Path.expand(path)) do
+          {:ok, query} ->
+            ParserManager.set_injection_query(query)
 
-        path ->
-          case File.read(Path.expand(path)) do
-            {:ok, query} ->
-              commands ++ [Protocol.encode_set_injection_query(query)]
-
-            {:error, reason} ->
-              Minga.Log.warning(
-                :editor,
-                "Could not read injections for #{name}: #{inspect(reason)}"
-              )
-
-              commands
-          end
-      end
-
-    if length(commands) > 1 do
-      ParserManager.send_commands(commands)
+          {:error, reason} ->
+            Minga.Log.warning(
+              :editor,
+              "Could not read injections for #{name}: #{inspect(reason)}"
+            )
+        end
     end
 
     :ok
