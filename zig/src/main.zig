@@ -15,7 +15,6 @@ pub const apprt = @import("apprt.zig");
 // Note: highlighter.zig is compiled into minga-parser, not the renderer.
 // Font rendering (CoreText, atlas) lives in the macOS Swift app (macos/).
 
-
 // Vaxis is only needed for the TUI panic recovery path.
 const vaxis = if (build_options.backend == .tui) @import("vaxis") else struct {};
 
@@ -92,5 +91,4 @@ test {
     _ = renderer;
     _ = surface;
     _ = apprt;
-
 }

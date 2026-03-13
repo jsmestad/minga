@@ -372,7 +372,6 @@ pub const TuiRuntime = struct {
                     }
                     offset += protocol.commandSize(remaining);
                 }
-
             }
 
             // stdin HUP / error
@@ -548,8 +547,6 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             if (key.mods.ctrl) mods |= protocol.MOD_CTRL;
             if (key.mods.alt) mods |= protocol.MOD_ALT;
             if (key.mods.super) mods |= protocol.MOD_SUPER;
-
-
 
             var kbuf: [6]u8 = undefined;
             const klen = try protocol.encodeKeyPress(&kbuf, key.codepoint, mods);

@@ -146,12 +146,20 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
 
 ### Pre-commit Checks (mandatory, no exceptions)
 
-**STOP. Before every `git commit` that touches Elixir files, run these commands and confirm they pass. Do not skip this step. Do not commit with "I'll fix it later." If a check fails, fix the issue before committing.**
+**STOP. Before every `git commit`, run the relevant checks below and confirm they pass. Do not skip this step. Do not commit with "I'll fix it later." If a check fails, fix the issue before committing.**
+
+**Elixir changes:**
 
 ```bash
 mix lint                          # Formatting, credo --strict, compile --warnings-as-errors
 mix test --warnings-as-errors     # Tests
 mix dialyzer                      # Typespec consistency
+```
+
+**Zig changes:**
+
+```bash
+mix zig.lint                      # zig fmt --check + zig build test
 ```
 
 If any check fails, fix it before committing. No exceptions.
@@ -181,7 +189,8 @@ end
 - Doc comments (`///`) on all public functions
 - Explicit error handling — no `catch unreachable` outside tests
 - `std.log` for debug output (stderr), never stdout (that's the Port channel)
-- `zig build test` must pass
+- `zig fmt` for all formatting (no manual style debates)
+- `mix zig.lint` must pass (`zig fmt --check` + `zig build test`)
 
 ### Logging and the `*Messages*` Buffer
 

@@ -15,7 +15,6 @@
 ///   fn render(*Self) Error!void
 ///   fn width(*Self) u16
 ///   fn height(*Self) u16
-
 const protocol = @import("protocol.zig");
 
 /// Cursor shape, matching the port protocol values.

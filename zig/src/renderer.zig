@@ -326,14 +326,16 @@ test "handleCommand draw_text respects surface width boundary" {
     var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
     defer rend.deinit();
 
-    try rend.handleCommand(.{ .draw_text = .{
-        .row = 0,
-        .col = 0,
-        .fg = 0,
-        .bg = 0,
-        .attrs = 0,
-        .text = "abcde", // 5 chars but width is 3
-    } });
+    try rend.handleCommand(.{
+        .draw_text = .{
+            .row = 0,
+            .col = 0,
+            .fg = 0,
+            .bg = 0,
+            .attrs = 0,
+            .text = "abcde", // 5 chars but width is 3
+        },
+    });
     try std.testing.expectEqual(@as(usize, 3), mock.cells_written);
 }
 
