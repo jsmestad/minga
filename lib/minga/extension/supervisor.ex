@@ -330,13 +330,12 @@ defmodule Minga.Extension.Supervisor do
       short_file = Path.basename(file)
       pos_str = format_position(position)
 
-      # All extension compile diagnostics go to debug level. Warnings about
-      # undefined Minga modules are expected (extensions compile standalone
-      # without Minga in scope) and would clutter the terminal during startup
-      # if logged at warning level.
       case severity do
         :error ->
           Minga.Log.warning(:editor, "[ext:error] #{short_file}:#{pos_str}: #{message}")
+
+        :warning ->
+          Minga.Log.warning(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
 
         _ ->
           Minga.Log.debug(:editor, "[ext] #{short_file}:#{pos_str}: #{message}")
