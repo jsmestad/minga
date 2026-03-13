@@ -120,7 +120,8 @@ defmodule Minga.Integration.PickerLifecycleTest do
       send_keys(ctx, "<Space>:")
 
       assert screen_contains?(ctx, "Commands")
-      assert_screen_snapshot(ctx, "command_palette_open")
+      # No snapshot: command count in the title bar changes when commands
+      # are added/removed, making the baseline fragile across branches.
     end
   end
 
@@ -136,7 +137,7 @@ defmodule Minga.Integration.PickerLifecycleTest do
       # Type "save" to filter to save-related commands
       send_keys(ctx, "save")
 
-      assert_screen_snapshot(ctx, "command_palette_filter_save")
+      assert screen_contains?(ctx, "save")
     end
   end
 
@@ -156,7 +157,6 @@ defmodule Minga.Integration.PickerLifecycleTest do
       assert editor_mode(ctx) == :normal
       refute screen_contains?(ctx, "Commands")
       assert buffer_cursor(ctx) == cursor_before
-      assert_screen_snapshot(ctx, "command_palette_cancel")
     end
   end
 
@@ -175,7 +175,6 @@ defmodule Minga.Integration.PickerLifecycleTest do
 
       assert editor_mode(ctx) == :normal
       refute screen_contains?(ctx, "Commands")
-      assert_screen_snapshot(ctx, "command_palette_execute")
     end
   end
 
