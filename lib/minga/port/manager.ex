@@ -241,16 +241,34 @@ defmodule Minga.Port.Manager do
 
   @spec detect_tty() :: String.t() | nil
   defp detect_tty do
-    # `ps -o tty=` returns the controlling terminal's short name (e.g. "s003")
-    # from the kernel — works even though System.cmd's child has piped stdin.
     with {output, 0} <- System.cmd("ps", ["-o", "tty=", "-p", to_string(:os.getpid())]),
-         tty_short = String.trim(output),
-         true <- tty_short != "" and tty_short != "??" do
-      # macOS: "s003" → "/dev/ttys003"
-      # Linux: "pts/3" → "/dev/pts/3"
-      "/dev/tty#{tty_short}"
+         tty_name = String.trim(output),
+         true <- tty_name != "" and tty_name != "??" do
+      tty_path_for(tty_name)
     else
       _ -> nil
+    end
+  end
+
+  @doc """
+  Builds a `/dev/` path from the tty name returned by `ps -o tty=`.
+
+  The format varies by OS and version:
+  - macOS long form: `"ttys008"` → `"/dev/ttys008"`
+  - macOS short form: `"s003"` → `"/dev/ttys003"`
+  - Linux: `"pts/3"` → `"/dev/pts/3"`
+
+  Checks if `/dev/{name}` exists first (handles long form and Linux).
+  Falls back to `/dev/tty{name}` for short forms.
+  """
+  @spec tty_path_for(String.t()) :: String.t()
+  def tty_path_for(tty_name) do
+    path = "/dev/#{tty_name}"
+
+    if File.exists?(path) do
+      path
+    else
+      "/dev/tty#{tty_name}"
     end
   end
 
