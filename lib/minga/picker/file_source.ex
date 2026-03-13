@@ -38,7 +38,7 @@ defmodule Minga.Picker.FileSource do
   def on_select({rel_path, _label, _desc}, state) do
     abs_path = Path.expand(rel_path)
 
-    Log.debug(:editor, "[file_picker] on_select path=#{rel_path} surface=#{state.surface_module}")
+    Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
 
     case find_buffer_by_path(state, abs_path) do
       nil ->
