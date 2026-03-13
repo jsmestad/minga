@@ -321,12 +321,13 @@ Current status and planned features. Updated as development progresses.
 | Notification toasts | ✅ | Top-right toasts for actions; auto-dismiss 3s; FIFO queue #179 |
 | Directory listing preview | ✅ | list_directory tool output shown with file/folder icons #220 |
 | Agent-first startup | ✅ | Boot into agentic view by default; configurable via `startup_view` and `agent_auto_context` #242 |
-| **Buffer-routed agent tools** | 📋 | Agent read/edit/write tools call `Buffer.Server` instead of `File.read/write`. Prerequisite for agent-aware undo. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers) |
-| **Buffer forking (multi-agent)** | 📋 | Each agent session gets an in-memory fork of the document; three-way merge on completion. Replaces git worktrees. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) |
-| **Selective flush-to-disk** | 📋 | Dirty buffers written to disk before agent shell commands (`mix test`, etc.). See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-3-flush-to-disk-for-shell-commands) |
+| **Buffer path registry** | 📋 | O(1) file-path-to-buffer lookup. Prerequisite for buffer-routed tools. #396 |
+| **Buffer-routed agent tools** | 📋 | Agent read/edit/write tools call `Buffer.Server` instead of `File.read/write`. #393. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers) |
+| **Buffer forking (multi-agent)** | 📋 | Each agent session gets an in-memory fork of the document; three-way merge on completion. Replaces git worktrees. #394. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) |
+| **Selective flush-to-disk** | 📋 | Dirty buffers written to disk before agent shell commands (`mix test`, etc.). #395. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md#phase-3-flush-to-disk-for-shell-commands) |
 | Inline completions (ghost text) | 📋 | #74 |
-| Agent-aware undo | 📋 | #76. Depends on buffer-routed agent tools (above) |
-| Edit boundaries | 📋 | #78. Depends on buffer-routed agent tools (above) |
+| Agent-aware undo | 📋 | #76. Depends on #393 (buffer-routed agent tools) |
+| Edit boundaries | 📋 | #78. Depends on #393 (buffer-routed agent tools) |
 | Inline diff review | 📋 | #79 |
 
 ## What's Next
