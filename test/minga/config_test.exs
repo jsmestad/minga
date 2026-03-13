@@ -6,6 +6,7 @@ defmodule Minga.ConfigTest do
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
+  alias Minga.Popup.Registry, as: PopupRegistry
 
   setup do
     # Ensure required servers are running
@@ -33,7 +34,12 @@ defmodule Minga.ConfigTest do
       {:error, {:already_started, _}} -> Hooks.reset()
     end
 
+    PopupRegistry.init()
+    PopupRegistry.clear()
+
     on_exit(fn ->
+      PopupRegistry.clear()
+
       for mod <- [KeymapActive, Hooks] do
         try do
           mod.reset()
@@ -231,6 +237,60 @@ defmodule Minga.ConfigTest do
       assert_raise ArgumentError, fn ->
         Minga.Config.for_filetype(:go, tab_width: -1)
       end
+    end
+  end
+
+  describe "popup/2" do
+    test "registers a popup rule with string pattern" do
+      Minga.Config.popup("*Warnings*", side: :bottom, size: {:percent, 30})
+
+      assert {:ok, rule} = PopupRegistry.match("*Warnings*")
+      assert rule.side == :bottom
+      assert rule.size == {:percent, 30}
+    end
+
+    test "registers a popup rule with regex pattern" do
+      Minga.Config.popup(~r/\*Help/, display: :float, width: {:percent, 60})
+
+      assert {:ok, rule} = PopupRegistry.match("*Help: elixir*")
+      assert rule.display == :float
+      assert rule.width == {:percent, 60}
+    end
+
+    test "later registration overrides same pattern" do
+      Minga.Config.popup("*Warnings*", side: :bottom)
+      Minga.Config.popup("*Warnings*", side: :right)
+
+      assert {:ok, rule} = PopupRegistry.match("*Warnings*")
+      assert rule.side == :right
+    end
+
+    test "raises on invalid options" do
+      assert_raise ArgumentError, fn ->
+        Minga.Config.popup("*test*", display: :invalid)
+      end
+    end
+
+    test "registers with default options" do
+      Minga.Config.popup("*scratch*")
+
+      assert {:ok, rule} = PopupRegistry.match("*scratch*")
+      assert rule.display == :split
+      assert rule.side == :bottom
+      assert rule.size == {:percent, 30}
+      assert rule.focus == true
+    end
+
+    test "config DSL imports popup/2" do
+      Code.compile_string("""
+      defmodule Minga.ConfigTest.PopupConfig#{System.unique_integer([:positive])} do
+        use Minga.Config
+        popup "*test-popup*", side: :right, size: {:percent, 40}
+      end
+      """)
+
+      assert {:ok, rule} = PopupRegistry.match("*test-popup*")
+      assert rule.side == :right
     end
   end
 end
