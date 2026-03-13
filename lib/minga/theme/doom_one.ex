@@ -159,6 +159,7 @@ defmodule Minga.Theme.DoomOne do
         inactive_bg: @base3,
         separator_fg: 0x3F444A,
         modified_fg: @orange,
+        attention_fg: @red,
         bg: @base3
       }
     }

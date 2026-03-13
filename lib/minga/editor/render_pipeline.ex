@@ -47,6 +47,7 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Viewport
@@ -858,6 +859,14 @@ defmodule Minga.Editor.RenderPipeline do
   defp send_title(state) do
     format = Options.get(:title_format) |> to_string()
     title = Title.format(state, format)
+
+    # Prepend [!] when any agent tab needs attention
+    title =
+      if state.tab_bar && TabBar.any_attention?(state.tab_bar) do
+        "[!] " <> title
+      else
+        title
+      end
 
     if title != Process.get(:last_title) do
       Process.put(:last_title, title)

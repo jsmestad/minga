@@ -54,6 +54,7 @@ defmodule Minga.Editor do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.TabBar
 
   @typedoc "Internal state."
   @type state :: EditorState.t()
@@ -420,6 +421,10 @@ defmodule Minga.Editor do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
     else
+      # Set attention on background agent tabs when they finish,
+      # encounter an error, or need approval. Derived from domain
+      # events; the Session doesn't know about UI attention.
+      state = maybe_set_background_attention(state, session_pid, event)
       {:noreply, state}
     end
   end
@@ -451,6 +456,32 @@ defmodule Minga.Editor do
   defp dispatch_agent_event(state, event) do
     {state, effects} = Events.handle(state, event)
     apply_effects(state, effects)
+  end
+
+  # Sets the attention flag on a background agent tab when the session
+  # reaches a state that needs user input. Derived from domain events;
+  # the Session process doesn't know about UI attention.
+  @spec maybe_set_background_attention(EditorState.t(), pid(), term()) :: EditorState.t()
+  defp maybe_set_background_attention(state, session_pid, {:status_changed, status})
+       when status in [:idle, :error] do
+    set_tab_attention(state, session_pid)
+  end
+
+  defp maybe_set_background_attention(state, session_pid, {:approval_pending, _}) do
+    set_tab_attention(state, session_pid)
+  end
+
+  defp maybe_set_background_attention(state, _session_pid, _event), do: state
+
+  @spec set_tab_attention(EditorState.t(), pid()) :: EditorState.t()
+  defp set_tab_attention(state, session_pid) do
+    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+      nil ->
+        state
+
+      _tab ->
+        %{state | tab_bar: TabBar.set_attention_by_session(state.tab_bar, session_pid, true)}
+    end
   end
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────

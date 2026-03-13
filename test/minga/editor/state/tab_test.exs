@@ -60,4 +60,20 @@ defmodule Minga.Editor.State.TabTest do
       refute Tab.file?(tab)
     end
   end
+
+  describe "set_attention/2" do
+    test "sets the attention flag to true" do
+      tab = Tab.new_agent(1) |> Tab.set_attention(true)
+      assert tab.attention == true
+    end
+
+    test "clears the attention flag" do
+      tab = Tab.new_agent(1) |> Tab.set_attention(true) |> Tab.set_attention(false)
+      assert tab.attention == false
+    end
+
+    test "defaults to false" do
+      assert Tab.new_agent(1).attention == false
+    end
+  end
 end

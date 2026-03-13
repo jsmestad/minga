@@ -793,6 +793,12 @@ defmodule Minga.Editor.State do
 
       state = restore_tab_context(state, target.context)
 
+      # Clear attention flag on the tab we're switching to.
+      state = %{
+        state
+        | tab_bar: TabBar.update_tab(state.tab_bar, target_id, &Tab.set_attention(&1, false))
+      }
+
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)
 
