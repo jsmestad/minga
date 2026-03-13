@@ -1,6 +1,6 @@
 # Contributing to Minga
 
-Thanks for your interest! Minga is in early development and contributions are welcome — whether that's bug reports, feature ideas, or code.
+Thanks for your interest! Minga is in early development and contributions are welcome: whether that's bug reports, feature ideas, or code.
 
 ## Getting Started
 
@@ -33,9 +33,9 @@ mix dialyzer                      # Typespec consistency
 
 See `AGENTS.md` (in the repo root) for the full project structure, coding standards, and conventions. The highlights:
 
-- **`@spec` on every public function** — Elixir 1.19's type system is strict
-- **Pattern matching over `if`/`cond`** — multi-clause functions preferred
-- **Test files mirror `lib/`** — `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
+- **`@spec` on every public function**: Elixir 1.19's type system is strict
+- **Pattern matching over `if`/`cond`**: multi-clause functions preferred
+- **Test files mirror `lib/`**: `lib/minga/buffer/document.ex` → `test/minga/buffer/document_test.exs`
 - **Property-based tests** with StreamData for data structures
 
 ## Key Documentation
@@ -43,7 +43,7 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 | Doc | What it covers |
 |-----|---------------|
 | [README.md](README.md) | Project overview and quick start |
-| [ROADMAP.md](ROADMAP.md) | Feature grid — what's done, what's planned |
+| [ROADMAP.md](ROADMAP.md) | Feature grid: what's done, what's planned |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Optimization roadmap with BEAM-specific techniques |
 | `AGENTS.md` | Coding standards, project structure, how to add features |
@@ -87,6 +87,6 @@ Examples:
 ## Updating Documentation
 
 When you finish a feature or change the architecture, update:
-- **`ROADMAP.md`** — flip status (📋 → 🚧 → ✅), add new rows as needed
-- **`docs/ARCHITECTURE.md`** — if you add process types, opcodes, or change supervision
-- **`docs/PERFORMANCE.md`** — mark optimizations as done
+- **`ROADMAP.md`**: flip status (📋 → 🚧 → ✅), add new rows as needed
+- **`docs/ARCHITECTURE.md`**: if you add process types, opcodes, or change supervision
+- **`docs/PERFORMANCE.md`**: mark optimizations as done

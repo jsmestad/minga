@@ -189,11 +189,11 @@ Emacs has eight advice combinators. Minga implements four that cover all the sam
   "Strip trailing whitespace before every save."
   (delete-trailing-whitespace))
 
-;; :before-while — only save if buffer has a file
+;; :before-while - only save if buffer has a file
 (advice-add 'save-buffer :before-while
   (lambda (&rest _) (buffer-file-name)))
 
-;; :around — full control
+;; :around - full control
 (define-advice format-buffer (:around (orig-fn &rest args))
   "Skip formatting if buffer has errors."
   (if (zerop (length (flymake-diagnostics)))
@@ -203,12 +203,12 @@ Emacs has eight advice combinators. Minga implements four that cover all the sam
 
 **Elixir:**
 ```elixir
-# :before — transform state on the way in
+# :before - transform state on the way in
 advise :before, :save, fn state ->
   strip_trailing_whitespace(state)
 end
 
-# :around — conditionally skip formatting (replaces :before-while pattern)
+# :around - conditionally skip formatting (replaces :before-while pattern)
 advise :around, :format_buffer, fn execute, state ->
   errors =
     state.buffers.active
@@ -222,7 +222,7 @@ advise :around, :format_buffer, fn execute, state ->
   end
 end
 
-# :override — replace save with a version that also stages in git
+# :override - replace save with a version that also stages in git
 advise :override, :save, fn state ->
   state = Minga.API.save()
   case Minga.Buffer.Server.file_path(state.buffers.active) do

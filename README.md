@@ -52,7 +52,7 @@ See the [Roadmap](ROADMAP.md) for the full feature grid and what's coming next. 
 
 ### Prerequisites
 
-- **[asdf](https://asdf-vm.com/)** (or compatible version manager) — Minga pins exact tool versions in `.tool-versions`. Install asdf and the required plugins, then run `asdf install` from the repo root to get the correct versions of everything:
+- **[asdf](https://asdf-vm.com/)** (or compatible version manager). Minga pins exact tool versions in `.tool-versions`. Install asdf and the required plugins, then run `asdf install` from the repo root to get the correct versions of everything:
   - Erlang/OTP 28+
   - Elixir 1.19+
   - Zig 0.15+
@@ -80,7 +80,7 @@ bin/minga path/to/file     # Open a file
 
 ### Now what?
 
-Minga uses **Vim-style modal editing**. You start in Normal mode — press `i` to enter Insert mode and type, `Esc` to go back to Normal.
+Minga uses **Vim-style modal editing**. You start in Normal mode. Press `i` to enter Insert mode and type, `Esc` to go back to Normal.
 
 Press **`Space`** in Normal mode to open the **Which-Key** popup, a discoverable menu of every leader command grouped by category (`f` → file, `b` → buffer, `w` → window, etc.). Start there to explore what's available.
 

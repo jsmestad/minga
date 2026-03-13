@@ -471,11 +471,11 @@ This tells Minga the filetype, but highlighting only works if a grammar for that
 
 Adding a grammar for a language Minga doesn't ship requires building from source. This involves five steps:
 
-1. **Vendor the grammar** — copy the tree-sitter grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`.
-2. **Add a highlight query** — place a `highlights.scm` at `zig/src/queries/{lang}/highlights.scm`. The grammar's upstream repo usually has one you can start from.
-3. **Register in the Zig build** — add an entry to the `grammars` array in `zig/build.zig` with `has_scanner` set appropriately.
-4. **Register in the highlighter** — in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array.
-5. **Register the filetype** — add extension/filename mappings in `lib/minga/filetype.ex` so files are detected correctly.
+1. **Vendor the grammar**: copy the tree-sitter grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`.
+2. **Add a highlight query**: place a `highlights.scm` at `zig/src/queries/{lang}/highlights.scm`. The grammar's upstream repo usually has one you can start from.
+3. **Register in the Zig build**: add an entry to the `grammars` array in `zig/build.zig` with `has_scanner` set appropriately.
+4. **Register in the highlighter**: in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array.
+5. **Register the filetype**: add extension/filename mappings in `lib/minga/filetype.ex` so files are detected correctly.
 
 After rebuilding (`mix compile`), the grammar is compiled into the binary and available immediately.
 
@@ -960,15 +960,15 @@ extension :my_formatter, path: "~/code/my_formatter", format_cmd: "prettier --st
 
 ## Further reading
 
-- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html) — the DSL module (`set`, `bind`, `command`, `on`, `advise`, `for_filetype`)
-- [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html) — typed option registry with per-filetype overrides
-- [`Minga.Config.Loader`](https://jsmestad.github.io/minga/Minga.Config.Loader.html) — config file discovery and evaluation
-- [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html) — lifecycle hook registry
-- [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html) — before/after command advice
-- [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) — mutable keymap (defaults + user overrides)
-- [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html) — key sequence string parser
-- [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) — user-friendly editor API for commands and eval
-- [`Minga.Formatter`](https://jsmestad.github.io/minga/Minga.Formatter.html) — formatter execution and default formatter registry
-- [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html) — extension behaviour and lifecycle
-- [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html) — extension process management
-- [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html) — deep dive on how the BEAM enables Emacs-level extensibility
+- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html): the DSL module (`set`, `bind`, `command`, `on`, `advise`, `for_filetype`)
+- [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html): typed option registry with per-filetype overrides
+- [`Minga.Config.Loader`](https://jsmestad.github.io/minga/Minga.Config.Loader.html): config file discovery and evaluation
+- [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html): lifecycle hook registry
+- [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html): before/after command advice
+- [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html): mutable keymap (defaults + user overrides)
+- [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html): key sequence string parser
+- [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html): user-friendly editor API for commands and eval
+- [`Minga.Formatter`](https://jsmestad.github.io/minga/Minga.Formatter.html): formatter execution and default formatter registry
+- [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html): extension behaviour and lifecycle
+- [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html): extension process management
+- [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html): deep dive on how the BEAM enables Emacs-level extensibility
