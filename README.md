@@ -6,9 +6,11 @@
 
 <!-- TODO: add a screenshot or terminal recording here -->
 
-Minga is a modal text editor built on **Elixir** and **Zig**. Every buffer, every agent session, every background task runs in its own isolated process on the BEAM VM. Nothing shares memory. Nothing blocks your keystrokes. If a component crashes, the rest keep running.
+Minga is a modal text editor powered by **Elixir on the BEAM VM**. Every buffer, every agent session, every background task runs in its own isolated process. Nothing shares memory. Nothing blocks your keystrokes. If a component crashes, the rest keep running.
 
 You get the editing model you already know (Vim motions, operators, text objects), the runtime depth you wish you had (redefine any command at runtime, hook into any lifecycle event, extend with real code), and an architecture that was designed from day one for the world where AI agents are editing files alongside you.
+
+Runs natively in the terminal (TUI) and as a macOS desktop app (GUI). Same editor core, same config, same extensions. Pick whichever fits your workflow.
 
 ## Why another editor?
 
@@ -16,9 +18,7 @@ AI coding agents need to read files, write files, run commands, and do it all co
 
 The BEAM VM was built 30 years ago to solve exactly this class of problem. Millions of lightweight processes, preemptive scheduling, no shared memory, crash isolation. It powers telecom switches and messaging systems where "one component failing takes down everything" is not acceptable.
 
-Minga points that runtime at a text editor.
-
-The catch? The BEAM can't draw on a terminal. So rendering is handled by a separate Zig binary using [libvaxis](https://github.com/rockorager/libvaxis). Two OS processes, clean binary protocol, each doing what it's best at.
+Minga points that runtime at a text editor. The editor core runs on the BEAM. Rendering is delegated to native frontends (a terminal UI and a macOS app) that communicate over a clean binary protocol. Two processes, no shared memory, each doing what it's best at.
 
 ## What you get
 
