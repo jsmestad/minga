@@ -812,3 +812,10 @@ Total size: 7 + (40 + text_len) per edit.
 **Fallback:** `parse_buffer` (opcode `0x21`) remains available for initial file load, language switches, and error recovery. If incremental parsing fails, the parser falls back to full reparse automatically.
 
 **Edit semantics:** Each edit replaces the byte range `[start_byte, old_end_byte)` with the inserted text. For insertions, `old_end_byte == start_byte`. For deletions, `text_len == 0`. The row/col positions are needed by tree-sitter's `TSInputEdit` for invalidating the correct tree nodes.
+
+
+---
+
+## Future: Buffer Fork UI
+
+When [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) lands, the protocol may need new opcodes for fork-related UI elements: fork status indicators in the modeline, merge conflict region rendering, or a fork branch picker. These will be additive (new opcodes, no changes to existing ones). Frontend implementors can safely ignore unknown opcodes by reading and discarding the payload based on the length prefix.
