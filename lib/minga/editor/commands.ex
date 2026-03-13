@@ -108,14 +108,22 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:leader_start, node}) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
+    prefix_keys = leader_keys_from_mode(state)
 
-    whichkey = %EditorState.WhichKey{node: node, timer: timer, show: false}
+    whichkey = %EditorState.WhichKey{
+      node: node,
+      timer: timer,
+      show: false,
+      prefix_keys: prefix_keys
+    }
+
     {state, {:whichkey_update, whichkey}}
   end
 
   def execute(state, {:leader_progress, node}) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
     timer = WhichKey.start_timeout()
+    prefix_keys = leader_keys_from_mode(state)
 
     # When the leader walk reaches SPC m, substitute the filetype-specific
     # trie based on the active buffer's filetype. This makes SPC m t resolve
@@ -125,7 +133,8 @@ defmodule Minga.Editor.Commands do
     whichkey = %EditorState.WhichKey{
       node: effective_node,
       timer: timer,
-      show: state.whichkey.show
+      show: state.whichkey.show,
+      prefix_keys: prefix_keys
     }
 
     {state, {:whichkey_update, whichkey}}
@@ -134,7 +143,24 @@ defmodule Minga.Editor.Commands do
   def execute(state, :leader_cancel) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
 
-    whichkey = %EditorState.WhichKey{node: nil, timer: nil, show: false}
+    whichkey = %EditorState.WhichKey{
+      node: nil,
+      timer: nil,
+      show: false,
+      prefix_keys: [],
+      page: 0
+    }
+
+    {state, {:whichkey_update, whichkey}}
+  end
+
+  def execute(state, :whichkey_next_page) do
+    whichkey = %{state.whichkey | page: state.whichkey.page + 1}
+    {state, {:whichkey_update, whichkey}}
+  end
+
+  def execute(state, :whichkey_prev_page) do
+    whichkey = %{state.whichkey | page: max(state.whichkey.page - 1, 0)}
     {state, {:whichkey_update, whichkey}}
   end
 
@@ -876,6 +902,16 @@ defmodule Minga.Editor.Commands do
 
   # When the leader sequence reaches SPC m, swap the which-key node with the
   # filetype-specific trie so the next key resolves filetype-scoped bindings.
+  # Extracts the accumulated leader key labels from mode_state (stored in
+  # reverse order, e.g. ["f", "SPC"]) and reverses them to display order.
+  @spec leader_keys_from_mode(EditorState.t()) :: [String.t()]
+  defp leader_keys_from_mode(%{vim: %{mode_state: %{leader_keys: keys}}})
+       when is_list(keys) do
+    Enum.reverse(keys)
+  end
+
+  defp leader_keys_from_mode(_state), do: []
+
   # Also updates mode_state.leader_node so the mode FSM uses the same trie.
   @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
           {Bindings.node_t(), EditorState.t()}

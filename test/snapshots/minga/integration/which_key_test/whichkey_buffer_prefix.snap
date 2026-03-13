@@ -14,16 +14,16 @@
 09│   ~
 10│   ~
 11│   ~
-12│────────────────────────────────────────────────────────────────────────────────
-13│  B       Switch buffer (all)
-14│  N       New empty buffer
-15│  W       View warnings
-16│  b       Switch buffer
-17│  d       Kill buffer
-18│  m       View messages
-19│  n       Next buffer
-20│  p       Previous buffer
-21│  s       Switch to scratch
+12│   ~
+13│   ~
+14│   ~
+15│   ~
+16│   ~
+17│╭─────────────────────────────────── SPC b ────────────────────────────────────╮
+18││B : Switch buffer (all)  b : Switch buffer        n : Next buffer             │
+19││N : New empty buffer     d : Kill buffer          p : Previous buffer         │
+20││W : View warnings        m : View messages        s : Switch to scratch       │
+21│╰──────────────────────────────────────────────────────────────────────────────╯
 22│ NORMAL  [scratch]                                               Text  1:1  Top
 23│
 ────────────────────────────────────────────────────────────────────────────────

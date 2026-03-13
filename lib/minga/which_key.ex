@@ -28,16 +28,21 @@ defmodule Minga.WhichKey do
   import Bitwise
 
   alias Minga.Keymap.Bindings
+  alias Minga.WhichKey.Icons
 
   defmodule Binding do
     @moduledoc "A formatted key binding entry for which-key popup display."
 
-    @enforce_keys [:key, :description]
-    defstruct [:key, :description]
+    @enforce_keys [:key, :description, :kind]
+    defstruct [:key, :description, :kind, :icon]
+
+    @type kind :: :command | :group
 
     @type t :: %__MODULE__{
             key: String.t(),
-            description: String.t()
+            description: String.t(),
+            kind: kind(),
+            icon: String.t() | nil
           }
   end
 
@@ -98,7 +103,8 @@ defmodule Minga.WhichKey do
   """
   @spec format_key(Bindings.key()) :: String.t()
   def format_key({32, 0}), do: "SPC"
-
+  def format_key({9, _}), do: "TAB"
+  def format_key({13, _}), do: "RET"
   def format_key({27, _}), do: "ESC"
 
   def format_key({codepoint, modifiers}) do
@@ -115,14 +121,20 @@ defmodule Minga.WhichKey do
   ## Examples
 
       iex> Minga.WhichKey.format_bindings([{{?j, 0}, "Move cursor down"}])
-      [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down"}]
+      [%Minga.WhichKey.Binding{key: "j", description: "Move cursor down", kind: :command, icon: nil}]
   """
   @spec format_bindings([{Bindings.key(), String.t() | atom()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
     Enum.map(children, fn {key, label} ->
+      desc = format_label(label)
+      kind = if group_label?(desc), do: :group, else: :command
+      icon = if kind == :group, do: Icons.for_group(desc)
+
       %Binding{
         key: format_key(key),
-        description: format_label(label)
+        description: desc,
+        kind: kind,
+        icon: icon
       }
     end)
   end
@@ -137,26 +149,6 @@ defmodule Minga.WhichKey do
     |> Bindings.children()
     |> format_bindings()
     |> Enum.sort_by(& &1.key)
-  end
-
-  @doc """
-  Renders a which-key popup as a plain-text list of columns.
-
-  Returns a list of strings, one per row, each of the form `"  key  description"`.
-  Suitable for drawing with the port renderer.
-
-  ## Examples
-
-      iex> alias Minga.WhichKey.Binding
-      iex> Minga.WhichKey.render_popup([%Binding{key: "j", description: "Move down"}])
-      ["  j       Move down"]
-  """
-  @spec render_popup([binding()]) :: [String.t()]
-  def render_popup(bindings) when is_list(bindings) do
-    Enum.map(bindings, fn %Binding{key: key, description: desc} ->
-      padded_key = String.pad_trailing(key, 8)
-      "  #{padded_key}#{desc}"
-    end)
   end
 
   # ── Private ───────────────────────────────────────────────────────────────────
@@ -179,4 +171,8 @@ defmodule Minga.WhichKey do
   defp format_label(:prefix), do: "+prefix"
   defp format_label(:unknown), do: "?"
   defp format_label(label) when is_atom(label), do: Atom.to_string(label)
+
+  @spec group_label?(String.t()) :: boolean()
+  defp group_label?("+" <> _), do: true
+  defp group_label?(_), do: false
 end

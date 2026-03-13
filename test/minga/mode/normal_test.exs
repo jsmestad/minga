@@ -315,6 +315,34 @@ defmodule Minga.Mode.NormalTest do
     end
   end
 
+  describe "which-key pagination during leader mode" do
+    test "Ctrl+D emits :whichkey_next_page without cancelling leader" do
+      leader_trie = Defaults.leader_trie()
+
+      state =
+        fresh_state()
+        |> Map.put(:leader_node, leader_trie)
+        |> Map.put(:leader_keys, ["SPC"])
+
+      {:execute, :whichkey_next_page, new_state} = Normal.handle_key({?d, 0x02}, state)
+      assert new_state.leader_node == leader_trie
+      assert new_state.leader_keys == ["SPC"]
+    end
+
+    test "Ctrl+U emits :whichkey_prev_page without cancelling leader" do
+      leader_trie = Defaults.leader_trie()
+
+      state =
+        fresh_state()
+        |> Map.put(:leader_node, leader_trie)
+        |> Map.put(:leader_keys, ["SPC"])
+
+      {:execute, :whichkey_prev_page, new_state} = Normal.handle_key({?u, 0x02}, state)
+      assert new_state.leader_node == leader_trie
+      assert new_state.leader_keys == ["SPC"]
+    end
+  end
+
   describe "unknown keys" do
     test "unknown key produces {:continue, state}" do
       assert {:continue, state} = Normal.handle_key({?z, 0}, fresh_state())
