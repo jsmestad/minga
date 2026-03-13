@@ -29,6 +29,7 @@ defmodule Minga.Agent.Event do
           | tool_approval()
           | tool_file_changed()
           | context_usage()
+          | turn_limit_reached()
           | error()
 
   @typedoc "Agent has started processing a prompt."
@@ -85,6 +86,12 @@ defmodule Minga.Agent.Event do
   @type context_usage :: %__MODULE__.ContextUsage{
           estimated_tokens: non_neg_integer(),
           context_limit: non_neg_integer() | nil
+        }
+
+  @typedoc "The agent reached its per-prompt turn limit."
+  @type turn_limit_reached :: %__MODULE__.TurnLimitReached{
+          current: non_neg_integer(),
+          limit: pos_integer()
         }
 
   @typedoc "An error occurred in the agent."
@@ -184,6 +191,17 @@ defmodule Minga.Agent.Event do
     @type t :: %__MODULE__{
             estimated_tokens: non_neg_integer(),
             context_limit: non_neg_integer() | nil
+          }
+  end
+
+  defmodule TurnLimitReached do
+    @moduledoc false
+    @enforce_keys [:current, :limit]
+    defstruct [:current, :limit]
+
+    @type t :: %__MODULE__{
+            current: non_neg_integer(),
+            limit: pos_integer()
           }
   end
 
