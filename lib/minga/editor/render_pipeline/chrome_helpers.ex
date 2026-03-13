@@ -11,7 +11,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Config.Options
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.Modeline
@@ -109,12 +111,24 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   # ── Which-key ──────────────────────────────────────────────────────────────
 
   @doc "Renders the which-key popup overlay."
-  @spec render_whichkey(state(), Viewport.t()) :: [DisplayList.draw()]
-  def render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport)
+  @spec render_whichkey(state(), Viewport.t(), :bottom | :float) :: [DisplayList.draw()]
+  def render_whichkey(state, viewport, layout \\ Options.get(:whichkey_layout))
+
+  def render_whichkey(%{whichkey: %{show: true, node: node}, theme: theme}, viewport, layout)
       when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     lines = WhichKey.render_popup(bindings)
 
+    case layout do
+      :float -> render_whichkey_float(lines, theme, viewport)
+      _bottom -> render_whichkey_bottom(lines, theme, viewport)
+    end
+  end
+
+  def render_whichkey(_state, _viewport, _layout), do: []
+
+  @spec render_whichkey_bottom([String.t()], Theme.t(), Viewport.t()) :: [DisplayList.draw()]
+  defp render_whichkey_bottom(lines, theme, viewport) do
     popup_row = max(0, viewport.rows - 3 - length(lines))
 
     border =
@@ -133,7 +147,40 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     [border | content_draws]
   end
 
-  def render_whichkey(_state, _viewport), do: []
+  @spec render_whichkey_float([String.t()], Theme.t(), Viewport.t()) :: [DisplayList.draw()]
+  defp render_whichkey_float(lines, theme, viewport) do
+    popup_theme = %{
+      fg: theme.popup.fg,
+      bg: theme.popup.bg,
+      border_fg: theme.popup.border_fg,
+      title_fg: Map.get(theme.popup, :title_fg, theme.popup.border_fg)
+    }
+
+    # Size the float to fit the content with some padding.
+    # Width: widest line + border + padding, capped at 70%.
+    max_line_w = lines |> Enum.map(&String.length/1) |> Enum.max(fn -> 20 end)
+    content_w = min(max_line_w + 4, div(viewport.cols * 70, 100))
+    content_h = min(length(lines), div(viewport.rows * 60, 100))
+
+    content_draws =
+      lines
+      |> Enum.with_index()
+      |> Enum.map(fn {line_text, row} ->
+        DisplayList.draw(row, 0, line_text, fg: theme.popup.fg, bg: theme.popup.bg)
+      end)
+
+    spec = %FloatingWindow.Spec{
+      title: "Which Key",
+      content: content_draws,
+      width: {:cols, content_w + 2},
+      height: {:rows, content_h + 2},
+      border: :rounded,
+      theme: popup_theme,
+      viewport: {viewport.rows, viewport.cols}
+    }
+
+    FloatingWindow.render(spec)
+  end
 
   # ── Agent panel ────────────────────────────────────────────────────────────
 
