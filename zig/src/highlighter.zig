@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
+const query_loader = @import("query_loader.zig");
 
 /// A highlight span: byte range + capture index.
 /// `pattern_index` is used for priority sorting (higher = more specific)
@@ -962,50 +963,59 @@ extern fn tree_sitter_diff() ?*const c.TSLanguage;
 extern fn tree_sitter_elisp() ?*const c.TSLanguage;
 
 
-const query_dir = "queries/";
+/// Helper to resolve a highlight query via the query_loader, which handles
+/// `; inherits:` directives at comptime. All parent queries are prepended
+/// automatically before the query reaches ts_query_new.
+fn ql(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .highlights);
+}
+
+/// Helper to resolve an injection query via the query_loader.
+fn qlInj(comptime name: []const u8) ?[]const u8 {
+    return comptime query_loader.resolve(name, .injections);
+}
 
 const builtin_grammars = [_]BuiltinGrammar{
-    .{ .name = "elixir", .func = tree_sitter_elixir, .query = @embedFile(query_dir ++ "elixir/highlights.scm") },
+    .{ .name = "elixir", .func = tree_sitter_elixir, .query = ql("elixir"), .injection_query = qlInj("elixir") },
     .{ .name = "heex", .func = tree_sitter_heex },
-    .{ .name = "json", .func = tree_sitter_json, .query = @embedFile(query_dir ++ "json/highlights.scm") },
-    .{ .name = "yaml", .func = tree_sitter_yaml, .query = @embedFile(query_dir ++ "yaml/highlights.scm") },
-    .{ .name = "toml", .func = tree_sitter_toml, .query = @embedFile(query_dir ++ "toml/highlights.scm") },
-    .{ .name = "markdown", .func = tree_sitter_markdown, .query = @embedFile(query_dir ++ "markdown/highlights.scm"), .injection_query = @embedFile(query_dir ++ "markdown/injections.scm") },
-    .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = @embedFile(query_dir ++ "markdown_inline/highlights.scm"), .injection_query = @embedFile(query_dir ++ "markdown_inline/injections.scm") },
-    .{ .name = "ruby", .func = tree_sitter_ruby, .query = @embedFile(query_dir ++ "ruby/highlights.scm") },
-    .{ .name = "javascript", .func = tree_sitter_javascript, .query = @embedFile(query_dir ++ "javascript/highlights.scm") },
-    .{ .name = "typescript", .func = tree_sitter_typescript, .query = @embedFile(query_dir ++ "typescript/highlights.scm") },
-    .{ .name = "tsx", .func = tree_sitter_tsx, .query = @embedFile(query_dir ++ "tsx/highlights.scm") },
-    .{ .name = "go", .func = tree_sitter_go, .query = @embedFile(query_dir ++ "go/highlights.scm") },
-    .{ .name = "rust", .func = tree_sitter_rust, .query = @embedFile(query_dir ++ "rust/highlights.scm") },
-    .{ .name = "zig", .func = tree_sitter_zig, .query = @embedFile(query_dir ++ "zig/highlights.scm") },
-    .{ .name = "erlang", .func = tree_sitter_erlang, .query = @embedFile(query_dir ++ "erlang/highlights.scm") },
-    .{ .name = "bash", .func = tree_sitter_bash, .query = @embedFile(query_dir ++ "bash/highlights.scm") },
-    .{ .name = "c", .func = tree_sitter_c, .query = @embedFile(query_dir ++ "c/highlights.scm") },
-    .{ .name = "cpp", .func = tree_sitter_cpp, .query = @embedFile(query_dir ++ "cpp/highlights.scm") },
-    .{ .name = "html", .func = tree_sitter_html, .query = @embedFile(query_dir ++ "html/highlights.scm") },
-    .{ .name = "css", .func = tree_sitter_css, .query = @embedFile(query_dir ++ "css/highlights.scm") },
-    .{ .name = "lua", .func = tree_sitter_lua, .query = @embedFile(query_dir ++ "lua/highlights.scm") },
-    .{ .name = "python", .func = tree_sitter_python, .query = @embedFile(query_dir ++ "python/highlights.scm") },
-    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = @embedFile(query_dir ++ "kotlin/highlights.scm") },
-    .{ .name = "gleam", .func = tree_sitter_gleam, .query = @embedFile(query_dir ++ "gleam/highlights.scm") },
-    .{ .name = "java", .func = tree_sitter_java, .query = @embedFile(query_dir ++ "java/highlights.scm") },
-    .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = @embedFile(query_dir ++ "c_sharp/highlights.scm") },
-    .{ .name = "php", .func = tree_sitter_php_only, .query = @embedFile(query_dir ++ "php/highlights.scm") },
-    .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = @embedFile(query_dir ++ "dockerfile/highlights.scm") },
-    .{ .name = "hcl", .func = tree_sitter_hcl, .query = @embedFile(query_dir ++ "hcl/highlights.scm") },
-    .{ .name = "scss", .func = tree_sitter_scss, .query = @embedFile(query_dir ++ "scss/highlights.scm") },
-    .{ .name = "graphql", .func = tree_sitter_graphql, .query = @embedFile(query_dir ++ "graphql/highlights.scm") },
-    .{ .name = "nix", .func = tree_sitter_nix, .query = @embedFile(query_dir ++ "nix/highlights.scm") },
-    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = @embedFile(query_dir ++ "ocaml/highlights.scm") },
-    .{ .name = "haskell", .func = tree_sitter_haskell, .query = @embedFile(query_dir ++ "haskell/highlights.scm") },
-    .{ .name = "scala", .func = tree_sitter_scala, .query = @embedFile(query_dir ++ "scala/highlights.scm") },
-    .{ .name = "r", .func = tree_sitter_r, .query = @embedFile(query_dir ++ "r/highlights.scm") },
-    .{ .name = "dart", .func = tree_sitter_dart, .query = @embedFile(query_dir ++ "dart/highlights.scm") },
-    .{ .name = "make", .func = tree_sitter_make, .query = @embedFile(query_dir ++ "make/highlights.scm") },
-    .{ .name = "diff", .func = tree_sitter_diff, .query = @embedFile(query_dir ++ "diff/highlights.scm") },
-    .{ .name = "elisp", .func = tree_sitter_elisp, .query = @embedFile(query_dir ++ "elisp/highlights.scm") },
-
+    .{ .name = "json", .func = tree_sitter_json, .query = ql("json") },
+    .{ .name = "yaml", .func = tree_sitter_yaml, .query = ql("yaml") },
+    .{ .name = "toml", .func = tree_sitter_toml, .query = ql("toml") },
+    .{ .name = "markdown", .func = tree_sitter_markdown, .query = ql("markdown"), .injection_query = qlInj("markdown") },
+    .{ .name = "markdown_inline", .func = tree_sitter_markdown_inline, .query = ql("markdown_inline"), .injection_query = qlInj("markdown_inline") },
+    .{ .name = "ruby", .func = tree_sitter_ruby, .query = ql("ruby") },
+    .{ .name = "javascript", .func = tree_sitter_javascript, .query = ql("javascript"), .injection_query = qlInj("javascript") },
+    .{ .name = "typescript", .func = tree_sitter_typescript, .query = ql("typescript") },
+    .{ .name = "tsx", .func = tree_sitter_tsx, .query = ql("tsx") },
+    .{ .name = "go", .func = tree_sitter_go, .query = ql("go") },
+    .{ .name = "rust", .func = tree_sitter_rust, .query = ql("rust"), .injection_query = qlInj("rust") },
+    .{ .name = "zig", .func = tree_sitter_zig, .query = ql("zig"), .injection_query = qlInj("zig") },
+    .{ .name = "erlang", .func = tree_sitter_erlang, .query = ql("erlang") },
+    .{ .name = "bash", .func = tree_sitter_bash, .query = ql("bash") },
+    .{ .name = "c", .func = tree_sitter_c, .query = ql("c") },
+    .{ .name = "cpp", .func = tree_sitter_cpp, .query = ql("cpp"), .injection_query = qlInj("cpp") },
+    .{ .name = "html", .func = tree_sitter_html, .query = ql("html"), .injection_query = qlInj("html") },
+    .{ .name = "css", .func = tree_sitter_css, .query = ql("css") },
+    .{ .name = "lua", .func = tree_sitter_lua, .query = ql("lua"), .injection_query = qlInj("lua") },
+    .{ .name = "python", .func = tree_sitter_python, .query = ql("python") },
+    .{ .name = "kotlin", .func = tree_sitter_kotlin, .query = ql("kotlin") },
+    .{ .name = "gleam", .func = tree_sitter_gleam, .query = ql("gleam"), .injection_query = qlInj("gleam") },
+    .{ .name = "java", .func = tree_sitter_java, .query = ql("java") },
+    .{ .name = "c_sharp", .func = tree_sitter_c_sharp, .query = ql("c_sharp") },
+    .{ .name = "php", .func = tree_sitter_php_only, .query = ql("php") },
+    .{ .name = "dockerfile", .func = tree_sitter_dockerfile, .query = ql("dockerfile") },
+    .{ .name = "hcl", .func = tree_sitter_hcl, .query = ql("hcl") },
+    .{ .name = "scss", .func = tree_sitter_scss, .query = ql("scss") },
+    .{ .name = "graphql", .func = tree_sitter_graphql, .query = ql("graphql") },
+    .{ .name = "nix", .func = tree_sitter_nix, .query = ql("nix") },
+    .{ .name = "ocaml", .func = tree_sitter_ocaml, .query = ql("ocaml") },
+    .{ .name = "haskell", .func = tree_sitter_haskell, .query = ql("haskell") },
+    .{ .name = "scala", .func = tree_sitter_scala, .query = ql("scala") },
+    .{ .name = "r", .func = tree_sitter_r, .query = ql("r") },
+    .{ .name = "dart", .func = tree_sitter_dart, .query = ql("dart") },
+    .{ .name = "make", .func = tree_sitter_make, .query = ql("make") },
+    .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff") },
+    .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────
