@@ -22,19 +22,22 @@ defmodule Minga.Agent.Memory do
 
   @doc """
   Returns the full path to the memory file.
+
+  Accepts an optional `config_dir` override for testing. When nil (the
+  default), uses `$XDG_CONFIG_HOME` or `~/.config`.
   """
-  @spec path() :: String.t()
-  def path do
-    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
-    Path.join([config_dir, "minga", @memory_filename])
+  @spec path(String.t() | nil) :: String.t()
+  def path(config_dir \\ nil) do
+    base = config_dir || System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+    Path.join([base, "minga", @memory_filename])
   end
 
   @doc """
   Reads the memory file and returns its content, or nil if it doesn't exist.
   """
-  @spec read() :: String.t() | nil
-  def read do
-    case File.read(path()) do
+  @spec read(String.t() | nil) :: String.t() | nil
+  def read(config_dir \\ nil) do
+    case File.read(path(config_dir)) do
       {:ok, ""} -> nil
       {:ok, content} -> content
       {:error, _} -> nil
@@ -46,9 +49,9 @@ defmodule Minga.Agent.Memory do
 
   Creates the file and parent directories if they don't exist.
   """
-  @spec append(String.t()) :: :ok | {:error, term()}
-  def append(text) when is_binary(text) do
-    file_path = path()
+  @spec append(String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def append(text, config_dir \\ nil) when is_binary(text) do
+    file_path = path(config_dir)
     dir = Path.dirname(file_path)
 
     with :ok <- File.mkdir_p(dir) do
@@ -65,9 +68,9 @@ defmodule Minga.Agent.Memory do
   Returns nil if no memory exists or the file is empty. Includes a warning
   when the memory file is approaching the token budget.
   """
-  @spec for_prompt() :: String.t() | nil
-  def for_prompt do
-    case read() do
+  @spec for_prompt(String.t() | nil) :: String.t() | nil
+  def for_prompt(config_dir \\ nil) do
+    case read(config_dir) do
       nil ->
         nil
 
@@ -92,18 +95,18 @@ defmodule Minga.Agent.Memory do
   @doc """
   Shows the current memory file content with stats.
   """
-  @spec summary() :: String.t()
-  def summary do
-    case read() do
+  @spec summary(String.t() | nil) :: String.t()
+  def summary(config_dir \\ nil) do
+    case read(config_dir) do
       nil ->
-        "No memory file found at #{path()}\n" <>
+        "No memory file found at #{path(config_dir)}\n" <>
           "Use /remember <text> to start building your memory."
 
       content ->
         lines = String.split(content, "\n", trim: true)
         estimated_tokens = div(String.length(content), 4)
 
-        "Memory file: #{path()}\n" <>
+        "Memory file: #{path(config_dir)}\n" <>
           "  Entries: #{length(lines)}\n" <>
           "  Estimated tokens: #{estimated_tokens}/#{@max_tokens}\n\n" <>
           content
@@ -113,9 +116,9 @@ defmodule Minga.Agent.Memory do
   @doc """
   Clears the memory file.
   """
-  @spec clear() :: :ok | {:error, term()}
-  def clear do
-    case File.rm(path()) do
+  @spec clear(String.t() | nil) :: :ok | {:error, term()}
+  def clear(config_dir \\ nil) do
+    case File.rm(path(config_dir)) do
       :ok -> :ok
       {:error, :enoent} -> :ok
       {:error, reason} -> {:error, reason}
