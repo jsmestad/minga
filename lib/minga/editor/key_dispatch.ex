@@ -32,13 +32,13 @@ defmodule Minga.Editor.KeyDispatch do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
-    old_mode = state.mode
+    old_mode = state.vim.mode
 
     # Route through EditingModel.Vim, which delegates to Mode.process/3.
     # This proves the EditingModel abstraction under real load. When CUA
     # (#306) arrives, this call site dispatches through the active editing
     # model instead of hardcoding Vim.
-    vim_state = VimModel.from_editor(old_mode, state.mode_state)
+    vim_state = VimModel.from_editor(old_mode, state.vim.mode_state)
     {new_mode, commands, new_vim_state} = VimModel.process_key(vim_state, key)
     {_, new_mode_state} = VimModel.to_editor(new_vim_state)
 
@@ -61,7 +61,7 @@ defmodule Minga.Editor.KeyDispatch do
     new_mode_state =
       ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
 
-    base_state = %{state | mode: new_mode, mode_state: new_mode_state}
+    base_state = %{state | vim: %{state.vim | mode: new_mode, mode_state: new_mode_state}}
 
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do
@@ -78,10 +78,10 @@ defmodule Minga.Editor.KeyDispatch do
 
     # Clean up mode_state if we've transitioned back to Normal.
     # Skip if a command changed the mode (e.g. substitute confirm, search).
-    if new_mode == :normal and old_mode != :normal and after_commands.mode == :normal do
-      case after_commands.mode_state do
+    if new_mode == :normal and old_mode != :normal and after_commands.vim.mode == :normal do
+      case after_commands.vim.mode_state do
         %Mode.State{} -> after_commands
-        _ -> %{after_commands | mode_state: Mode.initial_state()}
+        _ -> %{after_commands | vim: %{after_commands.vim | mode_state: Mode.initial_state()}}
       end
     else
       after_commands

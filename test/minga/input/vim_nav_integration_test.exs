@@ -14,15 +14,13 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
-  alias Minga.Mode
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -55,18 +53,13 @@ defmodule Minga.Input.VimNavIntegrationTest do
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
       buffers: %{active: nil, list: [], recent: []},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       status_msg: nil,
-      marks: %{},
-      change_recorder: ChangeRecorder.new(),
-      macro_recorder: MacroRecorder.new(),
       agent: agent,
       agentic: agentic,
       completion: nil,
       keymap_scope: :file_tree,
-      focus_stack: [Scoped, Minga.Input.ModeFSM],
-      reg: %Minga.Editor.State.Registers{}
+      focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end
 
@@ -127,21 +120,21 @@ defmodule Minga.Input.VimNavIntegrationTest do
       # i is not a tree-specific key, so it delegates to mode FSM
       # The mode FSM should block insert on read-only buffer
       {:handled, state} = walk_surface_handlers(state, ?i, 0)
-      assert state.mode == :normal
+      assert state.vim.mode == :normal
     end
 
     test "a does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
       {:handled, state} = walk_surface_handlers(state, ?a, 0)
-      assert state.mode == :normal
+      assert state.vim.mode == :normal
     end
 
     test "o does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
       {:handled, state} = walk_surface_handlers(state, ?o, 0)
-      assert state.mode == :normal
+      assert state.vim.mode == :normal
     end
   end
 
@@ -213,7 +206,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
       # g should delegate to mode FSM (pending_g)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      assert state.mode_state.pending_g == true
+      assert state.vim.mode_state.pending_g == true
 
       # second g should trigger gg (go to top)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)

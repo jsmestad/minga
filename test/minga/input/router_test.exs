@@ -5,9 +5,9 @@ defmodule Minga.Input.RouterTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input
   alias Minga.Input.Router
-  alias Minga.Mode
 
   defp base_state do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld\nthird")
@@ -15,8 +15,7 @@ defmodule Minga.Input.RouterTest do
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{
         active: buf,
         list: [buf],

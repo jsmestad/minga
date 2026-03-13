@@ -17,7 +17,10 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
+  alias Minga.Editor.State
   alias Minga.Editor.State.Registers
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
 
   setup :verify_on_exit!
 
@@ -39,7 +42,15 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
   end
 
   defp make_state do
-    %{reg: %Registers{}}
+    %State{
+      port_manager: nil,
+      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
+      vim: %VimState{
+        mode: :normal,
+        mode_state: nil,
+        reg: %Registers{}
+      }
+    }
   end
 
   defp clipboard_contents(agent) do
@@ -65,7 +76,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "named register also syncs to clipboard", %{clipboard: agent} do
       sentinel = "named-sync-#{System.unique_integer([:positive])}"
-      state = %{make_state() | reg: %{%Registers{} | active: "a"}}
+      state = put_in(make_state().vim.reg.active, "a")
       Helpers.put_register(state, sentinel, :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
@@ -74,7 +85,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "black hole register does not sync to clipboard", %{clipboard: agent} do
       sentinel = "blackhole-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
-      state = %{make_state() | reg: %{%Registers{} | active: "_"}}
+      state = put_in(make_state().vim.reg.active, "_")
       Helpers.put_register(state, "should not appear", :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
@@ -82,7 +93,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "explicit + register still works", %{clipboard: agent} do
       sentinel = "explicit-clip-#{System.unique_integer([:positive])}"
-      state = %{make_state() | reg: %{%Registers{} | active: "+"}}
+      state = put_in(make_state().vim.reg.active, "+")
       Helpers.put_register(state, sentinel, :yank, :unnamedplus)
 
       assert clipboard_contents(agent) == sentinel
@@ -101,7 +112,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "explicit + register still works even with clipboard: :none", %{clipboard: agent} do
       sentinel = "none-explicit-#{System.unique_integer([:positive])}"
-      state = %{make_state() | reg: %{%Registers{} | active: "+"}}
+      state = put_in(make_state().vim.reg.active, "+")
       Helpers.put_register(state, sentinel, :yank, :none)
 
       assert clipboard_contents(agent) == sentinel
@@ -138,7 +149,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       state = make_state()
       sentinel = "reg-a-#{System.unique_integer([:positive])}"
       state = Helpers.put_in_register(state, "a", sentinel)
-      state = %{state | reg: %{state.reg | active: "a"}}
+      state = put_in(state.vim.reg.active, "a")
 
       {text, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel

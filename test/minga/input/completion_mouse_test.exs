@@ -5,6 +5,7 @@ defmodule Minga.Input.CompletionMouseTest do
   alias Minga.Completion
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input.Completion, as: CompletionInput
   alias Minga.Mode
 
@@ -14,8 +15,7 @@ defmodule Minga.Input.CompletionMouseTest do
 
     %EditorState{
       port_manager: nil,
-      mode: :insert,
-      mode_state: Mode.initial_state(),
+      vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
       completion: completion
     }
@@ -51,8 +51,7 @@ defmodule Minga.Input.CompletionMouseTest do
     test "passes through when no completion is active" do
       state = %EditorState{
         port_manager: nil,
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
         completion: nil
       }
@@ -62,7 +61,7 @@ defmodule Minga.Input.CompletionMouseTest do
 
     test "passes through when in normal mode even with completion" do
       state = completion_state(sample_items())
-      state = %{state | mode: :normal}
+      state = %{state | vim: %{state.vim | mode: :normal}}
       {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
     end
   end

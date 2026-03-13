@@ -8,13 +8,13 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
 
   defp base_state do
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Minga.Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{},
       agent: %AgentState{},
       agentic: %ViewState{}

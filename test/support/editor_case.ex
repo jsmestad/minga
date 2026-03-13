@@ -258,7 +258,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the current editor mode."
   @spec editor_mode(editor_ctx()) :: atom()
   def editor_mode(%{editor: editor}) do
-    :sys.get_state(editor).mode
+    :sys.get_state(editor).vim.mode
   end
 
   @doc "Returns the buffer cursor position."

@@ -17,10 +17,10 @@ defmodule Minga.Editor.RenderPipelineTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.{Buffers, Highlighting, Windows}
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input
-  alias Minga.Mode
   alias Minga.Theme
 
   # ── Test helpers ───────────────────────────────────────────────────────────
@@ -37,8 +37,7 @@ defmodule Minga.Editor.RenderPipelineTest do
     %EditorState{
       port_manager: self(),
       viewport: Viewport.new(rows, cols),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       windows: %Windows{
         tree: WindowTree.new(win_id),
@@ -598,7 +597,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       # Simulate entering visual mode (changes visual_selection in context).
       # Visual mode uses VisualState as the mode_state, not a nested field.
       visual_state = %Minga.Mode.VisualState{visual_type: :char, visual_anchor: {0, 0}}
-      state = %{state | mode: :visual, mode_state: visual_state}
+      state = %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
 
       # Frame 2: context fingerprint will change due to visual selection
       state = RenderPipeline.run(state)

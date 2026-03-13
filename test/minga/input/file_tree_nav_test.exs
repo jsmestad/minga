@@ -5,16 +5,14 @@ defmodule Minga.Input.FileTreeNavTest do
 
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Input.FileTreeHandler
-  alias Minga.Mode
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -43,12 +41,8 @@ defmodule Minga.Input.FileTreeNavTest do
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
       buffers: %{active: nil, list: [], recent: []},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       status_msg: nil,
-      marks: %{},
-      change_recorder: ChangeRecorder.new(),
-      macro_recorder: MacroRecorder.new(),
       agent: agent,
       agentic: agentic,
       completion: nil,

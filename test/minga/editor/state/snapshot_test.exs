@@ -8,15 +8,17 @@ defmodule Minga.Editor.State.SnapshotTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
+  alias Minga.Mode
 
   defp make_state(opts \\ []) do
     buf = Keyword.get(opts, :buffer)
+    mode = Keyword.get(opts, :mode, :normal)
 
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
-      mode: Keyword.get(opts, :mode, :normal),
-      mode_state: Minga.Mode.initial_state(),
+      vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
       buffers: %Buffers{
         active: buf,
         list: if(buf, do: [buf], else: []),
@@ -37,7 +39,7 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       # Per-tab fields stored directly
       assert ctx.keymap_scope == :agent
-      assert ctx.mode == :insert
+      assert ctx.vim.mode == :insert
       assert ctx.buffers.active == buf
       assert ctx.windows == state.windows
 
@@ -53,7 +55,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state)
 
       assert ctx.buffers.active == buf
-      assert ctx.mode == :insert
+      assert ctx.vim == state.vim
       assert ctx.viewport == state.viewport
       assert ctx.mouse == state.mouse
       assert ctx.highlight == state.highlight
@@ -64,12 +66,6 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert ctx.injection_ranges == state.injection_ranges
       assert ctx.search == state.search
       assert ctx.pending_conflict == state.pending_conflict
-      assert ctx.reg == state.reg
-      assert ctx.marks == state.marks
-      assert ctx.last_jump_pos == state.last_jump_pos
-      assert ctx.last_find_char == state.last_find_char
-      assert ctx.change_recorder == state.change_recorder
-      assert ctx.macro_recorder == state.macro_recorder
     end
   end
 
@@ -85,7 +81,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.mode == :insert
+      assert restored.vim.mode == :insert
       assert restored.keymap_scope == :editor
       assert restored.buffers.active == buf_b
     end
@@ -113,7 +109,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       # Oldest format: bare fields like :active_buffer
       ctx = %{
         mode: :insert,
-        mode_state: Minga.Mode.initial_state(),
+        mode_state: Mode.initial_state(),
         keymap_scope: :editor,
         active_buffer: buf_b,
         active_buffer_index: 1
@@ -121,7 +117,7 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.keymap_scope == :editor
-      assert restored.mode == :insert
+      assert restored.vim.mode == :insert
       assert restored.buffers.active == buf_b
       assert restored.buffers.active_index == 1
     end
@@ -129,7 +125,7 @@ defmodule Minga.Editor.State.SnapshotTest do
     test "handles empty context gracefully" do
       state = make_state()
       restored = EditorState.restore_tab_context(state, %{})
-      assert restored.mode == :normal
+      assert restored.vim.mode == :normal
       assert restored.keymap_scope == :editor
     end
   end
@@ -160,14 +156,14 @@ defmodule Minga.Editor.State.SnapshotTest do
       switched = EditorState.switch_tab(state, tab_b.id)
 
       # Should have restored tab b's context
-      assert switched.mode == :insert
+      assert switched.vim.mode == :insert
       assert switched.buffers.active == buf_b
       assert switched.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context
       saved_a = TabBar.get(switched.tab_bar, tab_a.id)
       assert saved_a.context.keymap_scope == :editor
-      assert saved_a.context.mode == :normal
+      assert saved_a.context.vim.mode == :normal
       assert saved_a.context.buffers.active == buf_a
     end
 

@@ -22,11 +22,11 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input.AgentSearch
   alias Minga.Input.DiffReview
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ToolApproval
-  alias Minga.Mode
   alias Minga.Scroll
 
   defp base_state(opts) do
@@ -65,8 +65,7 @@ defmodule Minga.Input.SubStateHandlersTest do
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),

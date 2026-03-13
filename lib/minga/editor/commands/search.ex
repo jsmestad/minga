@@ -18,7 +18,7 @@ defmodule Minga.Editor.Commands.Search do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{buffers: %{active: buf}, mode_state: %SearchState{} = ms} = state,
+        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
         :incremental_search
       ) do
     if ms.input == "" do
@@ -39,7 +39,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, mode_state: %SearchState{} = ms} = state,
+        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
         :confirm_search
       ) do
     content = BufferServer.content(buf)
@@ -61,7 +61,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, mode_state: %SearchState{} = ms} = state,
+        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
         :cancel_search
       ) do
     BufferServer.move_to(buf, ms.original_cursor)
@@ -165,7 +165,7 @@ defmodule Minga.Editor.Commands.Search do
     end
   end
 
-  def execute(%{mode_state: %{input: query}} = state, :confirm_project_search)
+  def execute(%{vim: %{mode_state: %{input: query}}} = state, :confirm_project_search)
       when is_binary(query) and query != "" do
     root = project_root()
 
@@ -191,7 +191,8 @@ defmodule Minga.Editor.Commands.Search do
 
   # Advance cursor to current match during substitute confirm
   def execute(
-        %{buffers: %{active: buf}, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}} =
+          state,
         :substitute_confirm_advance
       ) do
     case Enum.at(ms.matches, ms.current) do
@@ -206,7 +207,8 @@ defmodule Minga.Editor.Commands.Search do
 
   # Apply accepted substitutions from confirm mode
   def execute(
-        %{buffers: %{active: buf}, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms} = state,
+        %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}} =
+          state,
         :apply_substitute_confirm
       ) do
     accepted_set = MapSet.new(ms.accepted)
@@ -283,7 +285,7 @@ defmodule Minga.Editor.Commands.Search do
 
         state
         |> put_in_search(:last_pattern, pattern)
-        |> then(&%{&1 | mode: :substitute_confirm, mode_state: ms})
+        |> then(&%{&1 | vim: %{&1.vim | mode: :substitute_confirm, mode_state: ms}})
     end
   end
 

@@ -12,8 +12,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Highlight
-  alias Minga.Mode
   alias Minga.Test.HeadlessPort
 
   describe "buffer switch resets highlights" do
@@ -468,8 +468,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state()
+      vim: VimState.new()
     }
   end
 end

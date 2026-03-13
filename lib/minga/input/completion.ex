@@ -31,7 +31,11 @@ defmodule Minga.Input.Completion do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{mode: :insert, completion: %Completion{} = completion} = state, cp, mods) do
+  def handle_key(
+        %{vim: %{mode: :insert}, completion: %Completion{} = completion} = state,
+        cp,
+        mods
+      ) do
     case do_handle(state, completion, cp, mods) do
       {:handled, new_state} -> {:handled, new_state}
       :passthrough -> {:passthrough, state}
@@ -55,7 +59,7 @@ defmodule Minga.Input.Completion do
 
   # Completion popup active: intercept scroll and clicks
   def handle_mouse(
-        %{mode: :insert, completion: %Completion{} = completion} = state,
+        %{vim: %{mode: :insert}, completion: %Completion{} = completion} = state,
         row,
         col,
         button,

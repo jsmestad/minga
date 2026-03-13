@@ -24,9 +24,9 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Input
-  alias Minga.Mode
   alias Minga.Scroll
 
   # ── Helpers ──────────────────────────────────────────────────────────────
@@ -61,8 +61,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       windows: %Windows{
         tree: {:leaf, 1},

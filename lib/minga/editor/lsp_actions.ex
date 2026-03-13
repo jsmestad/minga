@@ -258,7 +258,7 @@ defmodule Minga.Editor.LspActions do
   @spec set_jump_mark(state()) :: state()
   defp set_jump_mark(%{buffers: %{active: buf}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | last_jump_pos: pos}
+    %{state | vim: %{state.vim | last_jump_pos: pos}}
   end
 
   defp set_jump_mark(state), do: state

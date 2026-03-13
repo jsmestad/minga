@@ -4,8 +4,8 @@ defmodule Minga.Input.PickerMouseTest do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input.Picker, as: PickerInput
-  alias Minga.Mode
   alias Minga.Picker, as: PickerData
 
   defmodule TestSource do
@@ -28,8 +28,7 @@ defmodule Minga.Input.PickerMouseTest do
 
     %EditorState{
       port_manager: nil,
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
       picker_ui: %Minga.Editor.State.Picker{picker: picker, source: TestSource}
     }
@@ -81,8 +80,7 @@ defmodule Minga.Input.PickerMouseTest do
     test "passes through when no picker is active" do
       state = %EditorState{
         port_manager: nil,
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: VimState.new(),
         viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0}
       }
 

@@ -774,7 +774,7 @@ defmodule Minga.Editor.RenderPipeline do
       if state.picker_ui.picker do
         :beam
       else
-        Modeline.cursor_shape(state.mode)
+        Modeline.cursor_shape(state.vim.mode)
       end
 
     # Cursor position (picker overrides mode overrides buffer position)

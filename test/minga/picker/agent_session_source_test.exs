@@ -10,7 +10,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
   alias Minga.Editor.State.{Tab, TabBar}
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
-  alias Minga.Mode
+  alias Minga.Editor.VimState
   alias Minga.Picker.AgentSessionSource
 
   describe "title/0" do
@@ -150,8 +150,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       agentic: %ViewState{active: true, focus: :chat},
       windows: %Windows{},
       file_tree: nil,
-      mode: :normal,
-      mode_state: %{},
+      vim: VimState.new(),
       keymap_scope: :agent,
       active_buffer: nil,
       active_buffer_index: 0
@@ -168,8 +167,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       tab_bar: tb,
       buffers: %Buffers{},
       windows: %Windows{},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       keymap_scope: :agent,
       agent: agent,
       agentic: agentic,
@@ -195,8 +193,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       tab_bar: tb,
       buffers: %Buffers{},
       windows: %Windows{},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       keymap_scope: :agent,
       agent: agent,
       agentic: agentic,
@@ -214,8 +211,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       agentic: %ViewState{active: true, focus: :chat},
       windows: %Windows{},
       file_tree: nil,
-      mode: :normal,
-      mode_state: %{},
+      vim: VimState.new(),
       keymap_scope: :agent,
       active_buffer: nil,
       active_buffer_index: 0
@@ -234,8 +230,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       tab_bar: tb,
       buffers: %Buffers{},
       windows: %Windows{},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       keymap_scope: :editor,
       agent: agent,
       agentic: agentic,

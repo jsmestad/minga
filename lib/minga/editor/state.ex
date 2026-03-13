@@ -20,13 +20,10 @@ defmodule Minga.Editor.State do
   """
 
   alias Minga.Agent.View.State, as: ViewState
-  alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -41,6 +38,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
@@ -52,34 +50,21 @@ defmodule Minga.Editor.State do
   # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
   alias Minga.Theme
 
-  @typedoc "Stored last find-char motion for ; and , repeat."
-  @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
-
-  @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name (single letter)."
-  @type marks :: %{pid() => %{String.t() => Document.position()}}
-
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
-  @enforce_keys [:port_manager, :viewport, :mode, :mode_state]
+  @enforce_keys [:port_manager, :viewport]
   defstruct port_manager: nil,
             viewport: nil,
-            mode: :normal,
-            mode_state: nil,
+            vim: VimState.new(),
             buffers: %Buffers{},
             picker_ui: %Picker{},
             whichkey: %WhichKey{},
             search: %Search{},
-            reg: %Registers{},
             mouse: %Mouse{},
-            last_find_char: nil,
-            change_recorder: ChangeRecorder.new(),
             theme: Minga.Theme.get!(:doom_one),
             status_msg: nil,
             pending_conflict: nil,
-            marks: %{},
-            last_jump_pos: nil,
-            macro_recorder: MacroRecorder.new(),
             highlight: %Highlighting{},
             lsp: DocumentSync.new(),
             completion: nil,
@@ -102,22 +87,15 @@ defmodule Minga.Editor.State do
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
           viewport: Viewport.t(),
-          mode: Mode.mode(),
-          mode_state: Mode.state(),
+          vim: VimState.t(),
           buffers: Buffers.t(),
           picker_ui: Picker.t(),
           whichkey: WhichKey.t(),
           search: Search.t(),
-          reg: Registers.t(),
           mouse: Mouse.t(),
-          last_find_char: last_find_char(),
-          change_recorder: ChangeRecorder.t(),
           theme: Theme.t(),
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,
-          marks: marks(),
-          last_jump_pos: Document.position() | nil,
-          macro_recorder: MacroRecorder.t(),
           highlight: Highlighting.t(),
           lsp: DocumentSync.t(),
           completion: Completion.t() | nil,
@@ -562,14 +540,7 @@ defmodule Minga.Editor.State do
       injection_ranges: state.injection_ranges,
       search: state.search,
       pending_conflict: state.pending_conflict,
-      mode: state.mode,
-      mode_state: state.mode_state,
-      reg: state.reg,
-      marks: state.marks,
-      last_jump_pos: state.last_jump_pos,
-      last_find_char: state.last_find_char,
-      change_recorder: state.change_recorder,
-      macro_recorder: state.macro_recorder
+      vim: state.vim
     }
   end
 
@@ -589,7 +560,9 @@ defmodule Minga.Editor.State do
       if map_size(context) == 0 do
         build_file_tab_defaults(state)
       else
-        maybe_migrate_legacy_context(state, context)
+        context
+        |> maybe_migrate_legacy_context(state)
+        |> maybe_migrate_vim_fields()
       end
 
     # Restore all per-tab fields from the context
@@ -608,14 +581,7 @@ defmodule Minga.Editor.State do
     |> maybe_restore(:injection_ranges, context)
     |> maybe_restore(:search, context)
     |> maybe_restore(:pending_conflict, context)
-    |> maybe_restore(:mode, context)
-    |> maybe_restore(:mode_state, context)
-    |> maybe_restore(:reg, context)
-    |> maybe_restore(:marks, context)
-    |> maybe_restore(:last_jump_pos, context)
-    |> maybe_restore(:last_find_char, context)
-    |> maybe_restore(:change_recorder, context)
-    |> maybe_restore(:macro_recorder, context)
+    |> maybe_restore(:vim, context)
   end
 
   # Builds a file-tab context for a brand-new tab. Returns the flat format
@@ -660,26 +626,28 @@ defmodule Minga.Editor.State do
       injection_ranges: %{},
       search: %Search{},
       pending_conflict: nil,
-      mode: :normal,
-      mode_state: Mode.initial_state(),
-      reg: %Registers{},
-      marks: %{},
-      last_jump_pos: nil,
-      last_find_char: nil,
-      change_recorder: ChangeRecorder.new(),
-      macro_recorder: MacroRecorder.new()
+      vim: VimState.new()
     }
   end
 
   # Migrates legacy contexts (old nested format or oldest
   # bare-field format) to the new flat format. If the context already
   # has the :buffers key (new format), returns it unchanged.
-  @spec maybe_migrate_legacy_context(t(), Tab.context()) :: Tab.context()
-  defp maybe_migrate_legacy_context(_state, %{buffers: _} = context), do: context
+  @spec maybe_migrate_legacy_context(Tab.context(), t()) :: Tab.context()
+  defp maybe_migrate_legacy_context(%{buffers: _} = context, _state), do: context
 
-  defp maybe_migrate_legacy_context(_state, %{surface_state: %{buffers: _} = ss} = context) do
+  defp maybe_migrate_legacy_context(%{surface_state: %{buffers: _} = ss} = context, _state) do
     # Extract fields from old nested snapshot format
-    vim = ss.editing || %{}
+    vim_map = ss.editing || %{}
+
+    vim = %VimState{
+      mode: Map.get(vim_map, :mode, :normal),
+      mode_state: Map.get(vim_map, :mode_state, Mode.initial_state()),
+      reg: Map.get(vim_map, :reg, %Registers{}),
+      marks: Map.get(vim_map, :marks, %{}),
+      last_jump_pos: Map.get(vim_map, :last_jump_pos),
+      last_find_char: Map.get(vim_map, :last_find_char)
+    }
 
     %{
       keymap_scope: Map.get(context, :keymap_scope, :editor),
@@ -696,25 +664,16 @@ defmodule Minga.Editor.State do
       injection_ranges: Map.get(ss, :injection_ranges, %{}),
       search: Map.get(ss, :search, %Search{}),
       pending_conflict: Map.get(ss, :pending_conflict),
-      mode: Map.get(vim, :mode, :normal),
-      mode_state: Map.get(vim, :mode_state, Mode.initial_state()),
-      reg: Map.get(vim, :reg, %Registers{}),
-      marks: Map.get(vim, :marks, %{}),
-      last_jump_pos: Map.get(vim, :last_jump_pos),
-      last_find_char: Map.get(vim, :last_find_char),
-      change_recorder: Map.get(vim, :change_recorder, ChangeRecorder.new()),
-      macro_recorder: Map.get(vim, :macro_recorder, MacroRecorder.new())
+      vim: vim
     }
   end
 
-  defp maybe_migrate_legacy_context(state, context) do
+  defp maybe_migrate_legacy_context(context, state) do
     # Oldest format: bare fields like :active_buffer, :windows, :mode
     temp =
       state
       |> maybe_restore(:windows, context)
       |> maybe_restore(:file_tree, context)
-      |> maybe_restore(:mode, context)
-      |> maybe_restore(:mode_state, context)
 
     temp =
       case Map.fetch(context, :active_buffer) do
@@ -726,7 +685,16 @@ defmodule Minga.Editor.State do
           temp
       end
 
-    snapshot_tab_fields(%{temp | keymap_scope: Map.get(context, :keymap_scope, :editor)})
+    temp = %{temp | keymap_scope: Map.get(context, :keymap_scope, :editor)}
+
+    # Build vim state from old fields (will be migrated by maybe_migrate_vim_fields)
+    # Preserve vim-related fields from the original context so they can be migrated
+    # Drop the vim field from the snapshot so maybe_migrate_vim_fields will migrate the flat fields
+    snapshot_tab_fields(temp)
+    |> Map.drop([:vim])
+    |> Map.merge(
+      Map.take(context, [:mode, :mode_state, :reg, :marks, :last_jump_pos, :last_find_char])
+    )
   end
 
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
@@ -756,6 +724,36 @@ defmodule Minga.Editor.State do
       :error -> state
     end
   end
+
+  # Migrates old contexts with separate vim fields to the new VimState substruct
+  @spec maybe_migrate_vim_fields(Tab.context()) :: Tab.context()
+  defp maybe_migrate_vim_fields(%{vim: _} = context), do: context
+
+  defp maybe_migrate_vim_fields(%{mode: mode} = context) do
+    vim = %VimState{
+      mode: mode,
+      mode_state: Map.get(context, :mode_state, Mode.initial_state()),
+      reg: Map.get(context, :reg, %Registers{}),
+      marks: Map.get(context, :marks, %{}),
+      last_jump_pos: Map.get(context, :last_jump_pos),
+      last_find_char: Map.get(context, :last_find_char)
+    }
+
+    context
+    |> Map.drop([
+      :mode,
+      :mode_state,
+      :reg,
+      :marks,
+      :last_jump_pos,
+      :last_find_char,
+      :change_recorder,
+      :macro_recorder
+    ])
+    |> Map.put(:vim, vim)
+  end
+
+  defp maybe_migrate_vim_fields(context), do: context
 
   @doc """
   Switches to the tab with `target_id`.
@@ -850,7 +848,7 @@ defmodule Minga.Editor.State do
   end
 
   @spec maybe_restart_incoming_spinner(t()) :: t()
-  defp maybe_restart_incoming_spinner(%__MODULE__{} = state) do
+  defp maybe_restart_incoming_spinner(state) do
     agent = AgentAccess.agent(state)
 
     if AgentState.busy?(agent) and agent.spinner_timer == nil do

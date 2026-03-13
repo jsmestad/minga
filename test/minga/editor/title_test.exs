@@ -7,9 +7,9 @@ defmodule Minga.Editor.TitleTest do
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Title
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Mode
 
   defp state_with(opts \\ []) do
     path = Keyword.get(opts, :path, "/home/user/project/lib/editor.ex")
@@ -30,7 +30,7 @@ defmodule Minga.Editor.TitleTest do
 
     %{
       buffers: %{active: buf},
-      mode: mode
+      vim: %{mode: mode}
     }
   end
 
@@ -90,7 +90,7 @@ defmodule Minga.Editor.TitleTest do
     end
 
     test "no active buffer falls back to scratch" do
-      state = %{buffers: %{active: nil}, mode: :normal}
+      state = %{buffers: %{active: nil}, vim: %{mode: :normal}}
       result = Title.format(state, "{filename} - Minga")
       assert result == "*scratch* - Minga"
     end
@@ -105,8 +105,7 @@ defmodule Minga.Editor.TitleTest do
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: VimState.new(),
         buffers: %Buffers{active: scratch_buf, list: []},
         windows: %Windows{
           tree: WindowTree.new(1),
@@ -137,8 +136,7 @@ defmodule Minga.Editor.TitleTest do
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
-        mode: :normal,
-        mode_state: Mode.initial_state(),
+        vim: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf]},
         windows: %Windows{
           tree: WindowTree.new(1),

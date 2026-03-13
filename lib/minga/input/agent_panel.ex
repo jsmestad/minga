@@ -54,7 +54,7 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    if state.mode == :insert do
+    if state.vim.mode == :insert do
       # Resolve through the agent scope insert trie. This gives us the
       # same keybindings as the split pane path (Enter, Shift+Enter,
       # Backspace, Ctrl combos, @-mention, printable chars) without
@@ -103,7 +103,7 @@ defmodule Minga.Input.AgentPanel do
 
   @spec handle_panel_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  defp handle_panel_nav(state, _cp, _mods) when is_map(state.mode_state.leader_node) do
+  defp handle_panel_nav(state, _cp, _mods) when is_map(state.vim.mode_state.leader_node) do
     {:handled, delegate_to_mode_fsm(state, 0, 0)}
   end
 
@@ -126,7 +126,7 @@ defmodule Minga.Input.AgentPanel do
 
   defp panel_nav_key(state, ?i, _mods) do
     state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
-    {:panel, %{state | mode: :insert, mode_state: Minga.Mode.initial_state()}}
+    {:panel, %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}}
   end
 
   defp panel_nav_key(_state, _cp, _mods), do: :delegate
@@ -183,8 +183,13 @@ defmodule Minga.Input.AgentPanel do
   end
 
   @spec key_sequence_pending?(EditorState.t()) :: boolean()
-  defp key_sequence_pending?(%{mode_state: %{leader_node: node}}) when node != nil, do: true
-  defp key_sequence_pending?(%{mode_state: %{pending_g: true}}), do: true
-  defp key_sequence_pending?(%{mode: mode}) when mode in [:operator_pending, :command], do: true
+  defp key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
+    do: true
+
+  defp key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
+
+  defp key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
+    do: true
+
   defp key_sequence_pending?(_state), do: false
 end

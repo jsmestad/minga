@@ -69,8 +69,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
       modeline_row,
       modeline_width,
       %{
-        mode: if(is_active, do: state.mode, else: :normal),
-        mode_state: if(is_active, do: state.mode_state, else: nil),
+        mode: if(is_active, do: state.vim.mode, else: :normal),
+        mode_state: if(is_active, do: state.vim.mode_state, else: nil),
         file_name: file_name,
         filetype: filetype,
         dirty_marker: dirty_marker,
@@ -80,7 +80,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
         buf_index: buf_index,
         buf_count: buf_count,
         macro_recording:
-          if(is_active, do: MacroRecorder.recording?(state.macro_recorder), else: false),
+          if(is_active, do: MacroRecorder.recording?(state.vim.macro_recorder), else: false),
         agent_status: if(is_active, do: AgentAccess.agent(state).status, else: nil),
         agent_theme_colors:
           if(is_active && AgentAccess.agent(state).status,

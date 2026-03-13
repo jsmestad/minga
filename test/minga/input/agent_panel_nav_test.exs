@@ -5,8 +5,6 @@ defmodule Minga.Input.AgentPanelNavTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -24,8 +22,8 @@ defmodule Minga.Input.AgentPanelNavTest do
 
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input.Scoped
-  alias Minga.Mode
 
   defp make_state do
     buf = AgentBufferSync.start_buffer()
@@ -56,12 +54,8 @@ defmodule Minga.Input.AgentPanelNavTest do
       agent: agent,
       agentic: agentic,
       buffers: %{active: nil, list: [], recent: []},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       status_msg: nil,
-      marks: %{},
-      change_recorder: ChangeRecorder.new(),
-      macro_recorder: MacroRecorder.new(),
       file_tree: %FileTreeState{},
       completion: nil,
       keymap_scope: :editor,
@@ -140,7 +134,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state) == true
-      assert new_state.mode == :normal
+      assert new_state.vim.mode == :normal
     end
 
     test "input mode intercepts printable chars" do
@@ -149,7 +143,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
-      state = %{state | mode: :insert}
+      state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
       assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "a"
     end
@@ -190,7 +184,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
 
-      state = %{state | mode: :insert}
+      state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
       assert length(PanelState.input_lines(AgentAccess.panel(new_state))) > 1

@@ -5,16 +5,14 @@ defmodule Minga.Input.AgentChatNavTest do
   alias Minga.Agent.PanelState
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.ChangeRecorder
-  alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Input.AgentChatNav
-  alias Minga.Mode
   @ctrl Minga.Port.Protocol.mod_ctrl()
 
   defp make_state(opts \\ []) do
@@ -63,12 +61,8 @@ defmodule Minga.Input.AgentChatNavTest do
       agent: agent,
       agentic: agentic,
       buffers: %Buffers{active: file_buf, list: [file_buf]},
-      mode: :normal,
-      mode_state: Mode.initial_state(),
+      vim: VimState.new(),
       status_msg: nil,
-      marks: %{},
-      change_recorder: ChangeRecorder.new(),
-      macro_recorder: MacroRecorder.new(),
       file_tree: %FileTreeState{},
       completion: nil,
       keymap_scope: :agent,
@@ -161,7 +155,7 @@ defmodule Minga.Input.AgentChatNavTest do
       # 'A' (append at end of line) would enter insert mode in normal vim
       new_state = AgentChatNav.delegate_to_mode_fsm(state, buf, ?A, 0)
 
-      assert new_state.mode == :normal
+      assert new_state.vim.mode == :normal
     end
 
     test "restores original active buffer after dispatch" do

@@ -149,8 +149,8 @@ defmodule Minga.Input.AgentChatNav do
     # The Mode FSM may try to enter insert/visual/etc. from vim keys that
     # the scope trie didn't intercept. Reset to normal.
     state =
-      if state.mode != :normal do
-        %{state | mode: :normal, mode_state: Mode.initial_state()}
+      if state.vim.mode != :normal do
+        %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
       else
         state
       end

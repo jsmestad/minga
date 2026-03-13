@@ -9,10 +9,9 @@ defmodule Minga.Editor.State.Tab do
 
   ## Context format
 
-  The canonical context has three fields: `surface_module`, `surface_state`,
-  and `keymap_scope`. All per-view state (buffers, windows, mode, agent, etc.)
-  lives inside `surface_state`. Legacy contexts with per-field snapshots are
-  auto-migrated on first restore.
+  The canonical context is a flat map with per-tab fields (buffers, windows,
+  vim state, viewport, etc.) stored directly. Legacy contexts with nested
+  structure are auto-migrated on first restore.
   """
 
   # Tab contexts store per-tab fields directly as flat maps.
@@ -47,6 +46,8 @@ defmodule Minga.Editor.State.Tab do
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
           optional(:pending_conflict) => term(),
+          optional(:vim) => Minga.Editor.VimState.t(),
+          # Legacy fields kept for migration compatibility:
           optional(:mode) => atom(),
           optional(:mode_state) => term(),
           optional(:reg) => term(),

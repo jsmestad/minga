@@ -45,11 +45,11 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   @spec put_register(state(), String.t(), :yank | :delete, clipboard_mode()) :: state()
-  def put_register(%{reg: %{active: "_"}} = state, _text, _kind, _clipboard) do
+  def put_register(%{vim: %{reg: %{active: "_"}}} = state, _text, _kind, _clipboard) do
     reset_active_register(state)
   end
 
-  def put_register(%{reg: %{active: "+"}} = state, text, kind, _clipboard) do
+  def put_register(%{vim: %{reg: %{active: "+"}}} = state, text, kind, _clipboard) do
     case Clipboard.write(text) do
       :ok ->
         :ok
@@ -64,7 +64,7 @@ defmodule Minga.Editor.Commands.Helpers do
     state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
   end
 
-  def put_register(%{reg: %{active: name} = reg} = state, text, kind, clipboard)
+  def put_register(%{vim: %{reg: %{active: name} = reg}} = state, text, kind, clipboard)
       when name >= "A" and name <= "Z" do
     lower = String.downcase(name)
     existing = Registers.get(reg, lower) || ""
@@ -78,7 +78,7 @@ defmodule Minga.Editor.Commands.Helpers do
     |> reset_active_register()
   end
 
-  def put_register(%{reg: %{active: name}} = state, text, kind, clipboard)
+  def put_register(%{vim: %{reg: %{active: name}}} = state, text, kind, clipboard)
       when name >= "a" and name <= "z" do
     state
     |> put_in_register(name, text)
@@ -89,7 +89,7 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   def put_register(state, text, kind, clipboard) do
-    name = if state.reg.active == "", do: "", else: state.reg.active
+    name = if state.vim.reg.active == "", do: "", else: state.vim.reg.active
 
     state
     |> put_in_register(name, text)
@@ -115,12 +115,12 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   @spec get_register(state(), clipboard_mode()) :: {String.t() | nil, state()}
-  def get_register(%{reg: %{active: "+"}} = state, _clipboard) do
+  def get_register(%{vim: %{reg: %{active: "+"}}} = state, _clipboard) do
     text = Clipboard.read()
     {text, reset_active_register(state)}
   end
 
-  def get_register(%{reg: reg} = state, clipboard) do
+  def get_register(%{vim: %{reg: reg}} = state, clipboard) do
     key = if reg.active == "", do: "", else: reg.active
     stored = Registers.get(reg, key)
     text = maybe_read_clipboard(key, stored, clipboard)
@@ -153,7 +153,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @spec put_in_register(state(), String.t(), String.t()) :: state()
   def put_in_register(state, name, text) do
-    %{state | reg: Registers.put(state.reg, name, text)}
+    %{state | vim: %{state.vim | reg: Registers.put(state.vim.reg, name, text)}}
   end
 
   @spec write_unnamed(state(), String.t()) :: state()
@@ -186,7 +186,8 @@ defmodule Minga.Editor.Commands.Helpers do
   def maybe_sync_clipboard(state, _text, _clipboard), do: state
 
   @spec reset_active_register(state()) :: state()
-  def reset_active_register(state), do: %{state | reg: Registers.reset_active(state.reg)}
+  def reset_active_register(state),
+    do: %{state | vim: %{state.vim | reg: Registers.reset_active(state.vim.reg)}}
 
   # Reads clipboard mode from the active buffer's options. Falls back to
   # :none if no buffer is active (safe default: no clipboard calls).
@@ -212,7 +213,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec save_jump_pos(state(), Document.position(), Document.position()) :: state()
   def save_jump_pos(state, {from_line, _} = from_pos, {to_line, _})
       when from_line != to_line do
-    %{state | last_jump_pos: from_pos}
+    %{state | vim: %{state.vim | last_jump_pos: from_pos}}
   end
 
   def save_jump_pos(state, _from_pos, _to_pos), do: state

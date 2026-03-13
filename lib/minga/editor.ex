@@ -154,7 +154,7 @@ defmodule Minga.Editor do
   end
 
   def handle_call(:api_mode, _from, state) do
-    {:reply, state.mode, state}
+    {:reply, state.vim.mode, state}
   end
 
   def handle_call(:api_save, _from, %{buffers: %{active: nil}} = state) do
@@ -575,7 +575,7 @@ defmodule Minga.Editor do
   end
 
   @spec handle_paste_event_editor(state(), String.t()) :: state()
-  defp handle_paste_event_editor(%{mode: :insert, buffers: %{active: buf}} = state, text)
+  defp handle_paste_event_editor(%{vim: %{mode: :insert}, buffers: %{active: buf}} = state, text)
        when is_pid(buf) do
     {line, col} = BufferServer.cursor(buf)
     BufferServer.apply_text_edit(buf, line, col, line, col, text)
