@@ -29,6 +29,7 @@ defmodule Minga.Input do
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ModeFSM
   alias Minga.Input.Picker
+  alias Minga.Input.Popup
   alias Minga.Input.Scoped
   alias Minga.Input.ToolApproval
 
@@ -93,6 +94,7 @@ defmodule Minga.Input do
       DiffReview,
       AgentPanel,
       FileTreeHandler,
+      Popup,
       Scoped,
       AgentChatNav,
       GlobalBindings,

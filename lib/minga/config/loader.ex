@@ -31,6 +31,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Popup.Registry, as: PopupRegistry
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -127,6 +128,7 @@ defmodule Minga.Config.Loader do
     KeymapActive.reset()
     CommandRegistry.reset()
     ExtRegistry.reset()
+    PopupRegistry.clear()
 
     # Re-run the full load sequence (includes starting extensions)
     new_state = load_all()
@@ -151,6 +153,9 @@ defmodule Minga.Config.Loader do
   defp load_all do
     config_path = resolve_config_path()
     config_dir = Path.dirname(config_path)
+
+    # 0. Register default popup rules (before user config so overrides work)
+    register_default_popup_rules()
 
     # 1. Compile user modules
     {loaded_modules, modules_errors} = compile_user_modules(config_dir)
@@ -288,6 +293,22 @@ defmodule Minga.Config.Loader do
     else
       nil
     end
+  end
+
+  @spec register_default_popup_rules() :: :ok
+  defp register_default_popup_rules do
+    alias Minga.Popup.Rule
+
+    PopupRegistry.init()
+
+    defaults = [
+      Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: true),
+      Rule.new("*Messages*", side: :bottom, size: {:percent, 25}, focus: false, auto_close: true),
+      Rule.new("*scratch*", side: :bottom, size: {:percent, 30}, focus: true)
+    ]
+
+    Enum.each(defaults, &PopupRegistry.register/1)
+    :ok
   end
 
   @spec eval_config_file(String.t()) :: String.t() | nil

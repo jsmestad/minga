@@ -203,17 +203,24 @@ defmodule Minga.BufferManagementTest do
   end
 
   describe "SPC b s — switch to scratch" do
-    test "SPC b s shows scratch buffer" do
+    test "SPC b s shows scratch buffer in popup split" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bs")
-      assert_row_contains(ctx, 1, "# This buffer is for notes")
+
+      # Scratch buffer opens as a popup split; its content appears on screen
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "# This buffer is for notes")
     end
 
     test "scratch buffer is editable" do
       ctx = start_editor("hello")
       send_keys(ctx, "<SPC>bs")
       send_keys(ctx, "ggIedited: <Esc>")
-      assert_row_contains(ctx, 1, "edited:")
+
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "edited:")
     end
   end
 

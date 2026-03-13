@@ -2,6 +2,8 @@ defmodule Minga.Editor.WindowTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Window
+  alias Minga.Popup.Active, as: PopupActive
+  alias Minga.Popup.Rule, as: PopupRule
 
   defp make_window(opts \\ []) do
     buffer = Keyword.get_lazy(opts, :buffer, fn -> spawn(fn -> :ok end) end)
@@ -400,6 +402,27 @@ defmodule Minga.Editor.WindowTest do
       # Scroll down
       window = Window.detect_invalidation(window, 10, 4, 100, 1)
       assert window.dirty_lines == :all
+    end
+  end
+
+  describe "popup?/1" do
+    test "returns false for a normal window" do
+      window = make_window()
+      refute Window.popup?(window)
+    end
+
+    test "returns true for a window with popup metadata" do
+      rule = PopupRule.new("*test*")
+      active = PopupActive.new(rule, 2, nil, 1)
+      window = %{make_window() | popup_meta: active}
+      assert Window.popup?(window)
+    end
+  end
+
+  describe "popup_meta field" do
+    test "defaults to nil" do
+      window = make_window()
+      assert window.popup_meta == nil
     end
   end
 end

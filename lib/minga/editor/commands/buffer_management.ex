@@ -20,8 +20,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.Window
   alias Minga.Formatter
   alias Minga.Mode
+  alias Minga.Popup.Lifecycle, as: PopupLifecycle
 
   @type state :: EditorState.t()
 
@@ -127,15 +129,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(%{buffers: %{scratch: scratch_buf}} = state, :view_scratch) do
-    idx = Enum.find_index(state.buffers.list, &(&1 == scratch_buf))
-
-    case idx do
-      nil ->
-        Commands.add_buffer(state, scratch_buf)
-
-      i ->
-        switch_to_buffer(state, i)
-    end
+    open_special_buffer(state, "*scratch*", scratch_buf)
   end
 
   def execute(%{buffers: %{messages: nil}} = state, :view_messages) do
@@ -143,16 +137,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(%{buffers: %{messages: msg_buf}} = state, :view_messages) do
-    # Add messages buffer to buffer list if not already there, then switch to it
-    idx = Enum.find_index(state.buffers.list, &(&1 == msg_buf))
-
-    case idx do
-      nil ->
-        Commands.add_buffer(state, msg_buf)
-
-      i ->
-        switch_to_buffer(state, i)
-    end
+    open_special_buffer(state, "*Messages*", msg_buf)
   end
 
   # ── Line number style ─────────────────────────────────────────────────────
@@ -766,6 +751,71 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
 
     :ok
+  end
+
+  # Opens a special buffer (like *Messages* or *scratch*) as a popup if a
+  # matching popup rule exists, otherwise falls back to normal buffer switching.
+  # If the buffer is already open in a popup, toggles it closed.
+  @spec open_special_buffer(state(), String.t(), pid()) :: state()
+  defp open_special_buffer(state, buffer_name, buffer_pid) do
+    case find_popup_for_buffer(state, buffer_pid) do
+      {:ok, popup_window_id} ->
+        # Toggle: close the existing popup
+        PopupLifecycle.close_popup(state, popup_window_id)
+
+      :none ->
+        open_special_buffer_new(state, buffer_name, buffer_pid)
+    end
+  end
+
+  # Opens a new popup for the buffer, or falls back to normal buffer switching.
+  # Always focuses the popup since this is an explicit user command (not an
+  # automatic popup trigger where the rule's focus setting would apply).
+  @spec open_special_buffer_new(state(), String.t(), pid()) :: state()
+  defp open_special_buffer_new(state, buffer_name, buffer_pid) do
+    case PopupLifecycle.open_popup(state, buffer_name, buffer_pid) do
+      {:ok, new_state} ->
+        focus_popup_window(new_state, buffer_pid)
+
+      :no_match ->
+        switch_or_add_buffer(state, buffer_pid)
+    end
+  end
+
+  # Ensures the popup window displaying the given buffer is focused.
+  @spec focus_popup_window(state(), pid()) :: state()
+  defp focus_popup_window(state, buffer_pid) do
+    case find_popup_for_buffer(state, buffer_pid) do
+      {:ok, popup_window_id} ->
+        %{state | windows: %{state.windows | active: popup_window_id}}
+
+      :none ->
+        state
+    end
+  end
+
+  @spec switch_or_add_buffer(state(), pid()) :: state()
+  defp switch_or_add_buffer(state, buffer_pid) do
+    idx = Enum.find_index(state.buffers.list, &(&1 == buffer_pid))
+
+    case idx do
+      nil -> Commands.add_buffer(state, buffer_pid)
+      i -> switch_to_buffer(state, i)
+    end
+  end
+
+  # Finds an existing popup window displaying the given buffer pid.
+  @spec find_popup_for_buffer(state(), pid()) :: {:ok, Window.id()} | :none
+  defp find_popup_for_buffer(state, buffer_pid) do
+    result =
+      Enum.find(state.windows.map, fn {_id, window} ->
+        Window.popup?(window) and window.buffer == buffer_pid
+      end)
+
+    case result do
+      {id, _window} -> {:ok, id}
+      nil -> :none
+    end
   end
 
   # Refreshes git status in the file tree (if open) after file operations.

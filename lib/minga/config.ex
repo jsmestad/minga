@@ -39,6 +39,8 @@ defmodule Minga.Config do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Popup.Rule, as: PopupRule
 
   @doc """
   Injects the config DSL into the calling module or script.
@@ -330,6 +332,36 @@ defmodule Minga.Config do
     end
 
     :ok
+  end
+
+  @doc """
+  Declares a popup rule for a buffer name pattern.
+
+  When a buffer whose name matches `pattern` is opened, it will be
+  displayed according to the rule instead of replacing the current buffer.
+  Later registrations with the same pattern override earlier ones, so user
+  config overrides built-in defaults.
+
+  ## Split mode (default)
+
+      popup "*Warnings*", side: :bottom, size: {:percent, 30}, focus: true
+      popup "*compilation*", side: :bottom, size: {:percent, 25}, focus: false
+      popup ~r/\\*grep/, side: :right, size: {:percent, 40}, focus: true
+
+  ## Float mode
+
+      popup ~r/\\*Help/, display: :float, width: {:percent, 60},
+        height: {:percent, 70}, border: :rounded, focus: true, auto_close: true
+
+  ## Options
+
+  See `Minga.Popup.Rule` for the full list of supported options.
+  """
+  @spec popup(Regex.t() | String.t(), keyword()) :: :ok
+  def popup(pattern, opts \\ []) when is_binary(pattern) or is_struct(pattern, Regex) do
+    rule = PopupRule.new(pattern, opts)
+    PopupRegistry.unregister(pattern)
+    PopupRegistry.register(rule)
   end
 
   @doc """
