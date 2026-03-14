@@ -28,6 +28,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.Window
   alias Minga.Input
   alias Minga.Scroll
+  alias Minga.Test.StubServer
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -47,9 +48,17 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       thinking_level: "medium"
     }
 
+    default_session =
+      if Keyword.has_key?(opts, :session) do
+        Keyword.get(opts, :session)
+      else
+        {:ok, pid} = StubServer.start_link()
+        pid
+      end
+
     agent = %AgentState{
       panel: panel,
-      session: Keyword.get(opts, :session, nil),
+      session: default_session,
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 

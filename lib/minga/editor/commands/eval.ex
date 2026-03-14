@@ -17,8 +17,11 @@ defmodule Minga.Editor.Commands.Eval do
   @eval_timeout 5_000
   @max_status_length 120
 
-  @spec execute(state(), Mode.command()) :: state()
-  def execute(state, {:eval_expression, input}) do
+  @spec execute(state(), Mode.command(), keyword()) :: state()
+  def execute(state, command, opts \\ [])
+
+  def execute(state, {:eval_expression, input}, opts) do
+    timeout = Keyword.get(opts, :timeout, @eval_timeout)
     editor_pid = self()
 
     task =
@@ -27,7 +30,7 @@ defmodule Minga.Editor.Commands.Eval do
         fn -> eval_in_sandbox(input, editor_pid) end
       )
 
-    case Task.yield(task, @eval_timeout) || Task.shutdown(task, :brutal_kill) do
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, {:ok, result}} ->
         result_str = inspect(result, pretty: true, limit: 50)
         display = truncate(result_str, @max_status_length)
@@ -45,8 +48,10 @@ defmodule Minga.Editor.Commands.Eval do
         |> log_to_messages("Eval error: #{input}\n#{formatted}")
 
       nil ->
+        timeout_display = "#{div(timeout, 1000)}s"
+
         state
-        |> then(&%{&1 | status_msg: "Eval timed out (5s)"})
+        |> then(&%{&1 | status_msg: "Eval timed out (#{timeout_display})"})
         |> log_to_messages("Eval timeout: #{input}")
     end
   end

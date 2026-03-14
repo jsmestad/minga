@@ -8,6 +8,8 @@ defmodule Minga.Integration.AgentCursorTest do
   area, but the visible cursor is one row too high.
   """
 
+  # async: false — headless editors under high concurrency can destabilize
+  # ExUnit's :standard_error process registration during teardown
   use Minga.Test.EditorCase, async: false
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
@@ -17,6 +19,7 @@ defmodule Minga.Integration.AgentCursorTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
   alias Minga.Test.HeadlessPort
+  alias Minga.Test.StubServer
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +47,8 @@ defmodule Minga.Integration.AgentCursorTest do
         height: height
       )
 
+    {:ok, fake_session} = StubServer.start_link()
+
     :sys.replace_state(editor, fn state ->
       win_id = state.windows.active
       agent_window = Window.new_agent_chat(win_id, agent_buf, height, width)
@@ -54,7 +59,11 @@ defmodule Minga.Integration.AgentCursorTest do
       }
 
       agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
-      agent_state = Map.update!(state.agent, :buffer, fn _ -> agent_buf end)
+
+      agent_state =
+        state.agent
+        |> Map.put(:buffer, agent_buf)
+        |> Map.put(:session, fake_session)
 
       %{
         state

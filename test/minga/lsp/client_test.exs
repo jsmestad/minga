@@ -1,5 +1,7 @@
 defmodule Minga.LSP.ClientTest do
-  use ExUnit.Case
+  # async: false because mock LSP server spawns OS processes that may not
+  # start in time under heavy parallel test load
+  use ExUnit.Case, async: false
 
   alias Minga.Diagnostics
   alias Minga.LSP.Client
@@ -22,14 +24,14 @@ defmodule Minga.LSP.ClientTest do
     %{client: client, diag_server: diag_server}
   end
 
-  defp wait_until_ready(client, attempts \\ 50) do
+  defp wait_until_ready(client, attempts \\ 500) do
     if attempts <= 0 do
       flunk("LSP client did not become ready in time")
     end
 
     case Client.status(client) do
       :ready -> :ok
-      _ -> Process.sleep(100) && wait_until_ready(client, attempts - 1)
+      _ -> Process.sleep(10) && wait_until_ready(client, attempts - 1)
     end
   end
 

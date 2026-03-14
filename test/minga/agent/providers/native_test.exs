@@ -62,6 +62,10 @@ defmodule Minga.Agent.Providers.NativeTest do
 
   defp collect_events_acc(acc, timeout) do
     receive do
+      {:agent_provider_event, %Event.AgentEnd{} = event} ->
+        # AgentEnd is always the last event; return immediately
+        Enum.reverse([event | acc])
+
       {:agent_provider_event, event} ->
         collect_events_acc([event | acc], timeout)
     after

@@ -12,9 +12,6 @@ concurrency:
 
 env:
   MIX_ENV: test
-  ELIXIR_VERSION: "1.19.5"
-  OTP_VERSION: "28.3.3"
-  ZIG_VERSION: "0.15.2"
 
 jobs:
   lint:
@@ -25,12 +22,12 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
+          version-type: strict
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
+          version-file: .tool-versions
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -38,8 +35,8 @@ jobs:
           path: |
             deps
             _build
-          key: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
       - run: mix format --check-formatted
@@ -54,12 +51,12 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
+          version-type: strict
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
+          version-file: .tool-versions
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -67,8 +64,8 @@ jobs:
           path: |
             deps
             _build
-          key: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
       - run: mix test --warnings-as-errors
@@ -81,7 +78,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
+          version-file: .tool-versions
 
       - name: Run Zig tests
         run: cd zig && zig build test
@@ -126,36 +123,33 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    env:
+      MIX_ENV: dev
     steps:
       - uses: actions/checkout@v4
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
+          version-type: strict
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
+          version-file: .tool-versions
 
-      - name: Cache deps
+      # Separate cache from test jobs: dialyzer needs _build/dev, not _build/test.
+      # The PLT and compiled deps are both under _build/dev.
+      - name: Cache deps & PLT
         uses: actions/cache@v4
         with:
           path: |
             deps
-            _build
-          key: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - name: Cache PLT
-        uses: actions/cache@v4
-        with:
-          path: _build/dev/dialyxir_*.plt*
-          key: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            _build/dev
+          key: dialyzer-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
-      - run: MIX_ENV=dev mix dialyzer
+      - run: mix dialyzer
 
   docs:
     name: Deploy Docs
@@ -175,12 +169,12 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-file: .tool-versions
+          version-type: strict
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: ${{ env.ZIG_VERSION }}
+          version-file: .tool-versions
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -188,8 +182,8 @@ jobs:
           path: |
             deps
             _build
-          key: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
       - run: MIX_ENV=dev mix docs

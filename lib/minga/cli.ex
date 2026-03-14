@@ -169,7 +169,9 @@ defmodule Minga.CLI do
         :ok
 
       path ->
-        case wait_for_editor(50, 20) do
+        {interval, retries} = editor_wait_params()
+
+        case wait_for_editor(interval, retries) do
           :ok ->
             Minga.Editor.open_file(path)
 
@@ -179,6 +181,13 @@ defmodule Minga.CLI do
     end
 
     :ok
+  end
+
+  # Returns {interval_ms, max_retries} for editor wait polling.
+  # Configurable via application env for tests (default: 50ms × 20 = 1s).
+  @spec editor_wait_params() :: {non_neg_integer(), non_neg_integer()}
+  defp editor_wait_params do
+    Application.get_env(:minga, :editor_wait_params, {50, 20})
   end
 
   @spec wait_for_editor(non_neg_integer(), non_neg_integer()) :: :ok | :timeout

@@ -8,12 +8,25 @@ defmodule Minga.Integration.MouseTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Editor.State.FileTree
+  alias Minga.Test.StubServer
 
   # ── Test helpers ───────────────────────────────────────────────────────────
+
+  # Injects a stub agent session to avoid the ~700ms provider startup.
+  defp inject_fake_session(%{editor: editor} = ctx) do
+    {:ok, fake} = StubServer.start_link()
+
+    :sys.replace_state(editor, fn state ->
+      put_in(state.agent.session, fake)
+    end)
+
+    ctx
+  end
 
   # Opens the agent split pane and returns the separator column.
   # Fails the test if the separator can't be found (layout didn't render).
   defp open_agent_split(ctx) do
+    ctx = inject_fake_session(ctx)
     send_keys(ctx, "<Space>aa")
     row1 = screen_row(ctx, 1)
     sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
@@ -393,7 +406,8 @@ defmodule Minga.Integration.MouseTest do
         message: "file tree never opened"
       )
 
-      # Open agent panel
+      # Open agent panel (inject fake session to skip ~700ms provider startup)
+      inject_fake_session(ctx)
       send_keys(ctx, "<Space>aa")
 
       # Wait for both separators to appear (file tree | editor | agent)

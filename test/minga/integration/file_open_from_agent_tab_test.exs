@@ -14,6 +14,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   nothing. Result: blank content area.
   """
 
+  # async: false — headless editors under high concurrency can destabilize
+  # ExUnit's :standard_error process registration during teardown
   use Minga.Test.EditorCase, async: false
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
@@ -24,6 +26,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Test.HeadlessPort
+  alias Minga.Test.StubServer
 
   @moduletag :tmp_dir
 
@@ -60,6 +63,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
     # Reconfigure the editor state to agent mode. This replicates what
     # Startup.build_initial_state does when keymap_scope is :agent.
+    {:ok, fake_session} = StubServer.start_link()
+
     :sys.replace_state(editor, fn state ->
       win_id = state.windows.active
 
@@ -73,7 +78,9 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
 
       agent_state =
-        Map.update!(state.agent, :buffer, fn _ -> agent_buf end)
+        state.agent
+        |> Map.put(:buffer, agent_buf)
+        |> Map.put(:session, fake_session)
 
       %{
         state

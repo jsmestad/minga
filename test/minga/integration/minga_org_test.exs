@@ -15,60 +15,77 @@ defmodule Minga.Integration.MingaOrgTest do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.TreeSitter
 
-  @moduletag :tmp_dir
   @moduletag :integration
 
   @minga_org_repo "https://github.com/jsmestad/minga-org.git"
 
-  setup %{tmp_dir: tmp_dir} do
-    # Ensure the grammar registry ETS table exists
+  # Clone the repo once for the entire module instead of per-test.
+  # Tests that need clone_dir get it from the module attribute via context.
+  setup_all do
     HLGrammar.init_registry()
 
-    # Clone minga-org into the temp dir
-    clone_dir = Path.join(tmp_dir, "minga-org")
+    clone_dir =
+      Path.join(System.tmp_dir!(), "minga_org_test_#{System.unique_integer([:positive])}")
+
+    File.rm_rf!(clone_dir)
 
     {_, 0} =
       System.cmd("git", ["clone", "--depth", "1", @minga_org_repo, clone_dir],
         stderr_to_stdout: true
       )
 
-    %{clone_dir: clone_dir}
+    # Pre-compile the grammar once so individual tests don't each pay ~330ms.
+    source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])
+    {:ok, lib_path} = TreeSitter.compile_grammar("org_shared_test", source_dir)
+
+    on_exit(fn ->
+      File.rm_rf!(clone_dir)
+      File.rm(lib_path)
+    end)
+
+    %{clone_dir: clone_dir, compiled_lib: lib_path, source_dir: source_dir}
+  end
+
+  # Idempotent; ensures the ETS table exists even if setup_all hasn't run
+  # yet on this scheduler (defensive, costs nothing).
+  setup do
+    HLGrammar.init_registry()
+    :ok
   end
 
   describe "grammar compilation" do
-    test "compiles tree-sitter-org grammar from vendored sources", %{clone_dir: clone_dir} do
-      source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])
-
+    test "compiles tree-sitter-org grammar from vendored sources", %{
+      source_dir: source_dir,
+      compiled_lib: lib_path
+    } do
       assert File.exists?(Path.join(source_dir, "parser.c")),
              "parser.c should exist in vendored grammar"
 
       assert File.exists?(Path.join(source_dir, "scanner.c")),
              "scanner.c should exist in vendored grammar"
 
-      assert {:ok, lib_path} = TreeSitter.compile_grammar("org_integration_test", source_dir)
+      # Grammar was pre-compiled in setup_all; verify the result
       assert File.exists?(lib_path)
 
       # Verify it's a real shared library (check file type)
       {file_output, 0} = System.cmd("file", [lib_path])
       assert file_output =~ "shared library" or file_output =~ "dynamically linked"
-    after
-      File.rm(TreeSitter.grammar_lib_path("org_integration_test"))
     end
 
-    test "caches compiled grammar on second call", %{clone_dir: clone_dir} do
-      source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])
-
-      assert {:ok, lib_path} = TreeSitter.compile_grammar("org_cache_test", source_dir)
-      first_mtime = File.stat!(lib_path, time: :posix).mtime
+    test "caches compiled grammar on second call", %{
+      source_dir: source_dir,
+      compiled_lib: lib_path
+    } do
+      # Touch the compiled library so its mtime is strictly newer than sources.
+      original_mtime = File.stat!(lib_path, time: :posix).mtime
+      touched_mtime = original_mtime + 2
+      File.touch!(lib_path, touched_mtime)
 
       # Second compile should use cache (no recompilation)
-      Process.sleep(1100)
-      assert {:ok, ^lib_path} = TreeSitter.compile_grammar("org_cache_test", source_dir)
+      assert {:ok, ^lib_path} = TreeSitter.compile_grammar("org_shared_test", source_dir)
       second_mtime = File.stat!(lib_path, time: :posix).mtime
 
-      assert first_mtime == second_mtime, "library should not be recompiled"
-    after
-      File.rm(TreeSitter.grammar_lib_path("org_cache_test"))
+      assert second_mtime == touched_mtime, "library should not be recompiled"
     end
   end
 
@@ -193,13 +210,12 @@ defmodule Minga.Integration.MingaOrgTest do
 
   describe "full extension init simulation" do
     test "end-to-end: compile grammar, register filetype, register language", %{
-      clone_dir: clone_dir
+      clone_dir: clone_dir,
+      compiled_lib: lib_path
     } do
-      source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])
       query_path = Path.join([clone_dir, "queries", "org", "highlights.scm"])
 
-      # Step 1: Compile the grammar
-      assert {:ok, lib_path} = TreeSitter.compile_grammar("org_e2e_test", source_dir)
+      # Step 1: Grammar was pre-compiled in setup_all; verify it exists
       assert File.exists?(lib_path)
 
       # Step 2: Register filetype
@@ -217,8 +233,6 @@ defmodule Minga.Integration.MingaOrgTest do
       # The only thing we can't test without a running parser Port is the
       # actual load_grammar protocol message and grammar_loaded response.
       # That requires the Zig binary to be running.
-    after
-      File.rm(TreeSitter.grammar_lib_path("org_e2e_test"))
     end
   end
 end

@@ -14,6 +14,7 @@ defmodule Minga.Agent.Retry do
   @typedoc "Options for retry behavior."
   @type opts :: [
           max_retries: non_neg_integer(),
+          base_delay_ms: pos_integer(),
           on_retry: (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil
         ]
 
@@ -30,6 +31,7 @@ defmodule Minga.Agent.Retry do
 
   Options:
   - `:max_retries` - maximum number of retry attempts (default: 3)
+  - `:base_delay_ms` - initial backoff delay in milliseconds (default: 1000)
   - `:on_retry` - callback `(attempt, delay_ms, reason)` called before each retry
 
   ## Examples
@@ -40,9 +42,10 @@ defmodule Minga.Agent.Retry do
           {:ok, term()} | {:error, term()}
   def with_retry(fun, opts \\ []) when is_function(fun, 0) do
     max_retries = Keyword.get(opts, :max_retries, 3)
+    base_delay = Keyword.get(opts, :base_delay_ms, @base_delay_ms)
     on_retry = Keyword.get(opts, :on_retry)
 
-    attempt(fun, 0, max_retries, on_retry)
+    attempt(fun, 0, max_retries, on_retry, base_delay)
   end
 
   @doc """
@@ -88,19 +91,28 @@ defmodule Minga.Agent.Retry do
           (-> {:ok, term()} | {:error, term()}),
           non_neg_integer(),
           non_neg_integer(),
-          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil
+          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil,
+          pos_integer()
         ) :: {:ok, term()} | {:error, term()}
-  defp attempt(fun, attempt_num, max_retries, on_retry) do
+  defp attempt(fun, attempt_num, max_retries, on_retry, base_delay) do
     case fun.() do
       {:ok, result} ->
         {:ok, result}
 
       {:error, reason} ->
-        maybe_retry_error(fun, reason, attempt_num, max_retries, on_retry)
+        maybe_retry_error(fun, reason, attempt_num, max_retries, on_retry, base_delay)
     end
   rescue
     e ->
-      maybe_retry_exception(fun, e, __STACKTRACE__, attempt_num, max_retries, on_retry)
+      maybe_retry_exception(
+        fun,
+        e,
+        __STACKTRACE__,
+        attempt_num,
+        max_retries,
+        on_retry,
+        base_delay
+      )
   end
 
   @spec maybe_retry_error(
@@ -108,18 +120,19 @@ defmodule Minga.Agent.Retry do
           term(),
           non_neg_integer(),
           non_neg_integer(),
-          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil
+          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil,
+          pos_integer()
         ) :: {:ok, term()} | {:error, term()}
-  defp maybe_retry_error(fun, reason, attempt_num, max_retries, on_retry)
+  defp maybe_retry_error(fun, reason, attempt_num, max_retries, on_retry, base_delay)
        when attempt_num < max_retries and max_retries > 0 do
     if retryable?(reason) do
-      wait_and_retry(fun, attempt_num, max_retries, on_retry, format_reason(reason))
+      wait_and_retry(fun, attempt_num, max_retries, on_retry, format_reason(reason), base_delay)
     else
       {:error, reason}
     end
   end
 
-  defp maybe_retry_error(_fun, reason, _attempt_num, _max_retries, _on_retry) do
+  defp maybe_retry_error(_fun, reason, _attempt_num, _max_retries, _on_retry, _base_delay) do
     {:error, reason}
   end
 
@@ -129,18 +142,42 @@ defmodule Minga.Agent.Retry do
           Exception.stacktrace(),
           non_neg_integer(),
           non_neg_integer(),
-          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil
+          (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil,
+          pos_integer()
         ) :: {:ok, term()} | {:error, term()} | no_return()
-  defp maybe_retry_exception(fun, exception, _stacktrace, attempt_num, max_retries, on_retry)
+  defp maybe_retry_exception(
+         fun,
+         exception,
+         _stacktrace,
+         attempt_num,
+         max_retries,
+         on_retry,
+         base_delay
+       )
        when attempt_num < max_retries and max_retries > 0 do
     if retryable?(exception) do
-      wait_and_retry(fun, attempt_num, max_retries, on_retry, Exception.message(exception))
+      wait_and_retry(
+        fun,
+        attempt_num,
+        max_retries,
+        on_retry,
+        Exception.message(exception),
+        base_delay
+      )
     else
       raise exception
     end
   end
 
-  defp maybe_retry_exception(_fun, exception, stacktrace, _attempt_num, _max_retries, _on_retry) do
+  defp maybe_retry_exception(
+         _fun,
+         exception,
+         stacktrace,
+         _attempt_num,
+         _max_retries,
+         _on_retry,
+         _base_delay
+       ) do
     reraise exception, stacktrace
   end
 
@@ -151,19 +188,20 @@ defmodule Minga.Agent.Retry do
           non_neg_integer(),
           non_neg_integer(),
           (non_neg_integer(), non_neg_integer(), String.t() -> :ok) | nil,
-          String.t()
+          String.t(),
+          pos_integer()
         ) :: {:ok, term()} | {:error, term()}
-  defp wait_and_retry(fun, attempt_num, max_retries, on_retry, reason_str) do
-    delay = compute_delay(attempt_num)
+  defp wait_and_retry(fun, attempt_num, max_retries, on_retry, reason_str, base_delay) do
+    delay = compute_delay(attempt_num, base_delay)
     if on_retry, do: on_retry.(attempt_num + 1, delay, reason_str)
     # credo:disable-for-next-line Minga.Credo.NoProcessSleepCheck
     Process.sleep(delay)
-    attempt(fun, attempt_num + 1, max_retries, on_retry)
+    attempt(fun, attempt_num + 1, max_retries, on_retry, base_delay)
   end
 
-  @spec compute_delay(non_neg_integer()) :: pos_integer()
-  defp compute_delay(attempt_num) do
-    base = @base_delay_ms * Integer.pow(2, attempt_num)
+  @spec compute_delay(non_neg_integer(), pos_integer()) :: pos_integer()
+  defp compute_delay(attempt_num, base_delay_ms) do
+    base = base_delay_ms * Integer.pow(2, attempt_num)
     capped = min(base, @max_delay_ms)
     # Add jitter: 0-50% of the base delay
     jitter = :rand.uniform(max(div(capped, 2), 1))
