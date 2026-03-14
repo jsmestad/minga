@@ -575,6 +575,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, :goto_definition), do: LspActions.goto_definition(state)
   def execute(state, :hover), do: LspActions.hover(state)
 
+  def execute(%{buffers: %{active: buf}} = state, :alternate_file) when is_pid(buf) do
+    file_path = BufferServer.file_path(buf)
+    filetype = BufferServer.filetype(buf)
+    open_alternate(state, file_path, filetype)
+  end
+
+  def execute(state, :alternate_file), do: %{state | status_msg: "No active buffer"}
+
   def execute(state, :next_git_hunk), do: GitCommands.execute(state, :next_git_hunk)
   def execute(state, :prev_git_hunk), do: GitCommands.execute(state, :prev_git_hunk)
   def execute(state, :git_stage_hunk), do: GitCommands.execute(state, :git_stage_hunk)
@@ -743,6 +751,24 @@ defmodule Minga.Editor.Commands do
         %{id: id} -> EditorState.switch_tab(state, id)
         nil -> state
       end
+    end
+  end
+
+  # ── Private alternate file helpers ─────────────────────────────────────────
+
+  @spec open_alternate(state(), String.t() | nil, atom()) :: state()
+  defp open_alternate(state, nil, _filetype), do: %{state | status_msg: "Buffer has no file path"}
+
+  defp open_alternate(state, file_path, filetype) do
+    project_root = Minga.Project.root() || Path.dirname(file_path)
+    candidates = Minga.AlternateFile.candidates(file_path, filetype, project_root)
+
+    case Enum.find(candidates, &File.exists?/1) do
+      nil ->
+        %{state | status_msg: "No alternate file found for #{Path.basename(file_path)}"}
+
+      alt_path ->
+        execute(state, {:execute_ex_command, {:edit, alt_path}})
     end
   end
 

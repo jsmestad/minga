@@ -182,6 +182,31 @@ defmodule Minga.Keymap.Defaults do
   def all_bindings, do: @leader_bindings
 
   @doc """
+  Returns default filetype-scoped bindings for `SPC m`.
+
+  Each entry is `{filetype, key_sequence, command, description}` where key_sequence
+  is relative to the `SPC m` prefix (i.e., just the sub-keys).
+  """
+  @spec filetype_bindings() :: [{atom(), [Bindings.key()], atom(), String.t()}]
+  def filetype_bindings do
+    filetypes = [
+      :elixir,
+      :ruby,
+      :typescript,
+      :typescript_react,
+      :javascript,
+      :javascript_react,
+      :c,
+      :cpp,
+      :swift
+    ]
+
+    Enum.map(filetypes, fn ft ->
+      {ft, [{?a, @none}], :alternate_file, "Alternate file"}
+    end)
+  end
+
+  @doc """
   Returns a map of Normal mode key bindings: `{codepoint, modifiers} => {command, description}`.
 
   These are the hardcoded bindings from `Minga.Mode.Normal.handle_key/2`,
