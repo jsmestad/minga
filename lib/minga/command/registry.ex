@@ -26,8 +26,10 @@ defmodule Minga.Command.Registry do
   # functions in module attributes (which Elixir cannot escape at compile time).
   @built_in_specs [
     {:save, "Save the current file"},
-    {:quit, "Quit the editor"},
-    {:force_quit, "Quit without saving"},
+    {:quit, "Close tab or quit"},
+    {:force_quit, "Force close tab or quit"},
+    {:quit_all, "Quit the editor (all tabs)"},
+    {:force_quit_all, "Force quit the editor (all tabs)"},
     {:move_left, "Move cursor left"},
     {:move_right, "Move cursor right"},
     {:move_up, "Move cursor up"},
@@ -181,6 +183,14 @@ defmodule Minga.Command.Registry do
   defp execute_force_quit(state),
     do: Map.update(state, :pending_commands, [:force_quit], &[:force_quit | &1])
 
+  @spec execute_quit_all(map()) :: map()
+  defp execute_quit_all(state),
+    do: Map.update(state, :pending_commands, [:quit_all], &[:quit_all | &1])
+
+  @spec execute_force_quit_all(map()) :: map()
+  defp execute_force_quit_all(state),
+    do: Map.update(state, :pending_commands, [:force_quit_all], &[:force_quit_all | &1])
+
   @spec execute_move_left(map()) :: map()
   defp execute_move_left(state),
     do: Map.update(state, :pending_commands, [:move_left], &[:move_left | &1])
@@ -226,6 +236,8 @@ defmodule Minga.Command.Registry do
   defp built_in_execute(:save), do: &execute_save/1
   defp built_in_execute(:quit), do: &execute_quit/1
   defp built_in_execute(:force_quit), do: &execute_force_quit/1
+  defp built_in_execute(:quit_all), do: &execute_quit_all/1
+  defp built_in_execute(:force_quit_all), do: &execute_force_quit_all/1
   defp built_in_execute(:move_left), do: &execute_move_left/1
   defp built_in_execute(:move_right), do: &execute_move_right/1
   defp built_in_execute(:move_up), do: &execute_move_up/1

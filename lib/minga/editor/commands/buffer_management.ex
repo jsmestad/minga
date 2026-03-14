@@ -80,10 +80,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(state, :quit) do
-    System.stop(0)
-    state
-  end
+  def execute(state, :quit), do: close_tab_or_quit(state)
+  def execute(state, :force_quit), do: close_tab_or_quit(state)
+  def execute(state, :quit_all), do: shutdown_editor(state)
+  def execute(state, :force_quit_all), do: shutdown_editor(state)
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
@@ -195,17 +195,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
     execute(state, :quit)
   end
 
-  def execute(state, {:execute_ex_command, {:force_quit, []}}) do
-    Minga.Log.debug(:editor, "Force quitting editor")
-    System.stop(0)
-    state
-  end
+  def execute(state, {:execute_ex_command, {:force_quit, []}}),
+    do: execute(state, :force_quit)
+
+  def execute(state, {:execute_ex_command, {:quit_all, []}}),
+    do: execute(state, :quit_all)
+
+  def execute(state, {:execute_ex_command, {:force_quit_all, []}}),
+    do: execute(state, :force_quit_all)
 
   def execute(state, {:execute_ex_command, {:save_quit, []}}) do
-    state_after_save = execute(state, :save)
-    Minga.Log.debug(:editor, "Quitting editor after save")
-    System.stop(0)
-    state_after_save
+    state |> execute(:save) |> close_tab_or_quit()
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
@@ -644,20 +644,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
     # Find a file tab to switch to
     case TabBar.most_recent_of_kind(state.tab_bar, :file) do
       %Tab{} ->
-        # Deactivate agentic view and switch to the file tab
-        # Deactivate agent surface; restore_tab_context will set up the
-        # correct surface for the file tab we're switching to.
-        state = %{state | keymap_scope: :editor}
-        state = remove_current_tab(state)
-
-        # Restore the now-active tab's context
-        case EditorState.active_tab(state) do
-          %Tab{context: context} when is_map(context) and map_size(context) > 0 ->
-            EditorState.restore_tab_context(state, context)
-
-          _ ->
-            state
-        end
+        # Deactivate agentic view and switch to the file tab.
+        # restore_active_tab_context will set up the correct surface
+        # for the file tab we're switching to.
+        %{state | keymap_scope: :editor}
+        |> remove_current_tab()
+        |> restore_active_tab_context()
 
       nil ->
         # No file tabs left, just remove the agent tab
@@ -666,6 +658,45 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp close_agent_tab(state), do: state
+
+  # Closes the current tab if multiple tabs are open, or exits the editor
+  # if this is the last tab. Mirrors Neovim's `:q` hierarchy: close the
+  # smallest container first, only exit when nothing is left to close.
+  #
+  # For file tabs, this closes the tab without killing the buffer (matching
+  # Neovim where `:q` closes the window but the buffer stays in memory).
+  # For agent tabs, session cleanup is needed so we delegate to close_agent_tab.
+  @spec close_tab_or_quit(state()) :: state()
+  defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [_, _ | _]}} = state) do
+    case EditorState.active_tab_kind(state) do
+      :agent -> close_agent_tab(state)
+      _ -> close_file_tab(state)
+    end
+  end
+
+  defp close_tab_or_quit(state), do: shutdown_editor(state)
+
+  # Exits the editor. Single exit point so shutdown cleanup (flush buffers,
+  # save session, etc.) can be added in one place.
+  @spec shutdown_editor(state()) :: state()
+  defp shutdown_editor(state) do
+    System.stop(0)
+    state
+  end
+
+  # Closes the current file tab without killing the buffer. The buffer
+  # stays in the buffer pool (matching Neovim's `:q` which closes the
+  # window but leaves the buffer in the background buffer list).
+  @spec close_file_tab(state()) :: state()
+  defp close_file_tab(%{tab_bar: %TabBar{}} = state) do
+    active_tab = EditorState.active_tab(state)
+    label = if active_tab, do: active_tab.label, else: "tab"
+    Minga.Editor.log_to_messages("Closed: #{label}")
+
+    state
+    |> remove_current_tab()
+    |> restore_active_tab_context()
+  end
 
   @spec remove_current_tab(state()) :: state()
   defp remove_current_tab(%{tab_bar: %TabBar{} = tb} = state) do
@@ -676,6 +707,20 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp remove_current_tab(state), do: state
+
+  # Restores the now-active tab's snapshotted context into live editor state.
+  # Called after removing a tab to switch the editor to the neighbor tab's
+  # buffers, windows, viewport, etc. No-op for brand-new tabs with no snapshot.
+  @spec restore_active_tab_context(state()) :: state()
+  defp restore_active_tab_context(state) do
+    case EditorState.active_tab(state) do
+      %Tab{context: context} when is_map(context) and map_size(context) > 0 ->
+        EditorState.restore_tab_context(state, context)
+
+      _ ->
+        state
+    end
+  end
 
   @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
   defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do

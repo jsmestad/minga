@@ -109,10 +109,10 @@ defmodule Minga.Keymap.DefaultsTest do
 
     # ── Quit bindings ──────────────────────────────────────────────────────────
 
-    test "SPC q q → :quit" do
+    test "SPC q q → :quit_all" do
       trie = Defaults.leader_trie()
       {:prefix, q_node} = Bindings.lookup(trie, {?q, 0})
-      assert {:command, :quit} = Bindings.lookup(q_node, {?q, 0})
+      assert {:command, :quit_all} = Bindings.lookup(q_node, {?q, 0})
     end
 
     # ── Help bindings ──────────────────────────────────────────────────────────

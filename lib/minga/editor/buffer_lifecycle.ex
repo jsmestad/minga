@@ -70,7 +70,8 @@ defmodule Minga.Editor.BufferLifecycle do
   @doc "Notifies the LSP server after a buffer is killed/closed."
   @spec lsp_after_kill(state(), Mode.command(), pid() | nil) :: state()
   def lsp_after_kill(state, cmd, old_buffer)
-      when cmd in [:kill_buffer, {:execute_ex_command, {:quit, []}}] and is_pid(old_buffer) do
+      when cmd in [:kill_buffer, :quit, :force_quit, {:execute_ex_command, {:quit, []}}] and
+             is_pid(old_buffer) do
     if state.buffers.active != old_buffer do
       new_lsp = DocumentSync.on_buffer_close(state.lsp, old_buffer)
       %{state | lsp: new_lsp}
