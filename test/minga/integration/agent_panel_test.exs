@@ -4,7 +4,9 @@ defmodule Minga.Integration.AgentPanelTest do
   computation, and interaction with other UI elements (file tree, splits).
   """
   # Now async-safe: StubServer replaces real agent session startup
-  use Minga.Test.EditorCase, async: true
+  # async: false — headless editors under high concurrency can destabilize
+  # ExUnit's :standard_error process registration during teardown
+  use Minga.Test.EditorCase, async: false
 
   alias Minga.Editor.Layout
   alias Minga.Editor.State.FileTree

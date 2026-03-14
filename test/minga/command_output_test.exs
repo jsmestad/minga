@@ -1,5 +1,7 @@
 defmodule Minga.CommandOutputTest do
-  use ExUnit.Case, async: true
+  # async: false — spawns OS processes via Port; concurrent Port teardown
+  # can race with ExUnit's :standard_error capture/restore lifecycle
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.CommandOutput

@@ -7,7 +7,9 @@ defmodule Minga.Parser.IncrementalTest do
   commands to it. They require the parser binary to be built.
   """
 
-  use ExUnit.Case, async: true
+  # async: false — starts real Zig parser Port processes; concurrent Port
+  # teardown can race with ExUnit's :standard_error capture/restore lifecycle
+  use ExUnit.Case, async: false
 
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Port.Protocol
