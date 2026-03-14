@@ -180,30 +180,7 @@ defmodule Minga.Keymap.Defaults do
   @spec all_bindings() :: [{[Bindings.key()], atom(), String.t()}]
   def all_bindings, do: @leader_bindings
 
-  @doc """
-  Returns default filetype-scoped bindings for `SPC m`.
-
-  Each entry is `{filetype, key_sequence, command, description}` where key_sequence
-  is relative to the `SPC m` prefix (i.e., just the sub-keys).
-  """
-  @spec filetype_bindings() :: [{atom(), [Bindings.key()], atom(), String.t()}]
-  def filetype_bindings do
-    filetypes = [
-      :elixir,
-      :ruby,
-      :typescript,
-      :typescript_react,
-      :javascript,
-      :javascript_react,
-      :c,
-      :cpp,
-      :swift
-    ]
-
-    Enum.map(filetypes, fn ft ->
-      {ft, [{?a, @none}], :alternate_file, "Alternate file"}
-    end)
-  end
+  # filetype_bindings/0 is defined below with all SPC m bindings
 
   @doc """
   Returns a map of Normal mode key bindings: `{codepoint, modifiers} => {command, description}`.
@@ -303,5 +280,65 @@ defmodule Minga.Keymap.Defaults do
       # ── Multi-key ─────────────────────────────────────────────────────────
       {?g, 0} => {:prefix_g, "g prefix (gg = go to start)"}
     }
+  end
+
+  @doc """
+  Returns filetype-scoped bindings for the `SPC m` major mode prefix.
+
+  Each entry is `{filetype, key_sequence, command, description}` where
+  key_sequence is relative to the `SPC m` prefix.
+
+  These bindings are grouped by filetype and built into per-filetype
+  tries at startup by `Minga.Keymap.Active`.
+  """
+  @type filetype_binding ::
+          {atom(), [Bindings.key()], atom(), String.t()}
+
+  @spec filetype_bindings() :: [filetype_binding()]
+  def filetype_bindings do
+    supported_filetypes = [
+      :elixir,
+      :ruby,
+      :typescript,
+      :typescript_react,
+      :javascript,
+      :javascript_react,
+      :c,
+      :cpp,
+      :swift
+    ]
+
+    # SPC m a → alternate file for all supported filetypes
+    alternate_bindings =
+      Enum.map(supported_filetypes, fn ft ->
+        {ft, [{?a, @none}], :alternate_file, "Alternate file"}
+      end)
+
+    # SPC m t → +test submenu for all supported filetypes
+    test_bindings =
+      for ft <- supported_filetypes do
+        [
+          {ft, [{?t, 0}, {?t, 0}], :test_file, "Test file"},
+          {ft, [{?t, 0}, {?a, 0}], :test_all, "Test all"},
+          {ft, [{?t, 0}, {?p, 0}], :test_at_point, "Test at point"},
+          {ft, [{?t, 0}, {?r, 0}], :test_rerun, "Rerun last test"},
+          {ft, [{?t, 0}, {?o, 0}], :test_output, "Show test output"}
+        ]
+      end
+
+    alternate_bindings ++ List.flatten(test_bindings)
+  end
+
+  @doc """
+  Returns group prefixes for filetype-scoped bindings.
+
+  These add labels to intermediate keys so which-key shows them
+  (e.g., `t` → `+test` under `SPC m`).
+  """
+  @spec filetype_group_prefixes() :: [{[Bindings.key()], String.t()}]
+  def filetype_group_prefixes do
+    [
+      {[{?t, 0}], "+test"}
+    ]
   end
 end

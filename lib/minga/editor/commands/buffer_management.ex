@@ -141,6 +141,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     open_special_buffer(state, "*Warnings*", warn_buf)
   end
 
+  def execute(state, {:open_special_buffer, buffer_name, buffer_pid})
+      when is_binary(buffer_name) and is_pid(buffer_pid) do
+    open_special_buffer(state, buffer_name, buffer_pid)
+  end
+
   # ── Line number style ─────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :cycle_line_numbers) when is_pid(buf) do

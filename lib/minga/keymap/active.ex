@@ -278,24 +278,34 @@ defmodule Minga.Keymap.Active do
 
   @spec seed_defaults(:ets.table()) :: true
   defp seed_defaults(table) do
-    filetype_tries = build_default_filetype_tries()
-
     :ets.insert(table, [
       {@leader_trie_key, Defaults.leader_trie()},
       {@normal_overrides_key, %{}},
       {@scope_overrides_key, %{}},
-      {@filetype_tries_key, filetype_tries},
+      {@filetype_tries_key, build_default_filetype_tries()},
       {@mode_tries_key, %{}}
     ])
   end
 
   @spec build_default_filetype_tries() :: filetype_tries()
   defp build_default_filetype_tries do
-    Defaults.filetype_bindings()
-    |> Enum.reduce(%{}, fn {filetype, keys, command, description}, tries ->
-      trie = Map.get(tries, filetype, Bindings.new())
-      updated = Bindings.bind(trie, keys, command, description)
-      Map.put(tries, filetype, updated)
+    bindings = Defaults.filetype_bindings()
+    group_prefixes = Defaults.filetype_group_prefixes()
+
+    bindings
+    |> Enum.group_by(fn {ft, _keys, _cmd, _desc} -> ft end)
+    |> Enum.into(%{}, fn {ft, ft_bindings} ->
+      trie =
+        Enum.reduce(ft_bindings, Bindings.new(), fn {_ft, keys, cmd, desc}, acc ->
+          Bindings.bind(acc, keys, cmd, desc)
+        end)
+
+      trie =
+        Enum.reduce(group_prefixes, trie, fn {keys, desc}, acc ->
+          Bindings.bind_prefix(acc, keys, desc)
+        end)
+
+      {ft, trie}
     end)
   end
 

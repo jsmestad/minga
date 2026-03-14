@@ -97,7 +97,12 @@ defmodule Minga.Command.RegistryTest do
           :fold_open,
           :fold_close_all,
           :fold_open_all,
-          :alternate_file
+          :alternate_file,
+          :test_file,
+          :test_all,
+          :test_at_point,
+          :test_rerun,
+          :test_output
         ]
         |> Enum.sort()
 

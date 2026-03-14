@@ -248,9 +248,11 @@ defmodule Minga.Keymap.ActiveTest do
       trie = Active.mode_trie(s, :insert)
       assert :not_found = Bindings.lookup(trie, {?j, 0x02})
 
-      # Filetype tries cleared
+      # Filetype tries reset to defaults (user override for SPC m t → :test removed,
+      # but default +test prefix for :elixir remains from build_default_filetype_tries)
       ft_trie = Active.filetype_trie(s, :elixir)
-      assert :not_found = Bindings.lookup(ft_trie, {?t, 0})
+      # The user's :test command should be gone; the key is now a +test prefix from defaults
+      assert {:prefix, _} = Bindings.lookup(ft_trie, {?t, 0})
 
       # Scope overrides cleared
       assert Active.scope_overrides(s) == %{}

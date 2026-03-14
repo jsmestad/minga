@@ -50,6 +50,7 @@ defmodule Minga.Application do
       Minga.Config.Advice,
       Minga.Filetype.Registry,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+      {Registry, keys: :unique, name: Minga.CommandOutput.Registry},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
       Minga.Fold.Registry,

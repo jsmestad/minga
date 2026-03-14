@@ -589,6 +589,32 @@ defmodule Minga.Editor.Commands do
   def execute(state, :git_preview_hunk), do: GitCommands.execute(state, :git_preview_hunk)
   def execute(state, :git_blame_line), do: GitCommands.execute(state, :git_blame_line)
 
+  # ── Test runners ─────────────────────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, :test_file) when is_pid(buf) do
+    run_test_command(state, buf, :file)
+  end
+
+  def execute(state, :test_file), do: %{state | status_msg: "No active buffer"}
+
+  def execute(state, :test_all) do
+    run_test_command(state, nil, :all)
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :test_at_point) when is_pid(buf) do
+    run_test_command(state, buf, :at_point)
+  end
+
+  def execute(state, :test_at_point), do: %{state | status_msg: "No active buffer"}
+
+  def execute(state, :test_rerun) do
+    rerun_last_test(state)
+  end
+
+  def execute(state, :test_output) do
+    show_test_output(state)
+  end
+
   # ── Macro recording ──────────────────────────────────────────────────────
 
   def execute(state, :toggle_macro_recording) do
@@ -769,6 +795,86 @@ defmodule Minga.Editor.Commands do
       alt_path ->
         execute(state, {:execute_ex_command, {:edit, alt_path}})
     end
+  end
+
+  # ── Private test runner helpers ────────────────────────────────────────────
+
+  @spec run_test_command(state(), pid() | nil, :file | :all | :at_point) :: state()
+  defp run_test_command(state, buf, kind) do
+    filetype = if buf, do: BufferServer.filetype(buf), else: detect_project_filetype()
+    project_root = Minga.Project.root() || "."
+
+    case Minga.TestRunner.detect(filetype, project_root) do
+      {:ok, runner} ->
+        command = build_test_command(runner, buf, kind)
+        execute_test(state, command, project_root)
+
+      :none ->
+        %{state | status_msg: "No test runner configured for #{filetype}"}
+    end
+  end
+
+  @spec build_test_command(Minga.TestRunner.Runner.t(), pid() | nil, :file | :all | :at_point) ::
+          String.t() | nil
+  defp build_test_command(runner, _buf, :all) do
+    Minga.TestRunner.all_command(runner)
+  end
+
+  defp build_test_command(runner, buf, :file) when is_pid(buf) do
+    case BufferServer.file_path(buf) do
+      nil -> nil
+      path -> Minga.TestRunner.file_command(runner, path)
+    end
+  end
+
+  defp build_test_command(runner, buf, :at_point) when is_pid(buf) do
+    file_path = BufferServer.file_path(buf)
+    {cursor_line, _col} = BufferServer.cursor(buf)
+
+    if file_path do
+      Minga.TestRunner.at_point_command(runner, file_path, cursor_line + 1)
+    else
+      nil
+    end
+  end
+
+  defp build_test_command(_runner, _buf, _kind), do: nil
+
+  @spec execute_test(state(), String.t() | nil, String.t()) :: state()
+  defp execute_test(state, nil, _project_root) do
+    %{state | status_msg: "Cannot determine test command"}
+  end
+
+  defp execute_test(state, command, project_root) do
+    state = %{state | last_test_command: {command, project_root}}
+    Minga.CommandOutput.run("*test*", command, cwd: project_root)
+    show_test_output(state)
+  end
+
+  @spec rerun_last_test(state()) :: state()
+  defp rerun_last_test(%{last_test_command: {command, project_root}} = state) do
+    Minga.CommandOutput.run("*test*", command, cwd: project_root)
+    show_test_output(state)
+  end
+
+  defp rerun_last_test(state) do
+    %{state | status_msg: "No previous test command"}
+  end
+
+  @spec show_test_output(state()) :: state()
+  defp show_test_output(state) do
+    case Minga.CommandOutput.buffer("*test*") do
+      nil ->
+        %{state | status_msg: "No test output"}
+
+      buf_pid ->
+        BufferManagement.execute(state, {:open_special_buffer, "*test*", buf_pid})
+    end
+  end
+
+  @spec detect_project_filetype() :: atom()
+  defp detect_project_filetype do
+    Minga.TestRunner.detect_project_filetype(Minga.Project.root() || ".")
   end
 
   # ── Private formatting helpers ─────────────────────────────────────────────
