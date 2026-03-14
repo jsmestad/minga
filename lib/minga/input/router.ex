@@ -16,6 +16,8 @@ defmodule Minga.Input.Router do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Port.Manager, as: PortManager
+  alias Minga.Port.Protocol
 
   @doc """
   Dispatches a key press through the focus stack and runs post-key housekeeping.
@@ -89,7 +91,28 @@ defmodule Minga.Input.Router do
     |> Editor.do_maybe_reset_highlight(old_buffer)
     |> Editor.do_maybe_reparse(buf_version_before)
     |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
-    |> Editor.do_render()
+    |> maybe_render(buf_version_before)
+  end
+
+  # Skips the full render when entering operator-pending mode with no buffer
+  # change. This prevents the visible flicker between keystrokes of compound
+  # operators like `dd`, `cc`, `yy`, etc. The first keystroke is a zero-cost
+  # state flag, not a mode change that warrants a screen redraw.
+  #
+  # A bare `batch_end` is still emitted so that frame-synchronization contracts
+  # (HeadlessPort in tests, future frame-pacing in production) remain satisfied.
+  @spec maybe_render(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  defp maybe_render(%EditorState{vim: %{mode: :operator_pending}} = state, buf_version_before) do
+    if buffer_version(state) == buf_version_before do
+      PortManager.send_commands(state.port_manager, [Protocol.encode_batch_end()])
+      state
+    else
+      Editor.do_render(state)
+    end
+  end
+
+  defp maybe_render(state, _buf_version_before) do
+    Editor.do_render(state)
   end
 
   @doc """

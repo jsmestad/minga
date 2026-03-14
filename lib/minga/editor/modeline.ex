@@ -175,7 +175,7 @@ defmodule Minga.Editor.Modeline do
   defp mode_badge(:normal, _state), do: "NORMAL"
   defp mode_badge(:insert, _state), do: "INSERT"
   defp mode_badge(:visual, _state), do: "VISUAL"
-  defp mode_badge(:operator_pending, _state), do: "OPERATOR"
+  defp mode_badge(:operator_pending, _state), do: "NORMAL"
   defp mode_badge(:command, _state), do: "COMMAND"
   defp mode_badge(:replace, _state), do: "REPLACE"
   defp mode_badge(:search, _state), do: "SEARCH"

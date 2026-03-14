@@ -249,12 +249,14 @@ defmodule Minga.Integration.ModeTransitionsTest do
   # ── Normal → Operator Pending ──────────────────────────────────────────────
 
   describe "normal → operator pending (d)" do
-    test "modeline shows OPERATOR, waiting for motion" do
+    test "modeline stays NORMAL while in operator-pending mode" do
       ctx = start_editor("hello world\nsecond line")
 
       send_keys(ctx, "d")
 
-      assert_modeline_contains(ctx, "OPERATOR")
+      # Operator-pending is an invisible sub-state of Normal (like Vim/Doom).
+      # The modeline should NOT flash "OPERATOR".
+      assert_modeline_contains(ctx, "NORMAL")
       assert editor_mode(ctx) == :operator_pending
       assert_screen_snapshot(ctx, "normal_to_operator_d")
     end
