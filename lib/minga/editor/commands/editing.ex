@@ -44,6 +44,31 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
+  # Normal-mode x: deletes character at cursor and yanks it into the register.
+  def execute(%{buffers: %{active: buf}} = state, :delete_char_at) do
+    deleted = char_at_cursor(buf)
+
+    if deleted != "" do
+      BufferServer.delete_at(buf)
+      Helpers.put_register(state, deleted, :delete)
+    else
+      state
+    end
+  end
+
+  # Normal-mode X: deletes character before cursor and yanks it into the register.
+  def execute(%{buffers: %{active: buf}} = state, :delete_char_before) do
+    {line, col} = BufferServer.cursor(buf)
+
+    if col > 0 do
+      deleted = char_before_cursor(buf, line, col)
+      BufferServer.delete_before(buf)
+      Helpers.put_register(state, deleted, :delete)
+    else
+      state
+    end
+  end
+
   # ── Insertion ─────────────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :insert_newline) do
@@ -769,5 +794,30 @@ defmodule Minga.Editor.Commands.Editing do
     indent = byte_size(line_text) - byte_size(String.trim_leading(line_text))
     BufferServer.move_to(buf, {line, indent})
     :ok
+  end
+
+  # Returns the single grapheme at the cursor position, or "" on an empty line.
+  @spec char_at_cursor(pid()) :: String.t()
+  defp char_at_cursor(buf) do
+    {line, col} = BufferServer.cursor(buf)
+    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+
+    if col >= byte_size(line_text) do
+      ""
+    else
+      line_text
+      |> binary_part(col, byte_size(line_text) - col)
+      |> String.graphemes()
+      |> List.first()
+      |> then(&(&1 || ""))
+    end
+  end
+
+  # Returns the single grapheme before the cursor position.
+  @spec char_before_cursor(pid(), non_neg_integer(), pos_integer()) :: String.t()
+  defp char_before_cursor(buf, line, col) do
+    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+    before = binary_part(line_text, 0, col)
+    before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
   end
 end

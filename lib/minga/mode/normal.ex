@@ -724,14 +724,14 @@ defmodule Minga.Mode.Normal do
     {:execute, {:replace_char, char}, %{state | pending_replace: false}}
   end
 
-  # x — delete char at cursor
+  # x — delete char at cursor (yanks into register)
   def handle_key({?x, 0}, state) do
-    {:execute, :delete_at, state}
+    {:execute, :delete_char_at, state}
   end
 
-  # X — delete char before cursor
+  # X — delete char before cursor (yanks into register)
   def handle_key({?X, 0}, state) do
-    {:execute, :delete_before, state}
+    {:execute, :delete_char_before, state}
   end
 
   # J — join current line with next
@@ -751,7 +751,7 @@ defmodule Minga.Mode.Normal do
 
   # s — delete char at cursor, enter Insert mode (substitute char)
   def handle_key({?s, 0}, state) do
-    {:execute_then_transition, [:delete_at], :insert, state}
+    {:execute_then_transition, [:delete_char_at], :insert, state}
   end
 
   # S — clear line and enter Insert mode (substitute line)

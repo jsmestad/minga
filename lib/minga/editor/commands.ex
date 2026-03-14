@@ -342,6 +342,8 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :delete_before), do: Editing.execute(state, :delete_before)
   def execute(state, :delete_at), do: Editing.execute(state, :delete_at)
+  def execute(state, :delete_char_at), do: Editing.execute(state, :delete_char_at)
+  def execute(state, :delete_char_before), do: Editing.execute(state, :delete_char_before)
   def execute(state, :insert_newline), do: Editing.execute(state, :insert_newline)
   def execute(state, {:insert_char, _} = cmd), do: Editing.execute(state, cmd)
   def execute(state, :insert_line_below), do: Editing.execute(state, :insert_line_below)
