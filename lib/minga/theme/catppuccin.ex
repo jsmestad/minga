@@ -145,6 +145,7 @@ defmodule Minga.Theme.Catppuccin do
         separator_fg: p.surface0,
         modified_fg: p.peach,
         attention_fg: p.red,
+        close_hover_fg: p.red,
         bg: p.mantle
       }
     }

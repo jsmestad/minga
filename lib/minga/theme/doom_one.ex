@@ -163,6 +163,7 @@ defmodule Minga.Theme.DoomOne do
         separator_fg: 0x3F444A,
         modified_fg: @orange,
         attention_fg: @red,
+        close_hover_fg: @red,
         bg: @base3
       }
     }

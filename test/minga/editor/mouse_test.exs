@@ -303,4 +303,88 @@ defmodule Minga.Editor.MouseTest do
       assert BufferServer.cursor(buffer) == original
     end
   end
+
+  describe "tab close button click" do
+    alias Minga.Editor.State.TabBar
+
+    defp start_two_tab_editor do
+      {:ok, buf1} = BufferServer.start_link(content: "hello")
+      {:ok, buf2} = BufferServer.start_link(content: "world")
+
+      {:ok, editor} =
+        Editor.start_link(
+          name: :"editor_#{:erlang.unique_integer([:positive])}",
+          port_manager: nil,
+          buffer: buf1,
+          width: 80,
+          height: 10
+        )
+
+      # Inject a second tab directly via state manipulation
+      :sys.replace_state(editor, fn s ->
+        {tb, _tab} = TabBar.add(s.tab_bar, :file, "world.ex")
+        buffers = %{s.buffers | list: [buf1, buf2]}
+        %{s | tab_bar: tb, buffers: buffers}
+      end)
+
+      {editor, buf1, buf2}
+    end
+
+    defp inject_click_regions(editor, regions) do
+      :sys.replace_state(editor, fn state ->
+        %{state | tab_bar_click_regions: regions}
+      end)
+    end
+
+    test "clicking tab_close region closes the tab" do
+      {editor, _buf1, _buf2} = start_two_tab_editor()
+
+      s = state(editor)
+      assert length(s.tab_bar.tabs) == 2
+
+      # The active tab is tab 2 (we just added it). Inject a close region for it.
+      active_id = s.tab_bar.active_id
+      inject_click_regions(editor, [{5, 7, :"tab_close_#{active_id}"}])
+
+      # Click the close region on the tab bar row (row 0)
+      send_mouse(editor, 0, 6, :left, :press)
+
+      s = state(editor)
+      assert length(s.tab_bar.tabs) == 1
+    end
+
+    test "clicking tab_close on the last remaining tab does nothing" do
+      {editor, _buffer} = start_editor("hello")
+
+      s = state(editor)
+      assert length(s.tab_bar.tabs) == 1
+      active_id = s.tab_bar.active_id
+
+      inject_click_regions(editor, [{5, 7, :"tab_close_#{active_id}"}])
+      send_mouse(editor, 0, 6, :left, :press)
+
+      s = state(editor)
+      assert length(s.tab_bar.tabs) == 1
+    end
+
+    test "clicking tab_goto region switches tab without closing" do
+      {editor, _buf1, _buf2} = start_two_tab_editor()
+
+      s = state(editor)
+      active_id = s.tab_bar.active_id
+      other_id = Enum.find(s.tab_bar.tabs, &(&1.id != active_id)).id
+
+      inject_click_regions(editor, [
+        {0, 4, :"tab_goto_#{other_id}"},
+        {5, 7, :"tab_close_#{other_id}"}
+      ])
+
+      # Click the goto region (not the close region)
+      send_mouse(editor, 0, 2, :left, :press)
+
+      s = state(editor)
+      assert length(s.tab_bar.tabs) == 2
+      assert s.tab_bar.active_id == other_id
+    end
+  end
 end

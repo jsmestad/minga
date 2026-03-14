@@ -38,7 +38,14 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
   def render_tab_bar(state, layout) do
     {tab_row, _col, tab_width, _h} = layout.tab_bar
-    TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme)
+
+    hover_col =
+      case state.mouse.hover_pos do
+        {^tab_row, col} -> col
+        _ -> nil
+      end
+
+    TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme, hover_col)
   end
 
   # ── Window modeline ────────────────────────────────────────────────────────

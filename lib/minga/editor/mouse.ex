@@ -545,8 +545,16 @@ defmodule Minga.Editor.Mouse do
 
   defp maybe_handle_content_click(state, row, col) do
     case tab_bar_click(state, row, col) do
-      {:command, cmd} -> Minga.Editor.dispatch_command(state, cmd)
+      {:command, cmd} -> dispatch_tab_bar_command(state, cmd)
       :not_tab_bar -> handle_content_click(state, row, col)
+    end
+  end
+
+  @spec dispatch_tab_bar_command(state(), atom()) :: state()
+  defp dispatch_tab_bar_command(state, cmd) do
+    case Atom.to_string(cmd) do
+      "tab_close_" <> _ -> close_tab_by_command(state, cmd)
+      _ -> Minga.Editor.dispatch_command(state, cmd)
     end
   end
 
@@ -889,6 +897,12 @@ defmodule Minga.Editor.Mouse do
   defp parse_tab_id(cmd) do
     case Atom.to_string(cmd) do
       "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {tab_id, ""} -> {:ok, tab_id}
+          _ -> :error
+        end
+
+      "tab_close_" <> id_str ->
         case Integer.parse(id_str) do
           {tab_id, ""} -> {:ok, tab_id}
           _ -> :error
