@@ -7,6 +7,23 @@ defmodule Minga.Integration.MouseTest do
   """
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Editor.State.FileTree
+
+  # ── Test helpers ───────────────────────────────────────────────────────────
+
+  # Opens the agent split pane and returns the separator column.
+  # Fails the test if the separator can't be found (layout didn't render).
+  defp open_agent_split(ctx) do
+    send_keys(ctx, "<Space>aa")
+    row1 = screen_row(ctx, 1)
+    sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
+
+    assert sep_col != nil,
+           "expected vertical separator after opening agent split, got row: #{inspect(row1)}"
+
+    {ctx, sep_col}
+  end
+
   # ── Click to position ──────────────────────────────────────────────────────
 
   describe "single left click" do
@@ -157,27 +174,186 @@ defmodule Minga.Integration.MouseTest do
 
   # ── Click in agent panel ──────────────────────────────────────────────────
 
-  describe "click in agent panel area" do
-    test "clicking in agent panel area focuses it" do
+  describe "click in agent split pane" do
+    test "clicking in agent pane does not move buffer cursor" do
+      ctx = start_editor("hello world")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      # Click in the agent panel area (right of separator)
+      send_mouse(ctx, 5, sep_col + 5, :left)
+
+      # Buffer cursor should not have moved to the agent panel area
+      {_, buf_col} = buffer_cursor(ctx)
+
+      assert buf_col < sep_col,
+             "buffer cursor should stay in editor area after clicking agent panel"
+    end
+
+    test "clicking in agent pane switches focus to agent window" do
+      ctx = start_editor("hello world")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      # SPC a a opens the split but keeps editor active.
+      state_before = :sys.get_state(ctx.editor)
+      assert state_before.keymap_scope == :editor
+
+      editor_active_before = state_before.windows.active
+
+      # Click in the agent pane to focus it
+      send_mouse(ctx, 5, sep_col + 5, :left)
+
+      state_after = :sys.get_state(ctx.editor)
+
+      refute state_after.windows.active == editor_active_before,
+             "clicking in agent pane should change active window"
+
+      assert state_after.keymap_scope == :agent,
+             "clicking in agent pane should set scope to :agent, got #{state_after.keymap_scope}"
+    end
+
+    test "clicking in editor area while agent split is open returns focus to editor" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      # Click agent pane first to switch focus to agent
+      send_mouse(ctx, 5, sep_col + 5, :left)
+      state = :sys.get_state(ctx.editor)
+      assert state.keymap_scope == :agent
+
+      # Click in the editor area (left side, col 5)
+      send_mouse(ctx, 2, 5, :left)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.keymap_scope == :editor,
+             "clicking in editor area should switch scope to :editor, got #{state.keymap_scope}"
+    end
+  end
+
+  # ── Agent chat scroll ──────────────────────────────────────────────────────
+
+  describe "agent chat scroll" do
+    test "scroll wheel over agent pane scrolls chat, not editor buffer" do
+      ctx = start_editor("hello world")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      state_before = :sys.get_state(ctx.editor)
+      viewport_before = state_before.viewport.top
+
+      # Scroll down in the agent pane area
+      send_mouse(ctx, 5, sep_col + 5, :wheel_down)
+      send_mouse(ctx, 5, sep_col + 5, :wheel_down)
+
+      state_after = :sys.get_state(ctx.editor)
+
+      # Editor viewport should NOT have scrolled
+      assert state_after.viewport.top == viewport_before,
+             "scrolling over agent pane should not scroll editor viewport"
+
+      # Agent chat scroll offset should have increased
+      panel = state_after.agent.panel
+      assert panel.scroll.offset > 0, "agent chat scroll offset should increase on wheel_down"
+    end
+
+    test "scroll wheel over editor area does not scroll agent chat" do
+      ctx = start_editor(Enum.map_join(1..50, "\n", &"line #{&1}"))
+      {_ctx, _sep_col} = open_agent_split(ctx)
+
+      state_before = :sys.get_state(ctx.editor)
+      agent_scroll_before = state_before.agent.panel.scroll.offset
+
+      # Scroll in the editor area (col 5, left of the separator)
+      send_mouse(ctx, 5, 5, :wheel_down)
+      send_mouse(ctx, 5, 5, :wheel_down)
+
+      state_after = :sys.get_state(ctx.editor)
+
+      # Agent scroll should not have changed
+      assert state_after.agent.panel.scroll.offset == agent_scroll_before,
+             "scrolling in editor area should not affect agent chat scroll"
+
+      # But editor viewport should have scrolled
+      assert state_after.viewport.top > state_before.viewport.top,
+             "scrolling in editor area should scroll editor viewport"
+    end
+  end
+
+  # ── Agent input focus via click ────────────────────────────────────────────
+
+  describe "agent input focus via click" do
+    test "clicking in agent input area focuses the input" do
+      ctx = start_editor("hello world")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      # The input area is at the bottom of the agent pane.
+      # Click near the bottom of the agent pane (2 rows above the global
+      # modeline) to target the input area.
+      input_row = ctx.height - 3
+      send_mouse(ctx, input_row, sep_col + 5, :left)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.agent.panel.input_focused,
+             "clicking in the input area should focus the agent input"
+    end
+
+    test "clicking in agent chat area unfocuses the input" do
+      ctx = start_editor("hello world")
+      {ctx, sep_col} = open_agent_split(ctx)
+
+      # Establish precondition: focus the input by clicking in the input area
+      input_row = ctx.height - 3
+      send_mouse(ctx, input_row, sep_col + 5, :left)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.agent.panel.input_focused,
+             "precondition: input should be focused after clicking input area"
+
+      # Now click in the chat area (upper portion of agent pane) to unfocus
+      send_mouse(ctx, 3, sep_col + 5, :left)
+
+      state = :sys.get_state(ctx.editor)
+
+      refute state.agent.panel.input_focused,
+             "clicking in chat area should unfocus the agent input"
+    end
+  end
+
+  # ── Modeline click ─────────────────────────────────────────────────────────
+
+  describe "modeline click" do
+    test "clicking in the modeline row does not reposition the buffer cursor" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      # Position cursor at a known location first
+      send_mouse(ctx, 1, 5, :left)
+      cursor_before = buffer_cursor(ctx)
+
+      # Click in the modeline (second to last row)
+      modeline_row = ctx.height - 2
+      send_mouse(ctx, modeline_row, 10, :left)
+
+      cursor_after = buffer_cursor(ctx)
+
+      assert cursor_after == cursor_before,
+             "clicking in the modeline should not move the buffer cursor"
+    end
+
+    test "clicking in the minibuffer row does not reposition the buffer cursor" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>aa")
+      send_mouse(ctx, 1, 5, :left)
+      cursor_before = buffer_cursor(ctx)
 
-      # Find the separator column to know where the agent panel starts
-      row1 = screen_row(ctx, 1)
-      sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
+      # Click in the minibuffer (last row)
+      minibuffer_row = ctx.height - 1
+      send_mouse(ctx, minibuffer_row, 10, :left)
 
-      if sep_col do
-        # Click in the agent panel area (right of separator)
-        send_mouse(ctx, 5, sep_col + 5, :left)
+      cursor_after = buffer_cursor(ctx)
 
-        # Buffer cursor should not have moved to the agent panel area
-        # (the click was dispatched to the agent panel, not the buffer)
-        {_, buf_col} = buffer_cursor(ctx)
-
-        assert buf_col < sep_col,
-               "buffer cursor should stay in editor area after clicking agent panel"
-      end
+      assert cursor_after == cursor_before,
+             "clicking in the minibuffer should not move the buffer cursor"
     end
   end
 
@@ -196,6 +372,82 @@ defmodule Minga.Integration.MouseTest do
 
       assert editor_mode(ctx) == :visual
       assert_screen_snapshot(ctx, "mouse_shift_click_select")
+    end
+  end
+
+  # ── Multi-region dispatch ──────────────────────────────────────────────────
+
+  describe "multi-region dispatch" do
+    test "click dispatches to correct region when file tree and agent are both open" do
+      ctx = start_editor("hello world")
+
+      # Open file tree and wait for it to render
+      send_keys(ctx, "<Space>op")
+
+      wait_until(
+        ctx,
+        fn state ->
+          state.file_tree != nil and
+            FileTree.open?(state.file_tree)
+        end,
+        message: "file tree never opened"
+      )
+
+      # Open agent panel
+      send_keys(ctx, "<Space>aa")
+
+      # Wait for both separators to appear (file tree | editor | agent)
+      wait_until(
+        ctx,
+        fn _state ->
+          row1 = screen_row(ctx, 1)
+          sep_count = row1 |> String.graphemes() |> Enum.count(&(&1 == "│"))
+          sep_count >= 2
+        end,
+        message: "expected at least 2 separators (tree|editor|agent)"
+      )
+
+      rows = screen_text(ctx)
+      row1 = Enum.at(rows, 1)
+
+      # Find the two separators to know the three region boundaries
+      graphemes = String.graphemes(row1)
+
+      sep_positions =
+        graphemes
+        |> Enum.with_index()
+        |> Enum.filter(fn {ch, _i} -> ch == "│" end)
+        |> Enum.map(fn {_ch, i} -> i end)
+
+      assert length(sep_positions) >= 2,
+             "expected at least 2 separators, found #{length(sep_positions)} in: #{inspect(row1)}"
+
+      [tree_sep, agent_sep | _] = sep_positions
+
+      # Click in the file tree (left of first separator)
+      cursor_before = buffer_cursor(ctx)
+      send_mouse(ctx, 3, div(tree_sep, 2), :left)
+      cursor_after = buffer_cursor(ctx)
+
+      assert cursor_after == cursor_before,
+             "clicking in file tree should not move buffer cursor"
+
+      # Click in the agent area first (right of second separator)
+      # to switch to :agent scope
+      agent_col = agent_sep + 5
+      send_mouse(ctx, 5, agent_col, :left)
+      state = :sys.get_state(ctx.editor)
+
+      assert state.keymap_scope == :agent,
+             "clicking in agent area should set scope to :agent, got #{state.keymap_scope}"
+
+      # Now click in the editor area (between separators) to switch back
+      editor_col = tree_sep + div(agent_sep - tree_sep, 2)
+      send_mouse(ctx, 2, editor_col, :left)
+      state = :sys.get_state(ctx.editor)
+
+      assert state.keymap_scope == :editor,
+             "clicking in editor area should set scope to :editor, got #{state.keymap_scope}"
     end
   end
 end
