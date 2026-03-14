@@ -85,11 +85,12 @@ defmodule Minga.Agent.Tools.ShellTest do
         :ok
       end
 
-      # Sleep for 1 second (longer than our 200ms running indicator threshold)
+      # Sleep for 0.5s (longer than the 250ms running indicator threshold).
+      # The debounce cycle is 200ms, so the indicator fires at ~400ms.
       assert {:ok, _output} =
-               Shell.execute("sleep 1 && echo done", dir, 5,
+               Shell.execute("sleep 0.5 && echo done", dir, 5,
                  on_output: on_output,
-                 running_indicator_ms: 200
+                 running_indicator_ms: 250
                )
 
       chunks = collect_shell_chunks()

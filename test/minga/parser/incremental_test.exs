@@ -7,7 +7,7 @@ defmodule Minga.Parser.IncrementalTest do
   commands to it. They require the parser binary to be built.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Port.Protocol
