@@ -515,6 +515,54 @@ defmodule Minga.Editor.Commands.EditingTest do
     end
   end
 
+  describe "counted x (3x)" do
+    test "3x deletes three characters and yanks all three into the register" do
+      {editor, buffer} = start_editor("abcdef")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?3)
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == "def"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"abc", :charwise}
+    end
+
+    test "3x then p pastes all three deleted characters" do
+      {editor, buffer} = start_editor("abcdef")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?3)
+      send_key(editor, ?x)
+      send_key(editor, ?$)
+      send_key(editor, ?p)
+
+      content = BufferServer.content(buffer)
+      assert String.contains?(content, "abc")
+    end
+
+    test "count larger than available chars deletes only what exists" do
+      {editor, buffer} = start_editor("ab")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?5)
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == ""
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"ab", :charwise}
+    end
+
+    test "3X deletes three characters before cursor and yanks all three" do
+      {editor, buffer} = start_editor("abcdef")
+      BufferServer.move_to(buffer, {0, 4})
+      send_key(editor, ?3)
+      send_key(editor, ?X)
+
+      assert BufferServer.content(buffer) == "aef"
+      s = :sys.get_state(editor)
+      # Deleted chars in reading order: "bcd"
+      assert Map.get(s.vim.reg.registers, "") == {"bcd", :charwise}
+    end
+  end
+
   describe "X (delete_char_before) yanks into register" do
     test "X stores deleted char in unnamed register" do
       {editor, buffer} = start_editor("abc")

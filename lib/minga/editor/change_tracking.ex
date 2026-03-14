@@ -148,8 +148,8 @@ defmodule Minga.Editor.ChangeTracking do
   @spec editing_command?(Mode.command()) :: boolean()
   defp editing_command?(:delete_at), do: true
   defp editing_command?(:delete_before), do: true
-  defp editing_command?(:delete_char_at), do: true
-  defp editing_command?(:delete_char_before), do: true
+  defp editing_command?({:delete_chars_at, _}), do: true
+  defp editing_command?({:delete_chars_before, _}), do: true
   defp editing_command?(:delete_line), do: true
   defp editing_command?(:change_line), do: true
   defp editing_command?(:join_lines), do: true

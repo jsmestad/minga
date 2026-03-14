@@ -44,25 +44,24 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  # Normal-mode x: deletes character at cursor and yanks it into the register.
-  def execute(%{buffers: %{active: buf}} = state, :delete_char_at) do
-    deleted = char_at_cursor(buf)
+  # Normal-mode x: deletes count character(s) at cursor and yanks them into the register.
+  def execute(%{buffers: %{active: buf}} = state, {:delete_chars_at, count})
+      when is_integer(count) and count > 0 do
+    deleted = collect_chars_at(buf, count)
 
     if deleted != "" do
-      BufferServer.delete_at(buf)
       Helpers.put_register(state, deleted, :delete)
     else
       state
     end
   end
 
-  # Normal-mode X: deletes character before cursor and yanks it into the register.
-  def execute(%{buffers: %{active: buf}} = state, :delete_char_before) do
-    {line, col} = BufferServer.cursor(buf)
+  # Normal-mode X: deletes count character(s) before cursor and yanks them into the register.
+  def execute(%{buffers: %{active: buf}} = state, {:delete_chars_before, count})
+      when is_integer(count) and count > 0 do
+    deleted = collect_chars_before(buf, count)
 
-    if col > 0 do
-      deleted = char_before_cursor(buf, line, col)
-      BufferServer.delete_before(buf)
+    if deleted != "" do
       Helpers.put_register(state, deleted, :delete)
     else
       state
@@ -796,9 +795,41 @@ defmodule Minga.Editor.Commands.Editing do
     :ok
   end
 
-  # Returns the single grapheme at the cursor position, or "" on an empty line.
-  @spec char_at_cursor(pid()) :: String.t()
-  defp char_at_cursor(buf) do
+  # Deletes `count` characters at the cursor, returning the concatenated deleted text.
+  @spec collect_chars_at(pid(), pos_integer()) :: String.t()
+  defp collect_chars_at(buf, count) do
+    Enum.reduce(1..count, "", fn _, acc ->
+      case grapheme_at_cursor(buf) do
+        "" ->
+          acc
+
+        grapheme ->
+          BufferServer.delete_at(buf)
+          acc <> grapheme
+      end
+    end)
+  end
+
+  # Deletes `count` characters before the cursor, returning the concatenated
+  # deleted text in forward (reading) order.
+  @spec collect_chars_before(pid(), pos_integer()) :: String.t()
+  defp collect_chars_before(buf, count) do
+    Enum.reduce(1..count, "", fn _, acc ->
+      case grapheme_before_cursor(buf) do
+        "" ->
+          acc
+
+        grapheme ->
+          BufferServer.delete_before(buf)
+          # Prepend because we're deleting right-to-left
+          grapheme <> acc
+      end
+    end)
+  end
+
+  # Returns the single grapheme at the cursor position, or "" if at end of line.
+  @spec grapheme_at_cursor(pid()) :: String.t()
+  defp grapheme_at_cursor(buf) do
     {line, col} = BufferServer.cursor(buf)
     line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
 
@@ -813,11 +844,17 @@ defmodule Minga.Editor.Commands.Editing do
     end
   end
 
-  # Returns the single grapheme before the cursor position.
-  @spec char_before_cursor(pid(), non_neg_integer(), pos_integer()) :: String.t()
-  defp char_before_cursor(buf, line, col) do
-    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
-    before = binary_part(line_text, 0, col)
-    before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
+  # Returns the single grapheme before the cursor position, or "" if at col 0.
+  @spec grapheme_before_cursor(pid()) :: String.t()
+  defp grapheme_before_cursor(buf) do
+    {line, col} = BufferServer.cursor(buf)
+
+    if col == 0 do
+      ""
+    else
+      line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+      before = binary_part(line_text, 0, col)
+      before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
+    end
   end
 end
