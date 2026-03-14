@@ -769,11 +769,26 @@ defmodule Minga.Editor.RenderPipeline do
   def build_chrome(state, layout, scrolls, cursor_info) do
     full_viewport = state.viewport
 
-    # Modeline per window
+    # Modeline per buffer window
     {modeline_draws, modeline_click_regions} =
       Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
         {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
         {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+      end)
+
+    # Modeline per agent chat window (skipped in scrolls, rendered here)
+    {modeline_draws, modeline_click_regions} =
+      layout.window_layouts
+      |> Enum.reduce({modeline_draws, modeline_click_regions}, fn {win_id, win_layout},
+                                                                  {draws_acc, regions_acc} ->
+        window = Map.get(state.windows.map, win_id)
+
+        if window != nil and Content.agent_chat?(window.content) do
+          {draws, regions} = ChromeHelpers.render_agent_modeline(state, win_layout)
+          {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+        else
+          {draws_acc, regions_acc}
+        end
       end)
 
     # Separators (vertical split borders)
