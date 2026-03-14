@@ -528,6 +528,75 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  describe "dirty flag after undo/redo (#475)" do
+    @tag :tmp_dir
+    test "undo back to saved state clears dirty flag", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "undo_dirty.txt")
+      File.write!(path, "original")
+      {:ok, pid} = Server.start_link(file_path: path)
+
+      refute Server.dirty?(pid)
+
+      # Edit and verify dirty
+      Server.insert_char(pid, "X")
+      assert Server.dirty?(pid)
+
+      # Undo back to saved state
+      Server.undo(pid)
+      assert Server.content(pid) == "original"
+      refute Server.dirty?(pid)
+    end
+
+    @tag :tmp_dir
+    test "redo after undo restores dirty flag", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "redo_dirty.txt")
+      File.write!(path, "original")
+      {:ok, pid} = Server.start_link(file_path: path)
+
+      Server.insert_char(pid, "X")
+      assert Server.dirty?(pid)
+
+      Server.undo(pid)
+      refute Server.dirty?(pid)
+
+      Server.redo(pid)
+      assert Server.dirty?(pid)
+    end
+
+    @tag :tmp_dir
+    test "save then edit then undo clears dirty", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "save_undo.txt")
+      File.write!(path, "start")
+      {:ok, pid} = Server.start_link(file_path: path)
+
+      # Edit and save
+      Server.insert_char(pid, "A")
+      assert Server.dirty?(pid)
+      :ok = Server.save(pid)
+      refute Server.dirty?(pid)
+
+      # Edit again
+      Server.break_undo_coalescing(pid)
+      Server.insert_char(pid, "B")
+      assert Server.dirty?(pid)
+
+      # Undo the second edit, back to saved state
+      Server.undo(pid)
+      refute Server.dirty?(pid)
+    end
+
+    test "pathless file buffer edit then undo returns to clean" do
+      {:ok, pid} = Server.start_link(content: "text")
+
+      refute Server.dirty?(pid)
+      Server.insert_char(pid, "X")
+      assert Server.dirty?(pid)
+
+      Server.undo(pid)
+      refute Server.dirty?(pid), "pathless buffer should be clean after undoing to initial state"
+    end
+  end
+
   describe "edit delta tracking" do
     test "insert_char records an insertion delta" do
       {:ok, pid} = Server.start_link(content: "hello")

@@ -742,7 +742,7 @@ defmodule Minga.Buffer.Server do
       case write_file(state.file_path, Document.content(state.document)) do
         :ok ->
           {new_mtime, new_size} = file_stat_info(state.file_path)
-          {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
+          {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -763,7 +763,7 @@ defmodule Minga.Buffer.Server do
     case write_file(state.file_path, Document.content(state.document)) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(state.file_path)
-        {:reply, :ok, %{state | dirty: false, mtime: new_mtime, file_size: new_size}}
+        {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -822,7 +822,7 @@ defmodule Minga.Buffer.Server do
         {new_mtime, new_size} = file_stat_info(file_path)
 
         {:reply, :ok,
-         %{state | file_path: file_path, dirty: false, mtime: new_mtime, file_size: new_size}}
+         mark_saved(%{state | file_path: file_path, mtime: new_mtime, file_size: new_size})}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1074,15 +1074,18 @@ defmodule Minga.Buffer.Server do
       [] ->
         {:reply, :ok, state}
 
-      [prev_buf | rest_undo] ->
+      [{prev_version, prev_buf} | rest_undo] ->
+        redo_entry = {state.version, state.document}
+
         new_state =
           %{
             state
             | document: prev_buf,
+              version: prev_version,
               undo_stack: rest_undo,
-              redo_stack: [state.document | state.redo_stack]
+              redo_stack: [redo_entry | state.redo_stack]
           }
-          |> mark_dirty()
+          |> sync_dirty()
           |> clear_edits()
 
         {:reply, :ok, new_state}
@@ -1094,15 +1097,18 @@ defmodule Minga.Buffer.Server do
       [] ->
         {:reply, :ok, state}
 
-      [next_buf | rest_redo] ->
+      [{next_version, next_buf} | rest_redo] ->
+        undo_entry = {state.version, state.document}
+
         new_state =
           %{
             state
             | document: next_buf,
+              version: next_version,
               redo_stack: rest_redo,
-              undo_stack: [state.document | state.undo_stack]
+              undo_stack: [undo_entry | state.undo_stack]
           }
-          |> mark_dirty()
+          |> sync_dirty()
           |> clear_edits()
 
         {:reply, :ok, new_state}
@@ -1200,6 +1206,12 @@ defmodule Minga.Buffer.Server do
 
   @spec mark_dirty(state()) :: state()
   defp mark_dirty(state), do: BufState.mark_dirty(state)
+
+  @spec sync_dirty(state()) :: state()
+  defp sync_dirty(state), do: BufState.sync_dirty(state)
+
+  @spec mark_saved(state()) :: state()
+  defp mark_saved(state), do: BufState.mark_saved(state)
 
   @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}
   defp write_file(file_path, content) do
