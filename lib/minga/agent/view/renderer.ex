@@ -53,6 +53,8 @@ defmodule Minga.Agent.View.Renderer do
   @type state :: EditorState.t()
 
   @max_input_lines 8
+  @input_h_margin 2
+  @input_v_gap 1
 
   # ── Focused input type ─────────────────────────────────────────────────────
 
@@ -144,16 +146,19 @@ defmodule Minga.Agent.View.Renderer do
   def render_in_rect(%EditorState{} = state, {row, col, width, height}) do
     input = extract_input(state)
 
-    input_height =
-      compute_input_height(input.panel.input_lines, input_inner_width(width))
+    box_width = max(width - 2 * @input_h_margin, 10)
+    box_col = col + @input_h_margin
 
-    chat_height = max(height - input_height, 1)
-    input_row = row + chat_height
+    input_height =
+      compute_input_height(input.panel.input_lines, input_inner_width(box_width))
+
+    chat_height = max(height - input_height - @input_v_gap, 1)
+    input_row = row + chat_height + @input_v_gap
 
     {chat_draws, _metrics} =
       render_chat_from_input(input, {row, col, width, chat_height})
 
-    input_draws = render_input_from_input(input, input_row, width)
+    input_draws = render_input_from_input(input, input_row, box_col, box_width)
 
     chat_draws ++ input_draws
   end
@@ -176,11 +181,14 @@ defmodule Minga.Agent.View.Renderer do
     {row_off, col_off, chat_width, height} = content_rect
     {_sr, sidebar_col, sidebar_width, sidebar_height} = sidebar_rect
 
-    input_height =
-      compute_input_height(input.panel.input_lines, input_inner_width(chat_width))
+    box_width = max(chat_width - 2 * @input_h_margin, 10)
+    box_col = col_off + @input_h_margin
 
-    chat_height = max(height - input_height, 1)
-    input_row = row_off + chat_height
+    input_height =
+      compute_input_height(input.panel.input_lines, input_inner_width(box_width))
+
+    chat_height = max(height - input_height - @input_v_gap, 1)
+    input_row = row_off + chat_height + @input_v_gap
     separator_col = col_off + chat_width
 
     {chat_commands, _metrics} =
@@ -195,7 +203,7 @@ defmodule Minga.Agent.View.Renderer do
         {row_off, sidebar_col, sidebar_width, sidebar_height}
       )
 
-    input_commands = render_input_from_input(input, input_row, chat_width)
+    input_commands = render_input_from_input(input, input_row, box_col, box_width)
 
     total_width = chat_width + 1 + sidebar_width
 
@@ -222,14 +230,16 @@ defmodule Minga.Agent.View.Renderer do
   Returns nil when input is not focused (cursor hidden).
   """
   @spec cursor_position_in_rect(state(), rect()) :: {non_neg_integer(), non_neg_integer()} | nil
-  def cursor_position_in_rect(state, {row_off, _col_off, width, height}) do
+  def cursor_position_in_rect(state, {row_off, col_off, width, height}) do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused do
       agentic = AgentAccess.agentic(state)
       chat_width_pct = agentic.chat_width_pct
       chat_width = max(div(width * chat_width_pct, 100), 20)
-      inner_width = input_inner_width(chat_width)
+      box_width = max(chat_width - 2 * @input_h_margin, 10)
+      box_col = col_off + @input_h_margin
+      inner_width = input_inner_width(box_width)
 
       lines = PanelState.input_lines(panel)
       cursor = PanelState.input_cursor(panel)
@@ -237,8 +247,8 @@ defmodule Minga.Agent.View.Renderer do
       total_visual = InputWrap.visual_line_count(lines, inner_width)
       visible_lines = max(min(total_visual, @max_input_lines), 1)
       input_height = compute_input_height(lines, inner_width)
-      chat_height = max(height - input_height, 1)
-      input_row = row_off + chat_height
+      chat_height = max(height - input_height - @input_v_gap, 1)
+      input_row = row_off + chat_height + @input_v_gap
 
       {visual_line, visual_col} =
         InputWrap.logical_to_visual(lines, inner_width, cursor)
@@ -247,7 +257,7 @@ defmodule Minga.Agent.View.Renderer do
       visible_offset = visual_line - scroll
 
       input_text_row = input_row + 1 + min(visible_offset, visible_lines - 1)
-      input_col = 1 + 3 + visual_col
+      input_col = box_col + 1 + 3 + visual_col
       {input_text_row, input_col}
     else
       nil
@@ -300,8 +310,9 @@ defmodule Minga.Agent.View.Renderer do
     cols = state.viewport.cols
     pct = agentic.chat_width_pct
     chat_w = max(div(cols * pct, 100), 20)
-    input_h = compute_input_height(PanelState.input_lines(panel), input_inner_width(chat_w))
-    content_rows = max(rows - 1 - 1 - input_h - 1 - 1, 1)
+    box_w = max(chat_w - 2 * @input_h_margin, 10)
+    input_h = compute_input_height(PanelState.input_lines(panel), input_inner_width(box_w))
+    content_rows = max(rows - 1 - 1 - input_h - @input_v_gap - 1 - 1, 1)
 
     buffer_snapshot =
       case state.buffers.active do
@@ -849,9 +860,14 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Input area (left column) ──────────────────────────────────────────────
 
-  @spec render_input_from_input(RenderInput.t(), non_neg_integer(), pos_integer()) ::
+  @spec render_input_from_input(
+          RenderInput.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) ::
           [DisplayList.draw()]
-  defp render_input_from_input(input, row, width) do
+  defp render_input_from_input(input, row, col_off, width) do
     at = Theme.agent_theme(input.theme)
     panel = input.panel
     border_style = [fg: at.input_border, bg: at.panel_bg]
@@ -873,7 +889,7 @@ defmodule Minga.Agent.View.Renderer do
     right_tag = if mode_tag != "", do: " " <> mode_tag <> " ─", else: ""
     fill_len = max(width - 2 - String.length(label) - String.length(right_tag), 0)
     top_line = "╭" <> label <> String.duplicate("─", fill_len) <> right_tag <> "╮"
-    top_cmd = DisplayList.draw(row, 0, top_line, border_style)
+    top_cmd = DisplayList.draw(row, col_off, top_line, border_style)
 
     # ── Content rows: │   text            │
     content_start = row + 1
@@ -886,10 +902,10 @@ defmodule Minga.Agent.View.Renderer do
         fill = String.pad_trailing(inner, max(width - 2, 0))
 
         [
-          DisplayList.draw(content_start, 0, "│" <> fill <> "│", bg: at.input_bg),
-          DisplayList.draw(content_start, 0, "│", border_style),
-          DisplayList.draw(content_start, width - 1, "│", border_style),
-          DisplayList.draw(content_start, 1 + pad_left, padded,
+          DisplayList.draw(content_start, col_off, "│" <> fill <> "│", bg: at.input_bg),
+          DisplayList.draw(content_start, col_off, "│", border_style),
+          DisplayList.draw(content_start, col_off + width - 1, "│", border_style),
+          DisplayList.draw(content_start, col_off + 1 + pad_left, padded,
             fg: at.input_placeholder,
             bg: at.input_bg
           )
@@ -907,6 +923,7 @@ defmodule Minga.Agent.View.Renderer do
         sel_range = vim_visual_range(panel)
 
         chrome = %{
+          col_off: col_off,
           inner_width: inner_width,
           width: width,
           left_pad: left_pad,
@@ -937,7 +954,7 @@ defmodule Minga.Agent.View.Renderer do
     model_prefix = "─ " <> model_label <> " "
     model_fill_len = max(width - 2 - String.length(model_prefix), 0)
     bottom_line = "╰" <> model_prefix <> String.duplicate("─", model_fill_len) <> "╯"
-    bottom_cmd = DisplayList.draw(bottom_row, 0, bottom_line, border_style)
+    bottom_cmd = DisplayList.draw(bottom_row, col_off, bottom_line, border_style)
 
     [top_cmd | line_cmds] ++ [bottom_cmd]
   end
@@ -991,15 +1008,16 @@ defmodule Minga.Agent.View.Renderer do
           {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
         ) :: [DisplayList.draw()]
   defp render_input_row(row, display_text, fg_color, chrome, logical_idx, vl, sel_range) do
+    c = Map.get(chrome, :col_off, 0)
     padded = String.pad_trailing(display_text, chrome.inner_width)
     inner = chrome.left_pad <> padded <> chrome.right_pad
     fill = String.pad_trailing(inner, max(chrome.width - 2, 0))
-    text_col = 1 + chrome.pad_left
+    text_col = c + 1 + chrome.pad_left
 
     base = [
-      DisplayList.draw(row, 0, "│" <> fill <> "│", bg: chrome.input_bg),
-      DisplayList.draw(row, 0, "│", chrome.border_style),
-      DisplayList.draw(row, chrome.width - 1, "│", chrome.border_style),
+      DisplayList.draw(row, c, "│" <> fill <> "│", bg: chrome.input_bg),
+      DisplayList.draw(row, c, "│", chrome.border_style),
+      DisplayList.draw(row, c + chrome.width - 1, "│", chrome.border_style),
       DisplayList.draw(row, text_col, padded, fg: fg_color, bg: chrome.input_bg)
     ]
 
@@ -1087,6 +1105,23 @@ defmodule Minga.Agent.View.Renderer do
   """
   @spec input_inner_width(pos_integer()) :: pos_integer()
   def input_inner_width(box_width), do: max(box_width - 6, 1)
+
+  @doc """
+  Returns the prompt box width after applying horizontal margins.
+
+  The box is inset by `@input_h_margin` on each side of the chat column.
+  Public so that `Input.AgentMouse` can use the same layout math for hit-testing.
+  """
+  @spec input_box_width(pos_integer()) :: pos_integer()
+  def input_box_width(chat_width), do: max(chat_width - 2 * @input_h_margin, 10)
+
+  @doc """
+  Returns the vertical gap (in rows) between the prompt box and the modeline.
+
+  Public so that `Input.AgentMouse` can use the same layout math for hit-testing.
+  """
+  @spec input_v_gap() :: non_neg_integer()
+  def input_v_gap, do: @input_v_gap
 
   # Returns the visual selection range from Vim state, or nil.
   @spec vim_visual_range(map()) ::
