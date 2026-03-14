@@ -27,6 +27,9 @@ defmodule Minga.Buffer.State do
   """
   @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
 
+  @typedoc "An undo/redo stack entry: the document snapshot and its version at capture time."
+  @type stack_entry :: {non_neg_integer(), Document.t()}
+
   @enforce_keys [:document]
   defstruct document: nil,
             file_path: nil,
@@ -34,6 +37,7 @@ defmodule Minga.Buffer.State do
             buffer_type: :file,
             dirty: false,
             version: 0,
+            saved_version: 0,
             mtime: nil,
             file_size: nil,
             undo_stack: [],
@@ -53,10 +57,11 @@ defmodule Minga.Buffer.State do
           buffer_type: buffer_type(),
           dirty: boolean(),
           version: non_neg_integer(),
+          saved_version: non_neg_integer(),
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
-          undo_stack: [Document.t()],
-          redo_stack: [Document.t()],
+          undo_stack: [stack_entry()],
+          redo_stack: [stack_entry()],
           last_undo_at: integer(),
           name: String.t() | nil,
           read_only: boolean(),
@@ -77,9 +82,28 @@ defmodule Minga.Buffer.State do
 
   @undo_coalesce_ms 300
 
-  @doc "Marks the buffer as having unsaved changes."
+  @doc "Marks the buffer as having unsaved changes (bumps version)."
   @spec mark_dirty(t()) :: t()
-  def mark_dirty(%__MODULE__{} = state), do: %{state | dirty: true, version: state.version + 1}
+  def mark_dirty(%__MODULE__{} = state) do
+    new_version = state.version + 1
+    %{state | dirty: new_version != state.saved_version, version: new_version}
+  end
+
+  @doc """
+  Sets the dirty flag based on whether the given version matches the saved
+  version. Used by undo/redo which restore a version from the stack rather
+  than incrementing.
+  """
+  @spec sync_dirty(t()) :: t()
+  def sync_dirty(%__MODULE__{} = state) do
+    %{state | dirty: state.version != state.saved_version}
+  end
+
+  @doc "Records the current version as the save point for dirty tracking."
+  @spec mark_saved(t()) :: t()
+  def mark_saved(%__MODULE__{} = state) do
+    %{state | dirty: false, saved_version: state.version}
+  end
 
   @doc """
   Pushes the current document onto the undo stack and replaces it with
@@ -104,8 +128,10 @@ defmodule Minga.Buffer.State do
   @spec push_undo(t(), Document.t(), integer(), integer()) :: t()
   defp push_undo(%__MODULE__{} = state, new_buf, now, elapsed)
        when state.last_undo_at == 0 or elapsed >= @undo_coalesce_ms do
+    entry = {state.version, state.document}
+
     new_undo =
-      [state.document | state.undo_stack]
+      [entry | state.undo_stack]
       |> Enum.take(@max_undo_stack)
 
     %{state | document: new_buf, undo_stack: new_undo, redo_stack: [], last_undo_at: now}
@@ -126,9 +152,10 @@ defmodule Minga.Buffer.State do
   @spec push_undo_force(t(), Document.t()) :: t()
   def push_undo_force(%__MODULE__{} = state, new_buf) do
     now = System.monotonic_time(:millisecond)
+    entry = {state.version, state.document}
 
     new_undo =
-      [state.document | state.undo_stack]
+      [entry | state.undo_stack]
       |> Enum.take(@max_undo_stack)
 
     %{state | document: new_buf, undo_stack: new_undo, redo_stack: [], last_undo_at: now}

@@ -1126,7 +1126,10 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   defp call_llm_sync(llm_client, model, messages, opts) do
-    stream_opts = Keyword.take(opts, [:max_tokens])
+    stream_opts =
+      opts
+      |> Keyword.take([:max_tokens])
+      |> maybe_add_base_url(model)
 
     with {:ok, stream_response} <- llm_client.(model, messages, stream_opts),
          {:ok, response} <- StreamResponse.process_stream(stream_response) do
@@ -1137,6 +1140,8 @@ defmodule Minga.Agent.Providers.Native do
   @spec summary_client(llm_client()) :: Compaction.summary_fn()
   defp summary_client(llm_client) do
     fn model, messages, opts ->
+      opts = maybe_add_base_url(opts, model)
+
       with {:ok, stream_response} <- llm_client.(model, messages, opts),
            {:ok, response} <- StreamResponse.process_stream(stream_response) do
         {:ok, ReqLLM.Response.text(response) || ""}
@@ -1147,6 +1152,9 @@ defmodule Minga.Agent.Providers.Native do
   @spec build_stream_opts(String.t(), [ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
   defp build_stream_opts(model, tools, thinking_level, max_tokens) do
     opts = [tools: tools, max_tokens: max_tokens]
+
+    # Inject custom base URL if configured (for API gateways, load balancers, etc.)
+    opts = maybe_add_base_url(opts, model)
 
     # Enable Anthropic prompt caching when the model is Anthropic
     opts =
@@ -1189,6 +1197,58 @@ defmodule Minga.Agent.Providers.Native do
   catch
     :exit, _ -> true
   end
+
+  # Resolves the API base URL for the current request. Precedence:
+  #
+  # 1. MINGA_API_BASE_URL env var (global override for all providers)
+  # 2. Per-provider endpoint from :agent_api_endpoints map
+  # 3. Global :agent_api_base_url config
+  # 4. No override (use provider default)
+  @spec maybe_add_base_url(keyword(), String.t()) :: keyword()
+  defp maybe_add_base_url(opts, model) do
+    url =
+      non_empty(System.get_env("MINGA_API_BASE_URL")) ||
+        per_provider_url(model) ||
+        non_empty(read_config_string(:agent_api_base_url))
+
+    if url do
+      Keyword.put(opts, :base_url, url)
+    else
+      opts
+    end
+  end
+
+  @spec per_provider_url(String.t()) :: String.t() | nil
+  defp per_provider_url(model) do
+    provider = strip_provider_prefix_to_provider(model)
+
+    case read_config_endpoints() do
+      endpoints when is_map(endpoints) -> non_empty(Map.get(endpoints, provider))
+      _ -> nil
+    end
+  end
+
+  @spec strip_provider_prefix_to_provider(String.t()) :: String.t()
+  defp strip_provider_prefix_to_provider(model) do
+    case String.split(model, ":", parts: 2) do
+      [provider, _name] -> provider
+      [_bare] -> "anthropic"
+    end
+  end
+
+  @spec read_config_endpoints() :: map() | nil
+  defp read_config_endpoints do
+    Options.get(:agent_api_endpoints)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec non_empty(String.t() | nil) :: String.t() | nil
+  defp non_empty(nil), do: nil
+  defp non_empty(""), do: nil
+  defp non_empty(str) when is_binary(str), do: str
 
   # Builds tools that interact with the provider's internal state (todo, notebook).
   # These are created in init with a closure over the provider PID.

@@ -624,7 +624,7 @@ defmodule Minga.Editor.RenderPipeline do
 
         cr = visible_cursor - viewport.top + row_off
         cc = gutter_w + cursor_col - viewport.left + col_off
-        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim.mode))
+        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim))
       else
         nil
       end
@@ -922,7 +922,7 @@ defmodule Minga.Editor.RenderPipeline do
         ComposeHelpers.agent_cursor_from_layout(state, layout),
         active_wf_cursor,
         minibuffer_result,
-        Modeline.cursor_shape(state.vim.mode)
+        Modeline.cursor_shape(state.vim)
       )
 
     %Frame{

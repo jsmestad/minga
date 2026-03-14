@@ -81,10 +81,30 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(state, :quit), do: close_tab_or_quit(state)
+  def execute(state, :quit) do
+    if last_tab?(state) do
+      maybe_confirm_quit(state, :quit)
+    else
+      close_tab_or_quit(state)
+    end
+  end
+
   def execute(state, :force_quit), do: close_tab_or_quit(state)
-  def execute(state, :quit_all), do: shutdown_editor(state)
+  def execute(state, :quit_all), do: maybe_confirm_quit(state, :quit_all)
   def execute(state, :force_quit_all), do: shutdown_editor(state)
+
+  def execute(%{pending_quit: kind} = state, :confirm_quit_yes) when kind != nil do
+    state = %{state | pending_quit: nil}
+
+    case kind do
+      :quit -> close_tab_or_quit(state)
+      :quit_all -> shutdown_editor(state)
+    end
+  end
+
+  def execute(state, :confirm_quit_no) do
+    %{state | pending_quit: nil, status_msg: nil}
+  end
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
@@ -641,6 +661,42 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # For file tabs, this closes the tab without killing the buffer (matching
   # Neovim where `:q` closes the window but the buffer stays in memory).
   # For agent tabs, session cleanup is needed so we delegate to close_agent_tab.
+  # Checks whether a quit should be confirmed (dirty buffers + confirm_quit enabled).
+  # If confirmation is needed, sets `pending_quit` and a status message.
+  # Otherwise, proceeds with the quit immediately.
+  @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
+  defp maybe_confirm_quit(state, kind) do
+    if confirm_quit_enabled?() and any_buffer_dirty?(state) do
+      %{state | pending_quit: kind, status_msg: "Modified buffers exist. Really quit? (y/n)"}
+    else
+      case kind do
+        :quit -> close_tab_or_quit(state)
+        :quit_all -> shutdown_editor(state)
+      end
+    end
+  end
+
+  @spec any_buffer_dirty?(state()) :: boolean()
+  defp any_buffer_dirty?(state) do
+    Enum.any?(state.buffers.list, fn pid ->
+      Process.alive?(pid) and BufferServer.dirty?(pid)
+    end)
+  end
+
+  @spec confirm_quit_enabled?() :: boolean()
+  defp confirm_quit_enabled? do
+    ConfigOptions.get(:confirm_quit)
+  rescue
+    _ -> true
+  catch
+    :exit, _ -> true
+  end
+
+  @spec last_tab?(state()) :: boolean()
+  defp last_tab?(%{tab_bar: %TabBar{tabs: [_]}}), do: true
+  defp last_tab?(%{tab_bar: nil}), do: true
+  defp last_tab?(_state), do: false
+
   @spec close_tab_or_quit(state()) :: state()
   defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [_, _ | _]}} = state) do
     case EditorState.active_tab_kind(state) do

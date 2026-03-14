@@ -293,7 +293,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
   # ── Normal → Replace ──────────────────────────────────────────────────────────
 
   describe "normal → replace (r)" do
-    test "r awaits replacement char, stays in normal mode" do
+    test "r awaits replacement char, shows underline cursor" do
       ctx = start_editor("hello world")
 
       # r sets pending_replace in normal mode state, not a mode transition
@@ -301,6 +301,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
 
       assert_modeline_contains(ctx, "NORMAL")
       assert editor_mode(ctx) == :normal
+      assert cursor_shape(ctx) == :underline
       assert_screen_snapshot(ctx, "normal_pending_replace_r")
     end
   end
@@ -315,6 +316,50 @@ defmodule Minga.Integration.ModeTransitionsTest do
       assert cursor_shape(ctx) == :block
       assert String.starts_with?(buffer_content(ctx), "Xello")
       assert_screen_snapshot(ctx, "replace_char_complete")
+    end
+  end
+
+  describe "r + Escape cancels and reverts cursor" do
+    test "Escape after r returns to block cursor without replacing" do
+      ctx = start_editor("hello world")
+
+      send_keys(ctx, "r")
+      assert cursor_shape(ctx) == :underline
+
+      send_keys(ctx, "<Esc>")
+      assert cursor_shape(ctx) == :block
+      assert String.starts_with?(buffer_content(ctx), "hello")
+    end
+  end
+
+  describe "Replace mode (R) backspace restores original characters" do
+    test "R overwrites then backspace restores" do
+      ctx = start_editor("abcdef")
+
+      send_keys(ctx, "R")
+      assert editor_mode(ctx) == :replace
+      assert cursor_shape(ctx) == :underline
+
+      # Overwrite 'a' with 'X' and 'b' with 'Y'
+      type_text(ctx, "XY")
+      assert String.starts_with?(buffer_content(ctx), "XYcdef")
+
+      # Backspace restores 'b'
+      send_keys(ctx, "<BS>")
+      assert String.starts_with?(buffer_content(ctx), "Xbcdef")
+
+      # Backspace restores 'a'
+      send_keys(ctx, "<BS>")
+      assert String.starts_with?(buffer_content(ctx), "abcdef")
+    end
+
+    test "backspace at entry column is a no-op" do
+      ctx = start_editor("abcdef")
+
+      send_keys(ctx, "R")
+      # No overwrites yet, backspace should do nothing
+      send_keys(ctx, "<BS>")
+      assert String.starts_with?(buffer_content(ctx), "abcdef")
     end
   end
 

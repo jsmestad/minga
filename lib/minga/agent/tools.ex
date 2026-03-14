@@ -24,6 +24,7 @@ defmodule Minga.Agent.Tools do
   | `git_log`         | Show recent commits with structured output (read-only)|
   | `git_stage`       | Stage files for commit (destructive)                 |
   | `git_commit`      | Create a commit with a message (destructive)         |
+  | `memory_write`    | Save a learning or preference to persistent memory   |
   """
 
   alias Minga.Agent.Tools.EditFile
@@ -31,6 +32,7 @@ defmodule Minga.Agent.Tools do
   alias Minga.Agent.Tools.Git, as: GitTools
   alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
+  alias Minga.Agent.Tools.MemoryWrite
   alias Minga.Agent.Tools.MultiEditFile
   alias Minga.Agent.Tools.ReadFile
   alias Minga.Agent.Tools.Shell
@@ -91,7 +93,8 @@ defmodule Minga.Agent.Tools do
       git_diff(root),
       git_log(root),
       git_stage(root),
-      git_commit(root)
+      git_commit(root),
+      memory_write()
     ]
   end
 
@@ -545,6 +548,35 @@ defmodule Minga.Agent.Tools do
       },
       callback: fn args ->
         GitTools.commit(root, args["message"])
+      end
+    )
+  end
+
+  # ── Memory tools ──────────────────────────────────────────────────────────────
+
+  @spec memory_write() :: Tool.t()
+  defp memory_write do
+    Tool.new!(
+      name: "memory_write",
+      description: """
+      Save a learning, preference, or project convention to persistent memory.
+      Saved entries carry forward to future sessions automatically. Use this
+      sparingly for information that would be valuable across sessions:
+      coding conventions, user preferences, recurring patterns, project-specific
+      rules. Do not log routine observations or per-task notes.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "text" => %{
+            "type" => "string",
+            "description" => "The learning or preference to remember"
+          }
+        },
+        "required" => ["text"]
+      },
+      callback: fn args ->
+        MemoryWrite.execute(args["text"] || "")
       end
     )
   end

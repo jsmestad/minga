@@ -8,10 +8,20 @@ defmodule Minga.Integration.AgentPanelTest do
   # ExUnit's :standard_error process registration during teardown
   use Minga.Test.EditorCase, async: false
 
+  import Mox
+
   alias Minga.Editor.Layout
   alias Minga.Editor.State.FileTree
   alias Minga.Editor.Window.Content
   alias Minga.Test.StubServer
+
+  setup :verify_on_exit!
+
+  setup do
+    stub(Minga.Clipboard.Mock, :write, fn _text -> :ok end)
+    stub(Minga.Clipboard.Mock, :read, fn -> {:ok, ""} end)
+    :ok
+  end
 
   # ── Test helpers ───────────────────────────────────────────────────────────
 

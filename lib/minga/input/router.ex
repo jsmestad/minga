@@ -27,6 +27,41 @@ defmodule Minga.Input.Router do
   """
   @spec dispatch(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def dispatch(state, codepoint, modifiers) do
+    # Intercept keys when a quit confirmation prompt is active.
+    # y/n/Escape are handled here; all other keys are ignored.
+    if state.pending_quit do
+      return_dispatch_confirm_quit(state, codepoint)
+    else
+      dispatch_normal(state, codepoint, modifiers)
+    end
+  end
+
+  @spec return_dispatch_confirm_quit(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  defp return_dispatch_confirm_quit(state, codepoint) do
+    alias Minga.Editor.Commands
+
+    case codepoint do
+      ?y ->
+        Commands.execute(state, :confirm_quit_yes)
+
+      cancel when cancel in [?n, 27] ->
+        new_state = Commands.execute(state, :confirm_quit_no)
+        # Run housekeeping so the cleared prompt triggers a render.
+        post_key_housekeeping(
+          new_state,
+          state.buffers.active,
+          buffer_version(state),
+          state.vim.mode,
+          {cancel, 0}
+        )
+
+      _ ->
+        state
+    end
+  end
+
+  @spec dispatch_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  defp dispatch_normal(state, codepoint, modifiers) do
     old_buffer = state.buffers.active
     old_mode = state.vim.mode
     buf_version_before = buffer_version(state)
