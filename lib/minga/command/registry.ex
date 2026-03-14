@@ -84,6 +84,7 @@ defmodule Minga.Command.Registry do
     {:reload_config, "Reload config"},
     {:format_buffer, "Format buffer"},
     {:goto_definition, "Go to definition"},
+    {:alternate_file, "Switch to alternate file"},
     {:hover, "Hover documentation"},
     {:next_git_hunk, "Next git hunk"},
     {:prev_git_hunk, "Previous git hunk"},
