@@ -7,9 +7,11 @@ defmodule Minga.Editor.FoldMap do
   Neovim's per-window folds).
 
   Internally stores a sorted list of non-overlapping `FoldRange` structs.
-  Lookups use binary search for O(log n) performance. When the list is
-  empty, all translation functions are O(1) via guard clauses (zero
-  overhead for buffers without folds).
+  Lookups are linear scans over the sorted list. When the list is empty,
+  all translation functions are O(1) via guard clauses (zero overhead
+  for buffers without folds). This is adequate for typical fold counts
+  (tens, not thousands). The planned `DisplayMap` (#522) will replace
+  this module with an interval-tree-backed unified coordinate mapping.
 
   ## Coordinate translation
 
