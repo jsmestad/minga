@@ -9,6 +9,8 @@ defmodule Minga.Picker.ExtensionSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
 
@@ -17,7 +19,7 @@ defmodule Minga.Picker.ExtensionSource do
   def title, do: "Extension"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     extensions = ExtSupervisor.list_extensions()
     all_entries = ExtRegistry.all()
@@ -25,13 +27,13 @@ defmodule Minga.Picker.ExtensionSource do
     Enum.map(extensions, fn {name, version, status} ->
       source_label = source_description(name, all_entries)
       label = "#{name} v#{version} [#{status}]"
-      {name, label, source_label}
+      %Item{id: name, label: label, description: source_label}
     end)
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({name, _label, _desc}, state) when is_atom(name) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: name}, state) when is_atom(name) do
     alias Minga.Extension.Updater
 
     Task.start(fn ->

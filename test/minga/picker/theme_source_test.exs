@@ -1,6 +1,7 @@
 defmodule Minga.Picker.ThemeSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Picker.Item
   alias Minga.Picker.ThemeSource
   alias Minga.Theme
 
@@ -24,19 +25,19 @@ defmodule Minga.Picker.ThemeSourceTest do
 
     test "items are sorted alphabetically by name" do
       items = ThemeSource.candidates(%{})
-      names = Enum.map(items, fn {name, _label, _desc} -> name end)
+      names = Enum.map(items, fn %Item{id: name} -> name end)
       assert names == Enum.sort(names)
     end
 
     test "each item has a human-readable label" do
       items = ThemeSource.candidates(%{})
-      {_name, label, _desc} = Enum.find(items, fn {n, _, _} -> n == :doom_one end)
+      %Item{label: label} = Enum.find(items, fn %Item{id: n} -> n == :doom_one end)
       assert label == "󰏘 Doom One"
     end
 
     test "each item has a description with dark/light classification" do
       items = ThemeSource.candidates(%{})
-      {_, _, desc} = Enum.find(items, fn {n, _, _} -> n == :catppuccin_latte end)
+      %Item{description: desc} = Enum.find(items, fn %Item{id: n} -> n == :catppuccin_latte end)
       assert desc =~ "Light"
     end
   end
@@ -44,7 +45,13 @@ defmodule Minga.Picker.ThemeSourceTest do
   describe "on_select/2" do
     test "changes state.theme to the selected theme" do
       state = %{theme: Theme.get!(:doom_one)}
-      new_state = ThemeSource.on_select({:one_dark, "One Dark", "Dark, Atom"}, state)
+
+      new_state =
+        ThemeSource.on_select(
+          %Item{id: :one_dark, label: "One Dark", description: "Dark, Atom"},
+          state
+        )
+
       assert new_state.theme.name == :one_dark
     end
   end

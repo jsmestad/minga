@@ -9,6 +9,8 @@ defmodule Minga.Picker.BufferAllSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Picker.BufferSource
 
   @impl true
@@ -20,11 +22,11 @@ defmodule Minga.Picker.BufferAllSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(state), do: BufferSource.build_candidates(state, include_special: true)
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
+  @spec on_select(Item.t(), term()) :: term()
   def on_select(item, state), do: BufferSource.on_select(item, state)
 
   @impl true
@@ -32,10 +34,10 @@ defmodule Minga.Picker.BufferAllSource do
   def on_cancel(state), do: BufferSource.on_cancel(state)
 
   @impl true
-  @spec actions(Minga.Picker.item()) :: [Minga.Picker.Source.action_entry()]
+  @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
   def actions(item), do: BufferSource.actions(item)
 
   @impl true
-  @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
+  @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(action, item, state), do: BufferSource.on_action(action, item, state)
 end

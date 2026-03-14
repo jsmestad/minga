@@ -4,12 +4,13 @@ defmodule Minga.PickerTest do
   use ExUnit.Case, async: true
 
   alias Minga.Picker
+  alias Minga.Picker.Item
 
   @items [
-    {:a, "README.md", "/project/README.md"},
-    {:b, "config.exs", "/project/config/config.exs"},
-    {:c, "mix.exs", "/project/mix.exs"},
-    {:d, "editor.ex", "/project/lib/minga/editor.ex"}
+    %Item{id: :a, label: "README.md", description: "/project/README.md"},
+    %Item{id: :b, label: "config.exs", description: "/project/config/config.exs"},
+    %Item{id: :c, label: "mix.exs", description: "/project/mix.exs"},
+    %Item{id: :d, label: "editor.ex", description: "/project/lib/minga/editor.ex"}
   ]
 
   describe "new/2" do
@@ -62,71 +63,71 @@ defmodule Minga.PickerTest do
         |> Picker.type_char(".")
 
       assert Picker.count(picker) == 1
-      assert {:c, "mix.exs", _} = Picker.selected_item(picker)
+      assert %Item{id: :c, label: "mix.exs"} = Picker.selected_item(picker)
     end
   end
 
   describe "fuzzy/orderless matching" do
     test "orderless matching — segments match independently" do
       items = [
-        {:a, "buffer-switch", "Switch to buffer"},
-        {:b, "file-open", "Open a file"},
-        {:c, "buffer-kill", "Kill buffer"}
+        %Item{id: :a, label: "buffer-switch", description: "Switch to buffer"},
+        %Item{id: :b, label: "file-open", description: "Open a file"},
+        %Item{id: :c, label: "buffer-kill", description: "Kill buffer"}
       ]
 
       picker = Picker.new(items) |> Picker.filter("b sw")
       assert Picker.count(picker) == 1
-      assert {:a, "buffer-switch", _} = Picker.selected_item(picker)
+      assert %Item{id: :a, label: "buffer-switch"} = Picker.selected_item(picker)
     end
 
     test "fuzzy character matching — characters in order but not contiguous" do
       items = [
-        {:a, "editor.ex", "/project/lib/minga/editor.ex"},
-        {:b, "readme.md", "/project/readme.md"}
+        %Item{id: :a, label: "editor.ex", description: "/project/lib/minga/editor.ex"},
+        %Item{id: :b, label: "readme.md", description: "/project/readme.md"}
       ]
 
       # "edr" matches e-d-itor (e, d, r are in order)
       picker = Picker.new(items) |> Picker.filter("edr")
       assert Picker.count(picker) >= 1
-      assert {:a, "editor.ex", _} = Picker.selected_item(picker)
+      assert %Item{id: :a, label: "editor.ex"} = Picker.selected_item(picker)
     end
 
     test "exact prefix match scores higher than substring" do
       items = [
-        {:a, "xconfig.exs", ""},
-        {:b, "config.exs", ""}
+        %Item{id: :a, label: "xconfig.exs", description: ""},
+        %Item{id: :b, label: "config.exs", description: ""}
       ]
 
       picker = Picker.new(items) |> Picker.filter("config")
       # "config.exs" should be first (prefix match) over "xconfig.exs" (substring)
-      assert {:b, "config.exs", _} = Picker.selected_item(picker)
+      assert %Item{id: :b, label: "config.exs"} = Picker.selected_item(picker)
     end
 
     test "substring match scores higher than fuzzy" do
       items = [
-        {:a, "m_o_d_e.ex", ""},
-        {:b, "mode.ex", ""}
+        %Item{id: :a, label: "m_o_d_e.ex", description: ""},
+        %Item{id: :b, label: "mode.ex", description: ""}
       ]
 
       picker = Picker.new(items) |> Picker.filter("mode")
       # "mode.ex" (contiguous substring) should score higher than "m_o_d_e.ex" (fuzzy)
-      assert {:b, "mode.ex", _} = Picker.selected_item(picker)
+      assert %Item{id: :b, label: "mode.ex"} = Picker.selected_item(picker)
     end
 
     test "shorter labels score higher with same match type" do
       items = [
-        {:a, "very_long_editor_name.ex", ""},
-        {:b, "editor.ex", ""}
+        %Item{id: :a, label: "very_long_editor_name.ex", description: ""},
+        %Item{id: :b, label: "editor.ex", description: ""}
       ]
 
       picker = Picker.new(items) |> Picker.filter("editor")
-      assert {:b, "editor.ex", _} = Picker.selected_item(picker)
+      assert %Item{id: :b, label: "editor.ex"} = Picker.selected_item(picker)
     end
 
     test "all segments must match for a positive score" do
       items = [
-        {:a, "buffer-switch", "Switch to buffer"},
-        {:b, "file-open", "Open a file"}
+        %Item{id: :a, label: "buffer-switch", description: "Switch to buffer"},
+        %Item{id: :b, label: "file-open", description: "Open a file"}
       ]
 
       picker = Picker.new(items) |> Picker.filter("buffer zzz")
@@ -140,13 +141,13 @@ defmodule Minga.PickerTest do
 
     test "unicode characters match correctly" do
       items = [
-        {:a, "café.txt", "A café file"},
-        {:b, "resume.txt", "Plain text"}
+        %Item{id: :a, label: "café.txt", description: "A café file"},
+        %Item{id: :b, label: "resume.txt", description: "Plain text"}
       ]
 
       picker = Picker.new(items) |> Picker.filter("café")
       assert Picker.count(picker) == 1
-      assert {:a, "café.txt", _} = Picker.selected_item(picker)
+      assert %Item{id: :a, label: "café.txt"} = Picker.selected_item(picker)
     end
   end
 

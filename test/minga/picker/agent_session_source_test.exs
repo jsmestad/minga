@@ -1,6 +1,8 @@
 defmodule Minga.Picker.AgentSessionSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Picker.Item
+
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.View.State, as: ViewState
@@ -31,7 +33,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       state = %{tab_bar: tb, agent: %AgentState{session: nil}}
       candidates = AgentSessionSource.candidates(state)
 
-      Enum.each(candidates, fn {{_, tag}, _, _} ->
+      Enum.each(candidates, fn %Item{id: {_, tag}} ->
         assert tag == :disk
       end)
     end
@@ -42,10 +44,10 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
       state = state_with_agent_tab(pid)
       candidates = AgentSessionSource.candidates(state)
-      tab_entries = Enum.filter(candidates, fn {{_, tag}, _, _} -> match?({:tab, _}, tag) end)
+      tab_entries = Enum.filter(candidates, fn %Item{id: {_, tag}} -> match?({:tab, _}, tag) end)
       assert tab_entries != []
 
-      {{_, {:tab, _tab_id}}, label, desc} = hd(tab_entries)
+      %Item{id: {_, {:tab, _tab_id}}, label: label, description: desc} = hd(tab_entries)
       assert is_binary(label)
       assert String.contains?(desc, "test-model")
 
@@ -62,7 +64,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
       active =
         Enum.find(candidates, fn
-          {{_, {:tab, _}}, label, _} -> String.contains?(label, "\u{2022}")
+          %Item{id: {_, {:tab, _}}, label: label} -> String.contains?(label, "\u{2022}")
           _ -> false
         end)
 
@@ -88,7 +90,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
           _ -> false
         end)
 
-      Enum.each(bg_tabs, fn {_, label, _} ->
+      Enum.each(bg_tabs, fn %Item{label: label} ->
         refute String.contains?(label, "\u{2022}")
       end)
 
@@ -106,7 +108,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
       state = state_with_two_tabs_file_active(pid)
       agent_tab_id = Enum.find(state.tab_bar.tabs, &(&1.kind == :agent)).id
-      item = {{"some-id", {:tab, agent_tab_id}}, "label", "desc"}
+      item = %Item{id: {"some-id", {:tab, agent_tab_id}}, label: "label", description: "desc"}
       result = AgentSessionSource.on_select(item, state)
       assert result.tab_bar.active_id == agent_tab_id
 

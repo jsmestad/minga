@@ -13,13 +13,14 @@ defmodule Minga.Picker.FileSource do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
   alias Minga.Log
+  alias Minga.Picker.Item
 
   @impl true
   @spec title() :: String.t()
   def title, do: "Find file"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     root = project_root()
 
@@ -29,14 +30,20 @@ defmodule Minga.Picker.FileSource do
     end
   end
 
-  @spec format_file_candidate(String.t()) :: Minga.Picker.item()
+  @spec format_file_candidate(String.t()) :: Item.t()
   defp format_file_candidate(path) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
     ft = Filetype.detect(filename)
-    icon = Devicon.icon(ft)
+    {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
-    {path, "#{icon} #{filename}", dir_display}
+
+    %Item{
+      id: path,
+      label: "#{icon} #{filename}",
+      description: dir_display,
+      icon_color: color
+    }
   end
 
   @spec log_error(String.t()) :: []
@@ -46,8 +53,8 @@ defmodule Minga.Picker.FileSource do
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({rel_path, _label, _desc}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: rel_path}, state) do
     abs_path = Path.expand(rel_path)
 
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
@@ -93,16 +100,16 @@ defmodule Minga.Picker.FileSource do
   def on_cancel(state), do: state
 
   @impl true
-  @spec actions(Minga.Picker.item()) :: [Minga.Picker.Source.action_entry()]
+  @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
   def actions(_item) do
     [{"Open", :open}, {"Delete", :delete}]
   end
 
   @impl true
-  @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
+  @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:open, item, state), do: on_select(item, state)
 
-  def on_action(:delete, {rel_path, _label, _desc}, state) do
+  def on_action(:delete, %Item{id: rel_path}, state) do
     abs_path = Path.expand(rel_path)
 
     case File.rm(abs_path) do

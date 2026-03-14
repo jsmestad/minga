@@ -9,6 +9,8 @@ defmodule Minga.Picker.AgentSessionSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Agent.Session
   alias Minga.Agent.SessionStore
   alias Minga.Editor.State, as: EditorState
@@ -25,25 +27,25 @@ defmodule Minga.Picker.AgentSessionSource do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(%{tab_bar: %TabBar{} = tb} = _state) do
     live = tab_candidates(tb)
     disk = disk_candidates()
-    live_ids = MapSet.new(live, fn {{id, _}, _, _} -> id end)
+    live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)
 
     live ++
-      Enum.reject(disk, fn {{id, _}, _, _} -> MapSet.member?(live_ids, id) end)
+      Enum.reject(disk, fn %Item{id: {id, _}} -> MapSet.member?(live_ids, id) end)
   end
 
   def candidates(_state), do: []
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({{_id, {:tab, tab_id}}, _label, _desc}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {_id, {:tab, tab_id}}}, state) do
     EditorState.switch_tab(state, tab_id)
   end
 
-  def on_select({{session_id, :disk}, _label, _desc}, state) do
+  def on_select(%Item{id: {session_id, :disk}}, state) do
     case AgentAccess.session(state) do
       nil ->
         state
@@ -60,22 +62,26 @@ defmodule Minga.Picker.AgentSessionSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec tab_candidates(TabBar.t()) :: [Minga.Picker.item()]
+  @spec tab_candidates(TabBar.t()) :: [Item.t()]
   defp tab_candidates(tb) do
     tb
     |> TabBar.filter_by_kind(:agent)
     |> Enum.map(&tab_to_candidate(&1, &1.id == tb.active_id))
   end
 
-  @spec tab_to_candidate(Tab.t(), boolean()) :: Minga.Picker.item()
+  @spec tab_to_candidate(Tab.t(), boolean()) :: Item.t()
   defp tab_to_candidate(tab, is_active) do
     case session_metadata(tab.session) do
       {:ok, meta} ->
-        {{meta.id, {:tab, tab.id}}, format_label(meta, is_active), format_desc(meta)}
+        %Item{
+          id: {meta.id, {:tab, tab.id}},
+          label: format_label(meta, is_active),
+          description: format_desc(meta)
+        }
 
       :error ->
         label = if is_active, do: "\u{2022} #{tab.label}", else: tab.label
-        {{tab.id, {:tab, tab.id}}, label, "No session"}
+        %Item{id: {tab.id, {:tab, tab.id}}, label: label, description: "No session"}
     end
   end
 
@@ -88,7 +94,7 @@ defmodule Minga.Picker.AgentSessionSource do
     :exit, _ -> :error
   end
 
-  @spec disk_candidates() :: [Minga.Picker.item()]
+  @spec disk_candidates() :: [Item.t()]
   defp disk_candidates do
     SessionStore.list()
     |> Enum.map(fn meta ->
@@ -97,7 +103,7 @@ defmodule Minga.Picker.AgentSessionSource do
       desc =
         "#{meta.model_name} · #{meta.message_count} msgs · $#{Float.round(meta.cost, 4)} · #{meta.timestamp}"
 
-      {{meta.id, :disk}, label, desc}
+      %Item{id: {meta.id, :disk}, label: label, description: desc}
     end)
   end
 

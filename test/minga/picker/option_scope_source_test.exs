@@ -1,6 +1,8 @@
 defmodule Minga.Picker.OptionScopeSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
   alias Minga.Editor.State.Picker, as: PickerState
@@ -10,8 +12,8 @@ defmodule Minga.Picker.OptionScopeSourceTest do
     test "returns two scope choices" do
       items = OptionScopeSource.candidates(nil)
       assert length(items) == 2
-      assert {:buffer, _, _} = Enum.find(items, fn {id, _, _} -> id == :buffer end)
-      assert {:global, _, _} = Enum.find(items, fn {id, _, _} -> id == :global end)
+      assert %Item{id: :buffer} = Enum.find(items, fn %Item{id: id} -> id == :buffer end)
+      assert %Item{id: :global} = Enum.find(items, fn %Item{id: id} -> id == :global end)
     end
   end
 
@@ -29,7 +31,12 @@ defmodule Minga.Picker.OptionScopeSourceTest do
         }
       }
 
-      result = OptionScopeSource.on_select({:buffer, "This Buffer", ""}, state)
+      result =
+        OptionScopeSource.on_select(
+          %Item{id: :buffer, label: "This Buffer", description: ""},
+          state
+        )
+
       assert BufferServer.get_option(buf, :wrap) == true
       assert result.status_msg =~ "this buffer"
     end
@@ -48,7 +55,12 @@ defmodule Minga.Picker.OptionScopeSourceTest do
         }
       }
 
-      result = OptionScopeSource.on_select({:global, "All Buffers", ""}, state)
+      result =
+        OptionScopeSource.on_select(
+          %Item{id: :global, label: "All Buffers", description: ""},
+          state
+        )
+
       assert Options.get(:wrap) == !original
       assert result.status_msg =~ "all buffers"
 

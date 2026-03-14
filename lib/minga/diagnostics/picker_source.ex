@@ -9,6 +9,8 @@ defmodule Minga.Diagnostics.PickerSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DocumentSync
@@ -22,7 +24,7 @@ defmodule Minga.Diagnostics.PickerSource do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(%{buffers: %{active: buf}}) when is_pid(buf) do
     buf
     |> BufferServer.file_path()
@@ -31,7 +33,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   def candidates(_state), do: []
 
-  @spec candidates_for_path(String.t() | nil) :: [Minga.Picker.item()]
+  @spec candidates_for_path(String.t() | nil) :: [Item.t()]
   defp candidates_for_path(nil), do: []
 
   defp candidates_for_path(path) do
@@ -41,7 +43,7 @@ defmodule Minga.Diagnostics.PickerSource do
     |> Enum.map(&format_candidate/1)
   end
 
-  @spec format_candidate(Diagnostics.Diagnostic.t()) :: Minga.Picker.item()
+  @spec format_candidate(Diagnostics.Diagnostic.t()) :: Item.t()
   defp format_candidate(diag) do
     icon = severity_icon(diag.severity)
     line = diag.range.start_line + 1
@@ -49,12 +51,12 @@ defmodule Minga.Diagnostics.PickerSource do
     source_tag = if diag.source, do: " (#{diag.source})", else: ""
     label = "#{icon} #{line}:#{col}  #{diag.message}#{source_tag}"
 
-    {{diag.range.start_line, diag.range.start_col}, label, ""}
+    %Item{id: {diag.range.start_line, diag.range.start_col}, label: label}
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({{line, col}, _label, _desc}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {line, col}}, state) do
     case state.buffers.active do
       nil ->
         state

@@ -9,6 +9,8 @@ defmodule Minga.Picker.ThemeSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Theme
 
   @impl true
@@ -20,18 +22,18 @@ defmodule Minga.Picker.ThemeSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     Theme.available()
     |> Enum.sort()
     |> Enum.map(fn name ->
-      {name, "󰏘 #{display_name(name)}", description(name)}
+      %Item{id: name, label: "󰏘 #{display_name(name)}", description: description(name)}
     end)
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({name, _label, _desc}, state) when is_atom(name) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: name}, state) when is_atom(name) do
     %{state | theme: Theme.get!(name)}
   end
 

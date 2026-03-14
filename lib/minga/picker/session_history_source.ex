@@ -9,6 +9,8 @@ defmodule Minga.Picker.SessionHistorySource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Agent.Session
   alias Minga.Agent.SessionStore
   alias Minga.Editor.State.AgentAccess
@@ -22,19 +24,19 @@ defmodule Minga.Picker.SessionHistorySource do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_state) do
     SessionStore.list()
     |> Enum.map(fn meta ->
       label = format_label(meta)
       desc = format_description(meta)
-      {meta.id, label, desc}
+      %Item{id: meta.id, label: label, description: desc}
     end)
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({session_id, _label, _desc}, state) when is_binary(session_id) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: session_id}, state) when is_binary(session_id) do
     case AgentAccess.session(state) do
       nil ->
         state

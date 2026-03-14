@@ -8,6 +8,7 @@ defmodule Minga.Editor.PickerUITest do
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
   alias Minga.Picker
+  alias Minga.Picker.Item
   alias Minga.Theme
 
   defp theme_picker do
@@ -28,7 +29,7 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "returns draws and cursor when picker is active" do
-      items = [{"1", "file.ex", ""}, {"2", "test.ex", ""}]
+      items = [%Item{id: "1", label: "file.ex"}, %Item{id: "2", label: "test.ex"}]
       picker = Picker.new(items, title: "Files", max_visible: 10)
 
       input = %RenderInput{
@@ -45,7 +46,7 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "cursor is on the prompt row (last row)" do
-      items = [{"1", "main.ex", ""}]
+      items = [%Item{id: "1", label: "main.ex"}]
       picker = Picker.new(items, title: "Files", max_visible: 5)
 
       input = %RenderInput{
@@ -60,7 +61,11 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "draw tuples have valid 4-element structure" do
-      items = [{"1", "alpha.ex", "lib/"}, {"2", "beta.ex", "test/"}]
+      items = [
+        %Item{id: "1", label: "alpha.ex", description: "lib/"},
+        %Item{id: "2", label: "beta.ex", description: "test/"}
+      ]
+
       picker = Picker.new(items, title: "Test", max_visible: 10)
 
       input = %RenderInput{
@@ -84,7 +89,11 @@ defmodule Minga.Editor.PickerUITest do
 
   describe "render/1 centered layout" do
     test "renders draws inside a centered floating window" do
-      items = [{"1", "claude-sonnet-4", "Anthropic"}, {"2", "gpt-4o", "OpenAI"}]
+      items = [
+        %Item{id: "1", label: "claude-sonnet-4", description: "Anthropic"},
+        %Item{id: "2", label: "gpt-4o", description: "OpenAI"}
+      ]
+
       picker = Picker.new(items, title: "Select Model", max_visible: 10)
 
       input = %RenderInput{
@@ -101,7 +110,11 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "all draws are within the floating window rect" do
-      items = [{"1", "model-a", "desc"}, {"2", "model-b", "desc"}]
+      items = [
+        %Item{id: "1", label: "model-a", description: "desc"},
+        %Item{id: "2", label: "model-b", description: "desc"}
+      ]
+
       picker = Picker.new(items, title: "Models", max_visible: 10)
 
       vp = Viewport.new(24, 80)
@@ -130,7 +143,7 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "cursor is inside the floating window (not at viewport bottom)" do
-      items = [{"1", "test-model", ""}]
+      items = [%Item{id: "1", label: "test-model"}]
       picker = Picker.new(items, title: "Pick", max_visible: 5)
 
       input = %RenderInput{
@@ -151,7 +164,7 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "contains border characters from rounded style" do
-      items = [{"1", "item", ""}]
+      items = [%Item{id: "1", label: "item"}]
       picker = Picker.new(items, title: "Test", max_visible: 5)
 
       input = %RenderInput{
@@ -168,7 +181,7 @@ defmodule Minga.Editor.PickerUITest do
     end
 
     test "title appears in the draws" do
-      items = [{"1", "item", ""}]
+      items = [%Item{id: "1", label: "item"}]
       picker = Picker.new(items, title: "My Title", max_visible: 5)
 
       input = %RenderInput{

@@ -16,6 +16,8 @@ defmodule Minga.Picker.OptionScopeSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
 
@@ -24,18 +26,21 @@ defmodule Minga.Picker.OptionScopeSource do
   def title, do: "Apply to..."
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     [
-      {:buffer, "This Buffer", "Set for the current buffer only"},
-      {:global, "All Buffers (Default)",
-       "Set the default for all buffers without a local override"}
+      %Item{id: :buffer, label: "This Buffer", description: "Set for the current buffer only"},
+      %Item{
+        id: :global,
+        label: "All Buffers (Default)",
+        description: "Set the default for all buffers without a local override"
+      }
     ]
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({scope, _, _}, state) when scope in [:buffer, :global] do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: scope}, state) when scope in [:buffer, :global] do
     ctx = state.picker_ui.context
     apply_scoped(scope, ctx.option_name, ctx.new_value, state)
   end
