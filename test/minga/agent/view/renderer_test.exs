@@ -192,36 +192,40 @@ defmodule Minga.Agent.View.RendererTest do
   end
 
   describe "input area inside left column" do
-    test "input border renders at col 0 within the left panel" do
+    test "input border renders with horizontal margin" do
       state = base_state(rows: 30, cols: 100)
       commands = render_sidebar(state)
 
-      # Input box should have a top border starting at col 0
+      h_margin = 2
+
+      # Input box should have a top border starting at the margin offset
       input_cmds =
         Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == 0 and String.starts_with?(text, "╭─ Prompt")
+          col == h_margin and String.starts_with?(text, "╭─ Prompt")
         end)
 
-      assert input_cmds != [], "expected input border at col 0"
+      assert input_cmds != [], "expected input border at col #{h_margin}"
     end
 
-    test "input box width is constrained to left column (chat_width)" do
+    test "input box width is constrained to left column minus margins" do
       cols = 100
       state = base_state(rows: 30, cols: cols)
       commands = render_sidebar(state)
 
+      h_margin = 2
       chat_width = div(cols * 65, 100)
+      expected_box_width = chat_width - 2 * h_margin
 
       top_border_cmds =
         Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == 0 and String.starts_with?(text, "╭─ Prompt")
+          col == h_margin and String.starts_with?(text, "╭─ Prompt")
         end)
 
       assert [top_cmd | _] = top_border_cmds
       {_row, _col, top_text, _style} = top_cmd
 
-      assert String.length(top_text) <= chat_width,
-             "input box should be ≤ chat_width (#{chat_width}), got #{String.length(top_text)}"
+      assert String.length(top_text) == expected_box_width,
+             "input box should be #{expected_box_width}, got #{String.length(top_text)}"
     end
 
     test "right panel extends alongside the input area" do
@@ -229,6 +233,7 @@ defmodule Minga.Agent.View.RendererTest do
       state = base_state(rows: 30, cols: cols)
       commands = render_sidebar(state)
 
+      h_margin = 2
       chat_width = div(cols * 65, 100)
       viewer_col = chat_width + 1
 
@@ -236,7 +241,7 @@ defmodule Minga.Agent.View.RendererTest do
       input_row =
         commands
         |> Enum.find(fn {_r, col, text, _s} ->
-          col == 0 and String.starts_with?(text, "╭─ Prompt")
+          col == h_margin and String.starts_with?(text, "╭─ Prompt")
         end)
         |> elem(0)
 
