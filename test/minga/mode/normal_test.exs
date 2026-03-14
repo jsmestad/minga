@@ -357,8 +357,8 @@ defmodule Minga.Mode.NormalTest do
   end
 
   describe "s/S/C/D shortcuts (#51)" do
-    test "s emits [:delete_at] and transitions to :insert" do
-      assert {:execute_then_transition, [:delete_at], :insert, _} =
+    test "s emits [:delete_char_at] and transitions to :insert" do
+      assert {:execute_then_transition, [:delete_char_at], :insert, _} =
                Normal.handle_key({?s, 0}, fresh_state())
     end
 

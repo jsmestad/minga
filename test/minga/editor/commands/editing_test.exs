@@ -339,18 +339,14 @@ defmodule Minga.Editor.Commands.EditingTest do
       refute String.contains?(content, "\n")
     end
 
-    # NOTE: Vim's `x` should yank the deleted char into the unnamed register,
-    # but our `delete_at` doesn't do that yet. This test documents current
-    # behavior. When `x` is fixed to yank, update this test to assert "bac".
-    test "x does not currently store to register (known gap)" do
+    test "x then p pastes deleted char inline" do
       {editor, buffer} = start_editor("abc")
       BufferServer.move_to(buffer, {0, 0})
       send_key(editor, ?x)
       assert BufferServer.content(buffer) == "bc"
 
-      # p is a no-op because x didn't yank
       send_key(editor, ?p)
-      assert BufferServer.content(buffer) == "bc"
+      assert BufferServer.content(buffer) == "bac"
     end
 
     test "dw then p pastes deleted word inline" do
@@ -445,6 +441,142 @@ defmodule Minga.Editor.Commands.EditingTest do
   end
 
   # ── Visual-char paste (charwise guard) ─────────────────────────────────
+
+  # ── x / X yank into register (#482) ──────────────────────────────────────
+
+  describe "x (delete_char_at) yanks into register" do
+    test "x stores deleted char in unnamed register" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == "bc"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"a", :charwise}
+    end
+
+    test "xp transposes two characters" do
+      {editor, buffer} = start_editor("ab")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?x)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "ba"
+    end
+
+    test "x on empty line is a no-op" do
+      {editor, buffer} = start_editor("")
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == ""
+      s = :sys.get_state(editor)
+      refute Map.has_key?(s.vim.reg.registers, "")
+    end
+
+    test ~S["ax stores deleted char in named register a] do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == "bc"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "a") == {"a", :charwise}
+    end
+
+    test ~S["_x deletes without touching any register] do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      # First yank something into unnamed so we can verify it's not overwritten
+      send_key(editor, ?y)
+      send_key(editor, ?w)
+      previous_unnamed = Map.get(:sys.get_state(editor).vim.reg.registers, "")
+
+      send_key(editor, ?")
+      send_key(editor, ?_)
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == "bc"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == previous_unnamed
+    end
+
+    test "multiple x's each yank the char they delete" do
+      {editor, buffer} = start_editor("abcd")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?x)
+      send_key(editor, ?x)
+
+      assert BufferServer.content(buffer) == "cd"
+      # Last deleted char ('b') should be in unnamed
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"b", :charwise}
+    end
+  end
+
+  describe "X (delete_char_before) yanks into register" do
+    test "X stores deleted char in unnamed register" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 1})
+      send_key(editor, ?X)
+
+      assert BufferServer.content(buffer) == "bc"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"a", :charwise}
+    end
+
+    test "X at col 0 is a no-op" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?X)
+
+      assert BufferServer.content(buffer) == "abc"
+      s = :sys.get_state(editor)
+      refute Map.has_key?(s.vim.reg.registers, "")
+    end
+
+    test ~S["aX stores deleted char in named register a] do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 2})
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?X)
+
+      assert BufferServer.content(buffer) == "ac"
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "a") == {"b", :charwise}
+    end
+  end
+
+  describe "insert-mode backspace does NOT yank" do
+    test "backspace in insert mode deletes without touching registers" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 2})
+      # Enter insert mode
+      send_key(editor, ?i)
+      # Backspace (ASCII DEL)
+      send_key(editor, 127)
+
+      assert BufferServer.content(buffer) == "ac"
+      s = :sys.get_state(editor)
+      # Register should be empty since insert-mode backspace doesn't yank
+      refute Map.has_key?(s.vim.reg.registers, "")
+    end
+  end
+
+  describe "s (substitute) yanks deleted char" do
+    test "s deletes char, enters insert mode, and yanks deleted char" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?s)
+
+      assert BufferServer.content(buffer) == "bc"
+      s = :sys.get_state(editor)
+      assert s.vim.mode == :insert
+      assert Map.get(s.vim.reg.registers, "") == {"a", :charwise}
+    end
+  end
 
   describe "visual-char yank and paste" do
     test "vllly then p pastes inline" do
