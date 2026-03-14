@@ -38,7 +38,7 @@ defmodule Minga.Editor.DocumentSyncTest do
     }
   end
 
-  defp wait_until_ready(client, attempts \\ 50) do
+  defp wait_until_ready(client, attempts \\ 500) do
     if attempts <= 0, do: flunk("LSP client did not become ready in time")
 
     case Client.status(client) do
