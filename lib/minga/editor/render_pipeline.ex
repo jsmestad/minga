@@ -698,7 +698,7 @@ defmodule Minga.Editor.RenderPipeline do
 
   @spec render_agent_chat_window(state(), Window.t(), Layout.window_layout()) :: WindowFrame.t()
   defp render_agent_chat_window(state, _window, win_layout) do
-    {row_off, col_off, width, height} = win_layout.content
+    {_row_off, _col_off, width, height} = win_layout.content
 
     # Compute the sidebar split from the content rect and chat_width_pct.
     # This is an agent-specific layout concern, so it lives here in the
@@ -721,8 +721,14 @@ defmodule Minga.Editor.RenderPipeline do
         nil -> nil
       end
 
+    # Use {0, 0} for the rect origin. The agent renderer's draws already
+    # use absolute screen coordinates (they include row_off/col_off from
+    # the rect passed to render_with_sidebar / render_in_rect). Buffer
+    # windows also use {0, 0} for the same reason. DisplayList.to_commands
+    # offsets draws by the frame rect origin, so using {0, 0} avoids
+    # double-offsetting.
     %WindowFrame{
-      rect: {row_off, col_off, width, height},
+      rect: {0, 0, width, height},
       gutter: %{},
       lines: DisplayList.draws_to_layer(draws),
       tilde_lines: %{},
