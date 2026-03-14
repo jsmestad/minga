@@ -106,7 +106,12 @@ defmodule Minga.Command.Registry do
     {:fold_close, "Close fold at cursor (zc)"},
     {:fold_open, "Open fold at cursor (zo)"},
     {:fold_close_all, "Close all folds (zM)"},
-    {:fold_open_all, "Open all folds (zR)"}
+    {:fold_open_all, "Open all folds (zR)"},
+    {:test_file, "Run tests for current file"},
+    {:test_all, "Run all tests"},
+    {:test_at_point, "Run test at cursor"},
+    {:test_rerun, "Rerun last test"},
+    {:test_output, "Show test output"}
   ]
 
   # ── Client API ──────────────────────────────────────────────────────────────

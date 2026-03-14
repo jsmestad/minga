@@ -116,7 +116,8 @@ defmodule Minga.Editor.State do
             agent: %AgentState{},
             agentic: ViewState.new(),
             nav_flash: nil,
-            last_cursor_line: nil
+            last_cursor_line: nil,
+            last_test_command: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -154,7 +155,8 @@ defmodule Minga.Editor.State do
           agent: AgentState.t(),
           agentic: ViewState.t(),
           nav_flash: NavFlash.t() | nil,
-          last_cursor_line: non_neg_integer() | nil
+          last_cursor_line: non_neg_integer() | nil,
+          last_test_command: {String.t(), String.t()} | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
