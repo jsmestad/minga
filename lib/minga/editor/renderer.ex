@@ -23,7 +23,8 @@ defmodule Minga.Editor.Renderer do
 
   alias Minga.Editor.Dashboard
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Cursor, Frame}
+  alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay}
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
@@ -61,6 +62,7 @@ defmodule Minga.Editor.Renderer do
   def render(%{buffers: %{active: nil}} = state) do
     rows = state.viewport.rows
     cols = state.viewport.cols
+    viewport = state.viewport
 
     # Dashboard state is initialized by the editor when buffers empty,
     # but fall back to an empty state if somehow nil.
@@ -68,9 +70,29 @@ defmodule Minga.Editor.Renderer do
 
     splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
 
+    # Render picker overlay on top of the dashboard if one is open
+    # (e.g. :find_file or :project_switch from a dashboard quick action).
+    {picker_draws, picker_cursor} = PickerUI.render(state, viewport)
+
+    overlays =
+      if picker_draws == [] do
+        []
+      else
+        [%Overlay{draws: picker_draws, cursor: picker_cursor}]
+      end
+
+    # Use the picker cursor when a picker is open, otherwise park
+    # the cursor at 0,0 (invisible behind the dashboard).
+    cursor =
+      case picker_cursor do
+        {row, col} -> Cursor.new(row, col, :beam)
+        nil -> Cursor.new(0, 0, :block)
+      end
+
     frame = %Frame{
-      cursor: Cursor.new(0, 0, :block),
-      splash: splash_draws
+      cursor: cursor,
+      splash: splash_draws,
+      overlays: overlays
     }
 
     commands = DisplayList.to_commands(frame)
