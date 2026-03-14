@@ -1,5 +1,7 @@
 defmodule Minga.LSP.SupervisorTest do
-  use ExUnit.Case
+  # async: false because mock LSP server spawns OS processes that may not
+  # start in time under heavy parallel test load
+  use ExUnit.Case, async: false
 
   alias Minga.Diagnostics
   alias Minga.LSP.Client
