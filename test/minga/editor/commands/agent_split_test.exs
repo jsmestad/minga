@@ -16,11 +16,13 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
+  alias Minga.Test.StubServer
 
   defp make_state do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
     agent_buf = AgentBufferSync.start_buffer()
+    {:ok, fake_session} = StubServer.start_link()
 
     window = Window.new(1, buf, 24, 80)
 
@@ -38,7 +40,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
     agent = %AgentState{
       panel: panel,
       buffer: agent_buf,
-      session: nil,
+      session: fake_session,
       status: :idle,
       error: nil,
       spinner_timer: nil

@@ -5,7 +5,10 @@ defmodule Minga.Agent.Tools.ShellTest do
 
   @moduletag :tmp_dir
 
-  defp collect_shell_chunks(timeout) do
+  # Drains all shell chunks from the mailbox. Uses a short timeout since
+  # Shell.execute blocks until the command completes, so by the time we
+  # call this the chunks are already in the mailbox.
+  defp collect_shell_chunks(timeout \\ 50) do
     collect_shell_chunks_acc([], timeout)
   end
 
@@ -30,7 +33,7 @@ defmodule Minga.Agent.Tools.ShellTest do
                Shell.execute("echo line1; echo line2; echo line3", dir, 5, on_output: on_output)
 
       # Should have received at least one chunk
-      chunks = collect_shell_chunks(500)
+      chunks = collect_shell_chunks()
       combined = IO.iodata_to_binary(chunks)
       assert combined =~ "line1"
       assert combined =~ "line3"
@@ -61,7 +64,7 @@ defmodule Minga.Agent.Tools.ShellTest do
                  on_output: on_output
                )
 
-      chunks = collect_shell_chunks(500)
+      chunks = collect_shell_chunks()
       combined = IO.iodata_to_binary(chunks)
 
       # All 20 lines must appear in the combined output
@@ -82,11 +85,14 @@ defmodule Minga.Agent.Tools.ShellTest do
         :ok
       end
 
-      # Sleep for 4 seconds (longer than the 3s running indicator threshold)
+      # Sleep for 1 second (longer than our 200ms running indicator threshold)
       assert {:ok, _output} =
-               Shell.execute("sleep 4 && echo done", dir, 10, on_output: on_output)
+               Shell.execute("sleep 1 && echo done", dir, 5,
+                 on_output: on_output,
+                 running_indicator_ms: 200
+               )
 
-      chunks = collect_shell_chunks(500)
+      chunks = collect_shell_chunks()
       combined = IO.iodata_to_binary(chunks)
 
       # Should have received at least one running indicator

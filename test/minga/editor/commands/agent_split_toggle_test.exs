@@ -19,6 +19,14 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Input
+  alias Minga.Test.StubServer
+
+  # Starts a stub GenServer that replies :ok to any call and stops cleanly.
+  # Used as a fake agent session to avoid starting a real provider.
+  defp fake_session do
+    {:ok, pid} = StubServer.start_link()
+    pid
+  end
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
@@ -39,7 +47,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     }
 
     agent = %AgentState{
-      session: Keyword.get(opts, :session, nil),
+      session: Keyword.get(opts, :session, fake_session()),
       status: :idle,
       panel: panel,
       error: nil,

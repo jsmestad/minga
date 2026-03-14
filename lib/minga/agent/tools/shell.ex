@@ -11,7 +11,10 @@ defmodule Minga.Agent.Tools.Shell do
   """
 
   @typedoc "Options for shell execution."
-  @type execute_opts :: [on_output: (String.t() -> :ok)]
+  @type execute_opts :: [
+          on_output: (String.t() -> :ok),
+          running_indicator_ms: pos_integer()
+        ]
 
   @debounce_ms 200
   @running_indicator_ms 3_000
@@ -27,12 +30,15 @@ defmodule Minga.Agent.Tools.Shell do
       Debounced to at most one call every #{@debounce_ms}ms. If the command
       produces no output for #{@running_indicator_ms}ms, a "running..."
       indicator is sent.
+    - `:running_indicator_ms` — override the silence threshold before sending
+      a "running..." indicator (default: #{@running_indicator_ms})
   """
   @spec execute(String.t(), String.t(), pos_integer(), execute_opts()) ::
           {:ok, String.t()} | {:error, String.t()}
   def execute(command, cwd, timeout_secs, opts \\ [])
       when is_binary(command) and is_binary(cwd) and is_integer(timeout_secs) do
     on_output = Keyword.get(opts, :on_output)
+    indicator_ms = Keyword.get(opts, :running_indicator_ms, @running_indicator_ms)
     timeout_ms = timeout_secs * 1_000
 
     port =
@@ -51,7 +57,7 @@ defmodule Minga.Agent.Tools.Shell do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     now = System.monotonic_time(:millisecond)
 
-    collect_output(port, deadline, on_output, [], [], now, now)
+    collect_output(port, deadline, on_output, indicator_ms, [], [], now, now)
   rescue
     e ->
       {:error, "command failed: #{Exception.message(e)}"}
@@ -65,12 +71,22 @@ defmodule Minga.Agent.Tools.Shell do
           port(),
           integer(),
           (String.t() -> :ok) | nil,
+          pos_integer(),
           [String.t()],
           [String.t()],
           integer(),
           integer()
         ) :: {:ok, String.t()} | {:error, String.t()}
-  defp collect_output(port, deadline, on_output, acc, pending, last_flush, last_data) do
+  defp collect_output(
+         port,
+         deadline,
+         on_output,
+         indicator_ms,
+         acc,
+         pending,
+         last_flush,
+         last_data
+       ) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
     # Wake up at the sooner of: deadline, next debounce window, or running indicator
     wait_ms = min(remaining, @debounce_ms)
@@ -82,9 +98,18 @@ defmodule Minga.Agent.Tools.Shell do
 
         if on_output != nil and now - last_flush >= @debounce_ms do
           flush_pending(on_output, new_pending)
-          collect_output(port, deadline, on_output, [data | acc], [], now, now)
+          collect_output(port, deadline, on_output, indicator_ms, [data | acc], [], now, now)
         else
-          collect_output(port, deadline, on_output, [data | acc], new_pending, last_flush, now)
+          collect_output(
+            port,
+            deadline,
+            on_output,
+            indicator_ms,
+            [data | acc],
+            new_pending,
+            last_flush,
+            now
+          )
         end
 
       {^port, {:exit_status, exit_code}} ->
@@ -114,9 +139,18 @@ defmodule Minga.Agent.Tools.Shell do
         else
           # Check if we should flush pending output or send a running indicator
           {new_pending, new_flush, new_data} =
-            maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now)
+            maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now, indicator_ms)
 
-          collect_output(port, deadline, on_output, acc, new_pending, new_flush, new_data)
+          collect_output(
+            port,
+            deadline,
+            on_output,
+            indicator_ms,
+            acc,
+            new_pending,
+            new_flush,
+            new_data
+          )
         end
     end
   end
@@ -126,19 +160,20 @@ defmodule Minga.Agent.Tools.Shell do
           [String.t()],
           integer(),
           integer(),
-          integer()
+          integer(),
+          pos_integer()
         ) :: {[String.t()], integer(), integer()}
-  defp maybe_flush_or_indicate(nil, pending, last_flush, last_data, _now) do
+  defp maybe_flush_or_indicate(nil, pending, last_flush, last_data, _now, _indicator_ms) do
     {pending, last_flush, last_data}
   end
 
-  defp maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now) do
+  defp maybe_flush_or_indicate(on_output, pending, last_flush, last_data, now, indicator_ms) do
     if pending != [] and now - last_flush >= @debounce_ms do
       # Flush accumulated output
       flush_pending(on_output, pending)
       {[], now, last_data}
     else
-      if pending == [] and now - last_data >= @running_indicator_ms do
+      if pending == [] and now - last_data >= indicator_ms do
         # No output for a while, send a running indicator
         on_output.("[running...]\n")
         {[], now, now}

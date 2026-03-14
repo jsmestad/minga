@@ -59,14 +59,18 @@ defmodule Minga.Integration.MingaOrgTest do
       source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])
 
       assert {:ok, lib_path} = TreeSitter.compile_grammar("org_cache_test", source_dir)
-      first_mtime = File.stat!(lib_path, time: :posix).mtime
+
+      # Touch the compiled library so its mtime is strictly newer than sources.
+      # This avoids a 1.1s Process.sleep to wait for POSIX mtime granularity.
+      original_mtime = File.stat!(lib_path, time: :posix).mtime
+      touched_mtime = original_mtime + 2
+      File.touch!(lib_path, touched_mtime)
 
       # Second compile should use cache (no recompilation)
-      Process.sleep(1100)
       assert {:ok, ^lib_path} = TreeSitter.compile_grammar("org_cache_test", source_dir)
       second_mtime = File.stat!(lib_path, time: :posix).mtime
 
-      assert first_mtime == second_mtime, "library should not be recompiled"
+      assert second_mtime == touched_mtime, "library should not be recompiled"
     after
       File.rm(TreeSitter.grammar_lib_path("org_cache_test"))
     end

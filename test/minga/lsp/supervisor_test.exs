@@ -21,7 +21,7 @@ defmodule Minga.LSP.SupervisorTest do
 
     case Client.status(client) do
       :ready -> :ok
-      _ -> Process.sleep(100) && wait_until_ready(client, attempts - 1)
+      _ -> Process.sleep(10) && wait_until_ready(client, attempts - 1)
     end
   end
 

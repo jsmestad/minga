@@ -81,7 +81,8 @@ defmodule Minga.Agent.RetryTest do
               {:ok, :recovered}
             end
           end,
-          max_retries: 3
+          max_retries: 3,
+          base_delay_ms: 1
         )
 
       assert {:ok, :recovered} = result
@@ -97,7 +98,8 @@ defmodule Minga.Agent.RetryTest do
             :counters.add(counter, 1, 1)
             {:error, %{status: 529}}
           end,
-          max_retries: 2
+          max_retries: 2,
+          base_delay_ms: 1
         )
 
       assert {:error, %{status: 529}} = result
@@ -111,6 +113,7 @@ defmodule Minga.Agent.RetryTest do
       Retry.with_retry(
         fn -> {:error, %{status: 500}} end,
         max_retries: 2,
+        base_delay_ms: 1,
         on_retry: fn attempt, delay_ms, reason ->
           :ets.insert(callback_log, {attempt, delay_ms, reason})
         end
