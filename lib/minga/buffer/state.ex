@@ -13,6 +13,7 @@ defmodule Minga.Buffer.State do
   under burst editing while preserving correct undo for human-speed edits.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
 
@@ -48,6 +49,7 @@ defmodule Minga.Buffer.State do
             unlisted: false,
             persistent: false,
             pending_edits: [],
+            decorations: %Decorations{},
             options: %{}
 
   @type t :: %__MODULE__{
@@ -68,6 +70,7 @@ defmodule Minga.Buffer.State do
           unlisted: boolean(),
           persistent: boolean(),
           pending_edits: [EditDelta.t()],
+          decorations: Decorations.t(),
           options: %{atom() => term()}
         }
 
