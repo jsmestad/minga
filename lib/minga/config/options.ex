@@ -113,6 +113,8 @@ defmodule Minga.Config.Options do
           | :agent_diff_size_threshold
           | :agent_max_turns
           | :agent_max_cost
+          | :agent_api_base_url
+          | :agent_api_endpoints
           | :font_family
           | :font_size
           | :font_weight
@@ -189,6 +191,8 @@ defmodule Minga.Config.Options do
     {:agent_diff_size_threshold, :pos_integer, 1_048_576},
     {:agent_max_turns, :pos_integer, 100},
     {:agent_max_cost, :float_or_nil, nil},
+    {:agent_api_base_url, :string, ""},
+    {:agent_api_endpoints, :map_or_nil, nil},
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},
     {:nav_flash_threshold, :pos_integer, 5},

@@ -4,6 +4,7 @@ defmodule Minga.Agent.Providers.NativeTest do
   alias Minga.Agent.Event
   alias Minga.Agent.Providers.Native
   alias Minga.Agent.Tools
+  alias Minga.Config.Options
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -815,6 +816,139 @@ defmodule Minga.Agent.Providers.NativeTest do
       text_deltas = Enum.filter(events, &match?(%Event.TextDelta{}, &1))
       all_text = Enum.map_join(text_deltas, & &1.delta)
       refute all_text =~ "cost limit"
+    end
+  end
+
+  describe "custom API base URL" do
+    test "MINGA_API_BASE_URL env var injects base_url into stream opts", %{tmp_dir: dir} do
+      test_pid = self()
+
+      capturing_client = fn _model, _messages, opts ->
+        send(test_pid, {:captured_opts, opts})
+        build_stream_response([{:text, "ok"}])
+      end
+
+      System.put_env("MINGA_API_BASE_URL", "https://gateway.corp.com/v1")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
+      :ok = Native.send_prompt(pid, "test")
+
+      assert_receive {:captured_opts, opts}, 2_000
+      assert Keyword.get(opts, :base_url) == "https://gateway.corp.com/v1"
+
+      # Collect remaining events so the process winds down
+      collect_events(500)
+    after
+      System.delete_env("MINGA_API_BASE_URL")
+    end
+
+    test "no base_url when env var is not set", %{tmp_dir: dir} do
+      test_pid = self()
+
+      capturing_client = fn _model, _messages, opts ->
+        send(test_pid, {:captured_opts, opts})
+        build_stream_response([{:text, "ok"}])
+      end
+
+      System.delete_env("MINGA_API_BASE_URL")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
+      :ok = Native.send_prompt(pid, "test")
+
+      assert_receive {:captured_opts, opts}, 2_000
+      refute Keyword.has_key?(opts, :base_url)
+
+      collect_events(500)
+    end
+
+    test "per-provider endpoint from config takes precedence over global", %{tmp_dir: dir} do
+      test_pid = self()
+
+      capturing_client = fn _model, _messages, opts ->
+        send(test_pid, {:captured_opts, opts})
+        build_stream_response([{:text, "ok"}])
+      end
+
+      System.delete_env("MINGA_API_BASE_URL")
+
+      # Set both global and per-provider endpoints
+      Options.set(:agent_api_base_url, "https://global.example.com/v1")
+
+      Options.set(:agent_api_endpoints, %{
+        "anthropic" => "https://anthropic-gw.corp.com/v1",
+        "openai" => "https://openai-gw.corp.com/v1"
+      })
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: capturing_client,
+          model: "anthropic:claude-sonnet-4-20250514"
+        )
+
+      :ok = Native.send_prompt(pid, "test")
+
+      assert_receive {:captured_opts, opts}, 2_000
+      assert Keyword.get(opts, :base_url) == "https://anthropic-gw.corp.com/v1"
+
+      collect_events(500)
+    after
+      Options.set(:agent_api_base_url, "")
+      Options.set(:agent_api_endpoints, nil)
+    end
+
+    test "global base_url is used when no per-provider match", %{tmp_dir: dir} do
+      test_pid = self()
+
+      capturing_client = fn _model, _messages, opts ->
+        send(test_pid, {:captured_opts, opts})
+        build_stream_response([{:text, "ok"}])
+      end
+
+      System.delete_env("MINGA_API_BASE_URL")
+
+      Options.set(:agent_api_base_url, "https://global.example.com/v1")
+      Options.set(:agent_api_endpoints, %{"openai" => "https://openai-only.com/v1"})
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: capturing_client,
+          model: "anthropic:claude-sonnet-4-20250514"
+        )
+
+      :ok = Native.send_prompt(pid, "test")
+
+      assert_receive {:captured_opts, opts}, 2_000
+      assert Keyword.get(opts, :base_url) == "https://global.example.com/v1"
+
+      collect_events(500)
+    after
+      Options.set(:agent_api_base_url, "")
+      Options.set(:agent_api_endpoints, nil)
+    end
+
+    test "env var overrides per-provider endpoint", %{tmp_dir: dir} do
+      test_pid = self()
+
+      capturing_client = fn _model, _messages, opts ->
+        send(test_pid, {:captured_opts, opts})
+        build_stream_response([{:text, "ok"}])
+      end
+
+      System.put_env("MINGA_API_BASE_URL", "https://env-override.com/v1")
+      Options.set(:agent_api_endpoints, %{"anthropic" => "https://should-lose.com"})
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
+      :ok = Native.send_prompt(pid, "test")
+
+      assert_receive {:captured_opts, opts}, 2_000
+      assert Keyword.get(opts, :base_url) == "https://env-override.com/v1"
+
+      collect_events(500)
+    after
+      System.delete_env("MINGA_API_BASE_URL")
+      Options.set(:agent_api_endpoints, nil)
     end
   end
 end

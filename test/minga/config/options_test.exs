@@ -60,6 +60,8 @@ defmodule Minga.Config.OptionsTest do
                agent_notify_on: [:approval, :complete, :error],
                agent_max_turns: 100,
                agent_max_cost: nil,
+               agent_api_base_url: "",
+               agent_api_endpoints: nil,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                agent_tool_permissions: nil,
