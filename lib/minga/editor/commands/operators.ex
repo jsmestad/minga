@@ -33,19 +33,19 @@ defmodule Minga.Editor.Commands.Operators do
     {line, _col} = BufferServer.cursor(buf)
     yanked = BufferServer.get_lines_content(buf, line, line)
     BufferServer.delete_lines(buf, line, line)
-    Helpers.put_register(state, yanked <> "\n", :delete)
+    Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
   end
 
   def execute(%{buffers: %{active: buf}} = state, :change_line) do
     {line, _col} = BufferServer.cursor(buf)
     {:ok, yanked} = BufferServer.clear_line(buf, line)
-    Helpers.put_register(state, yanked <> "\n", :delete)
+    Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
   end
 
   def execute(%{buffers: %{active: buf}} = state, :yank_line) do
     {line, _col} = BufferServer.cursor(buf)
     yanked = BufferServer.get_lines_content(buf, line, line)
-    Helpers.put_register(state, yanked <> "\n", :yank)
+    Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
   end
 
   # ── Text object operators ─────────────────────────────────────────────────

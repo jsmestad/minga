@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Indent
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Registers
   alias Minga.Mode
   alias Minga.Mode.ReplaceState
   alias Minga.Mode.VisualState
@@ -237,28 +238,27 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Paste ─────────────────────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, :paste_before) do
-    {text, state} = Helpers.get_register(state)
+    {text, reg_type, state} = Helpers.get_register(state)
 
     case text do
       nil ->
         state
 
       t ->
-        BufferServer.insert_char(buf, t)
+        paste_content(buf, t, reg_type, :before)
         state
     end
   end
 
   def execute(%{buffers: %{active: buf}} = state, :paste_after) do
-    {text, state} = Helpers.get_register(state)
+    {text, reg_type, state} = Helpers.get_register(state)
 
     case text do
       nil ->
         state
 
       t ->
-        BufferServer.move(buf, :right)
-        BufferServer.insert_char(buf, t)
+        paste_content(buf, t, reg_type, :after)
         state
     end
   end
@@ -719,5 +719,55 @@ defmodule Minga.Editor.Commands.Editing do
       {_, idx} -> idx
       nil -> 0
     end
+  end
+
+  # ── Paste helpers ──────────────────────────────────────────────────────────
+
+  # Pastes text into the buffer, handling linewise vs charwise differently.
+  # Linewise: opens a new line above/below and inserts the content there.
+  # Charwise: inserts inline at (or one past) the cursor position.
+  @spec paste_content(pid(), String.t(), Registers.reg_type(), :before | :after) :: :ok
+  defp paste_content(buf, text, :linewise, direction) do
+    {line, _col} = BufferServer.cursor(buf)
+    # Strip the trailing newline that linewise yanks append
+    content = String.trim_trailing(text, "\n")
+
+    case direction do
+      :after ->
+        line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+        BufferServer.move_to(buf, {line, byte_size(line_text)})
+        BufferServer.insert_char(buf, "\n" <> content)
+        BufferServer.move_to(buf, {line + 1, 0})
+        move_to_first_nonblank(buf)
+
+      :before ->
+        BufferServer.move_to(buf, {line, 0})
+        BufferServer.insert_char(buf, content <> "\n")
+        BufferServer.move_to(buf, {line, 0})
+        move_to_first_nonblank(buf)
+    end
+
+    :ok
+  end
+
+  defp paste_content(buf, text, :charwise, :before) do
+    BufferServer.insert_char(buf, text)
+    :ok
+  end
+
+  defp paste_content(buf, text, :charwise, :after) do
+    BufferServer.move(buf, :right)
+    BufferServer.insert_char(buf, text)
+    :ok
+  end
+
+  # Moves cursor to the first non-whitespace character on the current line.
+  @spec move_to_first_nonblank(pid()) :: :ok
+  defp move_to_first_nonblank(buf) do
+    {line, _col} = BufferServer.cursor(buf)
+    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+    indent = byte_size(line_text) - byte_size(String.trim_leading(line_text))
+    BufferServer.move_to(buf, {line, indent})
+    :ok
   end
 end

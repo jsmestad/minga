@@ -61,7 +61,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "yy syncs to system clipboard", %{clipboard: agent} do
       sentinel = "yank-sync-#{System.unique_integer([:positive])}"
       state = make_state()
-      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        sentinel,
+        :yank,
+        :charwise,
+        :unnamedplus
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -69,7 +76,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "delete syncs to system clipboard", %{clipboard: agent} do
       sentinel = "delete-sync-#{System.unique_integer([:positive])}"
       state = make_state()
-      Helpers.put_register(state, sentinel, :delete, :unnamedplus)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        sentinel,
+        :delete,
+        :charwise,
+        :unnamedplus
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -77,7 +91,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "named register also syncs to clipboard", %{clipboard: agent} do
       sentinel = "named-sync-#{System.unique_integer([:positive])}"
       state = put_in(make_state().vim.reg.active, "a")
-      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        sentinel,
+        :yank,
+        :charwise,
+        :unnamedplus
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -86,7 +107,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       sentinel = "blackhole-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
       state = put_in(make_state().vim.reg.active, "_")
-      Helpers.put_register(state, "should not appear", :yank, :unnamedplus)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        "should not appear",
+        :yank,
+        :charwise,
+        :unnamedplus
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -94,7 +122,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "explicit + register still works", %{clipboard: agent} do
       sentinel = "explicit-clip-#{System.unique_integer([:positive])}"
       state = put_in(make_state().vim.reg.active, "+")
-      Helpers.put_register(state, sentinel, :yank, :unnamedplus)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        sentinel,
+        :yank,
+        :charwise,
+        :unnamedplus
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -105,7 +140,14 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       sentinel = "none-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
       state = make_state()
-      Helpers.put_register(state, "should not sync", :yank, :none)
+
+      Helpers.put_register_with_clipboard_override(
+        state,
+        "should not sync",
+        :yank,
+        :charwise,
+        :none
+      )
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -113,7 +155,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "explicit + register still works even with clipboard: :none", %{clipboard: agent} do
       sentinel = "none-explicit-#{System.unique_integer([:positive])}"
       state = put_in(make_state().vim.reg.active, "+")
-      Helpers.put_register(state, sentinel, :yank, :none)
+      Helpers.put_register_with_clipboard_override(state, sentinel, :yank, :charwise, :none)
 
       assert clipboard_contents(agent) == sentinel
     end
@@ -127,20 +169,37 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       internal = "internal-#{System.unique_integer([:positive])}"
       external = "external-#{System.unique_integer([:positive])}"
       # Put something in the unnamed register
-      state = Helpers.put_register(state, internal, :yank, :unnamedplus)
+      state =
+        Helpers.put_register_with_clipboard_override(
+          state,
+          internal,
+          :yank,
+          :charwise,
+          :unnamedplus
+        )
+
       # Simulate external copy by writing directly to the in-memory clipboard
       Agent.update(agent, fn _ -> external end)
 
-      {text, _state} = Helpers.get_register(state, :unnamedplus)
+      {text, _type, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == external
     end
 
     test "paste from unnamed register uses internal when clipboard matches" do
       sentinel = "same-#{System.unique_integer([:positive])}"
       state = make_state()
-      state = Helpers.put_register(state, sentinel, :yank, :unnamedplus)
+
+      state =
+        Helpers.put_register_with_clipboard_override(
+          state,
+          sentinel,
+          :yank,
+          :charwise,
+          :unnamedplus
+        )
+
       # Clipboard was synced, so it should match
-      {text, _state} = Helpers.get_register(state, :unnamedplus)
+      {text, _type, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel
     end
 
@@ -151,7 +210,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       state = Helpers.put_in_register(state, "a", sentinel)
       state = put_in(state.vim.reg.active, "a")
 
-      {text, _state} = Helpers.get_register(state, :unnamedplus)
+      {text, _type, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel
     end
   end
