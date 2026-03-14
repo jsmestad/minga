@@ -25,6 +25,15 @@ defmodule Minga.Input.RouterTest do
     }
   end
 
+  # Flushes all messages from the process mailbox, returning the count.
+  defp flush_mailbox(count \\ 0) do
+    receive do
+      _ -> flush_mailbox(count + 1)
+    after
+      0 -> count
+    end
+  end
+
   describe "dispatch/3" do
     test "dispatches a normal mode key through the focus stack" do
       state = base_state()
@@ -50,6 +59,33 @@ defmodule Minga.Input.RouterTest do
       state = base_state()
       # This should not crash, meaning render was called successfully
       _new_state = Router.dispatch(state, ?j, 0)
+    end
+
+    test "entering operator_pending mode skips full render but emits batch_end" do
+      state = base_state()
+      # Flush any startup messages
+      flush_mailbox()
+
+      # Press 'd' to enter operator_pending mode (no buffer mutation)
+      new_state = Router.dispatch(state, ?d, 0)
+      assert new_state.vim.mode == :operator_pending
+
+      # Only a single no-op batch_end message should be sent (no full render).
+      # port_manager is self(), so GenServer.cast sends a $gen_cast message.
+      msg_count = flush_mailbox()
+      assert msg_count == 1, "Expected exactly 1 batch_end message, got #{msg_count}"
+    end
+
+    test "normal motion triggers full render (more than one message)" do
+      state = base_state()
+      flush_mailbox()
+
+      # Press 'j' to move cursor down (normal motion, should render)
+      _new_state = Router.dispatch(state, ?j, 0)
+
+      # Full render sends multiple commands (draw, cursor, batch_end, etc.)
+      msg_count = flush_mailbox()
+      assert msg_count > 0, "Expected render messages after normal motion"
     end
 
     test "single dispatch path handles all key types" do

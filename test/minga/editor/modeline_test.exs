@@ -34,6 +34,20 @@ defmodule Minga.Editor.ModelineTest do
       end
     end
 
+    test "operator_pending mode shows NORMAL badge, not OPERATOR" do
+      data = Map.put(@base_data, :mode, :operator_pending)
+      {commands, _regions} = Modeline.render(0, 80, data)
+
+      texts =
+        Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+
+      assert Enum.any?(texts, &String.contains?(&1, "NORMAL")),
+             "Expected NORMAL badge in operator_pending mode, got: #{inspect(texts)}"
+
+      refute Enum.any?(texts, &String.contains?(&1, "OPERATOR")),
+             "Should not show OPERATOR badge in operator_pending mode"
+    end
+
     test "renders with dirty marker" do
       data = Map.put(@base_data, :dirty_marker, " ● ")
       {commands, _} = Modeline.render(0, 80, data)
