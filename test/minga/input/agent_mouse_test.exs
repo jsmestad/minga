@@ -47,7 +47,7 @@ defmodule Minga.Input.AgentMouseTest do
     }
 
     agentic = ViewState.new()
-    tab_bar = TabBar.new(Tab.new_file(1, "*scratch*"))
+    tab_bar = TabBar.new(Tab.new_file(1, "[no file]"))
 
     win_id = 1
     win = Window.new(win_id, buf, 24, 80)

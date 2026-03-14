@@ -4,7 +4,7 @@ defmodule Minga.Editor.Title do
 
   Uses `EditorState.active_content_context/1` to derive display metadata
   from the active window's content type. In agent mode the title shows
-  "Agent" instead of `*scratch*`. In buffer mode it shows the filename.
+  "Agent" instead of the buffer name. In buffer mode it shows the filename.
 
   The title format string supports these placeholders:
 
@@ -90,7 +90,7 @@ defmodule Minga.Editor.Title do
     dirty = BufferServer.dirty?(buf)
     name = BufferServer.buffer_name(buf)
 
-    filename = if path, do: Path.basename(path), else: name || "*scratch*"
+    filename = if path, do: Path.basename(path), else: name || "[no file]"
     directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
     filepath = path || ""
     bufname = name || filename
@@ -109,13 +109,13 @@ defmodule Minga.Editor.Title do
   @spec default_vars(atom()) :: [{String.t(), String.t()}]
   defp default_vars(mode) do
     [
-      {"filename", "*scratch*"},
+      {"filename", "[no file]"},
       {"filepath", ""},
       {"directory", ""},
       {"dirty", ""},
       {"readonly", ""},
       {"mode", mode |> to_string() |> String.upcase()},
-      {"bufname", "*scratch*"}
+      {"bufname", "[no file]"}
     ]
   end
 

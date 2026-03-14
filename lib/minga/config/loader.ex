@@ -345,8 +345,7 @@ defmodule Minga.Config.Loader do
 
     defaults = [
       Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: true),
-      Rule.new("*Messages*", side: :bottom, size: {:percent, 25}, focus: false, auto_close: true),
-      Rule.new("*scratch*", side: :bottom, size: {:percent, 30}, focus: true)
+      Rule.new("*Messages*", side: :bottom, size: {:percent, 25}, focus: false, auto_close: true)
     ]
 
     Enum.each(defaults, &PopupRegistry.register/1)

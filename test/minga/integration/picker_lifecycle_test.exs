@@ -22,12 +22,12 @@ defmodule Minga.Integration.PickerLifecycleTest do
       assert_screen_snapshot(ctx, "buffer_picker_open")
     end
 
-    test "shows current scratch buffer in item list" do
+    test "shows current buffer in item list" do
       ctx = start_editor("hello world")
 
       send_keys(ctx, "<Space>bb")
 
-      assert screen_contains?(ctx, "[scratch]")
+      assert screen_contains?(ctx, "[no file]")
     end
   end
 
@@ -74,9 +74,9 @@ defmodule Minga.Integration.PickerLifecycleTest do
       ctx = start_editor("hello world")
 
       send_keys(ctx, "<Space>bb")
-      assert screen_contains?(ctx, "[scratch]")
+      assert screen_contains?(ctx, "[no file]")
 
-      # Type something that won't match "[scratch]"
+      # Type something that won't match "[no file]"
       send_keys(ctx, "zzz")
 
       # The item should be filtered out (no match)
@@ -92,7 +92,7 @@ defmodule Minga.Integration.PickerLifecycleTest do
 
       send_keys(ctx, "<BS><BS><BS>")
       # Cleared filter, should show items again
-      assert screen_contains?(ctx, "[scratch]")
+      assert screen_contains?(ctx, "[no file]")
     end
   end
 

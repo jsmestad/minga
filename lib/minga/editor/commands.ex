@@ -474,7 +474,6 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
   def execute(state, :view_warnings), do: BufferManagement.execute(state, :view_warnings)
-  def execute(state, :view_scratch), do: BufferManagement.execute(state, :view_scratch)
   def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
   def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
 

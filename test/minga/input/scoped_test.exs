@@ -60,7 +60,7 @@ defmodule Minga.Input.ScopedTest do
         # Agent mode: tab bar with an agent tab active
         TabBar.new(Tab.new_agent(1, "Agent"))
       else
-        TabBar.new(Tab.new_file(1, "*scratch*"))
+        TabBar.new(Tab.new_file(1, "[no file]"))
       end
 
     mode = if(Keyword.get(opts, :input_focused, false), do: :insert, else: :normal)

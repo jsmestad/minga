@@ -278,13 +278,25 @@ defmodule Minga.Keymap.Active do
 
   @spec seed_defaults(:ets.table()) :: true
   defp seed_defaults(table) do
+    filetype_tries = build_default_filetype_tries()
+
     :ets.insert(table, [
       {@leader_trie_key, Defaults.leader_trie()},
       {@normal_overrides_key, %{}},
       {@scope_overrides_key, %{}},
-      {@filetype_tries_key, %{}},
+      {@filetype_tries_key, filetype_tries},
       {@mode_tries_key, %{}}
     ])
+  end
+
+  @spec build_default_filetype_tries() :: filetype_tries()
+  defp build_default_filetype_tries do
+    Defaults.filetype_bindings()
+    |> Enum.reduce(%{}, fn {filetype, keys, command, description}, tries ->
+      trie = Map.get(tries, filetype, Bindings.new())
+      updated = Bindings.bind(trie, keys, command, description)
+      Map.put(tries, filetype, updated)
+    end)
   end
 
   # ── Private: bind dispatch ──────────────────────────────────────────────────

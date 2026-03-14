@@ -389,9 +389,9 @@ defmodule Minga.Integration.AgentPanelTest do
       assert String.contains?(ml_after, "NORMAL"),
              "modeline should show NORMAL after close, got: #{inspect(ml_after)}"
 
-      # Both should show the scratch buffer name
-      assert String.contains?(ml_before, "[scratch]")
-      assert String.contains?(ml_after, "[scratch]")
+      # Both should show the buffer name
+      assert String.contains?(ml_before, "[no file]")
+      assert String.contains?(ml_after, "[no file]")
     end
 
     test "closing agent panel does not leave stale separator chars" do

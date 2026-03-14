@@ -24,6 +24,7 @@ defmodule Minga.Input do
   alias Minga.Input.AgentSearch
   alias Minga.Input.Completion
   alias Minga.Input.ConflictPrompt
+  alias Minga.Input.Dashboard
   alias Minga.Input.DiffReview
   alias Minga.Input.FileTreeHandler
   alias Minga.Input.GlobalBindings
@@ -54,6 +55,7 @@ defmodule Minga.Input do
   @spec default_stack() :: [module()]
   def default_stack do
     [
+      Dashboard,
       ConflictPrompt,
       Picker,
       Completion,
@@ -89,6 +91,7 @@ defmodule Minga.Input do
   @spec surface_handlers() :: [module()]
   def surface_handlers do
     [
+      Dashboard,
       AgentSearch,
       MentionCompletion,
       ToolApproval,

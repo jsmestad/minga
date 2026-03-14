@@ -12,6 +12,7 @@ defmodule Minga.Editor.Startup do
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
+  alias Minga.Editor.Dashboard
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -33,8 +34,8 @@ defmodule Minga.Editor.Startup do
   correct window type in a single pass.
 
   In agent mode the initial window is an agent chat window (full screen).
-  In editor mode it's a regular buffer window showing the scratch or
-  file buffer. The mode decision happens *before* window creation so
+  In editor mode it's a regular buffer window showing the file buffer
+  (or the dashboard if no file was specified). The mode decision happens *before* window creation so
   there's no create-then-replace dance.
   """
   @spec build_initial_state(keyword()) :: EditorState.t()
@@ -48,13 +49,16 @@ defmodule Minga.Editor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    {messages_buf, warnings_buf, scratch_buf} = start_special_buffers()
+    {messages_buf, warnings_buf} = start_special_buffers()
 
-    {active_buf, buffers} =
-      case {buffer, scratch_buf} do
-        {nil, pid} when is_pid(pid) -> {pid, []}
-        {pid, _} when is_pid(pid) -> {pid, [pid]}
-        _ -> {nil, []}
+    {active_buf, buffers, dashboard} =
+      case buffer do
+        pid when is_pid(pid) ->
+          {pid, [pid], nil}
+
+        _ ->
+          recent = safe_recent_files()
+          {nil, [], Dashboard.new_state(recent)}
       end
 
     # Decide mode FIRST, then create the right window type.
@@ -74,8 +78,7 @@ defmodule Minga.Editor.Startup do
         list: buffers,
         active_index: 0,
         messages: messages_buf,
-        warnings: warnings_buf,
-        scratch: scratch_buf
+        warnings: warnings_buf
       },
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
@@ -87,7 +90,8 @@ defmodule Minga.Editor.Startup do
         next_id: initial_window_id + 1
       },
       keymap_scope: keymap_scope,
-      focus_stack: Minga.Input.default_stack()
+      focus_stack: Minga.Input.default_stack(),
+      dashboard: dashboard
     }
 
     state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
@@ -107,7 +111,7 @@ defmodule Minga.Editor.Startup do
 
   In agent mode: starts the `*Agent*` buffer and creates an agent chat
   window. In editor mode: creates a regular buffer window for the
-  scratch or file buffer.
+  file buffer (or dashboard if no file was specified).
 
   Returns `{window | nil, agent_state_update}` where the update is
   either `{:agent_buffer, pid}` or `:noop`.
@@ -154,7 +158,7 @@ defmodule Minga.Editor.Startup do
       if active_buf && Process.alive?(active_buf) do
         Commands.Helpers.buffer_display_name(active_buf)
       else
-        "*scratch*"
+        "[no file]"
       end
 
     TabBar.new(Tab.new_file(1, file_label))
@@ -224,22 +228,14 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Starts the *Messages*, *Warnings*, and *scratch* special buffers.
+  Starts the *Messages* and *Warnings* special buffers.
   """
-  @spec start_special_buffers() :: {pid() | nil, pid() | nil, pid() | nil}
+  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
   def start_special_buffers do
     messages_buf = start_special_buffer("*Messages*", content: "", read_only: true)
     warnings_buf = start_special_buffer("*Warnings*", content: "", read_only: true)
 
-    scratch_filetype = ConfigOptions.get(:scratch_filetype)
-
-    scratch_content =
-      "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
-
-    scratch_buf =
-      start_special_buffer("*scratch*", content: scratch_content, filetype: scratch_filetype)
-
-    {messages_buf, warnings_buf, scratch_buf}
+    {messages_buf, warnings_buf}
   end
 
   @spec start_special_buffer(String.t(), keyword()) :: pid() | nil
@@ -295,5 +291,12 @@ defmodule Minga.Editor.Startup do
     _ -> :ok
   catch
     :exit, _ -> :ok
+  end
+
+  @spec safe_recent_files() :: [String.t()]
+  defp safe_recent_files do
+    Minga.Project.recent_files()
+  catch
+    :exit, _ -> []
   end
 end

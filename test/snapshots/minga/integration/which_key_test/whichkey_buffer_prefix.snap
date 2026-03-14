@@ -2,7 +2,7 @@
 # Cursor: (1, 3) block
 # Mode: normal
 ────────────────────────────────────────────────────────────────────────────────
-00│ 1: [scratch] ✕ 
+00│ 1: [no file] ✕ 
 01│ 1 hello world
 02│   ~
 03│   ~
@@ -21,9 +21,9 @@
 16│   ~
 17│╭─────────────────────────────────── SPC b ────────────────────────────────────╮
 18││B : Switch buffer (all)  b : Switch buffer        n : Next buffer             │
-19││N : New empty buffer     d : Kill buffer          p : Previous buffer         │
-20││W : View warnings        m : View messages        s : Switch to scratch       │
+19││N : New buffer           d : Kill buffer          p : Previous buffer         │
+20││W : View warnings        m : View messages                                    │
 21│╰──────────────────────────────────────────────────────────────────────────────╯
-22│ NORMAL  [scratch]                                               Text  1:1  Top
+22│ NORMAL  [no file]                                               Text  1:1  Top
 23│
 ────────────────────────────────────────────────────────────────────────────────

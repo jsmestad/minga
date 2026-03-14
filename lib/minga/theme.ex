@@ -46,7 +46,8 @@ defmodule Minga.Theme do
     :popup,
     :tree,
     :agent,
-    :tab_bar
+    :tab_bar,
+    :dashboard
   ]
 
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
@@ -71,7 +72,8 @@ defmodule Minga.Theme do
           popup: Minga.Theme.Popup.t(),
           tree: Minga.Theme.Tree.t(),
           agent: Minga.Theme.Agent.t() | nil,
-          tab_bar: Minga.Theme.TabBar.t() | nil
+          tab_bar: Minga.Theme.TabBar.t() | nil,
+          dashboard: Minga.Theme.Dashboard.t() | nil
         }
 
   # ── Color group structs ─────────────────────────────────────────────────────
@@ -393,6 +395,22 @@ defmodule Minga.Theme do
           }
   end
 
+  defmodule Dashboard do
+    @moduledoc "Dashboard (home screen) colors."
+    @enforce_keys [:bg, :logo_fg, :heading_fg, :item_fg, :item_active_bg, :shortcut_fg, :muted_fg]
+    defstruct [:bg, :logo_fg, :heading_fg, :item_fg, :item_active_bg, :shortcut_fg, :muted_fg]
+
+    @type t :: %__MODULE__{
+            bg: Minga.Theme.color(),
+            logo_fg: Minga.Theme.color(),
+            heading_fg: Minga.Theme.color(),
+            item_fg: Minga.Theme.color(),
+            item_active_bg: Minga.Theme.color(),
+            shortcut_fg: Minga.Theme.color(),
+            muted_fg: Minga.Theme.color()
+          }
+  end
+
   defmodule Tree do
     @moduledoc "File tree sidebar colors."
     @enforce_keys [
@@ -526,6 +544,22 @@ defmodule Minga.Theme do
   end
 
   def agent_theme(%__MODULE__{agent: agent}), do: agent
+
+  @doc "Returns the dashboard theme section, falling back to a basic default."
+  @spec dashboard_theme(t()) :: Dashboard.t()
+  def dashboard_theme(%__MODULE__{dashboard: nil}) do
+    %Dashboard{
+      bg: 0x282C34,
+      logo_fg: 0xECBE7B,
+      heading_fg: 0x51AFEF,
+      item_fg: 0xBBC2CF,
+      item_active_bg: 0x3E4451,
+      shortcut_fg: 0x98BE65,
+      muted_fg: 0x5B6268
+    }
+  end
+
+  def dashboard_theme(%__MODULE__{dashboard: dashboard}), do: dashboard
 
   @doc """
   Returns the style for a tree-sitter capture name, using suffix fallback.

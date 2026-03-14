@@ -166,16 +166,16 @@ defmodule Minga.Integration.CommandModeTest do
     end
   end
 
-  # ── Execution: :w on scratch buffer ────────────────────────────────────────
+  # ── Execution: :w on unnamed buffer ────────────────────────────────────────
 
-  describe "executing :w on scratch buffer" do
+  describe "executing :w on unnamed buffer" do
     test "shows no file name error in status" do
       ctx = start_editor("hello world")
 
       send_keys(ctx, ":w<CR>")
 
       assert editor_mode(ctx) == :normal
-      assert_screen_snapshot(ctx, "command_save_scratch")
+      assert_screen_snapshot(ctx, "command_save_unnamed")
     end
   end
 

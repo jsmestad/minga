@@ -215,11 +215,12 @@ defmodule Minga.Input.AgentMouse do
   defp handle_agent_click(state, {cr, _cc, cw, ch}, row, _col) do
     panel = AgentAccess.panel(state)
     input_lines = PanelState.input_lines(panel)
-    inner_width = ViewRenderer.input_inner_width(cw)
+    box_width = ViewRenderer.input_box_width(cw)
+    inner_width = ViewRenderer.input_inner_width(box_width)
     input_height = ViewRenderer.compute_input_height(input_lines, inner_width)
 
-    # Input area occupies the bottom `input_height` rows of the content rect
-    input_start_row = cr + ch - input_height
+    # Input area occupies the bottom `input_height + v_gap` rows of the content rect
+    input_start_row = cr + ch - input_height - ViewRenderer.input_v_gap()
 
     if row >= input_start_row do
       state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))

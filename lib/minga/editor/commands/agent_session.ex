@@ -77,7 +77,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   # ── Code block helpers ─────────────────────────────────────────────────────
 
   @doc """
-  Opens a code block from an agent chat message as a scratch buffer.
+  Opens a code block from an agent chat message as an unnamed buffer.
 
   Creates a new buffer with the code block content, sets its filetype
   based on the language tag, and displays it in the preview pane.

@@ -14,6 +14,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Search, as: SearchCommands
+  alias Minga.Editor.Dashboard
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -122,14 +123,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
         Minga.Log.error(:editor, "Failed to create buffer: #{inspect(reason)}")
         state
     end
-  end
-
-  def execute(%{buffers: %{scratch: nil}} = state, :view_scratch) do
-    %{state | status_msg: "No scratch buffer"}
-  end
-
-  def execute(%{buffers: %{scratch: scratch_buf}} = state, :view_scratch) do
-    open_special_buffer(state, "*scratch*", scratch_buf)
   end
 
   def execute(%{buffers: %{messages: nil}} = state, :view_messages) do
@@ -538,22 +531,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec remove_current_buffer(state()) :: state()
 
-  # Active buffer is scratch (not in buffer list) — clear it
-  defp remove_current_buffer(%{buffers: %{list: [], active: buf, scratch: buf}} = state)
-       when is_pid(buf) do
-    :sys.replace_state(buf, fn s ->
-      %{
-        s
-        | document:
-            Document.new(
-              "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n"
-            )
-      }
-    end)
-
-    %{state | status_msg: "Buffer is persistent — content cleared"}
-  end
-
   defp remove_current_buffer(
          %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs} = state
        ) do
@@ -562,16 +539,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
     # Check if persistent — if so, recreate instead of removing
     if buf && Process.alive?(buf) && BufferServer.persistent?(buf) do
       # Clear buffer content instead of killing it
-      buf_state = :sys.get_state(buf)
-
-      initial =
-        if buf_state.name == "*scratch*",
-          do:
-            "# This buffer is for notes you don't want to save.\n# It will persist across buffer switches.\n\n",
-          else: ""
-
       :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(initial)}
+        %{s | document: Document.new("")}
       end)
 
       %{state | status_msg: "Buffer is persistent — content cleared"}
@@ -594,10 +563,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       case new_buffers do
         [] ->
-          # Fall back to scratch buffer if available
-          fallback = bs.scratch
+          # No buffers left — initialize dashboard and let it render
+          recent = fetch_recent_files()
+          dash = Dashboard.new_state(recent)
 
-          %{state | buffers: %{bs | list: [], active_index: 0, active: fallback}}
+          %{state | buffers: %{bs | list: [], active_index: 0, active: nil}, dashboard: dash}
           |> EditorState.sync_active_window_buffer()
 
         _ ->
@@ -809,7 +779,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     :ok
   end
 
-  # Opens a special buffer (like *Messages* or *scratch*) as a popup if a
+  # Opens a special buffer (like *Messages* or *Warnings*) as a popup if a
   # matching popup rule exists, otherwise falls back to normal buffer switching.
   # If the buffer is already open in a popup, toggles it closed.
   @spec open_special_buffer(state(), String.t(), pid()) :: state()
@@ -881,5 +851,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp refresh_tree_git_status(%{file_tree: %{tree: tree}} = state) do
     updated_tree = Minga.FileTree.refresh_git_status(tree)
     put_in(state.file_tree.tree, updated_tree)
+  end
+
+  @spec fetch_recent_files() :: [String.t()]
+  defp fetch_recent_files do
+    Minga.Project.recent_files()
+  catch
+    :exit, _ -> []
   end
 end

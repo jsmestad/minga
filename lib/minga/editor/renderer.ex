@@ -21,6 +21,7 @@ defmodule Minga.Editor.Renderer do
   * `DisplayList`              — frame assembly and protocol conversion
   """
 
+  alias Minga.Editor.Dashboard
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Editor.RenderPipeline
@@ -53,15 +54,19 @@ defmodule Minga.Editor.Renderer do
   dirty-line tracking on subsequent frames. Callers must use the
   returned state for the optimization to work.
 
-  For the no-buffer splash screen, returns state unchanged (no windows
-  to cache).
+  For the dashboard home screen, returns state with dashboard state
+  initialized (if needed). No windows to cache.
   """
   @spec render(state()) :: state()
   def render(%{buffers: %{active: nil}} = state) do
-    splash_draws = [
-      DisplayList.draw(0, 0, "Minga v#{Minga.version()} — No file open"),
-      DisplayList.draw(1, 0, "Use: mix minga <filename>")
-    ]
+    rows = state.viewport.rows
+    cols = state.viewport.cols
+
+    # Dashboard state is initialized by the editor when buffers empty,
+    # but fall back to an empty state if somehow nil.
+    dash_state = state.dashboard || Dashboard.new_state()
+
+    splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
 
     frame = %Frame{
       cursor: Cursor.new(0, 0, :block),

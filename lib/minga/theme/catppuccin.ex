@@ -139,6 +139,15 @@ defmodule Minga.Theme.Catppuccin do
         heading3_fg: p.green,
         dashboard_label: p.blue
       },
+      dashboard: %Minga.Theme.Dashboard{
+        bg: p.base,
+        logo_fg: p.yellow,
+        heading_fg: p.blue,
+        item_fg: p.text,
+        item_active_bg: p.surface0,
+        shortcut_fg: p.green,
+        muted_fg: p.overlay0
+      },
       tab_bar: %Minga.Theme.TabBar{
         active_fg: p.text,
         active_bg: p.base,

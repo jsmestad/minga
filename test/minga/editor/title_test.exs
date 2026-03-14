@@ -71,10 +71,10 @@ defmodule Minga.Editor.TitleTest do
       assert result == "editor.ex [INSERT]"
     end
 
-    test "buffer with no path uses scratch name" do
+    test "buffer with no path uses no file name" do
       state = state_with(path: nil)
       result = Title.format(state, "{filename} - Minga")
-      assert result == "*scratch* - Minga"
+      assert result == "[no file] - Minga"
     end
 
     test "named buffer uses buffer name" do
@@ -89,24 +89,24 @@ defmodule Minga.Editor.TitleTest do
       assert result == "editor.ex"
     end
 
-    test "no active buffer falls back to scratch" do
+    test "no active buffer falls back to no file" do
       state = %{buffers: %{active: nil}, vim: %{mode: :normal}}
       result = Title.format(state, "{filename} - Minga")
-      assert result == "*scratch* - Minga"
+      assert result == "[no file] - Minga"
     end
   end
 
   describe "format/2 with EditorState (content-aware)" do
-    test "agent chat window shows Agent in title, not *scratch*" do
+    test "agent chat window shows Agent in title" do
       {:ok, agent_buf} = BufferServer.start_link(content: "")
-      {:ok, scratch_buf} = BufferServer.start_link(content: "scratch")
+      {:ok, file_buf} = BufferServer.start_link(content: "code")
       agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
       state = %EditorState{
         port_manager: self(),
         viewport: Viewport.new(24, 80),
         vim: VimState.new(),
-        buffers: %Buffers{active: scratch_buf, list: []},
+        buffers: %Buffers{active: file_buf, list: []},
         windows: %Windows{
           tree: WindowTree.new(1),
           map: %{1 => agent_window},
@@ -119,9 +119,6 @@ defmodule Minga.Editor.TitleTest do
       result = Title.format(state, "{filename} ({directory}) - Minga")
 
       assert String.contains?(result, "Agent")
-
-      refute String.contains?(result, "*scratch*"),
-             "agent-mode title must not show *scratch*"
     end
 
     test "buffer window shows filename in title" do

@@ -120,10 +120,6 @@ defmodule Minga.DeviconTest do
       assert {"\u{F0369}", _} = Devicon.icon_and_color(:messages)
     end
 
-    test "scratch has note icon" do
-      assert {"\u{F03EB}", _} = Devicon.icon_and_color(:scratch)
-    end
-
     test "help has help icon" do
       assert {"\u{F02D7}", _} = Devicon.icon_and_color(:help)
     end

@@ -48,8 +48,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}, {?d, @none}], :kill_buffer, "Kill buffer"},
     {[{?b, @none}, {?m, @none}], :view_messages, "View messages"},
     {[{?b, @none}, {?W, @none}], :view_warnings, "View warnings"},
-    {[{?b, @none}, {?s, @none}], :view_scratch, "Switch to scratch"},
-    {[{?b, @none}, {?N, @none}], :new_buffer, "New empty buffer"},
+    {[{?b, @none}, {?N, @none}], :new_buffer, "New buffer"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {[{?w, @none}, {?h, @none}], :window_left, "Window left"},
@@ -180,6 +179,31 @@ defmodule Minga.Keymap.Defaults do
   """
   @spec all_bindings() :: [{[Bindings.key()], atom(), String.t()}]
   def all_bindings, do: @leader_bindings
+
+  @doc """
+  Returns default filetype-scoped bindings for `SPC m`.
+
+  Each entry is `{filetype, key_sequence, command, description}` where key_sequence
+  is relative to the `SPC m` prefix (i.e., just the sub-keys).
+  """
+  @spec filetype_bindings() :: [{atom(), [Bindings.key()], atom(), String.t()}]
+  def filetype_bindings do
+    filetypes = [
+      :elixir,
+      :ruby,
+      :typescript,
+      :typescript_react,
+      :javascript,
+      :javascript_react,
+      :c,
+      :cpp,
+      :swift
+    ]
+
+    Enum.map(filetypes, fn ft ->
+      {ft, [{?a, @none}], :alternate_file, "Alternate file"}
+    end)
+  end
 
   @doc """
   Returns a map of Normal mode key bindings: `{codepoint, modifiers} => {command, description}`.

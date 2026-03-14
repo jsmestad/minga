@@ -157,6 +157,15 @@ defmodule Minga.Theme.DoomOne do
         heading3_fg: @green,
         dashboard_label: 0x61AFEF
       },
+      dashboard: %Minga.Theme.Dashboard{
+        bg: @bg,
+        logo_fg: @yellow,
+        heading_fg: @blue,
+        item_fg: @fg,
+        item_active_bg: 0x3E4451,
+        shortcut_fg: @green,
+        muted_fg: @base5
+      },
       tab_bar: %Minga.Theme.TabBar{
         active_fg: @fg,
         active_bg: @bg,
