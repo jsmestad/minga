@@ -32,8 +32,6 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Layout
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Mouse, as: MouseState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
@@ -135,28 +133,9 @@ defmodule Minga.Editor.Mouse do
     end
   end
 
-  # ── Left click in the agent panel → focus input ──
-
-  def handle(state, row, col, :left, mods, :press, cc)
-      when row >= 0 do
-    panel = AgentAccess.panel(state)
-
-    if panel.visible do
-      agent_panel_height = div(state.viewport.rows * 35, 100)
-      editor_rows = state.viewport.rows - agent_panel_height
-
-      if row >= editor_rows do
-        AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
-      else
-        state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
-        handle_left_press(state, row, col, mods, cc)
-      end
-    else
-      handle_left_press(state, row, col, mods, cc)
-    end
-  end
-
   # ── Left click (press) ──
+  # Agent-region clicks are intercepted by Input.AgentMouse before
+  # reaching this handler. This clause handles buffer-content clicks only.
 
   def handle(state, row, col, :left, mods, :press, cc) do
     handle_left_press(state, row, col, mods, cc)
