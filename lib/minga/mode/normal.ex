@@ -866,8 +866,12 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({@escape, _mods}, %ModeState{leader_node: node} = state)
       when is_map(node) do
-    new_state = %{state | leader_node: nil, leader_keys: [], count: nil}
+    new_state = %{state | leader_node: nil, leader_keys: [], count: nil, pending_replace: false}
     {:execute, :leader_cancel, new_state}
+  end
+
+  def handle_key({@escape, _mods}, %ModeState{pending_replace: true} = state) do
+    {:continue, %{state | pending_replace: false, count: nil}}
   end
 
   def handle_key({@escape, _mods}, %ModeState{} = state) do
