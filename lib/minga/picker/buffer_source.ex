@@ -10,6 +10,7 @@ defmodule Minga.Picker.BufferSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
 
@@ -165,10 +166,12 @@ defmodule Minga.Picker.BufferSource do
   @spec format_candidate(pid(), term()) :: Minga.Picker.item()
   defp format_candidate(buf, key) do
     name = display_name(buf)
+    ft = BufferServer.filetype(buf)
+    icon = Devicon.icon(ft)
     desc = BufferServer.file_path(buf) || ""
     dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
     ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
-    {key, name <> dirty <> ro, desc}
+    {key, "#{icon} #{name}#{dirty}#{ro}", desc}
   end
 
   @spec display_name(pid()) :: String.t()

@@ -9,7 +9,9 @@ defmodule Minga.Picker.FileSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Filetype
   alias Minga.Log
 
   @impl true
@@ -22,15 +24,25 @@ defmodule Minga.Picker.FileSource do
     root = project_root()
 
     case Minga.FileFind.list_files(root) do
-      {:ok, paths} ->
-        Enum.map(paths, fn path ->
-          {path, Path.basename(path), path}
-        end)
-
-      {:error, msg} ->
-        Minga.Log.error(:editor, "find_file: #{msg}")
-        []
+      {:ok, paths} -> Enum.map(paths, &format_file_candidate/1)
+      {:error, msg} -> log_error(msg)
     end
+  end
+
+  @spec format_file_candidate(String.t()) :: Minga.Picker.item()
+  defp format_file_candidate(path) do
+    filename = Path.basename(path)
+    dir = Path.dirname(path)
+    ft = Filetype.detect(filename)
+    icon = Devicon.icon(ft)
+    dir_display = if dir == ".", do: "", else: dir
+    {path, "#{icon} #{filename}", dir_display}
+  end
+
+  @spec log_error(String.t()) :: []
+  defp log_error(msg) do
+    Minga.Log.error(:editor, "find_file: #{msg}")
+    []
   end
 
   @impl true

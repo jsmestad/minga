@@ -9,7 +9,9 @@ defmodule Minga.Picker.RecentFileSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Filetype
   alias Minga.Project
 
   @impl true
@@ -19,15 +21,15 @@ defmodule Minga.Picker.RecentFileSource do
   @impl true
   @spec candidates(term()) :: [Minga.Picker.item()]
   def candidates(_context) do
-    root = Project.root()
     files = Project.recent_files()
 
-    files
-    |> Enum.with_index()
-    |> Enum.map(fn {rel_path, idx} ->
-      label = Path.basename(rel_path)
-      desc = if root, do: rel_path, else: rel_path
-      {idx, label, desc}
+    Enum.map(files, fn rel_path ->
+      filename = Path.basename(rel_path)
+      dir = Path.dirname(rel_path)
+      ft = Filetype.detect(filename)
+      icon = Devicon.icon(ft)
+      dir_display = if dir == ".", do: "", else: dir
+      {rel_path, "#{icon} #{filename}", dir_display}
     end)
   catch
     :exit, _ -> []
@@ -35,7 +37,7 @@ defmodule Minga.Picker.RecentFileSource do
 
   @impl true
   @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({_idx, _label, rel_path}, state) do
+  def on_select({rel_path, _label, _desc}, state) do
     root = project_root()
     abs_path = Path.join(root, rel_path)
 

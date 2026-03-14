@@ -9,7 +9,9 @@ defmodule Minga.Picker.ProjectSearchSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Filetype
 
   @impl true
   @spec title() :: String.t()
@@ -25,7 +27,10 @@ defmodule Minga.Picker.ProjectSearchSource do
     results
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
-      label = "#{match.file}:#{match.line}"
+      filename = Path.basename(match.file)
+      ft = Filetype.detect(filename)
+      icon = Devicon.icon(ft)
+      label = "#{icon} #{match.file}:#{match.line}"
       desc = String.trim(match.text)
       {idx, label, desc}
     end)

@@ -31,7 +31,7 @@ defmodule Minga.Picker.ThemeSourceTest do
     test "each item has a human-readable label" do
       items = ThemeSource.candidates(%{})
       {_name, label, _desc} = Enum.find(items, fn {n, _, _} -> n == :doom_one end)
-      assert label == "Doom One"
+      assert label == "󰏘 Doom One"
     end
 
     test "each item has a description with dark/light classification" do

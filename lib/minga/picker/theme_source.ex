@@ -25,7 +25,7 @@ defmodule Minga.Picker.ThemeSource do
     Theme.available()
     |> Enum.sort()
     |> Enum.map(fn name ->
-      {name, display_name(name), description(name)}
+      {name, "󰏘 #{display_name(name)}", description(name)}
     end)
   end
 

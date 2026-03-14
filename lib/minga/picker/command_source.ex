@@ -31,7 +31,7 @@ defmodule Minga.Picker.CommandSource do
       |> Enum.map(fn cmd ->
         keybind = Map.get(keybind_map, cmd.name, "")
         annotation = if keybind != "", do: "SPC #{keybind}", else: ""
-        {cmd.name, "#{cmd.name}: #{cmd.description}", annotation}
+        {cmd.name, "󰘳 #{cmd.name}: #{cmd.description}", annotation}
       end)
       |> Enum.sort_by(fn {_id, label, _desc} -> label end)
     catch
