@@ -62,6 +62,7 @@ defmodule Minga.Config.OptionsTest do
                agent_max_cost: nil,
                agent_api_base_url: "",
                agent_api_endpoints: nil,
+               confirm_quit: true,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                agent_tool_permissions: nil,

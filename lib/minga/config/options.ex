@@ -115,6 +115,7 @@ defmodule Minga.Config.Options do
           | :agent_max_cost
           | :agent_api_base_url
           | :agent_api_endpoints
+          | :confirm_quit
           | :font_family
           | :font_size
           | :font_weight
@@ -193,6 +194,7 @@ defmodule Minga.Config.Options do
     {:agent_max_cost, :float_or_nil, nil},
     {:agent_api_base_url, :string, ""},
     {:agent_api_endpoints, :map_or_nil, nil},
+    {:confirm_quit, :boolean, true},
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},
     {:nav_flash_threshold, :pos_integer, 5},

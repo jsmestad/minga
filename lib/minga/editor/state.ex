@@ -119,7 +119,8 @@ defmodule Minga.Editor.State do
             dashboard: nil,
             nav_flash: nil,
             last_cursor_line: nil,
-            last_test_command: nil
+            last_test_command: nil,
+            pending_quit: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -159,7 +160,8 @@ defmodule Minga.Editor.State do
           dashboard: Dashboard.state() | nil,
           nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
-          last_test_command: {String.t(), String.t()} | nil
+          last_test_command: {String.t(), String.t()} | nil,
+          pending_quit: :quit | :quit_all | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

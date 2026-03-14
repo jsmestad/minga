@@ -464,6 +464,8 @@ defmodule Minga.Editor.Commands do
   def execute(state, :force_quit), do: BufferManagement.execute(state, :force_quit)
   def execute(state, :quit_all), do: BufferManagement.execute(state, :quit_all)
   def execute(state, :force_quit_all), do: BufferManagement.execute(state, :force_quit_all)
+  def execute(state, :confirm_quit_yes), do: BufferManagement.execute(state, :confirm_quit_yes)
+  def execute(state, :confirm_quit_no), do: BufferManagement.execute(state, :confirm_quit_no)
   def execute(state, :buffer_list), do: BufferManagement.execute(state, :buffer_list)
   def execute(state, :buffer_list_all), do: BufferManagement.execute(state, :buffer_list_all)
   def execute(state, :buffer_next), do: BufferManagement.execute(state, :buffer_next)
