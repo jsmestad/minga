@@ -144,6 +144,15 @@ pub const TuiRuntime = struct {
     /// batch + the correct post-resize batch). Decremented per batch.
     refresh_batches: u8 = 0,
 
+    /// Last known terminal dimensions for poll-based resize detection.
+    /// SIGWINCH is unreliable for Port processes because BEAM's
+    /// erl_child_setup calls setsid(), which detaches the child from the
+    /// controlling terminal. SIGWINCH is delivered to the foreground
+    /// process group of the terminal, not to processes in other sessions.
+    /// Poll-based detection works regardless of signal delivery.
+    last_cols: u16 = 0,
+    last_rows: u16 = 0,
+
     /// True while inside a bracketed paste (between paste_start and paste_end).
     /// Key press events during this state are accumulated into `paste_buf`
     /// instead of being sent as individual key_press messages.
@@ -252,6 +261,8 @@ pub const TuiRuntime = struct {
         // Actual capabilities are detected asynchronously (DA1 response).
         // We send a capabilities_updated event once detection completes.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
+        self.last_cols = initial_ws.cols;
+        self.last_rows = initial_ws.rows;
         var ready_payload: [13]u8 = undefined;
         const ready_len = try protocol.encodeReadyWithCaps(
             &ready_payload,
@@ -318,6 +329,13 @@ pub const TuiRuntime = struct {
             if (g_winch.swap(false, .acq_rel)) {
                 try self.handleResize(stdout);
             }
+
+            // Poll-based resize detection: check terminal size on every
+            // loop iteration. SIGWINCH is unreliable for Port processes
+            // (BEAM's erl_child_setup calls setsid(), detaching the child
+            // from the controlling terminal's process group). Polling
+            // getWinsize is one ioctl per iteration, which is negligible.
+            try self.pollResize(stdout);
 
             // stdin readable (Port command from BEAM)
             if (pollfds[0].revents & std.posix.POLL.IN != 0) {
@@ -419,24 +437,52 @@ pub const TuiRuntime = struct {
         try stdout.flush();
     }
 
+    /// Poll-based resize detection. Compares the current terminal size
+    /// against the last known size and triggers handleResize if different.
+    /// Called on every event loop iteration. The ioctl cost is negligible.
+    fn pollResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
+        const ws = vaxis.Tty.getWinsize(self.tty.fd) catch return;
+        if (ws.cols != self.last_cols or ws.rows != self.last_rows) {
+            try self.applyResize(stdout, ws);
+        }
+    }
+
     fn handleResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
         const ws = try vaxis.Tty.getWinsize(self.tty.fd);
-        std.log.info("handleResize: cols={d} rows={d}", .{ ws.cols, ws.rows });
-        try self.vx.resize(self.alloc, self.tty.writer(), ws);
-        // Clear the physical terminal immediately. vx.resize() reinitializes
-        // the screen buffers but does NOT erase the terminal. If a stale
-        // render batch (generated before the resize) arrives before the
-        // BEAM's resize-triggered batch, it would paint old content into
-        // the new area. Clearing the terminal here ensures no ghost content
-        // persists regardless of frame ordering.
-        try self.tty.writer().writeAll("\x1b[2J\x1b[H"); // ED 2 (clear screen) + cursor home
+        try self.applyResize(stdout, ws);
+    }
+
+    /// Applies a resize with the given dimensions. Called by both
+    /// pollResize (which already has the Winsize) and handleResize
+    /// (SIGWINCH path, which fetches it fresh).
+    fn applyResize(self: *TuiRuntime, stdout: *std.Io.Writer, ws: vaxis.Winsize) !void {
+        std.log.info("applyResize: cols={d} rows={d}", .{ ws.cols, ws.rows });
+        self.last_cols = ws.cols;
+        self.last_rows = ws.rows;
+
+        // Reinitialize vaxis screen buffers WITHOUT writing to the
+        // terminal. vaxis.resize() sends cursor-home + erase-below,
+        // which causes a visible blank flash. By updating the buffers
+        // directly, the old content stays on screen until the next
+        // render overwrites it cleanly.
+        self.vx.screen.deinit(self.alloc);
+        self.vx.screen = try vaxis.Screen.init(self.alloc, ws);
+        self.vx.screen.width_method = self.vx.caps.unicode;
+        self.vx.screen_last.deinit(self.alloc);
+        self.vx.screen_last = try vaxis.AllocatingScreen.init(self.alloc, ws.cols, ws.rows);
+        self.vx.state.cursor.row = 0;
+        self.vx.state.cursor.col = 0;
+
+        // Force libvaxis to do a full cell write (not a diff) for the
+        // next two batches: one potentially stale pre-resize batch still
+        // in the pipe, and the correct post-resize batch from BEAM.
         self.refresh_batches = 2;
 
         var rbuf: [5]u8 = undefined;
         const rlen = try protocol.encodeResize(&rbuf, ws.cols, ws.rows);
         try protocol.writeMessage(stdout, rbuf[0..rlen]);
         try stdout.flush();
-        std.log.info("handleResize: sent resize event to BEAM", .{});
+        std.log.info("applyResize: sent resize event to BEAM", .{});
     }
 };
 
