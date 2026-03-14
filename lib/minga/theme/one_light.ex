@@ -130,7 +130,7 @@ defmodule Minga.Theme.OneLight do
         code_bg: @ui_bg,
         code_border: @syntax_guide,
         input_border: @hue_2,
-        input_bg: @ui_bg,
+        input_bg: @syntax_bg,
         input_placeholder: @mono_3,
         thinking_fg: @hue_6,
         status_thinking: @hue_6,
