@@ -34,14 +34,19 @@ pub const panic = std.debug.FullPanic(panicImpl);
 // Routes std.log calls over the port protocol to the BEAM instead of stderr.
 // Before the port writer is initialized, messages are silently discarded.
 
-/// Module-level writer for the port channel (stdout). Set by the TUI runtime
-/// during startup, before the event loop begins.
+/// Module-level blocking writer for the port channel (stdout). Used only
+/// during startup (before the event loop) for the ready event and early
+/// log messages. Set to null once the non-blocking PortWriter takes over.
 pub var g_port_writer: ?*std.Io.Writer = null;
+
+/// Module-level non-blocking port writer. Set by the TUI runtime once
+/// the event loop starts. Log messages use this when available, falling
+/// back to g_port_writer during startup. This prevents log calls from
+/// blocking the event loop when the BEAM pipe is full.
+pub var g_port_writer_nb: ?*@import("port_writer.zig") = null;
 
 fn mingaLogFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
     _ = scope;
-
-    const writer = g_port_writer orelse return;
 
     const level: u8 = switch (message_level) {
         .err => protocol.LOG_LEVEL_ERR,
@@ -56,8 +61,15 @@ fn mingaLogFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.en
 
     var payload_buf: [4096 + 4]u8 = undefined;
     const payload_len = protocol.encodeLogMessage(&payload_buf, level, msg) catch return;
-    protocol.writeMessage(writer, payload_buf[0..payload_len]) catch return;
-    writer.flush() catch {};
+
+    // Prefer the non-blocking PortWriter (active during event loop).
+    // Fall back to the blocking writer (active during startup only).
+    if (g_port_writer_nb) |pw| {
+        pw.enqueue(payload_buf[0..payload_len]) catch return;
+    } else if (g_port_writer) |writer| {
+        protocol.writeMessage(writer, payload_buf[0..payload_len]) catch return;
+        writer.flush() catch {};
+    }
 }
 
 pub const std_options = std.Options{
@@ -88,6 +100,8 @@ pub fn main() !void {
 // Pull in all module tests.
 test {
     _ = protocol;
+    _ = @import("port_writer.zig");
+    _ = @import("recovery.zig");
     _ = renderer;
     _ = surface;
     _ = apprt;

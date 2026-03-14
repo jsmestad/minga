@@ -11,6 +11,8 @@ const builtin = @import("builtin");
 const vaxis = @import("vaxis");
 const root = @import("../main.zig");
 const protocol = @import("../protocol.zig");
+const port_writer = @import("../port_writer.zig");
+const recovery_mod = @import("../recovery.zig");
 const renderer_mod = @import("../renderer.zig");
 const surface_mod = @import("../surface.zig");
 // Note: tree-sitter highlighting is handled by the separate minga-parser
@@ -249,17 +251,25 @@ pub const TuiRuntime = struct {
         // enableDetectedFeatures() to activate Kitty keyboard, etc.
         try self.vx.queryTerminalSend(self.tty.writer());
 
-        // Stdout (Port protocol channel).
+        const stdout_fd = std.posix.STDOUT_FILENO;
+
+        // Non-blocking PortWriter replaces the old blocking stdout writer.
+        // This prevents pipe backpressure from the BEAM from freezing the
+        // TTY input loop. Events are buffered and drained when stdout is
+        // writable. See #535.
+        var pw = try port_writer.init(self.alloc, stdout_fd);
+        defer pw.deinit();
+
+        // The ready event must be sent before entering non-blocking mode,
+        // because the BEAM waits for it synchronously before proceeding.
         var stdout_buf: [4096]u8 = undefined;
         var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
-        const stdout: *std.Io.Writer = &stdout_writer_obj.interface;
+        const blocking_stdout: *std.Io.Writer = &stdout_writer_obj.interface;
 
-        // Enable log routing over the port protocol now that stdout is ready.
-        root.g_port_writer = stdout;
+        // Enable log routing for startup messages (before event loop).
+        root.g_port_writer = blocking_stdout;
 
         // Send ready event with initial dimensions and default capabilities.
-        // Actual capabilities are detected asynchronously (DA1 response).
-        // We send a capabilities_updated event once detection completes.
         const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
         self.last_cols = initial_ws.cols;
         self.last_rows = initial_ws.rows;
@@ -270,10 +280,18 @@ pub const TuiRuntime = struct {
             initial_ws.rows,
             .{}, // defaults: tui, rgb, wcwidth, no images, emulated floats, monospace
         );
-        try protocol.writeMessage(stdout, ready_payload[0..ready_len]);
-        try stdout.flush();
+        try protocol.writeMessage(blocking_stdout, ready_payload[0..ready_len]);
+        try blocking_stdout.flush();
 
-        try self.runEventLoop(stdout);
+        // Now set stdout to non-blocking for the event loop.
+        port_writer.setNonBlocking(stdout_fd);
+
+        // Switch log routing to non-blocking PortWriter so log calls
+        // during the event loop can't block on a full pipe.
+        root.g_port_writer_nb = &pw;
+        root.g_port_writer = null;
+
+        try self.runEventLoop(&pw);
     }
 
     /// Clean up: free renderer, vaxis, and restore terminal.
@@ -288,8 +306,9 @@ pub const TuiRuntime = struct {
 
     // ── Event loop ────────────────────────────────────────────────────────────
 
-    fn runEventLoop(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
+    fn runEventLoop(self: *TuiRuntime, pw: *port_writer) !void {
         const stdin_fd = std.posix.STDIN_FILENO;
+        const stdout_fd = std.posix.STDOUT_FILENO;
 
         var tty_parser: vaxis.Parser = .{};
         var tty_read_buf: [1024]u8 = undefined;
@@ -297,45 +316,51 @@ pub const TuiRuntime = struct {
 
         var msg_buf: [65536]u8 = undefined;
 
-        var pollfds = [2]std.posix.pollfd{
+        // Recovery state: tracks BEAM responsiveness for Ctrl-G overlay.
+        var recovery = recovery_mod.init();
+
+        // Three fds: stdin (BEAM→Zig commands), tty (terminal input),
+        // stdout (Zig→BEAM events, only polled when there's pending data).
+        var pollfds = [3]std.posix.pollfd{
             .{ .fd = stdin_fd, .events = std.posix.POLL.IN, .revents = 0 },
             .{ .fd = self.tty.fd, .events = std.posix.POLL.IN, .revents = 0 },
+            .{ .fd = stdout_fd, .events = 0, .revents = 0 },
         };
 
         main_loop: while (true) {
             if (g_quit.load(.acquire)) break :main_loop;
 
             if (g_winch.swap(false, .acq_rel)) {
-                try self.handleResize(stdout);
+                try self.handleResize(pw);
             }
 
-            // Use raw poll to avoid std.posix.poll's automatic EINTR retry.
-            // SIGWINCH sets g_winch and interrupts poll with EINTR. We need
-            // to break out of poll immediately so we can process the resize
-            // before rendering the next frame. With the standard retry, each
-            // SIGWINCH during a window drag resets the 1000ms timeout, delaying
-            // resize processing by seconds.
+            // Only poll stdout for writability when there's pending data.
+            pollfds[2].events = if (pw.hasPending()) std.posix.POLL.OUT else 0;
+
             pollfds[0].revents = 0;
             pollfds[1].revents = 0;
-            const poll_rc = std.posix.system.poll(@ptrCast(&pollfds), 2, 1000);
+            pollfds[2].revents = 0;
+            const poll_rc = std.posix.system.poll(@ptrCast(&pollfds), 3, 1000);
             const poll_errno = std.posix.errno(poll_rc);
             if (poll_errno != .SUCCESS and poll_errno != .INTR) {
                 return error.PollError;
             }
 
             // Check for resize after poll (SIGWINCH can fire during poll).
-            // On EINTR, revents are undefined, so we skip fd processing and
-            // just handle the resize. On success, revents are valid.
             if (g_winch.swap(false, .acq_rel)) {
-                try self.handleResize(stdout);
+                try self.handleResize(pw);
             }
 
-            // Poll-based resize detection: check terminal size on every
-            // loop iteration. SIGWINCH is unreliable for Port processes
-            // (BEAM's erl_child_setup calls setsid(), detaching the child
-            // from the controlling terminal's process group). Polling
-            // getWinsize is one ioctl per iteration, which is negligible.
-            try self.pollResize(stdout);
+            // Poll-based resize detection.
+            try self.pollResize(pw);
+
+            // stdout writable: drain the write buffer.
+            if (pollfds[2].revents & std.posix.POLL.OUT != 0) {
+                _ = pw.drain() catch |err| {
+                    std.log.warn("stdout drain error: {}", .{err});
+                    break :main_loop;
+                };
+            }
 
             // stdin readable (Port command from BEAM)
             if (pollfds[0].revents & std.posix.POLL.IN != 0) {
@@ -353,12 +378,7 @@ pub const TuiRuntime = struct {
                 const payload = msg_buf[0..msg_len];
                 if (!try readExact(stdin_fd, payload)) break :main_loop;
 
-                // After a resize, force libvaxis to fully repaint. The
-                // physical terminal was already cleared in handleResize,
-                // but vx.refresh ensures libvaxis writes every cell (not
-                // just the diff). We allow up to 2 batches with refresh:
-                // one for a possibly stale pre-resize batch already in the
-                // pipe, one for the correct post-resize batch from BEAM.
+                // After a resize, force libvaxis to fully repaint.
                 if (self.refresh_batches > 0) {
                     self.vx.refresh = true;
                     self.refresh_batches -= 1;
@@ -372,13 +392,18 @@ pub const TuiRuntime = struct {
                         break;
                     };
                     switch (cmd) {
+                        .batch_end => {
+                            // BEAM sent a complete frame. Reset unresponsive timer.
+                            recovery.onRenderReceived();
+                            self.rend.handleCommand(cmd) catch |err| {
+                                std.log.warn("renderer error: {}", .{err});
+                            };
+                        },
                         .measure_text => |mt| {
-                            self.handleMeasureText(mt, stdout) catch |err| {
+                            self.handleMeasureText(mt, pw) catch |err| {
                                 std.log.warn("measure_text error: {}", .{err});
                             };
                         },
-                        // Highlight commands should not arrive at the renderer
-                        // (they go to the parser process), but handle gracefully.
                         .set_language, .parse_buffer, .set_highlight_query, .set_injection_query, .load_grammar, .query_language_at, .edit_buffer => {
                             std.log.warn("renderer received highlight command (should go to parser)", .{});
                         },
@@ -405,16 +430,16 @@ pub const TuiRuntime = struct {
                 tty_parse_loop: while (seq_start < n) {
                     const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
                     if (result.n == 0) {
-                        const remaining = n - seq_start;
-                        std.mem.copyForwards(u8, tty_read_buf[0..remaining], tty_read_buf[seq_start..n]);
-                        tty_read_start = remaining;
+                        const remaining_bytes = n - seq_start;
+                        std.mem.copyForwards(u8, tty_read_buf[0..remaining_bytes], tty_read_buf[seq_start..n]);
+                        tty_read_start = remaining_bytes;
                         break :tty_parse_loop;
                     }
                     tty_read_start = 0;
                     seq_start += result.n;
 
                     const event = result.event orelse continue;
-                    handleTtyEvent(self, event, stdout) catch |err| {
+                    handleTtyEvent(self, event, pw, &recovery) catch |err| {
                         std.log.warn("tty event error: {}", .{err});
                     };
                 }
@@ -423,7 +448,7 @@ pub const TuiRuntime = struct {
     }
 
     /// Compute monospace display width and send a text_width response.
-    fn handleMeasureText(_: *TuiRuntime, mt: protocol.MeasureText, stdout: *std.Io.Writer) !void {
+    fn handleMeasureText(_: *TuiRuntime, mt: protocol.MeasureText, pw: *port_writer) !void {
         var total_width: u16 = 0;
         var iter = vaxis.unicode.graphemeIterator(mt.text);
         while (iter.next()) |grapheme| {
@@ -433,38 +458,26 @@ pub const TuiRuntime = struct {
         }
         var rbuf: [7]u8 = undefined;
         const rlen = try protocol.encodeTextWidth(&rbuf, mt.request_id, total_width);
-        try protocol.writeMessage(stdout, rbuf[0..rlen]);
-        try stdout.flush();
+        try pw.enqueue(rbuf[0..rlen]);
     }
 
-    /// Poll-based resize detection. Compares the current terminal size
-    /// against the last known size and triggers handleResize if different.
-    /// Called on every event loop iteration. The ioctl cost is negligible.
-    fn pollResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
+    fn pollResize(self: *TuiRuntime, pw: *port_writer) !void {
         const ws = vaxis.Tty.getWinsize(self.tty.fd) catch return;
         if (ws.cols != self.last_cols or ws.rows != self.last_rows) {
-            try self.applyResize(stdout, ws);
+            try self.applyResize(pw, ws);
         }
     }
 
-    fn handleResize(self: *TuiRuntime, stdout: *std.Io.Writer) !void {
+    fn handleResize(self: *TuiRuntime, pw: *port_writer) !void {
         const ws = try vaxis.Tty.getWinsize(self.tty.fd);
-        try self.applyResize(stdout, ws);
+        try self.applyResize(pw, ws);
     }
 
-    /// Applies a resize with the given dimensions. Called by both
-    /// pollResize (which already has the Winsize) and handleResize
-    /// (SIGWINCH path, which fetches it fresh).
-    fn applyResize(self: *TuiRuntime, stdout: *std.Io.Writer, ws: vaxis.Winsize) !void {
+    fn applyResize(self: *TuiRuntime, pw: *port_writer, ws: vaxis.Winsize) !void {
         std.log.info("applyResize: cols={d} rows={d}", .{ ws.cols, ws.rows });
         self.last_cols = ws.cols;
         self.last_rows = ws.rows;
 
-        // Reinitialize vaxis screen buffers WITHOUT writing to the
-        // terminal. vaxis.resize() sends cursor-home + erase-below,
-        // which causes a visible blank flash. By updating the buffers
-        // directly, the old content stays on screen until the next
-        // render overwrites it cleanly.
         self.vx.screen.deinit(self.alloc);
         self.vx.screen = try vaxis.Screen.init(self.alloc, ws);
         self.vx.screen.width_method = self.vx.caps.unicode;
@@ -473,15 +486,11 @@ pub const TuiRuntime = struct {
         self.vx.state.cursor.row = 0;
         self.vx.state.cursor.col = 0;
 
-        // Force libvaxis to do a full cell write (not a diff) for the
-        // next two batches: one potentially stale pre-resize batch still
-        // in the pipe, and the correct post-resize batch from BEAM.
         self.refresh_batches = 2;
 
         var rbuf: [5]u8 = undefined;
         const rlen = try protocol.encodeResize(&rbuf, ws.cols, ws.rows);
-        try protocol.writeMessage(stdout, rbuf[0..rlen]);
-        try stdout.flush();
+        try pw.enqueue(rbuf[0..rlen]);
         std.log.info("applyResize: sent resize event to BEAM", .{});
     }
 };
@@ -557,7 +566,7 @@ fn installSignalHandlers() void {
 /// events are accumulated in `self.paste_buf` instead of being sent
 /// individually. On paste_end, the accumulated text is sent as a single
 /// paste_event message.
-fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer) !void {
+fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, pw: *port_writer, recovery: *recovery_mod) !void {
     const vx = &self.vx;
 
     switch (event) {
@@ -571,20 +580,46 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             if (self.paste_buf.items.len > 0) {
                 const paste_msg = try protocol.encodePasteEvent(self.alloc, self.paste_buf.items);
                 defer self.alloc.free(paste_msg);
-                try protocol.writeMessage(stdout, paste_msg);
-                try stdout.flush();
+                try pw.enqueue(paste_msg);
             }
             self.paste_buf.clearRetainingCapacity();
         },
 
         .key_press => |key| {
             if (self.pasting) {
-                // During a bracketed paste, accumulate the character into
-                // the paste buffer instead of sending a key_press event.
-                // Encode the codepoint as UTF-8.
                 var cp_buf: [4]u8 = undefined;
                 const cp_len = std.unicode.utf8Encode(key.codepoint, &cp_buf) catch return;
                 try self.paste_buf.appendSlice(self.alloc, cp_buf[0..cp_len]);
+                return;
+            }
+
+            // Recovery overlay intercept: when showing, route keys to
+            // the recovery menu instead of sending them to BEAM.
+            if (recovery.showing) {
+                const action = recovery.handleRecoveryKey(key.codepoint);
+                switch (action) {
+                    .restart => {
+                        recovery_mod.sendRestartSignal();
+                        return;
+                    },
+                    .quit => {
+                        g_quit.store(true, .release);
+                        return;
+                    },
+                    .wait => {
+                        // Force a full repaint to clear the overlay.
+                        self.vx.refresh = true;
+                        return;
+                    },
+                    .none => return, // Swallow unrecognized keys while overlay is up.
+                }
+            }
+
+            // Ctrl-G (codepoint 7) while BEAM is unresponsive: show
+            // the recovery overlay instead of sending to BEAM.
+            if (key.codepoint == 7 and recovery.isUnresponsive()) {
+                recovery.show();
+                recovery_mod.render(vx, self.tty.writer()) catch {};
                 return;
             }
 
@@ -596,8 +631,8 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
 
             var kbuf: [6]u8 = undefined;
             const klen = try protocol.encodeKeyPress(&kbuf, key.codepoint, mods);
-            try protocol.writeMessage(stdout, kbuf[0..klen]);
-            try stdout.flush();
+            try pw.enqueue(kbuf[0..klen]);
+            recovery.onKeySent();
         },
 
         .cap_kitty_keyboard => vx.caps.kitty_keyboard = true,
@@ -614,10 +649,6 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             std.Thread.Futex.wake(&vx.query_futex, 10);
             vx.queries_done.store(true, .unordered);
 
-            // Terminal capability detection is complete. Enable all
-            // detected features (Kitty keyboard protocol, Unicode
-            // mode 2027, etc.). This is the custom-event-loop
-            // counterpart to the blocking queryTerminal() call.
             try vx.enableDetectedFeatures(self.tty.writer());
 
             std.log.info("terminal caps: kitty_kb={} rgb={} unicode={s} kitty_gfx={}", .{
@@ -627,7 +658,6 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
                 vx.caps.kitty_graphics,
             });
 
-            // Send a capabilities_updated event with the actual detected caps.
             const caps = protocol.Capabilities{
                 .frontend_type = protocol.FRONTEND_TUI,
                 .color_depth = if (vx.caps.rgb) protocol.COLOR_RGB else protocol.COLOR_256,
@@ -638,8 +668,7 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             };
             var caps_buf: [9]u8 = undefined;
             const caps_len = protocol.encodeCapabilitiesUpdated(&caps_buf, caps) catch return;
-            protocol.writeMessage(stdout, caps_buf[0..caps_len]) catch return;
-            stdout.flush() catch return;
+            pw.enqueue(caps_buf[0..caps_len]) catch return;
         },
 
         .mouse => |mouse| {
@@ -668,10 +697,8 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, stdout: *std.Io.Writer)
             };
 
             var mbuf: [9]u8 = undefined;
-            // TUI always sends click_count=1; the BEAM does multi-click detection
             const mlen = try protocol.encodeMouseEvent(&mbuf, mouse.row, mouse.col, button, mods, event_type, 1);
-            try protocol.writeMessage(stdout, mbuf[0..mlen]);
-            try stdout.flush();
+            try pw.enqueue(mbuf[0..mlen]);
         },
 
         else => {},
