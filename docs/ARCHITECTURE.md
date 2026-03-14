@@ -244,7 +244,9 @@ Scopes are Minga's equivalent of Emacs major modes. A buffer's scope determines 
 
 ### Mouse Event Routing
 
-Mouse events flow through the same focus stack as keyboard input. Both the Zig TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/8`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
+Mouse events flow through the same focus stack as keyboard input, but with a key difference: **mouse routing is position-based, not scope-based.** Keyboard input routes through `keymap_scope` (which pane has focus). Mouse input routes by hit-testing the cursor position against `Layout.get(state)` rects (where on screen did the event happen). This means scrolling over the agent chat scrolls the chat regardless of which pane has keyboard focus.
+
+Both the Zig TUI and the Swift GUI encode mouse events as 9-byte `mouse_event` messages (opcode `0x04`) containing row, col, button, modifiers, event type, and click count. The BEAM decodes them in `Port.Protocol` and dispatches through `Input.Router.dispatch_mouse/7`, which walks the focus stack calling `handle_mouse/7` on each handler that implements it.
 
 ```
 Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + click_count)
@@ -253,14 +255,22 @@ Mouse event arrives (9 bytes: opcode + row + col + button + mods + event_type + 
 Editor.handle_info decodes via Port.Protocol
     │
     ▼
-Input.Router.dispatch_mouse walks focus stack
+Input.Router.dispatch_mouse walks overlay handlers, then surface handlers
     │
-    ├─ Input.Scoped (agentic view active?)
-    │     ├─ Yes → Agent.View.Mouse handles scroll, click-to-focus, separator drag
-    │     └─ No  → :passthrough
+    ├─ Overlays (Picker, Completion) — intercept when their UI is visible
     │
-    └─ Input.ModeFSM (fallback)
-          └─ Editor.Mouse.handle/8
+    ├─ Input.FileTreeHandler — hit-tests against Layout.file_tree rect
+    │     ├─ Inside file tree → handle tree click/scroll
+    │     └─ Outside → :passthrough
+    │
+    ├─ Input.AgentMouse — hit-tests against agent regions (position-based)
+    │     ├─ Agent chat window (WindowTree + Content.agent_chat?) → scroll chat, click-to-focus
+    │     ├─ Agent side panel (Layout.agent_panel rect) → scroll chat, click-to-focus
+    │     ├─ File viewer sidebar (right of chat_width_pct) → scroll preview
+    │     └─ Outside agent regions → :passthrough
+    │
+    └─ Input.ModeFSM (fallback) — buffer-content mouse handling
+          └─ Editor.Mouse.handle/7
                 ├─ click_count=1 → position cursor, start drag
                 ├─ click_count=2 → select word (visual char), word-snapped drag
                 ├─ click_count=3 → select line (visual line), line-snapped drag
@@ -269,6 +279,8 @@ Input.Router.dispatch_mouse walks focus stack
                 ├─ Middle click → paste register at position
                 └─ Wheel left/right → horizontal viewport scroll
 ```
+
+Each content-type handler is responsible for its own region. `Editor.Mouse` handles only buffer content; it has no knowledge of agent panels, file trees, or other content types. This follows the same principle as keyboard dispatch: the editing model produces commands, and each content type interprets them against its own data model.
 
 Multi-click detection works differently per frontend. The GUI sends `NSEvent.clickCount` directly in the protocol, so the BEAM trusts the native OS timing. The TUI sends `click_count=1` and the BEAM's `State.Mouse.record_press/4` detects multi-clicks using a timing window and position threshold, cycling 1 → 2 → 3 → 1.
 

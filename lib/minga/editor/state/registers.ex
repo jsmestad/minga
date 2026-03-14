@@ -4,7 +4,17 @@ defmodule Minga.Editor.State.Registers do
 
   Tracks the named register store and the currently selected register
   (set by `\"x` before an operator).
+
+  Each register entry is a `{text, type}` tuple where type is `:charwise`
+  or `:linewise`. Linewise entries (from `yy`, `dd`, visual-line yank)
+  paste as new lines; charwise entries paste inline at the cursor.
   """
+
+  @typedoc "Whether register content should paste as whole lines or inline text."
+  @type reg_type :: :charwise | :linewise
+
+  @typedoc "A register entry: text content paired with its paste type."
+  @type entry :: {String.t(), reg_type()}
 
   @typedoc """
   Register store. Keys are register names:
@@ -14,7 +24,7 @@ defmodule Minga.Editor.State.Registers do
   - `\"+\"` — system clipboard (virtual; read/write via Minga.Clipboard)
   - `\"_\"` — black hole (never stored)
   """
-  @type registers :: %{String.t() => String.t()}
+  @type registers :: %{String.t() => entry()}
 
   @type t :: %__MODULE__{
           registers: registers(),
@@ -24,16 +34,20 @@ defmodule Minga.Editor.State.Registers do
   defstruct registers: %{},
             active: ""
 
-  @doc "Puts `text` into the named register `name`."
-  @spec put(t(), String.t(), String.t()) :: t()
-  def put(%__MODULE__{} = reg, name, text) do
-    %{reg | registers: Map.put(reg.registers, name, text)}
+  @doc "Puts `text` into the named register `name` with the given type."
+  @spec put(t(), String.t(), String.t(), reg_type()) :: t()
+  def put(%__MODULE__{} = reg, name, text, type \\ :charwise) do
+    %{reg | registers: Map.put(reg.registers, name, {text, type})}
   end
 
-  @doc "Gets the value of the named register `name`."
-  @spec get(t(), String.t()) :: String.t() | nil
+  @doc "Gets the entry for the named register `name`. Returns `{text, type}` or `nil`."
+  @spec get(t(), String.t()) :: entry() | nil
   def get(%__MODULE__{registers: regs}, name) do
-    Map.get(regs, name)
+    case Map.get(regs, name) do
+      # Migrate bare strings from old format (e.g., tests, deserialized state)
+      text when is_binary(text) -> {text, :charwise}
+      other -> other
+    end
   end
 
   @doc "Resets the active register selection to unnamed."

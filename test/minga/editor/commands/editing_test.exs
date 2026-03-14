@@ -185,4 +185,283 @@ defmodule Minga.Editor.Commands.EditingTest do
       assert BufferServer.content(buffer) == original
     end
   end
+
+  # ── Linewise paste ──────────────────────────────────────────────────────
+
+  describe "linewise paste (yy + p)" do
+    test "yy then p pastes yanked line below the current line" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      send_key(editor, ?j)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "aaa\nbbb\naaa\nccc"
+    end
+
+    test "yy then P pastes yanked line above the current line" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      # move to line 2, paste above
+      send_key(editor, ?j)
+      send_key(editor, ?j)
+      send_key(editor, ?P)
+
+      assert BufferServer.content(buffer) == "aaa\nbbb\naaa\nccc"
+    end
+
+    test "p on the last line of the file appends a new line" do
+      {editor, buffer} = start_editor("aaa\nbbb")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      send_key(editor, ?j)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "aaa\nbbb\naaa"
+    end
+
+    test "P on the first line of the file inserts above" do
+      {editor, buffer} = start_editor("aaa\nbbb")
+      BufferServer.move_to(buffer, {1, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?P)
+
+      assert BufferServer.content(buffer) == "bbb\naaa\nbbb"
+    end
+
+    test "cursor column is irrelevant for linewise paste" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      # move to middle of line 1
+      BufferServer.move_to(buffer, {1, 2})
+      send_key(editor, ?p)
+
+      # Should still paste as a full new line, not splice at col 2
+      assert BufferServer.content(buffer) == "aaa\nbbb\naaa\nccc"
+    end
+  end
+
+  describe "linewise paste (dd + p/P)" do
+    test "dd then p moves deleted line below current line" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?d)
+      send_key(editor, ?d)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "bbb\naaa\nccc"
+    end
+
+    test "dd then P pastes deleted line above current line" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {1, 0})
+      send_key(editor, ?d)
+      send_key(editor, ?d)
+      # cursor is now on "ccc"
+      send_key(editor, ?P)
+
+      assert BufferServer.content(buffer) == "aaa\nbbb\nccc"
+    end
+  end
+
+  describe "linewise paste cursor positioning" do
+    test "p lands cursor on first non-blank of pasted line" do
+      {editor, buffer} = start_editor("  indented\nplain")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      send_key(editor, ?j)
+      send_key(editor, ?p)
+
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 2
+      assert col == 2
+    end
+
+    test "P lands cursor on first non-blank of pasted line" do
+      {editor, buffer} = start_editor("plain\n    deep")
+      BufferServer.move_to(buffer, {1, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?P)
+
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 0
+      assert col == 4
+    end
+
+    test "p with no-indent line lands cursor at col 0" do
+      {editor, buffer} = start_editor("noindent\nother")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      send_key(editor, ?j)
+      send_key(editor, ?p)
+
+      {line, col} = BufferServer.cursor(buffer)
+      assert line == 2
+      assert col == 0
+    end
+  end
+
+  describe "cc stores linewise register type" do
+    test "cc yanks the line content as linewise before clearing" do
+      {editor, _buffer} = start_editor("hello\nworld")
+      send_key(editor, ?c)
+      send_key(editor, ?c)
+
+      s = :sys.get_state(editor)
+      assert Map.get(s.vim.reg.registers, "") == {"hello\n", :linewise}
+    end
+  end
+
+  # ── Charwise paste (regression guard) ──────────────────────────────────
+
+  describe "charwise paste stays inline" do
+    test "yw then p pastes inline, no new line created" do
+      {editor, buffer} = start_editor("hello world")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?y)
+      send_key(editor, ?w)
+      send_key(editor, ?$)
+      send_key(editor, ?p)
+
+      content = BufferServer.content(buffer)
+      refute String.contains?(content, "\n")
+    end
+
+    # NOTE: Vim's `x` should yank the deleted char into the unnamed register,
+    # but our `delete_at` doesn't do that yet. This test documents current
+    # behavior. When `x` is fixed to yank, update this test to assert "bac".
+    test "x does not currently store to register (known gap)" do
+      {editor, buffer} = start_editor("abc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?x)
+      assert BufferServer.content(buffer) == "bc"
+
+      # p is a no-op because x didn't yank
+      send_key(editor, ?p)
+      assert BufferServer.content(buffer) == "bc"
+    end
+
+    test "dw then p pastes deleted word inline" do
+      {editor, buffer} = start_editor("one two three")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?d)
+      send_key(editor, ?w)
+      # "one " deleted, cursor at "two"
+      send_key(editor, ?$)
+      send_key(editor, ?p)
+
+      content = BufferServer.content(buffer)
+      refute String.contains?(content, "\n")
+      assert String.contains?(content, "one ")
+    end
+  end
+
+  # ── Named register linewise round-trip ─────────────────────────────────
+
+  describe "named register linewise round-trip" do
+    test ~S["ayy then "ap pastes as a new line] do
+      {editor, buffer} = start_editor("first\nsecond\nthird")
+      BufferServer.move_to(buffer, {0, 0})
+      # "ayy
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      # move to last line, "ap
+      send_key(editor, ?j)
+      send_key(editor, ?j)
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "first\nsecond\nthird\nfirst"
+    end
+
+    test "named register preserves linewise type through multiple operations" do
+      {editor, buffer} = start_editor("alpha\nbeta\ngamma")
+      BufferServer.move_to(buffer, {0, 0})
+      # "ayy
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?y)
+      send_key(editor, ?y)
+      # Now do an unnamed dd (overwrites unnamed register, not "a")
+      send_key(editor, ?j)
+      send_key(editor, ?d)
+      send_key(editor, ?d)
+      # "ap should still paste "alpha" as linewise from register a
+      send_key(editor, ?")
+      send_key(editor, ?a)
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "alpha\ngamma\nalpha"
+    end
+  end
+
+  # ── Visual-line paste ──────────────────────────────────────────────────
+
+  describe "visual-line yank and paste" do
+    test "Vjy then p pastes two lines below current line" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc\nddd")
+      BufferServer.move_to(buffer, {0, 0})
+      # V to enter visual-line, j to extend to line 1, y to yank
+      send_key(editor, ?V)
+      send_key(editor, ?j)
+      send_key(editor, ?y)
+      # Paste below wherever the cursor is after yank
+      send_key(editor, ?p)
+
+      lines = String.split(BufferServer.content(buffer), "\n")
+      # Should have 6 lines: original 4 + 2 pasted
+      assert length(lines) == 6
+      # The pasted block should contain "aaa" and "bbb" in order
+      assert Enum.count(lines, &(&1 == "aaa")) == 2
+      assert Enum.count(lines, &(&1 == "bbb")) == 2
+    end
+
+    test "Vd then p pastes deleted lines as linewise" do
+      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+      BufferServer.move_to(buffer, {0, 0})
+      send_key(editor, ?V)
+      send_key(editor, ?j)
+      send_key(editor, ?d)
+      # "aaa" and "bbb" deleted, cursor on "ccc"
+      send_key(editor, ?p)
+
+      assert BufferServer.content(buffer) == "ccc\naaa\nbbb"
+    end
+  end
+
+  # ── Visual-char paste (charwise guard) ─────────────────────────────────
+
+  describe "visual-char yank and paste" do
+    test "vllly then p pastes inline" do
+      {editor, buffer} = start_editor("abcdefgh")
+      BufferServer.move_to(buffer, {0, 0})
+      # select "abcd"
+      send_key(editor, ?v)
+      send_key(editor, ?l)
+      send_key(editor, ?l)
+      send_key(editor, ?l)
+      send_key(editor, ?y)
+      # move to end and paste
+      send_key(editor, ?$)
+      send_key(editor, ?p)
+
+      content = BufferServer.content(buffer)
+      refute String.contains?(content, "\n")
+    end
+  end
 end

@@ -1079,10 +1079,14 @@ defmodule Minga.Agent.View.Renderer do
     end
   end
 
-  # Computes the text width inside the input box, excluding borders and padding.
-  # Layout: "│" (1) + padding_left (3) + text + padding_right (1) + "│" (1) = 6 chars chrome.
+  @doc """
+  Computes the text width inside the input box, excluding borders and padding.
+
+  Layout: "│" (1) + padding_left (3) + text + padding_right (1) + "│" (1) = 6 chars chrome.
+  Public so that `Input.AgentMouse` can use the same layout math for hit-testing.
+  """
   @spec input_inner_width(pos_integer()) :: pos_integer()
-  defp input_inner_width(box_width), do: max(box_width - 6, 1)
+  def input_inner_width(box_width), do: max(box_width - 6, 1)
 
   # Returns the visual selection range from Vim state, or nil.
   @spec vim_visual_range(map()) ::
@@ -1122,11 +1126,15 @@ defmodule Minga.Agent.View.Renderer do
   defp input_mode_label(%{mode: :operator_pending}), do: "OP"
   defp input_mode_label(_panel), do: ""
 
-  # Computes the dynamic input area height for the bordered box:
-  # top border(1) + visible lines + bottom border(1).
-  # Uses visual line count (accounting for soft-wrap at inner_width).
+  @doc """
+  Computes the dynamic input area height for the bordered box:
+  top border(1) + visible lines + bottom border(1).
+
+  Uses visual line count (accounting for soft-wrap at inner_width).
+  Public so that `Input.AgentMouse` can use the same layout math for hit-testing.
+  """
   @spec compute_input_height([String.t()], pos_integer()) :: pos_integer()
-  defp compute_input_height(input_lines, inner_width) do
+  def compute_input_height(input_lines, inner_width) do
     visible = InputWrap.visible_height(input_lines, inner_width, @max_input_lines)
     visible + 2
   end
