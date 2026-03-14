@@ -153,6 +153,8 @@ defmodule Minga.Filetype do
   Checks exact filename (case-sensitive), then extension (case-insensitive),
   then `.env*`/`.envrc*` patterns. Returns `:text` if nothing matches.
   """
+  alias Minga.Language.Registry, as: LangRegistry
+
   @spec detect(String.t() | nil) :: filetype()
   def detect(nil), do: :text
 
@@ -161,8 +163,8 @@ defmodule Minga.Filetype do
 
     with :miss <- lookup_registry_filename(basename),
          :miss <- lookup_registry_extension(basename),
-         :miss <- lookup_filename(basename),
-         :miss <- lookup_extension(basename),
+         :miss <- lookup_lang_registry_filename(basename),
+         :miss <- lookup_lang_registry_extension(basename),
          :miss <- detect_env_pattern(basename) do
       :text
     end
@@ -196,6 +198,32 @@ defmodule Minga.Filetype do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  @spec lookup_lang_registry_filename(String.t()) :: filetype() | :miss
+  defp lookup_lang_registry_filename(basename) do
+    case LangRegistry.for_filename(basename) do
+      %{name: name} -> name
+      nil -> :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  @spec lookup_lang_registry_extension(String.t()) :: filetype() | :miss
+  defp lookup_lang_registry_extension(basename) do
+    case Path.extname(basename) do
+      "" ->
+        :miss
+
+      "." <> ext ->
+        case LangRegistry.for_extension(String.downcase(ext)) do
+          %{name: name} -> name
+          nil -> :miss
+        end
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
   @spec lookup_registry_filename(String.t()) :: filetype() | :miss
   defp lookup_registry_filename(basename) do
     case Minga.Filetype.Registry.lookup_filename(basename) do
@@ -222,24 +250,6 @@ defmodule Minga.Filetype do
     ArgumentError -> :miss
   end
 
-  @spec lookup_filename(String.t()) :: filetype() | :miss
-  defp lookup_filename(basename) do
-    Map.get(@filenames, basename, :miss)
-  end
-
-  @spec lookup_extension(String.t()) :: filetype() | :miss
-  defp lookup_extension(basename) do
-    case Path.extname(basename) do
-      "" ->
-        :miss
-
-      "." <> ext ->
-        ext
-        |> String.downcase()
-        |> then(&Map.get(@extensions, &1, :miss))
-    end
-  end
-
   @spec detect_env_pattern(String.t()) :: filetype() | :miss
   defp detect_env_pattern(basename) do
     cond do
@@ -259,7 +269,18 @@ defmodule Minga.Filetype do
       |> String.trim()
       |> extract_interpreter()
 
-    Map.get(@shebang_interpreters, interpreter, :text)
+    # Check Filetype.Registry first (runtime overrides), then Language registry,
+    # then fall back to the compile-time map for any stragglers
+    case Minga.Filetype.Registry.lookup_shebang(interpreter) do
+      nil ->
+        case LangRegistry.for_shebang(interpreter) do
+          %{name: name} -> name
+          nil -> Map.get(@shebang_interpreters, interpreter, :text)
+        end
+
+      filetype ->
+        filetype
+    end
   end
 
   defp parse_shebang(_), do: :text

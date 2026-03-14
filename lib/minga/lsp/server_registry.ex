@@ -19,131 +19,11 @@ defmodule Minga.LSP.ServerRegistry do
   or extend these defaults without modifying source code.
   """
 
+  alias Minga.Language.Registry, as: LangRegistry
   alias Minga.LSP.ServerConfig
 
   @typedoc "Configuration for a single language server."
   @type server_config :: ServerConfig.t()
-
-  @servers %{
-    elixir: [
-      %ServerConfig{
-        name: :lexical,
-        command: "lexical",
-        root_markers: ["mix.exs"]
-      }
-    ],
-    go: [
-      %ServerConfig{
-        name: :gopls,
-        command: "gopls",
-        root_markers: ["go.mod", "go.sum"]
-      }
-    ],
-    rust: [
-      %ServerConfig{
-        name: :rust_analyzer,
-        command: "rust-analyzer",
-        root_markers: ["Cargo.toml"]
-      }
-    ],
-    c: [
-      %ServerConfig{
-        name: :clangd,
-        command: "clangd",
-        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"]
-      }
-    ],
-    cpp: [
-      %ServerConfig{
-        name: :clangd,
-        command: "clangd",
-        root_markers: ["compile_commands.json", "CMakeLists.txt", ".clangd"]
-      }
-    ],
-    javascript: [
-      %ServerConfig{
-        name: :typescript_language_server,
-        command: "typescript-language-server",
-        args: ["--stdio"],
-        root_markers: ["package.json", "tsconfig.json", "jsconfig.json"]
-      }
-    ],
-    typescript: [
-      %ServerConfig{
-        name: :typescript_language_server,
-        command: "typescript-language-server",
-        args: ["--stdio"],
-        root_markers: ["package.json", "tsconfig.json"]
-      }
-    ],
-    python: [
-      %ServerConfig{
-        name: :pyright,
-        command: "pyright-langserver",
-        args: ["--stdio"],
-        root_markers: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]
-      }
-    ],
-    ruby: [
-      %ServerConfig{
-        name: :solargraph,
-        command: "solargraph",
-        args: ["stdio"],
-        root_markers: ["Gemfile", ".solargraph.yml"]
-      }
-    ],
-    zig: [
-      %ServerConfig{
-        name: :zls,
-        command: "zls",
-        root_markers: ["build.zig", "build.zig.zon"]
-      }
-    ],
-    lua: [
-      %ServerConfig{
-        name: :lua_ls,
-        command: "lua-language-server",
-        root_markers: [".luarc.json", ".luarc.jsonc", ".stylua.toml"]
-      }
-    ],
-    json: [
-      %ServerConfig{
-        name: :vscode_json_languageserver,
-        command: "vscode-json-language-server",
-        args: ["--stdio"]
-      }
-    ],
-    yaml: [
-      %ServerConfig{
-        name: :yaml_language_server,
-        command: "yaml-language-server",
-        args: ["--stdio"]
-      }
-    ],
-    css: [
-      %ServerConfig{
-        name: :vscode_css_languageserver,
-        command: "vscode-css-language-server",
-        args: ["--stdio"],
-        root_markers: ["package.json"]
-      }
-    ],
-    html: [
-      %ServerConfig{
-        name: :vscode_html_languageserver,
-        command: "vscode-html-language-server",
-        args: ["--stdio"],
-        root_markers: ["package.json"]
-      }
-    ],
-    bash: [
-      %ServerConfig{
-        name: :bash_language_server,
-        command: "bash-language-server",
-        args: ["start"]
-      }
-    ]
-  }
 
   @doc """
   Returns the list of language server configs for a filetype.
@@ -163,7 +43,10 @@ defmodule Minga.LSP.ServerRegistry do
   """
   @spec servers_for(atom()) :: [server_config()]
   def servers_for(filetype) when is_atom(filetype) do
-    Map.get(@servers, filetype, [])
+    case LangRegistry.get(filetype) do
+      %{language_servers: servers} when is_list(servers) -> servers
+      _ -> []
+    end
   end
 
   @doc """
@@ -177,7 +60,9 @@ defmodule Minga.LSP.ServerRegistry do
   """
   @spec supported_filetypes() :: [atom()]
   def supported_filetypes do
-    Map.keys(@servers)
+    LangRegistry.all()
+    |> Enum.filter(fn lang -> lang.language_servers != [] end)
+    |> Enum.map(fn lang -> lang.name end)
   end
 
   @doc """

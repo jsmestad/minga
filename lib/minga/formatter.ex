@@ -25,27 +25,18 @@ defmodule Minga.Formatter do
   """
 
   alias Minga.Config.Options
+  alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A shell command string, optionally containing `{file}`."
   @type formatter_spec :: String.t()
 
-  @default_formatters %{
-    elixir: "mix format --stdin-filename {file} -",
-    go: "gofmt",
-    rust: "rustfmt --edition 2021",
-    python: "python3 -m black --quiet -",
-    zig: "zig fmt --stdin",
-    c: "clang-format",
-    cpp: "clang-format",
-    javascript: "prettier --stdin-filepath {file}",
-    typescript: "prettier --stdin-filepath {file}",
-    javascript_react: "prettier --stdin-filepath {file}",
-    typescript_react: "prettier --stdin-filepath {file}"
-  }
-
   @doc "Returns the default formatter map (filetype atom to command string)."
   @spec default_formatters() :: %{atom() => formatter_spec()}
-  def default_formatters, do: @default_formatters
+  def default_formatters do
+    LangRegistry.all()
+    |> Enum.filter(fn lang -> lang.formatter != nil end)
+    |> Map.new(fn lang -> {lang.name, lang.formatter} end)
+  end
 
   @doc """
   Resolves the formatter command for a filetype.
@@ -58,7 +49,13 @@ defmodule Minga.Formatter do
   def resolve_formatter(filetype, file_path \\ nil) do
     user_formatter = Options.get_for_filetype(:formatter, filetype)
 
-    spec = user_formatter || Map.get(@default_formatters, filetype)
+    default =
+      case LangRegistry.get(filetype) do
+        %{formatter: fmt} when is_binary(fmt) -> fmt
+        _ -> nil
+      end
+
+    spec = user_formatter || default
 
     if spec && file_path do
       String.replace(spec, "{file}", file_path)
