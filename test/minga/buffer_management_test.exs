@@ -149,17 +149,17 @@ defmodule Minga.BufferManagementTest do
     end
 
     @tag :tmp_dir
-    test "killing the only buffer shows dashboard", %{tmp_dir: tmp_dir} do
+    test "killing the only buffer shows empty buffer", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "solo.txt")
       File.write!(path, "alone")
 
       ctx = start_editor("alone", file_path: path)
       send_keys(ctx, "<SPC>bd")
 
-      # Should show dashboard (version string visible)
+      # Should show an empty buffer (dashboard disabled pending rewrite)
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "Minga v")
+      assert String.contains?(all_text, "[new 1]")
     end
 
     @tag :tmp_dir

@@ -12,7 +12,6 @@ defmodule Minga.Editor.Startup do
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
-  alias Minga.Editor.Dashboard
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -51,15 +50,26 @@ defmodule Minga.Editor.Startup do
 
     {messages_buf, warnings_buf} = start_special_buffers()
 
-    {active_buf, buffers, dashboard} =
+    # Always ensure an active buffer exists. The editor's render pipeline,
+    # command dispatch, and input routing all assume buffers.active is a
+    # pid. The dashboard feature (which set active to nil) is disabled
+    # until it can be reimplemented as a special buffer. See #XXX.
+    {active_buf, buffers} =
       case buffer do
         pid when is_pid(pid) ->
-          {pid, [pid], nil}
+          {pid, [pid]}
 
         _ ->
-          recent = safe_recent_files()
-          {nil, [], Dashboard.new_state(recent)}
+          {:ok, buf} =
+            DynamicSupervisor.start_child(
+              Minga.Buffer.Supervisor,
+              {BufferServer, content: "", buffer_name: "[new 1]"}
+            )
+
+          {buf, [buf]}
       end
+
+    dashboard = nil
 
     # Decide mode FIRST, then create the right window type.
     {keymap_scope, _agentic_state} = startup_view_state(port_manager)
@@ -293,10 +303,6 @@ defmodule Minga.Editor.Startup do
     :exit, _ -> :ok
   end
 
-  @spec safe_recent_files() :: [String.t()]
-  defp safe_recent_files do
-    Minga.Project.recent_files()
-  catch
-    :exit, _ -> []
-  end
+  # NOTE: safe_recent_files/0 removed with dashboard disable.
+  # Will be restored when dashboard is reimplemented as a buffer.
 end
