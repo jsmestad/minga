@@ -35,7 +35,9 @@ defmodule Minga.Theme.DoomOne do
         bg: @bg,
         fg: @fg,
         tilde_fg: @base5,
-        split_border_fg: @base5
+        split_border_fg: @base5,
+        cursorline_bg: 0x2C323C,
+        nav_flash_bg: 0x3E4451
       },
       gutter: %Minga.Theme.Gutter{
         fg: @base5,

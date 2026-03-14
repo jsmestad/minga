@@ -17,6 +17,7 @@ defmodule Minga.Editor do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Config.Options
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.Commands
@@ -31,6 +32,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.MessageLog
+  alias Minga.Editor.NavFlash
   alias Minga.Editor.Renderer
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
@@ -306,6 +308,7 @@ defmodule Minga.Editor do
   # and runs centralized post-key housekeeping (highlight sync, reparse,
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
+    state = cancel_nav_flash(state)
     new_state = Input.Router.dispatch(state, codepoint, modifiers)
     {:noreply, new_state}
   end
@@ -484,8 +487,28 @@ defmodule Minga.Editor do
 
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
+    state = maybe_trigger_nav_flash(state)
     state = Renderer.render(state)
     {:noreply, %{state | render_timer: nil}}
+  end
+
+  # Nav-flash timer step — advance the fade or clear the flash.
+  def handle_info(:nav_flash_step, %{nav_flash: nil} = state) do
+    {:noreply, state}
+  end
+
+  def handle_info(:nav_flash_step, %{nav_flash: flash} = state) do
+    case NavFlash.advance(flash) do
+      {:continue, updated, effects} ->
+        state = %{state | nav_flash: apply_flash_effects(updated, effects)}
+        state = Renderer.render(state)
+        {:noreply, state}
+
+      :done ->
+        state = %{state | nav_flash: nil}
+        state = Renderer.render(state)
+        {:noreply, state}
+    end
   end
 
   # Warning popup debounce timer fired — open the *Warnings* popup if not
@@ -642,7 +665,7 @@ defmodule Minga.Editor do
   defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
     case Enum.find_index(state.buffers.list, &(&1 == pid)) do
       nil -> state
-      idx -> EditorState.switch_buffer(state, idx)
+      idx -> EditorState.switch_buffer(state, idx) |> reset_nav_flash_tracking()
     end
   end
 
@@ -700,6 +723,95 @@ defmodule Minga.Editor do
   defp schedule_render(state, delay_ms) do
     ref = Process.send_after(self(), :debounced_render, delay_ms)
     %{state | render_timer: ref}
+  end
+
+  # ── Nav-flash detection ───────────────────────────────────────────────────────
+
+  # Checks if the cursor jumped far enough to trigger a nav-flash.
+  # Updates `last_cursor_line` and, when the threshold is exceeded,
+  # starts (or restarts) the flash animation.
+  @spec maybe_trigger_nav_flash(state()) :: state()
+  defp maybe_trigger_nav_flash(%{buffers: %{active: nil}} = state), do: state
+
+  defp maybe_trigger_nav_flash(state) do
+    buf = state.buffers.active
+    {current_line, _col} = BufferServer.cursor(buf)
+
+    state = detect_jump(state, current_line)
+    %{state | last_cursor_line: current_line}
+  end
+
+  @spec detect_jump(state(), non_neg_integer()) :: state()
+  defp detect_jump(%{last_cursor_line: nil} = state, _current_line), do: state
+
+  defp detect_jump(state, current_line) do
+    delta = abs(current_line - state.last_cursor_line)
+    threshold = Options.get(:nav_flash_threshold)
+
+    if delta >= threshold and Options.get(:nav_flash) do
+      start_flash(state, current_line)
+    else
+      cancel_flash_if_active(state)
+    end
+  end
+
+  @spec start_flash(state(), non_neg_integer()) :: state()
+  defp start_flash(state, line) do
+    old_timer = if state.nav_flash, do: state.nav_flash.timer, else: nil
+    {flash, effects} = NavFlash.start(line, old_timer)
+    %{state | nav_flash: apply_flash_effects(flash, effects)}
+  end
+
+  @spec cancel_flash_if_active(state()) :: state()
+  defp cancel_flash_if_active(%{nav_flash: nil} = state), do: state
+
+  defp cancel_flash_if_active(state) do
+    effects = NavFlash.cancel_effects(state.nav_flash)
+    execute_flash_effects(effects)
+    %{state | nav_flash: nil}
+  end
+
+  # Resets nav-flash tracking after a buffer switch so the cursor
+  # position of the new buffer doesn't trigger a false-positive flash
+  # from the old buffer's cursor line.
+  @spec reset_nav_flash_tracking(state()) :: state()
+  defp reset_nav_flash_tracking(state) do
+    state = cancel_flash_if_active(state)
+    %{state | last_cursor_line: nil}
+  end
+
+  # Cancels any active nav-flash. Called on every keypress.
+  @spec cancel_nav_flash(state()) :: state()
+  defp cancel_nav_flash(%{nav_flash: nil} = state), do: state
+
+  defp cancel_nav_flash(state) do
+    effects = NavFlash.cancel_effects(state.nav_flash)
+    execute_flash_effects(effects)
+    %{state | nav_flash: nil}
+  end
+
+  # Executes side effects from NavFlash and returns the flash struct
+  # with the timer reference filled in.
+  @spec apply_flash_effects(NavFlash.t(), [NavFlash.side_effect()]) :: NavFlash.t()
+  defp apply_flash_effects(flash, effects) do
+    Enum.reduce(effects, flash, fn
+      {:send_after, msg, interval}, acc ->
+        ref = Process.send_after(self(), msg, interval)
+        %{acc | timer: ref}
+
+      {:cancel_timer, ref}, acc ->
+        Process.cancel_timer(ref)
+        acc
+    end)
+  end
+
+  # Executes side effects without updating a flash struct (for cancellation).
+  @spec execute_flash_effects([NavFlash.side_effect()]) :: :ok
+  defp execute_flash_effects(effects) do
+    Enum.each(effects, fn
+      {:cancel_timer, ref} -> Process.cancel_timer(ref)
+      {:send_after, msg, interval} -> Process.send_after(self(), msg, interval)
+    end)
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DocumentSync
@@ -82,6 +83,13 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         _ -> preview_matches
       end
 
+    cursorline_bg =
+      if is_active and Options.get(:cursorline) do
+        state.theme.editor.cursorline_bg
+      else
+        nil
+      end
+
     %Context{
       viewport: viewport,
       visual_selection: visual_selection,
@@ -90,6 +98,10 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       content_w: content_w,
       confirm_match: if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil),
       highlight: window_highlight(state, window),
+      cursorline_bg: cursorline_bg,
+      nav_flash: state.nav_flash,
+      nav_flash_bg: state.theme.editor.nav_flash_bg,
+      editor_bg: state.theme.editor.bg,
       has_sign_column: has_sign_column,
       diagnostic_signs: diagnostic_signs_for_window(state, window),
       git_signs: git_signs_for_window(state, window),

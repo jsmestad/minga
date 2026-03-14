@@ -32,7 +32,9 @@ defmodule Minga.Theme.OneDark do
         bg: @syntax_bg,
         fg: @mono_1,
         tilde_fg: @syntax_gutter,
-        split_border_fg: @syntax_guide
+        split_border_fg: @syntax_guide,
+        cursorline_bg: 0x2C323C,
+        nav_flash_bg: 0x3E4451
       },
       gutter: %Minga.Theme.Gutter{
         fg: @syntax_gutter,

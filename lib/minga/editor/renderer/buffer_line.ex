@@ -20,6 +20,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.NavFlash
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
@@ -90,6 +91,8 @@ defmodule Minga.Editor.Renderer.BufferLine do
     content_cmds =
       LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
 
+    content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
     {gutters, contents}
@@ -128,10 +131,92 @@ defmodule Minga.Editor.Renderer.BufferLine do
     vrow_ctx = %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w}
 
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
+    content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
     {gutters, contents}
+  end
+
+  # ── Cursorline & Nav-flash ─────────────────────────────────────────────────
+
+  # Applies cursorline or nav-flash background to content draws.
+  #
+  # For the cursor line: uses cursorline_bg (or nav-flash interpolated color
+  # if a flash is active on this line). For non-cursor lines: applies
+  # nav-flash bg if the flash targets this line (can happen briefly when
+  # the cursor has moved but the flash line hasn't caught up).
+  #
+  # Prepends a full-width fill draw so the tint extends past the text,
+  # then sets bg on each content draw that doesn't already have an explicit
+  # bg or :reverse (visual selections keep their own colors).
+  @spec maybe_apply_cursorline([DisplayList.draw()], non_neg_integer(), line_params()) ::
+          [DisplayList.draw()]
+  defp maybe_apply_cursorline(cmds, sr, p) do
+    bg = resolve_line_bg(p)
+
+    if bg do
+      apply_line_bg(cmds, sr, bg, p.ctx)
+    else
+      cmds
+    end
+  end
+
+  # Determines the effective background color for this line, considering
+  # both cursorline and nav-flash state.
+  @spec resolve_line_bg(line_params()) :: non_neg_integer() | nil
+  defp resolve_line_bg(%{buf_line: bl, cursor_line: cl, ctx: ctx}) do
+    effective_bg(nav_flash_bg_for_line(bl, ctx), bl, cl, ctx)
+  end
+
+  @spec effective_bg(non_neg_integer() | nil, non_neg_integer(), non_neg_integer(), Context.t()) ::
+          non_neg_integer() | nil
+  # Nav-flash overrides cursorline on the flash line
+  defp effective_bg(flash_bg, _bl, _cl, _ctx) when is_integer(flash_bg), do: flash_bg
+  # Normal cursorline for cursor line
+  defp effective_bg(nil, bl, cl, ctx) when bl == cl, do: ctx.cursorline_bg
+  # No highlight for other lines
+  defp effective_bg(nil, _bl, _cl, _ctx), do: nil
+
+  # Returns the interpolated flash bg if a flash is active on this line.
+  @spec nav_flash_bg_for_line(non_neg_integer(), Context.t()) :: non_neg_integer() | nil
+  defp nav_flash_bg_for_line(_buf_line, %{nav_flash: nil}), do: nil
+
+  defp nav_flash_bg_for_line(buf_line, %{nav_flash: %NavFlash{line: flash_line} = flash} = ctx)
+       when buf_line == flash_line do
+    flash_bg = ctx_nav_flash_bg(ctx)
+    target_bg = ctx.cursorline_bg || ctx_editor_bg(ctx)
+
+    if flash_bg do
+      NavFlash.color_for_step(flash, flash_bg, target_bg)
+    else
+      nil
+    end
+  end
+
+  defp nav_flash_bg_for_line(_buf_line, _ctx), do: nil
+
+  @spec ctx_nav_flash_bg(Context.t()) :: non_neg_integer() | nil
+  defp ctx_nav_flash_bg(%{nav_flash_bg: bg}), do: bg
+
+  @spec ctx_editor_bg(Context.t()) :: non_neg_integer()
+  defp ctx_editor_bg(%{editor_bg: bg}), do: bg
+
+  @spec apply_line_bg([DisplayList.draw()], non_neg_integer(), non_neg_integer(), Context.t()) ::
+          [DisplayList.draw()]
+  defp apply_line_bg(cmds, sr, bg, ctx) do
+    fill = DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), bg: bg)
+
+    tinted =
+      Enum.map(cmds, fn {row, col, text, style} ->
+        if Keyword.has_key?(style, :bg) or Keyword.has_key?(style, :reverse) do
+          {row, col, text, style}
+        else
+          {row, col, text, Keyword.put(style, :bg, bg)}
+        end
+      end)
+
+    [fill | tinted]
   end
 
   # ── Gutter primitives ───────────────────────────────────────────────────
