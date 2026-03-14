@@ -17,6 +17,7 @@ defmodule Minga.Editor do
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Config.Options
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.Commands
@@ -28,7 +29,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.KeyDispatch
-  alias Minga.Config.Options
   alias Minga.Editor.Layout
   alias Minga.Editor.LspActions
   alias Minga.Editor.MessageLog
