@@ -30,8 +30,8 @@ defmodule Minga.Picker.BufferSource do
 
   ## Options
 
-  * `:include_special` — when `true`, includes special buffers (`*scratch*`,
-    `*Messages*`, etc.) in the results. Defaults to `false`.
+  * `:include_special` — when `true`, includes special buffers (`*Messages*`,
+    `*Warnings*`, etc.) in the results. Defaults to `false`.
   """
   @spec build_candidates(term(), keyword()) :: [Minga.Picker.item()]
   def build_candidates(%{buffers: buffers_state}, opts \\ []) do
@@ -55,13 +55,13 @@ defmodule Minga.Picker.BufferSource do
   end
 
   @doc """
-  Returns candidate entries for special buffers (scratch, messages) that are
+  Returns candidate entries for special buffers (messages, warnings) that are
   alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
   key so `on_select` can distinguish them from list-indexed buffers.
   """
   @spec extra_special_buffers(Buffers.t()) :: [Minga.Picker.item()]
   def extra_special_buffers(%Buffers{list: list} = bs) do
-    special_fields = [bs.scratch, bs.messages]
+    special_fields = [bs.messages, bs.warnings]
 
     special_fields
     |> Enum.reject(&is_nil/1)
@@ -174,7 +174,7 @@ defmodule Minga.Picker.BufferSource do
   @spec display_name(pid()) :: String.t()
   defp display_name(buf) do
     case BufferServer.buffer_name(buf) do
-      nil -> Path.basename(BufferServer.file_path(buf) || "[scratch]")
+      nil -> Path.basename(BufferServer.file_path(buf) || "[no file]")
       name -> name
     end
   end

@@ -53,7 +53,6 @@ defmodule Minga.Command.RegistryTest do
           :cycle_line_numbers,
           :view_messages,
           :view_warnings,
-          :view_scratch,
           :new_buffer,
           :diagnostics_list,
           :next_diagnostic,

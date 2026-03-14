@@ -489,7 +489,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   def snapshot_display_name(snapshot) do
     base =
       case snapshot.file_path do
-        nil -> "[scratch]"
+        nil -> "[no file]"
         path -> Path.basename(path)
       end
 

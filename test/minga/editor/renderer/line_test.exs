@@ -185,7 +185,7 @@ defmodule Minga.Editor.Renderer.LineTest do
   end
 
   describe "no file open" do
-    test "shows scratch buffer when no file is loaded" do
+    test "shows dashboard when no file is loaded" do
       id = :erlang.unique_integer([:positive])
       {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
 
@@ -201,9 +201,10 @@ defmodule Minga.Editor.Renderer.LineTest do
       send(editor, {:minga_input, {:ready, 80, 24}})
       :ok = HeadlessPort.await_frame(port)
 
-      # Row 0 is the tab bar; content starts at row 1
-      row1 = HeadlessPort.get_row_text(port, @content_row)
-      assert String.contains?(row1, "# This buffer") or String.contains?(row1, "Minga")
+      # Dashboard should show version string somewhere on screen
+      screen = for row <- 0..23, do: HeadlessPort.get_row_text(port, row)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "Minga v")
     end
   end
 end

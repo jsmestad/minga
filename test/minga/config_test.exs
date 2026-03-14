@@ -285,9 +285,9 @@ defmodule Minga.ConfigTest do
     end
 
     test "registers with default options" do
-      Minga.Config.popup("*scratch*")
+      Minga.Config.popup("*TestPopup*")
 
-      assert {:ok, rule} = PopupRegistry.match("*scratch*")
+      assert {:ok, rule} = PopupRegistry.match("*TestPopup*")
       assert rule.display == :split
       assert rule.side == :bottom
       assert rule.size == {:percent, 30}

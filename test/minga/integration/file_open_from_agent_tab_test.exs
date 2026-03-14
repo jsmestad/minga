@@ -44,16 +44,16 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     agent_buf = AgentBufferSync.start_buffer()
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
-    # Create a scratch buffer so the editor has something in the buffer list
-    {:ok, scratch_buf} = BufferServer.start_link(content: "", buffer_name: "*scratch*")
+    # Create a file buffer so the editor has something in the buffer list
+    {:ok, file_buf} = BufferServer.start_link(content: "", buffer_name: "unnamed")
 
-    # Start the editor with the scratch buffer; we'll reconfigure the
+    # Start the editor with the file buffer; we'll reconfigure the
     # state to look like agent mode below.
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_agent_editor_#{id}",
         port_manager: port,
-        buffer: scratch_buf,
+        buffer: file_buf,
         width: width,
         height: height
       )
@@ -91,7 +91,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
     %{
       editor: editor,
-      buffer: scratch_buf,
+      buffer: file_buf,
       agent_buffer: agent_buf,
       port: port,
       width: width,

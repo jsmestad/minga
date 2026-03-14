@@ -3,7 +3,7 @@ defmodule Minga.Devicon do
   Maps filetypes and special buffer types to Nerd Font icons and colors.
 
   Language filetypes are looked up from the `Minga.Language.Registry` at
-  runtime. Special buffer types (agent, messages, scratch, help) are
+  runtime. Special buffer types (agent, messages, help) are
   hardcoded since they aren't languages.
 
   Used by the tab bar, file tree, buffer picker, and anywhere else that
@@ -33,7 +33,6 @@ defmodule Minga.Devicon do
 
   def icon_and_color(:agent), do: {"\u{F06A9}", 0x7EC8E3}
   def icon_and_color(:messages), do: {"\u{F0369}", 0x519ABA}
-  def icon_and_color(:scratch), do: {"\u{F03EB}", 0xCBCB41}
   def icon_and_color(:help), do: {"\u{F02D7}", 0x00ADD8}
 
   # ── Language-backed lookup ─────────────────────────────────────────────────

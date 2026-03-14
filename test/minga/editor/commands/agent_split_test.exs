@@ -45,7 +45,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
     }
 
     # Create a background agent tab to hold agent state
-    file_tab = Tab.new_file(1, "*scratch*")
+    file_tab = Tab.new_file(1, "[no file]")
 
     file_context = %{
       keymap_scope: :editor

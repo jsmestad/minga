@@ -154,6 +154,15 @@ defmodule Minga.Theme.OneLight do
         heading3_fg: @hue_4,
         dashboard_label: 0x4078F2
       },
+      dashboard: %Minga.Theme.Dashboard{
+        bg: @syntax_bg,
+        logo_fg: @hue_6,
+        heading_fg: @hue_2,
+        item_fg: @mono_1,
+        item_active_bg: @syntax_guide,
+        shortcut_fg: @hue_4,
+        muted_fg: @mono_3
+      },
       tab_bar: %Minga.Theme.TabBar{
         active_fg: 0x383A42,
         active_bg: @syntax_bg,

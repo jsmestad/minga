@@ -32,6 +32,7 @@ defmodule Minga.Editor.State do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Editor.CompletionTrigger
+  alias Minga.Editor.Dashboard
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
@@ -115,6 +116,7 @@ defmodule Minga.Editor.State do
             tab_bar_click_regions: [],
             agent: %AgentState{},
             agentic: ViewState.new(),
+            dashboard: nil,
             nav_flash: nil,
             last_cursor_line: nil
 
@@ -153,6 +155,7 @@ defmodule Minga.Editor.State do
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
           agentic: ViewState.t(),
+          dashboard: Dashboard.state() | nil,
           nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil
         }
@@ -218,7 +221,7 @@ defmodule Minga.Editor.State do
     dirty = BufferServer.dirty?(buf)
     filetype = BufferServer.filetype(buf)
 
-    display_name = if path, do: Path.basename(path), else: name || "*scratch*"
+    display_name = if path, do: Path.basename(path), else: name || "[no file]"
     directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
 
     %{
@@ -233,7 +236,7 @@ defmodule Minga.Editor.State do
   defp buffer_content_context(_state) do
     %{
       type: :buffer,
-      display_name: "*scratch*",
+      display_name: "[no file]",
       directory: "",
       dirty: false,
       filetype: :text
@@ -542,14 +545,16 @@ defmodule Minga.Editor.State do
   @spec live_buffer_label(pid()) :: String.t()
   defp live_buffer_label(pid) do
     case BufferServer.buffer_name(pid) do
-      nil -> BufferServer.file_path(pid) |> path_or_scratch()
-      name -> name
+      nil ->
+        case BufferServer.file_path(pid) do
+          nil -> "[no file]"
+          path -> Path.basename(path)
+        end
+
+      name ->
+        name
     end
   end
-
-  @spec path_or_scratch(String.t() | nil) :: String.t()
-  defp path_or_scratch(nil), do: "[scratch]"
-  defp path_or_scratch(path), do: Path.basename(path)
 
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 

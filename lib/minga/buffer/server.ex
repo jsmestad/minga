@@ -45,7 +45,7 @@ defmodule Minga.Buffer.Server do
 
   # ── Client API ──
 
-  @doc "Starts a buffer server. Pass `file_path:` to open a file, or `content:` for a scratch buffer."
+  @doc "Starts a buffer server. Pass `file_path:` to open a file, or `content:` for an unnamed buffer."
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name)

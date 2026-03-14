@@ -129,7 +129,7 @@ defmodule Minga.BufferPickerTest do
       ctx = start_editor("aaa content", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
 
-      # On buffer 3 (bbb). Open picker — items: aaa, *scratch*, bbb
+      # On buffer 3 (bbb). Open picker — items: aaa, [no file], bbb
       # Navigate and select bbb
       send_keys(ctx, "<SPC>bb")
       # Filter to just "bbb" to avoid scratch confusion

@@ -33,13 +33,13 @@ defmodule Minga.Integration.AgentCursorTest do
     agent_buf = AgentBufferSync.start_buffer()
     assert is_pid(agent_buf), "Failed to start agent buffer"
 
-    {:ok, scratch_buf} = BufferServer.start_link(content: "", buffer_name: "*scratch*")
+    {:ok, file_buf} = BufferServer.start_link(content: "", buffer_name: "unnamed")
 
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_agent_cursor_#{id}",
         port_manager: port,
-        buffer: scratch_buf,
+        buffer: file_buf,
         width: width,
         height: height
       )
@@ -71,7 +71,7 @@ defmodule Minga.Integration.AgentCursorTest do
 
     %{
       editor: editor,
-      buffer: scratch_buf,
+      buffer: file_buf,
       agent_buffer: agent_buf,
       port: port,
       width: width,

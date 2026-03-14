@@ -59,7 +59,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       if Keyword.get(opts, :agentic_active, false) do
         TabBar.new(Tab.new_agent(1, "Agent"))
       else
-        TabBar.new(Tab.new_file(1, "*scratch*"))
+        TabBar.new(Tab.new_file(1, "[no file]"))
       end
 
     %EditorState{

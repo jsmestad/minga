@@ -29,7 +29,6 @@ defmodule Minga.Config.Options do
   | `:title_format` | string with `{placeholder}` tokens               | `"{filename} {dirty}({directory}) - Minga"` |
   | `:recent_files_limit` | positive integer                            | `200`      |
   | `:persist_recent_files` | boolean                                  | `true`     |
-  | `:scratch_filetype`     | filetype atom                              | `:markdown`|
   | `:wrap`                 | boolean                                    | `false`    |
   | `:linebreak`            | boolean                                    | `true`     |
   | `:breakindent`          | boolean                                    | `true`     |
@@ -90,7 +89,6 @@ defmodule Minga.Config.Options do
           | :title_format
           | :recent_files_limit
           | :persist_recent_files
-          | :scratch_filetype
           | :clipboard
           | :wrap
           | :linebreak
@@ -166,7 +164,6 @@ defmodule Minga.Config.Options do
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga"},
     {:recent_files_limit, :pos_integer, 200},
     {:persist_recent_files, :boolean, true},
-    {:scratch_filetype, :atom, :markdown},
     {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus},
     {:wrap, :boolean, false},
     {:linebreak, :boolean, true},

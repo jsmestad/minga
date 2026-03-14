@@ -3,7 +3,7 @@ defmodule Minga.BufferManagementTest do
   Tests for multi-buffer management: opening, switching, closing buffers
   via keybindings and ex commands, verified through the headless harness.
 
-  Note: `*scratch*` and `*Messages*` are stored separately from the buffer
+  Note: `[no file]` and `*Messages*` are stored separately from the buffer
   list, so they don't affect buffer counts or indicators.
   """
 
@@ -149,16 +149,17 @@ defmodule Minga.BufferManagementTest do
     end
 
     @tag :tmp_dir
-    test "killing the only buffer falls back to scratch", %{tmp_dir: tmp_dir} do
+    test "killing the only buffer shows dashboard", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "solo.txt")
       File.write!(path, "alone")
 
       ctx = start_editor("alone", file_path: path)
       send_keys(ctx, "<SPC>bd")
 
-      # Should show scratch buffer as fallback
-      row0 = screen_row(ctx, 1)
-      assert String.contains?(row0, "# This buffer") or String.contains?(row0, "Minga")
+      # Should show dashboard (version string visible)
+      screen = screen_text(ctx)
+      all_text = Enum.join(screen, "\n")
+      assert String.contains?(all_text, "Minga v")
     end
 
     @tag :tmp_dir
@@ -199,28 +200,6 @@ defmodule Minga.BufferManagementTest do
 
       send_keys(ctx, "<SPC>bp")
       assert_modeline_contains(ctx, "[1/2]")
-    end
-  end
-
-  describe "SPC b s — switch to scratch" do
-    test "SPC b s shows scratch buffer in popup split" do
-      ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bs")
-
-      # Scratch buffer opens as a popup split; its content appears on screen
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "# This buffer is for notes")
-    end
-
-    test "scratch buffer is editable" do
-      ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bs")
-      send_keys(ctx, "ggIedited: <Esc>")
-
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "edited:")
     end
   end
 
