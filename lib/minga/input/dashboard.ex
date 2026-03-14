@@ -3,9 +3,9 @@ defmodule Minga.Input.Dashboard do
   Input handler for the dashboard home screen.
 
   Active only when no file buffer is open (`buffers.active == nil`).
-  Captures j/k for cursor navigation, Enter for item selection, and
-  passes everything else through so global bindings (SPC sequences,
-  Ctrl+Q) still work.
+  Captures j/k and arrow keys for cursor navigation, Enter or SPC for
+  item selection, and passes everything else through so global bindings
+  (Ctrl+Q) still work.
   """
 
   @behaviour Minga.Input.Handler
@@ -19,19 +19,24 @@ defmodule Minga.Input.Dashboard do
   @key_j ?j
   @key_k ?k
   @key_enter 13
+  @key_space 32
+
+  # Kitty keyboard protocol arrow key codepoints
+  @arrow_up 57_352
+  @arrow_down 57_353
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
   def handle_key(%{buffers: %{active: nil}, dashboard: %{} = dash} = state, codepoint, _modifiers) do
     case codepoint do
-      @key_j ->
+      cp when cp == @key_j or cp == @arrow_down ->
         {:handled, %{state | dashboard: Dashboard.cursor_down(dash)}}
 
-      @key_k ->
+      cp when cp == @key_k or cp == @arrow_up ->
         {:handled, %{state | dashboard: Dashboard.cursor_up(dash)}}
 
-      @key_enter ->
+      cp when cp == @key_enter or cp == @key_space ->
         handle_select(state, dash)
 
       _ ->

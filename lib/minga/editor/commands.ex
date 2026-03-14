@@ -272,6 +272,12 @@ defmodule Minga.Editor.Commands do
   def execute(state, :tree_refresh), do: tree_refresh(state)
   def execute(state, :tree_close), do: tree_close(state)
 
+  # ── Commands that work without an active buffer (e.g. from dashboard) ────
+
+  def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
+  def execute(state, :project_switch), do: Project.execute(state, :project_switch)
+  def execute(state, :project_recent_files), do: Project.execute(state, :project_recent_files)
+
   # ── Guard: no buffer → no-op ──────────────────────────────────────────────
 
   def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
@@ -437,11 +443,9 @@ defmodule Minga.Editor.Commands do
   # ── Project ────────────────────────────────────────────────────────────────
 
   def execute(state, :project_find_file), do: Project.execute(state, :project_find_file)
-  def execute(state, :project_switch), do: Project.execute(state, :project_switch)
   def execute(state, :project_invalidate), do: Project.execute(state, :project_invalidate)
   def execute(state, :project_add), do: Project.execute(state, :project_add)
   def execute(state, :project_remove), do: Project.execute(state, :project_remove)
-  def execute(state, :project_recent_files), do: Project.execute(state, :project_recent_files)
 
   # ── Folding ───────────────────────────────────────────────────────────────
 
@@ -474,7 +478,6 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
   def execute(state, :view_warnings), do: BufferManagement.execute(state, :view_warnings)
-  def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
   def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
 
   # ── Config reload ────────────────────────────────────────────────────────
