@@ -179,12 +179,24 @@ fn writeAt(win: vaxis.Window, col: u16, row: u16, text: []const u8, style: vaxis
 }
 
 /// Send SIGUSR1 to the parent process (the BEAM VM).
+/// Uses raw syscalls on Linux to avoid requiring libc linkage.
+/// On macOS, libc is always linked so std.c.getppid() is fine.
 pub fn sendRestartSignal() void {
-    const parent_pid = std.c.getppid();
+    const parent_pid = getParentPid();
     if (parent_pid > 1) {
-        // SIGUSR1 = 30 on macOS, 10 on Linux
-        _ = std.c.kill(parent_pid, std.posix.SIG.USR1);
+        std.posix.kill(parent_pid, std.posix.SIG.USR1) catch {};
     }
+}
+
+/// Get the parent process ID. Uses a raw syscall on Linux (no libc
+/// dependency) and the libc wrapper on macOS (always available).
+fn getParentPid() std.posix.pid_t {
+    const builtin = @import("builtin");
+    return switch (builtin.os.tag) {
+        .linux => @bitCast(@as(u32, @truncate(std.os.linux.syscall0(.getppid)))),
+        .macos, .ios => std.c.getppid(),
+        else => 0,
+    };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
