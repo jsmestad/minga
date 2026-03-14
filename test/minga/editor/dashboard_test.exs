@@ -2,6 +2,12 @@ defmodule Minga.Editor.DashboardTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Dashboard
+  alias Minga.Editor.Renderer
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Picker, as: PickerState
+  alias Minga.Editor.Viewport
+  alias Minga.Picker
 
   describe "new_state/1" do
     test "creates state with quick actions when no recent files" do
@@ -159,6 +165,45 @@ defmodule Minga.Editor.DashboardTest do
         end)
 
       assert active_bg_draws != [], "expected active item to have highlight background"
+    end
+  end
+
+  describe "dashboard renderer with picker overlay" do
+    test "renders picker overlay when a picker is open with no active buffer" do
+      # Build state: dashboard visible, no active buffer, picker open
+      items = [{"1", "file_a.ex", ""}, {"2", "file_b.ex", ""}]
+      picker = Picker.new(items, title: "Find File", max_visible: 10)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: nil},
+        focus_stack: Minga.Input.default_stack(),
+        dashboard: Dashboard.new_state(),
+        theme: Minga.Theme.get!(:doom_one),
+        picker_ui: %PickerState{picker: picker, source: Minga.Picker.FileSource}
+      }
+
+      # Render returns state; side effect is a GenServer.cast to port_manager
+      _new_state = Renderer.render(state)
+
+      # Receive the cast sent to self() (port_manager)
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+      # The commands should contain picker content ("> " is the prompt prefix)
+      # encoded as binary protocol commands. Verify the list is non-empty
+      # and longer than a bare dashboard render (which has no overlays).
+      assert is_list(commands)
+      assert commands != []
+
+      # Re-render without the picker to compare command counts
+      bare_state = %{state | picker_ui: %PickerState{}}
+      _new_bare = Renderer.render(bare_state)
+      assert_receive {:"$gen_cast", {:send_commands, bare_commands}}
+
+      # With a picker, we should have more draw commands (the overlay draws)
+      assert length(commands) > length(bare_commands),
+             "picker overlay should add draw commands to the dashboard frame"
     end
   end
 end
