@@ -19,6 +19,7 @@ defmodule Minga.Input do
   """
 
   alias Minga.Input.AgentChatNav
+  alias Minga.Input.AgentMouse
   alias Minga.Input.AgentPanel
   alias Minga.Input.AgentSearch
   alias Minga.Input.Completion
@@ -98,6 +99,7 @@ defmodule Minga.Input do
       Scoped,
       AgentChatNav,
       GlobalBindings,
+      AgentMouse,
       ModeFSM
     ]
   end
