@@ -126,6 +126,8 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    env:
+      MIX_ENV: dev
     steps:
       - uses: actions/checkout@v4
 
@@ -138,24 +140,19 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - name: Cache deps
+      # Separate cache from test jobs: dialyzer needs _build/dev, not _build/test.
+      # The PLT and compiled deps are both under _build/dev.
+      - name: Cache deps & PLT
         uses: actions/cache@v4
         with:
           path: |
             deps
-            _build
-          key: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
-
-      - name: Cache PLT
-        uses: actions/cache@v4
-        with:
-          path: _build/dev/dialyxir_*.plt*
-          key: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
-          restore-keys: plt-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            _build/dev
+          key: dialyzer-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
 
       - run: mix deps.get
-      - run: MIX_ENV=dev mix dialyzer
+      - run: mix dialyzer
 
   docs:
     name: Deploy Docs
