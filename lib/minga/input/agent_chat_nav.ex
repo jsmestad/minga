@@ -161,7 +161,16 @@ defmodule Minga.Input.AgentChatNav do
     {cursor_line, _col} = BufferServer.cursor(chat_buffer)
     state = sync_scroll_to_cursor(state, cursor_line)
 
-    put_in(state.buffers.active, real_active)
+    # Only restore the original active buffer if a command didn't
+    # legitimately change it. Leader commands like :new_buffer update
+    # buffers.active to the newly created buffer. If we blindly restore
+    # real_active, state.buffers.active and window.buffer diverge:
+    # the window shows the new buffer but keystrokes write to the old one.
+    if state.buffers.active == chat_buffer do
+      put_in(state.buffers.active, real_active)
+    else
+      state
+    end
   end
 
   @spec sync_scroll_to_cursor(EditorState.t(), non_neg_integer()) :: EditorState.t()

@@ -104,8 +104,13 @@ defmodule Minga.Input.AgentPanel do
 
   @spec handle_panel_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  # Leader sequence in progress: passthrough to ModeFSM so the leader
+  # command runs against the real active buffer, not the chat buffer.
+  # Previously this called delegate_to_mode_fsm(state, 0, 0) which
+  # discarded the actual key and could clobber buffers.active if the
+  # leader command (e.g. :new_buffer) changed it during execution.
   defp handle_panel_nav(state, _cp, _mods) when is_map(state.vim.mode_state.leader_node) do
-    {:handled, delegate_to_mode_fsm(state, 0, 0)}
+    {:passthrough, state}
   end
 
   defp handle_panel_nav(state, cp, mods) do
@@ -155,7 +160,14 @@ defmodule Minga.Input.AgentPanel do
       real_active = state.buffers.active
       state = put_in(state.buffers.active, prompt_pid)
       state = Minga.Editor.do_handle_key(state, cp, mods)
-      put_in(state.buffers.active, real_active)
+
+      # Only restore if a command didn't legitimately change buffers.active.
+      # Same guard as AgentChatNav.delegate_to_mode_fsm/4.
+      if state.buffers.active == prompt_pid do
+        put_in(state.buffers.active, real_active)
+      else
+        state
+      end
     else
       # No prompt buffer, try scope bindings
       key = {cp, mods}

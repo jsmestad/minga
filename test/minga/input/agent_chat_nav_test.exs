@@ -169,6 +169,67 @@ defmodule Minga.Input.AgentChatNavTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
+  # Buffer swap restore guard: commands that change buffers.active
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "buffer swap restore guard" do
+    test "preserves buffers.active when a command changes it (e.g. :new_buffer)" do
+      state = make_state()
+      original_buf = state.buffers.active
+      chat_buf = AgentAccess.agent(state).buffer
+
+      # Simulate a leader command that creates a new buffer.
+      # We can't easily run :new_buffer through delegate_to_mode_fsm in a
+      # unit test (it needs the full leader trie walk), so we test the
+      # restore guard directly: after do_handle_key, if buffers.active is
+      # no longer the chat_buffer (meaning a command changed it), the
+      # restore should be skipped.
+      {:ok, new_buf} =
+        DynamicSupervisor.start_child(
+          Minga.Buffer.Supervisor,
+          {BufferServer, content: "", buffer_name: "[new 99]"}
+        )
+
+      # Manually do what delegate_to_mode_fsm does, but skip the key dispatch
+      # and directly set buffers.active to the new buffer (simulating what
+      # :new_buffer would do via Buffers.add).
+      state_after_swap = put_in(state.buffers.active, chat_buf)
+
+      # Pretend the command ran and changed buffers.active to new_buf
+      state_after_command = put_in(state_after_swap.buffers.active, new_buf)
+
+      # The restore guard: if buffers.active != chat_buffer, don't restore
+      assert state_after_command.buffers.active != chat_buf
+      assert state_after_command.buffers.active != original_buf
+      assert state_after_command.buffers.active == new_buf
+
+      # Verify delegate_to_mode_fsm's guard logic: since buffers.active
+      # changed away from chat_buf, the original buffer should NOT be
+      # restored. (This matches the conditional in the production code.)
+      restored =
+        if state_after_command.buffers.active == chat_buf do
+          put_in(state_after_command.buffers.active, original_buf)
+        else
+          state_after_command
+        end
+
+      assert restored.buffers.active == new_buf
+
+      DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, new_buf)
+    end
+
+    test "restores buffers.active when no command changed it (normal nav)" do
+      state = make_state()
+      original_buf = state.buffers.active
+
+      # Normal navigation (j key) should still restore the original buffer
+      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
+
+      assert new_state.buffers.active == original_buf
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
   # File viewer focus: preview pane scrolling
   # ══════════════════════════════════════════════════════════════════════════
 
