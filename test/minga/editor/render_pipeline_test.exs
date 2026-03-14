@@ -1,64 +1,22 @@
 defmodule Minga.Editor.RenderPipelineTest do
   @moduledoc """
-  Per-stage tests for the render pipeline.
+  Integration tests for the full render pipeline.
 
-  Each stage is tested independently with constructed inputs, verifying
-  it can be called without running the full pipeline.
+  Tests that exercise cross-stage behavior: the full `run/1` pipeline
+  and dirty-line tracking across frames. Per-stage unit tests live in
+  `test/minga/editor/render_pipeline/*_test.exs`.
   """
 
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
-  alias Minga.Editor.RenderPipeline.{Chrome, WindowScroll}
+  alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.{Buffers, Highlighting, Windows}
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
-  alias Minga.Editor.Window
-  alias Minga.Editor.WindowTree
-  alias Minga.Input
-  alias Minga.Theme
 
-  # ── Test helpers ───────────────────────────────────────────────────────────
-
-  defp base_state(opts \\ []) do
-    rows = Keyword.get(opts, :rows, 24)
-    cols = Keyword.get(opts, :cols, 80)
-    content = Keyword.get(opts, :content, "line one\nline two\nline three")
-    {:ok, buf} = BufferServer.start_link(content: content)
-
-    win_id = 1
-    window = Window.new(win_id, buf, rows, cols)
-
-    %EditorState{
-      port_manager: self(),
-      viewport: Viewport.new(rows, cols),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-      windows: %Windows{
-        tree: WindowTree.new(win_id),
-        map: %{win_id => window},
-        active: win_id,
-        next_id: win_id + 1
-      },
-      focus_stack: Input.default_stack(),
-      theme: Theme.get!(:doom_one),
-      highlight: %Highlighting{}
-    }
-  end
-
-  # Helper to run through scroll and get {scrolls, state}
-  defp run_through_scroll(state) do
-    state = EditorState.sync_active_window_cursor(state)
-    state = RenderPipeline.compute_layout(state)
-    layout = Layout.get(state)
-    {scrolls, state} = RenderPipeline.scroll_windows(state, layout)
-    {scrolls, state, layout}
-  end
+  import Minga.Editor.RenderPipeline.TestHelpers
 
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────
 
@@ -96,226 +54,6 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert er == 1
       assert ew == 100
       assert eh == 28
-    end
-  end
-
-  # ── Stage 3: Scroll ────────────────────────────────────────────────────────
-
-  describe "scroll_windows/2" do
-    test "returns {scrolls, state} for each window" do
-      state = base_state()
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      assert map_size(scrolls) == 1
-      [{_win_id, scroll}] = Map.to_list(scrolls)
-      assert %WindowScroll{} = scroll
-      assert %EditorState{} = state
-    end
-
-    test "scroll result contains buffer lines" do
-      state = base_state(content: "alpha\nbeta\ngamma")
-      {scrolls, _state, _layout} = run_through_scroll(state)
-      [{_win_id, scroll}] = Map.to_list(scrolls)
-
-      assert "alpha" in scroll.lines
-      assert "beta" in scroll.lines
-      assert "gamma" in scroll.lines
-    end
-
-    test "scroll result has correct cursor at line 0" do
-      state = base_state()
-      {scrolls, _state, _layout} = run_through_scroll(state)
-      [{_win_id, scroll}] = Map.to_list(scrolls)
-
-      assert scroll.cursor_line == 0
-      assert scroll.first_line == 0
-      assert scroll.is_active == true
-    end
-
-    test "gutter_w is non-negative" do
-      state = base_state()
-      {scrolls, _state, _layout} = run_through_scroll(state)
-      [{_win_id, scroll}] = Map.to_list(scrolls)
-
-      assert scroll.gutter_w >= 0
-      assert scroll.content_w >= 1
-    end
-
-    test "scroll result includes buf_version" do
-      state = base_state()
-      {scrolls, _state, _layout} = run_through_scroll(state)
-      [{_win_id, scroll}] = Map.to_list(scrolls)
-
-      assert is_integer(scroll.buf_version)
-      assert scroll.buf_version >= 0
-    end
-
-    test "first frame marks all lines dirty on the window" do
-      state = base_state()
-      {_scrolls, state, _layout} = run_through_scroll(state)
-      [{_win_id, window}] = Map.to_list(state.windows.map)
-
-      # First frame: sentinel values trigger full invalidation
-      assert window.dirty_lines == :all
-    end
-  end
-
-  # ── Stage 4: Content ──────────────────────────────────────────────────────
-
-  describe "build_content/2" do
-    test "returns {WindowFrames, cursor_info, state}" do
-      state = base_state()
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      {frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-
-      assert [%WindowFrame{} | _] = frames
-      assert %Cursor{row: row, col: col, shape: shape} = cursor_info
-      assert is_integer(row)
-      assert is_integer(col)
-      assert shape in [:block, :beam, :underline]
-      assert %EditorState{} = state
-    end
-
-    test "WindowFrame contains gutter and line layers" do
-      state = base_state(content: "hello world")
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      {[wf], _cursor, _state} = RenderPipeline.build_content(state, scrolls)
-
-      assert map_size(wf.lines) >= 1
-    end
-
-    test "modeline layer is empty (Chrome handles modeline)" do
-      state = base_state()
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      {[wf], _cursor, _state} = RenderPipeline.build_content(state, scrolls)
-
-      assert wf.modeline == %{}
-    end
-
-    test "updates window tracking fields after render" do
-      state = base_state()
-      {scrolls, state, _layout} = run_through_scroll(state)
-
-      {_frames, _cursor, state} = RenderPipeline.build_content(state, scrolls)
-
-      [{_win_id, window}] = Map.to_list(state.windows.map)
-
-      # After rendering, dirty_lines should be cleared
-      assert window.dirty_lines == %{}
-      # Tracking fields should be set (no longer sentinels)
-      assert window.last_viewport_top >= 0
-      assert window.last_gutter_w >= 0
-      assert window.last_line_count > 0
-      assert window.last_buf_version >= 0
-    end
-  end
-
-  # ── Stage 5: Chrome ────────────────────────────────────────────────────────
-
-  describe "build_chrome/4" do
-    test "returns a Chrome struct" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {_frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert %Chrome{} = chrome
-    end
-
-    test "chrome contains minibuffer draw" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {_frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert [_ | _] = chrome.minibuffer
-      assert Enum.all?(chrome.minibuffer, &is_tuple/1)
-    end
-
-    test "chrome contains modeline draws per window" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {_frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert map_size(chrome.modeline_draws) == 1
-      [{_win_id, draws}] = Map.to_list(chrome.modeline_draws)
-      assert [_ | _] = draws
-    end
-
-    test "chrome regions is a list of binaries" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {_frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      assert is_list(chrome.regions)
-      assert Enum.all?(chrome.regions, &is_binary/1)
-    end
-  end
-
-  # ── Stage 6: Compose ──────────────────────────────────────────────────────
-
-  describe "compose_windows/4" do
-    test "returns a Frame struct" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      frame = RenderPipeline.compose_windows(frames, chrome, cursor_info, state)
-
-      assert %Frame{cursor: %Cursor{}} = frame
-      assert frame.cursor.shape in [:block, :beam, :underline]
-    end
-
-    test "frame windows have modeline injected" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      frame = RenderPipeline.compose_windows(frames, chrome, cursor_info, state)
-
-      [wf | _] = frame.windows
-      assert map_size(wf.modeline) >= 1
-    end
-
-    test "frame includes chrome elements" do
-      state = base_state()
-      {scrolls, state, layout} = run_through_scroll(state)
-      {frames, cursor_info, state} = RenderPipeline.build_content(state, scrolls)
-      chrome = RenderPipeline.build_chrome(state, layout, scrolls, cursor_info)
-
-      frame = RenderPipeline.compose_windows(frames, chrome, cursor_info, state)
-
-      assert frame.minibuffer != []
-      assert is_list(frame.regions)
-    end
-  end
-
-  # ── Stage 7: Emit ─────────────────────────────────────────────────────────
-
-  describe "emit/2" do
-    test "converts frame to commands and sends to port_manager" do
-      frame = %Frame{
-        cursor: Cursor.new(0, 0, :block),
-        splash: [DisplayList.draw(0, 0, "hello")]
-      }
-
-      state = base_state()
-      assert :ok = RenderPipeline.emit(frame, state)
-
-      assert_receive {:"$gen_cast", {:send_commands, commands}}
-      assert is_list(commands)
-      assert Enum.all?(commands, &is_binary/1)
     end
   end
 
@@ -364,7 +102,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)
-      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+      {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
       window2 = Map.get(state.windows.map, win_id)
       # No changes detected, dirty_lines stays empty
@@ -389,7 +127,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)
-      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+      {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
       window2 = Map.get(state.windows.map, win_id)
       # Buffer version changed → full invalidation (conservative)
@@ -551,7 +289,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)
-      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+      {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
       window = Map.get(state.windows.map, win_id)
       # With absolute line numbers, only old and new cursor lines dirty
@@ -575,7 +313,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)
-      {_scrolls, state} = RenderPipeline.scroll_windows(state, layout)
+      {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
       [{_win_id, window}] = Map.to_list(state.windows.map)
       # Hybrid/relative: all lines dirty because every gutter number changes

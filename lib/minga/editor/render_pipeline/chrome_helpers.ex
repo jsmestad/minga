@@ -27,7 +27,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
   @type state :: EditorState.t()
 
-  @typep window_scroll :: Minga.Editor.RenderPipeline.WindowScroll.t()
+  @typep window_scroll :: Minga.Editor.RenderPipeline.Scroll.WindowScroll.t()
 
   # ── Tab bar ────────────────────────────────────────────────────────────────
 
