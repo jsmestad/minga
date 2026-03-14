@@ -517,7 +517,7 @@ defmodule Minga.Theme do
       code_bg: 0x1E2127,
       code_border: 0x5B6268,
       input_border: 0x51AFEF,
-      input_bg: 0x1E2127,
+      input_bg: 0x23272E,
       input_placeholder: 0x5B6268,
       thinking_fg: 0xECBE7B,
       status_thinking: 0xECBE7B,

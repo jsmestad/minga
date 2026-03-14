@@ -115,7 +115,7 @@ defmodule Minga.Theme.Catppuccin do
         code_bg: p.mantle,
         code_border: p.surface1,
         input_border: p.blue,
-        input_bg: p.mantle,
+        input_bg: p.base,
         input_placeholder: p.overlay0,
         thinking_fg: p.yellow,
         status_thinking: p.yellow,

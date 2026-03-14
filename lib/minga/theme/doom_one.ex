@@ -133,7 +133,7 @@ defmodule Minga.Theme.DoomOne do
         code_bg: 0x1E2127,
         code_border: @base5,
         input_border: @blue,
-        input_bg: 0x1E2127,
+        input_bg: @bg,
         input_placeholder: @base5,
         thinking_fg: @yellow,
         status_thinking: @yellow,
