@@ -8,48 +8,7 @@ defmodule Minga.Highlight.Grammar do
   in `~/.config/minga/queries/{language}/highlights.scm`.
   """
 
-  @filetype_to_language %{
-    elixir: "elixir",
-    erlang: "erlang",
-    heex: "heex",
-    ruby: "ruby",
-    javascript: "javascript",
-    javascript_react: "javascript",
-    typescript: "typescript",
-    typescript_react: "tsx",
-    go: "go",
-    rust: "rust",
-    zig: "zig",
-    c: "c",
-    cpp: "cpp",
-    python: "python",
-    lua: "lua",
-    bash: "bash",
-    html: "html",
-    css: "css",
-    json: "json",
-    yaml: "yaml",
-    toml: "toml",
-    markdown: "markdown",
-    kotlin: "kotlin",
-    gleam: "gleam",
-    java: "java",
-    c_sharp: "c_sharp",
-    php: "php",
-    dockerfile: "dockerfile",
-    hcl: "hcl",
-    scss: "scss",
-    graphql: "graphql",
-    nix: "nix",
-    ocaml: "ocaml",
-    haskell: "haskell",
-    scala: "scala",
-    r: "r",
-    dart: "dart",
-    make: "make",
-    diff: "diff",
-    emacs_lisp: "elisp"
-  }
+  alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A tree-sitter language name."
   @type language :: String.t()
@@ -205,7 +164,12 @@ defmodule Minga.Highlight.Grammar do
         ArgumentError -> %{}
       end
 
-    Map.merge(@filetype_to_language, dynamic)
+    static =
+      LangRegistry.all()
+      |> Enum.filter(fn lang -> lang.grammar != nil end)
+      |> Map.new(fn lang -> {lang.name, lang.grammar} end)
+
+    Map.merge(static, dynamic)
   end
 
   # ── Private ──
@@ -224,9 +188,9 @@ defmodule Minga.Highlight.Grammar do
 
   @spec lookup_static(atom()) :: {:ok, language()} | :unsupported
   defp lookup_static(filetype) do
-    case Map.get(@filetype_to_language, filetype) do
-      nil -> :unsupported
-      lang -> {:ok, lang}
+    case LangRegistry.get(filetype) do
+      %{grammar: grammar} when is_binary(grammar) -> {:ok, grammar}
+      _ -> :unsupported
     end
   end
 

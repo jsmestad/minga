@@ -13,6 +13,7 @@ defmodule Minga.Comment do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A single injection range from tree-sitter."
   @type injection_range :: %{
@@ -20,78 +21,6 @@ defmodule Minga.Comment do
           end_byte: non_neg_integer(),
           language: String.t()
         }
-
-  # ── Comment string lookup ──────────────────────────────────────────────────
-
-  @comment_strings %{
-    # Hash-style
-    elixir: "# ",
-    python: "# ",
-    ruby: "# ",
-    bash: "# ",
-    fish: "# ",
-    yaml: "# ",
-    toml: "# ",
-    make: "# ",
-    dockerfile: "# ",
-    gitconfig: "# ",
-    conf: "# ",
-    nix: "# ",
-    r: "# ",
-    perl: "# ",
-    csv: "# ",
-    editorconfig: "# ",
-
-    # Double-slash style
-    zig: "// ",
-    c: "// ",
-    cpp: "// ",
-    go: "// ",
-    rust: "// ",
-    javascript: "// ",
-    typescript: "// ",
-    javascript_react: "// ",
-    typescript_react: "// ",
-    java: "// ",
-    kotlin: "// ",
-    swift: "// ",
-    c_sharp: "// ",
-    scala: "// ",
-    dart: "// ",
-    php: "// ",
-    protobuf: "// ",
-    hcl: "// ",
-    gleam: "// ",
-    json: "// ",
-
-    # Double-dash style
-    lua: "-- ",
-    sql: "-- ",
-    haskell: "-- ",
-
-    # Semicolon style
-    emacs_lisp: ";; ",
-    lfe: ";; ",
-    ini: "; ",
-    vim: "\" ",
-
-    # Percent style
-    erlang: "% ",
-
-    # XML/HTML use block comments, but we provide a line-ish default
-    html: "<!-- ",
-    xml: "<!-- ",
-    css: "/* ",
-    scss: "// ",
-
-    # Other
-    heex: "<%!-- ",
-    graphql: "# ",
-    diff: "# ",
-    markdown: "<!-- ",
-    ocaml: "(* ",
-    text: "# "
-  }
 
   @typedoc "Direction the toggle should go."
   @type toggle_direction :: :comment | :uncomment
@@ -114,7 +43,10 @@ defmodule Minga.Comment do
   """
   @spec comment_string(atom()) :: String.t()
   def comment_string(filetype) do
-    Map.get(@comment_strings, filetype, "# ")
+    case LangRegistry.get(filetype) do
+      %{comment_token: token} when is_binary(token) -> token
+      _ -> "# "
+    end
   end
 
   @doc """

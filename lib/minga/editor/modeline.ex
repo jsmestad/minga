@@ -184,40 +184,10 @@ defmodule Minga.Editor.Modeline do
   defp mode_badge(:extension_confirm, _state), do: "UPDATE"
 
   @spec filetype_label(atom()) :: String.t()
-  defp filetype_label(:text), do: "Text"
-  defp filetype_label(:elixir), do: "Elixir"
-  defp filetype_label(:erlang), do: "Erlang"
-  defp filetype_label(:heex), do: "HEEx"
-  defp filetype_label(:ruby), do: "Ruby"
-  defp filetype_label(:javascript), do: "JavaScript"
-  defp filetype_label(:typescript), do: "TypeScript"
-  defp filetype_label(:javascript_react), do: "JSX"
-  defp filetype_label(:typescript_react), do: "TSX"
-  defp filetype_label(:go), do: "Go"
-  defp filetype_label(:rust), do: "Rust"
-  defp filetype_label(:zig), do: "Zig"
-  defp filetype_label(:c), do: "C"
-  defp filetype_label(:cpp), do: "C++"
-  defp filetype_label(:lua), do: "Lua"
-  defp filetype_label(:python), do: "Python"
-  defp filetype_label(:bash), do: "Shell"
-  defp filetype_label(:html), do: "HTML"
-  defp filetype_label(:css), do: "CSS"
-  defp filetype_label(:json), do: "JSON"
-  defp filetype_label(:yaml), do: "YAML"
-  defp filetype_label(:toml), do: "TOML"
-  defp filetype_label(:markdown), do: "Markdown"
-  defp filetype_label(:sql), do: "SQL"
-  defp filetype_label(:graphql), do: "GraphQL"
-  defp filetype_label(:kotlin), do: "Kotlin"
-  defp filetype_label(:gleam), do: "Gleam"
-  defp filetype_label(:dockerfile), do: "Dockerfile"
-  defp filetype_label(:make), do: "Makefile"
-  defp filetype_label(:emacs_lisp), do: "Emacs Lisp"
-  defp filetype_label(:lfe), do: "LFE"
-  defp filetype_label(:nix), do: "Nix"
-  defp filetype_label(:java), do: "Java"
-  defp filetype_label(:swift), do: "Swift"
-  defp filetype_label(:fish), do: "Fish"
-  defp filetype_label(other), do: other |> Atom.to_string() |> String.capitalize()
+  defp filetype_label(filetype) do
+    case Minga.Language.Registry.get(filetype) do
+      %{label: label} when is_binary(label) -> label
+      _ -> filetype |> Atom.to_string() |> String.capitalize()
+    end
+  end
 end

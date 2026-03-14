@@ -43,6 +43,7 @@ defmodule Minga.Application do
     Grammar.init_registry()
 
     base_children = [
+      Minga.Language.Registry,
       Minga.Config.Options,
       Minga.Keymap.Active,
       Minga.Config.Hooks,

@@ -23,42 +23,36 @@ defmodule Minga.Project.Detector do
   """
 
   @typedoc "Project type inferred from the marker that matched."
-  @type project_type ::
-          :git
-          | :mix
-          | :cargo
-          | :node
-          | :go
-          | :python
-          | :ruby
-          | :zig
-          | :minga
-          | :unknown
+  @type project_type :: atom()
 
   @typedoc "Detection result."
   @type result :: {:ok, root :: String.t(), project_type()} | :none
 
-  @default_markers [
+  # Non-language sentinel markers (always present regardless of Language registry)
+  @sentinel_markers [
     {".git", :git},
-    {"mix.exs", :mix},
-    {"Cargo.toml", :cargo},
-    {"package.json", :node},
-    {"go.mod", :go},
-    {"pyproject.toml", :python},
-    {"setup.py", :python},
-    {"Gemfile", :ruby},
-    {"build.zig", :zig},
     {".minga", :minga}
   ]
 
   @doc """
   Returns the default marker list as `{filename, project_type}` tuples.
 
-  These cover the most common project types. Pass a custom list to
-  `detect/2` if you need different markers.
+  Combines sentinel markers (`.git`, `.minga`) with root markers from
+  all registered languages. Pass a custom list to `detect/2` if you
+  need different markers.
   """
   @spec default_markers() :: [{String.t(), project_type()}]
-  def default_markers, do: @default_markers
+  def default_markers do
+    lang_markers =
+      Minga.Language.Registry.all()
+      |> Enum.flat_map(fn lang ->
+        type = lang.project_type || :unknown
+        Enum.map(lang.root_markers, fn marker -> {marker, type} end)
+      end)
+      |> Enum.uniq_by(fn {marker, _} -> marker end)
+
+    @sentinel_markers ++ lang_markers
+  end
 
   @doc """
   Detects the project root for a file using the default marker list.
@@ -73,7 +67,7 @@ defmodule Minga.Project.Detector do
   """
   @spec detect(String.t()) :: result()
   def detect(file_path) when is_binary(file_path) do
-    detect(file_path, @default_markers)
+    detect(file_path, default_markers())
   end
 
   @doc """
