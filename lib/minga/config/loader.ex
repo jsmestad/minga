@@ -161,7 +161,23 @@ defmodule Minga.Config.Loader do
     {loaded_modules, modules_errors} = compile_user_modules(config_dir)
 
     # 2. Eval global config
-    load_error = eval_if_exists(config_path)
+    custom_config? = cli_config_file() != nil
+
+    load_error =
+      case {custom_config?, File.exists?(config_path)} do
+        {true, false} ->
+          "Custom config not found: #{config_path} (using defaults)"
+
+        _ ->
+          eval_if_exists(config_path)
+      end
+
+    load_error =
+      if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
+        "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
+      else
+        load_error
+      end
 
     # 3. Eval project-local config
     project_path = resolve_project_config_path()
@@ -272,6 +288,23 @@ defmodule Minga.Config.Loader do
 
   @spec resolve_config_path() :: String.t()
   defp resolve_config_path do
+    case cli_config_file() do
+      path when is_binary(path) -> path
+      nil -> default_config_path()
+    end
+  end
+
+  # Checks CLI startup flags for a --config override.
+  @spec cli_config_file() :: String.t() | nil
+  defp cli_config_file do
+    case Application.get_env(:minga, :cli_startup_flags) do
+      %{config_file: path} when is_binary(path) -> path
+      _ -> nil
+    end
+  end
+
+  @spec default_config_path() :: String.t()
+  defp default_config_path do
     base =
       case System.get_env("XDG_CONFIG_HOME") do
         nil -> Path.expand("~/.config")

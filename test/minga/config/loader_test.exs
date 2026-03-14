@@ -389,6 +389,235 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "--config CLI flag" do
+    test "loader uses the custom config path when config_file flag is set" do
+      # Create a custom config in a non-standard location
+      custom_dir =
+        Path.join(System.tmp_dir!(), "minga_custom_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(custom_dir)
+      custom_path = Path.join(custom_dir, "my_config.exs")
+
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 42
+      """)
+
+      # Also set up a standard XDG config with a different value so we can
+      # confirm the custom one wins
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 2
+        """)
+
+      # Set the CLI flag
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+        File.rm_rf!(custom_dir)
+      end)
+
+      name = :"loader_custom_cfg_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      # The custom config should have been loaded (tab_width = 42)
+      assert Options.get(:tab_width) == 42
+      # config_path should return the custom path
+      assert Loader.config_path(pid) == custom_path
+      # No load errors
+      assert Loader.load_error(pid) == nil
+    end
+
+    test "nonexistent --config path warns in status bar but does not crash" do
+      custom_path = "/tmp/minga_nonexistent_#{System.unique_integer([:positive])}.exs"
+
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      # Set up XDG so the loader doesn't try to read a real config
+      empty_dir =
+        Path.join(System.tmp_dir!(), "minga_empty_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(empty_dir)
+      System.put_env("XDG_CONFIG_HOME", empty_dir)
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        System.delete_env("XDG_CONFIG_HOME")
+        File.rm_rf!(empty_dir)
+      end)
+
+      name = :"loader_missing_custom_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      # User explicitly requested a file that doesn't exist: warn them
+      assert Loader.load_error(pid) =~ "Custom config not found"
+      assert Loader.load_error(pid) =~ custom_path
+      # config_path still reports the custom path
+      assert Loader.config_path(pid) == custom_path
+    end
+
+    test "--config with non-.exs extension warns about potentially invalid file" do
+      custom_dir =
+        Path.join(System.tmp_dir!(), "minga_noexs_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(custom_dir)
+      custom_path = Path.join(custom_dir, "my_config.txt")
+
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 7
+      """)
+
+      {_dir, cleanup} = make_config_dir("")
+
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+        File.rm_rf!(custom_dir)
+      end)
+
+      name = :"loader_noexs_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      # The file was loaded (tab_width changed), but a warning is shown
+      assert Options.get(:tab_width) == 7
+      assert Loader.load_error(pid) =~ "does not end in .exs"
+      assert Loader.load_error(pid) =~ custom_path
+    end
+
+    test "project-local .minga.exs still loads after custom --config" do
+      custom_dir =
+        Path.join(System.tmp_dir!(), "minga_custom2_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(custom_dir)
+      custom_path = Path.join(custom_dir, "my_config.exs")
+
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 10
+      """)
+
+      # Set up XDG (even though it won't be used for global config)
+      {_dir, cleanup} = make_config_dir("")
+
+      # Create .minga.exs in a temp project dir
+      project_dir =
+        Path.join(System.tmp_dir!(), "minga_proj_custom_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(project_dir)
+
+      File.write!(Path.join(project_dir, ".minga.exs"), """
+      use Minga.Config
+      set :tab_width, 99
+      """)
+
+      original_cwd = File.cwd!()
+      File.cd!(project_dir)
+
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      on_exit(fn ->
+        File.cd!(original_cwd)
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+        File.rm_rf!(custom_dir)
+        File.rm_rf!(project_dir)
+      end)
+
+      name = :"loader_custom_proj_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      # Project-local config overrides the custom global config (last writer wins)
+      assert Options.get(:tab_width) == 99
+      assert Loader.project_config_error(pid) == nil
+    end
+
+    test "without --config flag, loader uses the default XDG path" do
+      Application.delete_env(:minga, :cli_startup_flags)
+
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :tab_width, 5
+        """)
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+      end)
+
+      name = :"loader_no_flag_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert Options.get(:tab_width) == 5
+      # config_path should be the standard XDG path
+      assert Loader.config_path(pid) =~ "minga/config.exs"
+    end
+
+    test "reload preserves the custom config path" do
+      custom_dir =
+        Path.join(System.tmp_dir!(), "minga_reload_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(custom_dir)
+      custom_path = Path.join(custom_dir, "my_config.exs")
+
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 11
+      """)
+
+      {_dir, cleanup} = make_config_dir("")
+
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+        File.rm_rf!(custom_dir)
+      end)
+
+      name = :"loader_reload_custom_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+      assert Options.get(:tab_width) == 11
+
+      # Change the custom config
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 22
+      """)
+
+      assert :ok = Loader.reload(pid)
+      assert Options.get(:tab_width) == 22
+      # Path should still be the custom one
+      assert Loader.config_path(pid) == custom_path
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   # Creates a temporary directory structure that mimics XDG_CONFIG_HOME with

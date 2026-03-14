@@ -28,10 +28,11 @@ defmodule Minga.CLI do
   @typedoc "CLI flags that override config options."
   @type flags :: %{
           force_editor: boolean(),
-          no_context: boolean()
+          no_context: boolean(),
+          config_file: String.t() | nil
         }
 
-  @default_flags %{force_editor: false, no_context: false}
+  @default_flags %{force_editor: false, no_context: false, config_file: nil}
 
   @doc "Main entry point for the CLI."
   @spec main([String.t()]) :: :ok
@@ -107,6 +108,22 @@ defmodule Minga.CLI do
     parse_args(rest, file, %{flags | no_context: true})
   end
 
+  defp parse_args(["--config", <<"--", _::binary>> | _], _file, _flags) do
+    {:error, "--config requires a path argument, not a flag\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--config", "" | _], _file, _flags) do
+    {:error, "--config requires a non-empty path argument\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--config", path | rest], file, flags) when is_binary(path) do
+    parse_args(rest, file, %{flags | config_file: Path.expand(path)})
+  end
+
+  defp parse_args(["--config"], _file, _flags) do
+    {:error, "--config requires a path argument\n\n#{usage()}"}
+  end
+
   defp parse_args([<<"--", _::binary>> = flag | _], _file, _flags) do
     {:error, "unknown flag: #{flag}\n\n#{usage()}"}
   end
@@ -130,16 +147,18 @@ defmodule Minga.CLI do
     Usage: minga [options] [filename]
 
     Options:
-      -h, --help         Show this help message
-      -v, --version      Show version
-      --editor           Start in file editing mode (skip agentic view)
-      --no-context       Don't load the file as agent context
+      -h, --help             Show this help message
+      -v, --version          Show version
+      --config <path>        Use a custom config file instead of the default
+      --editor               Start in file editing mode (skip agentic view)
+      --no-context           Don't load the file as agent context
 
     Examples:
-      minga                    Start agentic view
-      minga README.md          Start agentic view with file as context
-      minga --editor README.md Open file in traditional editor
-      minga --no-context foo.ex  Agentic view, file open but not as context
+      minga                          Start agentic view
+      minga README.md                Start agentic view with file as context
+      minga --editor README.md       Open file in traditional editor
+      minga --no-context foo.ex      Agentic view, file open but not as context
+      minga --config ~/minimal.exs   Use a custom config profile
     """
   end
 
