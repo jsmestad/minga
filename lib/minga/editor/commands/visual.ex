@@ -23,12 +23,12 @@ defmodule Minga.Editor.Commands.Visual do
     visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)
 
-    yanked =
+    {yanked, reg_type} =
       case visual_type do
         :char ->
           text = BufferServer.get_range(buf, anchor, cursor)
           BufferServer.delete_range(buf, anchor, cursor)
-          text
+          {text, :charwise}
 
         :line ->
           {anchor_line, _} = anchor
@@ -37,10 +37,10 @@ defmodule Minga.Editor.Commands.Visual do
           end_line = max(anchor_line, cursor_line)
           text = BufferServer.get_lines_content(buf, start_line, end_line)
           BufferServer.delete_lines(buf, start_line, end_line)
-          text <> "\n"
+          {text <> "\n", :linewise}
       end
 
-    Helpers.put_register(state, yanked, :delete)
+    Helpers.put_register(state, yanked, :delete, reg_type)
   end
 
   def execute(
@@ -51,20 +51,20 @@ defmodule Minga.Editor.Commands.Visual do
     visual_type = ms.visual_type
     cursor = BufferServer.cursor(buf)
 
-    yanked =
+    {yanked, reg_type} =
       case visual_type do
         :char ->
-          BufferServer.get_range(buf, anchor, cursor)
+          {BufferServer.get_range(buf, anchor, cursor), :charwise}
 
         :line ->
           {anchor_line, _} = anchor
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          BufferServer.get_lines_content(buf, start_line, end_line) <> "\n"
+          {BufferServer.get_lines_content(buf, start_line, end_line) <> "\n", :linewise}
       end
 
-    Helpers.put_register(state, yanked, :yank)
+    Helpers.put_register(state, yanked, :yank, reg_type)
   end
 
   def execute(

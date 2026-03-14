@@ -39,17 +39,50 @@ defmodule Minga.Editor.Commands.Helpers do
   system clipboard. The 4-arity version lets callers override this
   explicitly (useful in tests to avoid depending on global Options state).
   """
-  @spec put_register(state(), String.t(), :yank | :delete) :: state()
-  def put_register(state, text, kind) do
-    put_register(state, text, kind, resolve_clipboard(state))
+  @spec put_register(state(), String.t(), :yank | :delete, Registers.reg_type()) :: state()
+  def put_register(state, text, kind, reg_type \\ :charwise) do
+    put_register_with_clipboard(state, text, kind, reg_type, resolve_clipboard(state))
   end
 
-  @spec put_register(state(), String.t(), :yank | :delete, clipboard_mode()) :: state()
-  def put_register(%{vim: %{reg: %{active: "_"}}} = state, _text, _kind, _clipboard) do
+  @doc """
+  Like `put_register/4` but with an explicit clipboard mode override.
+  Used in tests to avoid depending on global Options state.
+  """
+  @spec put_register_with_clipboard_override(
+          state(),
+          String.t(),
+          :yank | :delete,
+          Registers.reg_type(),
+          clipboard_mode()
+        ) :: state()
+  def put_register_with_clipboard_override(state, text, kind, reg_type, clipboard) do
+    put_register_with_clipboard(state, text, kind, reg_type, clipboard)
+  end
+
+  @spec put_register_with_clipboard(
+          state(),
+          String.t(),
+          :yank | :delete,
+          Registers.reg_type(),
+          clipboard_mode()
+        ) :: state()
+  defp put_register_with_clipboard(
+         %{vim: %{reg: %{active: "_"}}} = state,
+         _text,
+         _kind,
+         _reg_type,
+         _clipboard
+       ) do
     reset_active_register(state)
   end
 
-  def put_register(%{vim: %{reg: %{active: "+"}}} = state, text, kind, _clipboard) do
+  defp put_register_with_clipboard(
+         %{vim: %{reg: %{active: "+"}}} = state,
+         text,
+         kind,
+         reg_type,
+         _clipboard
+       ) do
     case Clipboard.write(text) do
       :ok ->
         :ok
@@ -61,39 +94,60 @@ defmodule Minga.Editor.Commands.Helpers do
         Minga.Log.warning(:editor, "Clipboard: write failed (#{reason})")
     end
 
-    state |> write_unnamed(text) |> maybe_write_yank(text, kind) |> reset_active_register()
+    state
+    |> write_unnamed(text, reg_type)
+    |> maybe_write_yank(text, kind, reg_type)
+    |> reset_active_register()
   end
 
-  def put_register(%{vim: %{reg: %{active: name} = reg}} = state, text, kind, clipboard)
-      when name >= "A" and name <= "Z" do
+  defp put_register_with_clipboard(
+         %{vim: %{reg: %{active: name} = reg}} = state,
+         text,
+         kind,
+         reg_type,
+         clipboard
+       )
+       when name >= "A" and name <= "Z" do
     lower = String.downcase(name)
-    existing = Registers.get(reg, lower) || ""
-    appended = existing <> text
+
+    {existing_text, _existing_type} =
+      case Registers.get(reg, lower) do
+        {t, ty} -> {t, ty}
+        nil -> {"", :charwise}
+      end
+
+    appended = existing_text <> text
 
     state
-    |> put_in_register(lower, appended)
-    |> write_unnamed(text)
-    |> maybe_write_yank(text, kind)
+    |> put_in_register(lower, appended, reg_type)
+    |> write_unnamed(text, reg_type)
+    |> maybe_write_yank(text, kind, reg_type)
     |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
 
-  def put_register(%{vim: %{reg: %{active: name}}} = state, text, kind, clipboard)
-      when name >= "a" and name <= "z" do
+  defp put_register_with_clipboard(
+         %{vim: %{reg: %{active: name}}} = state,
+         text,
+         kind,
+         reg_type,
+         clipboard
+       )
+       when name >= "a" and name <= "z" do
     state
-    |> put_in_register(name, text)
-    |> write_unnamed(text)
-    |> maybe_write_yank(text, kind)
+    |> put_in_register(name, text, reg_type)
+    |> write_unnamed(text, reg_type)
+    |> maybe_write_yank(text, kind, reg_type)
     |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
 
-  def put_register(state, text, kind, clipboard) do
+  defp put_register_with_clipboard(state, text, kind, reg_type, clipboard) do
     name = if state.vim.reg.active == "", do: "", else: state.vim.reg.active
 
     state
-    |> put_in_register(name, text)
-    |> maybe_write_yank(text, kind)
+    |> put_in_register(name, text, reg_type)
+    |> maybe_write_yank(text, kind, reg_type)
     |> maybe_sync_clipboard(text, clipboard)
     |> reset_active_register()
   end
@@ -109,59 +163,77 @@ defmodule Minga.Editor.Commands.Helpers do
   Reads `clipboard_mode` from `state` by default. The 2-arity version
   lets callers override this explicitly for testing.
   """
-  @spec get_register(state()) :: {String.t() | nil, state()}
+  @spec get_register(state()) :: {String.t() | nil, Registers.reg_type(), state()}
   def get_register(state) do
     get_register(state, resolve_clipboard(state))
   end
 
-  @spec get_register(state(), clipboard_mode()) :: {String.t() | nil, state()}
+  @spec get_register(state(), clipboard_mode()) ::
+          {String.t() | nil, Registers.reg_type(), state()}
   def get_register(%{vim: %{reg: %{active: "+"}}} = state, _clipboard) do
     text = Clipboard.read()
-    {text, reset_active_register(state)}
+    {text, :charwise, reset_active_register(state)}
   end
 
   def get_register(%{vim: %{reg: reg}} = state, clipboard) do
     key = if reg.active == "", do: "", else: reg.active
-    stored = Registers.get(reg, key)
-    text = maybe_read_clipboard(key, stored, clipboard)
-    {text, reset_active_register(state)}
+    entry = Registers.get(reg, key)
+
+    {text, reg_type} =
+      case entry do
+        {t, ty} -> {t, ty}
+        nil -> {nil, :charwise}
+      end
+
+    {final_text, final_type} = maybe_read_clipboard(key, text, reg_type, clipboard)
+    {final_text, final_type, reset_active_register(state)}
   end
 
   # When pasting from the unnamed register with clipboard sync enabled,
   # check the system clipboard. If its content differs from what we stored,
   # the user copied something externally, so prefer the clipboard content.
-  @spec maybe_read_clipboard(String.t(), String.t() | nil, clipboard_mode()) :: String.t() | nil
-  defp maybe_read_clipboard("", stored, clipboard) do
+  # Clipboard reads are always :charwise since we have no type metadata.
+  @spec maybe_read_clipboard(
+          String.t(),
+          String.t() | nil,
+          Registers.reg_type(),
+          clipboard_mode()
+        ) :: {String.t() | nil, Registers.reg_type()}
+  defp maybe_read_clipboard("", stored, reg_type, clipboard) do
     if clipboard in [:unnamedplus, :unnamed] do
-      read_clipboard_or_fallback(stored)
+      read_clipboard_or_fallback(stored, reg_type)
     else
-      stored
+      {stored, reg_type}
     end
   end
 
-  defp maybe_read_clipboard(_key, stored, _clipboard), do: stored
+  defp maybe_read_clipboard(_key, stored, reg_type, _clipboard), do: {stored, reg_type}
 
-  @spec read_clipboard_or_fallback(String.t() | nil) :: String.t() | nil
-  defp read_clipboard_or_fallback(stored) do
+  @spec read_clipboard_or_fallback(String.t() | nil, Registers.reg_type()) ::
+          {String.t() | nil, Registers.reg_type()}
+  defp read_clipboard_or_fallback(stored, reg_type) do
     case Clipboard.read() do
-      nil -> stored
-      "" -> stored
-      clipboard_text when clipboard_text != stored -> clipboard_text
-      _same -> stored
+      nil -> {stored, reg_type}
+      "" -> {stored, reg_type}
+      clipboard_text when clipboard_text != stored -> {clipboard_text, :charwise}
+      _same -> {stored, reg_type}
     end
   end
 
-  @spec put_in_register(state(), String.t(), String.t()) :: state()
-  def put_in_register(state, name, text) do
-    %{state | vim: %{state.vim | reg: Registers.put(state.vim.reg, name, text)}}
+  @spec put_in_register(state(), String.t(), String.t(), Registers.reg_type()) :: state()
+  def put_in_register(state, name, text, reg_type \\ :charwise) do
+    %{state | vim: %{state.vim | reg: Registers.put(state.vim.reg, name, text, reg_type)}}
   end
 
-  @spec write_unnamed(state(), String.t()) :: state()
-  def write_unnamed(state, text), do: put_in_register(state, "", text)
+  @spec write_unnamed(state(), String.t(), Registers.reg_type()) :: state()
+  def write_unnamed(state, text, reg_type \\ :charwise),
+    do: put_in_register(state, "", text, reg_type)
 
-  @spec maybe_write_yank(state(), String.t(), :yank | :delete) :: state()
-  def maybe_write_yank(state, text, :yank), do: put_in_register(state, "0", text)
-  def maybe_write_yank(state, _text, :delete), do: state
+  @spec maybe_write_yank(state(), String.t(), :yank | :delete, Registers.reg_type()) :: state()
+  def maybe_write_yank(state, text, :yank, reg_type),
+    do: put_in_register(state, "0", text, reg_type)
+
+  def maybe_write_yank(state, _text, :delete, _reg_type), do: state
 
   @doc """
   Syncs text to the system clipboard when the `clipboard` option is set
