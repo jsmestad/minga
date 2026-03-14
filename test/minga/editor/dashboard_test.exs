@@ -69,7 +69,7 @@ defmodule Minga.Editor.DashboardTest do
 
     test "returns correct command after moving cursor" do
       state = Dashboard.new_state() |> Dashboard.cursor_down()
-      assert Dashboard.selected_command(state) == :recent_files
+      assert Dashboard.selected_command(state) == :project_recent_files
     end
 
     test "returns open_file command for recent file items" do

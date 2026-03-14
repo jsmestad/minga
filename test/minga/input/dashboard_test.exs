@@ -19,6 +19,10 @@ defmodule Minga.Input.DashboardTest do
     }
   end
 
+  # Kitty keyboard protocol arrow key codepoints
+  @arrow_up 57_352
+  @arrow_down 57_353
+
   describe "handle_key/3 when dashboard is active" do
     test "j moves cursor down" do
       state = state_with_dashboard()
@@ -34,6 +38,32 @@ defmodule Minga.Input.DashboardTest do
 
       {:handled, new_state} = DashInput.handle_key(state, ?k, 0)
       assert new_state.dashboard.cursor == length(state.dashboard.items) - 1
+    end
+
+    test "arrow down moves cursor down" do
+      state = state_with_dashboard()
+      assert state.dashboard.cursor == 0
+
+      {:handled, new_state} = DashInput.handle_key(state, @arrow_down, 0)
+      assert new_state.dashboard.cursor == 1
+    end
+
+    test "arrow up moves cursor up (wraps)" do
+      state = state_with_dashboard()
+      assert state.dashboard.cursor == 0
+
+      {:handled, new_state} = DashInput.handle_key(state, @arrow_up, 0)
+      assert new_state.dashboard.cursor == length(state.dashboard.items) - 1
+    end
+
+    test "space selects the current item and clears dashboard" do
+      state = state_with_dashboard()
+      # First item is :find_file which opens a picker; the picker open
+      # call will fail in this test context but the dashboard should
+      # still be cleared. Catch the error and verify the intent.
+      result = DashInput.handle_key(state, 32, 0)
+      assert {:handled, new_state} = result
+      assert new_state.dashboard == nil
     end
 
     test "other keys pass through" do

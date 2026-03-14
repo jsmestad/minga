@@ -3,8 +3,8 @@ defmodule Minga.Editor.Dashboard do
   Dashboard home screen renderer.
 
   Renders the editor's landing page when no file buffers are open. Shows
-  an ASCII pretzel logo, quick-action shortcuts, recent files, and a
-  version string. All content is horizontally centered.
+  an ASCII mountain range header, quick-action shortcuts, recent files,
+  and a version string. All content is horizontally centered.
 
   This is a pure rendering module: it takes dimensions, theme, and state,
   and returns a list of `DisplayList.draw()` tuples. No side effects.
@@ -77,9 +77,9 @@ defmodule Minga.Editor.Dashboard do
   @doc """
   Renders the dashboard as a list of display list draws.
 
-  Lays out the pretzel logo, quick actions, recent files heading, recent
-  file entries, and a bottom-pinned version string, all horizontally
-  centered in the given `width` x `height` area.
+  Lays out the mountain range header, quick actions, recent files
+  heading, recent file entries, and a bottom-pinned version string, all
+  horizontally centered in the given `width` x `height` area.
   """
   @spec render(pos_integer(), pos_integer(), Theme.t(), state()) :: [DisplayList.draw()]
   def render(width, height, theme, dash_state) do
@@ -168,29 +168,16 @@ defmodule Minga.Editor.Dashboard do
   @spec logo() :: [String.t()]
   defp logo do
     [
-      "            .::^^^^::.",
-      "         .^^          ^^.",
-      "       .^   .::^^^^::.   ^.",
-      "      :   .^          ^.   :",
-      "     :  .^   .:::::.   ^.  :",
-      "    :  :   .^       ^.   :  :",
-      "   :  :  .^           ^.  :  :",
-      "   :  :  :             :  :  :",
-      "   :  :  :             :  :  :",
-      "    :  :  ^.         .^  :  :",
-      "     :  ^.  ^.     .^  .^  :",
-      "      :   ^.  ^. .^  .^   :",
-      "       ^.   ^.  Y  .^   .^",
-      "         ^.  .^   ^.  .^",
-      "          .^^ .^.^ ^^.",
-      "        .^   .^   ^.   ^.",
-      "       :   .^       ^.   :",
-      "      :  .^           ^.  :",
-      "      :  :             :  :",
-      "       :  ^.         .^  :",
-      "        ^.  ^::...::^  .^",
-      "          ^^.        .^^",
-      "             ^^^^^^^^"
+      "                /\\                                        ",
+      "               /  \\            /\\                         ",
+      "              /    \\          /  \\         /\\             ",
+      "             /      \\   /\\  /    \\       /  \\            ",
+      "            /        \\ /  \\/      \\     /    \\     /\\    ",
+      "           /          V    \\       \\   /      \\   /  \\   ",
+      "      /\\  /                 \\       \\ /        \\ /    \\  ",
+      "     /  \\/                   \\       V          V      \\ ",
+      "    /                         \\                         \\",
+      "───/                           \\─────────────────────────"
     ]
   end
 
@@ -211,10 +198,10 @@ defmodule Minga.Editor.Dashboard do
   defp quick_actions do
     [
       %{label: "Find file", shortcut: "SPC f f", command: :find_file},
-      %{label: "Recent files", shortcut: "SPC f r", command: :recent_files},
+      %{label: "Recent files", shortcut: "SPC f r", command: :project_recent_files},
       %{label: "New buffer", shortcut: "SPC b N", command: :new_buffer},
-      %{label: "Agent session", shortcut: "SPC a a", command: :activate_agent},
-      %{label: "Switch project", shortcut: "SPC p p", command: :find_project}
+      %{label: "Agent session", shortcut: "SPC a a", command: :toggle_agentic_view},
+      %{label: "Switch project", shortcut: "SPC p p", command: :project_switch}
     ]
   end
 
