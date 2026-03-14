@@ -9,6 +9,7 @@ defmodule Minga.Input.AgentPanelNavTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
+  alias Minga.Keymap.Active, as: KeymapActive
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,
@@ -122,6 +123,21 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {new_line, _} = BufferServer.cursor(buf)
       assert new_line > start_line
+    end
+  end
+
+  describe "leader sequence passthrough" do
+    test "passes through when leader_node is set so commands run against real buffer" do
+      state = make_state()
+
+      # Simulate a leader sequence in progress (SPC b was pressed, waiting for N)
+      leader_trie = KeymapActive.leader_trie()
+      mode_state = %{state.vim.mode_state | leader_node: leader_trie}
+      state = %{state | vim: %{state.vim | mode_state: mode_state}}
+
+      # Should passthrough, not route through delegate_to_mode_fsm
+      # (which swaps buffers.active and could clobber it on restore).
+      {:passthrough, _state} = AgentPanel.handle_key(state, ?N, 0)
     end
   end
 
