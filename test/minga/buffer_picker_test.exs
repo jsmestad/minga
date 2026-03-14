@@ -42,29 +42,30 @@ defmodule Minga.BufferPickerTest do
   describe "filtering" do
     @tag :tmp_dir
     test "typing filters the buffer list", %{tmp_dir: tmp_dir} do
-      path1 = Path.join(tmp_dir, "foo.txt")
-      path2 = Path.join(tmp_dir, "bar.txt")
-      path3 = Path.join(tmp_dir, "baz.txt")
-      File.write!(path1, "foo")
-      File.write!(path2, "bar")
-      File.write!(path3, "baz")
+      # Use filenames whose unique prefixes don't appear in the tmp_dir path.
+      # The picker matches against the full file path (desc field), so if the
+      # directory name contains the filter substring, all files match.
+      path1 = Path.join(tmp_dir, "xylo.txt")
+      path2 = Path.join(tmp_dir, "zap.txt")
+      path3 = Path.join(tmp_dir, "zen.txt")
+      File.write!(path1, "xylo")
+      File.write!(path2, "zap")
+      File.write!(path3, "zen")
 
-      ctx = start_editor("foo", file_path: path1)
+      ctx = start_editor("xylo", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
       send_keys(ctx, ":e #{path3}<CR>")
 
-      # Open picker and type "ba"
+      # Open picker and type "ze" to match only zen.txt
       send_keys(ctx, "<SPC>bb")
-      send_key(ctx, ?b)
-      send_key(ctx, ?a)
+      send_key(ctx, ?z)
+      send_key(ctx, ?e)
 
-      # Should see bar and baz but not foo (skip row 0 which is the tab bar)
+      # Should see zen but not xylo (skip row 0 which is the tab bar)
       screen = screen_text(ctx)
-      # Drop the tab bar row before checking picker content
       picker_text = screen |> Enum.drop(1) |> Enum.join("\n")
-      assert String.contains?(picker_text, "bar.txt")
-      assert String.contains?(picker_text, "baz.txt")
-      refute String.contains?(picker_text, "foo.txt")
+      assert String.contains?(picker_text, "zen.txt")
+      refute String.contains?(picker_text, "xylo.txt")
     end
   end
 

@@ -20,6 +20,8 @@ defmodule Minga.Command.RegistryTest do
           :save,
           :quit,
           :force_quit,
+          :quit_all,
+          :force_quit_all,
           :move_left,
           :move_right,
           :move_up,

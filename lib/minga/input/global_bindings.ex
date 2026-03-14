@@ -32,10 +32,10 @@ defmodule Minga.Input.GlobalBindings do
     {:handled, state}
   end
 
-  # Ctrl+Q: quit
+  # Ctrl+Q: close tab or quit (tab-aware, matches :q behavior)
   def handle_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    System.stop(0)
-    {:handled, state}
+    new_state = Minga.Editor.dispatch_command(state, :quit)
+    {:handled, new_state}
   end
 
   def handle_key(state, _cp, _mods) do

@@ -3,6 +3,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.TabBar
 
   defp start_editor(content) do
     {:ok, buffer} = BufferServer.start_link(content: content)
@@ -28,6 +30,11 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
     text
     |> String.to_charlist()
     |> Enum.each(fn char -> send_key(editor, char) end)
+  end
+
+  defp tab_count(editor) do
+    state = :sys.get_state(editor)
+    TabBar.count(state.tab_bar)
   end
 
   describe "command mode" do
@@ -127,5 +134,57 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
       send_key(editor, ?s, 0x02)
       assert Process.alive?(editor)
     end
+  end
+
+  describe "tab-aware :q" do
+    test ":q with multiple tabs closes the current tab without exiting" do
+      {editor, _buffer} = start_editor("first file")
+      assert tab_count(editor) == 1
+
+      # Opening a second file on a file tab adds to the same tab's buffer
+      # list (no new tab). To get 2 tabs, inject a second tab directly.
+      add_second_tab(editor)
+      assert tab_count(editor) == 2
+
+      # Type :q<Enter>
+      send_key(editor, ?:)
+      type_string(editor, "q")
+      send_key(editor, 13)
+
+      assert Process.alive?(editor), "Editor should stay alive when closing one of multiple tabs"
+      assert tab_count(editor) == 1
+    end
+
+    # Note: `:q` with a single tab calls `System.stop(0)` which can't be
+    # tested without killing the test process. The exit path is verified
+    # by code inspection: `close_tab_or_quit` falls through to
+    # `shutdown_editor` when the tab bar has only one tab.
+
+    test ":q does not kill the buffer (matches Neovim)" do
+      {editor, first_buffer} = start_editor("first file")
+      add_second_tab(editor)
+      assert tab_count(editor) == 2
+
+      # Type :q<Enter> to close the current tab
+      send_key(editor, ?:)
+      type_string(editor, "q")
+      send_key(editor, 13)
+
+      # The first buffer should still be alive (not killed)
+      assert Process.alive?(first_buffer),
+             "Buffer should stay alive after :q closes its tab"
+    end
+  end
+
+  # Injects a second file tab into the editor's tab bar by manipulating
+  # state directly. This avoids needing to go through the full open_file
+  # path which adds buffers to the existing tab rather than creating new ones.
+  defp add_second_tab(editor) do
+    :sys.replace_state(editor, fn state ->
+      {:ok, buffer2} = BufferServer.start_link(content: "second tab content")
+      {new_tb, _tab} = TabBar.add(state.tab_bar, :file, "second.txt")
+      new_buffers = Buffers.add(state.buffers, buffer2)
+      %{state | tab_bar: new_tb, buffers: new_buffers}
+    end)
   end
 end

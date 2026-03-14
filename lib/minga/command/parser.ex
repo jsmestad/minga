@@ -13,6 +13,8 @@ defmodule Minga.Command.Parser do
   | `w!`             | `{:force_save, []}`            |
   | `q`              | `{:quit, []}`                  |
   | `q!`             | `{:force_quit, []}`            |
+  | `qa`             | `{:quit_all, []}`              |
+  | `qa!`            | `{:force_quit_all, []}`        |
   | `wq`             | `{:save_quit, []}`             |
   | `e <filename>`   | `{:edit, filename}`            |
   | `e!`             | `{:force_edit, []}`            |
@@ -25,9 +27,11 @@ defmodule Minga.Command.Parser do
 
   * `{:save, []}` — write the current buffer to disk (`:w`)
   * `{:force_save, []}` — force-write, skipping mtime check (`:w!`)
-  * `{:quit, []}` — quit the editor (`:q`)
-  * `{:force_quit, []}` — quit without saving (`:q!`)
-  * `{:save_quit, []}` — save and quit (`:wq`)
+  * `{:quit, []}` — close current tab or quit if last tab (`:q`)
+  * `{:force_quit, []}` — force close tab or quit without saving (`:q!`)
+  * `{:quit_all, []}` — quit the entire editor (`:qa`)
+  * `{:force_quit_all, []}` — force quit the entire editor (`:qa!`)
+  * `{:save_quit, []}` — save and close tab, or save and quit if last tab (`:wq`)
   * `{:edit, filename}` — open a file (`:e filename`)
   * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
   * `{:new_buffer, []}` — create a new empty buffer (`:new` / `:enew`)
@@ -40,6 +44,8 @@ defmodule Minga.Command.Parser do
           | {:force_save, []}
           | {:quit, []}
           | {:force_quit, []}
+          | {:quit_all, []}
+          | {:force_quit_all, []}
           | {:save_quit, []}
           | {:edit, String.t()}
           | {:force_edit, []}
@@ -105,6 +111,10 @@ defmodule Minga.Command.Parser do
   defp do_parse("w!"), do: {:force_save, []}
   defp do_parse("q"), do: {:quit, []}
   defp do_parse("q!"), do: {:force_quit, []}
+  defp do_parse("qa"), do: {:quit_all, []}
+  defp do_parse("qa!"), do: {:force_quit_all, []}
+  defp do_parse("qall"), do: {:quit_all, []}
+  defp do_parse("qall!"), do: {:force_quit_all, []}
   defp do_parse("wq"), do: {:save_quit, []}
   defp do_parse("e!"), do: {:force_edit, []}
   defp do_parse("checktime"), do: {:checktime, []}

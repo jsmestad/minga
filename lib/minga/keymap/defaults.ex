@@ -61,7 +61,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?w, @none}, {?d, @none}], :window_close, "Close window"},
 
     # ── Quit ──────────────────────────────────────────────────────────────────
-    {[{?q, @none}, {?q, @none}], :quit, "Quit editor"},
+    {[{?q, @none}, {?q, @none}], :quit_all, "Quit editor"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},

@@ -26,6 +26,22 @@ defmodule Minga.Command.ParserTest do
     test ":wq parses to {:save_quit, []}" do
       assert {:save_quit, []} = Parser.parse("wq")
     end
+
+    test ":qa parses to {:quit_all, []}" do
+      assert {:quit_all, []} = Parser.parse("qa")
+    end
+
+    test ":qa! parses to {:force_quit_all, []}" do
+      assert {:force_quit_all, []} = Parser.parse("qa!")
+    end
+
+    test ":qall parses to {:quit_all, []}" do
+      assert {:quit_all, []} = Parser.parse("qall")
+    end
+
+    test ":qall! parses to {:force_quit_all, []}" do
+      assert {:force_quit_all, []} = Parser.parse("qall!")
+    end
   end
 
   describe "parse/1 — edit command" do

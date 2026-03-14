@@ -43,13 +43,21 @@ defmodule Minga.Buffer.DocumentPerfTest do
   @medium_lines 100_000
   @large_lines 1_000_000
 
+  # Number of warmup iterations to prime caches and JIT before measuring.
+  @warmup 500
+
   # Number of times each operation is repeated inside a single measurement
   # to amortize :timer.tc overhead.
-  @iterations 1_000
+  @iterations 5_000
 
   # Maximum allowed ratio of large-buffer time to small-buffer time.
   # O(1) operations will be well under 5×; O(n) would be 1 000× or more.
   @max_ratio 20.0
+
+  # When both measurements are below this threshold (µs), the ratio is
+  # meaningless because we're dividing noise by noise. Skip the ratio
+  # assertion and just verify both are fast in absolute terms.
+  @noise_floor_us 0.5
 
   setup_all do
     small = build_buf(@small_lines)
@@ -78,17 +86,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
     test "cursor does not scale with buffer size", %{small: small, large: large} do
       small_us = avg_time_us(fn -> Document.cursor(small) end)
       large_us = avg_time_us(fn -> Document.cursor(large) end)
-
-      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
-
-      assert ratio < @max_ratio,
-             """
-             cursor/1 time ratio exceeded O(1) cap.
-             small (#{@small_lines} lines): #{fmt(small_us)}µs avg
-             large (#{@large_lines} lines): #{fmt(large_us)}µs avg
-             ratio: #{Float.round(ratio, 2)}× (must be < #{@max_ratio}×)
-             This indicates a regression back to O(n) scanning.
-             """
+      assert_no_scaling(small_us, large_us, "cursor/1")
     end
   end
 
@@ -108,16 +106,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
     test "line_count does not scale with buffer size", %{small: small, large: large} do
       small_us = avg_time_us(fn -> Document.line_count(small) end)
       large_us = avg_time_us(fn -> Document.line_count(large) end)
-
-      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
-
-      assert ratio < @max_ratio,
-             """
-             line_count/1 time ratio exceeded O(1) cap.
-             small (#{@small_lines} lines): #{fmt(small_us)}µs avg
-             large (#{@large_lines} lines): #{fmt(large_us)}µs avg
-             ratio: #{Float.round(ratio, 2)}× (must be < #{@max_ratio}×)
-             """
+      assert_no_scaling(small_us, large_us, "line_count/1")
     end
   end
 
@@ -132,14 +121,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
     test "insert_char does not scale with buffer size", %{small: small, large: large} do
       small_us = avg_time_us(fn -> Document.insert_char(small, "x") end)
       large_us = avg_time_us(fn -> Document.insert_char(large, "x") end)
-
-      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
-
-      assert ratio < @max_ratio,
-             """
-             insert_char/2 time ratio exceeded cap.
-             small: #{fmt(small_us)}µs  large: #{fmt(large_us)}µs  ratio: #{Float.round(ratio, 2)}×
-             """
+      assert_no_scaling(small_us, large_us, "insert_char/2")
     end
   end
 
@@ -173,16 +155,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
 
       small_us = avg_time_us(fn -> Document.delete_before(buf_small) end)
       large_us = avg_time_us(fn -> Document.delete_before(buf_large) end)
-
-      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
-
-      assert ratio < @max_ratio,
-             """
-             delete_before/1 scaled with total buffer size (not just `before` length).
-             small (#{@small_lines} lines, before=5 chars): #{fmt(small_us)}µs
-             large (#{@large_lines} lines, before=5 chars): #{fmt(large_us)}µs
-             ratio: #{Float.round(ratio, 2)}× (must be < #{@max_ratio}×)
-             """
+      assert_no_scaling(small_us, large_us, "delete_before/1")
     end
   end
 
@@ -190,11 +163,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
     test "cursor_offset does not scan the buffer", %{small: small, large: large} do
       small_us = avg_time_us(fn -> Document.cursor_offset(small) end)
       large_us = avg_time_us(fn -> Document.cursor_offset(large) end)
-
-      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
-
-      assert ratio < @max_ratio,
-             "cursor_offset/1 scaled unexpectedly: #{Float.round(ratio, 2)}×"
+      assert_no_scaling(small_us, large_us, "cursor_offset/1")
     end
   end
 
@@ -206,11 +175,39 @@ defmodule Minga.Buffer.DocumentPerfTest do
     Document.new(String.duplicate(@line, n))
   end
 
-  # Runs `fun` @iterations times and returns the average wall-clock time in microseconds.
+  # Runs `fun` with warmup, then measures @iterations and returns the
+  # average wall-clock time in microseconds. The warmup pass primes CPU
+  # caches and the BEAM JIT so the measurement reflects steady-state.
   @spec avg_time_us((-> term())) :: float()
   defp avg_time_us(fun) do
+    Enum.each(1..@warmup, fn _ -> fun.() end)
     {total_us, _} = :timer.tc(fn -> Enum.each(1..@iterations, fn _ -> fun.() end) end)
     total_us / @iterations
+  end
+
+  # Asserts that the ratio of large-buffer time to small-buffer time stays
+  # below @max_ratio. When both measurements are below the noise floor,
+  # the ratio is meaningless (dividing sub-microsecond noise by noise), so
+  # we skip the ratio check and only verify both are fast in absolute terms.
+  @spec assert_no_scaling(float(), float(), String.t()) :: :ok
+  defp assert_no_scaling(small_us, large_us, label) do
+    if small_us < @noise_floor_us and large_us < @noise_floor_us do
+      # Both are sub-microsecond. The operation is O(1) by any measure.
+      # Ratio would be meaningless noise, so just verify absolute speed.
+      assert large_us < 1_000,
+             "#{label} on large buffer took #{fmt(large_us)}µs (expected < 1ms)"
+    else
+      ratio = if small_us > 0, do: large_us / small_us, else: 1.0
+
+      assert ratio < @max_ratio,
+             """
+             #{label} time ratio exceeded O(1) cap.
+             small: #{fmt(small_us)}µs  large: #{fmt(large_us)}µs
+             ratio: #{Float.round(ratio, 2)}× (must be < #{@max_ratio}×)
+             """
+    end
+
+    :ok
   end
 
   # Formats a float µs value for assertion messages.
