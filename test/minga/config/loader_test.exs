@@ -435,7 +435,7 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
     end
 
-    test "nonexistent --config path produces a nil load error (file just doesn't exist)" do
+    test "nonexistent --config path warns in status bar but does not crash" do
       custom_path = "/tmp/minga_nonexistent_#{System.unique_integer([:positive])}.exs"
 
       Application.put_env(:minga, :cli_startup_flags, %{
@@ -460,10 +460,46 @@ defmodule Minga.Config.LoaderTest do
       name = :"loader_missing_custom_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name)
 
-      # Same behavior as a missing default config: no error, no crash
-      assert Loader.load_error(pid) == nil
-      # But config_path still reports the custom path
+      # User explicitly requested a file that doesn't exist: warn them
+      assert Loader.load_error(pid) =~ "Custom config not found"
+      assert Loader.load_error(pid) =~ custom_path
+      # config_path still reports the custom path
       assert Loader.config_path(pid) == custom_path
+    end
+
+    test "--config with non-.exs extension warns about potentially invalid file" do
+      custom_dir =
+        Path.join(System.tmp_dir!(), "minga_noexs_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(custom_dir)
+      custom_path = Path.join(custom_dir, "my_config.txt")
+
+      File.write!(custom_path, """
+      use Minga.Config
+      set :tab_width, 7
+      """)
+
+      {_dir, cleanup} = make_config_dir("")
+
+      Application.put_env(:minga, :cli_startup_flags, %{
+        force_editor: false,
+        no_context: false,
+        config_file: custom_path
+      })
+
+      on_exit(fn ->
+        Application.delete_env(:minga, :cli_startup_flags)
+        cleanup.()
+        File.rm_rf!(custom_dir)
+      end)
+
+      name = :"loader_noexs_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      # The file was loaded (tab_width changed), but a warning is shown
+      assert Options.get(:tab_width) == 7
+      assert Loader.load_error(pid) =~ "does not end in .exs"
+      assert Loader.load_error(pid) =~ custom_path
     end
 
     test "project-local .minga.exs still loads after custom --config" do

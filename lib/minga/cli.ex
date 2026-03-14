@@ -108,6 +108,14 @@ defmodule Minga.CLI do
     parse_args(rest, file, %{flags | no_context: true})
   end
 
+  defp parse_args(["--config", <<"--", _::binary>> | _], _file, _flags) do
+    {:error, "--config requires a path argument, not a flag\n\n#{usage()}"}
+  end
+
+  defp parse_args(["--config", "" | _], _file, _flags) do
+    {:error, "--config requires a non-empty path argument\n\n#{usage()}"}
+  end
+
   defp parse_args(["--config", path | rest], file, flags) when is_binary(path) do
     parse_args(rest, file, %{flags | config_file: Path.expand(path)})
   end

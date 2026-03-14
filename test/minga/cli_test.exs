@@ -102,6 +102,16 @@ defmodule Minga.CLITest do
       assert message =~ "--config requires a path argument"
     end
 
+    test "--config followed by another flag returns error" do
+      assert {:error, message} = CLI.parse_args(["--config", "--editor"])
+      assert message =~ "--config requires a path argument, not a flag"
+    end
+
+    test "--config with empty string returns error" do
+      assert {:error, message} = CLI.parse_args(["--config", ""])
+      assert message =~ "--config requires a non-empty path argument"
+    end
+
     test "--config flag appears in help output" do
       assert {:error, message} = CLI.parse_args(["--help"])
       assert message =~ "--config"
