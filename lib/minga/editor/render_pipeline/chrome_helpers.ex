@@ -95,6 +95,63 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     )
   end
 
+  @doc """
+  Renders the modeline for an agent chat window.
+
+  Shows vim mode, macro recording, and agent session status instead of
+  the filename/filetype/position info that buffer modelines display.
+  """
+  @spec render_agent_modeline(state(), Layout.window_layout()) ::
+          {[DisplayList.draw()], [Modeline.click_region()]}
+  def render_agent_modeline(state, win_layout) do
+    {modeline_row, _mc, modeline_width, modeline_height} = win_layout.modeline
+
+    if modeline_height == 0 do
+      {[], []}
+    else
+      {_row_off, col_off, _cw, _ch} = win_layout.content
+      agent = AgentAccess.agent(state)
+      panel = AgentAccess.panel(state)
+
+      message_count =
+        if agent.session do
+          try do
+            length(Session.messages(agent.session))
+          catch
+            :exit, _ -> 0
+          end
+        else
+          0
+        end
+
+      model_label =
+        if panel.model_name != "", do: panel.model_name, else: "Agent"
+
+      Modeline.render(
+        modeline_row,
+        modeline_width,
+        %{
+          mode: state.vim.mode,
+          mode_state: state.vim.mode_state,
+          file_name: "󰚩 #{model_label}",
+          filetype: :text,
+          dirty_marker: "",
+          cursor_line: message_count,
+          cursor_col: 0,
+          line_count: max(message_count, 1),
+          buf_index: 1,
+          buf_count: 1,
+          macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
+          agent_status: agent.status,
+          agent_theme_colors: Theme.agent_theme(state.theme),
+          mode_override: nil
+        },
+        state.theme,
+        col_off
+      )
+    end
+  end
+
   # ── Separators ─────────────────────────────────────────────────────────────
 
   @doc "Renders vertical split separators between windows."

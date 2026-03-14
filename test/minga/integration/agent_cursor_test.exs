@@ -79,10 +79,24 @@ defmodule Minga.Integration.AgentCursorTest do
     }
   end
 
-  # Finds the row number containing the given text substring.
+  # Finds the first row number containing the given text substring.
   @spec find_row_containing([String.t()], String.t()) :: non_neg_integer() | nil
   defp find_row_containing(rows, text) do
     Enum.find_index(rows, &String.contains?(&1, text))
+  end
+
+  # Finds the last row number containing the given text substring.
+  # Useful for finding the modeline when the same text appears in other UI areas.
+  @spec find_last_row_containing([String.t()], String.t()) :: non_neg_integer() | nil
+  defp find_last_row_containing(rows, text) do
+    rows
+    |> Enum.with_index()
+    |> Enum.filter(fn {row, _idx} -> String.contains?(row, text) end)
+    |> List.last()
+    |> case do
+      {_row, idx} -> idx
+      nil -> nil
+    end
   end
 
   # ── Tests ────────────────────────────────────────────────────────────────────
@@ -146,6 +160,53 @@ defmodule Minga.Integration.AgentCursorTest do
                "At #{width}x#{height}: cursor should be on row #{content_row}, " <>
                  "got row #{cursor_row}."
       end
+    end
+  end
+
+  describe "agent modeline" do
+    test "modeline shows vim mode and model name in agent view" do
+      ctx = start_agent_editor()
+
+      rows = screen_text(ctx)
+
+      # The modeline is the last row containing the model name (the sidebar
+      # also shows it, so we need the bottom-most occurrence).
+      modeline_idx = find_last_row_containing(rows, "claude-sonnet-4")
+      assert modeline_idx != nil, "Should find model name in the modeline"
+
+      modeline_text = Enum.at(rows, modeline_idx)
+
+      assert String.contains?(modeline_text, "NORMAL"),
+             "Modeline should show NORMAL mode, got: #{modeline_text}"
+    end
+
+    test "modeline shows INSERT mode after focusing input" do
+      ctx = start_agent_editor()
+
+      send_keys(ctx, "i")
+
+      rows = screen_text(ctx)
+
+      modeline_idx = find_last_row_containing(rows, "claude-sonnet-4")
+      assert modeline_idx != nil, "Should find modeline with model name"
+
+      modeline_text = Enum.at(rows, modeline_idx)
+
+      assert String.contains?(modeline_text, "INSERT"),
+             "Modeline should show INSERT mode after pressing i, got: #{modeline_text}"
+    end
+
+    test "modeline is below the input area" do
+      ctx = start_agent_editor()
+
+      rows = screen_text(ctx)
+
+      prompt_row = find_row_containing(rows, "Prompt")
+      modeline_row = find_last_row_containing(rows, "claude-sonnet-4")
+
+      assert prompt_row != nil, "Should find the prompt border"
+      assert modeline_row != nil, "Should find the modeline"
+      assert modeline_row > prompt_row, "Modeline should be below the prompt border"
     end
   end
 end
