@@ -28,6 +28,7 @@ defmodule Minga.Input do
   alias Minga.Input.DiffReview
   alias Minga.Input.FileTreeHandler
   alias Minga.Input.GlobalBindings
+  alias Minga.Input.Interrupt
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ModeFSM
   alias Minga.Input.Picker
@@ -39,6 +40,7 @@ defmodule Minga.Input do
   Returns the full default focus stack.
 
   Priority order (first handler wins):
+  0. Interrupt — Ctrl-G escape hatch, always active, resets to known-good state
   1. ConflictPrompt — modal, swallows all keys when active
   2. Picker — modal overlay, blocks all input while active
   3. Completion — insert-mode sub-dispatch for popup navigation
@@ -55,6 +57,7 @@ defmodule Minga.Input do
   @spec default_stack() :: [module()]
   def default_stack do
     [
+      Interrupt,
       Dashboard,
       ConflictPrompt,
       Picker,
@@ -76,6 +79,7 @@ defmodule Minga.Input do
   @spec overlay_handlers() :: [module()]
   def overlay_handlers do
     [
+      Interrupt,
       ConflictPrompt,
       Picker,
       Completion

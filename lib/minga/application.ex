@@ -21,6 +21,7 @@ defmodule Minga.Application do
       ├── Minga.Agent.Supervisor (DynamicSupervisor)
       ├── Minga.Parser.Manager
       ├── Minga.Port.Manager
+      ├── Minga.Editor.Watchdog
       └── Minga.Editor
 
   In standalone (Burrito) mode, automatically processes CLI arguments
@@ -72,6 +73,7 @@ defmodule Minga.Application do
           Minga.FileWatcher,
           Minga.Parser.Manager,
           {Minga.Port.Manager, [backend: backend]},
+          Minga.Editor.Watchdog,
           Minga.Editor
         ]
       else
