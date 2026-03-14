@@ -9,6 +9,13 @@ defmodule Minga.Editor.TabBarRenderer do
   Uses Powerline slant separators between tabs and handles overflow when
   tabs exceed the terminal width by scrolling to keep the active tab
   visible.
+
+  ## Close button behavior
+
+  Each tab reserves space for a close icon ("✕"). The icon is visible on
+  the active tab always, and on inactive tabs only when the mouse hovers
+  over that tab's region. When hidden, the reserved space renders as
+  blank (fg matches bg). Tab widths are stable regardless of hover state.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -29,14 +36,22 @@ defmodule Minga.Editor.TabBarRenderer do
   @overflow_left "\u{25C2} "
   @overflow_right " \u{25B8}"
 
+  # Close icon: U+2715 MULTIPLICATION X
+  @close_icon "✕"
+  @close_placeholder " "
+
   @doc """
   Renders the tab bar at the given row.
 
+  `hover_col` is the mouse column if the mouse is hovering on the tab bar
+  row, or `nil` if not hovering. Used to determine which inactive tab (if
+  any) should reveal its close button.
+
   Returns `{draw_commands, click_regions}`.
   """
-  @spec render(non_neg_integer(), pos_integer(), TabBar.t(), Theme.t()) ::
+  @spec render(non_neg_integer(), pos_integer(), TabBar.t(), Theme.t(), non_neg_integer() | nil) ::
           {[DisplayList.draw()], [click_region()]}
-  def render(row, cols, %TabBar{} = tb, %Theme{} = theme) do
+  def render(row, cols, %TabBar{} = tb, %Theme{} = theme, hover_col \\ nil) do
     colors = tab_bar_colors(theme)
 
     # Build logical segments for each tab (text, colors, tab id, width)
@@ -46,20 +61,24 @@ defmodule Minga.Editor.TabBarRenderer do
     total_width = Enum.reduce(segments, 0, fn seg, acc -> acc + seg.width + 1 end)
 
     if total_width <= cols do
-      render_segments(row, cols, segments, colors)
+      render_segments(row, cols, segments, colors, hover_col)
     else
-      render_overflow(row, cols, segments, tb.active_id, colors)
+      render_overflow(row, cols, segments, tb.active_id, colors, hover_col)
     end
   end
 
   # ── Segment building ───────────────────────────────────────────────────────
 
   @typep segment :: %{
-           text: String.t(),
+           body_text: String.t(),
+           close_text: String.t(),
            fg: Theme.color(),
            bg: Theme.color(),
            tab_id: pos_integer(),
-           width: non_neg_integer()
+           body_width: non_neg_integer(),
+           close_width: non_neg_integer(),
+           width: non_neg_integer(),
+           is_active: boolean()
          }
 
   @spec build_segments(TabBar.t(), map()) :: [segment()]
@@ -83,22 +102,40 @@ defmodule Minga.Editor.TabBarRenderer do
       attention = if tab.attention and not is_active, do: " !", else: ""
       number = tab_number(position)
 
-      text = " #{number}#{icon} #{label}#{dirty}#{status}#{attention} "
-      width = Unicode.display_width(text)
+      body_text = " #{number}#{icon} #{label}#{dirty}#{status}#{attention} "
+      close_text = "#{@close_icon} "
+
+      body_width = Unicode.display_width(body_text)
+      close_width = Unicode.display_width(close_text)
 
       # Override color for attention tabs (not active) to make the badge visible
       fg = if tab.attention and not is_active, do: colors.attention_fg, else: fg
 
-      %{text: text, fg: fg, bg: bg, tab_id: tab.id, width: width}
+      %{
+        body_text: body_text,
+        close_text: close_text,
+        fg: fg,
+        bg: bg,
+        tab_id: tab.id,
+        body_width: body_width,
+        close_width: close_width,
+        width: body_width + close_width,
+        is_active: is_active
+      }
     end)
   end
 
   # ── Normal rendering (fits in terminal width) ──────────────────────────────
 
-  @spec render_segments(non_neg_integer(), pos_integer(), [segment()], map()) ::
-          {[DisplayList.draw()], [click_region()]}
-  defp render_segments(row, cols, segments, colors) do
-    {draws, regions, col} = emit_segments(row, 0, segments, colors)
+  @spec render_segments(
+          non_neg_integer(),
+          pos_integer(),
+          [segment()],
+          map(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()]}
+  defp render_segments(row, cols, segments, colors, hover_col) do
+    {draws, regions, col} = emit_segments(row, 0, segments, colors, hover_col)
 
     # Fill remaining width
     fill = fill_draws(row, col, cols, colors.bg)
@@ -107,21 +144,33 @@ defmodule Minga.Editor.TabBarRenderer do
 
   # ── Overflow rendering (tabs exceed terminal width) ─────────────────────────
 
-  @spec render_overflow(non_neg_integer(), pos_integer(), [segment()], pos_integer(), map()) ::
-          {[DisplayList.draw()], [click_region()]}
-  defp render_overflow(row, cols, segments, active_id, colors) do
+  @spec render_overflow(
+          non_neg_integer(),
+          pos_integer(),
+          [segment()],
+          pos_integer(),
+          map(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()]}
+  defp render_overflow(row, cols, segments, active_id, colors, hover_col) do
     left_indicator_w = String.length(@overflow_left)
     right_indicator_w = String.length(@overflow_right)
     usable = cols - left_indicator_w - right_indicator_w
 
     # Find the scroll offset that keeps the active tab visible.
-    # Walk segments left to right, accumulating width. The scroll offset
-    # is the first pixel column that's visible.
     {scroll_offset, _} = find_scroll_offset(segments, active_id, usable)
 
     # Render visible segments with clipping
     {draws, regions, end_col} =
-      emit_segments_clipped(row, left_indicator_w, segments, colors, scroll_offset, usable)
+      emit_segments_clipped(
+        row,
+        left_indicator_w,
+        segments,
+        colors,
+        scroll_offset,
+        usable,
+        hover_col
+      )
 
     # Left overflow indicator
     show_left = scroll_offset > 0
@@ -185,21 +234,35 @@ defmodule Minga.Editor.TabBarRenderer do
 
   # ── Shared emit helpers ────────────────────────────────────────────────────
 
-  @spec emit_segments(non_neg_integer(), non_neg_integer(), [segment()], map()) ::
-          {[DisplayList.draw()], [click_region()], non_neg_integer()}
-  defp emit_segments(row, start_col, segments, colors) do
+  @spec emit_segments(
+          non_neg_integer(),
+          non_neg_integer(),
+          [segment()],
+          map(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()], non_neg_integer()}
+  defp emit_segments(row, start_col, segments, colors, hover_col) do
     Enum.reduce(segments, {[], [], start_col}, fn seg, {draws, regions, col} ->
-      # Tab content
-      tab_draw = {row, col, seg.text, [fg: seg.fg, bg: seg.bg]}
-      tab_end = col + seg.width
+      # Body draw
+      body_draw = {row, col, seg.body_text, [fg: seg.fg, bg: seg.bg]}
+      body_end = col + seg.body_width
 
-      # Click region
-      region = {col, tab_end - 1, :"tab_goto_#{seg.tab_id}"}
+      # Close icon draw (visible or hidden based on active/hover state)
+      close_visible = close_icon_visible?(seg, col, col + seg.width, hover_col)
+      close_fg = if close_visible, do: colors.close_hover_fg, else: seg.bg
+      close_text = if close_visible, do: seg.close_text, else: placeholder_text(seg.close_width)
+      close_draw = {row, body_end, close_text, [fg: close_fg, bg: seg.bg]}
+      close_end = body_end + seg.close_width
+
+      # Click regions: body for tab switch, close icon for tab close
+      body_region = {col, body_end - 1, :"tab_goto_#{seg.tab_id}"}
+      close_region = {body_end, close_end - 1, :"tab_close_#{seg.tab_id}"}
 
       # Powerline separator
-      {sep_draws, sep_end} = powerline_sep(row, tab_end, seg.bg, colors.bg, colors)
+      {sep_draws, sep_end} = powerline_sep(row, close_end, seg.bg, colors.bg, colors)
 
-      {draws ++ [tab_draw | sep_draws], [region | regions], sep_end}
+      {draws ++ [body_draw, close_draw | sep_draws], [close_region, body_region | regions],
+       sep_end}
     end)
   end
 
@@ -209,9 +272,18 @@ defmodule Minga.Editor.TabBarRenderer do
           [segment()],
           map(),
           non_neg_integer(),
-          pos_integer()
+          pos_integer(),
+          non_neg_integer() | nil
         ) :: {[DisplayList.draw()], [click_region()], non_neg_integer()}
-  defp emit_segments_clipped(row, screen_start, segments, colors, scroll_offset, usable) do
+  defp emit_segments_clipped(
+         row,
+         screen_start,
+         segments,
+         colors,
+         scroll_offset,
+         usable,
+         hover_col
+       ) do
     screen_end = screen_start + usable
 
     Enum.reduce(segments, {[], [], 0}, fn seg, {draws, regions, logical_col} ->
@@ -221,26 +293,73 @@ defmodule Minga.Editor.TabBarRenderer do
       if seg_end <= scroll_offset or screen_col >= screen_end do
         {draws, regions, seg_end}
       else
-        tab_draw = {row, screen_col, seg.text, [fg: seg.fg, bg: seg.bg]}
-        tab_screen_end = screen_col + seg.width
-        region = clipped_region(screen_col, tab_screen_end, screen_start, screen_end, seg.tab_id)
-        {sep_draws, _} = powerline_sep(row, tab_screen_end, seg.bg, colors.bg, colors)
+        {new_draws, new_regions} =
+          emit_clipped_segment(row, seg, screen_col, screen_start, screen_end, colors, hover_col)
 
-        {draws ++ [tab_draw | sep_draws], maybe_add_region(regions, region), seg_end}
+        {draws ++ new_draws, new_regions ++ regions, seg_end}
       end
     end)
+  end
+
+  @spec emit_clipped_segment(
+          non_neg_integer(),
+          segment(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map(),
+          non_neg_integer() | nil
+        ) :: {[DisplayList.draw()], [click_region()]}
+  defp emit_clipped_segment(row, seg, screen_col, screen_start, screen_end, colors, hover_col) do
+    body_screen_end = screen_col + seg.body_width
+    close_screen_end = screen_col + seg.width
+
+    close_visible = close_icon_visible?(seg, screen_col, close_screen_end, hover_col)
+    close_fg = if close_visible, do: colors.close_hover_fg, else: seg.bg
+
+    close_text =
+      if close_visible, do: seg.close_text, else: placeholder_text(seg.close_width)
+
+    body_draw = {row, screen_col, seg.body_text, [fg: seg.fg, bg: seg.bg]}
+    close_draw = {row, body_screen_end, close_text, [fg: close_fg, bg: seg.bg]}
+
+    body_region =
+      clipped_region(
+        screen_col,
+        body_screen_end,
+        screen_start,
+        screen_end,
+        :"tab_goto_#{seg.tab_id}"
+      )
+
+    close_region =
+      clipped_region(
+        body_screen_end,
+        close_screen_end,
+        screen_start,
+        screen_end,
+        :"tab_close_#{seg.tab_id}"
+      )
+
+    {sep_draws, _} = powerline_sep(row, close_screen_end, seg.bg, colors.bg, colors)
+
+    regions =
+      []
+      |> maybe_add_region(body_region)
+      |> maybe_add_region(close_region)
+
+    {[body_draw, close_draw | sep_draws], regions}
   end
 
   @spec maybe_add_region([click_region()], click_region() | nil) :: [click_region()]
   defp maybe_add_region(regions, nil), do: regions
   defp maybe_add_region(regions, region), do: [region | regions]
 
-  @spec clipped_region(integer(), integer(), integer(), integer(), pos_integer()) ::
+  @spec clipped_region(integer(), integer(), integer(), integer(), atom()) ::
           click_region() | nil
-  defp clipped_region(screen_col, tab_screen_end, screen_start, screen_end, tab_id) do
-    if tab_screen_end > screen_start and screen_col < screen_end do
-      {max(screen_col, screen_start), min(tab_screen_end - 1, screen_end - 1),
-       :"tab_goto_#{tab_id}"}
+  defp clipped_region(screen_col, region_end, screen_start, screen_end, command) do
+    if region_end > screen_start and screen_col < screen_end do
+      {max(screen_col, screen_start), min(region_end - 1, screen_end - 1), command}
     else
       nil
     end
@@ -261,6 +380,25 @@ defmodule Minga.Editor.TabBarRenderer do
     fill = String.duplicate(" ", max_col - col)
     [{row, col, fill, [bg: bg]}]
   end
+
+  # ── Close icon visibility ─────────────────────────────────────────────────
+
+  @spec close_icon_visible?(
+          segment(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) ::
+          boolean()
+  defp close_icon_visible?(%{is_active: true}, _col_start, _col_end, _hover_col), do: true
+  defp close_icon_visible?(_seg, _col_start, _col_end, nil), do: false
+
+  defp close_icon_visible?(_seg, col_start, col_end, hover_col) do
+    hover_col >= col_start and hover_col < col_end
+  end
+
+  @spec placeholder_text(non_neg_integer()) :: String.t()
+  defp placeholder_text(width), do: String.duplicate(@close_placeholder, width)
 
   # ── Tab content helpers ────────────────────────────────────────────────────
 
@@ -307,6 +445,7 @@ defmodule Minga.Editor.TabBarRenderer do
       separator_fg: ml.bar_fg,
       modified_fg: 0xDA8548,
       attention_fg: 0xFF6C6B,
+      close_hover_fg: 0xFF6C6B,
       bg: ml.bar_bg
     }
   end

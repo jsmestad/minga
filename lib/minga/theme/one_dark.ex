@@ -160,6 +160,7 @@ defmodule Minga.Theme.OneDark do
         separator_fg: @syntax_guide,
         modified_fg: @hue_6_2,
         attention_fg: @hue_5,
+        close_hover_fg: @hue_5,
         bg: @ui_bg
       }
     }

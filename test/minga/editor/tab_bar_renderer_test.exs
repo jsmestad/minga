@@ -8,7 +8,7 @@ defmodule Minga.Editor.TabBarRendererTest do
 
   defp doom_theme, do: Theme.get!(:doom_one)
 
-  describe "render/4 basics" do
+  describe "render/5 basics" do
     test "produces draws and click regions for a single tab" do
       tab = Tab.new_file(1, "main.ex")
       tb = TabBar.new(tab)
@@ -75,8 +75,118 @@ defmodule Minga.Editor.TabBarRendererTest do
     end
   end
 
+  describe "close button" do
+    test "active tab shows close icon" do
+      tab = Tab.new_file(1, "main.ex")
+      tb = TabBar.new(tab)
+
+      {draws, _} = TabBarRenderer.render(0, 80, tb, doom_theme())
+
+      all_text = Enum.map_join(draws, fn {_, _, text, _} -> text end)
+      assert String.contains?(all_text, "✕")
+    end
+
+    test "inactive tab hides close icon when not hovered" do
+      tab1 = Tab.new_file(1, "one.ex")
+      tb = TabBar.new(tab1)
+      {tb, _} = TabBar.add(tb, :file, "two.ex")
+      tb = TabBar.switch_to(tb, 1)
+
+      theme = doom_theme()
+      colors = Map.from_struct(theme.tab_bar)
+
+      {draws, _} = TabBarRenderer.render(0, 80, tb, theme, nil)
+
+      # Find the close icon draw for the inactive tab (two.ex).
+      # The close draw is the draw command right after the body draw
+      # containing "two.ex". Its fg should match the inactive tab's bg
+      # (invisible).
+      inactive_body_idx =
+        Enum.find_index(draws, fn {_, _, text, _} -> String.contains?(text, "two.ex") end)
+
+      assert inactive_body_idx != nil
+      close_draw = Enum.at(draws, inactive_body_idx + 1)
+      {_, _, _close_text, close_style} = close_draw
+      assert Keyword.get(close_style, :fg) == colors.inactive_bg
+    end
+
+    test "inactive tab shows close icon when hovered" do
+      tab1 = Tab.new_file(1, "one.ex")
+      tb = TabBar.new(tab1)
+      {tb, _} = TabBar.add(tb, :file, "two.ex")
+      tb = TabBar.switch_to(tb, 1)
+
+      theme = doom_theme()
+      colors = Map.from_struct(theme.tab_bar)
+
+      # Render once without hover to find the inactive tab's column range
+      {draws, _} = TabBarRenderer.render(0, 120, tb, theme, nil)
+
+      inactive_draw =
+        Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "two.ex") end)
+
+      {_, inactive_col, _, _} = inactive_draw
+
+      # Now render with hover_col inside the inactive tab's region
+      {draws_hovered, _} = TabBarRenderer.render(0, 120, tb, theme, inactive_col + 1)
+
+      # Find the close draw for the inactive tab
+      inactive_body_idx =
+        Enum.find_index(draws_hovered, fn {_, _, text, _} -> String.contains?(text, "two.ex") end)
+
+      close_draw = Enum.at(draws_hovered, inactive_body_idx + 1)
+      {_, _, close_text, close_style} = close_draw
+      assert String.contains?(close_text, "✕")
+      assert Keyword.get(close_style, :fg) == colors.close_hover_fg
+    end
+
+    test "close icon on active tab uses close_hover_fg color" do
+      tab = Tab.new_file(1, "main.ex")
+      tb = TabBar.new(tab)
+
+      theme = doom_theme()
+      colors = Map.from_struct(theme.tab_bar)
+
+      {draws, _} = TabBarRenderer.render(0, 80, tb, theme)
+
+      close_draw = Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "✕") end)
+      assert close_draw != nil
+      {_, _, _, close_style} = close_draw
+      assert Keyword.get(close_style, :fg) == colors.close_hover_fg
+    end
+
+    test "tab widths are stable regardless of hover state" do
+      tab1 = Tab.new_file(1, "one.ex")
+      tb = TabBar.new(tab1)
+      {tb, _} = TabBar.add(tb, :file, "two.ex")
+      tb = TabBar.switch_to(tb, 1)
+
+      theme = doom_theme()
+
+      # Render without hover
+      {draws_no_hover, _} = TabBarRenderer.render(0, 120, tb, theme, nil)
+
+      # Find the column of the inactive tab's body
+      inactive_draw_no_hover =
+        Enum.find(draws_no_hover, fn {_, _, text, _} -> String.contains?(text, "two.ex") end)
+
+      {_, col_no_hover, _, _} = inactive_draw_no_hover
+
+      # Render with hover on the inactive tab
+      {draws_hover, _} = TabBarRenderer.render(0, 120, tb, theme, col_no_hover + 1)
+
+      inactive_draw_hover =
+        Enum.find(draws_hover, fn {_, _, text, _} -> String.contains?(text, "two.ex") end)
+
+      {_, col_hover, _, _} = inactive_draw_hover
+
+      # Tab position should be identical
+      assert col_no_hover == col_hover
+    end
+  end
+
   describe "click regions" do
-    test "each tab has a click region" do
+    test "each tab has goto and close click regions" do
       tab1 = Tab.new_file(1, "a.ex")
       tb = TabBar.new(tab1)
       {tb, _} = TabBar.add(tb, :file, "b.ex")
@@ -85,12 +195,42 @@ defmodule Minga.Editor.TabBarRendererTest do
       {_, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
 
       commands = Enum.map(regions, fn {_, _, cmd} -> cmd end) |> MapSet.new()
+
+      # Goto regions
       assert :tab_goto_1 in commands
       assert :tab_goto_2 in commands
       assert :tab_goto_3 in commands
+
+      # Close regions
+      assert :tab_close_1 in commands
+      assert :tab_close_2 in commands
+      assert :tab_close_3 in commands
     end
 
-    test "click regions don't overlap" do
+    test "goto and close regions for the same tab don't overlap" do
+      tab1 = Tab.new_file(1, "main.ex")
+      tb = TabBar.new(tab1)
+      {tb, _} = TabBar.add(tb, :file, "other.ex")
+
+      {_, regions} = TabBarRenderer.render(0, 120, tb, doom_theme())
+
+      # Check each tab's goto and close regions don't overlap
+      for tab_id <- [1, 2] do
+        goto = Enum.find(regions, fn {_, _, cmd} -> cmd == :"tab_goto_#{tab_id}" end)
+        close = Enum.find(regions, fn {_, _, cmd} -> cmd == :"tab_close_#{tab_id}" end)
+
+        assert goto != nil, "Missing goto region for tab #{tab_id}"
+        assert close != nil, "Missing close region for tab #{tab_id}"
+
+        {_, goto_end, _} = goto
+        {close_start, _, _} = close
+
+        assert goto_end < close_start,
+               "Tab #{tab_id} goto (end=#{goto_end}) overlaps close (start=#{close_start})"
+      end
+    end
+
+    test "all click regions across tabs don't overlap" do
       tab1 = Tab.new_file(1, "first.ex")
       tb = TabBar.new(tab1)
       {tb, _} = TabBar.add(tb, :file, "second.ex")
@@ -104,6 +244,21 @@ defmodule Minga.Editor.TabBarRendererTest do
       |> Enum.each(fn [{_, end1, _}, {start2, _, _}] ->
         assert end1 < start2, "Regions overlap: end=#{end1} >= start=#{start2}"
       end)
+    end
+
+    test "close region comes after goto region for the same tab" do
+      tab = Tab.new_file(1, "test.ex")
+      tb = TabBar.new(tab)
+
+      {_, regions} = TabBarRenderer.render(0, 80, tb, doom_theme())
+
+      goto = Enum.find(regions, fn {_, _, cmd} -> cmd == :tab_goto_1 end)
+      close = Enum.find(regions, fn {_, _, cmd} -> cmd == :tab_close_1 end)
+
+      {goto_start, _, _} = goto
+      {close_start, _, _} = close
+
+      assert close_start > goto_start
     end
   end
 
