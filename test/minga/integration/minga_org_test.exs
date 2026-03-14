@@ -15,24 +15,35 @@ defmodule Minga.Integration.MingaOrgTest do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.TreeSitter
 
-  @moduletag :tmp_dir
   @moduletag :integration
 
   @minga_org_repo "https://github.com/jsmestad/minga-org.git"
 
-  setup %{tmp_dir: tmp_dir} do
-    # Ensure the grammar registry ETS table exists
+  # Clone the repo once for the entire module instead of per-test.
+  # Tests that need clone_dir get it from the module attribute via context.
+  setup_all do
     HLGrammar.init_registry()
 
-    # Clone minga-org into the temp dir
-    clone_dir = Path.join(tmp_dir, "minga-org")
+    clone_dir =
+      Path.join(System.tmp_dir!(), "minga_org_test_#{System.unique_integer([:positive])}")
+
+    File.rm_rf!(clone_dir)
 
     {_, 0} =
       System.cmd("git", ["clone", "--depth", "1", @minga_org_repo, clone_dir],
         stderr_to_stdout: true
       )
 
+    on_exit(fn -> File.rm_rf!(clone_dir) end)
+
     %{clone_dir: clone_dir}
+  end
+
+  # Idempotent; ensures the ETS table exists even if setup_all hasn't run
+  # yet on this scheduler (defensive, costs nothing).
+  setup do
+    HLGrammar.init_registry()
+    :ok
   end
 
   describe "grammar compilation" do
