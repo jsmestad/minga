@@ -185,7 +185,7 @@ defmodule Minga.Editor.Renderer.LineTest do
   end
 
   describe "no file open" do
-    test "shows dashboard when no file is loaded" do
+    test "shows empty buffer when no file is loaded" do
       id = :erlang.unique_integer([:positive])
       {:ok, port} = HeadlessPort.start_link(width: 80, height: 24)
 
@@ -201,10 +201,10 @@ defmodule Minga.Editor.Renderer.LineTest do
       send(editor, {:minga_input, {:ready, 80, 24}})
       :ok = HeadlessPort.await_frame(port)
 
-      # Dashboard should show version string somewhere on screen
+      # Should show a normal editor with an empty buffer, not a dashboard
       screen = for row <- 0..23, do: HeadlessPort.get_row_text(port, row)
       all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "Minga v")
+      assert String.contains?(all_text, "[new 1]")
     end
   end
 end

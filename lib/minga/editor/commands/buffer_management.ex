@@ -14,7 +14,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Search, as: SearchCommands
-  alias Minga.Editor.Dashboard
+
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -588,12 +588,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       case new_buffers do
         [] ->
-          # No buffers left — initialize dashboard and let it render
-          recent = fetch_recent_files()
-          dash = Dashboard.new_state(recent)
-
-          %{state | buffers: %{bs | list: [], active_index: 0, active: nil}, dashboard: dash}
-          |> EditorState.sync_active_window_buffer()
+          create_fallback_buffer(state, bs)
 
         _ ->
           new_idx = min(idx, Enum.count(new_buffers) - 1)
@@ -914,10 +909,20 @@ defmodule Minga.Editor.Commands.BufferManagement do
     put_in(state.file_tree.tree, updated_tree)
   end
 
-  @spec fetch_recent_files() :: [String.t()]
-  defp fetch_recent_files do
-    Minga.Project.recent_files()
-  catch
-    :exit, _ -> []
+  # Creates an empty buffer when the last buffer is killed.
+  # Dashboard is disabled pending rewrite as a special buffer.
+  @spec create_fallback_buffer(state(), EditorState.Buffers.t()) :: state()
+  defp create_fallback_buffer(state, bs) do
+    case DynamicSupervisor.start_child(
+           Minga.Buffer.Supervisor,
+           {BufferServer, content: "", buffer_name: "[new 1]"}
+         ) do
+      {:ok, new_buf} ->
+        %{state | buffers: %{bs | list: [new_buf], active_index: 0, active: new_buf}}
+        |> EditorState.sync_active_window_buffer()
+
+      {:error, _} ->
+        %{state | buffers: %{bs | list: [], active_index: 0, active: nil}}
+    end
   end
 end
