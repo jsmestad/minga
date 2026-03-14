@@ -123,6 +123,14 @@ Rules:
 3. Never stack a second speculative fix on top of an untested first fix.
 4. Never revert or replace a working fix with a "cleaner" version without user confirmation that the new version also works.
 
+## Build It Right or Don't Build It
+
+Never scope foundational infrastructure to a "V1" that deliberately skips known requirements. If a data structure needs to handle 10,000 entries in production (e.g., LSP diagnostics), build it with the right algorithm from the start (interval tree, not linear scan). If a system needs incremental updates, don't ship clear-and-reapply and plan to "optimize later." The optimization never happens, and every feature built on top inherits the limitation.
+
+This applies to internal infrastructure like data structures, coordinate mapping systems, rendering pipelines, and protocol layers. It does not apply to user-facing features, where shipping a subset of functionality (e.g., keyboard selection before mouse selection) is a legitimate scoping choice.
+
+The test: if cutting the corner means the next team building on this code has to work around the limitation or refactor the foundation, it's not a valid shortcut. Build the foundation once, correctly.
+
 ## Coding Standards
 
 ### Elixir Types (mandatory)
