@@ -541,4 +541,77 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       assert text_nowrap == text_wrap
     end
   end
+
+  # ── Cursorline highlighting ──────────────────────────────────────────────
+
+  describe "cursorline highlighting" do
+    @cursorline_bg 0x2C323C
+
+    test "applies cursorline bg to content draws on the cursor line" do
+      ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
+      params = make_params(%{buf_line: 3, cursor_line: 3, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      # Every draw should have the cursorline bg
+      Enum.each(decoded, fn cmd ->
+        assert cmd.bg == @cursorline_bg,
+               "expected cursorline bg #{inspect(@cursorline_bg)}, got #{inspect(cmd.bg)} in #{inspect(cmd)}"
+      end)
+    end
+
+    test "includes a full-width fill draw on the cursor line" do
+      ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
+      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      fill =
+        Enum.find(decoded, fn cmd ->
+          cmd.bg == @cursorline_bg and String.length(cmd.text) == ctx.content_w
+        end)
+
+      assert fill != nil, "expected a full-width fill draw with cursorline bg"
+    end
+
+    test "does not apply cursorline bg to non-cursor lines" do
+      ctx = make_ctx(%{cursorline_bg: @cursorline_bg})
+      params = make_params(%{buf_line: 5, cursor_line: 3, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      Enum.each(decoded, fn cmd ->
+        refute cmd.bg == @cursorline_bg,
+               "non-cursor line should not have cursorline bg"
+      end)
+    end
+
+    test "does not apply cursorline bg when cursorline_bg is nil" do
+      ctx = make_ctx(%{cursorline_bg: nil})
+      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      Enum.each(decoded, fn cmd ->
+        refute cmd.bg == @cursorline_bg
+      end)
+    end
+
+    test "preserves explicit bg from visual selection on cursor line" do
+      ctx =
+        make_ctx(%{
+          cursorline_bg: @cursorline_bg,
+          visual_selection: {:line, 0, 0}
+        })
+
+      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      # The selection draws use :reverse, which means they have no explicit :bg
+      # set by the selection renderer. The fill draw should have cursorline bg,
+      # and the reversed draw should be present too.
+      assert Enum.any?(decoded, fn cmd -> cmd.bg == @cursorline_bg end)
+    end
+  end
 end

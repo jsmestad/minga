@@ -90,6 +90,8 @@ defmodule Minga.Editor.Renderer.BufferLine do
     content_cmds =
       LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
 
+    content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
     {gutters, contents}
@@ -128,10 +130,41 @@ defmodule Minga.Editor.Renderer.BufferLine do
     vrow_ctx = %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w}
 
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
+    content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
     {gutters, contents}
+  end
+
+  # ── Cursorline ────────────────────────────────────────────────────────────
+
+  # Applies cursorline background to content draws when the line is the
+  # cursor line. Prepends a full-width fill draw so the tint extends past
+  # the text, then sets bg on each content draw that doesn't already have
+  # an explicit bg (visual selections keep their own colors).
+  @spec maybe_apply_cursorline([DisplayList.draw()], non_neg_integer(), line_params()) ::
+          [DisplayList.draw()]
+  defp maybe_apply_cursorline(cmds, _sr, %{buf_line: bl, cursor_line: cl})
+       when bl != cl,
+       do: cmds
+
+  defp maybe_apply_cursorline(cmds, _sr, %{ctx: %{cursorline_bg: nil}}), do: cmds
+
+  defp maybe_apply_cursorline(cmds, sr, %{ctx: ctx}) do
+    bg = ctx.cursorline_bg
+    fill = DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), bg: bg)
+
+    tinted =
+      Enum.map(cmds, fn {row, col, text, style} ->
+        if Keyword.has_key?(style, :bg) do
+          {row, col, text, style}
+        else
+          {row, col, text, Keyword.put(style, :bg, bg)}
+        end
+      end)
+
+    [fill | tinted]
   end
 
   # ── Gutter primitives ───────────────────────────────────────────────────

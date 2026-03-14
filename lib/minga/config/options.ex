@@ -43,6 +43,7 @@ defmodule Minga.Config.Options do
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
   | `:font_ligatures`         | boolean                                     | `true`      |
   | `:whichkey_layout`        | `:bottom` or `:float`                       | `:bottom`   |
+  | `:cursorline`             | boolean                                        | `true`    |
   | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
   | `:log_level_render`       | log level or `:default`                     | `:default`  |
   | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
@@ -122,6 +123,7 @@ defmodule Minga.Config.Options do
           | :log_level_lsp
           | :log_level_agent
           | :log_level_editor
+          | :cursorline
           | :log_level_config
           | :log_level_port
 
@@ -186,6 +188,7 @@ defmodule Minga.Config.Options do
     {:agent_diff_size_threshold, :pos_integer, 1_048_576},
     {:agent_max_turns, :pos_integer, 100},
     {:agent_max_cost, :float_or_nil, nil},
+    {:cursorline, :boolean, true},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
