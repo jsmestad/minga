@@ -38,8 +38,17 @@ defmodule Minga.Agent.ProviderResolver do
   """
   @spec resolve() :: resolved()
   def resolve do
-    preference = read_config_provider()
-    resolve(preference)
+    # Allow tests to override the provider module via application env.
+    # This avoids starting real providers (~700ms) in tests that exercise
+    # session lifecycle without caring which provider backs it.
+    case Application.get_env(:minga, :test_provider_module) do
+      nil ->
+        preference = read_config_provider()
+        resolve(preference)
+
+      module when is_atom(module) ->
+        %Resolved{module: module, name: "test"}
+    end
   end
 
   @doc """
