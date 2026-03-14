@@ -66,7 +66,11 @@ defmodule Minga.Theme.DoomOne do
           command: {0x000000, @yellow},
           replace: {0x000000, @red},
           search: {0x000000, @cyan}
-        }
+        },
+        lsp_ready: @green,
+        lsp_initializing: @yellow,
+        lsp_starting: @base5,
+        lsp_error: @red
       },
       picker: %Minga.Theme.Picker{
         bg: 0x1E2127,

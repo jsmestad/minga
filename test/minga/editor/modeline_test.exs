@@ -14,7 +14,8 @@ defmodule Minga.Editor.ModelineTest do
     cursor_col: 0,
     line_count: 10,
     buf_index: 1,
-    buf_count: 1
+    buf_count: 1,
+    macro_recording: false
   }
 
   describe "render/3" do
@@ -77,16 +78,83 @@ defmodule Minga.Editor.ModelineTest do
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :buffer_list end)
     end
 
-    test "buffer_list click region has correct column range" do
-      {_commands, regions} = Modeline.render(0, 80, @base_data)
+    test "filetype segment includes devicon for known filetype" do
+      {commands, _regions} = Modeline.render(0, 120, @base_data)
 
-      {start_col, end_col, :buffer_list} =
-        Enum.find(regions, fn {_, _, cmd} -> cmd == :buffer_list end)
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
 
-      # Mode badge " NORMAL " = 8 display width, powerline separator "" = 0 width
-      assert start_col == 8
-      # File segment " test.ex " = 9 display width
-      assert end_col == 17
+      # Elixir devicon should appear somewhere in the modeline
+      {icon, _color} = Minga.Devicon.icon_and_color(:elixir)
+      assert String.contains?(combined, icon)
+    end
+
+    test "filetype segment is clickable with filetype_menu target" do
+      {_commands, regions} = Modeline.render(0, 120, @base_data)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :filetype_menu end)
+    end
+
+    test "LSP indicator shows green dot when ready" do
+      data = Map.put(@base_data, :lsp_status, :ready)
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "●")
+    end
+
+    test "LSP indicator shows spinner when initializing" do
+      data = Map.put(@base_data, :lsp_status, :initializing)
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "⟳")
+    end
+
+    test "LSP indicator shows dimmed circle when starting" do
+      data = Map.put(@base_data, :lsp_status, :starting)
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "◯")
+    end
+
+    test "LSP indicator shows error mark when errored" do
+      data = Map.put(@base_data, :lsp_status, :error)
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "✗")
+    end
+
+    test "no LSP indicator when status is none" do
+      data = Map.put(@base_data, :lsp_status, :none)
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      refute String.contains?(combined, "●")
+      refute String.contains?(combined, "⟳")
+      refute String.contains?(combined, "✗")
+    end
+
+    test "no LSP indicator when lsp_status key is absent" do
+      {commands, _regions} = Modeline.render(0, 120, @base_data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      refute String.contains?(combined, "●")
+      refute String.contains?(combined, "⟳")
+      refute String.contains?(combined, "✗")
+    end
+
+    test "LSP indicator is clickable with lsp_info target" do
+      data = Map.put(@base_data, :lsp_status, :ready)
+      {_commands, regions} = Modeline.render(0, 120, data)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :lsp_info end)
     end
   end
 

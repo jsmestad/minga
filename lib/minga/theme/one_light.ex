@@ -63,7 +63,11 @@ defmodule Minga.Theme.OneLight do
           command: {0xFFFFFF, @hue_6_2},
           replace: {0xFFFFFF, @hue_5},
           search: {0xFFFFFF, @hue_1}
-        }
+        },
+        lsp_ready: @hue_4,
+        lsp_initializing: @hue_6_2,
+        lsp_starting: @syntax_guide,
+        lsp_error: @hue_5
       },
       picker: %Minga.Theme.Picker{
         bg: @ui_bg,

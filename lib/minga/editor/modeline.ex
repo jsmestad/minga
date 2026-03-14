@@ -15,6 +15,7 @@ defmodule Minga.Editor.Modeline do
   """
 
   alias Minga.Buffer.Unicode
+  alias Minga.Devicon
   alias Minga.Editor.DisplayList
   alias Minga.Mode
 
@@ -26,6 +27,9 @@ defmodule Minga.Editor.Modeline do
 
   # Powerline separator characters
   @separator ""
+
+  @typedoc "LSP connection status for the modeline indicator."
+  @type lsp_status :: :ready | :initializing | :starting | :error | :none
 
   @typedoc "Data for rendering the modeline."
   @type modeline_data :: %{
@@ -42,7 +46,8 @@ defmodule Minga.Editor.Modeline do
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => Minga.Editor.State.Agent.status(),
           optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil,
-          optional(:mode_override) => String.t() | nil
+          optional(:mode_override) => String.t() | nil,
+          optional(:lsp_status) => lsp_status()
         }
 
   @doc """
@@ -76,7 +81,9 @@ defmodule Minga.Editor.Modeline do
       end
 
     file_segment = " #{data.file_name}#{data.dirty_marker}#{buf_indicator}#{macro_indicator} "
-    filetype_segment = " #{filetype_label(data.filetype)} "
+
+    {devicon, devicon_color} = Devicon.icon_and_color(data.filetype)
+    filetype_label = filetype_label(data.filetype)
 
     percent =
       if data.line_count <= 1,
@@ -92,6 +99,7 @@ defmodule Minga.Editor.Modeline do
     filetype_bg = bar_bg
 
     agent_segments = build_agent_segments(data, bar_bg)
+    lsp_segments = build_lsp_segments(data, bar_bg, ml)
 
     # Segments are {text, fg, bg, opts, click_target}
     # click_target is an atom command or nil for non-clickable segments
@@ -103,13 +111,16 @@ defmodule Minga.Editor.Modeline do
         {@separator, info_bg, bar_bg, [], nil}
       ] ++ Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
 
-    right_segments = [
-      {filetype_segment, filetype_fg, filetype_bg, [], nil},
-      {@separator, info_bg, bar_bg, [], nil},
-      {pos_segment, info_fg, info_bg, [], nil},
-      {@separator, mode_bg, info_bg, [], nil},
-      {pct_segment, mode_fg, mode_bg, [bold: true], nil}
-    ]
+    right_segments =
+      lsp_segments ++
+        [
+          {" #{devicon}", devicon_color, filetype_bg, [], nil},
+          {" #{filetype_label} ", filetype_fg, filetype_bg, [], :filetype_menu},
+          {@separator, info_bg, bar_bg, [], nil},
+          {pos_segment, info_fg, info_bg, [], nil},
+          {@separator, mode_bg, info_bg, [], nil},
+          {pct_segment, mode_fg, mode_bg, [bold: true], nil}
+        ]
 
     left_width =
       Enum.reduce(left_segments, 0, fn {text, _, _, _, _}, acc ->
@@ -175,6 +186,18 @@ defmodule Minga.Editor.Modeline do
       {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, bold: true}]
       {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, bold: true}]
       {:error, c} -> [{" ✗ ", c.status_error, bar_bg, bold: true}]
+      _ -> []
+    end
+  end
+
+  @spec build_lsp_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_lsp_segments(data, bar_bg, ml) do
+    case Map.get(data, :lsp_status) do
+      :ready -> [{"●", ml.lsp_ready || 0x98BE65, bar_bg, [], :lsp_info}]
+      :initializing -> [{"⟳", ml.lsp_initializing || 0xECBE7B, bar_bg, [bold: true], :lsp_info}]
+      :starting -> [{"◯", ml.lsp_starting || 0x5B6268, bar_bg, [], :lsp_info}]
+      :error -> [{"✗", ml.lsp_error || 0xFF6C6B, bar_bg, [bold: true], :lsp_info}]
       _ -> []
     end
   end

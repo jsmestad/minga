@@ -576,6 +576,11 @@ defmodule Minga.Editor.Commands do
     Diagnostics.execute(state, :lsp_info)
   end
 
+  def execute(state, :filetype_menu) do
+    # TODO: open SPC m which-key popup for the active buffer's filetype
+    %{state | status_msg: "Filetype actions not yet implemented (SPC m)"}
+  end
+
   def execute(state, :goto_definition), do: LspActions.goto_definition(state)
   def execute(state, :hover), do: LspActions.hover(state)
 

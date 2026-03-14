@@ -106,6 +106,7 @@ defmodule Minga.Editor.State do
             windows: %Windows{},
             file_tree: %FileTreeState{},
             git_buffers: %{},
+            lsp_status: :none,
             injection_ranges: %{},
             focus_stack: [],
             keymap_scope: :editor,
@@ -143,6 +144,7 @@ defmodule Minga.Editor.State do
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           git_buffers: %{pid() => pid()},
+          lsp_status: Minga.Editor.Modeline.lsp_status(),
           injection_ranges: %{
             pid() => [
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
