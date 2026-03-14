@@ -33,7 +33,8 @@ defmodule Minga.Theme.OneLight do
         fg: @mono_1,
         tilde_fg: @mono_3,
         split_border_fg: @syntax_guide,
-        cursorline_bg: 0xF0F0F0
+        cursorline_bg: 0xF0F0F0,
+        nav_flash_bg: 0xE0E0E0
       },
       gutter: %Minga.Theme.Gutter{
         fg: @syntax_gutter,

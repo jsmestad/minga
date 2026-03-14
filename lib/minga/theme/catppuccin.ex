@@ -18,7 +18,8 @@ defmodule Minga.Theme.Catppuccin do
         fg: p.text,
         tilde_fg: p.surface1,
         split_border_fg: p.surface1,
-        cursorline_bg: p.surface0
+        cursorline_bg: p.surface0,
+        nav_flash_bg: p.surface1
       },
       gutter: %Minga.Theme.Gutter{
         fg: p.overlay0,

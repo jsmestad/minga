@@ -33,6 +33,7 @@ defmodule Minga.Editor.State do
   alias Minga.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -113,7 +114,9 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             agent: %AgentState{},
-            agentic: ViewState.new()
+            agentic: ViewState.new(),
+            nav_flash: nil,
+            last_cursor_line: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -149,7 +152,9 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
-          agentic: ViewState.t()
+          agentic: ViewState.t(),
+          nav_flash: NavFlash.t() | nil,
+          last_cursor_line: non_neg_integer() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

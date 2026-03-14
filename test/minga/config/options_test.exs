@@ -76,6 +76,8 @@ defmodule Minga.Config.OptionsTest do
                log_level_agent: :default,
                log_level_editor: :default,
                cursorline: true,
+               nav_flash: true,
+               nav_flash_threshold: 5,
                log_level_config: :default,
                log_level_port: :default
              }

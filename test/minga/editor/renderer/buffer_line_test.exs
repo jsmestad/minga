@@ -597,7 +597,7 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       end)
     end
 
-    test "preserves explicit bg from visual selection on cursor line" do
+    test "does not apply cursorline bg to reversed (selected) draws on cursor line" do
       ctx =
         make_ctx(%{
           cursorline_bg: @cursorline_bg,
@@ -606,12 +606,102 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
 
       params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
       {_g, content, 1} = BufferLine.render(params)
+
+      # Reversed draws (from visual selection) should not have cursorline bg
+      reversed_draws =
+        content
+        |> List.flatten()
+        |> Enum.filter(fn {_r, _c, _t, style} -> Keyword.get(style, :reverse, false) end)
+
+      Enum.each(reversed_draws, fn {_r, _c, _t, style} ->
+        refute Keyword.has_key?(style, :bg),
+               "reversed (selected) draw should not have cursorline bg applied"
+      end)
+
+      # The fill draw should still have cursorline bg
+      decoded = decode_all(content)
+      assert Enum.any?(decoded, fn cmd -> cmd.bg == @cursorline_bg end)
+    end
+  end
+
+  # ── Nav-flash highlighting ──────────────────────────────────────────────
+
+  describe "nav-flash highlighting" do
+    @flash_bg 0x3E4451
+    @cursorline_bg 0x2C323C
+    @editor_bg 0x282C34
+
+    test "flash overrides cursorline bg on the flash line" do
+      flash = %Minga.Editor.NavFlash{line: 5, step: 0, max_steps: 3, timer: nil}
+
+      ctx =
+        make_ctx(%{
+          cursorline_bg: @cursorline_bg,
+          nav_flash: flash,
+          nav_flash_bg: @flash_bg,
+          editor_bg: @editor_bg
+        })
+
+      params = make_params(%{buf_line: 5, cursor_line: 5, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
       decoded = decode_all(content)
 
-      # The selection draws use :reverse, which means they have no explicit :bg
-      # set by the selection renderer. The fill draw should have cursorline bg,
-      # and the reversed draw should be present too.
-      assert Enum.any?(decoded, fn cmd -> cmd.bg == @cursorline_bg end)
+      # At step 0, the bg should be the full flash_bg (not cursorline_bg)
+      fill =
+        Enum.find(decoded, fn cmd ->
+          String.length(cmd.text) == ctx.content_w
+        end)
+
+      assert fill != nil
+      assert fill.bg == @flash_bg
+    end
+
+    test "flash does not affect non-flash lines" do
+      flash = %Minga.Editor.NavFlash{line: 10, step: 0, max_steps: 3, timer: nil}
+
+      ctx =
+        make_ctx(%{
+          cursorline_bg: @cursorline_bg,
+          nav_flash: flash,
+          nav_flash_bg: @flash_bg,
+          editor_bg: @editor_bg
+        })
+
+      # Line 5 is the cursor line but NOT the flash line
+      params = make_params(%{buf_line: 5, cursor_line: 5, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      # Should have cursorline bg, not flash bg
+      Enum.each(decoded, fn cmd ->
+        refute cmd.bg == @flash_bg,
+               "non-flash line should not have flash bg"
+      end)
+    end
+
+    test "later flash steps produce interpolated colors" do
+      flash = %Minga.Editor.NavFlash{line: 0, step: 2, max_steps: 3, timer: nil}
+
+      ctx =
+        make_ctx(%{
+          cursorline_bg: @cursorline_bg,
+          nav_flash: flash,
+          nav_flash_bg: @flash_bg,
+          editor_bg: @editor_bg
+        })
+
+      params = make_params(%{buf_line: 0, cursor_line: 0, ctx: ctx})
+      {_g, content, 1} = BufferLine.render(params)
+      decoded = decode_all(content)
+
+      fill =
+        Enum.find(decoded, fn cmd ->
+          String.length(cmd.text) == ctx.content_w
+        end)
+
+      assert fill != nil
+      # At final step (2 of 3), should be the target (cursorline_bg)
+      assert fill.bg == @cursorline_bg
     end
   end
 end
