@@ -41,34 +41,35 @@ defmodule Minga.Extension.GitIntegrationTest do
   alias Minga.Extension.Git, as: ExtGit
 
   @moduletag :tmp_dir
+  # Prevent git hangs under system load from blocking the entire suite
+  @moduletag timeout: 15_000
 
   describe "clone and verify" do
     test "clones a git repo to the target directory", %{tmp_dir: tmp_dir} do
-      # Create a bare repo to clone from
       repo_path = Path.join(tmp_dir, "source_repo")
       File.mkdir_p!(repo_path)
-      System.cmd("git", ["init", "--bare"], cd: repo_path, stderr_to_stdout: true)
+      git!(repo_path, ["init", "--bare"])
 
       work_path = Path.join(tmp_dir, "work")
-      System.cmd("git", ["clone", repo_path, work_path], stderr_to_stdout: true)
+      git!(tmp_dir, ["clone", repo_path, work_path])
       File.mkdir_p!(Path.join(work_path, "lib"))
       File.write!(Path.join(work_path, "lib/my_ext.ex"), "defmodule MyExt do\nend\n")
-      System.cmd("git", ["add", "."], cd: work_path, stderr_to_stdout: true)
+      git!(work_path, ["add", "."])
 
-      System.cmd(
-        "git",
-        ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "init"],
-        cd: work_path,
-        stderr_to_stdout: true
-      )
+      git!(work_path, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@test.com",
+        "commit",
+        "-m",
+        "init"
+      ])
 
-      System.cmd("git", ["push"], cd: work_path, stderr_to_stdout: true)
+      git!(work_path, ["push"])
 
-      # Clone via git clone directly to verify the repo works
       dest = Path.join(tmp_dir, "cloned_ext")
-
-      {_output, 0} =
-        System.cmd("git", ["clone", "--depth", "1", repo_path, dest], stderr_to_stdout: true)
+      git!(tmp_dir, ["clone", "--depth", "1", repo_path, dest])
 
       assert File.dir?(Path.join(dest, ".git"))
       assert File.exists?(Path.join(dest, "lib/my_ext.ex"))
@@ -79,18 +80,21 @@ defmodule Minga.Extension.GitIntegrationTest do
     test "returns the short HEAD ref", %{tmp_dir: tmp_dir} do
       repo = Path.join(tmp_dir, "repo_with_commit")
       File.mkdir_p!(repo)
-      System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["init"])
       File.write!(Path.join(repo, "file.txt"), "hello")
-      System.cmd("git", ["add", "."], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["add", "."])
 
-      System.cmd(
-        "git",
-        ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "init"],
-        cd: repo,
-        stderr_to_stdout: true
-      )
+      git!(repo, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@test.com",
+        "commit",
+        "-m",
+        "init"
+      ])
 
-      {ref, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"], cd: repo)
+      {ref, 0} = git(repo, ["rev-parse", "--short", "HEAD"])
       assert String.length(String.trim(ref)) > 0
     end
   end
@@ -99,34 +103,37 @@ defmodule Minga.Extension.GitIntegrationTest do
     test "checks out a specific ref", %{tmp_dir: tmp_dir} do
       repo = Path.join(tmp_dir, "rollback_repo")
       File.mkdir_p!(repo)
-      System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["init"])
 
       File.write!(Path.join(repo, "file.txt"), "v1")
-      System.cmd("git", ["add", "."], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["add", "."])
+      git!(repo, ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v1"])
 
-      System.cmd(
-        "git",
-        ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v1"],
-        cd: repo,
-        stderr_to_stdout: true
-      )
-
-      {first_ref, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"], cd: repo)
+      {first_ref, 0} = git(repo, ["rev-parse", "--short", "HEAD"])
       first_ref = String.trim(first_ref)
 
       File.write!(Path.join(repo, "file.txt"), "v2")
-      System.cmd("git", ["add", "."], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["add", "."])
+      git!(repo, ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v2"])
 
-      System.cmd(
-        "git",
-        ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v2"],
-        cd: repo,
-        stderr_to_stdout: true
-      )
-
-      {_, 0} = System.cmd("git", ["checkout", first_ref], cd: repo, stderr_to_stdout: true)
+      git!(repo, ["checkout", first_ref])
       content = File.read!(Path.join(repo, "file.txt"))
       assert content == "v1"
     end
+  end
+
+  # Helpers with consistent options
+  defp git(dir, args) do
+    System.cmd("git", args, cd: dir, stderr_to_stdout: true)
+  end
+
+  defp git!(dir, args) do
+    {output, code} = git(dir, args)
+
+    if code != 0 do
+      flunk("git #{Enum.join(args, " ")} failed (exit #{code}): #{String.trim(output)}")
+    end
+
+    {output, code}
   end
 end
