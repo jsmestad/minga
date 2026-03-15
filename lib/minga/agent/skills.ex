@@ -186,8 +186,6 @@ defmodule Minga.Agent.Skills do
     else
       []
     end
-  rescue
-    _ -> []
   end
 
   @spec try_load_skill(String.t(), String.t(), :global | :project) :: [skill()]

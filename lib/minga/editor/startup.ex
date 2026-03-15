@@ -189,7 +189,7 @@ defmodule Minga.Editor.Startup do
     want_agent? =
       tui_mode? and
         not cli_flags.force_editor and
-        safe_get_option(:startup_view, :agent) == :agent
+        ConfigOptions.get(:startup_view) == :agent
 
     if want_agent? do
       av = %ViewState{ViewState.new() | active: true, focus: :chat}
@@ -200,25 +200,15 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Reads a config option with a fallback if the Options Agent isn't running.
-  """
-  @spec safe_get_option(ConfigOptions.option_name(), term()) :: term()
-  def safe_get_option(name, fallback) do
-    ConfigOptions.get(name)
-  rescue
-    _ -> fallback
-  end
-
-  @doc """
-  Fetches port capabilities, returning defaults if the port isn't available.
+  Fetches port capabilities, returning defaults if no port manager is configured.
   """
   @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
   def fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
 
   def fetch_capabilities(port_manager) do
     PortManager.capabilities(port_manager)
-  rescue
-    _ -> %Minga.Port.Capabilities{}
+  catch
+    :exit, _ -> %Minga.Port.Capabilities{}
   end
 
   @doc """
@@ -297,8 +287,6 @@ defmodule Minga.Editor.Startup do
     weight = ConfigOptions.get(:font_weight)
     cmd = Minga.Port.Protocol.encode_set_font(family, size, ligatures, weight)
     Minga.Port.Manager.send_commands(port, [cmd])
-  rescue
-    _ -> :ok
   catch
     :exit, _ -> :ok
   end

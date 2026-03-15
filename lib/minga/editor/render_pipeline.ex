@@ -213,6 +213,8 @@ defmodule Minga.Editor.RenderPipeline do
     File.write("/tmp/minga_layout_debug.log", Enum.join(log_lines, "\n"), [:append])
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.debug(:render, "Layout debug write failed: #{Exception.message(e)}")
+      :ok
   end
 end

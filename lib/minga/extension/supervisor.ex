@@ -177,7 +177,13 @@ defmodule Minga.Extension.Supervisor do
           try do
             entry.module.version()
           rescue
-            _ -> "unknown"
+            e ->
+              Minga.Log.warning(
+                :config,
+                "Extension #{name} version() failed: #{Exception.message(e)}"
+              )
+
+              "unknown"
           end
         else
           "unknown"
