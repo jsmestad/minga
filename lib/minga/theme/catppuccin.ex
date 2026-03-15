@@ -48,7 +48,11 @@ defmodule Minga.Theme.Catppuccin do
           command: {p.base, p.yellow},
           replace: {p.base, p.red},
           search: {p.base, p.sky}
-        }
+        },
+        lsp_ready: p.green,
+        lsp_initializing: p.yellow,
+        lsp_starting: p.overlay0,
+        lsp_error: p.red
       },
       picker: %Minga.Theme.Picker{
         bg: p.mantle,

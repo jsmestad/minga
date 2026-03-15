@@ -479,6 +479,23 @@ defmodule Minga.Editor do
     end
   end
 
+  # Refresh the cached LSP status for the modeline indicator.
+  # Fired after buffer open (with delay for async LSP initialization)
+  # and periodically while LSP clients are connecting.
+  def handle_info(:refresh_lsp_status, state) do
+    old_status = state.lsp_status
+    state = BufferLifecycle.refresh_lsp_status(state)
+
+    # If still initializing/starting, check again in 1 second
+    if state.lsp_status in [:starting, :initializing] do
+      Process.send_after(self(), :refresh_lsp_status, 1_000)
+    end
+
+    # Re-render if status changed (modeline needs update)
+    state = if state.lsp_status != old_status, do: schedule_render(state, 16), else: state
+    {:noreply, state}
+  end
+
   # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
   # Debounced because multiple diagnostics may arrive in rapid succession.
   def handle_info({:diagnostics_changed, _uri}, state) do

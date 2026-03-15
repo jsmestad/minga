@@ -10,6 +10,7 @@ defmodule Minga.Editor.BufferLifecycle do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Hooks, as: ConfigHooks
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Mode
@@ -22,7 +23,32 @@ defmodule Minga.Editor.BufferLifecycle do
   @spec lsp_buffer_opened(state(), pid()) :: state()
   def lsp_buffer_opened(state, buffer_pid) do
     new_lsp = DocumentSync.on_buffer_open(state.lsp, buffer_pid)
-    %{state | lsp: new_lsp}
+    state = %{state | lsp: new_lsp}
+    state = refresh_lsp_status(state)
+
+    # Schedule a deferred refresh for async LSP initialization.
+    # The client starts in :starting, transitions to :initializing,
+    # then :ready. The handle_info(:refresh_lsp_status) clause polls
+    # until the status stabilizes.
+    if state.lsp_status in [:starting, :initializing, :none] do
+      Process.send_after(self(), :refresh_lsp_status, 500)
+    end
+
+    state
+  end
+
+  @doc """
+  Refreshes the cached LSP status for the active buffer.
+
+  Call this when LSP lifecycle events arrive (client connected,
+  initialized, crashed) to keep the modeline indicator current
+  without querying on every render frame.
+  """
+  @spec refresh_lsp_status(state()) :: state()
+  def refresh_lsp_status(%{buffers: %{active: nil}} = state), do: %{state | lsp_status: :none}
+
+  def refresh_lsp_status(%{buffers: %{active: buf}} = state) do
+    %{state | lsp_status: ChromeHelpers.lsp_status_for_buffer(state, buf)}
   end
 
   @doc "Notifies the LSP server that the active buffer changed."

@@ -33,6 +33,7 @@ defmodule Minga.Command.RegistryTest do
           :insert_newline,
           :undo,
           :redo,
+          :filetype_menu,
           :find_file,
           :search_project,
           :buffer_list,

@@ -123,7 +123,18 @@ defmodule Minga.Theme do
   defmodule Modeline do
     @moduledoc "Modeline (status bar) colors."
     @enforce_keys [:bar_fg, :bar_bg, :info_fg, :info_bg, :filetype_fg, :mode_colors]
-    defstruct [:bar_fg, :bar_bg, :info_fg, :info_bg, :filetype_fg, :mode_colors]
+    defstruct [
+      :bar_fg,
+      :bar_bg,
+      :info_fg,
+      :info_bg,
+      :filetype_fg,
+      :mode_colors,
+      lsp_ready: nil,
+      lsp_initializing: nil,
+      lsp_starting: nil,
+      lsp_error: nil
+    ]
 
     @type t :: %__MODULE__{
             bar_fg: Minga.Theme.color(),
@@ -131,7 +142,11 @@ defmodule Minga.Theme do
             info_fg: Minga.Theme.color(),
             info_bg: Minga.Theme.color(),
             filetype_fg: Minga.Theme.color(),
-            mode_colors: %{atom() => {fg :: Minga.Theme.color(), bg :: Minga.Theme.color()}}
+            mode_colors: %{atom() => {fg :: Minga.Theme.color(), bg :: Minga.Theme.color()}},
+            lsp_ready: Minga.Theme.color() | nil,
+            lsp_initializing: Minga.Theme.color() | nil,
+            lsp_starting: Minga.Theme.color() | nil,
+            lsp_error: Minga.Theme.color() | nil
           }
   end
 
