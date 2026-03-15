@@ -231,7 +231,14 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     # Pre-compute wrap map for all visible buffer lines in one batch call
     # (more efficient than per-line WrapMap.compute during the reduce).
     wrap_index =
-      precompute_wrap_index(wrap_on, visible_line_map, lines, first_line, ctx.content_w)
+      precompute_wrap_index(
+        wrap_on,
+        visible_line_map,
+        lines,
+        first_line,
+        ctx.content_w,
+        ctx.decorations
+      )
 
     render_opts = %{
       cursor_line: cursor_line,
@@ -309,6 +316,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   defp render_normal_entry(buf_line, fold_info, screen_row, render_opts, win, {g, c}) do
     %{lines: lines, first_line: first_line, wrap_index: wrap_index} = render_opts
+
     line_index = buf_line - first_line
     line_text = Enum.at(lines, line_index, "")
     display_text = fold_display_text(line_text, fold_info)
@@ -334,11 +342,12 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           [{non_neg_integer(), term()}],
           [String.t()],
           non_neg_integer(),
-          pos_integer()
+          pos_integer(),
+          Decorations.t()
         ) :: %{non_neg_integer() => WrapMap.wrap_entry()}
-  defp precompute_wrap_index(false, _visible_line_map, _lines, _first_line, _width), do: %{}
+  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs), do: %{}
 
-  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width) do
+  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width, decorations) do
     # Extract buffer lines that need wrapping (skip virtual lines, blocks, folds)
     buffer_entries =
       visible_line_map
@@ -352,14 +361,32 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         {buf_line, display_text}
       end)
 
-    texts = Enum.map(buffer_entries, &elem(&1, 1))
-    buf_lines = Enum.map(buffer_entries, &elem(&1, 0))
+    # Compute wrap entries per-line, adjusting width for inline virtual text.
+    # Inline VTs (e.g., "▎ " border) displace content rightward, so the
+    # available text width is content_w minus the VT display width.
+    wrap_entries =
+      Enum.map(buffer_entries, fn {buf_line, text} ->
+        vt_width = inline_vt_width(decorations, buf_line)
+        [entry] = WrapMap.compute([text], max(width - vt_width, 10))
+        entry
+      end)
 
-    wrap_entries = WrapMap.compute(texts, width)
+    buf_lines = Enum.map(buffer_entries, &elem(&1, 0))
 
     buf_lines
     |> Enum.zip(wrap_entries)
     |> Map.new()
+  end
+
+  # Returns the total display width of inline virtual texts on a line.
+  @spec inline_vt_width(Decorations.t(), non_neg_integer()) :: non_neg_integer()
+  defp inline_vt_width(decorations, buf_line) do
+    decorations
+    |> Decorations.inline_virtual_texts_for_line(buf_line)
+    |> Enum.reduce(0, fn vt, acc ->
+      seg_width = Enum.reduce(vt.segments, 0, fn {text, _style}, w -> w + String.length(text) end)
+      acc + seg_width
+    end)
   end
 
   defp clear_block_render_cache do
