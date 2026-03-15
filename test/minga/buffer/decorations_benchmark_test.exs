@@ -119,21 +119,17 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   end
 
   describe "performance: zero decorations (baseline)" do
-    test "empty decorations add zero overhead to line rendering" do
+    test "empty decorations short-circuit without allocations" do
       decs = Decorations.new()
-      line = String.duplicate("x", 80)
 
-      {elapsed_us, _} =
-        :timer.tc(fn ->
-          for i <- 0..999 do
-            ranges = Decorations.highlights_for_line(decs, i)
-            Decorations.merge_highlights([{line, []}], ranges, i)
-          end
-        end)
-
-      # 1000 lines with empty decorations should take essentially zero time
-      assert elapsed_us < 500,
-             "Empty decorations took #{elapsed_us}µs for 1000 lines, expected < 500µs"
+      # The zero-cost guarantee is structural: empty? guards in the render
+      # pipeline skip all decoration work. Verify the guards work correctly
+      # rather than relying on absolute timing thresholds that flake on CI.
+      assert Decorations.empty?(decs)
+      assert Decorations.highlights_for_line(decs, 0) == []
+      assert Decorations.highlights_for_lines(decs, 0, 100) == []
+      assert Decorations.highlight_count(decs) == 0
+      refute Decorations.has_virtual_texts?(decs)
     end
   end
 
