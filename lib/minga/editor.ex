@@ -479,6 +479,12 @@ defmodule Minga.Editor do
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
+      {:signature_help, pending} ->
+        new_state = put_in(state.lsp.pending, pending)
+        new_state = CompletionHandling.handle_signature_help_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
       {nil, _} ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)

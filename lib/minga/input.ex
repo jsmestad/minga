@@ -35,6 +35,7 @@ defmodule Minga.Input do
   alias Minga.Input.Picker
   alias Minga.Input.Popup
   alias Minga.Input.Scoped
+  alias Minga.Input.SignatureHelp
   alias Minga.Input.ToolApproval
 
   @doc """
@@ -63,6 +64,7 @@ defmodule Minga.Input do
       ConflictPrompt,
       Picker,
       Hover,
+      SignatureHelp,
       Completion,
       Scoped,
       GlobalBindings,

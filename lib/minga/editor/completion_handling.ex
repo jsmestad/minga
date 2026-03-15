@@ -11,6 +11,7 @@ defmodule Minga.Editor.CompletionHandling do
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
 
@@ -187,7 +188,8 @@ defmodule Minga.Editor.CompletionHandling do
   @spec do_update(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
   defp do_update(state, buf, codepoint) do
     state = update_filter(state, buf)
-    maybe_trigger(state, buf, codepoint)
+    state = maybe_trigger(state, buf, codepoint)
+    maybe_trigger_signature_help(state, buf, codepoint)
   end
 
   @spec update_filter(EditorState.t(), pid()) :: EditorState.t()
@@ -273,6 +275,90 @@ defmodule Minga.Editor.CompletionHandling do
   end
 
   defp codepoint_to_char(_), do: nil
+
+  # ── Signature help ───────────────────────────────────────────────────────
+
+  @doc """
+  Handles a `textDocument/signatureHelp` response.
+
+  Creates a `SignatureHelp` struct from the response and stores it
+  in editor state. Returns state unchanged on error or empty response.
+  """
+  @spec handle_signature_help_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
+          EditorState.t()
+  def handle_signature_help_response(state, {:error, _}), do: state
+  def handle_signature_help_response(state, {:ok, nil}), do: %{state | signature_help: nil}
+
+  def handle_signature_help_response(state, {:ok, result}) when is_map(result) do
+    {cursor_row, cursor_col} = approximate_cursor_screen_pos(state)
+    sh = SignatureHelp.from_response(result, cursor_row, cursor_col)
+    %{state | signature_help: sh}
+  end
+
+  def handle_signature_help_response(state, _), do: state
+
+  @spec maybe_trigger_signature_help(EditorState.t(), pid(), non_neg_integer()) ::
+          EditorState.t()
+  defp maybe_trigger_signature_help(state, buf, codepoint) do
+    case codepoint do
+      # ( triggers signature help
+      ?( ->
+        send_signature_help_request(state, buf)
+
+      # , re-triggers (next parameter)
+      ?, ->
+        send_signature_help_request(state, buf)
+
+      # ) dismisses signature help
+      ?) ->
+        %{state | signature_help: nil}
+
+      _ ->
+        state
+    end
+  end
+
+  @spec send_signature_help_request(EditorState.t(), pid()) :: EditorState.t()
+  defp send_signature_help_request(state, buf) do
+    case lsp_client_for(state, buf) do
+      nil ->
+        state
+
+      client ->
+        file_path = BufferServer.file_path(buf)
+
+        if file_path do
+          uri = DocumentSync.path_to_uri(file_path)
+          {line, col} = BufferServer.cursor(buf)
+
+          params = %{
+            "textDocument" => %{"uri" => uri},
+            "position" => %{"line" => line, "character" => col}
+          }
+
+          ref = Client.request(client, "textDocument/signatureHelp", params)
+          put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, :signature_help))
+        else
+          state
+        end
+    end
+  end
+
+  @spec approximate_cursor_screen_pos(EditorState.t()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp approximate_cursor_screen_pos(state) do
+    buf = state.buffers.active
+
+    if buf do
+      {line, col} = BufferServer.cursor(buf)
+      vp = state.viewport
+      screen_row = max(line - vp.top + 1, 1)
+      screen_col = min(col + 4, vp.cols - 1)
+      {screen_row, screen_col}
+    else
+      {div(state.viewport.rows, 2), div(state.viewport.cols, 2)}
+    end
+  end
 
   @spec lsp_client_for(EditorState.t(), pid()) :: pid() | nil
   defp lsp_client_for(state, buffer_pid) do

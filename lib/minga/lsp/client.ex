@@ -662,6 +662,14 @@ defmodule Minga.LSP.Client do
         "hover" => %{
           "dynamicRegistration" => false,
           "contentFormat" => ["markdown", "plaintext"]
+        },
+        "signatureHelp" => %{
+          "dynamicRegistration" => false,
+          "signatureInformation" => %{
+            "documentationFormat" => ["markdown", "plaintext"],
+            "parameterInformation" => %{"labelOffsetSupport" => true},
+            "activeParameterSupport" => true
+          }
         }
       }
     }

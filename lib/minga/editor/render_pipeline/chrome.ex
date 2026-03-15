@@ -21,6 +21,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
+  alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.Window
@@ -145,6 +146,9 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
     # Hover popup overlay
     hover_draws = render_hover_popup(state)
 
+    # Signature help overlay
+    sig_help_draws = render_signature_help(state)
+
     # Float popup overlays (from the popup system)
     float_overlays = PopupLifecycle.render_float_overlays(state)
 
@@ -152,6 +156,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
       (float_overlays ++
          [
            %Overlay{draws: hover_draws},
+           %Overlay{draws: sig_help_draws},
            %Overlay{draws: whichkey_draws},
            %Overlay{draws: completion_draws},
            %Overlay{draws: picker_draws, cursor: picker_cursor}
@@ -185,5 +190,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
 
   defp render_hover_popup(%{hover_popup: popup, viewport: vp, theme: theme}) do
     HoverPopup.render(popup, {vp.rows, vp.cols}, theme)
+  end
+
+  @spec render_signature_help(state()) :: [DisplayList.draw()]
+  defp render_signature_help(%{signature_help: nil}), do: []
+
+  defp render_signature_help(%{signature_help: sh, viewport: vp, theme: theme}) do
+    SignatureHelp.render(sh, {vp.rows, vp.cols}, theme)
   end
 end
