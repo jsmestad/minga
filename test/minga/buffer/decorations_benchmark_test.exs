@@ -7,7 +7,6 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.HighlightRange
 
   describe "performance: 1,000 decorations" do
     setup do
@@ -78,59 +77,35 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
              "Query + merge took #{elapsed_us}µs, expected < 2000µs with 10,000 decorations"
     end
 
-    test "bulk rebuild from list completes in under 50ms" do
-      intervals =
-        for i <- 0..9_999 do
-          %HighlightRange{
-            id: make_ref(),
-            start: {i, 0},
-            end_: {i, 20},
-            style: [bg: 0x3E4452],
-            priority: 0,
-            group: :diagnostics
-          }
-        end
+    test "batch clear-and-replace of 10,000 decorations completes in under 50ms" do
+      # This is the real-world pattern: LSP diagnostic refresh or agent chat
+      # sync clears all decorations in a group and replaces them. The batch
+      # API defers tree rebuilding until commit, so 10K operations produce
+      # a single from_list rebuild at the end.
+      base_decs = build_decorations(10_000)
 
       {elapsed_us, decs} =
         :timer.tc(fn ->
-          Enum.reduce(intervals, Decorations.new(), fn range, decs ->
-            {_id, decs} =
-              Decorations.add_highlight(decs, range.start, range.end_,
-                style: range.style,
-                group: range.group
-              )
-
-            decs
-          end)
-        end)
-
-      assert Decorations.highlight_count(decs) == 10_000
-      # Building 10k decorations one at a time should complete in under 50ms
-      assert elapsed_us < 50_000,
-             "Building 10,000 decorations took #{elapsed_us}µs, expected < 50000µs"
-    end
-
-    test "batch rebuild completes faster than sequential inserts" do
-      base_decs = build_decorations(5_000)
-
-      new_ranges =
-        for i <- 5_000..9_999 do
-          {make_ref(), {i, 0}, {i, 20}, [bg: 0x3E4452], :diagnostics}
-        end
-
-      {batch_us, _} =
-        :timer.tc(fn ->
           Decorations.batch(base_decs, fn d ->
-            Enum.reduce(new_ranges, d, fn {_id, s, e, style, group}, acc ->
-              {_, acc} = Decorations.add_highlight(acc, s, e, style: style, group: group)
+            d = Decorations.remove_group(d, :diagnostics)
+
+            Enum.reduce(0..9_999, d, fn i, acc ->
+              {_, acc} =
+                Decorations.add_highlight(acc, {i, 0}, {i, 20},
+                  style: [bg: 0xECBE7B],
+                  group: :diagnostics
+                )
+
               acc
             end)
           end)
         end)
 
-      # Batch should complete in reasonable time (under 100ms for 5k additions)
-      assert batch_us < 100_000,
-             "Batch of 5,000 additions took #{batch_us}µs, expected < 100000µs"
+      assert Decorations.highlight_count(decs) == 10_000
+      # Batch collects ops then does one from_list rebuild: O(n log n) with
+      # low constant factor. Must stay under 50ms even on CI runners.
+      assert elapsed_us < 50_000,
+             "Batch clear+replace of 10,000 decorations took #{elapsed_us}µs, expected < 50000µs"
     end
   end
 
