@@ -91,7 +91,13 @@ defmodule Minga.Editor do
     GenServer.cast(server, {:log_to_messages, text})
   end
 
-  @doc "Log a warning/error to the *Warnings* buffer with auto-popup. Used by the custom Logger handler."
+  @doc """
+  Log a warning/error to the *Warnings* buffer with auto-popup.
+
+  Used by the custom Logger handler. The popup opens without stealing
+  focus. Once the user dismisses it with `q`, new warnings are logged
+  silently until the user explicitly re-opens via `SPC b W`.
+  """
   @spec log_to_warnings(String.t(), GenServer.server()) :: :ok
   def log_to_warnings(text, server \\ __MODULE__) do
     GenServer.cast(server, {:log_to_warnings, text})
@@ -933,6 +939,7 @@ defmodule Minga.Editor do
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()
+  defp open_warnings_popup_if_needed(%{warnings_popup_dismissed: true} = state), do: state
   defp open_warnings_popup_if_needed(%{buffers: %{warnings: nil}} = state), do: state
 
   defp open_warnings_popup_if_needed(state) do
@@ -964,8 +971,7 @@ defmodule Minga.Editor do
   defp scroll_warnings_to_end(state, warnings_buf) do
     case Enum.find(state.windows.map, fn {_id, win} -> win.buffer == warnings_buf end) do
       {_id, _win} ->
-        # The popup rule has focus: true, which means the user's cursor is there.
-        # Just trigger a render so the viewport catches up to the appended content.
+        # Trigger a render so the viewport catches up to the appended content.
         schedule_render(state, 16)
 
       nil ->

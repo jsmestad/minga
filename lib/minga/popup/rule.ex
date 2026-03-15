@@ -18,7 +18,7 @@ defmodule Minga.Popup.Rule do
 
   ## Examples
 
-      Popup.Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: true)
+      Popup.Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: false)
 
       Popup.Rule.new(~r/\\*Help/, display: :float, width: {:percent, 60},
         height: {:percent, 70}, border: :rounded, focus: true, auto_close: true)

@@ -15,6 +15,7 @@ defmodule Minga.Input.Popup do
   @behaviour Minga.Input.Handler
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.WarningLog
   alias Minga.Editor.Window
   alias Minga.Popup.Lifecycle
 
@@ -29,6 +30,7 @@ defmodule Minga.Input.Popup do
       meta ->
         # Only intercept the quit key in normal mode (not insert mode)
         if state.vim.mode == :normal and matches_quit_key?(meta.rule.quit_key, codepoint) do
+          state = WarningLog.mark_dismissed_if_warnings(state)
           {:handled, Lifecycle.close_active_popup(state)}
         else
           {:passthrough, state}

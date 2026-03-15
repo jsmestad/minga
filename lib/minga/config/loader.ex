@@ -344,7 +344,7 @@ defmodule Minga.Config.Loader do
     PopupRegistry.init()
 
     defaults = [
-      Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: true),
+      Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}, focus: false),
       Rule.new("*Messages*", side: :bottom, size: {:percent, 25}, focus: false, auto_close: true)
     ]
 

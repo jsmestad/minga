@@ -159,6 +159,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(%{buffers: %{warnings: warn_buf}} = state, :view_warnings) do
+    state = %{state | warnings_popup_dismissed: false}
     open_special_buffer(state, "*Warnings*", warn_buf)
   end
 
