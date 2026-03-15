@@ -65,7 +65,7 @@ defmodule Minga.Clipboard.System do
       _ -> nil
     end
   rescue
-    _ -> nil
+    ErlangError -> nil
   end
 
   @spec run_write(String.t(), [String.t()], String.t()) :: :ok | :unavailable | {:error, term()}
@@ -88,7 +88,7 @@ defmodule Minga.Clipboard.System do
         await_port_exit(port)
     end
   rescue
-    error -> {:error, inspect(error)}
+    e in [ErlangError, ArgumentError] -> {:error, Exception.message(e)}
   end
 
   @spec await_port_exit(port()) :: :ok | {:error, term()}

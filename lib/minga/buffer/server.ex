@@ -44,6 +44,25 @@ defmodule Minga.Buffer.Server do
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
 
+  # ── Child Spec ──
+
+  @doc """
+  Returns a child spec with `restart: :temporary`.
+
+  Buffers run under a DynamicSupervisor. If a buffer crashes, it should
+  stay dead rather than restarting without its original init args (file
+  path, content). The Editor detects the dead buffer via `:DOWN` monitor
+  and shows a clear indicator to the user.
+  """
+  @spec child_spec([start_opt()]) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary
+    }
+  end
+
   # ── Client API ──
 
   @doc "Starts a buffer server. Pass `file_path:` to open a file, or `content:` for an unnamed buffer."
