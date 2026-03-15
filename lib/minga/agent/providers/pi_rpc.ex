@@ -26,7 +26,7 @@ defmodule Minga.Agent.Providers.PiRpc do
   changed. Update this value after verifying compatibility with a new
   pi release.
   """
-  @validated_pi_version "0.57.1"
+  @validated_pi_version "0.58.1"
 
   @typedoc "Internal state for the Pi RPC provider."
   @type state :: %{

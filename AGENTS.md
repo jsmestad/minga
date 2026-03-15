@@ -48,8 +48,10 @@ lib/
       registry.ex             # Named command lookup
       parser.ex               # :command parsing
     comment.ex                 # Line comment toggling per filetype (tree-sitter injection-aware)
-    git.ex                     # Git shell utilities (root, show HEAD, stage, blame)
+    git.ex                     # Git delegator (resolves backend via app config)
     git/
+      backend.ex             # Behaviour for git operations (9 callbacks)
+      system.ex              # Production backend (shells out to git CLI)
       buffer.ex              # Per-buffer GenServer: caches HEAD, computes diffs
       diff.ex                # Pure in-memory line diffing via List.myers_difference/2
     config.ex                 # Config DSL (use Minga.Config)
@@ -159,16 +161,36 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   5. **Never build a "safe client" wrapper module** that mirrors another module's API with nil-handling and exit-catching added. That's just indirection. The monitor is the real fix; the wrapper hides the problem behind a layer that every caller must remember to use.
 - `mix compile --warnings-as-errors` must pass clean
 
+### Common Elixir Footguns
+
+LLM agents hit these repeatedly. Read before writing any Elixir:
+
+- **Lists don't support index access.** `mylist[0]` doesn't work. Use `Enum.at(mylist, 0)`, `hd/1`, or pattern matching.
+- **Bind the result of block expressions.** Variables can't be rebound inside `if`/`case`/`with` and have the change leak out. Always bind: `state = if condition, do: new_state, else: state`.
+- **Never nest multiple modules in one file.** It causes cyclic compilation dependencies. One `defmodule` per `.ex` file.
+- **Don't use `String.to_atom/1` on user input.** Atoms are never garbage collected. Use `String.to_existing_atom/1` or keep it as a string.
+- **Predicate functions end in `?`, not `is_`.** Reserve `is_` prefix for guard-compatible functions only.
+- **`DynamicSupervisor` and `Registry` require names.** Always pass `name:` in the child spec: `{DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one}`.
+- **Don't use map access syntax on structs.** `my_struct[:field]` doesn't work (structs don't implement Access). Use `my_struct.field` or pattern match.
+- **`mix deps.clean --all` is almost never needed.** Don't nuke deps as a first troubleshooting step. Try `mix deps.get` or `mix compile --force` first.
+
 ### Pre-commit Checks (enforced by commit-gate extension)
 
 The `commit-gate` extension blocks every `git commit` until `mix lint` has passed. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you.
 
-**Elixir changes:**
+**Run `mix precommit` when you're done with all changes.** This runs lint + tests in one shot. Fix any failures before committing.
 
 ```bash
-mix lint                          # Formatting, credo --strict, compile --warnings-as-errors
-mix test --warnings-as-errors     # Tests
-mix dialyzer                      # Typespec consistency
+mix precommit                     # Runs: format, credo, compile, dialyzer, test
+```
+
+For targeted checks:
+
+```bash
+mix lint                          # Format + credo + compile + dialyzer (no tests)
+mix test --warnings-as-errors     # Tests only
+mix test test/minga/foo_test.exs  # Single file (faster iteration)
+mix test --failed                 # Re-run only previously failed tests
 ```
 
 **Zig changes:**
@@ -198,6 +220,29 @@ end
 - **Edge cases always tested**: empty state, boundaries, unicode
 - **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
 - Run with `mix test --warnings-as-errors`
+
+**Process synchronization in tests:**
+
+- **Use `start_supervised!/1`** to start processes in tests. It guarantees cleanup between tests.
+- **Avoid `Process.sleep/1` in tests.** Use `:sys.get_state/1` as a synchronization barrier (ensures the process has handled prior messages), or `Process.monitor/1` + `assert_receive {:DOWN, ...}` to wait for process exit. Sleep is acceptable only in integration tests that interact with external OS processes.
+- **Avoid `Process.alive?/1` in assertions.** It's a race condition. Monitor the process instead.
+
+**Debugging test failures:**
+
+```bash
+mix test test/minga/foo_test.exs          # Run one file
+mix test test/minga/foo_test.exs:42       # Run one test (line number)
+mix test --failed                         # Re-run only failures from last run
+mix test --seed 12345                     # Reproduce a specific run order
+```
+
+**DI stubs for OS processes:**
+
+Tests must not spawn OS processes during concurrent (async) execution. The BEAM's `erl_child_setup` has a race condition that causes EPIPE errors under concurrency. Modules that shell out (`Minga.Git`, `Minga.FileFind`, `Minga.ProjectSearch`) use a backend behaviour pattern so tests can inject stubs:
+
+- `Minga.Git` → `Minga.Git.Backend` behaviour, `Minga.Git.Stub` in tests (configured in `config/test.exs`)
+- `Git.Stub` is ETS-backed and configurable per-test via `Git.Stub.set_root/2`, `set_status/2`, etc.
+- Tests that genuinely need OS processes (e.g., `Extension.GitIntegrationTest`) must be `async: false` with `@moduletag timeout:` to prevent hangs
 
 ### Zig
 
