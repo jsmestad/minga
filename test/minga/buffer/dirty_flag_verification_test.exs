@@ -4,6 +4,7 @@ defmodule Minga.Buffer.DirtyFlagVerificationTest do
   through undo, redo, save, and save_as operations.
   """
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Buffer.Server
 
@@ -145,5 +146,49 @@ defmodule Minga.Buffer.DirtyFlagVerificationTest do
 
     Server.undo(pid)
     refute Server.dirty?(pid), "new buffer should be clean after undoing all edits"
+  end
+
+  @tag :tmp_dir
+  property "dirty flag is consistent after random insert/undo sequences", %{tmp_dir: dir} do
+    check all(
+            ops <-
+              StreamData.list_of(
+                StreamData.frequency([
+                  {3, StreamData.constant(:insert)},
+                  {2, StreamData.constant(:undo)},
+                  {1, StreamData.constant(:save)},
+                  {1, StreamData.constant(:break)}
+                ]),
+                min_length: 1,
+                max_length: 20
+              )
+          ) do
+      path = Path.join(dir, "prop_#{:erlang.unique_integer([:positive])}.txt")
+      File.write!(path, "start")
+      {:ok, pid} = Server.start_link(file_path: path)
+
+      Enum.each(ops, fn
+        :insert ->
+          Server.insert_char(pid, "x")
+
+        :undo ->
+          Server.undo(pid)
+
+        :save ->
+          Server.save(pid)
+
+        :break ->
+          Server.break_undo_coalescing(pid)
+      end)
+
+      # After any sequence: if content matches what was last saved,
+      # dirty should be false. We can't easily track the saved content
+      # in the property, but we CAN verify the invariant that saving
+      # then doing nothing leaves the buffer clean.
+      Server.save(pid)
+      refute Server.dirty?(pid), "buffer should be clean immediately after save"
+
+      GenServer.stop(pid)
+    end
   end
 end

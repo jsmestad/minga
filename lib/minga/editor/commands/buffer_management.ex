@@ -226,6 +226,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state |> execute(:save) |> close_tab_or_quit()
   end
 
+  def execute(state, {:execute_ex_command, {:save_quit_all, []}}) do
+    state |> save_all_buffers() |> shutdown_editor()
+  end
+
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
     case find_buffer_by_path(state, file_path) do
       nil ->
@@ -701,6 +705,19 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)
+
+  # Saves all dirty buffers in the buffer list. Called by :wqa before
+  # shutting down. Returns state unchanged (side-effectual only).
+  @spec save_all_buffers(state()) :: state()
+  defp save_all_buffers(state) do
+    Enum.each(state.buffers.list, fn buf ->
+      if Process.alive?(buf) and BufferServer.dirty?(buf) do
+        BufferServer.save(buf)
+      end
+    end)
+
+    state
+  end
 
   # Exits the editor. Single exit point so shutdown cleanup (flush buffers,
   # save session, etc.) can be added in one place.

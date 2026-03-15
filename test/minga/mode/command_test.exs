@@ -99,6 +99,13 @@ defmodule Minga.Mode.CommandTest do
                result
     end
 
+    test ":wqa → execute {:save_quit_all, []} then transition to normal" do
+      result = Command.handle_key({@enter, 0}, fresh_state("wqa"))
+
+      assert {:execute_then_transition, [{:execute_ex_command, {:save_quit_all, []}}], :normal, _} =
+               result
+    end
+
     test ":e filename → execute {:edit, filename} then transition to normal" do
       result = Command.handle_key({@enter, 0}, fresh_state("e README.md"))
 
