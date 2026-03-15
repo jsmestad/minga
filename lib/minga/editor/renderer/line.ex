@@ -27,7 +27,7 @@ defmodule Minga.Editor.Renderer.Line do
   @typedoc "A grapheme paired with its display width."
   @type grapheme_pair :: {String.t(), non_neg_integer()}
 
-  @doc "Renders a single buffer line into draw tuples."
+  @doc "Renders a single buffer line into draw tuples, including virtual text decorations."
   @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t(), non_neg_integer()) ::
           [DisplayList.draw()]
   def render(line_text, screen_row, buf_line, %Context{} = ctx, line_byte_offset \\ 0) do
@@ -91,6 +91,55 @@ defmodule Minga.Editor.Renderer.Line do
           sel_end
         )
     end
+    |> append_eol_virtual_text(screen_row, buf_line, line_display_len, ctx)
+  end
+
+  # Appends EOL virtual text draw commands after the line content.
+  # EOL text appears after the last character, separated by one space.
+  @spec append_eol_virtual_text(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) :: [DisplayList.draw()]
+  defp append_eol_virtual_text(draws, _screen_row, _buf_line, _line_len, %{
+         decorations: %{virtual_texts: []}
+       }),
+       do: draws
+
+  defp append_eol_virtual_text(draws, screen_row, buf_line, line_display_len, ctx) do
+    eol_vts = Decorations.eol_virtual_texts_for_line(ctx.decorations, buf_line)
+
+    if eol_vts == [] do
+      draws
+    else
+      # EOL text starts after the line content + 1 space separator,
+      # adjusted for viewport horizontal scroll
+      eol_start = max(line_display_len + 1 - ctx.viewport.left, 0) + ctx.gutter_w
+
+      {eol_draws, _col} =
+        Enum.reduce(eol_vts, {[], eol_start}, fn vt, {acc, col} ->
+          render_virtual_text_segments(vt.segments, screen_row, col, acc)
+        end)
+
+      draws ++ Enum.reverse(eol_draws)
+    end
+  end
+
+  # Renders styled virtual text segments into draw commands.
+  @spec render_virtual_text_segments(
+          [Decorations.VirtualText.segment()],
+          non_neg_integer(),
+          non_neg_integer(),
+          [DisplayList.draw()]
+        ) :: {[DisplayList.draw()], non_neg_integer()}
+  defp render_virtual_text_segments(segments, screen_row, start_col, acc) do
+    Enum.reduce(segments, {acc, start_col}, fn {text, style}, {draws, col} ->
+      width = Unicode.display_width(text)
+      draw = DisplayList.draw(screen_row, col, text, style)
+      {[draw | draws], col + width}
+    end)
   end
 
   # ── Display-width helpers ─────────────────────────────────────────────────
@@ -253,7 +302,154 @@ defmodule Minga.Editor.Renderer.Line do
   defp render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights) do
     segments = [{line_text, []}]
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
+    segments = inject_inline_virtual_text(segments, ctx.decorations, buf_line)
     render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  # ── Inline virtual text injection ────────────────────────────────────────────
+
+  # Injects inline virtual text segments into the styled segment list at their
+  # anchor column positions, displacing subsequent content rightward.
+  # Virtual text segments are tagged with {:virtual, true} in their style so
+  # selection rendering can skip them.
+  @spec inject_inline_virtual_text(
+          [{String.t(), keyword()}],
+          Decorations.t(),
+          non_neg_integer()
+        ) :: [{String.t(), keyword()}]
+  defp inject_inline_virtual_text(segments, decorations, buf_line) do
+    inline_vts = Decorations.inline_virtual_texts_for_line(decorations, buf_line)
+
+    if inline_vts == [] do
+      segments
+    else
+      do_inject_inline(segments, inline_vts, 0, [])
+    end
+  end
+
+  # Walk through segments, tracking the current buffer column. When a virtual
+  # text's anchor column falls within the current segment, split the segment
+  # and insert the virtual text segments between the halves.
+  @spec do_inject_inline(
+          [{String.t(), keyword()}],
+          [Decorations.VirtualText.t()],
+          non_neg_integer(),
+          [{String.t(), keyword()}]
+        ) :: [{String.t(), keyword()}]
+  defp do_inject_inline([], remaining_vts, _col, acc) do
+    # Append any remaining virtual texts after all buffer content
+    vt_segments =
+      Enum.flat_map(remaining_vts, fn vt ->
+        Enum.map(vt.segments, fn {text, style} ->
+          {text, Keyword.put(style, :virtual, true)}
+        end)
+      end)
+
+    Enum.reverse(acc, vt_segments)
+  end
+
+  defp do_inject_inline(segments, [], _col, acc) do
+    # No more virtual texts to inject, append remaining segments
+    Enum.reverse(acc, segments)
+  end
+
+  defp do_inject_inline(
+         [{seg_text, seg_style} | rest_segs],
+         [%{anchor: {_l, anchor_col}} = vt | rest_vts],
+         col,
+         acc
+       ) do
+    seg_width = Unicode.display_width(seg_text)
+    seg_end = col + seg_width
+
+    inject_at_position(
+      {seg_text, seg_style},
+      rest_segs,
+      vt,
+      rest_vts,
+      col,
+      seg_end,
+      anchor_col,
+      acc
+    )
+  end
+
+  # Virtual text anchor is at or before the current segment start: inject before
+  @spec inject_at_position(
+          {String.t(), keyword()},
+          [{String.t(), keyword()}],
+          Decorations.VirtualText.t(),
+          [Decorations.VirtualText.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [{String.t(), keyword()}]
+        ) :: [{String.t(), keyword()}]
+  defp inject_at_position(seg, rest_segs, vt, rest_vts, col, _seg_end, anchor_col, acc)
+       when anchor_col <= col do
+    vt_segs = tag_virtual_segments(vt.segments)
+    do_inject_inline([seg | rest_segs], rest_vts, col, vt_segs ++ acc)
+  end
+
+  # Virtual text anchor is within the current segment: split and inject
+  defp inject_at_position(
+         {seg_text, seg_style},
+         rest_segs,
+         vt,
+         rest_vts,
+         col,
+         seg_end,
+         anchor_col,
+         acc
+       )
+       when anchor_col < seg_end do
+    split_at = anchor_col - col
+    {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
+    vt_segs = tag_virtual_segments(vt.segments)
+
+    after_part = if after_text != "", do: [{after_text, seg_style}], else: []
+    new_acc = after_part ++ vt_segs ++ [{before_text, seg_style} | acc]
+    do_inject_inline(rest_segs, rest_vts, seg_end, new_acc)
+  end
+
+  # Virtual text anchor is after the current segment: skip segment, keep going
+  defp inject_at_position(
+         {seg_text, seg_style},
+         rest_segs,
+         vt,
+         rest_vts,
+         _col,
+         seg_end,
+         _anchor_col,
+         acc
+       ) do
+    do_inject_inline(rest_segs, [vt | rest_vts], seg_end, [{seg_text, seg_style} | acc])
+  end
+
+  @spec tag_virtual_segments([{String.t(), keyword()}]) :: [{String.t(), keyword()}]
+  defp tag_virtual_segments(segments) do
+    Enum.map(segments, fn {text, style} ->
+      {text, Keyword.put(style, :virtual, true)}
+    end)
+  end
+
+  # Split text at a display column position (not byte or grapheme index).
+  @spec split_text_at_display_col(String.t(), non_neg_integer()) :: {String.t(), String.t()}
+  defp split_text_at_display_col(text, display_col) do
+    graphemes = String.graphemes(text)
+
+    {before_acc, after_acc, _} =
+      Enum.reduce(graphemes, {[], [], 0}, fn g, {bef, aft, col} ->
+        w = Unicode.grapheme_width(g)
+
+        if col < display_col do
+          {[g | bef], aft, col + w}
+        else
+          {bef, [g | aft], col + w}
+        end
+      end)
+
+    {before_acc |> Enum.reverse() |> Enum.join(), after_acc |> Enum.reverse() |> Enum.join()}
   end
 
   # ── Syntax highlighting ──────────────────────────────────────────────────────
@@ -279,6 +475,7 @@ defmodule Minga.Editor.Renderer.Line do
 
     # Merge decoration highlight ranges with syntax segments (pre-queried, no double lookup)
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
+    segments = inject_inline_virtual_text(segments, ctx.decorations, buf_line)
 
     render_segments_with_scroll(segments, screen_row, ctx)
   end

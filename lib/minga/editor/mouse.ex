@@ -27,6 +27,7 @@ defmodule Minga.Editor.Mouse do
 
   import Bitwise
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.Layout
@@ -741,7 +742,18 @@ defmodule Minga.Editor.Mouse do
        do: nil
 
   defp resolve_buffer_pos(buf, _row, _visible, target_line, target_col, _total) do
-    {target_line, clamp_col_to_line(buf, target_line, target_col)}
+    # Adjust for inline virtual text: the target_col is a display column,
+    # but if inline virtual text is present, the buffer column is different.
+    adjusted_col = adjust_col_for_virtual_text(buf, target_line, target_col)
+    {target_line, clamp_col_to_line(buf, target_line, adjusted_col)}
+  end
+
+  @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp adjust_col_for_virtual_text(buf, line, display_col) do
+    Decorations.display_col_to_buf_col(BufferServer.decorations(buf), line, display_col)
+  catch
+    :exit, _ -> display_col
   end
 
   # Computes the scroll top the same way the render pipeline does:
