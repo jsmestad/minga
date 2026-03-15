@@ -9,7 +9,10 @@ defmodule Minga.Picker.BufferSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
 
@@ -22,7 +25,7 @@ defmodule Minga.Picker.BufferSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(state), do: build_candidates(state, include_special: false)
 
   @doc """
@@ -33,7 +36,7 @@ defmodule Minga.Picker.BufferSource do
   * `:include_special` — when `true`, includes special buffers (`*Messages*`,
     `*Warnings*`, etc.) in the results. Defaults to `false`.
   """
-  @spec build_candidates(term(), keyword()) :: [Minga.Picker.item()]
+  @spec build_candidates(term(), keyword()) :: [Item.t()]
   def build_candidates(%{buffers: buffers_state}, opts \\ []) do
     %{list: buffers} = buffers_state
     include_special = Keyword.get(opts, :include_special, false)
@@ -59,7 +62,7 @@ defmodule Minga.Picker.BufferSource do
   alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
   key so `on_select` can distinguish them from list-indexed buffers.
   """
-  @spec extra_special_buffers(Buffers.t()) :: [Minga.Picker.item()]
+  @spec extra_special_buffers(Buffers.t()) :: [Item.t()]
   def extra_special_buffers(%Buffers{list: list} = bs) do
     special_fields = [bs.messages, bs.warnings]
 
@@ -71,13 +74,13 @@ defmodule Minga.Picker.BufferSource do
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({{:pid, pid}, _label, _desc}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:pid, pid}}, state) do
     # Special buffer not yet in the list: add it (which also switches to it)
     EditorState.add_buffer(state, pid)
   end
 
-  def on_select({idx, _label, _desc}, state) when is_integer(idx) do
+  def on_select(%Item{id: idx}, state) when is_integer(idx) do
     EditorState.switch_buffer(state, idx)
   end
 
@@ -90,18 +93,18 @@ defmodule Minga.Picker.BufferSource do
   def on_cancel(state), do: state
 
   @impl true
-  @spec actions(Minga.Picker.item()) :: [Minga.Picker.Source.action_entry()]
+  @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
   def actions(_item) do
     [{"Switch", :switch}, {"Kill", :kill}]
   end
 
   @impl true
-  @spec on_action(atom(), Minga.Picker.item(), term()) :: term()
+  @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:switch, item, state), do: on_select(item, state)
 
   def on_action(
         :kill,
-        {idx, _label, _desc},
+        %Item{id: idx},
         %{buffers: %Minga.Editor.State.Buffers{list: buffers} = bs} = state
       )
       when is_integer(idx) and idx < length(buffers) do
@@ -162,13 +165,21 @@ defmodule Minga.Picker.BufferSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec format_candidate(pid(), term()) :: Minga.Picker.item()
+  @spec format_candidate(pid(), term()) :: Item.t()
   defp format_candidate(buf, key) do
     name = display_name(buf)
+    ft = BufferServer.filetype(buf)
+    {icon, color} = Devicon.icon_and_color(ft)
     desc = BufferServer.file_path(buf) || ""
     dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
     ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
-    {key, name <> dirty <> ro, desc}
+
+    %Item{
+      id: key,
+      label: "#{icon} #{name}#{dirty}#{ro}",
+      description: desc,
+      icon_color: color
+    }
   end
 
   @spec display_name(pid()) :: String.t()

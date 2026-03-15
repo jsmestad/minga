@@ -350,7 +350,7 @@ defmodule Minga.Editor.PickerUI do
     item_commands =
       visible
       |> Enum.with_index()
-      |> Enum.flat_map(fn {{_id, label, desc}, idx} ->
+      |> Enum.flat_map(fn {item, idx} ->
         row = first_item_row + idx
 
         if row < 0 or row >= viewport.rows do
@@ -358,12 +358,13 @@ defmodule Minga.Editor.PickerUI do
         else
           render_item(
             row,
-            label,
-            desc,
+            item.label,
+            item.description,
             idx == selected_offset,
             picker.query,
             viewport.cols,
-            picker_colors
+            picker_colors,
+            item.icon_color
           )
         end
       end)
@@ -461,18 +462,19 @@ defmodule Minga.Editor.PickerUI do
     item_draws =
       visible
       |> Enum.with_index()
-      |> Enum.flat_map(fn {{_id, label, desc}, idx} ->
+      |> Enum.flat_map(fn {item, idx} ->
         if idx >= items_h,
           do: [],
           else:
             render_centered_item(
               idx,
-              label,
-              desc,
+              item.label,
+              item.description,
               idx == selected_offset,
               picker.query,
               interior_w,
-              pc
+              pc,
+              item.icon_color
             )
       end)
 
@@ -511,9 +513,10 @@ defmodule Minga.Editor.PickerUI do
           boolean(),
           String.t(),
           pos_integer(),
-          map()
+          map(),
+          non_neg_integer() | nil
         ) :: [DisplayList.draw()]
-  defp render_centered_item(row, label, desc, selected, query, width, pc) do
+  defp render_centered_item(row, label, desc, selected, query, width, pc, icon_color) do
     bg = if selected, do: pc.sel_bg, else: pc.bg
     fg = if selected, do: pc.text_fg, else: pc.text_fg
 
@@ -534,10 +537,38 @@ defmodule Minga.Editor.PickerUI do
     # Label (brighter text)
     label_draw = [DisplayList.draw(row, 0, label, fg: fg, bg: bg)]
 
+    # Icon color overlay
+    icon_draws = render_icon_color(row, icon_color, bg, label, 0)
+
     # Highlight matching characters in the label
     match_draws = highlight_matches(row, label, query, pc.match_fg, bg)
 
-    base ++ label_draw ++ match_draws
+    base ++ label_draw ++ icon_draws ++ match_draws
+  end
+
+  # Renders the icon (first grapheme of the label) in its language color.
+  # `col_offset` is where the label text starts on the row: 1 for bottom
+  # layout (leading space), 0 for centered layout.
+  # Renders the icon (first grapheme of the label) in its language color.
+  # `col_offset` is where the label starts: 1 for bottom layout (leading
+  # space prefix), 0 for centered layout.
+  @spec render_icon_color(
+          non_neg_integer(),
+          non_neg_integer() | nil,
+          non_neg_integer(),
+          String.t(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_icon_color(_row, nil, _bg, _label, _col_offset), do: []
+
+  defp render_icon_color(row, color, bg, label, col_offset) when is_integer(color) do
+    case String.next_grapheme(label) do
+      {icon, _rest} ->
+        [DisplayList.draw(row, col_offset, icon, fg: color, bg: bg)]
+
+      nil ->
+        []
+    end
   end
 
   @spec highlight_matches(non_neg_integer(), String.t(), String.t(), term(), term()) :: [
@@ -600,9 +631,10 @@ defmodule Minga.Editor.PickerUI do
           boolean(),
           String.t(),
           pos_integer(),
-          map()
+          map(),
+          non_neg_integer() | nil
         ) :: [DisplayList.draw()]
-  defp render_item(row, label, desc, is_selected, query, cols, colors) do
+  defp render_item(row, label, desc, is_selected, query, cols, colors, icon_color) do
     fg = if is_selected, do: colors.highlight_fg, else: colors.text_fg
     row_bg = if is_selected, do: colors.sel_bg, else: colors.bg
 
@@ -635,6 +667,8 @@ defmodule Minga.Editor.PickerUI do
 
     highlight_cmds = render_match_highlights(row, label, query, colors.match_fg, row_bg)
 
+    icon_cmds = render_icon_color(row, icon_color, row_bg, label, 1)
+
     desc_cmds =
       if desc_display != "" do
         desc_start = cols - Unicode.display_width(desc_display) - 1
@@ -643,7 +677,7 @@ defmodule Minga.Editor.PickerUI do
         []
       end
 
-    [bg_cmd | highlight_cmds] ++ desc_cmds
+    [bg_cmd | icon_cmds] ++ highlight_cmds ++ desc_cmds
   end
 
   # Renders highlighted characters for fuzzy match positions in a picker label.

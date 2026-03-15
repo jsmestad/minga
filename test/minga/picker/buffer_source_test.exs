@@ -7,6 +7,7 @@ defmodule Minga.Picker.BufferSourceTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Picker.BufferAllSource
   alias Minga.Picker.BufferSource
+  alias Minga.Picker.Item
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferServer.start_link(opts)
@@ -65,7 +66,7 @@ defmodule Minga.Picker.BufferSourceTest do
       special_buf = start_buffer(content: "", buffer_name: "*Messages*")
 
       candidates = BufferSource.candidates(fake_state([file_buf, special_buf]))
-      labels = Enum.map(candidates, fn {_idx, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       refute Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
@@ -93,7 +94,7 @@ defmodule Minga.Picker.BufferSourceTest do
       candidates =
         BufferSource.build_candidates(fake_state([file_buf, special_buf]), include_special: true)
 
-      labels = Enum.map(candidates, fn {_idx, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert Enum.any?(labels, &String.contains?(&1, "*scratch*"))
     end
@@ -105,7 +106,7 @@ defmodule Minga.Picker.BufferSourceTest do
       candidates =
         BufferSource.build_candidates(fake_state([unlisted, special]), include_special: true)
 
-      labels = Enum.map(candidates, fn {_idx, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert length(candidates) == 1
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
@@ -126,7 +127,7 @@ defmodule Minga.Picker.BufferSourceTest do
       special_buf = start_buffer(content: "", buffer_name: "*Messages*")
 
       candidates = BufferAllSource.candidates(fake_state([file_buf, special_buf]))
-      labels = Enum.map(candidates, fn {_idx, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert length(candidates) == 2
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
@@ -142,7 +143,7 @@ defmodule Minga.Picker.BufferSourceTest do
       state = fake_state([file_buf], messages: messages, warnings: warnings)
       candidates = BufferAllSource.candidates(state)
 
-      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
       assert length(candidates) == 3
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
@@ -155,7 +156,7 @@ defmodule Minga.Picker.BufferSourceTest do
       state = fake_state([], messages: messages)
       candidates = BufferAllSource.candidates(state)
 
-      assert [{key, _label, _desc}] = candidates
+      assert [%Item{id: key}] = candidates
       assert {:pid, ^messages} = key
     end
 
@@ -175,7 +176,7 @@ defmodule Minga.Picker.BufferSourceTest do
       state = fake_state([file_buf], messages: messages)
       candidates = BufferSource.candidates(state)
 
-      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
       assert length(candidates) == 1
       refute Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
@@ -188,7 +189,7 @@ defmodule Minga.Picker.BufferSourceTest do
       state = fake_state([messages], messages: messages)
       candidates = BufferAllSource.candidates(state)
 
-      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end
 
@@ -199,7 +200,7 @@ defmodule Minga.Picker.BufferSourceTest do
       state = fake_state([], messages: messages)
       candidates = BufferAllSource.candidates(state)
 
-      labels = Enum.map(candidates, fn {_key, label, _desc} -> label end)
+      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
       assert length(candidates) == 1
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
     end

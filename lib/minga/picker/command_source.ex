@@ -10,6 +10,8 @@ defmodule Minga.Picker.CommandSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
@@ -22,7 +24,7 @@ defmodule Minga.Picker.CommandSource do
   def title, do: "Commands"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     keybind_map = build_keybind_map()
 
@@ -31,9 +33,14 @@ defmodule Minga.Picker.CommandSource do
       |> Enum.map(fn cmd ->
         keybind = Map.get(keybind_map, cmd.name, "")
         annotation = if keybind != "", do: "SPC #{keybind}", else: ""
-        {cmd.name, "#{cmd.name}: #{cmd.description}", annotation}
+
+        %Item{
+          id: cmd.name,
+          label: "󰘳 #{cmd.name}: #{cmd.description}",
+          annotation: annotation
+        }
       end)
-      |> Enum.sort_by(fn {_id, label, _desc} -> label end)
+      |> Enum.sort_by(& &1.label)
     catch
       :exit, _ ->
         Minga.Log.warning(:editor, "Command registry not available")
@@ -42,8 +49,8 @@ defmodule Minga.Picker.CommandSource do
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({command_name, _label, _desc}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: command_name}, state) do
     case lookup_command(command_name) do
       %Command{scope: %{} = scope} = cmd ->
         open_scope_picker(state, cmd, scope)

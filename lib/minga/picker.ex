@@ -20,16 +20,18 @@ defmodule Minga.Picker do
 
   ## Usage
 
+      alias Minga.Picker.Item
+
       picker = Picker.new([
-        {"pid1", "README.md", "/project/README.md"},
-        {"pid2", "config.exs", "/project/config/config.exs [+]"}
+        %Item{id: "pid1", label: "README.md", description: "/project/README.md"},
+        %Item{id: "pid2", label: "config.exs", description: "/project/config/config.exs [+]"}
       ], title: "Switch buffer")
 
       picker = Picker.type_char(picker, "r")
       # filtered to items matching "r"
 
       picker = Picker.move_down(picker)
-      {id, label, desc} = Picker.selected_item(picker)
+      %Item{id: id} = Picker.selected_item(picker)
   """
 
   @enforce_keys [:items, :title]
@@ -40,18 +42,17 @@ defmodule Minga.Picker do
             max_visible: 10,
             title: ""
 
-  @typedoc "A unique identifier for a picker item."
-  @type item_id :: term()
+  alias Minga.Picker.Item
 
-  @typedoc "A picker item: `{id, label, description}`."
-  @type item :: {item_id(), String.t(), String.t()}
+  @typedoc "A picker item struct."
+  @type item :: Item.t()
 
   @typedoc "Picker state."
   @type t :: %__MODULE__{
-          items: [item()],
+          items: [Item.t()],
           query: String.t(),
           selected: non_neg_integer(),
-          filtered: [item()],
+          filtered: [Item.t()],
           max_visible: pos_integer(),
           title: String.t()
         }
@@ -149,11 +150,11 @@ defmodule Minga.Picker do
   end
 
   @doc "Returns the selected item's id, or nil."
-  @spec selected_id(t()) :: item_id() | nil
+  @spec selected_id(t()) :: term()
   def selected_id(picker) do
     case selected_item(picker) do
       nil -> nil
-      {id, _label, _desc} -> id
+      %Item{id: id} -> id
     end
   end
 
@@ -246,7 +247,7 @@ defmodule Minga.Picker do
     else
       scored =
         items
-        |> Enum.map(fn {_id, label, desc} = item ->
+        |> Enum.map(fn %Item{label: label, description: desc} = item ->
           score = score_item(label, desc, segments)
           {item, score}
         end)

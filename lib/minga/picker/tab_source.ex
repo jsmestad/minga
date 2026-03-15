@@ -9,6 +9,8 @@ defmodule Minga.Picker.TabSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
@@ -19,7 +21,7 @@ defmodule Minga.Picker.TabSource do
   def title, do: "Switch Tab"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(%{tab_bar: %TabBar{} = tb}) do
     Enum.map(tb.tabs, fn tab ->
       icon = tab_icon(tab)
@@ -27,15 +29,15 @@ defmodule Minga.Picker.TabSource do
       active_marker = if tab.id == tb.active_id, do: " \u{2022}", else: ""
       desc = tab_description(tab)
 
-      {tab.id, "#{icon} #{label}#{active_marker}", desc}
+      %Item{id: tab.id, label: "#{icon} #{label}#{active_marker}", description: desc}
     end)
   end
 
   def candidates(_), do: []
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({tab_id, _, _}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: tab_id}, state) do
     EditorState.switch_tab(state, tab_id)
   end
 

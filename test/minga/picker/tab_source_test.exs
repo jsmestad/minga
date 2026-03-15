@@ -1,6 +1,8 @@
 defmodule Minga.Picker.TabSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Picker.Item
+
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Picker.TabSource
@@ -21,7 +23,7 @@ defmodule Minga.Picker.TabSourceTest do
       candidates = TabSource.candidates(%{tab_bar: tb})
       assert length(candidates) == 3
 
-      {id1, label1, _} = Enum.find(candidates, fn {id, _, _} -> id == 1 end)
+      %Item{id: id1, label: label1} = Enum.find(candidates, fn %Item{id: id} -> id == 1 end)
       assert id1 == 1
       assert String.contains?(label1, "main.ex")
     end
@@ -34,10 +36,10 @@ defmodule Minga.Picker.TabSourceTest do
 
       candidates = TabSource.candidates(%{tab_bar: tb})
 
-      {_, active_label, _} = Enum.find(candidates, fn {id, _, _} -> id == 1 end)
+      %Item{label: active_label} = Enum.find(candidates, fn %Item{id: id} -> id == 1 end)
       assert String.contains?(active_label, "\u{2022}")
 
-      {_, inactive_label, _} = Enum.find(candidates, fn {id, _, _} -> id == 2 end)
+      %Item{label: inactive_label} = Enum.find(candidates, fn %Item{id: id} -> id == 2 end)
       refute String.contains?(inactive_label, "\u{2022}")
     end
 
@@ -45,7 +47,7 @@ defmodule Minga.Picker.TabSourceTest do
       tab = Tab.new_agent(1, "My Session")
       tb = TabBar.new(tab)
 
-      [{_, label, desc}] = TabSource.candidates(%{tab_bar: tb})
+      [%Item{label: label, description: desc}] = TabSource.candidates(%{tab_bar: tb})
       assert String.contains?(label, "My Session")
       assert desc == "agent"
     end

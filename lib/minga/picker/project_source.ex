@@ -8,6 +8,8 @@ defmodule Minga.Picker.ProjectSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Project
 
   @impl true
@@ -15,21 +17,21 @@ defmodule Minga.Picker.ProjectSource do
   def title, do: "Switch project"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     Project.known_projects()
     |> Enum.with_index()
-    |> Enum.map(fn {root, idx} ->
+    |> Enum.map(fn {root, _idx} ->
       label = Path.basename(root)
-      {idx, label, root}
+      %Item{id: root, label: label, description: root}
     end)
   catch
     :exit, _ -> []
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({_idx, _label, root_path}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: root_path}, state) do
     Project.switch(root_path)
 
     # After switching project, open the file finder scoped to the new root.

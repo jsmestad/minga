@@ -1,6 +1,8 @@
 defmodule Minga.Picker.CommandSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Command
   alias Minga.Editor.State, as: EditorState
@@ -13,7 +15,13 @@ defmodule Minga.Picker.CommandSourceTest do
   describe "on_select/2 — regular command" do
     test "sets pending_command for non-scopeable commands" do
       state = %{pending_command: nil}
-      result = CommandSource.on_select({:save, "save: Save the current file", ""}, state)
+
+      result =
+        CommandSource.on_select(
+          %Item{id: :save, label: "save: Save the current file", description: ""},
+          state
+        )
+
       assert result.pending_command == :save
     end
   end
@@ -32,7 +40,7 @@ defmodule Minga.Picker.CommandSourceTest do
 
       result =
         CommandSource.on_select(
-          {:toggle_wrap, "toggle_wrap: Toggle word wrap", ""},
+          %Item{id: :toggle_wrap, label: "toggle_wrap: Toggle word wrap", description: ""},
           state
         )
 

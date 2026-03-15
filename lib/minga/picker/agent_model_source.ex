@@ -13,6 +13,8 @@ defmodule Minga.Picker.AgentModelSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Agent.Session
   alias Minga.Editor.State.AgentAccess
 
@@ -29,7 +31,7 @@ defmodule Minga.Picker.AgentModelSource do
   def layout, do: :centered
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(state) do
     session = AgentAccess.session(state)
 
@@ -42,13 +44,13 @@ defmodule Minga.Picker.AgentModelSource do
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({model_id, _label, _desc}, state) when is_binary(model_id) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: model_id}, state) when is_binary(model_id) do
     # Native provider: model_id is the full "provider:model_name" string
     Minga.Editor.Commands.Agent.set_model(state, model_id)
   end
 
-  def on_select({{provider, model_id}, _label, _desc}, state) do
+  def on_select(%Item{id: {provider, model_id}}, state) do
     # Pi-agent backend: separate provider and model_id
     Minga.Editor.Commands.Agent.set_provider(
       Minga.Editor.Commands.Agent.set_model(state, model_id),
@@ -74,7 +76,7 @@ defmodule Minga.Picker.AgentModelSource do
     end
   end
 
-  @spec format_model(map()) :: Minga.Picker.item()
+  @spec format_model(map()) :: Item.t()
   defp format_model(model) do
     id = model["id"] || "unknown"
     provider = model["provider"] || "unknown"
@@ -85,7 +87,7 @@ defmodule Minga.Picker.AgentModelSource do
 
     desc = String.trim("#{provider}  #{context_info}  #{cost_info}#{current_marker}")
 
-    {id, name, desc}
+    %Item{id: id, label: name, description: desc}
   end
 
   @spec format_cost(map() | nil) :: String.t()

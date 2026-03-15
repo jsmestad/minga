@@ -8,6 +8,7 @@ defmodule Minga.Editor.DashboardTest do
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
   alias Minga.Picker
+  alias Minga.Picker.Item
 
   describe "new_state/1" do
     test "creates state with quick actions when no recent files" do
@@ -171,7 +172,7 @@ defmodule Minga.Editor.DashboardTest do
   describe "dashboard renderer with picker overlay" do
     test "renders picker overlay when a picker is open with no active buffer" do
       # Build state: dashboard visible, no active buffer, picker open
-      items = [{"1", "file_a.ex", ""}, {"2", "file_b.ex", ""}]
+      items = [%Item{id: "1", label: "file_a.ex"}, %Item{id: "2", label: "file_b.ex"}]
       picker = Picker.new(items, title: "Find File", max_visible: 10)
 
       state = %EditorState{

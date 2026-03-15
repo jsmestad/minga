@@ -8,8 +8,12 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Filetype
 
   @impl true
   @spec title() :: String.t()
@@ -20,22 +24,25 @@ defmodule Minga.Picker.ProjectSearchSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(%{search: %{project_results: results}}) when is_list(results) do
     results
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
-      label = "#{match.file}:#{match.line}"
+      filename = Path.basename(match.file)
+      ft = Filetype.detect(filename)
+      {icon, color} = Devicon.icon_and_color(ft)
+      label = "#{icon} #{match.file}:#{match.line}"
       desc = String.trim(match.text)
-      {idx, label, desc}
+      %Item{id: idx, label: label, description: desc, icon_color: color}
     end)
   end
 
   def candidates(_context), do: []
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({idx, _label, _desc}, %{search: %{project_results: results}} = state)
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: idx}, %{search: %{project_results: results}} = state)
       when is_integer(idx) do
     case Enum.at(results, idx) do
       nil -> state

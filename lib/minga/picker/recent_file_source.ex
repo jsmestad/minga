@@ -8,8 +8,12 @@ defmodule Minga.Picker.RecentFileSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Picker.Item
+
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Filetype
   alias Minga.Project
 
   @impl true
@@ -17,25 +21,31 @@ defmodule Minga.Picker.RecentFileSource do
   def title, do: "Recent files"
 
   @impl true
-  @spec candidates(term()) :: [Minga.Picker.item()]
+  @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
-    root = Project.root()
     files = Project.recent_files()
 
-    files
-    |> Enum.with_index()
-    |> Enum.map(fn {rel_path, idx} ->
-      label = Path.basename(rel_path)
-      desc = if root, do: rel_path, else: rel_path
-      {idx, label, desc}
+    Enum.map(files, fn rel_path ->
+      filename = Path.basename(rel_path)
+      dir = Path.dirname(rel_path)
+      ft = Filetype.detect(filename)
+      {icon, color} = Devicon.icon_and_color(ft)
+      dir_display = if dir == ".", do: "", else: dir
+
+      %Item{
+        id: rel_path,
+        label: "#{icon} #{filename}",
+        description: dir_display,
+        icon_color: color
+      }
     end)
   catch
     :exit, _ -> []
   end
 
   @impl true
-  @spec on_select(Minga.Picker.item(), term()) :: term()
-  def on_select({_idx, _label, rel_path}, state) do
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: rel_path}, state) do
     root = project_root()
     abs_path = Path.join(root, rel_path)
 
