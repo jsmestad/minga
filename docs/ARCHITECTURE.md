@@ -96,32 +96,46 @@ BEAM processes are organized into supervision trees that encode dependency relat
 
 ```
 Minga.Supervisor (rest_for_one)
-├── Config.Options           ← typed option registry (ETS, read_concurrency)
-├── Keymap.Active            ← mutable keymap store (ETS, read_concurrency)
-├── Config.Hooks             ← lifecycle hook registry (Agent)
-├── Config.Advice            ← before/after command advice (ETS, read_concurrency)
-├── Config.Loader            ← config file discovery and evaluation
-├── Filetype.Registry        ← static data, rarely fails
-├── Buffer.Supervisor        ← if this restarts, buffers survive
-│    ├── Buffer processes    ← one per open file/scratch buffer
+├── Foundation.Supervisor (rest_for_one)
+│    ├── Language.Registry    ← ETS, language definitions
+│    ├── Events               ← Registry(:duplicate), pub/sub bus
+│    ├── Config.Options       ← typed option registry (ETS, read_concurrency)
+│    ├── Keymap.Active        ← mutable keymap store (ETS, read_concurrency)
+│    ├── Config.Hooks         ← lifecycle hook registry (Agent)
+│    ├── Config.Advice        ← before/after command advice (ETS, read_concurrency)
+│    └── Filetype.Registry    ← static data, rarely fails
+├── Buffer.Supervisor (DynamicSupervisor, one_for_one)
+│    ├── Buffer processes     ← one per open file/scratch buffer
 │    ├── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
 │    └── Buffer.Fork processes ← (planned) per-agent forks for concurrent editing
-├── Eval.TaskSupervisor      ← supervised tasks for user code
-├── Command.Registry         ← ETS-backed, aggregates commands from Provider modules on restart
-├── Extension.Registry       ← extension metadata store
-├── Extension.Supervisor     ← DynamicSupervisor for extension processes
-├── Diagnostics              ← source-agnostic diagnostic aggregation (ETS reads, GenServer writes)
-├── LSP.Supervisor           ← DynamicSupervisor for LSP client processes
-├── Agent.Supervisor         ← DynamicSupervisor for agent session process trees
-│    └── Agent.Session       ← one per active agent session (provider, conversation, tools)
-├── Project                  ← project root detection, known-projects persistence, file cache
-├── FileWatcher              ← OS file notifications
-├── Parser.Manager           ← owns the tree-sitter parser process
-├── Port.Manager             ← owns the Zig renderer process
-└── Editor                   ← orchestration, depends on everything above
+├── Services.Supervisor (rest_for_one)
+│    ├── Services.Independent (one_for_one)
+│    │    ├── Git.Tracker     ← subscribes to buffer events, ETS registry
+│    │    ├── CommandOutput.Registry ← Registry(:unique)
+│    │    ├── Eval.TaskSupervisor ← supervised tasks for user code
+│    │    ├── Command.Registry ← ETS-backed, aggregates commands from Provider modules
+│    │    ├── Fold.Registry   ← fold state
+│    │    └── Diagnostics     ← source-agnostic diagnostic aggregation (ETS reads, GenServer writes)
+│    ├── Extension.Registry   ← extension metadata store (Agent)
+│    ├── Extension.Supervisor ← DynamicSupervisor for extension processes
+│    ├── Config.Loader        ← config file discovery and evaluation
+│    ├── LSP.Supervisor       ← DynamicSupervisor for LSP client processes
+│    ├── LSP.SyncServer       ← subscribes to buffer events, manages LSP sync
+│    ├── Project              ← project root detection, known-projects persistence, file cache
+│    └── Agent.Supervisor     ← DynamicSupervisor for agent session process trees
+│         └── Agent.Session   ← one per active agent session (provider, conversation, tools)
+└── Runtime.Supervisor (one_for_one, conditional)
+     ├── Editor.Watchdog      ← SIGUSR1 recovery (independent leaf)
+     ├── FileWatcher          ← OS file notifications (independent leaf)
+     └── Editor.Supervisor (rest_for_one)
+          ├── Parser.Manager  ← owns the tree-sitter parser process
+          ├── Port.Manager    ← owns the Zig renderer process
+          └── Editor          ← orchestration, depends on Parser + Port
 ```
 
-The `rest_for_one` strategy means: if the Port Manager fails, the Editor restarts too (since it depends on the renderer), but buffers are untouched. Your undo history, cursor positions, unsaved changes: all preserved. The renderer comes back up, re-renders the current viewport, and you're exactly where you were.
+The tree uses nested supervisors to constrain blast radius. A filesystem watcher flake restarts only FileWatcher, not the renderer. A git tracking crash restarts only Git.Tracker, not its sibling services. The `rest_for_one` chains within Foundation and Services preserve real dependency ordering (Events → Config subscribers, Extension.Registry → Config.Loader) while preventing unrelated siblings from cascading into each other.
+
+The tightly-coupled trio (Parser → Port → Editor) lives in its own `rest_for_one` supervisor: if the Port Manager fails, the Editor restarts too (since it depends on the renderer), but buffers are untouched. Your undo history, cursor positions, unsaved changes: all preserved. The renderer comes back up, re-renders the current viewport, and you're exactly where you were.
 
 This is graceful degradation. Individual features can fail and recover independently. Losing your LSP connection doesn't affect your editing. A plugin that hits an error doesn't corrupt your buffers. The system degrades in pieces rather than failing all at once.
 

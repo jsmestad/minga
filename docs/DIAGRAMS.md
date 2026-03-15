@@ -4,41 +4,63 @@ Interactive diagrams of how Minga's processes, data, and communication are struc
 
 ## Supervision Tree
 
-The BEAM side of Minga is organized as a `rest_for_one` supervision tree. If a process crashes, everything below it in the tree restarts, but everything above it stays untouched.
+The BEAM side of Minga uses nested supervisors to constrain blast radius. The top-level `rest_for_one` preserves the Foundation → Services → Editor cascade. Inner supervisors use strategies matched to their children's actual dependency profiles.
 
 ```mermaid
 graph TD
     SUP["Minga.Supervisor<br/><i>rest_for_one</i>"]
 
-    SUP --> OPTS["Config.Options"]
-    SUP --> LOADER["Config.Loader"]
-    SUP --> FT["Filetype.Registry"]
-    SUP --> BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
-    SUP --> TASKSUP["Eval.TaskSupervisor<br/><i>Task.Supervisor</i>"]
-    SUP --> CMDREG["Command.Registry"]
-    SUP --> DIAG["Diagnostics"]
-    SUP --> LSPSUP["LSP.Supervisor<br/><i>DynamicSupervisor</i>"]
-    SUP --> FW["FileWatcher"]
-    SUP --> PM["Port.Manager"]
-    SUP --> ED["Editor"]
+    SUP --> FOUND["Foundation.Supervisor<br/><i>rest_for_one</i>"]
+    FOUND --> LANG["Language.Registry"]
+    FOUND --> EVENTS["Events"]
+    FOUND --> OPTS["Config.Options"]
+    FOUND --> KEYMAP["Keymap.Active"]
+    FOUND --> HOOKS["Config.Hooks"]
+    FOUND --> ADVICE["Config.Advice"]
+    FOUND --> FT["Filetype.Registry"]
 
+    SUP --> BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
     BUFSUP --> B1["Buffer: main.ex"]
     BUFSUP --> B2["Buffer: router.ex"]
     BUFSUP --> B3["Buffer: schema.ex"]
     BUFSUP --> BF1["Buffer.Fork: main.ex<br/><i>(agent session A)</i>"]
 
-    SUP --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
+    SUP --> SVC["Services.Supervisor<br/><i>rest_for_one</i>"]
+    SVC --> INDEP["Services.Independent<br/><i>one_for_one</i>"]
+    INDEP --> GIT["Git.Tracker"]
+    INDEP --> TASKSUP["Eval.TaskSupervisor"]
+    INDEP --> CMDREG["Command.Registry"]
+    INDEP --> DIAG["Diagnostics"]
+    SVC --> EXTREG["Extension.Registry"]
+    SVC --> EXTSUP["Extension.Supervisor"]
+    SVC --> LOADER["Config.Loader"]
+    SVC --> LSPSUP["LSP.Supervisor<br/><i>DynamicSupervisor</i>"]
+    SVC --> SYNC["LSP.SyncServer"]
+    SVC --> PROJ["Project"]
+    SVC --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
     AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
     AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
-
     LSPSUP --> LSP1["LSP Client: elixir-ls"]
     LSPSUP --> LSP2["LSP Client: lua-ls"]
+
+    SUP --> RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
+    RT --> WD["Editor.Watchdog"]
+    RT --> FW["FileWatcher"]
+    RT --> EDSUP["Editor.Supervisor<br/><i>rest_for_one</i>"]
+    EDSUP --> PARSER["Parser.Manager"]
+    EDSUP --> PM["Port.Manager"]
+    EDSUP --> ED["Editor"]
 
     PM -. "stdin/stdout<br/>Port protocol" .-> ZIG["Zig Process<br/><i>libvaxis + tree-sitter</i>"]
 
     AS1 -. "apply_text_edits<br/>(message passing)" .-> BF1
 
     style SUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
+    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
+    style RT fill:#6c3483,stroke:#4a235a,color:#fff
+    style EDSUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
     style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
     style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
     style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
@@ -46,6 +68,8 @@ graph TD
     style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
     style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
     style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
     style B1 fill:#2471a3,stroke:#1a5276,color:#fff
     style B2 fill:#2471a3,stroke:#1a5276,color:#fff
     style B3 fill:#2471a3,stroke:#1a5276,color:#fff

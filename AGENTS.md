@@ -18,6 +18,12 @@ lib/
   minga.ex                    # Root module
   minga/
     application.ex            # OTP application / supervisor tree
+    foundation/
+      supervisor.ex           # Foundation supervisor (Events, Config, Keymap, etc.)
+    services/
+      supervisor.ex           # Services supervisor (Git, Extensions, LSP, Diagnostics, etc.)
+    runtime/
+      supervisor.ex           # Runtime supervisor (Watchdog, FileWatcher, Editor.Supervisor)
     buffer/
       document.ex           # Pure data structure (no GenServer)
       server.ex               # GenServer wrapper for gap buffer
@@ -32,6 +38,7 @@ lib/
       manager.ex              # GenServer managing the tree-sitter parser Port
     editor.ex                 # Editor orchestration GenServer
     editor/
+      supervisor.ex           # Editor supervisor (Parser, Port, Editor)
       layout.ex               # Pure layout computation (single source of truth for all rects)
       viewport.ex             # Viewport scrolling logic
     mode/
