@@ -272,7 +272,8 @@ defmodule Minga.MixProject do
         "compile --warnings-as-errors",
         "dialyzer"
       ],
-      "lint.fix": ["format", "credo --strict"]
+      "lint.fix": ["format", "credo --strict"],
+      precommit: ["lint", "test"]
     ]
   end
 end
