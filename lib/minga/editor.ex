@@ -23,7 +23,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
-  alias Minga.Editor.DocumentSync
+
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.FoldRange
   alias Minga.Editor.HighlightEvents
@@ -449,12 +449,6 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  # LSP debounced didChange timer fired — flush the change notification
-  def handle_info({:lsp_did_change, buffer_pid}, state) do
-    new_lsp = DocumentSync.flush_did_change(state.lsp, buffer_pid)
-    {:noreply, %{state | lsp: new_lsp}}
-  end
-
   # Completion debounce timer fired — send the actual completion request
   def handle_info({:completion_debounce, client, buffer_pid}, state) do
     new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, client, buffer_pid)
@@ -463,27 +457,27 @@ defmodule Minga.Editor do
 
   # LSP async response — route to the appropriate handler based on lsp.pending
   def handle_info({:lsp_response, ref, result}, state) do
-    case Map.pop(state.lsp.pending, ref) do
+    case Map.pop(state.lsp_pending, ref) do
       {:definition, pending} ->
-        new_state = put_in(state.lsp.pending, pending)
+        new_state = put_in(state.lsp_pending, pending)
         new_state = LspActions.handle_definition_response(new_state, result)
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
       {:hover, pending} ->
-        new_state = put_in(state.lsp.pending, pending)
+        new_state = put_in(state.lsp_pending, pending)
         new_state = LspActions.handle_hover_response(new_state, result)
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
       {:completion_resolve, pending} ->
-        new_state = put_in(state.lsp.pending, pending)
+        new_state = put_in(state.lsp_pending, pending)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
       {:signature_help, pending} ->
-        new_state = put_in(state.lsp.pending, pending)
+        new_state = put_in(state.lsp_pending, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
         new_state = Renderer.render(new_state)
         {:noreply, new_state}

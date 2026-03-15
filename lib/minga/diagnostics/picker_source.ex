@@ -13,7 +13,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
-  alias Minga.Editor.DocumentSync
+  alias Minga.LSP.SyncServer
 
   @impl true
   @spec title() :: String.t()
@@ -38,7 +38,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   defp candidates_for_path(path) do
     path
-    |> DocumentSync.path_to_uri()
+    |> SyncServer.path_to_uri()
     |> Diagnostics.for_uri()
     |> Enum.map(&format_candidate/1)
   end

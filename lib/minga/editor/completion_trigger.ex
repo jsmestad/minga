@@ -22,8 +22,8 @@ defmodule Minga.Editor.CompletionTrigger do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Editor.DocumentSync
   alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
 
   @debounce_ms 100
 
@@ -48,10 +48,10 @@ defmodule Minga.Editor.CompletionTrigger do
   Returns `{updated_bridge_state, updated_completion}` where completion
   may be unchanged (if debouncing) or nil (if dismissed).
   """
-  @spec maybe_trigger(t(), String.t(), pid(), map()) ::
+  @spec maybe_trigger(t(), String.t(), pid()) ::
           {t(), Completion.t() | nil}
-  def maybe_trigger(bridge, char, buffer_pid, lsp_state) do
-    clients = DocumentSync.clients_for_buffer(lsp_state, buffer_pid)
+  def maybe_trigger(bridge, char, buffer_pid) do
+    clients = SyncServer.clients_for_buffer(buffer_pid)
 
     case clients do
       [] ->
@@ -146,7 +146,7 @@ defmodule Minga.Editor.CompletionTrigger do
         {bridge, nil}
 
       path ->
-        uri = DocumentSync.path_to_uri(path)
+        uri = SyncServer.path_to_uri(path)
         {line, col} = get_cursor_position(buffer_pid)
 
         params = %{
