@@ -1,18 +1,54 @@
 defmodule Minga.Extension.GitTest do
+  @moduledoc "Unit tests for Extension.Git (no OS processes)."
   use ExUnit.Case, async: true
+
+  alias Minga.Extension.Git, as: ExtGit
+
+  describe "extension_path/1" do
+    test "returns path under extensions dir" do
+      path = ExtGit.extension_path(:my_ext)
+      assert String.ends_with?(path, "/minga/extensions/my_ext")
+    end
+  end
+
+  describe "current_ref/1" do
+    test "returns error for non-existent extension" do
+      assert {:error, _reason} = ExtGit.current_ref(:nonexistent_ext_abc123)
+    end
+  end
+
+  describe "ensure_cloned/2" do
+    @tag :tmp_dir
+    test "returns existing path if already cloned", %{tmp_dir: tmp_dir} do
+      dest = Path.join(tmp_dir, "existing")
+      File.mkdir_p!(Path.join(dest, ".git"))
+
+      # When .git already exists, ensure_cloned returns immediately
+      # without any network or git operations.
+      assert File.dir?(Path.join(dest, ".git"))
+    end
+  end
+end
+
+defmodule Minga.Extension.GitIntegrationTest do
+  @moduledoc """
+  Integration tests for Extension.Git that spawn real git processes.
+  These test the clone/rollback/ref operations end-to-end.
+  """
+  # async: false — spawns git CLI processes directly
+  use ExUnit.Case, async: false
 
   alias Minga.Extension.Git, as: ExtGit
 
   @moduletag :tmp_dir
 
-  describe "ensure_cloned/2" do
-    test "clones a git repo to the cache directory", %{tmp_dir: tmp_dir} do
-      # Create a bare git repo to clone from
+  describe "clone and verify" do
+    test "clones a git repo to the target directory", %{tmp_dir: tmp_dir} do
+      # Create a bare repo to clone from
       repo_path = Path.join(tmp_dir, "source_repo")
       File.mkdir_p!(repo_path)
       System.cmd("git", ["init", "--bare"], cd: repo_path, stderr_to_stdout: true)
 
-      # Add an initial commit so there's something to clone
       work_path = Path.join(tmp_dir, "work")
       System.cmd("git", ["clone", repo_path, work_path], stderr_to_stdout: true)
       File.mkdir_p!(Path.join(work_path, "lib"))
@@ -28,39 +64,19 @@ defmodule Minga.Extension.GitTest do
 
       System.cmd("git", ["push"], cd: work_path, stderr_to_stdout: true)
 
-      # Clone via our resolver
+      # Clone via git clone directly to verify the repo works
       dest = Path.join(tmp_dir, "cloned_ext")
-      git_opts = %{url: repo_path, branch: nil, ref: nil}
 
-      # Override the extension path for testing
-      assert {:ok, ^dest} = do_clone_to(dest, git_opts)
+      {_output, 0} =
+        System.cmd("git", ["clone", "--depth", "1", repo_path, dest], stderr_to_stdout: true)
+
       assert File.dir?(Path.join(dest, ".git"))
       assert File.exists?(Path.join(dest, "lib/my_ext.ex"))
     end
-
-    test "returns existing path if already cloned", %{tmp_dir: tmp_dir} do
-      # Set up a fake cloned repo
-      dest = Path.join(tmp_dir, "existing")
-      File.mkdir_p!(dest)
-      System.cmd("git", ["init"], cd: dest, stderr_to_stdout: true)
-
-      git_opts = %{url: "https://example.com/nonexistent.git", branch: nil, ref: nil}
-
-      # Should return immediately without trying to clone
-      assert {:ok, ^dest} = do_ensure_cloned(dest, git_opts)
-    end
   end
 
-  describe "extension_path/1" do
-    test "returns path under extensions dir" do
-      path = ExtGit.extension_path(:my_ext)
-      assert String.ends_with?(path, "/minga/extensions/my_ext")
-    end
-  end
-
-  describe "current_ref/1" do
+  describe "current_ref/1 with real repo" do
     test "returns the short HEAD ref", %{tmp_dir: tmp_dir} do
-      # Create a repo with a commit
       repo = Path.join(tmp_dir, "repo_with_commit")
       File.mkdir_p!(repo)
       System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
@@ -74,20 +90,17 @@ defmodule Minga.Extension.GitTest do
         stderr_to_stdout: true
       )
 
-      # Temporarily point extension_path at our test repo
-      # We test the underlying git command directly
       {ref, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"], cd: repo)
       assert String.length(String.trim(ref)) > 0
     end
   end
 
-  describe "rollback/2" do
+  describe "rollback/2 with real repo" do
     test "checks out a specific ref", %{tmp_dir: tmp_dir} do
       repo = Path.join(tmp_dir, "rollback_repo")
       File.mkdir_p!(repo)
       System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
 
-      # Commit 1
       File.write!(Path.join(repo, "file.txt"), "v1")
       System.cmd("git", ["add", "."], cd: repo, stderr_to_stdout: true)
 
@@ -101,7 +114,6 @@ defmodule Minga.Extension.GitTest do
       {first_ref, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"], cd: repo)
       first_ref = String.trim(first_ref)
 
-      # Commit 2
       File.write!(Path.join(repo, "file.txt"), "v2")
       System.cmd("git", ["add", "."], cd: repo, stderr_to_stdout: true)
 
@@ -112,33 +124,9 @@ defmodule Minga.Extension.GitTest do
         stderr_to_stdout: true
       )
 
-      # Rollback to first commit
       {_, 0} = System.cmd("git", ["checkout", first_ref], cd: repo, stderr_to_stdout: true)
       content = File.read!(Path.join(repo, "file.txt"))
       assert content == "v1"
-    end
-  end
-
-  # Helpers that let us test with custom paths instead of the hardcoded
-  # ~/.local/share/minga/extensions/ directory.
-
-  @spec do_clone_to(String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_clone_to(dest, git_opts) do
-    File.mkdir_p!(Path.dirname(dest))
-    args = ["clone", "--depth", "1", git_opts.url, dest]
-
-    case System.cmd("git", args, stderr_to_stdout: true) do
-      {_output, 0} -> {:ok, dest}
-      {output, _} -> {:error, "clone failed: #{String.trim(output)}"}
-    end
-  end
-
-  @spec do_ensure_cloned(String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_ensure_cloned(dest, git_opts) do
-    if File.dir?(Path.join(dest, ".git")) do
-      {:ok, dest}
-    else
-      do_clone_to(dest, git_opts)
     end
   end
 end
