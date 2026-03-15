@@ -3,27 +3,44 @@ defmodule Minga.Application do
   The Minga OTP Application.
 
   Starts the supervision tree (the "Stamm") that manages all editor
-  processes. Uses `rest_for_one` strategy: if the Port Manager crashes,
-  the Editor restarts too (since it depends on the renderer).
+  processes. The top-level supervisor uses `rest_for_one` so that a
+  Foundation crash cascades to Services and the Editor, but not the
+  other way around.
 
   ## Supervision Tree
 
       Minga.Supervisor (rest_for_one)
-      ├── Minga.Events (Registry, :duplicate)
-      ├── Minga.Config.Options
-      ├── Minga.Keymap.Active
-      ├── Minga.Config.Hooks
-      ├── Minga.Config.Advice
-      ├── Minga.Config.Loader
-      ├── Minga.Buffer.Supervisor (DynamicSupervisor)
-      ├── Minga.Fold.Registry
-      ├── Minga.Extension.Registry
-      ├── Minga.Extension.Supervisor (DynamicSupervisor)
-      ├── Minga.Agent.Supervisor (DynamicSupervisor)
-      ├── Minga.Parser.Manager
-      ├── Minga.Port.Manager
-      ├── Minga.Editor.Watchdog
-      └── Minga.Editor
+      ├── Minga.Foundation.Supervisor (rest_for_one)
+      │   ├── Minga.Language.Registry
+      │   ├── Minga.Events (Registry, :duplicate)
+      │   ├── Minga.Config.Options
+      │   ├── Minga.Keymap.Active
+      │   ├── Minga.Config.Hooks
+      │   ├── Minga.Config.Advice
+      │   └── Minga.Filetype.Registry
+      ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
+      ├── Minga.Services.Supervisor (rest_for_one)
+      │   ├── Minga.Services.Independent (one_for_one)
+      │   │   ├── Minga.Git.Tracker
+      │   │   ├── Minga.CommandOutput.Registry
+      │   │   ├── Minga.Eval.TaskSupervisor
+      │   │   ├── Minga.Command.Registry
+      │   │   ├── Minga.Fold.Registry
+      │   │   └── Minga.Diagnostics
+      │   ├── Minga.Extension.Registry
+      │   ├── Minga.Extension.Supervisor
+      │   ├── Minga.Config.Loader
+      │   ├── Minga.LSP.Supervisor
+      │   ├── Minga.LSP.SyncServer
+      │   ├── Minga.Project
+      │   └── Minga.Agent.Supervisor
+      └── Minga.Runtime.Supervisor (one_for_one, conditional)
+          ├── Minga.Editor.Watchdog          (independent leaf)
+          ├── Minga.FileWatcher              (independent leaf)
+          └── Minga.Editor.Supervisor (rest_for_one)
+              ├── Minga.Parser.Manager
+              ├── Minga.Port.Manager
+              └── Minga.Editor
 
   In standalone (Burrito) mode, automatically processes CLI arguments
   after the supervision tree is up.
@@ -47,27 +64,9 @@ defmodule Minga.Application do
     DevHandler.attach()
 
     base_children = [
-      Minga.Language.Registry,
-      Minga.Events,
-      Minga.Config.Options,
-      Minga.Keymap.Active,
-      Minga.Config.Hooks,
-      Minga.Config.Advice,
-      Minga.Filetype.Registry,
+      Minga.Foundation.Supervisor,
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-      Minga.Git.Tracker,
-      {Registry, keys: :unique, name: Minga.CommandOutput.Registry},
-      {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
-      Minga.Command.Registry,
-      Minga.Fold.Registry,
-      Minga.Extension.Registry,
-      Minga.Extension.Supervisor,
-      Minga.Config.Loader,
-      Minga.Diagnostics,
-      Minga.LSP.Supervisor,
-      Minga.LSP.SyncServer,
-      Minga.Project,
-      Minga.Agent.Supervisor
+      Minga.Services.Supervisor
     ]
 
     editor_children =
@@ -76,11 +75,10 @@ defmodule Minga.Application do
         backend = Application.get_env(:minga, :backend, :tui)
 
         [
-          Minga.FileWatcher,
-          Minga.Parser.Manager,
-          {Minga.Port.Manager, [backend: backend]},
-          Minga.Editor.Watchdog,
-          Minga.Editor
+          # Runtime.Supervisor wraps Watchdog, FileWatcher, and Editor.Supervisor
+          # under one_for_one so leaf processes restart independently. A FileWatcher
+          # crash restarts only FileWatcher, not the renderer.
+          {Minga.Runtime.Supervisor, [backend: backend]}
         ]
       else
         []
@@ -91,14 +89,17 @@ defmodule Minga.Application do
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)
 
-    # Prune old agent sessions in the background
+    # Prune old agent sessions using the supervised Task.Supervisor
+    # (not fire-and-forget Task.start) so crashes are visible.
     if match?({:ok, _}, result) do
-      Task.start(fn -> prune_old_sessions() end)
+      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, &prune_old_sessions/0)
     end
 
     # In Burrito standalone mode, kick off the CLI
     if Burrito.Util.running_standalone?() do
-      Task.start(fn -> Minga.CLI.start_from_cli() end)
+      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+        Minga.CLI.start_from_cli()
+      end)
     end
 
     result

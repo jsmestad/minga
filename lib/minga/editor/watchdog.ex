@@ -20,11 +20,11 @@ defmodule Minga.Editor.Watchdog do
 
   ## Supervision placement
 
-  The Watchdog must start before the Editor in the supervision tree
-  so it's ready to receive signals from the moment the Editor boots.
-  It sits alongside the Editor under the `rest_for_one` supervisor.
-  If the Watchdog itself crashes, it gets restarted independently
-  (it has no dependencies on other processes).
+  The Watchdog is an independent leaf child of `Runtime.Supervisor`
+  (`one_for_one`), placed before `Editor.Supervisor` so it's ready to
+  receive signals from the moment the Editor boots. Under `one_for_one`,
+  a Watchdog crash restarts only itself without affecting FileWatcher
+  or Editor.Supervisor.
   """
 
   use GenServer
