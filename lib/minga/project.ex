@@ -251,7 +251,7 @@ defmodule Minga.Project do
     {:noreply, %{state | rebuilding?: false, rebuild_ref: nil}}
   end
 
-  def handle_info({:minga_event, :buffer_opened, %{path: path}}, state) do
+  def handle_info({:minga_event, :buffer_opened, %Minga.Events.BufferEvent{path: path}}, state) do
     state = do_detect_and_set(state, path)
     state = do_record_file(state, path)
     {:noreply, state}

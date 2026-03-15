@@ -170,7 +170,12 @@ defmodule Minga.Editor do
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
-        Minga.Events.broadcast(:buffer_opened, %{buffer: pid, path: file_path})
+
+        Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
+          buffer: pid,
+          path: file_path
+        })
+
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -588,7 +593,7 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  def handle_info({:minga_event, :buffer_saved, _payload}, state) do
+  def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
     {:noreply, refresh_tree_git_status(state)}
   end
 
@@ -905,7 +910,7 @@ defmodule Minga.Editor do
     new_state = Commands.add_buffer(state, pid)
     new_state = log_message(new_state, "Opened: #{path}")
     new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
-    Minga.Events.broadcast(:buffer_opened, %{buffer: pid, path: path})
+    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{buffer: pid, path: path})
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
 

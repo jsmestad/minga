@@ -122,7 +122,10 @@ defmodule Minga.Editor.BufferLifecycle do
          {:execute_ex_command, {:save_quit, []}}
        ] do
       path = BufferServer.file_path(buf)
-      if path, do: Minga.Events.broadcast(:buffer_saved, %{buffer: buf, path: path})
+
+      if path,
+        do:
+          Minga.Events.broadcast(:buffer_saved, %Minga.Events.BufferEvent{buffer: buf, path: path})
 
       new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
       %{state | lsp: new_lsp}

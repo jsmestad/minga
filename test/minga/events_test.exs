@@ -5,27 +5,39 @@ defmodule Minga.EventsTest do
   alias Minga.Events
 
   setup do
-    # Start the EventBus Registry if not already running.
-    case Registry.start_link(keys: :duplicate, name: Minga.EventBus) do
-      {:ok, pid} ->
-        on_exit(fn -> Process.exit(pid, :shutdown) end)
-
-      {:error, {:already_started, _}} ->
-        :ok
-    end
-
+    # The EventBus Registry is started by the application supervision tree.
+    # Tests should use the application's instance rather than starting their own,
+    # because killing a test-started instance with the same name poisons the
+    # rest_for_one supervisor and cascades failures to every downstream process.
     :ok
+  end
+
+  # Spawns a long-lived process to use as a fake buffer pid. Event bus
+  # subscribers like Git.Tracker guard on `is_pid(buf)`, so passing atoms
+  # would either be silently ignored (best case) or crash downstream
+  # GenServers and cascade through the rest_for_one supervisor (worst case).
+  defp fake_buffer do
+    pid = spawn(fn -> receive do: (:stop -> :ok) end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: send(pid, :stop)
+    end)
+
+    pid
   end
 
   describe "subscribe/1 and broadcast/2" do
     test "subscriber receives broadcast payload" do
+      buf = fake_buffer()
       Events.subscribe(:buffer_saved)
-      Events.broadcast(:buffer_saved, %{buffer: :fake_buf, path: "/tmp/test.ex"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/tmp/test.ex"})
 
-      assert_receive {:minga_event, :buffer_saved, %{buffer: :fake_buf, path: "/tmp/test.ex"}}
+      assert_receive {:minga_event, :buffer_saved,
+                      %Events.BufferEvent{buffer: ^buf, path: "/tmp/test.ex"}}
     end
 
     test "multiple subscribers all receive the broadcast" do
+      buf = fake_buffer()
       parent = self()
 
       pids =
@@ -44,10 +56,10 @@ defmodule Minga.EventsTest do
       # Wait for all to subscribe before broadcasting.
       for i <- 1..3, do: assert_receive({:subscribed, ^i}, 500)
 
-      Events.broadcast(:buffer_saved, %{buffer: :buf, path: "/test"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/test"})
 
       for i <- 1..3 do
-        assert_receive {:received, ^i, %{buffer: :buf, path: "/test"}}, 500
+        assert_receive {:received, ^i, %{buffer: ^buf, path: "/test"}}, 500
       end
 
       # Clean up spawned processes.
@@ -55,36 +67,44 @@ defmodule Minga.EventsTest do
     end
 
     test "broadcast with no subscribers is a no-op" do
-      assert :ok = Events.broadcast(:buffer_saved, %{buffer: :buf, path: "/test"})
+      buf = fake_buffer()
+
+      assert :ok =
+               Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/test"})
+
       refute_receive {:minga_event, _, _}, 50
     end
 
     test "subscribing to different topics only receives matching events" do
+      buf = fake_buffer()
       Events.subscribe(:buffer_opened)
 
-      Events.broadcast(:buffer_saved, %{buffer: :buf, path: "/test"})
-      Events.broadcast(:buffer_opened, %{buffer: :buf, path: "/test"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/test"})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/test"})
 
       refute_receive {:minga_event, :buffer_saved, _}, 50
-      assert_receive {:minga_event, :buffer_opened, %{buffer: :buf, path: "/test"}}
+
+      assert_receive {:minga_event, :buffer_opened,
+                      %Events.BufferEvent{buffer: ^buf, path: "/test"}}
     end
   end
 
   describe "subscribe/2 with metadata" do
     test "subscribe with metadata value" do
       Events.subscribe(:mode_changed, :my_component)
-      Events.broadcast(:mode_changed, %{old: :normal, new: :insert})
+      Events.broadcast(:mode_changed, %Events.ModeEvent{old: :normal, new: :insert})
 
-      assert_receive {:minga_event, :mode_changed, %{old: :normal, new: :insert}}
+      assert_receive {:minga_event, :mode_changed, %Events.ModeEvent{old: :normal, new: :insert}}
     end
   end
 
   describe "unsubscribe/1" do
     test "unsubscribed process no longer receives broadcasts" do
+      buf = fake_buffer()
       Events.subscribe(:buffer_saved)
       Events.unsubscribe(:buffer_saved)
 
-      Events.broadcast(:buffer_saved, %{buffer: :buf, path: "/test"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/test"})
 
       refute_receive {:minga_event, :buffer_saved, _}, 50
     end
@@ -112,15 +132,16 @@ defmodule Minga.EventsTest do
     end
 
     test "hooks fire when event is broadcast through the bus" do
+      buf = fake_buffer()
       test_pid = self()
 
-      Hooks.register(:after_save, fn buf, path ->
-        send(test_pid, {:hook_via_bus, buf, path})
+      Hooks.register(:after_save, fn buf_arg, path ->
+        send(test_pid, {:hook_via_bus, buf_arg, path})
       end)
 
-      Events.broadcast(:buffer_saved, %{buffer: :my_buf, path: "/via/bus.ex"})
+      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/via/bus.ex"})
 
-      assert_receive {:hook_via_bus, :my_buf, "/via/bus.ex"}, 500
+      assert_receive {:hook_via_bus, ^buf, "/via/bus.ex"}, 500
     end
 
     test "mode_changed event triggers on_mode_change hooks" do
@@ -130,21 +151,22 @@ defmodule Minga.EventsTest do
         send(test_pid, {:mode_hook, old, new})
       end)
 
-      Events.broadcast(:mode_changed, %{old: :normal, new: :visual})
+      Events.broadcast(:mode_changed, %Events.ModeEvent{old: :normal, new: :visual})
 
       assert_receive {:mode_hook, :normal, :visual}, 500
     end
 
     test "buffer_opened event triggers after_open hooks" do
+      buf = fake_buffer()
       test_pid = self()
 
-      Hooks.register(:after_open, fn buf, path ->
-        send(test_pid, {:open_hook, buf, path})
+      Hooks.register(:after_open, fn buf_arg, path ->
+        send(test_pid, {:open_hook, buf_arg, path})
       end)
 
-      Events.broadcast(:buffer_opened, %{buffer: :buf, path: "/opened.ex"})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/opened.ex"})
 
-      assert_receive {:open_hook, :buf, "/opened.ex"}, 500
+      assert_receive {:open_hook, ^buf, "/opened.ex"}, 500
     end
   end
 end

@@ -13,11 +13,24 @@ defmodule Minga.Events do
       Minga.Events.subscribe(:buffer_saved)
 
       # In an event source:
-      Minga.Events.broadcast(:buffer_saved, %{buffer: buf, path: path})
+      Minga.Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: path})
 
   Subscribers receive the event synchronously in the dispatch callback,
   which runs in the broadcaster's process. For heavy work, subscribers
   should send themselves a message and handle it asynchronously.
+
+  ## Payload types
+
+  Each topic has a typed struct payload with `@enforce_keys`. This means
+  the compiler catches missing fields at construction time, and the type
+  checker flags wrong field types (e.g. atom instead of pid). Subscribers
+  pattern-match on the struct, so malformed payloads can't sneak through.
+
+  | Topic            | Payload struct    | Required fields              |
+  |------------------|-------------------|------------------------------|
+  | `:buffer_saved`  | `BufferEvent`     | `buffer: pid(), path: String.t()` |
+  | `:buffer_opened` | `BufferEvent`     | `buffer: pid(), path: String.t()` |
+  | `:mode_changed`  | `ModeEvent`       | `old: atom(), new: atom()`   |
 
   ## Why Registry?
 
@@ -30,14 +43,36 @@ defmodule Minga.Events do
 
   @registry Minga.EventBus
 
+  # ── Payload structs ─────────────────────────────────────────────────────────
+
+  defmodule BufferEvent do
+    @moduledoc "Payload for `:buffer_saved` and `:buffer_opened` events."
+    @enforce_keys [:buffer, :path]
+    defstruct [:buffer, :path]
+
+    @type t :: %__MODULE__{buffer: pid(), path: String.t()}
+  end
+
+  defmodule ModeEvent do
+    @moduledoc "Payload for `:mode_changed` events."
+    @enforce_keys [:old, :new]
+    defstruct [:old, :new]
+
+    @type t :: %__MODULE__{old: atom(), new: atom()}
+  end
+
+  # ── Types ───────────────────────────────────────────────────────────────────
+
   @typedoc "Known event topics."
   @type topic ::
           :buffer_saved
           | :buffer_opened
           | :mode_changed
 
-  @typedoc "Event payload. A map with topic-specific keys."
-  @type payload :: map()
+  @typedoc "Typed event payloads. Each topic has a specific struct."
+  @type payload :: BufferEvent.t() | ModeEvent.t()
+
+  # ── Child spec ──────────────────────────────────────────────────────────────
 
   @doc """
   Returns the child spec for the event bus Registry.
@@ -48,6 +83,8 @@ defmodule Minga.Events do
   def child_spec(_opts) do
     Registry.child_spec(keys: :duplicate, name: @registry)
   end
+
+  # ── Subscribe / Unsubscribe ─────────────────────────────────────────────────
 
   @doc """
   Subscribes the calling process to a topic.
@@ -82,26 +119,6 @@ defmodule Minga.Events do
   end
 
   @doc """
-  Broadcasts a payload to all subscribers of a topic.
-
-  Each subscriber's callback receives `{pid, value}` where `value` is
-  whatever was passed to `subscribe/2` (default `[]`). The callback runs
-  in the caller's process, so keep it lightweight. For async work, have
-  the callback send a message to the subscriber pid.
-
-  Returns `:ok`. If no processes are subscribed to the topic, this is a
-  no-op with negligible cost.
-  """
-  @spec broadcast(topic(), payload()) :: :ok
-  def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
-    Registry.dispatch(@registry, topic, fn entries ->
-      for {pid, _value} <- entries do
-        send(pid, {:minga_event, topic, payload})
-      end
-    end)
-  end
-
-  @doc """
   Unsubscribes the calling process from a topic.
 
   Removes all registrations for this process under the given topic key.
@@ -110,6 +127,31 @@ defmodule Minga.Events do
   def unsubscribe(topic) when is_atom(topic) do
     Registry.unregister(@registry, topic)
   end
+
+  # ── Broadcast ───────────────────────────────────────────────────────────────
+
+  @doc """
+  Broadcasts a typed payload to all subscribers of a topic.
+
+  Accepts `BufferEvent` for buffer topics and `ModeEvent` for mode changes.
+  Using structs with `@enforce_keys` means the compiler catches missing
+  fields and the type checker flags wrong field types at the call site,
+  before the event ever reaches subscribers.
+
+  Returns `:ok`. If no processes are subscribed to the topic, this is a
+  no-op with negligible cost.
+  """
+  @spec broadcast(:buffer_saved | :buffer_opened, BufferEvent.t()) :: :ok
+  @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
+  def broadcast(topic, %_{} = payload) when is_atom(topic) do
+    Registry.dispatch(@registry, topic, fn entries ->
+      for {pid, _value} <- entries do
+        send(pid, {:minga_event, topic, payload})
+      end
+    end)
+  end
+
+  # ── Query ───────────────────────────────────────────────────────────────────
 
   @doc """
   Returns the list of pids subscribed to a topic.

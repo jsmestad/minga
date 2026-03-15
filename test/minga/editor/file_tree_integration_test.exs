@@ -251,7 +251,10 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       assert state.file_tree.tree != nil
 
       # Broadcast a :buffer_saved event (simulating what lsp_after_save does)
-      Minga.Events.broadcast(:buffer_saved, %{buffer: state.buffers.active, path: file})
+      Minga.Events.broadcast(:buffer_saved, %Minga.Events.BufferEvent{
+        buffer: state.buffers.active,
+        path: file
+      })
 
       # A synchronous call to the Editor flushes its mailbox, guaranteeing
       # the :minga_event handle_info has been processed before we inspect state.
