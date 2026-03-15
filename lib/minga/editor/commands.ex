@@ -2,10 +2,12 @@ defmodule Minga.Editor.Commands do
   @moduledoc """
   Command execution for the editor.
 
-  Translates `Mode.command()` atoms/tuples into buffer mutations and state
-  updates. All public functions return `state()` or `{state(), action()}`.
+  Atom commands are dispatched through `Minga.Command.Registry`, which maps
+  command names to execute functions pointing at the appropriate sub-module.
+  Tuple commands (parameterized commands like `{:insert_char, c}`) still use
+  pattern matching since they carry runtime arguments.
 
-  This module is a thin dispatcher — each domain has its own sub-module:
+  ## Sub-modules
 
   * `Commands.Movement`        — h/j/k/l, word, find-char, bracket, page scroll
   * `Commands.Editing`         — insert/delete, join, replace, indent, undo/redo, paste
@@ -23,32 +25,21 @@ defmodule Minga.Editor.Commands do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Loader, as: ConfigLoader
+  alias Minga.Command
+  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.Commands.BufferManagement
-  alias Minga.Editor.Commands.Diagnostics
   alias Minga.Editor.Commands.Editing
   alias Minga.Editor.Commands.Eval
-  alias Minga.Editor.Commands.Folding
-  alias Minga.Editor.Commands.Git, as: GitCommands
+  alias Minga.Editor.Commands.Extensions, as: ExtCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Lsp, as: LspCommands
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
-  alias Minga.Editor.Commands.Project
-  alias Minga.Editor.Commands.Search
   alias Minga.Editor.Commands.Visual
-  alias Minga.Editor.Layout
-  alias Minga.Editor.LspActions
-  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.FileTree, as: FileTreeState
-  alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
-  alias Minga.FileTree
-  alias Minga.FileTree.BufferSync
-  alias Minga.Formatter
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias Minga.Mode
@@ -66,49 +57,28 @@ defmodule Minga.Editor.Commands do
   @doc """
   Executes a single command against the editor state.
 
+  Atom commands are resolved through the Command Registry. Tuple commands
+  (parameterized commands) are dispatched via pattern matching.
+
   Returns `state()` for the common case, or `{state(), action()}` when the
-  GenServer must dispatch a follow-up action (dot-repeat).
+  GenServer must dispatch a follow-up action (dot-repeat, macro replay).
   """
   @spec execute(state(), Mode.command()) :: state() | {state(), action()}
 
-  # ── Commands that do not require a buffer ─────────────────────────────────
-
-  def execute(state, :command_palette) do
-    PickerUI.open(state, Minga.Picker.CommandSource)
-  end
-
-  def execute(state, :find_file) do
-    PickerUI.open(state, Minga.Picker.FileSource)
-  end
-
-  def execute(state, :theme_picker) do
-    PickerUI.open(state, Minga.Picker.ThemeSource)
-  end
-
-  def execute(state, :set_language) do
-    PickerUI.open(state, Minga.Picker.LanguageSource)
-  end
-
-  def execute(state, :search_project) do
-    %{
-      state
-      | vim: %{state.vim | mode: :search_prompt, mode_state: %Minga.Mode.SearchPromptState{}}
-    }
-  end
+  # ── Tuple commands (parameterized, not registry-dispatched) ───────────────
 
   # Dot-repeat: return a tagged tuple so the GenServer can call replay_last_change/2.
   def execute(state, {:dot_repeat, count}) do
     {state, {:dot_repeat, count}}
   end
 
-  # Register selection — stores the chosen register name for the next op.
-  # `"` (unnamed) maps to the empty-string key; all others are stored as-is.
+  # Register selection: stores the chosen register name for the next op.
   def execute(state, {:select_register, char}) when is_binary(char) do
     name = if char == "\"", do: "", else: char
     put_in(state.vim.reg.active, name)
   end
 
-  # ── Leader / which-key (no buffer required) ───────────────────────────────
+  # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
     if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
@@ -130,9 +100,6 @@ defmodule Minga.Editor.Commands do
     timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
 
-    # When the leader walk reaches SPC m, substitute the filetype-specific
-    # trie based on the active buffer's filetype. This makes SPC m t resolve
-    # to the correct command for the current filetype.
     {effective_node, state} = maybe_substitute_filetype_trie(state, node)
 
     whichkey = %EditorState.WhichKey{
@@ -178,354 +145,139 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:describe_key_result, _, _, _} = cmd), do: Help.execute(state, cmd)
   def execute(state, {:describe_key_not_found, _} = cmd), do: Help.execute(state, cmd)
 
-  # ── File tree ─────────────────────────────────────────────────────────────
-
-  def execute(state, :toggle_file_tree), do: toggle_file_tree(state)
-
-  # ── AI Agent (before no-buffer guard — agent works without a buffer) ─────
-  def execute(state, :toggle_agent_panel), do: AgentCommands.toggle_panel(state)
-  def execute(state, :toggle_agentic_view), do: AgentCommands.toggle_agentic_view(state)
-  def execute(state, :toggle_agent_split), do: AgentCommands.toggle_agent_split(state)
-  def execute(state, :cycle_agent_tabs), do: AgentCommands.cycle_agent_tabs(state)
-  def execute(state, :agent_abort), do: AgentCommands.abort_agent(state)
-  def execute(state, :agent_new_session), do: AgentCommands.new_agent_session(state)
+  # ── Agent tuple commands ──────────────────────────────────────────────────
 
   def execute(state, {:agent_set_provider, [provider]}),
     do: AgentCommands.set_provider(state, provider)
 
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
-  def execute(state, :agent_pick_model), do: PickerUI.open(state, Minga.Picker.AgentModelSource)
-
-  def execute(state, :agent_session_history),
-    do: PickerUI.open(state, Minga.Picker.SessionHistorySource)
-
-  def execute(state, :agent_cycle_model), do: AgentCommands.cycle_model(state)
-  def execute(state, :agent_summarize), do: AgentCommands.summarize(state)
-
-  def execute(state, :agent_cycle_thinking), do: AgentCommands.cycle_thinking_level(state)
-
-  # ── Agent scope commands (dispatched via keymap scope resolution) ──────────
-  # Chat scroll commands for normal mode (:agent_scroll_down/up/etc.) removed.
-  # Navigation keys now pass through the scope trie to AgentChatNav, which
-  # routes them through the Mode FSM against the *Agent* buffer.
-  # These two remain for scrolling chat while the prompt input is focused:
-  def execute(state, :agent_scroll_half_down), do: AgentCommands.scroll_chat_down(state)
-  def execute(state, :agent_scroll_half_up), do: AgentCommands.scroll_chat_up(state)
-  def execute(state, :agent_toggle_collapse), do: AgentCommands.scope_toggle_collapse(state)
-
-  def execute(state, :agent_toggle_all_collapse),
-    do: AgentCommands.scope_toggle_all_collapse(state)
-
-  def execute(state, :agent_expand_at_cursor), do: AgentCommands.scope_expand_at_cursor(state)
-  def execute(state, :agent_collapse_at_cursor), do: AgentCommands.scope_collapse_at_cursor(state)
-  def execute(state, :agent_collapse_all), do: AgentCommands.scope_collapse_all(state)
-  def execute(state, :agent_expand_all), do: AgentCommands.scope_expand_all(state)
-  def execute(state, :agent_next_message), do: AgentCommands.scope_next_message(state)
-  def execute(state, :agent_next_code_block), do: AgentCommands.scope_next_code_block(state)
-  def execute(state, :agent_next_tool_call), do: AgentCommands.scope_next_tool_call(state)
-  def execute(state, :agent_prev_message), do: AgentCommands.scope_prev_message(state)
-  def execute(state, :agent_prev_code_block), do: AgentCommands.scope_prev_code_block(state)
-  def execute(state, :agent_prev_tool_call), do: AgentCommands.scope_prev_tool_call(state)
-  def execute(state, :agent_copy_code_block), do: AgentCommands.scope_copy_code_block(state)
-  def execute(state, :agent_copy_message), do: AgentCommands.scope_copy_message(state)
-  def execute(state, :agent_open_code_block), do: AgentCommands.scope_open_code_block(state)
-  def execute(state, :agent_focus_input), do: AgentCommands.scope_focus_input(state)
-  def execute(state, :agent_unfocus_input), do: AgentCommands.scope_unfocus_input(state)
-  def execute(state, :agent_unfocus_and_quit), do: AgentCommands.scope_unfocus_and_quit(state)
-  def execute(state, :agent_grow_panel), do: AgentCommands.scope_grow_panel(state)
-  def execute(state, :agent_shrink_panel), do: AgentCommands.scope_shrink_panel(state)
-  def execute(state, :agent_reset_panel), do: AgentCommands.scope_reset_panel(state)
-  def execute(state, :agent_switch_focus), do: AgentCommands.scope_switch_focus(state)
-  def execute(state, :agent_start_search), do: AgentCommands.scope_start_search(state)
-  def execute(state, :agent_next_search_match), do: AgentCommands.scope_next_search_match(state)
-  def execute(state, :agent_prev_search_match), do: AgentCommands.scope_prev_search_match(state)
-  def execute(state, :agent_session_switcher), do: AgentCommands.scope_session_switcher(state)
-  def execute(state, :agent_toggle_help), do: AgentCommands.scope_toggle_help(state)
-  def execute(state, :agent_close), do: AgentCommands.scope_close(state)
-  def execute(state, :agent_dismiss_or_noop), do: AgentCommands.scope_dismiss_or_noop(state)
-  def execute(state, :agent_clear_chat), do: AgentCommands.scope_clear_chat(state)
-  def execute(state, :agent_submit_or_newline), do: AgentCommands.scope_submit_or_newline(state)
-  def execute(state, :agent_insert_newline), do: AgentCommands.scope_insert_newline(state)
-  def execute(state, :agent_submit_or_abort), do: AgentCommands.scope_submit_or_abort(state)
-  def execute(state, :agent_input_backspace), do: AgentCommands.input_backspace(state)
-  def execute(state, :agent_input_up), do: AgentCommands.scope_input_up(state)
-  def execute(state, :agent_input_down), do: AgentCommands.scope_input_down(state)
-  def execute(state, :agent_save_buffer), do: AgentCommands.scope_save_buffer(state)
 
   def execute(state, {:agent_self_insert, char}),
     do: AgentCommands.scope_self_insert(state, char)
 
-  # Input mode transition (insert → normal on Escape)
-  def execute(state, :agent_input_to_normal), do: AgentCommands.input_to_normal(state)
+  # ── Parameterized movement ────────────────────────────────────────────────
 
-  def execute(state, :agent_accept_hunk), do: AgentCommands.scope_accept_hunk(state)
-  def execute(state, :agent_reject_hunk), do: AgentCommands.scope_reject_hunk(state)
-  def execute(state, :agent_accept_all_hunks), do: AgentCommands.scope_accept_all_hunks(state)
-  def execute(state, :agent_reject_all_hunks), do: AgentCommands.scope_reject_all_hunks(state)
-  def execute(state, :agent_approve_tool), do: AgentCommands.scope_approve_tool(state)
-  def execute(state, :agent_deny_tool), do: AgentCommands.scope_deny_tool(state)
-
-  def execute(state, :agent_trigger_mention),
-    do: AgentCommands.scope_trigger_mention(state)
-
-  # ── File tree scope commands ──────────────────────────────────────────────
-  def execute(state, :tree_open_or_toggle), do: tree_open_or_toggle(state)
-  def execute(state, :tree_toggle_directory), do: tree_toggle_directory(state)
-  def execute(state, :tree_expand), do: tree_expand(state)
-  def execute(state, :tree_collapse), do: tree_collapse(state)
-  def execute(state, :tree_toggle_hidden), do: tree_toggle_hidden(state)
-  def execute(state, :tree_refresh), do: tree_refresh(state)
-  def execute(state, :tree_close), do: tree_close(state)
-
-  # ── Commands that work without an active buffer (e.g. from dashboard) ────
-
-  def execute(state, :new_buffer), do: BufferManagement.execute(state, :new_buffer)
-  def execute(state, :project_switch), do: Project.execute(state, :project_switch)
-  def execute(state, :project_recent_files), do: Project.execute(state, :project_recent_files)
-
-  # ── Guard: no buffer → no-op ──────────────────────────────────────────────
-
-  def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
-
-  # ── Movement ──────────────────────────────────────────────────────────────
-
-  def execute(state, :move_left), do: Movement.execute(state, :move_left)
-  def execute(state, :move_right), do: Movement.execute(state, :move_right)
-  def execute(state, :move_up), do: Movement.execute(state, :move_up)
-  def execute(state, :move_down), do: Movement.execute(state, :move_down)
-  def execute(state, :move_logical_up), do: Movement.execute(state, :move_logical_up)
-  def execute(state, :move_logical_down), do: Movement.execute(state, :move_logical_down)
-
-  def execute(state, :move_to_logical_line_start),
-    do: Movement.execute(state, :move_to_logical_line_start)
-
-  def execute(state, :move_to_logical_line_end),
-    do: Movement.execute(state, :move_to_logical_line_end)
-
-  def execute(state, :move_to_line_start), do: Movement.execute(state, :move_to_line_start)
-  def execute(state, :move_to_line_end), do: Movement.execute(state, :move_to_line_end)
-  def execute(state, :word_forward), do: Movement.execute(state, :word_forward)
-  def execute(state, :word_backward), do: Movement.execute(state, :word_backward)
-  def execute(state, :word_end), do: Movement.execute(state, :word_end)
-  def execute(state, :word_forward_big), do: Movement.execute(state, :word_forward_big)
-  def execute(state, :word_backward_big), do: Movement.execute(state, :word_backward_big)
-  def execute(state, :word_end_big), do: Movement.execute(state, :word_end_big)
-
-  def execute(state, :move_to_first_non_blank),
-    do: Movement.execute(state, :move_to_first_non_blank)
-
-  def execute(state, :move_to_document_start),
-    do: Movement.execute(state, :move_to_document_start)
-
-  def execute(state, :move_to_document_end), do: Movement.execute(state, :move_to_document_end)
-  def execute(state, {:goto_line, _} = cmd), do: Movement.execute(state, cmd)
-
-  def execute(state, :next_line_first_non_blank),
-    do: Movement.execute(state, :next_line_first_non_blank)
-
-  def execute(state, :prev_line_first_non_blank),
-    do: Movement.execute(state, :prev_line_first_non_blank)
-
-  def execute(state, {:find_char, _, _} = cmd), do: Movement.execute(state, cmd)
-  def execute(state, :repeat_find_char), do: Movement.execute(state, :repeat_find_char)
-
-  def execute(state, :repeat_find_char_reverse),
-    do: Movement.execute(state, :repeat_find_char_reverse)
-
-  def execute(state, :match_bracket), do: Movement.execute(state, :match_bracket)
-  def execute(state, :paragraph_forward), do: Movement.execute(state, :paragraph_forward)
-  def execute(state, :paragraph_backward), do: Movement.execute(state, :paragraph_backward)
-  def execute(state, {:move_to_screen, _} = cmd), do: Movement.execute(state, cmd)
-  def execute(state, :half_page_down), do: Movement.execute(state, :half_page_down)
-  def execute(state, :half_page_up), do: Movement.execute(state, :half_page_up)
-  def execute(state, :page_down), do: Movement.execute(state, :page_down)
-  def execute(state, :page_up), do: Movement.execute(state, :page_up)
-  def execute(state, :window_left), do: Movement.execute(state, :window_left)
-  def execute(state, :window_right), do: Movement.execute(state, :window_right)
-  def execute(state, :window_up), do: Movement.execute(state, :window_up)
-  def execute(state, :window_down), do: Movement.execute(state, :window_down)
-  def execute(state, :split_vertical), do: Movement.execute(state, :split_vertical)
-  def execute(state, :split_horizontal), do: Movement.execute(state, :split_horizontal)
-  def execute(state, :window_close), do: Movement.execute(state, :window_close)
-  def execute(state, :describe_key), do: Movement.execute(state, :describe_key)
-
-  # ── Editing ───────────────────────────────────────────────────────────────
-
-  def execute(state, :delete_before), do: Editing.execute(state, :delete_before)
-  def execute(state, :delete_at), do: Editing.execute(state, :delete_at)
-  def execute(state, {:delete_chars_at, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:delete_chars_before, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, :insert_newline), do: Editing.execute(state, :insert_newline)
-  def execute(state, {:insert_char, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, :insert_line_below), do: Editing.execute(state, :insert_line_below)
-  def execute(state, :insert_line_above), do: Editing.execute(state, :insert_line_above)
-  def execute(state, :join_lines), do: Editing.execute(state, :join_lines)
-  def execute(state, {:replace_char, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, :toggle_case), do: Editing.execute(state, :toggle_case)
-  def execute(state, {:replace_overwrite, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, :replace_restore), do: Editing.execute(state, :replace_restore)
-  def execute(state, :undo), do: Editing.execute(state, :undo)
-  def execute(state, :redo), do: Editing.execute(state, :redo)
-  def execute(state, :paste_before), do: Editing.execute(state, :paste_before)
-  def execute(state, :paste_after), do: Editing.execute(state, :paste_after)
-  def execute(state, :indent_line), do: Editing.execute(state, :indent_line)
-  def execute(state, :dedent_line), do: Editing.execute(state, :dedent_line)
-  def execute(state, :comment_line), do: Editing.execute(state, :comment_line)
-  def execute(state, {:comment_motion, _} = cmd), do: Editing.execute(state, cmd)
-
-  def execute(state, :comment_visual_selection),
-    do: Editing.execute(state, :comment_visual_selection)
-
-  def execute(state, {:indent_lines, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:dedent_lines, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:indent_motion, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:dedent_motion, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:reindent_lines, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:reindent_motion, _} = cmd), do: Editing.execute(state, cmd)
-  def execute(state, {:reindent_text_object, _, _} = cmd), do: Editing.execute(state, cmd)
-
-  def execute(state, :indent_visual_selection),
-    do: Editing.execute(state, :indent_visual_selection)
-
-  def execute(state, :dedent_visual_selection),
-    do: Editing.execute(state, :dedent_visual_selection)
-
-  def execute(state, :reindent_visual_selection),
-    do: Editing.execute(state, :reindent_visual_selection)
-
-  # ── Operators ─────────────────────────────────────────────────────────────
-
-  def execute(state, {:delete_motion, _} = cmd), do: Operators.execute(state, cmd)
-  def execute(state, {:change_motion, _} = cmd), do: Operators.execute(state, cmd)
-  def execute(state, {:yank_motion, _} = cmd), do: Operators.execute(state, cmd)
-  def execute(state, :delete_line), do: Operators.execute(state, :delete_line)
-  def execute(state, :change_line), do: Operators.execute(state, :change_line)
-  def execute(state, :yank_line), do: Operators.execute(state, :yank_line)
-  def execute(state, {:delete_text_object, _, _} = cmd), do: Operators.execute(state, cmd)
-  def execute(state, {:change_text_object, _, _} = cmd), do: Operators.execute(state, cmd)
-  def execute(state, {:yank_text_object, _, _} = cmd), do: Operators.execute(state, cmd)
-
-  # ── Visual ────────────────────────────────────────────────────────────────
-
-  def execute(state, :delete_visual_selection),
-    do: Visual.execute(state, :delete_visual_selection)
-
-  def execute(state, :yank_visual_selection), do: Visual.execute(state, :yank_visual_selection)
-  def execute(state, {:wrap_visual_selection, _, _} = cmd), do: Visual.execute(state, cmd)
-  def execute(state, {:visual_text_object, _, _} = cmd), do: Visual.execute(state, cmd)
-
-  # ── Search ────────────────────────────────────────────────────────────────
-
-  def execute(state, :incremental_search), do: Search.execute(state, :incremental_search)
-  def execute(state, :confirm_search), do: Search.execute(state, :confirm_search)
-  def execute(state, :cancel_search), do: Search.execute(state, :cancel_search)
-  def execute(state, :search_next), do: Search.execute(state, :search_next)
-  def execute(state, :search_prev), do: Search.execute(state, :search_prev)
-
-  def execute(state, :search_word_under_cursor_forward),
-    do: Search.execute(state, :search_word_under_cursor_forward)
-
-  def execute(state, :search_word_under_cursor_backward),
-    do: Search.execute(state, :search_word_under_cursor_backward)
-
-  def execute(state, :confirm_project_search),
-    do: Search.execute(state, :confirm_project_search)
-
-  def execute(state, :substitute_confirm_advance),
-    do: Search.execute(state, :substitute_confirm_advance)
-
-  def execute(state, :apply_substitute_confirm),
-    do: Search.execute(state, :apply_substitute_confirm)
-
-  # ── Marks ─────────────────────────────────────────────────────────────────
-
-  def execute(state, {:set_mark, _} = cmd), do: Marks.execute(state, cmd)
-  def execute(state, {:jump_to_mark_line, _} = cmd), do: Marks.execute(state, cmd)
-  def execute(state, {:jump_to_mark_exact, _} = cmd), do: Marks.execute(state, cmd)
-  def execute(state, :jump_to_last_pos_line), do: Marks.execute(state, :jump_to_last_pos_line)
-  def execute(state, :jump_to_last_pos_exact), do: Marks.execute(state, :jump_to_last_pos_exact)
-
-  # ── Project ────────────────────────────────────────────────────────────────
-
-  def execute(state, :project_find_file), do: Project.execute(state, :project_find_file)
-  def execute(state, :project_invalidate), do: Project.execute(state, :project_invalidate)
-  def execute(state, :project_add), do: Project.execute(state, :project_add)
-  def execute(state, :project_remove), do: Project.execute(state, :project_remove)
-
-  # ── Folding ───────────────────────────────────────────────────────────────
-
-  def execute(state, :fold_toggle), do: Folding.execute(state, :fold_toggle)
-  def execute(state, :fold_close), do: Folding.execute(state, :fold_close)
-  def execute(state, :fold_open), do: Folding.execute(state, :fold_open)
-  def execute(state, :fold_close_all), do: Folding.execute(state, :fold_close_all)
-  def execute(state, :fold_open_all), do: Folding.execute(state, :fold_open_all)
-
-  # ── Buffer management ─────────────────────────────────────────────────────
-
-  def execute(state, :save), do: BufferManagement.execute(state, :save)
-  def execute(state, :force_save), do: BufferManagement.execute(state, :force_save)
-  def execute(state, :reload), do: BufferManagement.execute(state, :reload)
-  def execute(state, :quit), do: BufferManagement.execute(state, :quit)
-  def execute(state, :force_quit), do: BufferManagement.execute(state, :force_quit)
-  def execute(state, :quit_all), do: BufferManagement.execute(state, :quit_all)
-  def execute(state, :force_quit_all), do: BufferManagement.execute(state, :force_quit_all)
-  def execute(state, :confirm_quit_yes), do: BufferManagement.execute(state, :confirm_quit_yes)
-  def execute(state, :confirm_quit_no), do: BufferManagement.execute(state, :confirm_quit_no)
-  def execute(state, :buffer_list), do: BufferManagement.execute(state, :buffer_list)
-  def execute(state, :buffer_list_all), do: BufferManagement.execute(state, :buffer_list_all)
-  def execute(state, :buffer_next), do: BufferManagement.execute(state, :buffer_next)
-  def execute(state, :buffer_prev), do: BufferManagement.execute(state, :buffer_prev)
-  def execute(state, :kill_buffer), do: BufferManagement.execute(state, :kill_buffer)
-
-  def execute(state, :cycle_line_numbers),
-    do: BufferManagement.execute(state, :cycle_line_numbers)
-
-  def execute(state, :toggle_wrap),
-    do: BufferManagement.execute(state, :toggle_wrap)
-
-  def execute(state, :view_messages), do: BufferManagement.execute(state, :view_messages)
-  def execute(state, :view_warnings), do: BufferManagement.execute(state, :view_warnings)
-  def execute(state, :open_config), do: BufferManagement.execute(state, :open_config)
-
-  # ── Config reload ────────────────────────────────────────────────────────
-
-  def execute(state, :reload_config) do
-    case ConfigLoader.reload() do
-      :ok ->
-        Minga.Editor.log_to_messages("Config reloaded")
-        %{state | status_msg: "Config reloaded"}
-
-      {:error, msg} ->
-        Minga.Log.warning(:config, "Config reload error: #{msg}")
-        %{state | status_msg: "Config reload error: #{msg}"}
-    end
+  def execute(state, {:goto_line, _} = cmd) do
+    guard_buffer(state, fn -> Movement.execute(state, cmd) end)
   end
 
-  # ── Format ────────────────────────────────────────────────────────────
-
-  def execute(%{buffers: %{active: buf}} = state, :format_buffer) when is_pid(buf) do
-    filetype = BufferServer.filetype(buf)
-    file_path = BufferServer.file_path(buf)
-    spec = Formatter.resolve_formatter(filetype, file_path)
-
-    case spec do
-      nil ->
-        %{state | status_msg: "No formatter configured for #{filetype}"}
-
-      _ ->
-        format_and_replace(state, buf, spec)
-    end
+  def execute(state, {:find_char, _, _} = cmd) do
+    guard_buffer(state, fn -> Movement.execute(state, cmd) end)
   end
 
-  def execute(state, :format_buffer), do: %{state | status_msg: "No buffer to format"}
-
-  # ── Diagnostics ──────────────────────────────────────────────────────────
-
-  def execute(state, :diagnostics_list) do
-    PickerUI.open(state, Minga.Diagnostics.PickerSource)
+  def execute(state, {:move_to_screen, _} = cmd) do
+    guard_buffer(state, fn -> Movement.execute(state, cmd) end)
   end
 
-  # ── Textobject navigation ──────────────────────────────────────────────────
+  # ── Parameterized editing ─────────────────────────────────────────────────
+
+  def execute(state, {:delete_chars_at, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:delete_chars_before, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:insert_char, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:replace_char, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:replace_overwrite, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:comment_motion, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:indent_lines, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:dedent_lines, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:indent_motion, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:dedent_motion, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:reindent_lines, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:reindent_motion, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  def execute(state, {:reindent_text_object, _, _} = cmd) do
+    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+  end
+
+  # ── Parameterized operators ───────────────────────────────────────────────
+
+  def execute(state, {:delete_motion, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:change_motion, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:yank_motion, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:delete_text_object, _, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:change_text_object, _, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:yank_text_object, _, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  # ── Parameterized visual ──────────────────────────────────────────────────
+
+  def execute(state, {:wrap_visual_selection, _, _} = cmd) do
+    guard_buffer(state, fn -> Visual.execute(state, cmd) end)
+  end
+
+  def execute(state, {:visual_text_object, _, _} = cmd) do
+    guard_buffer(state, fn -> Visual.execute(state, cmd) end)
+  end
+
+  # ── Parameterized search ──────────────────────────────────────────────────
+
+  # (none currently, all search commands are atoms)
+
+  # ── Parameterized marks ───────────────────────────────────────────────────
+
+  def execute(state, {:set_mark, _} = cmd) do
+    guard_buffer(state, fn -> Marks.execute(state, cmd) end)
+  end
+
+  def execute(state, {:jump_to_mark_line, _} = cmd) do
+    guard_buffer(state, fn -> Marks.execute(state, cmd) end)
+  end
+
+  def execute(state, {:jump_to_mark_exact, _} = cmd) do
+    guard_buffer(state, fn -> Marks.execute(state, cmd) end)
+  end
+
+  # ── Textobject navigation ─────────────────────────────────────────────────
 
   def execute(%{buffers: %{active: buf}} = state, {:goto_next_textobject, type})
       when is_pid(buf) do
@@ -567,88 +319,7 @@ defmodule Minga.Editor.Commands do
     end
   end
 
-  # ── Diagnostics ───────────────────────────────────────────────────────────
-
-  def execute(state, :next_diagnostic) do
-    Diagnostics.execute(state, :next_diagnostic)
-  end
-
-  def execute(state, :prev_diagnostic) do
-    Diagnostics.execute(state, :prev_diagnostic)
-  end
-
-  def execute(state, :lsp_info), do: LspCommands.execute(state, :lsp_info)
-  def execute(state, :lsp_restart), do: LspCommands.execute(state, :lsp_restart)
-  def execute(state, :lsp_stop), do: LspCommands.execute(state, :lsp_stop)
-  def execute(state, :lsp_start), do: LspCommands.execute(state, :lsp_start)
-
-  def execute(state, :filetype_menu) do
-    PickerUI.open(state, Minga.Picker.LanguageSource)
-  end
-
-  def execute(state, :goto_definition), do: LspActions.goto_definition(state)
-  def execute(state, :hover), do: LspActions.hover(state)
-
-  def execute(%{buffers: %{active: buf}} = state, :alternate_file) when is_pid(buf) do
-    file_path = BufferServer.file_path(buf)
-    filetype = BufferServer.filetype(buf)
-    open_alternate(state, file_path, filetype)
-  end
-
-  def execute(state, :alternate_file), do: %{state | status_msg: "No active buffer"}
-
-  def execute(state, :next_git_hunk), do: GitCommands.execute(state, :next_git_hunk)
-  def execute(state, :prev_git_hunk), do: GitCommands.execute(state, :prev_git_hunk)
-  def execute(state, :git_stage_hunk), do: GitCommands.execute(state, :git_stage_hunk)
-  def execute(state, :git_revert_hunk), do: GitCommands.execute(state, :git_revert_hunk)
-  def execute(state, :git_preview_hunk), do: GitCommands.execute(state, :git_preview_hunk)
-  def execute(state, :git_blame_line), do: GitCommands.execute(state, :git_blame_line)
-
-  # ── Test runners ─────────────────────────────────────────────────────────
-
-  def execute(%{buffers: %{active: buf}} = state, :test_file) when is_pid(buf) do
-    run_test_command(state, buf, :file)
-  end
-
-  def execute(state, :test_file), do: %{state | status_msg: "No active buffer"}
-
-  def execute(state, :test_all) do
-    run_test_command(state, nil, :all)
-  end
-
-  def execute(%{buffers: %{active: buf}} = state, :test_at_point) when is_pid(buf) do
-    run_test_command(state, buf, :at_point)
-  end
-
-  def execute(state, :test_at_point), do: %{state | status_msg: "No active buffer"}
-
-  def execute(state, :test_rerun) do
-    rerun_last_test(state)
-  end
-
-  def execute(state, :test_output) do
-    show_test_output(state)
-  end
-
-  # ── Macro recording ──────────────────────────────────────────────────────
-
-  def execute(state, :toggle_macro_recording) do
-    alias Minga.Editor.MacroRecorder
-
-    case MacroRecorder.recording?(state.vim.macro_recorder) do
-      {true, _reg} ->
-        # Stop recording
-        rec = MacroRecorder.stop_recording(state.vim.macro_recorder)
-        %{state | vim: %{state.vim | macro_recorder: rec}, status_msg: "Recorded macro"}
-
-      false ->
-        # Enter pending state for register selection
-        %{
-          state
-          | vim: %{state.vim | mode_state: %{state.vim.mode_state | pending_macro_register: true}}
-        }
-    end
-  end
+  # ── Macro commands (return action tuples) ─────────────────────────────────
 
   def execute(state, {:start_macro_recording, register}) do
     alias Minga.Editor.MacroRecorder
@@ -674,13 +345,7 @@ defmodule Minga.Editor.Commands do
     end
   end
 
-  def execute(%{vim: %{macro_recorder: %{last_register: nil}}} = state, :replay_last_macro) do
-    %{state | status_msg: "No previous macro"}
-  end
-
-  def execute(%{vim: %{macro_recorder: %{last_register: reg}}} = state, :replay_last_macro) do
-    {state, {:replay_macro, reg}}
-  end
+  # ── Ex commands (tuple dispatch) ──────────────────────────────────────────
 
   def execute(state, {:execute_ex_command, {:lsp_info, []}}),
     do: LspCommands.execute(state, :lsp_info)
@@ -695,234 +360,40 @@ defmodule Minga.Editor.Commands do
     do: LspCommands.execute(state, :lsp_start)
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
-    execute(state, :extension_list)
-  end
-
-  def execute(state, :extension_list) do
-    alias Minga.Extension.Registry, as: ExtRegistry
-    alias Minga.Extension.Supervisor, as: ExtSupervisor
-
-    extensions = ExtSupervisor.list_extensions()
-    all_entries = ExtRegistry.all()
-
-    msg =
-      case extensions do
-        [] ->
-          "No extensions loaded"
-
-        exts ->
-          lines =
-            Enum.map(exts, fn {name, version, status} ->
-              source_label = format_source_label(name, all_entries)
-              "  #{name} v#{version} [#{status}] (#{source_label})"
-            end)
-
-          ["Extensions:" | lines] |> Enum.join("\n")
-      end
-
-    %{state | status_msg: msg}
+    ExtCommands.list(state)
   end
 
   def execute(state, {:execute_ex_command, {:extension_update_all, []}}) do
-    execute(state, :extension_update_all)
-  end
-
-  def execute(state, :extension_update_all) do
-    alias Minga.Extension.Updater
-
-    Task.start(fn -> Updater.check_all() end)
-    %{state | status_msg: "Checking for extension updates..."}
+    ExtCommands.update_all(state)
   end
 
   def execute(state, {:execute_ex_command, {:extension_update, []}}) do
-    execute(state, :extension_update)
-  end
-
-  def execute(state, :extension_update) do
-    PickerUI.open(state, Minga.Picker.ExtensionSource)
-  end
-
-  def execute(state, :apply_extension_updates) do
-    alias Minga.Extension.Updater
-
-    ms = state.vim.mode_state
-    Task.start(fn -> Updater.apply_accepted(ms) end)
-
-    %{state | status_msg: "Applying extension updates..."}
-  end
-
-  def execute(state, :extension_confirm_details) do
-    alias Minga.Extension.Updater
-
-    ms = state.vim.mode_state
-    update = Enum.at(ms.updates, ms.current)
-    details = Updater.details(update.name)
-    Minga.Editor.log_to_messages(details)
-    state
+    ExtCommands.update(state)
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)
 
-  # Tab bar click: tab_goto_N switches to tab with id N.
-  # SPC 1..9 also routes here; N is treated as both a tab ID (for click
-  # regions) and a 1-based position index (for keyboard shortcuts).
-  # If no tab has that exact ID, we fall back to positional lookup.
-  def execute(%{tab_bar: %TabBar{} = tb} = state, cmd) when is_atom(cmd) do
-    case parse_tab_goto(cmd) do
-      {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
-      :error -> state
+  # ── Registry dispatch for atom commands ───────────────────────────────────
+  #
+  # This is the main dispatch path. All atom commands are looked up in the
+  # Command Registry. If the command requires a buffer and none is active,
+  # we return state unchanged. Otherwise, call the registered execute function.
+
+  def execute(state, cmd) when is_atom(cmd) do
+    case CommandRegistry.lookup(CommandRegistry, cmd) do
+      {:ok, %Command{requires_buffer: true}} when is_nil(state.buffers.active) ->
+        state
+
+      {:ok, %Command{execute: fun}} ->
+        fun.(state)
+
+      :error ->
+        state
     end
   end
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state
-
-  @spec parse_tab_goto(atom()) :: {:ok, pos_integer()} | :error
-  defp parse_tab_goto(cmd) do
-    case Atom.to_string(cmd) do
-      "tab_goto_" <> id_str ->
-        case Integer.parse(id_str) do
-          {n, ""} -> {:ok, n}
-          _ -> :error
-        end
-
-      _ ->
-        :error
-    end
-  end
-
-  @spec switch_tab_by_id_or_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
-  defp switch_tab_by_id_or_index(state, tb, n) do
-    if TabBar.has_tab?(tb, n) do
-      EditorState.switch_tab(state, n)
-    else
-      case TabBar.tab_at(tb, n) do
-        %{id: id} -> EditorState.switch_tab(state, id)
-        nil -> state
-      end
-    end
-  end
-
-  # ── Private alternate file helpers ─────────────────────────────────────────
-
-  @spec open_alternate(state(), String.t() | nil, atom()) :: state()
-  defp open_alternate(state, nil, _filetype), do: %{state | status_msg: "Buffer has no file path"}
-
-  defp open_alternate(state, file_path, filetype) do
-    project_root = Minga.Project.root() || Path.dirname(file_path)
-    candidates = Minga.AlternateFile.candidates(file_path, filetype, project_root)
-
-    case Enum.find(candidates, &File.exists?/1) do
-      nil ->
-        %{state | status_msg: "No alternate file found for #{Path.basename(file_path)}"}
-
-      alt_path ->
-        execute(state, {:execute_ex_command, {:edit, alt_path}})
-    end
-  end
-
-  # ── Private test runner helpers ────────────────────────────────────────────
-
-  @spec run_test_command(state(), pid() | nil, :file | :all | :at_point) :: state()
-  defp run_test_command(state, buf, kind) do
-    filetype = if buf, do: BufferServer.filetype(buf), else: detect_project_filetype()
-    project_root = Minga.Project.root() || "."
-
-    case Minga.TestRunner.detect(filetype, project_root) do
-      {:ok, runner} ->
-        command = build_test_command(runner, buf, kind)
-        execute_test(state, command, project_root)
-
-      :none ->
-        %{state | status_msg: "No test runner configured for #{filetype}"}
-    end
-  end
-
-  @spec build_test_command(Minga.TestRunner.Runner.t(), pid() | nil, :file | :all | :at_point) ::
-          String.t() | nil
-  defp build_test_command(runner, _buf, :all) do
-    Minga.TestRunner.all_command(runner)
-  end
-
-  defp build_test_command(runner, buf, :file) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
-      nil -> nil
-      path -> Minga.TestRunner.file_command(runner, path)
-    end
-  end
-
-  defp build_test_command(runner, buf, :at_point) when is_pid(buf) do
-    file_path = BufferServer.file_path(buf)
-    {cursor_line, _col} = BufferServer.cursor(buf)
-
-    if file_path do
-      Minga.TestRunner.at_point_command(runner, file_path, cursor_line + 1)
-    else
-      nil
-    end
-  end
-
-  defp build_test_command(_runner, _buf, _kind), do: nil
-
-  @spec execute_test(state(), String.t() | nil, String.t()) :: state()
-  defp execute_test(state, nil, _project_root) do
-    %{state | status_msg: "Cannot determine test command"}
-  end
-
-  defp execute_test(state, command, project_root) do
-    state = %{state | last_test_command: {command, project_root}}
-    Minga.CommandOutput.run("*test*", command, cwd: project_root)
-    show_test_output(state)
-  end
-
-  @spec rerun_last_test(state()) :: state()
-  defp rerun_last_test(%{last_test_command: {command, project_root}} = state) do
-    Minga.CommandOutput.run("*test*", command, cwd: project_root)
-    show_test_output(state)
-  end
-
-  defp rerun_last_test(state) do
-    %{state | status_msg: "No previous test command"}
-  end
-
-  @spec show_test_output(state()) :: state()
-  defp show_test_output(state) do
-    case Minga.CommandOutput.buffer("*test*") do
-      nil ->
-        %{state | status_msg: "No test output"}
-
-      buf_pid ->
-        BufferManagement.execute(state, {:open_special_buffer, "*test*", buf_pid})
-    end
-  end
-
-  @spec detect_project_filetype() :: atom()
-  defp detect_project_filetype do
-    Minga.TestRunner.detect_project_filetype(Minga.Project.root() || ".")
-  end
-
-  # ── Private formatting helpers ─────────────────────────────────────────────
-
-  @spec format_and_replace(state(), pid(), Formatter.formatter_spec()) :: state()
-  defp format_and_replace(state, buf, spec) do
-    content = BufferServer.content(buf)
-    buf_name = BufferServer.file_path(buf) |> Path.basename()
-
-    case Formatter.format(content, spec) do
-      {:ok, formatted} ->
-        {cursor_line, cursor_col} = BufferServer.cursor(buf)
-        BufferServer.replace_content(buf, formatted)
-        line_count = BufferServer.line_count(buf)
-        safe_line = min(cursor_line, max(line_count - 1, 0))
-        BufferServer.move_to(buf, {safe_line, cursor_col})
-        Minga.Editor.log_to_messages("Formatted: #{buf_name}")
-        %{state | status_msg: "Formatted"}
-
-      {:error, msg} ->
-        Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
-        %{state | status_msg: "Format error: #{msg}"}
-    end
-  end
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────
 
@@ -939,131 +410,15 @@ defmodule Minga.Editor.Commands do
   @spec add_buffer(state(), pid()) :: state()
   def add_buffer(state, pid), do: EditorState.add_buffer(state, pid)
 
-  # ── File tree helpers ───────────────────────────────────────────────────
+  # ── Private helpers ───────────────────────────────────────────────────────
 
-  @spec toggle_file_tree(state()) :: state()
-  defp toggle_file_tree(%{file_tree: %{tree: nil}} = state), do: open_file_tree(state)
-
-  defp toggle_file_tree(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
-    GenServer.stop(buf, :normal)
-
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
-  end
-
-  defp toggle_file_tree(state) do
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
-  end
-
-  @spec open_file_tree(state()) :: state()
-  defp open_file_tree(state) do
-    root = Minga.Project.root() || File.cwd!()
-    tree = FileTree.new(root)
-    tree = FileTree.refresh_git_status(tree)
-    tree = reveal_active_in_tree(tree, state.buffers.active)
-    buf = BufferSync.start_buffer(tree)
-
-    %{state | file_tree: FileTreeState.open(state.file_tree, tree, buf), keymap_scope: :file_tree}
-    |> Layout.invalidate()
-    |> EditorState.invalidate_all_windows()
-  end
-
-  @spec reveal_active_in_tree(FileTree.t(), pid() | nil) :: FileTree.t()
-  defp reveal_active_in_tree(tree, nil), do: tree
-
-  defp reveal_active_in_tree(tree, buf) do
-    case BufferServer.file_path(buf) do
-      nil -> tree
-      path -> FileTree.reveal(tree, path)
-    end
-  end
-
-  # ── File tree scope commands ──────────────────────────────────────────────
-
-  @spec tree_open_or_toggle(state()) :: state()
-  defp tree_open_or_toggle(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_open_or_toggle(%{file_tree: %{tree: tree}} = state) do
-    case FileTree.selected_entry(tree) do
-      %{dir?: true} ->
-        new_tree = FileTree.toggle_expand(tree)
-        tree_sync_and_update(state, new_tree)
-
-      %{dir?: false, path: path} ->
-        state = put_in(state.file_tree.focused, false)
-        state = %{state | keymap_scope: :editor}
-
-        case start_buffer(path) do
-          {:ok, pid} -> Minga.Editor.do_file_tree_open(state, pid, path, tree)
-          {:error, _} -> state
-        end
-
-      nil ->
-        state
-    end
-  end
-
-  @spec tree_toggle_directory(state()) :: state()
-  defp tree_toggle_directory(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_toggle_directory(%{file_tree: %{tree: tree}} = state) do
-    tree_sync_and_update(state, FileTree.toggle_expand(tree))
-  end
-
-  @spec tree_expand(state()) :: state()
-  defp tree_expand(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_expand(%{file_tree: %{tree: tree}} = state),
-    do: tree_sync_and_update(state, FileTree.expand(tree))
-
-  @spec tree_collapse(state()) :: state()
-  defp tree_collapse(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_collapse(%{file_tree: %{tree: tree}} = state),
-    do: tree_sync_and_update(state, FileTree.collapse(tree))
-
-  @spec tree_toggle_hidden(state()) :: state()
-  defp tree_toggle_hidden(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_toggle_hidden(%{file_tree: %{tree: tree}} = state),
-    do: tree_sync_and_update(state, FileTree.toggle_hidden(tree))
-
-  @spec tree_refresh(state()) :: state()
-  defp tree_refresh(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp tree_refresh(%{file_tree: %{tree: tree}} = state) do
-    tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
-    tree_sync_and_update(state, tree)
-  end
-
-  @spec tree_close(state()) :: state()
-  defp tree_close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
-    GenServer.stop(buf, :normal)
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
-  end
-
-  defp tree_close(state),
-    do: %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
-
-  @spec tree_sync_and_update(state(), FileTree.t()) :: state()
-  defp tree_sync_and_update(%{file_tree: %{buffer: buf}} = state, new_tree) when is_pid(buf) do
-    BufferSync.sync(buf, new_tree)
-    put_in(state.file_tree.tree, new_tree)
-  end
-
-  defp tree_sync_and_update(state, new_tree) do
-    put_in(state.file_tree.tree, new_tree)
-  end
+  @spec guard_buffer(state(), (-> state() | {state(), action()})) ::
+          state() | {state(), action()}
+  defp guard_buffer(%{buffers: %{active: nil}} = state, _fun), do: state
+  defp guard_buffer(_state, fun), do: fun.()
 
   # ── Filetype trie substitution ────────────────────────────────────────────
 
-  # When the leader sequence reaches SPC m, swap the which-key node with the
-  # filetype-specific trie so the next key resolves filetype-scoped bindings.
-  # Extracts the accumulated leader key labels from mode_state (stored in
-  # reverse order, e.g. ["f", "SPC"]) and reverses them to display order.
   @spec leader_keys_from_mode(EditorState.t()) :: [String.t()]
   defp leader_keys_from_mode(%{vim: %{mode_state: %{leader_keys: keys}}})
        when is_list(keys) do
@@ -1072,21 +427,17 @@ defmodule Minga.Editor.Commands do
 
   defp leader_keys_from_mode(_state), do: []
 
-  # Also updates mode_state.leader_node so the mode FSM uses the same trie.
   @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
           {Bindings.node_t(), EditorState.t()}
   defp maybe_substitute_filetype_trie(state, node) do
-    # Check if we just arrived at SPC m (leader_keys is ["m", "SPC"])
     case state.vim.mode_state do
       %{leader_keys: ["m", "SPC"]} ->
         filetype = current_filetype(state)
         ft_trie = filetype_trie_for(filetype)
 
         if ft_trie.children == %{} do
-          # No filetype bindings registered; use the default (empty) m node
           {node, state}
         else
-          # Substitute with the filetype trie and update mode_state
           state = put_in(state.vim.mode_state.leader_node, ft_trie)
           {ft_trie, state}
         end
@@ -1110,17 +461,5 @@ defmodule Minga.Editor.Commands do
     KeymapActive.filetype_trie(filetype)
   catch
     :exit, _ -> Bindings.new()
-  end
-
-  # ── Extension management helpers ───────────────────────────────────────────
-
-  @spec format_source_label(atom(), [{atom(), Minga.Extension.Entry.t()}]) :: String.t()
-  defp format_source_label(name, all_entries) do
-    case List.keyfind(all_entries, name, 0) do
-      {_, %{source_type: :path, path: path}} -> "path: #{path}"
-      {_, %{source_type: :git, git: %{url: url}}} -> "git: #{url}"
-      {_, %{source_type: :hex, hex: %{package: pkg}}} -> "hex: #{pkg}"
-      _ -> "unknown"
-    end
   end
 end

@@ -4,12 +4,23 @@ defmodule Minga.Editor.Commands.Project do
   add/remove known projects.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
   alias Minga.Project
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:project_find_file, "Find file in project", true},
+    {:project_invalidate, "Invalidate project cache", true},
+    {:project_add, "Add project", true},
+    {:project_remove, "Remove project", true},
+    {:project_switch, "Switch project", false},
+    {:project_recent_files, "Recent files", false}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -67,5 +78,17 @@ defmodule Minga.Editor.Commands.Project do
     Project.root()
   catch
     :exit, _ -> nil
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

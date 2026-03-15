@@ -6,6 +6,8 @@ defmodule Minga.Editor.Commands.Folding do
   and available fold ranges live in the Window struct, not the buffer.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.FoldMap
@@ -16,6 +18,14 @@ defmodule Minga.Editor.Commands.Folding do
 
   @typedoc "Fold command atoms."
   @type fold_command :: :fold_toggle | :fold_close | :fold_open | :fold_close_all | :fold_open_all
+
+  @command_specs [
+    {:fold_toggle, "Toggle fold at cursor (za)", true},
+    {:fold_close, "Close fold at cursor (zc)", true},
+    {:fold_open, "Open fold at cursor (zo)", true},
+    {:fold_close_all, "Close all folds (zM)", true},
+    {:fold_open_all, "Open all folds (zR)", true}
+  ]
 
   @doc """
   Executes a fold command on the active window.
@@ -95,5 +105,17 @@ defmodule Minga.Editor.Commands.Folding do
     end
   catch
     :exit, _ -> :ok
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

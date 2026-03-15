@@ -4,12 +4,20 @@ defmodule Minga.Editor.Commands.Operators do
   line-wise variants (dd/yy/cc/S).
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:delete_line, "Delete current line", true},
+    {:change_line, "Change current line", true},
+    {:yank_line, "Yank current line", true}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -63,5 +71,17 @@ defmodule Minga.Editor.Commands.Operators do
   def execute(%{buffers: %{active: buf}} = state, {:yank_text_object, modifier, spec})
       when is_pid(buf) do
     Helpers.apply_text_object(state, modifier, spec, :yank)
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

@@ -4,6 +4,8 @@ defmodule Minga.Editor.Commands.Search do
   word-under-cursor search.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
@@ -16,6 +18,19 @@ defmodule Minga.Editor.Commands.Search do
   alias Minga.ProjectSearch
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:incremental_search, "Start incremental search", true},
+    {:confirm_search, "Confirm search", true},
+    {:cancel_search, "Cancel search", true},
+    {:search_next, "Next search match", true},
+    {:search_prev, "Previous search match", true},
+    {:search_word_under_cursor_forward, "Search word under cursor (forward)", true},
+    {:search_word_under_cursor_backward, "Search word under cursor (backward)", true},
+    {:confirm_project_search, "Confirm project search", true},
+    {:substitute_confirm_advance, "Advance substitute confirmation", true},
+    {:apply_substitute_confirm, "Apply substitute and confirm", true}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -419,5 +434,38 @@ defmodule Minga.Editor.Commands.Search do
       %Window{} = win -> if Window.has_folds?(win), do: win
       nil -> nil
     end
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    standard =
+      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+        %Minga.Command{
+          name: name,
+          description: desc,
+          requires_buffer: requires_buffer,
+          execute: fn state -> execute(state, name) end
+        }
+      end)
+
+    extra = [
+      %Minga.Command{
+        name: :search_project,
+        description: "Search across project files",
+        requires_buffer: false,
+        execute: fn state ->
+          %{
+            state
+            | vim: %{
+                state.vim
+                | mode: :search_prompt,
+                  mode_state: %Minga.Mode.SearchPromptState{}
+              }
+          }
+        end
+      }
+    ]
+
+    standard ++ extra
   end
 end

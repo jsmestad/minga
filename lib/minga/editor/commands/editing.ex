@@ -4,6 +4,8 @@ defmodule Minga.Editor.Commands.Editing do
   case toggle, indent/dedent, undo/redo, and paste.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Comment
@@ -17,6 +19,28 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:delete_before, "Delete character before cursor (backspace)", true},
+    {:delete_at, "Delete character at cursor (delete)", true},
+    {:insert_newline, "Insert a newline at cursor", true},
+    {:insert_line_below, "Insert line below", true},
+    {:insert_line_above, "Insert line above", true},
+    {:join_lines, "Join lines", true},
+    {:toggle_case, "Toggle character case", true},
+    {:replace_restore, "Restore replaced character", true},
+    {:undo, "Undo the last change", true},
+    {:redo, "Redo the last undone change", true},
+    {:paste_before, "Paste before cursor", true},
+    {:paste_after, "Paste after cursor", true},
+    {:indent_line, "Indent line", true},
+    {:dedent_line, "Dedent line", true},
+    {:comment_line, "Toggle comment on line", true},
+    {:comment_visual_selection, "Toggle comment on selection", true},
+    {:indent_visual_selection, "Indent visual selection", true},
+    {:dedent_visual_selection, "Dedent visual selection", true},
+    {:reindent_visual_selection, "Re-indent visual selection", true}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -856,5 +880,47 @@ defmodule Minga.Editor.Commands.Editing do
       before = binary_part(line_text, 0, col)
       before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
     end
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    standard =
+      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+        %Minga.Command{
+          name: name,
+          description: desc,
+          requires_buffer: requires_buffer,
+          execute: fn state -> execute(state, name) end
+        }
+      end)
+
+    aliases = [
+      %Minga.Command{
+        name: :toggle_comment_line,
+        description: "Toggle comment on line",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :comment_line) end
+      },
+      %Minga.Command{
+        name: :toggle_comment_selection,
+        description: "Toggle comment on selection",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :comment_visual_selection) end
+      },
+      %Minga.Command{
+        name: :delete_chars_at,
+        description: "Delete character(s) at cursor and yank (x)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, {:delete_chars_at, 1}) end
+      },
+      %Minga.Command{
+        name: :delete_chars_before,
+        description: "Delete character(s) before cursor and yank (X)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, {:delete_chars_before, 1}) end
+      }
+    ]
+
+    standard ++ aliases
   end
 end

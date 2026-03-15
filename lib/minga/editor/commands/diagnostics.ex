@@ -6,12 +6,19 @@ defmodule Minga.Editor.Commands.Diagnostics do
   Both wrap around at buffer boundaries.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.Supervisor, as: LSPSupervisor
+
+  @command_specs [
+    {:next_diagnostic, "Jump to next diagnostic", true},
+    {:prev_diagnostic, "Jump to previous diagnostic", true}
+  ]
 
   @doc "Executes a diagnostic or LSP command."
   @spec execute(EditorState.t(), :next_diagnostic | :prev_diagnostic | :lsp_info) ::
@@ -72,5 +79,17 @@ defmodule Minga.Editor.Commands.Diagnostics do
             %{state | status_msg: diag.message}
         end
     end
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

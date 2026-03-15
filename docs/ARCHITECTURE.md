@@ -107,7 +107,7 @@ Minga.Supervisor (rest_for_one)
 │    ├── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
 │    └── Buffer.Fork processes ← (planned) per-agent forks for concurrent editing
 ├── Eval.TaskSupervisor      ← supervised tasks for user code
-├── Command.Registry         ← rebuilt from module attributes on restart
+├── Command.Registry         ← ETS-backed, aggregates commands from Provider modules on restart
 ├── Extension.Registry       ← extension metadata store
 ├── Extension.Supervisor     ← DynamicSupervisor for extension processes
 ├── Diagnostics              ← source-agnostic diagnostic aggregation (ETS reads, GenServer writes)

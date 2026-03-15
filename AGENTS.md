@@ -324,7 +324,7 @@ When implementing features, completing planned work, or changing architecture:
 ## Adding New Features
 
 ### New command
-1. Define in `Minga.Command.Registry` with name, description, execute function
+1. Add the command to the appropriate `Commands.*` sub-module's `__commands__/0` (implements `Minga.Command.Provider` behaviour). Include name, description, `requires_buffer` flag, and execute function. If no existing sub-module fits, create a new one and add it to the `@command_modules` list in `Minga.Command.Registry`.
 2. Add keybinding in `Minga.Keymap.Defaults`
 3. Test the command function and the keybinding lookup
 
