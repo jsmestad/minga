@@ -18,6 +18,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   All render functions return `DisplayList.draw()` tuples.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.NavFlash
@@ -92,6 +93,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
       LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
 
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+    content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -125,13 +127,39 @@ defmodule Minga.Editor.Renderer.BufferLine do
     gutter_cmd = if is_first, do: render_number(p, sr), else: render_blank_gutter(p, sr)
 
     # Content: slide the viewport window to this visual row's column range.
+    #
+    # When inline VTs exist (e.g., "▎ " border), we strip them from the
+    # decorations so Line.render works in pure text coordinates. The border
+    # is drawn directly and text shifted rightward. This avoids coordinate
+    # mismatches between WrapMap (text-only) and the segment pipeline.
     vrow_display_off = Unicode.display_col(p.line_text, vrow.byte_offset)
     vrow_display_w = Unicode.display_width(vrow.text)
+    vt_w = inline_vt_display_width(p.ctx.decorations, p.buf_line)
+
     vrow_viewport = %{p.ctx.viewport | left: vrow_display_off}
-    vrow_ctx = %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w}
+
+    vrow_ctx =
+      if vt_w > 0 do
+        stripped = strip_inline_vts(p.ctx.decorations, p.buf_line)
+        %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w, decorations: stripped}
+      else
+        %{p.ctx | viewport: vrow_viewport, content_w: vrow_display_w}
+      end
 
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+    content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
+
+    # Draw the border and shift text rightward to make room.
+    content_cmds =
+      if vt_w > 0 do
+        shifted =
+          Enum.map(content_cmds, fn {row, col, text, style} -> {row, col + vt_w, text, style} end)
+
+        inline_vt_border_draw(p.ctx.decorations, p.buf_line, sr) ++ shifted
+      else
+        content_cmds
+      end
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -217,6 +245,73 @@ defmodule Minga.Editor.Renderer.BufferLine do
       end)
 
     [fill | tinted]
+  end
+
+  # Applies full-width background fill when the line has a decoration
+  # highlight with a bg color. Without this, decoration bg only colors
+  # existing text characters, not the full terminal width.
+  @spec maybe_apply_decoration_bg([DisplayList.draw()], non_neg_integer(), line_params()) ::
+          [DisplayList.draw()]
+  defp maybe_apply_decoration_bg(cmds, sr, p) do
+    bg = decoration_line_bg(p.ctx.decorations, p.buf_line)
+
+    if bg do
+      apply_line_bg(cmds, sr, bg, p.ctx)
+    else
+      cmds
+    end
+  end
+
+  defp decoration_line_bg(decorations, buf_line) do
+    decorations
+    |> Decorations.highlights_for_line(buf_line)
+    |> Enum.find_value(fn hl ->
+      bg = Keyword.get(hl.style, :bg)
+      if bg && hl.start == {buf_line, 0}, do: bg, else: nil
+    end)
+  end
+
+  # Removes inline virtual texts for a specific line from the decorations.
+  # Used during wrapped rendering to prevent the VT from interfering with
+  # the segment pipeline's coordinate system.
+  @spec strip_inline_vts(Decorations.t(), non_neg_integer()) :: Decorations.t()
+  defp strip_inline_vts(%Decorations{virtual_texts: vts} = decs, buf_line) do
+    filtered =
+      Enum.reject(vts, fn vt ->
+        vt.placement == :inline and match?({^buf_line, _}, vt.anchor)
+      end)
+
+    %{decs | virtual_texts: filtered}
+  end
+
+  # Renders inline VT border as direct draw commands for continuation rows.
+  @spec inline_vt_border_draw(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
+          [DisplayList.draw()]
+  defp inline_vt_border_draw(decorations, buf_line, screen_row) do
+    case Decorations.inline_virtual_texts_for_line(decorations, buf_line) do
+      [] ->
+        []
+
+      [vt | _] ->
+        Enum.map(vt.segments, fn {text, style} ->
+          DisplayList.draw(screen_row, 0, text, style)
+        end)
+    end
+  end
+
+  # Returns the total display width of inline virtual texts on a line.
+  @spec inline_vt_display_width(Decorations.t(), non_neg_integer()) :: non_neg_integer()
+  defp inline_vt_display_width(decorations, buf_line) do
+    decorations
+    |> Decorations.inline_virtual_texts_for_line(buf_line)
+    |> Enum.reduce(0, fn vt, acc ->
+      seg_width =
+        Enum.reduce(vt.segments, 0, fn {text, _style}, w ->
+          w + Unicode.display_width(text)
+        end)
+
+      acc + seg_width
+    end)
   end
 
   # ── Gutter primitives ───────────────────────────────────────────────────

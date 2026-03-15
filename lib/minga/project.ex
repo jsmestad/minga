@@ -140,10 +140,13 @@ defmodule Minga.Project do
 
   @impl true
   @spec init(keyword()) :: {:ok, t()}
-  def init(_opts) do
+  def init(opts) do
     # Subscribe to buffer-open events so we detect projects and record
     # recent files automatically, without the Editor wiring it up.
-    Minga.Events.subscribe(:buffer_opened)
+    # Tests pass subscribe: false to avoid cross-test event contamination.
+    unless Keyword.get(opts, :subscribe) == false do
+      Minga.Events.subscribe(:buffer_opened)
+    end
 
     known = load_known_projects()
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}

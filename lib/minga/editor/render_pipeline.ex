@@ -116,17 +116,14 @@ defmodule Minga.Editor.RenderPipeline do
         Content.build_content(state, scrolls)
       end)
 
-    # Stage 4b: Agent chat window content (rendered separately from buffers)
-    agent_chat_frames =
+    # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
+    {agent_chat_frames, agent_cursor, state} =
       Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
         Content.build_agent_chat_content(state, layout)
       end)
 
     # If the agent chat window set a cursor, use it (overrides buffer cursor).
-    cursor_info =
-      Enum.reduce(agent_chat_frames, cursor_info, fn wf, acc ->
-        if wf.cursor != nil, do: wf.cursor, else: acc
-      end)
+    cursor_info = if agent_cursor != nil, do: agent_cursor, else: cursor_info
 
     window_frames = buffer_frames ++ agent_chat_frames
 

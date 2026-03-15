@@ -33,40 +33,13 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Windows
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
   alias Minga.Input.AgentPanel
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
-
-  @doc "Toggles the agent chat panel."
-  @spec toggle_panel(state()) :: state()
-  def toggle_panel(state) do
-    panel = AgentAccess.panel(state)
-
-    if panel.visible and not AgentAccess.input_focused?(state) do
-      update_agent(state, &AgentState.focus_input(&1, true))
-    else
-      state = update_agent(state, &AgentState.toggle_panel/1)
-
-      state =
-        if AgentAccess.panel(state).visible and AgentAccess.session(state) == nil do
-          AgentSession.start_agent_session(state)
-        else
-          state
-        end
-
-      state =
-        if AgentAccess.panel(state).visible do
-          update_agent(state, &AgentState.focus_input(&1, true))
-        else
-          update_agent(state, &AgentState.focus_input(&1, false))
-        end
-
-      state
-      |> Layout.invalidate()
-      |> EditorState.invalidate_all_windows()
-    end
-  end
 
   @doc "Legacy alias for `toggle_agent_split/1`."
   @spec toggle_agentic_view(state()) :: state()
@@ -117,12 +90,29 @@ defmodule Minga.Editor.Commands.Agent do
   defp ensure_agent_tab(state) do
     case find_agent_tab(state) do
       nil ->
+        state = ensure_agent_buffer(state)
+        agent_buf = AgentAccess.agent(state).buffer
+
+        # Build a windows context with an agent_chat window so the tab
+        # renders through the buffer pipeline (not the old ChatRenderer).
+        win_id = 1
+        rows = max(state.viewport.rows, 1)
+        cols = max(state.viewport.cols, 1)
+        agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+        windows = %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => agent_window},
+          active: win_id,
+          next_id: win_id + 1
+        }
+
+        context = %{keymap_scope: :agent, windows: windows}
+
         # Create agent tab in the background (don't switch to it)
         {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
         agent_tab = TabBar.find_by_kind(tb, :agent)
-        tb = TabBar.update_context(tb, agent_tab.id, %{keymap_scope: :agent})
-
-        state = ensure_agent_buffer(state)
+        tb = TabBar.update_context(tb, agent_tab.id, context)
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}
@@ -268,6 +258,11 @@ defmodule Minga.Editor.Commands.Agent do
       {:error, reason} ->
         %{state | status_msg: "Agent error: #{inspect(reason)}"}
     end
+  catch
+    # The :DOWN monitor clears stale session PIDs, but there's a race window:
+    # the session can die while we're mid-call (before :DOWN is processed).
+    # This is the user-facing hot path (Enter to send), so catch it here.
+    :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
   end
 
   @spec resolve_mentions(String.t(), keyword()) ::
@@ -319,6 +314,8 @@ defmodule Minga.Editor.Commands.Agent do
       Session.abort(AgentAccess.session(state))
       state
     end
+  catch
+    :exit, _ -> state
   end
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
@@ -1049,7 +1046,6 @@ defmodule Minga.Editor.Commands.Agent do
   # Maps command name atoms to their implementing function names.
   # All agent commands work without a buffer.
   @agent_command_specs [
-    {:toggle_agent_panel, "Toggle AI agent panel", :toggle_panel},
     {:toggle_agentic_view, "Toggle agent split pane", :toggle_agentic_view},
     {:toggle_agent_split, "Toggle agent split", :toggle_agent_split},
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},

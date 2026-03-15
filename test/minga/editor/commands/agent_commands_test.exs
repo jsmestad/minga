@@ -85,48 +85,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     }
   end
 
-  # ── toggle_panel ─────────────────────────────────────────────────────────
-
-  describe "toggle_panel/1" do
-    test "opens the panel when closed" do
-      state = base_state(panel_visible: false, active_agent: false)
-      new_state = AgentCommands.toggle_panel(state)
-
-      assert AgentAccess.panel(new_state).visible == true
-    end
-
-    test "focuses input when opening the panel" do
-      state = base_state(panel_visible: false, active_agent: false)
-      new_state = AgentCommands.toggle_panel(state)
-
-      assert AgentAccess.input_focused?(new_state) == true
-    end
-
-    test "closes the panel when visible and input is focused" do
-      state = base_state(panel_visible: true, input_focused: true)
-      new_state = AgentCommands.toggle_panel(state)
-
-      assert AgentAccess.panel(new_state).visible == false
-    end
-
-    test "focuses input when panel is visible but input is not focused" do
-      state = base_state(panel_visible: true, input_focused: false)
-      new_state = AgentCommands.toggle_panel(state)
-
-      # Should focus input, not close
-      assert AgentAccess.panel(new_state).visible == true
-      assert AgentAccess.input_focused?(new_state) == true
-    end
-
-    test "invalidates layout when toggling" do
-      state = base_state(panel_visible: false, active_agent: false)
-      state = %{state | layout: :some_cached_layout}
-      new_state = AgentCommands.toggle_panel(state)
-
-      assert new_state.layout == nil
-    end
-  end
-
   # ── submit_prompt ────────────────────────────────────────────────────────
 
   describe "submit_prompt/1" do

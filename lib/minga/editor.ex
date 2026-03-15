@@ -55,6 +55,7 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -560,6 +561,8 @@ defmodule Minga.Editor do
   # writes agent/agentic fields on EditorState directly.
 
   def handle_info({:agent_event, session_pid, event}, state) do
+    Minga.Log.debug(:agent, "[event] #{inspect(event)}")
+
     if AgentAccess.session(state) == session_pid do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
@@ -576,6 +579,23 @@ defmodule Minga.Editor do
   def handle_info(:agent_spinner_tick, state) do
     state = dispatch_agent_event(state, :spinner_tick)
     {:noreply, state}
+  end
+
+  # Agent session process died. Clear the stale PID from state so nil-checks
+  # throughout Commands.Agent prevent further calls to the dead process.
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    if AgentAccess.session(state) == pid and AgentAccess.agent(state).session_monitor == ref do
+      Minga.Log.error(
+        :agent,
+        "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
+      )
+
+      state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+      state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
   end
 
   @toast_duration_ms 3_000
