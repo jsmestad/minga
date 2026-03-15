@@ -154,14 +154,15 @@ defmodule Minga.Editor.LspActionsTest do
       assert result.status_msg == "No hover information"
     end
 
-    test "displays hover content in status_msg" do
+    test "creates hover popup for content" do
       state = fake_state()
       hover = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
       result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert result.status_msg == "Returns :ok"
+      assert %Minga.Editor.HoverPopup{} = result.hover_popup
+      assert result.hover_popup.focused == false
     end
 
-    test "strips markdown fences from hover content" do
+    test "creates hover popup for markdown content" do
       state = fake_state()
 
       hover = %{
@@ -172,7 +173,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert result.status_msg == "@spec foo() :: :ok"
+      assert %Minga.Editor.HoverPopup{} = result.hover_popup
+      assert result.hover_popup.content_lines != []
     end
 
     test "handles hover with no contents key" do
@@ -185,6 +187,12 @@ defmodule Minga.Editor.LspActionsTest do
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp fake_state do
-    %{status_msg: nil, last_jump_pos: nil}
+    %{
+      status_msg: nil,
+      last_jump_pos: nil,
+      hover_popup: nil,
+      buffers: %{active: nil},
+      viewport: %{rows: 24, cols: 80, top: 0}
+    }
   end
 end

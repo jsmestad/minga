@@ -13,6 +13,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   alias Minga.Editor.CompletionUI
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
+  alias Minga.Editor.HoverPopup
   alias Minga.Editor.Layout
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.Caps
@@ -141,12 +142,16 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
           []
       end
 
+    # Hover popup overlay
+    hover_draws = render_hover_popup(state)
+
     # Float popup overlays (from the popup system)
     float_overlays = PopupLifecycle.render_float_overlays(state)
 
     overlays =
       (float_overlays ++
          [
+           %Overlay{draws: hover_draws},
            %Overlay{draws: whichkey_draws},
            %Overlay{draws: completion_draws},
            %Overlay{draws: picker_draws, cursor: picker_cursor}
@@ -171,5 +176,14 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
       overlays: overlays,
       regions: regions
     }
+  end
+
+  # ── Hover popup ──────────────────────────────────────────────────────────
+
+  @spec render_hover_popup(state()) :: [DisplayList.draw()]
+  defp render_hover_popup(%{hover_popup: nil}), do: []
+
+  defp render_hover_popup(%{hover_popup: popup, viewport: vp, theme: theme}) do
+    HoverPopup.render(popup, {vp.rows, vp.cols}, theme)
   end
 end

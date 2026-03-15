@@ -657,7 +657,7 @@ defmodule Minga.LSP.Client do
         },
         "hover" => %{
           "dynamicRegistration" => false,
-          "contentFormat" => ["plaintext"]
+          "contentFormat" => ["markdown", "plaintext"]
         }
       }
     }

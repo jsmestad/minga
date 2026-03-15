@@ -67,7 +67,19 @@ defmodule Minga.Editor.FloatingWindow do
 
     @type size :: {:cols, pos_integer()} | {:rows, pos_integer()} | {:percent, 1..100}
 
-    @type position :: :center | {row_offset :: integer(), col_offset :: integer()}
+    @typedoc """
+    Position for the floating window.
+
+    - `:center` — centered in the viewport
+    - `{row_offset, col_offset}` — offset from center
+    - `{:anchor, row, col, :above | :below}` — anchored to a cursor position,
+      appearing above or below. Flips if there isn't enough room.
+    """
+    @type position ::
+            :center
+            | {row_offset :: integer(), col_offset :: integer()}
+            | {:anchor, row :: non_neg_integer(), col :: non_neg_integer(),
+               preferred :: :above | :below}
 
     @type t :: %__MODULE__{
             title: String.t() | nil,
@@ -166,6 +178,33 @@ defmodule Minga.Editor.FloatingWindow do
     center_col = max(div(vp_cols - w, 2), 0)
     row = clamp(center_row + row_off, 0, max(vp_rows - h, 0))
     col = clamp(center_col + col_off, 0, max(vp_cols - w, 0))
+    {row, col}
+  end
+
+  # Anchor positioning: place the window near a cursor position.
+  # Tries the preferred direction first, flips if there isn't room.
+  defp resolve_position({:anchor, anchor_row, anchor_col, preferred}, h, w, vp_rows, vp_cols) do
+    col = clamp(anchor_col, 0, max(vp_cols - w, 0))
+
+    row =
+      case preferred do
+        :above ->
+          if anchor_row - h >= 0 do
+            anchor_row - h
+          else
+            # Not enough room above, try below
+            min(anchor_row + 1, max(vp_rows - h, 0))
+          end
+
+        :below ->
+          if anchor_row + 1 + h <= vp_rows do
+            anchor_row + 1
+          else
+            # Not enough room below, try above
+            max(anchor_row - h, 0)
+          end
+      end
+
     {row, col}
   end
 

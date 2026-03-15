@@ -317,4 +317,48 @@ defmodule Minga.Editor.FloatingWindowTest do
       assert length(bg_draws) == 5
     end
   end
+
+  # ── Anchor positioning ─────────────────────────────────────────────────────
+
+  describe "anchor positioning" do
+    test "positions above cursor when there is room" do
+      s = spec(position: {:anchor, 15, 10, :above}, height: {:rows, 5}, width: {:cols, 20})
+      draws = FloatingWindow.render(s)
+      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
+      max_row = Enum.max(rows)
+      assert max_row < 15
+    end
+
+    test "flips below cursor when not enough room above" do
+      s = spec(position: {:anchor, 2, 10, :above}, height: {:rows, 5}, width: {:cols, 20})
+      draws = FloatingWindow.render(s)
+      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
+      min_row = Enum.min(rows)
+      assert min_row >= 2
+    end
+
+    test "positions below cursor when preferred" do
+      s = spec(position: {:anchor, 5, 10, :below}, height: {:rows, 5}, width: {:cols, 20})
+      draws = FloatingWindow.render(s)
+      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
+      min_row = Enum.min(rows)
+      assert min_row > 5
+    end
+
+    test "flips above when not enough room below" do
+      s = spec(position: {:anchor, 21, 10, :below}, height: {:rows, 5}, width: {:cols, 20})
+      draws = FloatingWindow.render(s)
+      rows = Enum.map(draws, fn {r, _c, _text, _s} -> r end)
+      max_row = Enum.max(rows)
+      assert max_row <= 21
+    end
+
+    test "clamps column to viewport" do
+      s = spec(position: {:anchor, 10, 70, :above}, height: {:rows, 3}, width: {:cols, 20})
+      draws = FloatingWindow.render(s)
+      cols = Enum.map(draws, fn {_r, c, _text, _s} -> c end)
+      max_col = Enum.max(cols)
+      assert max_col < 80
+    end
+  end
 end
