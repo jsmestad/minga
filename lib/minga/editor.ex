@@ -172,7 +172,7 @@ defmodule Minga.Editor do
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
         new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
-        fire_hook(:after_open, [pid, file_path])
+        Minga.Events.broadcast(:buffer_opened, %{buffer: pid, path: file_path})
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -923,7 +923,7 @@ defmodule Minga.Editor do
     new_state = log_message(new_state, "Opened: #{path}")
     new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
     new_state = BufferLifecycle.git_buffer_opened(new_state, pid)
-    fire_hook(:after_open, [pid, path])
+    Minga.Events.broadcast(:buffer_opened, %{buffer: pid, path: path})
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
   end
 
@@ -1004,15 +1004,6 @@ defmodule Minga.Editor do
   end
 
   # ── Config options ──────────────────────────────────────────────────────
-
-  alias Minga.Config.Hooks, as: ConfigHooks
-
-  @spec fire_hook(ConfigHooks.event(), [term()]) :: :ok
-  defp fire_hook(event, args) do
-    ConfigHooks.run(event, args)
-  catch
-    :exit, _ -> :ok
-  end
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 

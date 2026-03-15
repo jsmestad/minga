@@ -9,6 +9,7 @@ defmodule Minga.Application do
   ## Supervision Tree
 
       Minga.Supervisor (rest_for_one)
+      ├── Minga.Events (Registry, :duplicate)
       ├── Minga.Config.Options
       ├── Minga.Keymap.Active
       ├── Minga.Config.Hooks
@@ -45,6 +46,7 @@ defmodule Minga.Application do
 
     base_children = [
       Minga.Language.Registry,
+      Minga.Events,
       Minga.Config.Options,
       Minga.Keymap.Active,
       Minga.Config.Hooks,

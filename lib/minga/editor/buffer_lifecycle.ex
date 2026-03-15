@@ -8,7 +8,7 @@ defmodule Minga.Editor.BufferLifecycle do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Hooks, as: ConfigHooks
+
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.Modeline
   alias Minga.Editor.State, as: EditorState
@@ -123,7 +123,7 @@ defmodule Minga.Editor.BufferLifecycle do
          {:execute_ex_command, {:save_quit, []}}
        ] do
       path = BufferServer.file_path(buf)
-      if path, do: ConfigHooks.run(:after_save, [buf, path])
+      if path, do: Minga.Events.broadcast(:buffer_saved, %{buffer: buf, path: path})
 
       new_lsp = DocumentSync.on_buffer_save(state.lsp, buf)
       %{state | lsp: new_lsp}

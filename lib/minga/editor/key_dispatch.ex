@@ -11,7 +11,7 @@ defmodule Minga.Editor.KeyDispatch do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Advice, as: ConfigAdvice
-  alias Minga.Config.Hooks, as: ConfigHooks
+
   alias Minga.EditingModel.Vim, as: VimModel
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.ChangeTracking
@@ -69,7 +69,7 @@ defmodule Minga.Editor.KeyDispatch do
       if base_state.buffers.active,
         do: BufferServer.break_undo_coalescing(base_state.buffers.active)
 
-      fire_hook(:on_mode_change, [old_mode, new_mode])
+      Minga.Events.broadcast(:mode_changed, %{old: old_mode, new: new_mode})
     end
 
     after_commands =
@@ -134,12 +134,5 @@ defmodule Minga.Editor.KeyDispatch do
     _ -> false
   catch
     :exit, _ -> false
-  end
-
-  @spec fire_hook(ConfigHooks.event(), [term()]) :: :ok
-  defp fire_hook(event, args) do
-    ConfigHooks.run(event, args)
-  catch
-    :exit, _ -> :ok
   end
 end
