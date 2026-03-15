@@ -108,6 +108,7 @@ defmodule Minga.Editor.State do
             git_buffers: %{},
             lsp_status: :none,
             hover_popup: nil,
+            signature_help: nil,
             injection_ranges: %{},
             focus_stack: [],
             keymap_scope: :editor,
@@ -147,6 +148,7 @@ defmodule Minga.Editor.State do
           git_buffers: %{pid() => pid()},
           lsp_status: Minga.Editor.Modeline.lsp_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
+          signature_help: Minga.Editor.SignatureHelp.t() | nil,
           injection_ranges: %{
             pid() => [
               %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
