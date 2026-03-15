@@ -238,7 +238,7 @@ defmodule Minga.Editor.FloatingWindow do
     bottom = DisplayList.draw(row + h - 1, col, chars.bl <> horiz <> chars.br, border_style)
 
     sides =
-      for r <- (row + 1)..(row + h - 2) do
+      for r <- (row + 1)..(row + h - 2)//1 do
         [
           DisplayList.draw(r, col, chars.v, border_style),
           DisplayList.draw(r, col + w - 1, chars.v, border_style)
