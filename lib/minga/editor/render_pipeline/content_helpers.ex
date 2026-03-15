@@ -229,6 +229,21 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             c_cmds = render_virtual_line_entry(vt, screen_row, gutter_w, row_off, col_off)
             {g, prepend_all(c, c_cmds), win}
 
+          {:block, block, line_idx} ->
+            # Block decoration: invoke render callback, draw the line_idx-th row
+            c_cmds =
+              render_block_entry(
+                block,
+                line_idx,
+                screen_row,
+                gutter_w,
+                ctx.content_w,
+                row_off,
+                col_off
+              )
+
+            {g, prepend_all(c, c_cmds), win}
+
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
             # Decoration fold with custom placeholder: invoke the callback
@@ -265,7 +280,18 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         end
       end)
 
+    # Clean up per-frame block render cache from process dictionary
+    clear_block_render_cache()
+
     {Enum.reverse(gutters), Enum.reverse(contents_rev), length(visible_line_map), window}
+  end
+
+  defp clear_block_render_cache do
+    Process.get_keys()
+    |> Enum.each(fn
+      {:block_render_cache, _} = key -> Process.delete(key)
+      _ -> :ok
+    end)
   end
 
   @spec fold_display_text(String.t(), term()) :: String.t()
@@ -278,6 +304,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
+  defp fold_display_text(_text, {:block, _, _}), do: ""
 
   @spec fold_gutter_indicator(
           term(),
@@ -297,6 +324,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   defp fold_gutter_indicator({:virtual_line, _}, _screen_row, _row_off, _col_off), do: []
+  defp fold_gutter_indicator({:block, _, _}, _screen_row, _row_off, _col_off), do: []
 
   @spec render_folded_line(
           Window.t(),
@@ -431,6 +459,47 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           non_neg_integer()
         ) :: [DisplayList.draw()]
   defp render_placeholder_segments(segments, screen_row, gutter_w, row_off, col_off) do
+    row = screen_row + row_off
+
+    {draws, _col} =
+      Enum.reduce(segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
+        width = Unicode.display_width(text)
+        draw = DisplayList.draw(row, col, text, style)
+        {[draw | acc], col + width}
+      end)
+
+    Enum.reverse(draws)
+  end
+
+  # Renders a single row of a block decoration by invoking its render callback
+  # and extracting the line_idx-th row from the result.
+  @spec render_block_entry(
+          Decorations.BlockDecoration.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_block_entry(block, line_idx, screen_row, gutter_w, content_w, row_off, col_off) do
+    # Cache render callback result per block ID to avoid re-invoking
+    # for each line_idx of a multi-line block.
+    cache_key = {:block_render_cache, block.id}
+
+    lines =
+      case Process.get(cache_key) do
+        nil ->
+          result = block.render.(content_w)
+          normalized = Decorations.BlockDecoration.normalize_render_result(result)
+          Process.put(cache_key, normalized)
+          normalized
+
+        cached ->
+          cached
+      end
+
+    segments = Enum.at(lines, line_idx, [])
     row = screen_row + row_off
 
     {draws, _col} =

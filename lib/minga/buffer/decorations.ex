@@ -37,6 +37,7 @@ defmodule Minga.Buffer.Decorations do
   at once (e.g., agent chat sync or LSP diagnostic refresh).
   """
 
+  alias Minga.Buffer.Decorations.BlockDecoration
   alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Decorations.HighlightRange
   alias Minga.Buffer.Decorations.VirtualText
@@ -72,6 +73,7 @@ defmodule Minga.Buffer.Decorations do
   - `highlights`: interval tree of highlight ranges
   - `virtual_texts`: list of virtual text decorations (queried by line, not range)
   - `fold_regions`: list of buffer-level fold regions (per-buffer, not per-window)
+  - `block_decorations`: list of block decorations (custom-rendered lines between buffer lines)
   - `pending`: list of pending operations during a batch (nil when not batching)
   - `version`: monotonically increasing version for change detection by the render pipeline
   """
@@ -79,6 +81,7 @@ defmodule Minga.Buffer.Decorations do
           highlights: IntervalTree.t(),
           virtual_texts: [VirtualText.t()],
           fold_regions: [FoldRegion.t()],
+          block_decorations: [BlockDecoration.t()],
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()}] | nil,
           version: non_neg_integer()
@@ -88,6 +91,7 @@ defmodule Minga.Buffer.Decorations do
   defstruct highlights: nil,
             virtual_texts: [],
             fold_regions: [],
+            block_decorations: [],
             pending: nil,
             version: 0
 
@@ -384,6 +388,79 @@ defmodule Minga.Buffer.Decorations do
   def has_fold_regions?(%__MODULE__{fold_regions: []}), do: false
   def has_fold_regions?(%__MODULE__{}), do: true
 
+  # ── Block decoration API ─────────────────────────────────────────────────
+
+  @doc """
+  Adds a block decoration to the buffer. Returns `{id, updated_decorations}`.
+
+  ## Options
+
+  - `:placement` (required) - `:above` or `:below` the anchor line
+  - `:render` (required) - callback `(width -> [{text, style}] | [[{text, style}]])`
+  - `:height` (optional, default 1) - number of display lines, or `:dynamic`
+  - `:on_click` (optional) - callback `(row, col) -> :ok` for interactive blocks
+  - `:priority` (optional, default 0) - ordering when multiple blocks share an anchor
+  """
+  @spec add_block_decoration(t(), non_neg_integer(), keyword()) :: {reference(), t()}
+  def add_block_decoration(%__MODULE__{} = decs, anchor_line, opts) do
+    id = make_ref()
+
+    block = %BlockDecoration{
+      id: id,
+      anchor_line: anchor_line,
+      placement: Keyword.fetch!(opts, :placement),
+      render: Keyword.fetch!(opts, :render),
+      height: Keyword.get(opts, :height, 1),
+      on_click: Keyword.get(opts, :on_click),
+      priority: Keyword.get(opts, :priority, 0)
+    }
+
+    new_blocks = [block | decs.block_decorations]
+    {id, %{decs | block_decorations: new_blocks, version: decs.version + 1}}
+  end
+
+  @doc "Removes a block decoration by ID."
+  @spec remove_block_decoration(t(), reference()) :: t()
+  def remove_block_decoration(%__MODULE__{} = decs, id) do
+    new_blocks = Enum.reject(decs.block_decorations, fn b -> b.id == id end)
+
+    if length(new_blocks) == length(decs.block_decorations) do
+      decs
+    else
+      %{decs | block_decorations: new_blocks, version: decs.version + 1}
+    end
+  end
+
+  @doc """
+  Returns block decorations for a specific anchor line, sorted by priority.
+  Returns `{above, below}` tuple.
+  """
+  @spec blocks_for_line(t(), non_neg_integer()) ::
+          {above :: [BlockDecoration.t()], below :: [BlockDecoration.t()]}
+  def blocks_for_line(%__MODULE__{block_decorations: []}, _line), do: {[], []}
+
+  def blocks_for_line(%__MODULE__{block_decorations: blocks}, line) do
+    line_blocks =
+      blocks
+      |> Enum.filter(fn b -> b.anchor_line == line end)
+      |> Enum.sort_by(fn b -> b.priority end)
+
+    above = Enum.filter(line_blocks, fn b -> b.placement == :above end)
+    below = Enum.filter(line_blocks, fn b -> b.placement == :below end)
+    {above, below}
+  end
+
+  @doc "Returns true if there are any block decorations."
+  @spec has_block_decorations?(t()) :: boolean()
+  def has_block_decorations?(%__MODULE__{block_decorations: []}), do: false
+  def has_block_decorations?(%__MODULE__{}), do: true
+
+  @doc "Returns the block decoration with the given ID, or nil."
+  @spec block_decoration_by_id(t(), reference()) :: BlockDecoration.t() | nil
+  def block_decoration_by_id(%__MODULE__{block_decorations: blocks}, id) do
+    Enum.find(blocks, fn b -> b.id == id end)
+  end
+
   # ── Column mapping (inline virtual text) ─────────────────────────────────
 
   @doc """
@@ -575,10 +652,21 @@ defmodule Minga.Buffer.Decorations do
   Returns true if there are no decorations of any kind.
   """
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{highlights: nil, virtual_texts: [], fold_regions: []}), do: true
+  def empty?(%__MODULE__{
+        highlights: nil,
+        virtual_texts: [],
+        fold_regions: [],
+        block_decorations: []
+      }),
+      do: true
 
-  def empty?(%__MODULE__{highlights: hl, virtual_texts: vts, fold_regions: folds}) do
-    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == []
+  def empty?(%__MODULE__{
+        highlights: hl,
+        virtual_texts: vts,
+        fold_regions: folds,
+        block_decorations: blocks
+      }) do
+    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == [] and blocks == []
   end
 
   # ── Anchor adjustment ───────────────────────────────────────────────────
@@ -606,7 +694,8 @@ defmodule Minga.Buffer.Decorations do
           IntervalTree.position()
         ) :: t()
   def adjust_for_edit(%__MODULE__{} = decs, _edit_start, _edit_end, _new_end)
-      when decs.highlights == nil and decs.virtual_texts == [] and decs.fold_regions == [],
+      when decs.highlights == nil and decs.virtual_texts == [] and decs.fold_regions == [] and
+             decs.block_decorations == [],
       do: decs
 
   def adjust_for_edit(%__MODULE__{} = decs, edit_start, edit_end, new_end) do
@@ -629,11 +718,14 @@ defmodule Minga.Buffer.Decorations do
     new_vts = adjust_virtual_texts(decs.virtual_texts, ctx)
     new_folds = adjust_fold_regions(decs.fold_regions, ctx)
 
+    new_blocks = adjust_block_decorations(decs.block_decorations, ctx)
+
     %{
       decs
       | highlights: new_highlights,
         virtual_texts: new_vts,
         fold_regions: new_folds,
+        block_decorations: new_blocks,
         version: decs.version + 1
     }
   end
@@ -662,6 +754,35 @@ defmodule Minga.Buffer.Decorations do
   defp adjust_anchor_position(_anchor, ctx), do: ctx.new_end
 
   @spec adjust_fold_regions([FoldRegion.t()], edit_ctx()) :: [FoldRegion.t()]
+  @spec adjust_block_decorations([BlockDecoration.t()], edit_ctx()) :: [BlockDecoration.t()]
+  defp adjust_block_decorations([], _ctx), do: []
+
+  defp adjust_block_decorations(blocks, ctx) do
+    {edit_start_line, _} = ctx.edit_start
+    {edit_end_line, _} = ctx.edit_end
+
+    Enum.map(blocks, fn block ->
+      adjust_block_anchor(block, edit_start_line, edit_end_line, ctx.line_delta)
+    end)
+  end
+
+  @spec adjust_block_anchor(BlockDecoration.t(), non_neg_integer(), non_neg_integer(), integer()) ::
+          BlockDecoration.t()
+  defp adjust_block_anchor(block, _edit_start, edit_end, line_delta)
+       when block.anchor_line > edit_end do
+    %{block | anchor_line: block.anchor_line + line_delta}
+  end
+
+  defp adjust_block_anchor(block, edit_start, _edit_end, _line_delta)
+       when block.anchor_line < edit_start do
+    block
+  end
+
+  defp adjust_block_anchor(block, edit_start, _edit_end, _line_delta) do
+    # Block anchor is within the edited region: clamp to edit start
+    %{block | anchor_line: edit_start}
+  end
+
   defp adjust_fold_regions([], _ctx), do: []
 
   defp adjust_fold_regions(folds, ctx) do

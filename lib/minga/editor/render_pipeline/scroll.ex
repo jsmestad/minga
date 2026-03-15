@@ -207,7 +207,14 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     decorations = fetch_decorations(window.buffer)
 
     visible_line_map =
-      case DisplayMap.compute(fold_map, decorations, first_line, visible_rows, line_count_approx) do
+      case DisplayMap.compute(
+             fold_map,
+             decorations,
+             first_line,
+             visible_rows,
+             line_count_approx,
+             content_width
+           ) do
         nil ->
           # No decoration folds or virtual lines. Use the existing VisibleLines
           # for per-window folds (or nil for the no-fold fast path).
