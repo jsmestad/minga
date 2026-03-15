@@ -151,7 +151,10 @@ defmodule Minga.FileWatcher do
     {:noreply, %__MODULE__{state | subscriber: nil}}
   end
 
-  def handle_info({:minga_event, :buffer_opened, %{path: path}}, %__MODULE__{} = state) do
+  def handle_info(
+        {:minga_event, :buffer_opened, %Minga.Events.BufferEvent{path: path}},
+        %__MODULE__{} = state
+      ) do
     {:noreply, do_watch_path(state, Path.expand(path))}
   end
 

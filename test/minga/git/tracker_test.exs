@@ -31,7 +31,7 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "defmodule Foo do\nend\n", file_path: path)
 
-      Events.broadcast(:buffer_opened, %{buffer: buf, path: path})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
 
       assert_until(fn -> Tracker.tracked?(buf) end,
         message: "Expected git buffer to be started for #{path}"
@@ -52,7 +52,7 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
 
-      Events.broadcast(:buffer_opened, %{buffer: buf, path: path})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
       assert_until(fn -> Tracker.tracked?(buf) end)
 
       # Kill the buffer and verify cleanup.
@@ -68,7 +68,7 @@ defmodule Minga.Git.TrackerTest do
       path = "/tmp/not_a_git_repo_#{:rand.uniform(100_000)}.ex"
       {:ok, buf} = BufferServer.start_link(content: "hello", file_path: path)
 
-      Events.broadcast(:buffer_opened, %{buffer: buf, path: path})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
 
       # Give a moment for async processing, then verify no tracking started.
       refute_until(fn -> Tracker.tracked?(buf) end)
@@ -86,7 +86,7 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "line1\nline2\n", file_path: path)
 
-      Events.broadcast(:buffer_opened, %{buffer: buf, path: path})
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
       assert_until(fn -> Tracker.tracked?(buf) end)
 
       # Modify buffer content and notify.
@@ -101,6 +101,17 @@ defmodule Minga.Git.TrackerTest do
     test "no-op for untracked buffer" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
       assert :ok = Tracker.notify_change(buf)
+    end
+
+    test "logs warning for non-pid argument" do
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          assert :ok = Tracker.notify_change(:not_a_pid)
+        end)
+
+      assert log =~ "[Git.Tracker] notify_change called with non-pid"
     end
   end
 

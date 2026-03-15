@@ -154,9 +154,11 @@ defmodule Minga.Config.Hooks do
   end
 
   @spec payload_to_args(Minga.Events.topic(), Minga.Events.payload()) :: [term()]
-  defp payload_to_args(:buffer_saved, %{buffer: buf, path: path}), do: [buf, path]
-  defp payload_to_args(:buffer_opened, %{buffer: buf, path: path}), do: [buf, path]
-  defp payload_to_args(:mode_changed, %{old: old_mode, new: new_mode}), do: [old_mode, new_mode]
+  defp payload_to_args(_topic, %Minga.Events.BufferEvent{buffer: buf, path: path}),
+    do: [buf, path]
+
+  defp payload_to_args(_topic, %Minga.Events.ModeEvent{old: old_mode, new: new_mode}),
+    do: [old_mode, new_mode]
 
   @spec do_run(state(), event(), [term()]) :: :ok
   defp do_run(state, event, args) do

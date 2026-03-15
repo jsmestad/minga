@@ -67,7 +67,16 @@ defmodule Minga.Git.Tracker do
   diff recomputation. No-op if the buffer has no git tracking. Safe to
   call from any process.
   """
-  @spec notify_change(pid()) :: :ok
+  @spec notify_change(term()) :: :ok
+  def notify_change(buffer_pid) when not is_pid(buffer_pid) do
+    Minga.Log.warning(
+      :editor,
+      "[Git.Tracker] notify_change called with non-pid: #{inspect(buffer_pid)}"
+    )
+
+    :ok
+  end
+
   def notify_change(buffer_pid) when is_pid(buffer_pid) do
     case lookup(buffer_pid) do
       nil ->
@@ -104,12 +113,20 @@ defmodule Minga.Git.Tracker do
   end
 
   @impl true
-  def handle_info({:minga_event, :buffer_opened, %{buffer: buf, path: path}}, state) do
+  def handle_info(
+        {:minga_event, :buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path}},
+        state
+      )
+      when is_pid(buf) do
     state = maybe_start_git_buffer(state, buf, path)
     {:noreply, state}
   end
 
-  def handle_info({:minga_event, :buffer_saved, %{buffer: buf, path: _path}}, state) do
+  def handle_info(
+        {:minga_event, :buffer_saved, %Minga.Events.BufferEvent{buffer: buf}},
+        state
+      )
+      when is_pid(buf) do
     invalidate_on_save(buf)
     {:noreply, state}
   end

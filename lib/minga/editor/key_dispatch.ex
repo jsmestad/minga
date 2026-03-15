@@ -69,7 +69,7 @@ defmodule Minga.Editor.KeyDispatch do
       if base_state.buffers.active,
         do: BufferServer.break_undo_coalescing(base_state.buffers.active)
 
-      Minga.Events.broadcast(:mode_changed, %{old: old_mode, new: new_mode})
+      Minga.Events.broadcast(:mode_changed, %Minga.Events.ModeEvent{old: old_mode, new: new_mode})
     end
 
     after_commands =
