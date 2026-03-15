@@ -32,6 +32,7 @@ defmodule Minga.Command.Parser do
   * `{:quit_all, []}` — quit the entire editor (`:qa`)
   * `{:force_quit_all, []}` — force quit the entire editor (`:qa!`)
   * `{:save_quit, []}` — save and close tab, or save and quit if last tab (`:wq`)
+  * `{:save_quit_all, []}` — save all buffers and quit (`:wqa`)
   * `{:edit, filename}` — open a file (`:e filename`)
   * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
   * `{:new_buffer, []}` — create a new empty buffer (`:new` / `:enew`)
@@ -47,6 +48,7 @@ defmodule Minga.Command.Parser do
           | {:quit_all, []}
           | {:force_quit_all, []}
           | {:save_quit, []}
+          | {:save_quit_all, []}
           | {:edit, String.t()}
           | {:force_edit, []}
           | {:checktime, []}
@@ -116,6 +118,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("qall"), do: {:quit_all, []}
   defp do_parse("qall!"), do: {:force_quit_all, []}
   defp do_parse("wq"), do: {:save_quit, []}
+  defp do_parse("wqa"), do: {:save_quit_all, []}
+  defp do_parse("wqall"), do: {:save_quit_all, []}
   defp do_parse("e!"), do: {:force_edit, []}
   defp do_parse("checktime"), do: {:checktime, []}
   defp do_parse("new"), do: {:new_buffer, []}
