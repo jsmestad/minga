@@ -10,8 +10,10 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   tracking fields from the previous frame.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldMap.VisibleLines
   alias Minga.Editor.Layout
@@ -98,7 +100,8 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
             line_number_style: atom(),
             wrap_on: boolean(),
             buf_version: non_neg_integer(),
-            visible_line_map: [VisibleLines.line_entry()] | nil
+            visible_line_map:
+              [VisibleLines.line_entry()] | [Minga.Editor.DisplayMap.entry()] | nil
           }
   end
 
@@ -196,11 +199,23 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
         FoldMap.visible_to_buffer(fold_map, vis_first)
       end
 
-    # Compute which buffer lines are visible at each screen row
+    # Compute which buffer lines are visible at each screen row.
+    # The DisplayMap merges per-window folds, decoration folds, and virtual
+    # lines into a unified mapping. Falls back to VisibleLines when there
+    # are no decoration folds or virtual lines (pure window-fold case).
     line_count_approx = BufferServer.line_count(window.buffer)
+    decorations = fetch_decorations(window.buffer)
 
     visible_line_map =
-      VisibleLines.compute(fold_map, first_line, visible_rows, line_count_approx)
+      case DisplayMap.compute(fold_map, decorations, first_line, visible_rows, line_count_approx) do
+        nil ->
+          # No decoration folds or virtual lines. Use the existing VisibleLines
+          # for per-window folds (or nil for the no-fold fast path).
+          VisibleLines.compute(fold_map, first_line, visible_rows, line_count_approx)
+
+        %DisplayMap{} = dm ->
+          DisplayMap.to_visible_line_map(dm)
+      end
 
     # Fetch buffer data: need to cover all visible buffer lines
     {fetch_first, fetch_count} =
@@ -210,13 +225,8 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
           {first_line, fetch_rows}
 
         entries ->
-          case VisibleLines.buffer_range(entries) do
-            nil ->
-              {first_line, visible_rows}
-
-            {buf_first, buf_last} ->
-              {buf_first, buf_last - buf_first + 1}
-          end
+          {buf_first, buf_last} = buffer_range_from_entries(entries)
+          {buf_first, buf_last - buf_first + 1}
       end
 
     snapshot = BufferServer.render_snapshot(window.buffer, fetch_first, fetch_count)
@@ -267,6 +277,24 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
       buf_version: snapshot.version,
       visible_line_map: visible_line_map
     }
+  end
+
+  @spec fetch_decorations(pid()) :: Decorations.t()
+  defp fetch_decorations(buf) do
+    BufferServer.decorations(buf)
+  catch
+    :exit, _ -> Decorations.new()
+  end
+
+  # Compute buffer range from a visible_line_map (works for both
+  # VisibleLines entries and DisplayMap entries).
+  @spec buffer_range_from_entries([{non_neg_integer(), term()}]) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp buffer_range_from_entries([]), do: {0, 0}
+
+  defp buffer_range_from_entries(entries) do
+    lines = Enum.map(entries, fn {line, _} -> line end)
+    {Enum.min(lines), Enum.max(lines)}
   end
 
   # When cursor line changes with relative or hybrid numbering, every

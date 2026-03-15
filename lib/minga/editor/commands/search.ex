@@ -4,6 +4,7 @@ defmodule Minga.Editor.Commands.Search do
   word-under-cursor search.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -374,13 +375,43 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   # Auto-unfold any fold containing the given line in the active window.
+  # Handles both per-window folds and decoration folds.
   @spec auto_unfold_at(state(), non_neg_integer()) :: state()
   defp auto_unfold_at(state, line) do
-    case active_foldable_window(state) do
-      nil -> state
-      win -> EditorState.update_window(state, win.id, &Window.unfold_containing(&1, [line]))
+    # Unfold per-window folds
+    state =
+      case active_foldable_window(state) do
+        nil -> state
+        win -> EditorState.update_window(state, win.id, &Window.unfold_containing(&1, [line]))
+      end
+
+    # Unfold decoration folds
+    auto_unfold_decoration_fold(state, line)
+  end
+
+  @spec auto_unfold_decoration_fold(state(), non_neg_integer()) :: state()
+  defp auto_unfold_decoration_fold(state, line) do
+    buf = state.buffers.active
+    open_decoration_fold_at(buf, line)
+    state
+  catch
+    :exit, _ -> state
+  end
+
+  @spec open_decoration_fold_at(pid() | nil, non_neg_integer()) :: :ok
+  defp open_decoration_fold_at(buf, line) when is_pid(buf) do
+    decs = BufferServer.decorations(buf)
+
+    case Decorations.fold_region_at(decs, line) do
+      %{closed: true, id: id} ->
+        BufferServer.batch_decorations(buf, fn d -> Decorations.toggle_fold_region(d, id) end)
+
+      _ ->
+        :ok
     end
   end
+
+  defp open_decoration_fold_at(_buf, _line), do: :ok
 
   @spec active_foldable_window(state()) :: Window.t() | nil
   defp active_foldable_window(state) do

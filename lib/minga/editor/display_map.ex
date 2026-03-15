@@ -75,14 +75,12 @@ defmodule Minga.Editor.DisplayMap do
           t() | nil
   def compute(fold_map, decorations, first_buf_line, visible_rows, total_lines) do
     has_window_folds = not FoldMap.empty?(fold_map)
-    has_closed_dec_folds = Decorations.closed_fold_regions(decorations) != []
+    closed_dec_folds = Decorations.closed_fold_regions(decorations)
     has_virtual_lines = has_virtual_lines?(decorations)
 
-    if not has_window_folds and not has_closed_dec_folds and not has_virtual_lines do
+    if not has_window_folds and closed_dec_folds == [] and not has_virtual_lines do
       nil
     else
-      closed_dec_folds = Decorations.closed_fold_regions(decorations)
-
       entries =
         build_entries(
           fold_map,
@@ -150,6 +148,68 @@ defmodule Minga.Editor.DisplayMap do
     case Enum.at(entries, display_row) do
       nil -> nil
       {line, _} -> line
+    end
+  end
+
+  @doc """
+  Returns the next visible buffer line after the given buffer line.
+
+  Skips over lines hidden by folds (both per-window and decoration).
+  Falls back to `FoldMap.next_visible/2` when no DisplayMap is available.
+  """
+  @spec next_visible_line(t(), non_neg_integer()) :: non_neg_integer()
+  def next_visible_line(%__MODULE__{entries: entries}, line) do
+    # Find the entry after the one for `line`
+    idx = Enum.find_index(entries, fn {l, type} -> l == line and type != {:virtual_line, nil} end)
+
+    case idx do
+      nil ->
+        # Line not in current viewport entries, return line + 1
+        line + 1
+
+      i ->
+        # Find the next entry that's a real buffer line (not a virtual line)
+        entries
+        |> Enum.drop(i + 1)
+        |> Enum.find(fn {_l, type} ->
+          type != {:virtual_line, nil} and not match?({:virtual_line, _}, type)
+        end)
+        |> case do
+          nil -> line + 1
+          {next_line, _} -> next_line
+        end
+    end
+  end
+
+  @doc """
+  Returns the previous visible buffer line before the given buffer line.
+
+  Skips over lines hidden by folds. Falls back to `FoldMap.prev_visible/2`
+  when no DisplayMap is available.
+  """
+  @spec prev_visible_line(t(), non_neg_integer()) :: non_neg_integer()
+  def prev_visible_line(%__MODULE__{entries: entries}, line) do
+    idx =
+      Enum.find_index(entries, fn {l, type} ->
+        l == line and not match?({:virtual_line, _}, type)
+      end)
+
+    case idx do
+      nil ->
+        max(line - 1, 0)
+
+      0 ->
+        max(line - 1, 0)
+
+      i ->
+        entries
+        |> Enum.take(i)
+        |> Enum.reverse()
+        |> Enum.find(fn {_l, type} -> not match?({:virtual_line, _}, type) end)
+        |> case do
+          nil -> max(line - 1, 0)
+          {prev_line, _} -> prev_line
+        end
     end
   end
 

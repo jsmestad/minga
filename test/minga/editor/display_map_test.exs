@@ -81,25 +81,16 @@ defmodule Minga.Editor.DisplayMapTest do
       refute 10 in visible_lines
     end
 
-    test "open decoration fold shows all lines normally" do
+    test "open decoration fold returns nil (fast path, nothing to map)" do
       fm = FoldMap.new()
 
       decs = Decorations.new()
       {_id, decs} = Decorations.add_fold_region(decs, 5, 10, closed: false)
 
-      # With only open folds and no other decorations, DisplayMap should
-      # still return nil (no mapping needed since nothing is hidden)
+      # Open folds don't affect display. closed_fold_regions is empty,
+      # so compute returns nil for the zero-overhead fast path.
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
-
-      # Even though has_fold_regions? is true, closed_fold_regions is empty
-      # and there are no virtual lines, so the fast path kicks in... wait,
-      # has_fold_regions? returns true. So dm won't be nil.
-      # But the entries should show all lines normally.
-      if dm != nil do
-        entries = DisplayMap.to_visible_line_map(dm)
-        types = Enum.map(entries, fn {_, type} -> type end) |> Enum.uniq()
-        assert types == [:normal]
-      end
+      assert dm == nil
     end
   end
 
@@ -157,6 +148,28 @@ defmodule Minga.Editor.DisplayMapTest do
       # line prevents the decoration fold from activating.
       assert 12 in visible_lines
       assert 15 in visible_lines
+    end
+
+    test "nested decoration folds: outer hides inner" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+      {_id1, decs} = Decorations.add_fold_region(decs, 5, 15, closed: true)
+      {_id2, decs} = Decorations.add_fold_region(decs, 8, 12, closed: true)
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+      entries = DisplayMap.to_visible_line_map(dm)
+
+      visible_lines = Enum.map(entries, fn {line, _} -> line end)
+
+      # Outer fold at 5-15 hides everything inside (including inner fold at 8-12)
+      # Line 5 shows as decoration fold start
+      assert 5 in visible_lines
+      refute 8 in visible_lines
+      refute 12 in visible_lines
+      refute 15 in visible_lines
+
+      # Line 16 is visible (after outer fold)
+      assert 16 in visible_lines
     end
 
     test "decoration fold nested inside window fold is hidden entirely" do
@@ -296,6 +309,49 @@ defmodule Minga.Editor.DisplayMapTest do
       assert DisplayMap.buf_line_for_display_row(dm, 0) == 0
       assert DisplayMap.buf_line_for_display_row(dm, 3) == 3
       assert DisplayMap.buf_line_for_display_row(dm, 4) == 7
+    end
+  end
+
+  # ── next/prev visible line ────────────────────────────────────────────────
+
+  describe "next_visible_line/2 and prev_visible_line/2" do
+    test "skips over window fold" do
+      fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(5, 10))
+      decs = Decorations.new()
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      assert DisplayMap.next_visible_line(dm, 4) == 5
+      # Line 5 is fold start; next visible after it should be 11
+      assert DisplayMap.next_visible_line(dm, 5) == 11
+      assert DisplayMap.prev_visible_line(dm, 11) == 5
+    end
+
+    test "skips over decoration fold" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_fold_region(decs, 5, 10, closed: true)
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      assert DisplayMap.next_visible_line(dm, 5) == 11
+      assert DisplayMap.prev_visible_line(dm, 11) == 5
+    end
+
+    test "skips over virtual lines" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+
+      {_, decs} =
+        Decorations.add_virtual_text(decs, {5, 0},
+          segments: [{"header", []}],
+          placement: :above
+        )
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      # next_visible_line after line 4 should be 5 (the virtual line is
+      # not a buffer line, so it's skipped)
+      assert DisplayMap.next_visible_line(dm, 4) == 5
     end
   end
 
