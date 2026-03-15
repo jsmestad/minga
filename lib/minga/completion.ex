@@ -21,7 +21,9 @@ defmodule Minga.Completion do
             selected: 0,
             filter_text: "",
             trigger_position: {0, 0},
-            max_visible: 10
+            max_visible: 10,
+            resolve_timer: nil,
+            last_resolved_index: -1
 
   @typedoc "LSP CompletionItemKind as an atom."
   @type item_kind ::
@@ -69,8 +71,10 @@ defmodule Minga.Completion do
           insert_text: String.t(),
           filter_text: String.t(),
           detail: String.t(),
+          documentation: String.t(),
           sort_text: String.t(),
-          text_edit: text_edit() | nil
+          text_edit: text_edit() | nil,
+          raw: map() | nil
         }
 
   @type t :: %__MODULE__{
@@ -79,7 +83,9 @@ defmodule Minga.Completion do
           selected: non_neg_integer(),
           filter_text: String.t(),
           trigger_position: {non_neg_integer(), non_neg_integer()},
-          max_visible: pos_integer()
+          max_visible: pos_integer(),
+          resolve_timer: reference() | nil,
+          last_resolved_index: integer()
         }
 
   # ── Constructor ──────────────────────────────────────────────────────────────
@@ -246,10 +252,50 @@ defmodule Minga.Completion do
       insert_text: insert_text,
       filter_text: Map.get(raw, "filterText", label),
       detail: Map.get(raw, "detail", ""),
+      documentation: extract_documentation(Map.get(raw, "documentation")),
       sort_text: Map.get(raw, "sortText", label),
-      text_edit: parse_text_edit(Map.get(raw, "textEdit"))
+      text_edit: parse_text_edit(Map.get(raw, "textEdit")),
+      raw: raw
     }
   end
+
+  @doc """
+  Updates the documentation for the currently selected item.
+
+  Called when a `completionItem/resolve` response arrives with
+  the full documentation text.
+  """
+  @spec update_selected_documentation(t(), String.t()) :: t()
+  def update_selected_documentation(%__MODULE__{} = completion, doc_text) do
+    item = selected_item(completion)
+
+    if item do
+      updated = %{item | documentation: doc_text}
+      idx = absolute_selected_index(completion)
+
+      filtered =
+        List.update_at(completion.filtered, idx, fn _ -> updated end)
+
+      %{completion | filtered: filtered}
+    else
+      completion
+    end
+  end
+
+  @spec absolute_selected_index(t()) :: non_neg_integer()
+  defp absolute_selected_index(%__MODULE__{selected: sel}), do: sel
+
+  @spec extract_documentation(term()) :: String.t()
+  defp extract_documentation(nil), do: ""
+  defp extract_documentation(text) when is_binary(text), do: String.trim(text)
+
+  defp extract_documentation(%{"kind" => _, "value" => value}) when is_binary(value),
+    do: String.trim(value)
+
+  defp extract_documentation(%{"value" => value}) when is_binary(value),
+    do: String.trim(value)
+
+  defp extract_documentation(_), do: ""
 
   @spec strip_snippet_markers(String.t()) :: String.t()
   defp strip_snippet_markers(text) do

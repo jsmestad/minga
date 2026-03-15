@@ -10,7 +10,87 @@ defmodule Minga.Editor.CompletionHandling do
   alias Minga.Completion
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.CompletionTrigger
+  alias Minga.Editor.DocumentSync
   alias Minga.Editor.State, as: EditorState
+  alias Minga.LSP.Client
+
+  @resolve_debounce_ms 150
+
+  @doc """
+  Triggers a `completionItem/resolve` request for the selected item.
+
+  Called when C-n/C-p moves the selection. Debounces to avoid flooding
+  the server when navigating rapidly. Only triggers if the selected
+  item doesn't already have documentation and the server supports resolve.
+  """
+  @spec maybe_resolve_selected(EditorState.t()) :: EditorState.t()
+  def maybe_resolve_selected(%{completion: nil} = state), do: state
+
+  def maybe_resolve_selected(%{completion: completion} = state) do
+    item = Completion.selected_item(completion)
+    selected_idx = completion.selected
+
+    # Skip if already resolved for this index, or if doc is already present
+    if item == nil or selected_idx == completion.last_resolved_index or
+         (item.documentation != "" and item.documentation != nil) do
+      state
+    else
+      # Cancel previous resolve timer
+      if completion.resolve_timer do
+        Process.cancel_timer(completion.resolve_timer)
+      end
+
+      timer =
+        Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
+
+      completion = %{completion | resolve_timer: timer}
+      %{state | completion: completion}
+    end
+  end
+
+  @doc """
+  Sends the actual `completionItem/resolve` request after debounce.
+
+  Called from Editor.handle_info({:completion_resolve, index}).
+  """
+  @spec flush_resolve(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  def flush_resolve(%{completion: nil} = state, _index), do: state
+
+  def flush_resolve(%{completion: completion, buffers: %{active: buf}} = state, index) do
+    item = Enum.at(completion.filtered, index)
+
+    if item == nil or item.raw == nil do
+      state
+    else
+      case lsp_client_for(state, buf) do
+        nil ->
+          state
+
+        client ->
+          ref = Client.request(client, "completionItem/resolve", item.raw)
+          put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, :completion_resolve))
+      end
+    end
+  end
+
+  @doc """
+  Handles a `completionItem/resolve` response.
+
+  Updates the selected completion item's documentation with the
+  resolved content.
+  """
+  @spec handle_resolve_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
+          EditorState.t()
+  def handle_resolve_response(%{completion: nil} = state, _result), do: state
+
+  def handle_resolve_response(state, {:error, _error}), do: state
+
+  def handle_resolve_response(%{completion: completion} = state, {:ok, resolved}) do
+    doc_text = extract_resolve_documentation(resolved)
+    completion = Completion.update_selected_documentation(completion, doc_text)
+    completion = %{completion | last_resolved_index: completion.selected}
+    %{state | completion: completion}
+  end
 
   @doc """
   Accepts the currently selected completion item.
@@ -54,6 +134,11 @@ defmodule Minga.Editor.CompletionHandling do
   """
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(state) do
+    # Cancel any pending resolve timer to avoid stale messages
+    if state.completion && state.completion.resolve_timer do
+      Process.cancel_timer(state.completion.resolve_timer)
+    end
+
     new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
     %{state | completion: nil, completion_trigger: new_bridge}
   end
@@ -188,4 +273,22 @@ defmodule Minga.Editor.CompletionHandling do
   end
 
   defp codepoint_to_char(_), do: nil
+
+  @spec lsp_client_for(EditorState.t(), pid()) :: pid() | nil
+  defp lsp_client_for(state, buffer_pid) do
+    case DocumentSync.clients_for_buffer(state.lsp, buffer_pid) do
+      [client | _] -> client
+      [] -> nil
+    end
+  end
+
+  @spec extract_resolve_documentation(map()) :: String.t()
+  defp extract_resolve_documentation(%{"documentation" => %{"value" => value}})
+       when is_binary(value),
+       do: String.trim(value)
+
+  defp extract_resolve_documentation(%{"documentation" => doc}) when is_binary(doc),
+    do: String.trim(doc)
+
+  defp extract_resolve_documentation(_), do: ""
 end

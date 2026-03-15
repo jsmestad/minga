@@ -18,6 +18,7 @@ defmodule Minga.Editor.HoverPopup do
   alias Minga.Agent.Markdown
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
+  alias Minga.Editor.MarkdownStyles
 
   @enforce_keys [:content_lines, :anchor_row, :anchor_col]
   defstruct content_lines: [],
@@ -173,7 +174,7 @@ defmodule Minga.Editor.HoverPopup do
           {acc, col}
         else
           clipped = String.slice(text, 0, max(max_width - 2 - col, 0))
-          draw_style = style_to_opts(style, syntax, base_fg)
+          draw_style = MarkdownStyles.to_draw_opts(style, syntax, base_fg)
           draw = DisplayList.draw(row, col, clipped, draw_style)
           {[draw | acc], col + text_len}
         end
@@ -181,31 +182,6 @@ defmodule Minga.Editor.HoverPopup do
 
     Enum.reverse(draws)
   end
-
-  @spec style_to_opts(Markdown.style(), map(), non_neg_integer()) :: keyword()
-  defp style_to_opts(:plain, _syntax, fg), do: [fg: fg]
-  defp style_to_opts(:bold, _syntax, fg), do: [fg: fg, bold: true]
-  defp style_to_opts(:italic, _syntax, fg), do: [fg: fg, italic: true]
-  defp style_to_opts(:bold_italic, _syntax, fg), do: [fg: fg, bold: true, italic: true]
-  defp style_to_opts(:code, syntax, _fg), do: [fg: Map.get(syntax, :string, 0x98BE65)]
-  defp style_to_opts(:code_block, syntax, _fg), do: [fg: Map.get(syntax, :string, 0x98BE65)]
-
-  defp style_to_opts({:code_content, _lang}, syntax, _fg),
-    do: [fg: Map.get(syntax, :string, 0x98BE65)]
-
-  defp style_to_opts(:header1, syntax, _fg),
-    do: [fg: Map.get(syntax, :keyword, 0x51AFEF), bold: true]
-
-  defp style_to_opts(:header2, syntax, _fg),
-    do: [fg: Map.get(syntax, :keyword, 0x51AFEF), bold: true]
-
-  defp style_to_opts(:header3, syntax, _fg),
-    do: [fg: Map.get(syntax, :keyword, 0x51AFEF)]
-
-  defp style_to_opts(:blockquote, _syntax, _fg), do: [fg: 0x5B6268, italic: true]
-  defp style_to_opts(:list_bullet, syntax, _fg), do: [fg: Map.get(syntax, :keyword, 0x51AFEF)]
-  defp style_to_opts(:rule, _syntax, _fg), do: [fg: 0x5B6268]
-  defp style_to_opts(_other, _syntax, fg), do: [fg: fg]
 
   @spec default_popup_theme() :: map()
   defp default_popup_theme do

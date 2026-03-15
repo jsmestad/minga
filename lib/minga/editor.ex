@@ -473,10 +473,22 @@ defmodule Minga.Editor do
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
+      {:completion_resolve, pending} ->
+        new_state = put_in(state.lsp.pending, pending)
+        new_state = CompletionHandling.handle_resolve_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
       {nil, _} ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)
     end
+  end
+
+  # Completion resolve debounce timer fired — send the actual resolve request
+  def handle_info({:completion_resolve, index}, state) do
+    state = CompletionHandling.flush_resolve(state, index)
+    {:noreply, state}
   end
 
   # Refresh the cached LSP status for the modeline indicator.

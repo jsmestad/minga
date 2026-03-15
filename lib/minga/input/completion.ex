@@ -15,6 +15,7 @@ defmodule Minga.Input.Completion do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Editor.CompletionHandling
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
 
@@ -181,13 +182,15 @@ defmodule Minga.Input.Completion do
   # C-n or arrow down: move selection down
   defp do_handle(state, completion, cp, mods)
        when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
-    {:handled, %{state | completion: Completion.move_down(completion)}}
+    state = %{state | completion: Completion.move_down(completion)}
+    {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
   # C-p or arrow up: move selection up
   defp do_handle(state, completion, cp, mods)
        when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
-    {:handled, %{state | completion: Completion.move_up(completion)}}
+    state = %{state | completion: Completion.move_up(completion)}
+    {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
   # Tab or Enter: accept the selected completion

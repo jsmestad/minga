@@ -646,7 +646,11 @@ defmodule Minga.LSP.Client do
           "dynamicRegistration" => false,
           "completionItem" => %{
             "snippetSupport" => false,
-            "insertReplaceSupport" => true
+            "insertReplaceSupport" => true,
+            "documentationFormat" => ["markdown", "plaintext"],
+            "resolveSupport" => %{
+              "properties" => ["documentation", "detail", "additionalTextEdits"]
+            }
           },
           "completionItemKind" => %{
             "valueSet" => Enum.to_list(1..25)
