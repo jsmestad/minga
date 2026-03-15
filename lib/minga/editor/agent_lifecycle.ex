@@ -85,14 +85,23 @@ defmodule Minga.Editor.AgentLifecycle do
 
       # Don't clear the buffer when the session is dead and returns no messages.
       # The buffer should preserve its last-known content.
-      if messages != [] do
-        AgentBufferSync.sync(agent.buffer, messages)
-      end
-
-      state
+      sync_buffer_content(state, agent.buffer, messages)
     else
       state
     end
+  end
+
+  @spec sync_buffer_content(state(), pid(), [term()]) :: state()
+  defp sync_buffer_content(state, _buffer, []), do: state
+
+  defp sync_buffer_content(state, buffer, messages) do
+    line_index = AgentBufferSync.sync(buffer, messages)
+
+    # Cache the line index in the panel state so callers (scroll_context,
+    # code_block_index_for_scroll) can read it without recomputing.
+    AgentAccess.update_agent(state, fn a ->
+      %{a | panel: %{a.panel | cached_line_index: line_index}}
+    end)
   end
 
   @doc """

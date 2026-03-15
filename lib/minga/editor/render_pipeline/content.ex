@@ -257,8 +257,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
       end
 
     # Compute prompt height and subdivide the content rect.
-    # Uses the same layout math as ViewRenderer.render_in_rect to keep
-    # prompt position consistent with the old rendering path.
+    # Subdivide the content rect for chat content vs prompt input.
     prompt_height = ViewRenderer.prompt_height(state, chat_width)
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)

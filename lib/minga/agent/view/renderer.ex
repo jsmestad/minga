@@ -1,48 +1,27 @@
 defmodule Minga.Agent.View.Renderer do
   @moduledoc """
-  Full-screen agentic view renderer (OpenCode-style layout).
+  Agent view rendering helpers: prompt input, dashboard sidebar, and cursor positioning.
 
-  Layout from top to bottom:
+  Chat content rendering is handled by the standard buffer pipeline through
+  the `*Agent*` buffer (managed by `BufferSync` and decorated by `ChatDecorations`).
+  This module provides only the supplementary chrome:
 
-      Row 0          Tab bar (rendered by TabBarRenderer)
-      Row 1          Title bar (status, model, session info, token usage)
-      Row 2..H-2     Left column: Chat + Input │ Right column: Preview/Dashboard
-        Left:          Chat messages (rows 2..H-2-input_h)
-                       Input border + text + model info (bottom of left col)
-        Right:         Preview or dashboard (full column height)
-        Separator:     Vertical │ (full column height)
-      Row H-2        Modeline (full width)
-      Row H-1        Minibuffer (reserved by editor)
+  - **Prompt input box** (`render_prompt_only/2`) with vim mode indicator
+  - **Dashboard sidebar** (`render_dashboard_only/2`) showing context, model, LSP status
+  - **Cursor positioning** (`cursor_position_in_rect/2`) for the input area
+  - **Prompt height** (`prompt_height/2`) for layout computation
 
-  The two-column split extends the full height between title bar and
-  modeline. The input area renders within the left column only, not at
-  full width. The right panel (preview/dashboard) extends alongside the
-  input area. This matches the OpenCode reference layout.
-
-  Called by `Minga.Editor.RenderPipeline` when the agent chat is visible in a window split.
-  Returns `DisplayList.draw()` tuples.
+  Called by `Minga.Editor.RenderPipeline.Content` when rendering agent chat windows.
   """
 
-  alias Minga.Agent.ChatRenderer
-  alias Minga.Agent.DiffRenderer
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.PanelState
   alias Minga.Agent.Session
-  alias Minga.Agent.View.DirectoryRenderer
-  alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.ShellRenderer
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.DisplayList
-
-  alias Minga.Editor.Renderer.Context
-  alias Minga.Editor.Renderer.Gutter
-  alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Editor.Viewport
 
   alias Minga.Input.Wrap, as: InputWrap
-  alias Minga.Keymap.Scope
   alias Minga.Scroll
   alias Minga.Theme
 
@@ -67,8 +46,6 @@ defmodule Minga.Agent.View.Renderer do
     and makes the data dependency graph explicit.
     """
 
-    alias Minga.Agent.View.Preview
-    alias Minga.Highlight
     alias Minga.Theme
 
     @enforce_keys [:theme, :agent_status, :panel, :agentic]
@@ -79,9 +56,6 @@ defmodule Minga.Agent.View.Renderer do
       :agentic,
       messages: [],
       usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
-      preview: Preview.new(),
-      buffer_snapshot: nil,
-      highlight: nil,
       pending_approval: nil,
       session_title: "Minga Agent",
       lsp_servers: []
@@ -94,9 +68,6 @@ defmodule Minga.Agent.View.Renderer do
             agentic: agentic_data(),
             messages: list(),
             usage: map(),
-            preview: Preview.t(),
-            buffer_snapshot: map() | nil,
-            highlight: Highlight.t() | nil,
             pending_approval: map() | nil,
             session_title: String.t(),
             lsp_servers: [atom()]
@@ -145,27 +116,6 @@ defmodule Minga.Agent.View.Renderer do
     compute_input_height(input.panel.input_lines, input_inner_width(box_width))
   end
 
-  @spec render_in_rect(state(), rect()) :: [DisplayList.draw()]
-  def render_in_rect(%EditorState{} = state, {row, col, width, height}) do
-    input = extract_input(state)
-
-    box_width = max(width - 2 * @input_h_margin, 10)
-    box_col = col + @input_h_margin
-
-    input_height =
-      compute_input_height(input.panel.input_lines, input_inner_width(box_width))
-
-    chat_height = max(height - input_height - @input_v_gap, 1)
-    input_row = row + chat_height + @input_v_gap
-
-    {chat_draws, _metrics} =
-      render_chat_from_input(input, {row, col, width, chat_height})
-
-    input_draws = render_input_from_input(input, input_row, box_col, box_width)
-
-    chat_draws ++ input_draws
-  end
-
   @doc """
   Renders only the prompt input area into the given rect.
 
@@ -185,63 +135,6 @@ defmodule Minga.Agent.View.Renderer do
   def render_dashboard_only(%EditorState{} = state, rect) do
     input = extract_input(state)
     render_dashboard(input, rect)
-  end
-
-  @doc """
-  Renders agent chat with the sidebar (file viewer/dashboard).
-
-  The pipeline provides two rects: `content_rect` for the chat+input area
-  (left column) and `sidebar_rect` for the file viewer/dashboard
-  (right column). A vertical separator is drawn in the 1-col gap
-  between them. Does not render title bar or modeline (those are
-  handled by the pipeline's chrome layer).
-
-  Returns a flat list of draw commands positioned within the given rects.
-  """
-  @spec render_with_sidebar(state(), rect(), rect()) :: [DisplayList.draw()]
-  def render_with_sidebar(%EditorState{} = state, content_rect, sidebar_rect) do
-    input = extract_input(state)
-
-    {row_off, col_off, chat_width, height} = content_rect
-    {_sr, sidebar_col, sidebar_width, sidebar_height} = sidebar_rect
-
-    box_width = max(chat_width - 2 * @input_h_margin, 10)
-    box_col = col_off + @input_h_margin
-
-    input_height =
-      compute_input_height(input.panel.input_lines, input_inner_width(box_width))
-
-    chat_height = max(height - input_height - @input_v_gap, 1)
-    input_row = row_off + chat_height + @input_v_gap
-    separator_col = col_off + chat_width
-
-    {chat_commands, _metrics} =
-      render_chat_from_input(input, {row_off, col_off, chat_width, chat_height})
-
-    separator_commands =
-      render_separator(separator_col, row_off, height, input.theme)
-
-    viewer_commands =
-      render_file_viewer_from_input(
-        input,
-        {row_off, sidebar_col, sidebar_width, sidebar_height}
-      )
-
-    input_commands = render_input_from_input(input, input_row, box_col, box_width)
-
-    total_width = chat_width + 1 + sidebar_width
-
-    overlays =
-      if input.agentic.help_visible do
-        render_help_overlay(input, total_width, height)
-      else
-        []
-      end
-
-    toast_cmds = render_toast_overlay(input, total_width)
-
-    chat_commands ++
-      separator_commands ++ viewer_commands ++ input_commands ++ overlays ++ toast_cmds
   end
 
   @doc """
@@ -319,38 +212,6 @@ defmodule Minga.Agent.View.Renderer do
         empty_usage()
       end
 
-    # Pre-fetch buffer snapshot for file viewer.
-    # When pinned, we ask for the tail of the buffer by passing a large
-    # offset; render_snapshot clamps internally.
-    preview_scroll =
-      if agentic.preview.scroll.pinned do
-        # Large value that render_snapshot will clamp to the real bottom.
-        999_999
-      else
-        agentic.preview.scroll.offset
-      end
-
-    rows = state.viewport.rows
-    cols = state.viewport.cols
-    pct = agentic.chat_width_pct
-    chat_w = max(div(cols * pct, 100), 20)
-    box_w = max(chat_w - 2 * @input_h_margin, 10)
-    input_h = compute_input_height(PanelState.input_lines(panel), input_inner_width(box_w))
-    content_rows = max(rows - 1 - 1 - input_h - @input_v_gap - 1 - 1, 1)
-
-    buffer_snapshot =
-      case state.buffers.active do
-        nil ->
-          nil
-
-        buf ->
-          snapshot = BufferServer.render_snapshot(buf, preview_scroll, content_rows)
-          %{snapshot | name: snapshot_display_name(snapshot)}
-      end
-
-    highlight =
-      if state.highlight.current.capture_names != [], do: state.highlight.current, else: nil
-
     %RenderInput{
       theme: state.theme,
       agent_status: agent.status,
@@ -379,9 +240,6 @@ defmodule Minga.Agent.View.Renderer do
       },
       messages: messages,
       usage: usage,
-      preview: agentic.preview,
-      buffer_snapshot: buffer_snapshot,
-      highlight: highlight,
       pending_approval: agent.pending_approval,
       session_title: session_title(messages),
       lsp_servers: safe_lsp_servers()
@@ -409,131 +267,6 @@ defmodule Minga.Agent.View.Renderer do
     first_line = text |> String.split("\n") |> hd()
     truncated = String.slice(first_line, 0, 50)
     if String.length(truncated) == 50, do: truncated <> "...", else: truncated
-  end
-
-  # ── Chat panel (messages only) ──────────────────────────────────────────────
-
-  @spec render_chat_from_input(RenderInput.t(), rect()) ::
-          {[DisplayList.draw()], ChatRenderer.scroll_metrics()}
-  defp render_chat_from_input(input, rect) do
-    panel_state = %{
-      messages: input.messages,
-      status: input.agent_status || :idle,
-      input_lines: input.panel.input_lines,
-      scroll: input.panel.scroll,
-      spinner_frame: input.panel.spinner_frame,
-      usage: input.usage,
-      model_name: input.panel.model_name,
-      thinking_level: input.panel.thinking_level,
-      display_start_index: input.panel.display_start_index,
-      error_message: nil,
-      pending_approval: input.pending_approval,
-      mention_completion: input.panel.mention_completion
-    }
-
-    ChatRenderer.render_messages_only(rect, panel_state, input.theme)
-  end
-
-  @typedoc "Scroll metrics propagated from the chat renderer for caching in PanelState."
-  @type scroll_metrics :: ChatRenderer.scroll_metrics()
-
-  # ── Vertical separator ──────────────────────────────────────────────────────
-
-  @spec render_separator(non_neg_integer(), non_neg_integer(), pos_integer(), Theme.t()) ::
-          [DisplayList.draw()]
-  defp render_separator(col, start_row, height, theme) do
-    at = Theme.agent_theme(theme)
-
-    for row <- start_row..(start_row + height - 1) do
-      DisplayList.draw(row, col, "│", fg: at.panel_border, bg: at.panel_bg)
-    end
-  end
-
-  # ── File viewer panel ───────────────────────────────────────────────────────
-
-  @spec render_file_viewer_from_input(RenderInput.t(), rect()) :: [DisplayList.draw()]
-
-  defp render_file_viewer_from_input(input, rect) do
-    render_preview(input, rect)
-  end
-
-  # ── Preview content dispatch ────────────────────────────────────────────────
-
-  @spec render_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
-
-  defp render_preview(%{preview: %Preview{content: {:diff, review}}} = input, rect) do
-    DiffRenderer.render(rect, review, input.theme)
-  end
-
-  defp render_preview(
-         %{preview: %Preview{content: {:shell, cmd, output, status}, scroll: scroll}} =
-           input,
-         rect
-       ) do
-    spinner = input.panel.spinner_frame
-
-    ShellRenderer.render(
-      rect,
-      cmd,
-      output,
-      status,
-      scroll.offset,
-      scroll.pinned,
-      spinner,
-      input.theme
-    )
-  end
-
-  defp render_preview(
-         %{preview: %Preview{content: {:file, path, content}, scroll: scroll}} = input,
-         {row_off, col_off, width, height}
-       ) do
-    render_file_preview(
-      input,
-      path,
-      content,
-      scroll.offset,
-      scroll.pinned,
-      {row_off, col_off, width, height}
-    )
-  end
-
-  defp render_preview(
-         %{preview: %Preview{content: {:directory, path, entries}, scroll: scroll}} =
-           input,
-         rect
-       ) do
-    DirectoryRenderer.render(
-      rect,
-      path,
-      entries,
-      scroll.offset,
-      scroll.pinned,
-      input.theme
-    )
-  end
-
-  defp render_preview(%{preview: %Preview{content: :empty}} = input, rect) do
-    render_dashboard(input, rect)
-  end
-
-  defp render_preview(%{buffer_snapshot: nil}, {row_off, col_off, width, height}) do
-    render_empty_preview({row_off, col_off, width, height})
-  end
-
-  defp render_preview(input, {row_off, col_off, width, height}) do
-    render_buffer_preview(input, {row_off, col_off, width, height})
-  end
-
-  # ── Empty preview ───────────────────────────────────────────────────────────
-
-  @spec render_empty_preview(rect()) :: [DisplayList.draw()]
-  defp render_empty_preview({row_off, col_off, width, height}) do
-    blank = String.duplicate(" ", width)
-
-    for row <- 0..(height - 1) do
-      DisplayList.draw(row_off + row, col_off, blank)
-    end
   end
 
   # ── Dashboard panel (session info) ──────────────────────────────────────────
@@ -718,165 +451,6 @@ defmodule Minga.Agent.View.Renderer do
     else
       path
     end
-  end
-
-  # ── File content preview ────────────────────────────────────────────────────
-
-  @spec render_file_preview(
-          RenderInput.t(),
-          String.t(),
-          String.t(),
-          non_neg_integer(),
-          boolean(),
-          rect()
-        ) ::
-          [DisplayList.draw()]
-  defp render_file_preview(
-         input,
-         path,
-         content,
-         scroll,
-         auto_follow,
-         {row_off, col_off, width, height}
-       ) do
-    at = Theme.agent_theme(input.theme)
-    lines = String.split(content, "\n")
-    total = length(lines)
-
-    content_start = row_off + 1
-    content_rows = max(height - 1, 1)
-    max_scroll = max(total - content_rows, 0)
-    scroll_clamped = if auto_follow, do: max_scroll, else: min(scroll, max_scroll)
-    visible = Enum.slice(lines, scroll_clamped, content_rows)
-
-    gutter_w = file_viewer_gutter_width(total)
-    content_w = max(width - gutter_w, 1)
-
-    # Header
-    display_name = Path.basename(path)
-    header_text = String.pad_trailing(" 📄 #{display_name} (read_file)", width)
-    header = DisplayList.draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
-
-    # Content lines
-    line_cmds =
-      visible
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {line, idx} ->
-        row = content_start + idx
-        line_num = scroll_clamped + idx + 1
-        gutter_text = String.pad_leading("#{line_num}", gutter_w - 1) <> " "
-        line_text = String.slice(line, 0, content_w)
-        blank = String.duplicate(" ", width)
-
-        [
-          DisplayList.draw(row, col_off, blank, bg: at.panel_bg),
-          DisplayList.draw(row, col_off, gutter_text, fg: at.tool_border, bg: at.panel_bg),
-          DisplayList.draw(row, col_off + gutter_w, line_text, fg: at.text_fg, bg: at.panel_bg)
-        ]
-      end)
-
-    # Fill remaining rows
-    rendered = length(visible)
-
-    tilde_cmds =
-      if rendered < content_rows do
-        blank = String.duplicate(" ", width)
-
-        for r <- (content_start + rendered)..(content_start + content_rows - 1) do
-          DisplayList.draw(r, col_off, blank, bg: at.panel_bg)
-        end
-      else
-        []
-      end
-
-    [header | line_cmds] ++ tilde_cmds
-  end
-
-  # ── Buffer snapshot preview (legacy fallback) ───────────────────────────────
-
-  @spec render_buffer_preview(RenderInput.t(), rect()) :: [DisplayList.draw()]
-  defp render_buffer_preview(input, {row_off, col_off, width, height}) do
-    snapshot = input.buffer_snapshot
-
-    content_start = row_off + 1
-    content_rows = max(height - 1, 1)
-
-    lines = snapshot.lines
-    line_count = snapshot.line_count
-
-    scroll = Scroll.resolve(input.preview.scroll, line_count, content_rows)
-
-    abs_gutter_col = max(col_off, 0)
-    local_gutter_w = file_viewer_gutter_width(line_count)
-    abs_content_col = col_off + local_gutter_w
-    content_w = max(width - local_gutter_w, 1)
-
-    viewer_vp = Viewport.new(content_rows, width)
-    viewer_vp = %{viewer_vp | top: scroll}
-
-    render_ctx = %Context{
-      viewport: viewer_vp,
-      visual_selection: nil,
-      search_matches: [],
-      gutter_w: abs_content_col,
-      content_w: content_w,
-      confirm_match: nil,
-      highlight: input.highlight,
-      has_sign_column: false,
-      diagnostic_signs: %{},
-      git_signs: %{},
-      gutter_colors: input.theme.gutter,
-      git_colors: input.theme.git
-    }
-
-    {gutter_cmds, line_cmds, _} =
-      Enum.reduce(
-        Enum.with_index(lines),
-        {[], [], snapshot.first_line_byte_offset},
-        fn {line_text, screen_row}, {gutters, contents, byte_offset} ->
-          buf_line = max(scroll + screen_row, 0)
-          abs_row = max(content_start + screen_row, 0)
-
-          gutter_cmd =
-            Gutter.render_number(
-              abs_row,
-              abs_gutter_col,
-              buf_line,
-              0,
-              local_gutter_w,
-              :absolute,
-              render_ctx.gutter_colors
-            )
-
-          content_cmds =
-            LineRenderer.render(line_text, abs_row, buf_line, render_ctx, byte_offset)
-
-          next_offset = byte_offset + byte_size(line_text) + 1
-
-          {gutters ++ List.wrap(gutter_cmd), contents ++ content_cmds, next_offset}
-        end
-      )
-
-    tilde_cmds =
-      if length(lines) < content_rows do
-        tilde_start = content_start + length(lines)
-        tilde_end = content_start + content_rows - 1
-
-        for r <- tilde_start..tilde_end do
-          DisplayList.draw(r, abs_content_col, "~", fg: input.theme.editor.tilde_fg)
-        end
-      else
-        []
-      end
-
-    at = Theme.agent_theme(input.theme)
-    file_name = Map.get(snapshot, :name, "[No Name]")
-    header_text = String.pad_trailing(" 📄 #{file_name}", width)
-
-    header_cmd =
-      DisplayList.draw(row_off, col_off, header_text, fg: at.header_fg, bg: at.header_bg)
-
-    [header_cmd | gutter_cmds] ++ line_cmds ++ tilde_cmds
   end
 
   # ── Input area (left column) ──────────────────────────────────────────────
@@ -1144,9 +718,6 @@ defmodule Minga.Agent.View.Renderer do
   @spec input_v_gap() :: non_neg_integer()
   def input_v_gap, do: @input_v_gap
 
-  # Returns the visual selection range from Vim state, or nil.
-  @spec vim_visual_range(map()) ::
-          {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}} | nil
   # Visual selection range for the prompt input. Uses the editor's mode
   # state (visual_start) when in visual mode, since the prompt uses the
   # standard Mode FSM.
@@ -1197,16 +768,6 @@ defmodule Minga.Agent.View.Renderer do
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
-  @spec file_viewer_gutter_width(non_neg_integer()) :: non_neg_integer()
-  defp file_viewer_gutter_width(line_count) do
-    digits = line_count |> max(1) |> Integer.digits() |> length()
-    digits + 1
-  end
-
-  @spec snapshot_display_name(map()) :: String.t()
-  defp snapshot_display_name(%{name: name}) when is_binary(name) and name != "", do: name
-  defp snapshot_display_name(_), do: "[No Name]"
-
   @spec empty_usage() :: map()
   defp empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
 
@@ -1234,149 +795,5 @@ defmodule Minga.Agent.View.Renderer do
         used = max(actual, context_estimate)
         min(round(used / n * 100), 100)
     end
-  end
-
-  # ── Toast overlay ─────────────────────────────────────────────────────────
-
-  @spec render_toast_overlay(RenderInput.t(), pos_integer()) :: [DisplayList.draw()]
-  defp render_toast_overlay(%{agentic: %{toast: nil}}, _cols), do: []
-
-  defp render_toast_overlay(%{agentic: %{toast: toast}} = input, cols) do
-    at = Theme.agent_theme(input.theme)
-    text = " #{toast.icon} #{toast.message} "
-    text_len = String.length(text)
-    col = max(cols - text_len - 1, 0)
-
-    fg = toast_fg(toast.level, at)
-    bg = toast_bg(toast.level, at)
-
-    [DisplayList.draw(0, col, text, fg: fg, bg: bg)]
-  end
-
-  @spec toast_fg(atom(), Theme.Agent.t()) :: Theme.color()
-  defp toast_fg(:error, at), do: at.status_error
-  defp toast_fg(:warning, at), do: at.status_thinking
-  defp toast_fg(:info, at), do: at.status_idle
-
-  @spec toast_bg(atom(), Theme.Agent.t()) :: Theme.color()
-  defp toast_bg(_level, at), do: at.header_bg
-
-  # ── Help overlay ──────────────────────────────────────────────────────────
-
-  @spec render_help_overlay(RenderInput.t(), pos_integer(), pos_integer()) :: [DisplayList.draw()]
-  defp render_help_overlay(input, cols, rows) do
-    at = Theme.agent_theme(input.theme)
-
-    groups = Scope.help_groups(:agent, input.agentic.focus)
-
-    context_label =
-      case input.agentic.focus do
-        :file_viewer -> "File Viewer"
-        _ -> "Chat"
-      end
-
-    content_lines = help_content_lines(groups)
-
-    box_width = min(max(div(cols * 60, 100), 40), cols - 4)
-    box_height = min(length(content_lines) + 4, rows - 4)
-    start_col = div(cols - box_width, 2)
-    start_row = div(rows - box_height, 2)
-    key_col_width = 20
-
-    border_top = "┌" <> String.duplicate("─", box_width - 2) <> "┐"
-    border_bottom = "└" <> String.duplicate("─", box_width - 2) <> "┘"
-    blank_line = "│" <> String.duplicate(" ", box_width - 2) <> "│"
-
-    # Top border
-    commands = [
-      DisplayList.draw(start_row, start_col, border_top, fg: at.panel_border, bg: at.panel_bg)
-    ]
-
-    # Title row
-    title = " Keybindings (#{context_label}) "
-    title_pad = String.duplicate(" ", max(box_width - 2 - String.length(title), 0))
-
-    commands = [
-      DisplayList.draw(start_row + 1, start_col, "│#{title}#{title_pad}│",
-        fg: at.assistant_label,
-        bg: at.panel_bg,
-        bold: true
-      )
-      | commands
-    ]
-
-    # Separator
-    sep = "├" <> String.duplicate("─", box_width - 2) <> "┤"
-
-    commands = [
-      DisplayList.draw(start_row + 2, start_col, sep, fg: at.panel_border, bg: at.panel_bg)
-      | commands
-    ]
-
-    # Content rows
-    visible_lines = Enum.take(content_lines, box_height - 4)
-
-    commands =
-      visible_lines
-      |> Enum.with_index(3)
-      |> Enum.reduce(commands, fn {{type, left, right}, row_offset}, acc ->
-        row = start_row + row_offset
-
-        {line, style} =
-          help_line_content(type, left, right, box_width, key_col_width, blank_line, at)
-
-        [DisplayList.draw(row, start_col, line, style) | acc]
-      end)
-
-    # Bottom border
-    bottom_row = start_row + length(visible_lines) + 3
-
-    [
-      DisplayList.draw(bottom_row, start_col, border_bottom, fg: at.panel_border, bg: at.panel_bg)
-      | commands
-    ]
-  end
-
-  @spec help_line_content(
-          atom(),
-          String.t(),
-          String.t(),
-          pos_integer(),
-          pos_integer(),
-          String.t(),
-          Theme.Agent.t()
-        ) ::
-          {String.t(), keyword()}
-  defp help_line_content(:header, left, _right, box_width, _key_w, _blank, at) do
-    text = " #{left} "
-    pad = String.duplicate(" ", max(box_width - 2 - String.length(text), 0))
-    {"│#{text}#{pad}│", [fg: at.assistant_label, bg: at.panel_bg, bold: true]}
-  end
-
-  defp help_line_content(:binding, left, right, box_width, key_w, _blank, at) do
-    key_text = String.pad_trailing(left, key_w)
-    desc_space = max(box_width - 2 - key_w - 2, 1)
-    desc_text = String.slice(right, 0, desc_space)
-    desc_pad = String.duplicate(" ", max(desc_space - String.length(desc_text), 0))
-    {"│ #{key_text}#{desc_text}#{desc_pad} │", [fg: at.text_fg, bg: at.panel_bg]}
-  end
-
-  defp help_line_content(:spacer, _left, _right, _box_width, _key_w, blank, at) do
-    {blank, [fg: at.panel_border, bg: at.panel_bg]}
-  end
-
-  @typedoc "Help content line type."
-  @type help_line ::
-          {:header, String.t(), String.t()}
-          | {:binding, String.t(), String.t()}
-          | {:spacer, String.t(), String.t()}
-
-  @spec help_content_lines([Scope.help_group()]) :: [help_line()]
-  defp help_content_lines(groups) do
-    Enum.flat_map(groups, fn {category, bindings} ->
-      header = [{:header, category, ""}]
-      items = Enum.map(bindings, fn {key, desc} -> {:binding, key, desc} end)
-      header ++ items ++ [{:spacer, "", ""}]
-    end)
   end
 end

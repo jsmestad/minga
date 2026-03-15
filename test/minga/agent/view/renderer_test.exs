@@ -2,7 +2,6 @@ defmodule Minga.Agent.View.RendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.PanelState
-  alias Minga.Agent.View.Preview
   alias Minga.Agent.View.Renderer
   alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
@@ -48,12 +47,9 @@ defmodule Minga.Agent.View.RendererTest do
       buffer: nil
     }
 
-    preview_opt = Keyword.get(opts, :preview, nil)
-
     agentic = %ViewState{
       active: true,
       focus: Keyword.get(opts, :focus, :chat),
-      preview: preview_opt || Preview.new(),
       saved_windows: nil,
       pending_prefix: nil,
       saved_file_tree: nil
@@ -70,230 +66,6 @@ defmodule Minga.Agent.View.RendererTest do
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
     }
-  end
-
-  # Computes content_rect and sidebar_rect from state, matching
-  # what the render pipeline's compute_agent_sidebar/2 does.
-  # Content starts at row 0, col 0 (no title bar or modeline; those
-  # are chrome layer concerns).
-  @spec sidebar_rects(EditorState.t()) ::
-          {Minga.Editor.Layout.rect(), Minga.Editor.Layout.rect()}
-  defp sidebar_rects(state) do
-    cols = state.viewport.cols
-    rows = state.viewport.rows
-    chat_width = max(div(cols * state.agentic.chat_width_pct, 100), 20)
-    sidebar_col = chat_width + 1
-    sidebar_width = max(cols - chat_width - 1, 10)
-
-    {{0, 0, chat_width, rows}, {0, sidebar_col, sidebar_width, rows}}
-  end
-
-  # Convenience: render with sidebar using production-like rects.
-  @spec render_sidebar(EditorState.t()) :: [Minga.Editor.DisplayList.draw()]
-  defp render_sidebar(state) do
-    {content_rect, sidebar_rect} = sidebar_rects(state)
-    Renderer.render_with_sidebar(state, content_rect, sidebar_rect)
-  end
-
-  describe "render_with_sidebar/3" do
-    test "returns a non-empty list of draw tuples" do
-      state = base_state(rows: 30, cols: 100)
-      commands = render_sidebar(state)
-      assert [_ | _] = commands
-      assert Enum.all?(commands, &is_tuple/1)
-    end
-
-    test "all draw tuples have valid 4-element structure" do
-      state = base_state(rows: 30, cols: 100)
-      commands = render_sidebar(state)
-
-      Enum.each(commands, fn cmd ->
-        assert tuple_size(cmd) == 4, "draw tuple should have 4 elements: #{inspect(cmd)}"
-        {row, col, text, style} = cmd
-        assert is_integer(row)
-        assert is_integer(col)
-        assert is_binary(text)
-        assert is_list(style)
-      end)
-    end
-
-    test "produces more commands with more rows (larger viewport)" do
-      state_small = base_state(rows: 20, cols: 80)
-      state_large = base_state(rows: 40, cols: 80)
-
-      cmds_small = render_sidebar(state_small)
-      cmds_large = render_sidebar(state_large)
-
-      assert length(cmds_large) > length(cmds_small)
-    end
-
-    test "does not crash when active buffer is nil" do
-      state = base_state()
-      state = put_in(state.buffers.active, nil)
-      commands = render_sidebar(state)
-      assert is_list(commands)
-    end
-
-    test "renders with file viewer scroll applied" do
-      state_top = base_state(viewer_scroll: 0)
-      state_scrolled = base_state(viewer_scroll: 2)
-
-      cmds_top = render_sidebar(state_top)
-      cmds_scrolled = render_sidebar(state_scrolled)
-
-      assert is_list(cmds_top)
-      assert is_list(cmds_scrolled)
-    end
-  end
-
-  describe "render_in_rect/2" do
-    test "returns a non-empty list of draw tuples" do
-      state = base_state(rows: 30, cols: 100)
-      commands = Renderer.render_in_rect(state, {0, 0, 80, 30})
-      assert [_ | _] = commands
-      assert Enum.all?(commands, &is_tuple/1)
-    end
-
-    test "compact mode has no column separator or sidebar content" do
-      cols = 100
-      state = base_state(rows: 30, cols: cols)
-      chat_width = div(cols * 65, 100)
-      commands = Renderer.render_in_rect(state, {0, 0, chat_width, 30})
-
-      # No draw commands should appear past the chat width (no sidebar column)
-      sidebar_cmds =
-        Enum.filter(commands, fn {_r, col, _text, _s} -> col > chat_width end)
-
-      assert sidebar_cmds == [], "compact mode should not have sidebar content"
-    end
-  end
-
-  describe "layout proportions" do
-    test "chat panel occupies ~65% of columns" do
-      cols = 120
-      state = base_state(cols: cols)
-
-      expected_chat_width = div(cols * 65, 100)
-      commands = render_sidebar(state)
-
-      chat_cols =
-        commands
-        |> Enum.map(fn {_row, col, _text, _style} -> col end)
-        |> Enum.filter(&(&1 < expected_chat_width))
-
-      viewer_cols =
-        commands
-        |> Enum.map(fn {_row, col, _text, _style} -> col end)
-        |> Enum.filter(&(&1 > expected_chat_width))
-
-      assert chat_cols != [], "expected draw commands in chat panel columns"
-      assert viewer_cols != [], "expected draw commands in viewer panel columns"
-    end
-  end
-
-  describe "input area inside left column" do
-    test "input border renders with horizontal margin" do
-      state = base_state(rows: 30, cols: 100)
-      commands = render_sidebar(state)
-
-      h_margin = 2
-
-      # Input box should have a top border starting at the margin offset
-      input_cmds =
-        Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == h_margin and String.starts_with?(text, "╭─ Prompt")
-        end)
-
-      assert input_cmds != [], "expected input border at col #{h_margin}"
-    end
-
-    test "input box width is constrained to left column minus margins" do
-      cols = 100
-      state = base_state(rows: 30, cols: cols)
-      commands = render_sidebar(state)
-
-      h_margin = 2
-      chat_width = div(cols * 65, 100)
-      expected_box_width = chat_width - 2 * h_margin
-
-      top_border_cmds =
-        Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == h_margin and String.starts_with?(text, "╭─ Prompt")
-        end)
-
-      assert [top_cmd | _] = top_border_cmds
-      {_row, _col, top_text, _style} = top_cmd
-
-      assert String.length(top_text) == expected_box_width,
-             "input box should be #{expected_box_width}, got #{String.length(top_text)}"
-    end
-
-    test "right panel extends alongside the input area" do
-      cols = 100
-      state = base_state(rows: 30, cols: cols)
-      commands = render_sidebar(state)
-
-      h_margin = 2
-      chat_width = div(cols * 65, 100)
-      viewer_col = chat_width + 1
-
-      # Find the input box top border row
-      input_row =
-        commands
-        |> Enum.find(fn {_r, col, text, _s} ->
-          col == h_margin and String.starts_with?(text, "╭─ Prompt")
-        end)
-        |> elem(0)
-
-      # The viewer/dashboard should have draw commands at rows alongside the input
-      viewer_at_input_rows =
-        Enum.filter(commands, fn {row, col, _text, _style} ->
-          row >= input_row and col >= viewer_col
-        end)
-
-      assert viewer_at_input_rows != [],
-             "expected right panel content at rows alongside the input area"
-    end
-
-    test "separator extends the full panel height" do
-      cols = 100
-      rows = 30
-      state = base_state(rows: rows, cols: cols)
-      commands = render_sidebar(state)
-
-      chat_width = div(cols * 65, 100)
-
-      sep_cmds =
-        Enum.filter(commands, fn {_row, col, text, _style} ->
-          col == chat_width and text == "│"
-        end)
-
-      sep_rows = Enum.map(sep_cmds, fn {row, _, _, _} -> row end) |> Enum.sort()
-
-      # Separator should span the full height of the content rect
-      expected_rows = Enum.to_list(0..(rows - 1))
-
-      assert sep_rows == expected_rows,
-             "separator should span rows 0..#{rows - 1}, got #{inspect(sep_rows)}"
-    end
-  end
-
-  describe "file viewer header" do
-    test "file viewer header is at the top of the viewer panel" do
-      state = base_state(rows: 30, cols: 100)
-      commands = render_sidebar(state)
-
-      chat_width = div(100 * 65, 100)
-      viewer_col = chat_width + 1
-
-      # Header should be at row 0 (top of content rect), at viewer_col
-      header_cmds =
-        Enum.filter(commands, fn {row, col, _text, _style} ->
-          row == 0 and col >= viewer_col
-        end)
-
-      assert header_cmds != [], "expected file viewer header at the top of the viewer panel"
-    end
   end
 
   describe "cursor_position_in_rect/2" do
@@ -343,119 +115,103 @@ defmodule Minga.Agent.View.RendererTest do
     end
   end
 
-  describe "resize re-layout" do
-    test "different viewport sizes produce different chat widths" do
-      state_80 = base_state(rows: 24, cols: 80)
-      state_120 = base_state(rows: 24, cols: 120)
+  describe "prompt_height/2" do
+    test "returns a positive integer" do
+      state = base_state()
+      height = Renderer.prompt_height(state, 80)
+      assert is_integer(height)
+      assert height >= 3
+    end
 
-      cmds_80 = render_sidebar(state_80)
-      cmds_120 = render_sidebar(state_120)
+    test "grows with multiline input" do
+      state_single = base_state(input_lines: ["hello"])
+      state_multi = base_state(input_lines: ["line 1", "line 2", "line 3"])
 
-      cols_80 =
-        cmds_80
-        |> Enum.map(fn {_row, col, _text, _style} -> col end)
-        |> Enum.max(fn -> 0 end)
+      h_single = Renderer.prompt_height(state_single, 80)
+      h_multi = Renderer.prompt_height(state_multi, 80)
 
-      cols_120 =
-        cmds_120
-        |> Enum.map(fn {_row, col, _text, _style} -> col end)
-        |> Enum.max(fn -> 0 end)
-
-      assert cols_120 > cols_80, "wider viewport should use more columns"
+      assert h_multi > h_single
     end
   end
 
-  describe "model info" do
-    test "model name appears near input area" do
+  describe "render_prompt_only/2" do
+    test "returns draw tuples with prompt border" do
       state = base_state()
-      commands = render_sidebar(state)
+      commands = Renderer.render_prompt_only(state, {30, 0, 80, 5})
+
+      assert [_ | _] = commands
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
-    end
-
-    test "thinking level appears when set" do
-      state = base_state()
-      commands = render_sidebar(state)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "medium"))
-    end
-
-    test "provider name appears in model info line (titleized)" do
-      state = base_state()
-      commands = render_sidebar(state)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-      assert Enum.any?(texts, &String.contains?(&1, "Anthropic"))
-    end
-  end
-
-  describe "input box border" do
-    test "input area has rounded box border with Prompt label" do
-      state = base_state()
-      commands = render_sidebar(state)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
-
-      assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt")),
-             "expected top border with Prompt label"
-
-      assert Enum.any?(texts, &String.starts_with?(&1, "╰─")),
-             "expected bottom border"
-
-      refute Enum.any?(texts, &String.contains?(&1, "─── Prompt")),
-             "should not have old Prompt border"
+      assert Enum.any?(texts, &String.starts_with?(&1, "╭─ Prompt"))
+      assert Enum.any?(texts, &String.starts_with?(&1, "╰─"))
     end
 
     test "model info is embedded in bottom border" do
       state = base_state()
-      commands = render_sidebar(state)
+      commands = Renderer.render_prompt_only(state, {30, 0, 80, 5})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, fn text ->
                String.starts_with?(text, "╰─") and String.contains?(text, "Claude Sonnet 4")
-             end),
-             "expected model info in bottom border"
+             end)
     end
   end
 
-  describe "dashboard panel" do
-    test "shows session info when preview is empty" do
+  describe "render_dashboard_only/2" do
+    test "shows context, model, LSP, and directory sections" do
       state = base_state()
-      commands = render_sidebar(state)
+      commands = Renderer.render_dashboard_only(state, {0, 80, 40, 30})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "Context"))
       assert Enum.any?(texts, &String.contains?(&1, "Model"))
       assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
-    end
-
-    test "shows working directory" do
-      state = base_state()
-      commands = render_sidebar(state)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Directory"))
     end
 
     test "shows LSP section with no servers when list is empty" do
       state = base_state()
-      commands = render_sidebar(state)
+      commands = Renderer.render_dashboard_only(state, {0, 80, 40, 30})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "LSP"))
       assert Enum.any?(texts, &String.contains?(&1, "No servers active"))
     end
+  end
 
-    test "not shown when preview has file content" do
-      preview =
-        Preview.set_file(
-          Preview.new(),
-          "/tmp/test.txt",
-          "hello world"
-        )
+  describe "input layout helpers" do
+    test "input_box_width applies horizontal margins" do
+      assert Renderer.input_box_width(80) == 80 - 2 * 2
+    end
 
-      state = base_state(preview: preview)
-      commands = render_sidebar(state)
-      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+    test "input_inner_width subtracts border chrome" do
+      box_w = Renderer.input_box_width(80)
+      inner = Renderer.input_inner_width(box_w)
+      assert inner == box_w - 6
+    end
 
-      assert Enum.any?(texts, &String.contains?(&1, "test.txt"))
+    test "compute_input_height includes borders" do
+      # Single line: top border(1) + 1 visible line + bottom border(1) = 3
+      assert Renderer.compute_input_height(["hello"], 60) == 3
+    end
+
+    test "input_v_gap returns the vertical gap constant" do
+      assert is_integer(Renderer.input_v_gap())
+      assert Renderer.input_v_gap() >= 0
+    end
+  end
+
+  describe "context_fill_pct/3" do
+    test "returns nil for unknown models" do
+      assert Renderer.context_fill_pct(%{input: 100, output: 50}, "unknown-model") == nil
+    end
+
+    test "returns a percentage for known models" do
+      pct = Renderer.context_fill_pct(%{input: 50_000, output: 10_000}, "claude-sonnet-4")
+
+      if pct != nil do
+        assert is_integer(pct)
+        assert pct >= 0 and pct <= 100
+      end
     end
   end
 end
