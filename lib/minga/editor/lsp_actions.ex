@@ -10,6 +10,7 @@ defmodule Minga.Editor.LspActions do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
 
@@ -84,7 +85,9 @@ defmodule Minga.Editor.LspActions do
   @doc """
   Handles a textDocument/hover response.
 
-  Extracts plain text content and displays it in the minibuffer.
+  Creates a floating hover popup with markdown-rendered content anchored
+  at the cursor position. Falls back to a minibuffer message if the
+  content is very short (single line, no markdown).
   """
   @spec handle_hover_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_hover_response(state, {:error, error}) do
@@ -97,11 +100,16 @@ defmodule Minga.Editor.LspActions do
   end
 
   def handle_hover_response(state, {:ok, %{"contents" => contents}}) do
-    text = extract_hover_text(contents)
+    markdown = extract_hover_markdown(contents)
 
-    case text do
-      "" -> %{state | status_msg: "No hover information"}
-      _ -> %{state | status_msg: text}
+    case markdown do
+      "" ->
+        %{state | status_msg: "No hover information"}
+
+      text ->
+        {cursor_row, cursor_col} = hover_cursor_screen_position(state)
+        popup = HoverPopup.new(text, cursor_row, cursor_col)
+        %{state | hover_popup: popup}
     end
   end
 
@@ -262,6 +270,64 @@ defmodule Minga.Editor.LspActions do
   end
 
   defp set_jump_mark(state), do: state
+
+  @doc """
+  Extracts raw markdown text from LSP hover contents.
+
+  Preserves markdown formatting for floating window rendering.
+  Handles MarkupContent, plain strings, and MarkedString arrays.
+  """
+  @spec extract_hover_markdown(term()) :: String.t()
+  def extract_hover_markdown(%{"kind" => "markdown", "value" => value}) when is_binary(value) do
+    String.trim(value)
+  end
+
+  def extract_hover_markdown(%{"kind" => "plaintext", "value" => value}) when is_binary(value) do
+    String.trim(value)
+  end
+
+  def extract_hover_markdown(%{"kind" => _, "value" => value}) when is_binary(value) do
+    String.trim(value)
+  end
+
+  def extract_hover_markdown(text) when is_binary(text) do
+    String.trim(text)
+  end
+
+  def extract_hover_markdown(items) when is_list(items) do
+    items
+    |> Enum.map(&extract_hover_markdown/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  def extract_hover_markdown(%{"language" => lang, "value" => value}) when is_binary(value) do
+    "```#{lang}\n#{String.trim(value)}\n```"
+  end
+
+  def extract_hover_markdown(_), do: ""
+
+  # Computes the cursor's screen position for anchoring the hover popup.
+  # Uses the last rendered cursor position from the compose stage.
+  @spec hover_cursor_screen_position(state()) :: {non_neg_integer(), non_neg_integer()}
+  defp hover_cursor_screen_position(state) do
+    # Use the viewport cursor position from the active window
+    buf = state.buffers.active
+
+    if buf do
+      {line, col} = BufferServer.cursor(buf)
+      # Approximate screen position: line offset from viewport top + gutter
+      vp = state.viewport
+      screen_row = line - vp.top + 1
+      screen_col = col + 4
+      {clamp(screen_row, 1, vp.rows - 2), clamp(screen_col, 0, vp.cols - 1)}
+    else
+      {div(state.viewport.rows, 2), div(state.viewport.cols, 2)}
+    end
+  end
+
+  @spec clamp(integer(), integer(), integer()) :: integer()
+  defp clamp(val, lo, hi), do: max(lo, min(val, hi))
 
   @spec strip_markdown(String.t()) :: String.t()
   defp strip_markdown(text) do

@@ -28,6 +28,7 @@ defmodule Minga.Input do
   alias Minga.Input.DiffReview
   alias Minga.Input.FileTreeHandler
   alias Minga.Input.GlobalBindings
+  alias Minga.Input.Hover
   alias Minga.Input.Interrupt
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ModeFSM
@@ -61,6 +62,7 @@ defmodule Minga.Input do
       Dashboard,
       ConflictPrompt,
       Picker,
+      Hover,
       Completion,
       Scoped,
       GlobalBindings,
