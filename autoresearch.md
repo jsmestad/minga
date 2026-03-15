@@ -73,6 +73,12 @@ Replaced raw `System.cmd("git", ["status", ...])` in `FileTree.GitStatus` with `
 ### Extension test restructuring
 Split `Extension.GitTest` into pure unit tests (async: true) and integration tests that spawn real git (async: false). Tests were previously deleted; reviewer caught it and they were restored.
 
+### ExUnit timeouts on integration tests
+Added `@moduletag timeout: 15_000` (Extension.GitIntegrationTest) and `@moduletag timeout: 30_000` (MingaOrgTest) to prevent hung git commands from blocking the sync test queue. Also wrapped the `setup_all` clone in MingaOrgTest in a `Task.async/await` with 25s timeout since ExUnit's per-test timeout doesn't cover `setup_all`.
+
+### set_filetype explicit_options preservation
+Added `explicit_options` MapSet to buffer state. `set_option` tracks which options were explicitly set. `set_filetype` reseeds from global defaults but preserves explicitly-set values. Prevents clipboard `:none` from being overwritten by filetype changes.
+
 ### Dead ends
 - `max_cases: 4` eliminated failures but slowed tests by 45%. Not worth it.
 - Marking `file_find_test` and `project_search_test` as `async: false` was rejected as a workaround; their OS process spawning is marginal (~10 calls total).
