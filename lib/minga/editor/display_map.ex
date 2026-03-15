@@ -75,14 +75,12 @@ defmodule Minga.Editor.DisplayMap do
           t() | nil
   def compute(fold_map, decorations, first_buf_line, visible_rows, total_lines) do
     has_window_folds = not FoldMap.empty?(fold_map)
-    has_closed_dec_folds = Decorations.closed_fold_regions(decorations) != []
+    closed_dec_folds = Decorations.closed_fold_regions(decorations)
     has_virtual_lines = has_virtual_lines?(decorations)
 
-    if not has_window_folds and not has_closed_dec_folds and not has_virtual_lines do
+    if not has_window_folds and closed_dec_folds == [] and not has_virtual_lines do
       nil
     else
-      closed_dec_folds = Decorations.closed_fold_regions(decorations)
-
       entries =
         build_entries(
           fold_map,

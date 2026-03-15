@@ -10,6 +10,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   """
 
   alias Minga.Buffer.Decorations
+  alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -221,39 +222,64 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       visible_line_map
       |> Enum.with_index()
       |> Enum.reduce({[], [], window}, fn {{buf_line, fold_info}, screen_row}, {g, c, win} ->
-        line_index = buf_line - first_line
-        line_text = Enum.at(lines, line_index, "")
-        display_text = fold_display_text(line_text, fold_info)
+        case fold_info do
+          {:virtual_line, vt} ->
+            # Virtual lines render their own styled segments, no buffer content
+            c_cmds = render_virtual_line_entry(vt, screen_row, gutter_w, row_off, col_off)
+            {g, prepend_all(c, c_cmds), win}
 
-        render_folded_line(
-          win,
-          buf_line,
-          display_text,
-          fold_info,
-          screen_row,
-          %{
-            cursor_line: cursor_line,
-            ctx: ctx,
-            ln_style: ln_style,
-            gutter_w: gutter_w,
-            sign_w: sign_w,
-            max_rows: max_rows,
-            row_off: row_off,
-            col_off: col_off
-          },
-          {g, c}
-        )
+          {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
+          when placeholder != nil ->
+            # Decoration fold with custom placeholder: invoke the callback
+            fold_g =
+              fold_gutter_indicator(fold_info, screen_row, row_off, col_off)
+
+            segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
+            c_cmds = render_placeholder_segments(segments, screen_row, gutter_w, row_off, col_off)
+            {fold_g ++ g, prepend_all(c, c_cmds), win}
+
+          _ ->
+            line_index = buf_line - first_line
+            line_text = Enum.at(lines, line_index, "")
+            display_text = fold_display_text(line_text, fold_info)
+
+            render_folded_line(
+              win,
+              buf_line,
+              display_text,
+              fold_info,
+              screen_row,
+              %{
+                cursor_line: cursor_line,
+                ctx: ctx,
+                ln_style: ln_style,
+                gutter_w: gutter_w,
+                sign_w: sign_w,
+                max_rows: max_rows,
+                row_off: row_off,
+                col_off: col_off
+              },
+              {g, c}
+            )
+        end
       end)
 
     {Enum.reverse(gutters), Enum.reverse(contents_rev), length(visible_line_map), window}
   end
 
-  @spec fold_display_text(String.t(), :normal | {:fold_start, pos_integer()}) :: String.t()
+  @spec fold_display_text(String.t(), term()) :: String.t()
   defp fold_display_text(text, :normal), do: text
   defp fold_display_text(text, {:fold_start, hidden}), do: text <> " ··· #{hidden} lines"
 
+  defp fold_display_text(_text, {:decoration_fold, fold}) do
+    hidden = FoldRegion.hidden_count(fold)
+    " ··· #{hidden} lines"
+  end
+
+  defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
+
   @spec fold_gutter_indicator(
-          :normal | {:fold_start, pos_integer()},
+          term(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
@@ -264,6 +290,12 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   defp fold_gutter_indicator(:normal, _screen_row, _row_off, _col_off), do: []
+
+  defp fold_gutter_indicator({:decoration_fold, _}, screen_row, row_off, col_off) do
+    [DisplayList.draw(screen_row + row_off, col_off, "▸")]
+  end
+
+  defp fold_gutter_indicator({:virtual_line, _}, _screen_row, _row_off, _col_off), do: []
 
   @spec render_folded_line(
           Window.t(),
@@ -364,6 +396,50 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       )
 
     {Enum.reverse(gutters), Enum.reverse(contents), screen_row}
+  end
+
+  # Renders a virtual line entry (from DisplayMap) into draw commands.
+  # Virtual lines have no buffer content; they render their styled segments
+  # directly with no line number in the gutter.
+  @spec render_virtual_line_entry(
+          Decorations.VirtualText.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_virtual_line_entry(vt, screen_row, gutter_w, row_off, col_off) do
+    row = screen_row + row_off
+
+    {draws, _col} =
+      Enum.reduce(vt.segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
+        width = Unicode.display_width(text)
+        draw = DisplayList.draw(row, col, text, style)
+        {[draw | acc], col + width}
+      end)
+
+    Enum.reverse(draws)
+  end
+
+  # Renders styled segments from a fold placeholder callback into draw commands.
+  @spec render_placeholder_segments(
+          [{String.t(), keyword()}],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp render_placeholder_segments(segments, screen_row, gutter_w, row_off, col_off) do
+    row = screen_row + row_off
+
+    {draws, _col} =
+      Enum.reduce(segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
+        width = Unicode.display_width(text)
+        draw = DisplayList.draw(row, col, text, style)
+        {[draw | acc], col + width}
+      end)
+
+    Enum.reverse(draws)
   end
 
   @doc "Prepends draw commands to an accumulator."

@@ -81,25 +81,16 @@ defmodule Minga.Editor.DisplayMapTest do
       refute 10 in visible_lines
     end
 
-    test "open decoration fold shows all lines normally" do
+    test "open decoration fold returns nil (fast path, nothing to map)" do
       fm = FoldMap.new()
 
       decs = Decorations.new()
       {_id, decs} = Decorations.add_fold_region(decs, 5, 10, closed: false)
 
-      # With only open folds and no other decorations, DisplayMap should
-      # still return nil (no mapping needed since nothing is hidden)
+      # Open folds don't affect display. closed_fold_regions is empty,
+      # so compute returns nil for the zero-overhead fast path.
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
-
-      # Even though has_fold_regions? is true, closed_fold_regions is empty
-      # and there are no virtual lines, so the fast path kicks in... wait,
-      # has_fold_regions? returns true. So dm won't be nil.
-      # But the entries should show all lines normally.
-      if dm != nil do
-        entries = DisplayMap.to_visible_line_map(dm)
-        types = Enum.map(entries, fn {_, type} -> type end) |> Enum.uniq()
-        assert types == [:normal]
-      end
+      assert dm == nil
     end
   end
 
