@@ -2,7 +2,7 @@ defmodule Minga.Buffer.Decorations do
   @moduledoc """
   Buffer decoration storage and API.
 
-  Stores highlight ranges (and later, virtual text, fold regions, and block
+  Stores highlight ranges and virtual text (and later, fold regions and block
   decorations) for a single buffer. Decorations are visual overlays that do
   not modify the buffer's text content. They are stored per-buffer and
   consumed by the render pipeline during the content rendering stage.
@@ -38,6 +38,7 @@ defmodule Minga.Buffer.Decorations do
   """
 
   alias Minga.Buffer.Decorations.HighlightRange
+  alias Minga.Buffer.Decorations.VirtualText
   alias Minga.Buffer.IntervalTree
 
   @typedoc "A position used in highlight range start/end."
@@ -68,11 +69,13 @@ defmodule Minga.Buffer.Decorations do
   The decorations state for a buffer.
 
   - `highlights`: interval tree of highlight ranges
+  - `virtual_texts`: list of virtual text decorations (queried by line, not range)
   - `pending`: list of pending operations during a batch (nil when not batching)
   - `version`: monotonically increasing version for change detection by the render pipeline
   """
   @type t :: %__MODULE__{
           highlights: IntervalTree.t(),
+          virtual_texts: [VirtualText.t()],
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()}] | nil,
           version: non_neg_integer()
@@ -80,6 +83,7 @@ defmodule Minga.Buffer.Decorations do
 
   @enforce_keys []
   defstruct highlights: nil,
+            virtual_texts: [],
             pending: nil,
             version: 0
 
@@ -182,6 +186,216 @@ defmodule Minga.Buffer.Decorations do
     %__MODULE__{version: decs.version + 1}
   end
 
+  # ── Virtual text API ──────────────────────────────────────────────────────
+
+  @doc """
+  Adds a virtual text decoration to the buffer. Returns `{id, updated_decorations}`.
+
+  ## Options
+
+  - `:segments` (required) - list of `{text, style}` tuples
+  - `:placement` (required) - `:inline`, `:eol`, `:above`, or `:below`
+  - `:priority` (optional, default 0) - determines ordering when multiple
+    virtual texts share the same anchor
+
+  ## Examples
+
+      {id, decs} = Decorations.add_virtual_text(decs, {5, 10},
+        segments: [{"← error here", [fg: 0xFF6C6B, italic: true]}],
+        placement: :eol
+      )
+
+      {id, decs} = Decorations.add_virtual_text(decs, {0, 0},
+        segments: [{"▎ Agent", [fg: 0x51AFEF, bold: true]}],
+        placement: :above
+      )
+  """
+  @spec add_virtual_text(t(), IntervalTree.position(), keyword()) :: {reference(), t()}
+  def add_virtual_text(%__MODULE__{} = decs, anchor, opts) do
+    id = make_ref()
+
+    vt = %VirtualText{
+      id: id,
+      anchor: anchor,
+      segments: Keyword.fetch!(opts, :segments),
+      placement: Keyword.fetch!(opts, :placement),
+      priority: Keyword.get(opts, :priority, 0)
+    }
+
+    new_vts = [vt | decs.virtual_texts]
+    {id, %{decs | virtual_texts: new_vts, version: decs.version + 1}}
+  end
+
+  @doc "Removes a virtual text decoration by ID."
+  @spec remove_virtual_text(t(), reference()) :: t()
+  def remove_virtual_text(%__MODULE__{} = decs, id) do
+    new_vts = Enum.reject(decs.virtual_texts, fn vt -> vt.id == id end)
+
+    if length(new_vts) == length(decs.virtual_texts) do
+      decs
+    else
+      %{decs | virtual_texts: new_vts, version: decs.version + 1}
+    end
+  end
+
+  # ── Virtual text queries ─────────────────────────────────────────────────
+
+  @doc """
+  Returns all virtual text decorations anchored to a specific line,
+  sorted by column then priority.
+  """
+  @spec virtual_texts_for_line(t(), non_neg_integer()) :: [VirtualText.t()]
+  def virtual_texts_for_line(%__MODULE__{virtual_texts: vts}, line) do
+    vts
+    |> Enum.filter(fn %VirtualText{anchor: {l, _c}} -> l == line end)
+    |> Enum.sort_by(fn %VirtualText{anchor: {_l, c}, priority: p} -> {c, p} end)
+  end
+
+  @doc """
+  Returns inline virtual texts for a specific line, sorted by column then priority.
+  """
+  @spec inline_virtual_texts_for_line(t(), non_neg_integer()) :: [VirtualText.t()]
+  def inline_virtual_texts_for_line(%__MODULE__{} = decs, line) do
+    decs
+    |> virtual_texts_for_line(line)
+    |> Enum.filter(fn %VirtualText{placement: p} -> p == :inline end)
+  end
+
+  @doc """
+  Returns EOL virtual texts for a specific line, sorted by priority.
+  """
+  @spec eol_virtual_texts_for_line(t(), non_neg_integer()) :: [VirtualText.t()]
+  def eol_virtual_texts_for_line(%__MODULE__{} = decs, line) do
+    decs
+    |> virtual_texts_for_line(line)
+    |> Enum.filter(fn %VirtualText{placement: p} -> p == :eol end)
+  end
+
+  @doc """
+  Returns virtual lines (`:above` or `:below`) anchored to a specific line.
+  Returns `{above, below}` tuple, each sorted by priority.
+  """
+  @spec virtual_lines_for_line(t(), non_neg_integer()) ::
+          {above :: [VirtualText.t()], below :: [VirtualText.t()]}
+  def virtual_lines_for_line(%__MODULE__{} = decs, line) do
+    line_vts = virtual_texts_for_line(decs, line)
+    above = Enum.filter(line_vts, fn %VirtualText{placement: p} -> p == :above end)
+    below = Enum.filter(line_vts, fn %VirtualText{placement: p} -> p == :below end)
+    {above, below}
+  end
+
+  @doc """
+  Returns true if there are any virtual texts of any placement.
+  """
+  @spec has_virtual_texts?(t()) :: boolean()
+  def has_virtual_texts?(%__MODULE__{virtual_texts: []}), do: false
+  def has_virtual_texts?(%__MODULE__{}), do: true
+
+  @doc """
+  Returns the count of virtual lines (`:above` and `:below`) in the given
+  line range. Used by viewport scroll calculations.
+  """
+  @spec virtual_line_count(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def virtual_line_count(%__MODULE__{virtual_texts: []}, _start_line, _end_line), do: 0
+
+  def virtual_line_count(%__MODULE__{virtual_texts: vts}, start_line, end_line) do
+    Enum.count(vts, fn %VirtualText{anchor: {line, _}, placement: p} ->
+      line >= start_line and line <= end_line and p in [:above, :below]
+    end)
+  end
+
+  # ── Column mapping (inline virtual text) ─────────────────────────────────
+
+  @doc """
+  Converts a buffer column to a display column on the given line,
+  accounting for inline virtual text that shifts content rightward.
+
+  Virtual texts anchored at or before `buf_col` add their display width
+  to the result. Virtual texts after `buf_col` don't affect it.
+  """
+  @spec buf_col_to_display_col(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def buf_col_to_display_col(%__MODULE__{virtual_texts: []}, _line, buf_col), do: buf_col
+
+  def buf_col_to_display_col(%__MODULE__{} = decs, line, buf_col) do
+    inline_vts = inline_virtual_texts_for_line(decs, line)
+    add_virtual_widths(inline_vts, buf_col)
+  end
+
+  @doc """
+  Converts a display column to a buffer column on the given line,
+  accounting for inline virtual text.
+
+  This is the inverse of `buf_col_to_display_col/3`. Used by mouse click
+  position mapping to find the correct buffer column when clicking on a
+  display column that may be offset by virtual text.
+  """
+  @spec display_col_to_buf_col(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def display_col_to_buf_col(%__MODULE__{virtual_texts: []}, _line, display_col), do: display_col
+
+  def display_col_to_buf_col(%__MODULE__{} = decs, line, display_col) do
+    inline_vts = inline_virtual_texts_for_line(decs, line)
+    subtract_virtual_widths(inline_vts, display_col)
+  end
+
+  @spec add_virtual_widths([VirtualText.t()], non_neg_integer()) :: non_neg_integer()
+  defp add_virtual_widths([], buf_col), do: buf_col
+
+  defp add_virtual_widths(inline_vts, buf_col) do
+    Enum.reduce(inline_vts, buf_col, fn %VirtualText{anchor: {_l, anchor_col}} = vt,
+                                        display_col ->
+      if anchor_col <= buf_col do
+        display_col + VirtualText.display_width(vt)
+      else
+        display_col
+      end
+    end)
+  end
+
+  @spec subtract_virtual_widths([VirtualText.t()], non_neg_integer()) :: non_neg_integer()
+  defp subtract_virtual_widths([], display_col), do: display_col
+
+  defp subtract_virtual_widths(inline_vts, display_col) do
+    # Walk through inline virtual texts (sorted by anchor column).
+    # Track the cumulative width of virtual texts seen so far.
+    # Each virtual text shifts subsequent display columns right by its width.
+    {total_vt_width, result} =
+      Enum.reduce_while(inline_vts, {0, nil}, fn vt, {vt_width_sum, _} ->
+        classify_display_col_vs_vt(vt, vt_width_sum, display_col)
+      end)
+
+    # If we didn't halt early, click is past all virtual texts
+    result || display_col - total_vt_width
+  end
+
+  # Click is before this virtual text: subtract accumulated vt width
+  @spec classify_display_col_vs_vt(VirtualText.t(), non_neg_integer(), non_neg_integer()) ::
+          {:halt | :cont, {non_neg_integer(), non_neg_integer() | nil}}
+  defp classify_display_col_vs_vt(
+         %VirtualText{anchor: {_l, anchor_col}},
+         vt_width_sum,
+         display_col
+       )
+       when display_col < anchor_col + vt_width_sum do
+    {:halt, {vt_width_sum, display_col - vt_width_sum}}
+  end
+
+  # Click is ON this virtual text: snap to anchor
+  defp classify_display_col_vs_vt(
+         %VirtualText{anchor: {_l, anchor_col}} = vt,
+         vt_width_sum,
+         display_col
+       ) do
+    vt_w = VirtualText.display_width(vt)
+    display_anchor = anchor_col + vt_width_sum
+
+    if display_col < display_anchor + vt_w do
+      {:halt, {vt_width_sum + vt_w, anchor_col}}
+    else
+      # Click is past this virtual text: accumulate its width
+      {:cont, {vt_width_sum + vt_w, nil}}
+    end
+  end
+
   # ── Batch operations ─────────────────────────────────────────────────────
 
   @doc """
@@ -281,8 +495,12 @@ defmodule Minga.Buffer.Decorations do
   Returns true if there are no decorations of any kind.
   """
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{highlights: nil}), do: true
-  def empty?(%__MODULE__{highlights: hl}), do: IntervalTree.empty?(hl)
+  def empty?(%__MODULE__{highlights: nil, virtual_texts: []}), do: true
+  def empty?(%__MODULE__{highlights: nil, virtual_texts: _}), do: false
+
+  def empty?(%__MODULE__{highlights: hl, virtual_texts: vts}) do
+    IntervalTree.empty?(hl) and vts == []
+  end
 
   # ── Anchor adjustment ───────────────────────────────────────────────────
 
@@ -308,8 +526,13 @@ defmodule Minga.Buffer.Decorations do
           IntervalTree.position(),
           IntervalTree.position()
         ) :: t()
-  def adjust_for_edit(%__MODULE__{highlights: nil} = decs, _edit_start, _edit_end, _new_end),
-    do: decs
+  def adjust_for_edit(
+        %__MODULE__{highlights: nil, virtual_texts: []} = decs,
+        _edit_start,
+        _edit_end,
+        _new_end
+      ),
+      do: decs
 
   def adjust_for_edit(%__MODULE__{} = decs, edit_start, edit_end, new_end) do
     {edit_end_line, edit_end_col} = edit_end
@@ -320,12 +543,41 @@ defmodule Minga.Buffer.Decorations do
     ctx = build_edit_ctx(edit_start, edit_end, new_end, line_delta, col_delta)
 
     new_highlights =
-      IntervalTree.map_filter(decs.highlights, fn interval ->
-        adjust_range(interval.value, interval, ctx)
-      end)
+      if decs.highlights == nil do
+        nil
+      else
+        IntervalTree.map_filter(decs.highlights, fn interval ->
+          adjust_range(interval.value, interval, ctx)
+        end)
+      end
 
-    %{decs | highlights: new_highlights, version: decs.version + 1}
+    new_vts = adjust_virtual_texts(decs.virtual_texts, ctx)
+
+    %{decs | highlights: new_highlights, virtual_texts: new_vts, version: decs.version + 1}
   end
+
+  @spec adjust_virtual_texts([VirtualText.t()], edit_ctx()) :: [VirtualText.t()]
+  defp adjust_virtual_texts([], _ctx), do: []
+
+  defp adjust_virtual_texts(vts, ctx) do
+    Enum.map(vts, fn vt -> adjust_virtual_text_anchor(vt, ctx) end)
+  end
+
+  @spec adjust_virtual_text_anchor(VirtualText.t(), edit_ctx()) :: VirtualText.t()
+  defp adjust_virtual_text_anchor(%VirtualText{anchor: anchor} = vt, ctx) do
+    # Virtual text has a single anchor point. Shift it like a range start.
+    new_anchor = adjust_anchor_position(anchor, ctx)
+    %{vt | anchor: new_anchor}
+  end
+
+  @spec adjust_anchor_position(IntervalTree.position(), edit_ctx()) :: IntervalTree.position()
+  defp adjust_anchor_position(anchor, ctx) when anchor < ctx.edit_start, do: anchor
+
+  defp adjust_anchor_position(anchor, ctx) when anchor >= ctx.edit_end do
+    shift_position(anchor, ctx.edit_end, ctx.line_delta, ctx.col_delta)
+  end
+
+  defp adjust_anchor_position(_anchor, ctx), do: ctx.new_end
 
   @typep edit_ctx :: %{
            edit_start: IntervalTree.position(),

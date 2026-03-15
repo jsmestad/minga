@@ -8,6 +8,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   """
 
   alias Minga.Agent.View.Renderer, as: ViewRenderer
+  alias Minga.Buffer.Decorations
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, WindowFrame}
   alias Minga.Editor.FoldMap
@@ -169,7 +170,11 @@ defmodule Minga.Editor.RenderPipeline.Content do
           end
 
         cr = visible_cursor - viewport.top + row_off
-        cc = gutter_w + cursor_col - viewport.left + col_off
+        # Adjust cursor column for inline virtual text that shifts content right
+        adjusted_cursor_col =
+          Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
+
+        cc = gutter_w + adjusted_cursor_col - viewport.left + col_off
         Cursor.new(cr, cc, Modeline.cursor_shape(state.vim))
       else
         nil

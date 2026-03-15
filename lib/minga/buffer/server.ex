@@ -514,6 +514,24 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:batch_decorations, fun})
   end
 
+  @doc """
+  Adds a virtual text decoration to the buffer.
+
+  Returns the decoration ID (a reference) for later removal.
+  See `Minga.Buffer.Decorations.add_virtual_text/3` for options.
+  """
+  @spec add_virtual_text(GenServer.server(), Decorations.highlight_range_pos(), keyword()) ::
+          reference()
+  def add_virtual_text(server, anchor, opts) do
+    GenServer.call(server, {:add_virtual_text, anchor, opts})
+  end
+
+  @doc "Removes a virtual text decoration by ID."
+  @spec remove_virtual_text(GenServer.server(), reference()) :: :ok
+  def remove_virtual_text(server, id) do
+    GenServer.call(server, {:remove_virtual_text, id})
+  end
+
   @doc "Returns the decorations struct for read-only access (e.g., by the render pipeline)."
   @spec decorations(GenServer.server()) :: Decorations.t()
   def decorations(server) do
@@ -1191,6 +1209,16 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:batch_decorations, fun}, _from, state) do
     decs = Decorations.batch(state.decorations, fun)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call({:add_virtual_text, anchor, opts}, _from, state) do
+    {id, decs} = Decorations.add_virtual_text(state.decorations, anchor, opts)
+    {:reply, id, %{state | decorations: decs}}
+  end
+
+  def handle_call({:remove_virtual_text, id}, _from, state) do
+    decs = Decorations.remove_virtual_text(state.decorations, id)
     {:reply, :ok, %{state | decorations: decs}}
   end
 
