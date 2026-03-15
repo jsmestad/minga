@@ -216,7 +216,7 @@ defmodule Minga.Editor.Commands.Search do
         :substitute_confirm_advance
       ) do
     case Enum.at(ms.matches, ms.current) do
-      {line, col, _len} -> BufferServer.move_to(buf, {line, col})
+      %Minga.Search.Match{line: line, col: col} -> BufferServer.move_to(buf, {line, col})
       _ -> :ok
     end
 
@@ -245,14 +245,14 @@ defmodule Minga.Editor.Commands.Search do
 
       new_content =
         Enum.reduce(sorted_indices, ms.original_content, fn idx, content ->
-          {line, col, len} = Enum.at(ms.matches, idx)
+          %Minga.Search.Match{line: line, col: col, length: len} = Enum.at(ms.matches, idx)
           replace_match(content, line, col, len, ms.replacement)
         end)
 
       BufferServer.replace_content(buf, new_content)
 
       # Restore cursor to a safe position
-      cursor_line = elem(hd(ms.matches), 0)
+      cursor_line = hd(ms.matches).line
       total_lines = BufferServer.line_count(buf)
       safe_line = min(cursor_line, max(0, total_lines - 1))
       BufferServer.move_to(buf, {safe_line, 0})
@@ -283,7 +283,7 @@ defmodule Minga.Editor.Commands.Search do
         all_matches
       else
         all_matches
-        |> Enum.group_by(fn {line, _col, _len} -> line end)
+        |> Enum.group_by(fn %Minga.Search.Match{line: line} -> line end)
         |> Enum.flat_map(fn {_line, line_matches} -> [hd(line_matches)] end)
         |> Enum.sort()
       end
@@ -293,7 +293,7 @@ defmodule Minga.Editor.Commands.Search do
         %{state | status_msg: "Pattern not found: #{pattern}"}
 
       _ ->
-        {first_line, first_col, _len} = hd(matches)
+        %Minga.Search.Match{line: first_line, col: first_col} = hd(matches)
         BufferServer.move_to(buf, {first_line, first_col})
 
         ms = %Minga.Mode.SubstituteConfirmState{

@@ -15,9 +15,10 @@ defmodule Minga.Search do
   """
 
   alias Minga.Buffer.Document
+  alias Minga.Search.Match
 
-  @typedoc "A match: `{line, byte_col, byte_length}`."
-  @type match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @typedoc "A search match with line, byte column, and byte length."
+  @type match :: Match.t()
 
   @typedoc "Search direction."
   @type direction :: :forward | :backward
@@ -66,12 +67,12 @@ defmodule Minga.Search do
   `first_line` is the buffer line number of the first element in `lines`,
   used to compute absolute line numbers in the returned matches.
 
-  Returns a list of `{line, byte_col, byte_length}` tuples.
+  Returns a list of `Search.Match` structs.
 
   ## Examples
 
       iex> Minga.Search.find_all_in_range(["foo bar foo", "baz foo"], "foo", 0)
-      [{0, 0, 3}, {0, 8, 3}, {1, 4, 3}]
+      [%Minga.Search.Match{line: 0, col: 0, length: 3}, %Minga.Search.Match{line: 0, col: 8, length: 3}, %Minga.Search.Match{line: 1, col: 4, length: 3}]
   """
   @spec find_all_in_range([String.t()], String.t(), non_neg_integer()) :: [match()]
   def find_all_in_range(_lines, "", _first_line), do: []
@@ -108,7 +109,7 @@ defmodule Minga.Search do
           abs_pos = start + pos
 
           find_all_overlapping(line, pattern, pat_len, line_num, abs_pos + 1, [
-            {line_num, abs_pos, pat_len} | acc
+            Match.new(line_num, abs_pos, pat_len) | acc
           ])
       end
     end

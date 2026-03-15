@@ -3,6 +3,7 @@ defmodule Minga.SearchTest do
 
   alias Minga.Buffer.Document
   alias Minga.Search
+  alias Minga.Search.Match
 
   # ── find_next/4 ────────────────────────────────────────────────────────
 
@@ -68,12 +69,19 @@ defmodule Minga.SearchTest do
   describe "find_all_in_range/3" do
     test "finds all occurrences across lines" do
       lines = ["foo bar foo", "baz foo"]
-      assert [{0, 0, 3}, {0, 8, 3}, {1, 4, 3}] = Search.find_all_in_range(lines, "foo", 0)
+
+      assert [
+               %Match{line: 0, col: 0, length: 3},
+               %Match{line: 0, col: 8, length: 3},
+               %Match{line: 1, col: 4, length: 3}
+             ] = Search.find_all_in_range(lines, "foo", 0)
     end
 
     test "respects first_line offset" do
       lines = ["foo bar"]
-      assert [{5, 0, 3}] = Search.find_all_in_range(lines, "foo", 5)
+
+      assert [%Match{line: 5, col: 0, length: 3}] =
+               Search.find_all_in_range(lines, "foo", 5)
     end
 
     test "returns empty list for empty pattern" do
@@ -86,7 +94,10 @@ defmodule Minga.SearchTest do
 
     test "finds overlapping start positions" do
       # "aa" in "aaa" should find at col 0 and col 1
-      assert [{0, 0, 2}, {0, 1, 2}] = Search.find_all_in_range(["aaa"], "aa", 0)
+      assert [
+               %Match{line: 0, col: 0, length: 2},
+               %Match{line: 0, col: 1, length: 2}
+             ] = Search.find_all_in_range(["aaa"], "aa", 0)
     end
   end
 

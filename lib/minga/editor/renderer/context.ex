@@ -13,9 +13,9 @@ defmodule Minga.Editor.Renderer.Context do
 
   alias Minga.Buffer.Decorations
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.Viewport
   alias Minga.Highlight
+  alias Minga.Search.Match
 
   @enforce_keys [:viewport, :gutter_w, :content_w]
   defstruct viewport: nil,
@@ -32,11 +32,6 @@ defmodule Minga.Editor.Renderer.Context do
             has_sign_column: false,
             diagnostic_signs: %{},
             git_signs: %{},
-            search_colors: %Minga.Theme.Search{
-              highlight_fg: 0x000000,
-              highlight_bg: 0xECBE7B,
-              current_bg: 0xFF6C6B
-            },
             git_colors: %Minga.Theme.Git{
               added_fg: 0x98BE65,
               modified_fg: 0x51AFEF,
@@ -68,10 +63,10 @@ defmodule Minga.Editor.Renderer.Context do
   @type t :: %__MODULE__{
           viewport: Viewport.t(),
           visual_selection: visual_selection(),
-          search_matches: [SearchHighlight.search_match()],
+          search_matches: [Match.t()],
           gutter_w: non_neg_integer(),
           content_w: pos_integer(),
-          confirm_match: SearchHighlight.search_match() | nil,
+          confirm_match: Match.t() | nil,
           highlight: Highlight.t() | nil,
           cursorline_bg: Minga.Theme.color() | nil,
           nav_flash: Minga.Editor.NavFlash.t() | nil,
@@ -82,7 +77,6 @@ defmodule Minga.Editor.Renderer.Context do
           git_signs: %{non_neg_integer() => Minga.Git.Diff.hunk_type()},
           decorations: Decorations.t(),
           git_colors: Minga.Theme.Git.t(),
-          search_colors: Minga.Theme.Search.t(),
           gutter_colors: Minga.Theme.Gutter.t()
         }
 end

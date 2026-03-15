@@ -17,7 +17,7 @@ defmodule Minga.Mode.SubstituteConfirmState do
             count: nil
 
   @typedoc "A match position: `{line, col, length}`."
-  @type match_pos :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @type match_pos :: Minga.Search.Match.t()
 
   @type t :: %__MODULE__{
           matches: [match_pos()],

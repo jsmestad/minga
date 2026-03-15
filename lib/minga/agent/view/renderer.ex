@@ -803,7 +803,6 @@ defmodule Minga.Agent.View.Renderer do
       has_sign_column: false,
       diagnostic_signs: %{},
       git_signs: %{},
-      search_colors: input.theme.search,
       gutter_colors: input.theme.gutter,
       git_colors: input.theme.git
     }
