@@ -115,6 +115,12 @@ defmodule Minga.Config.Options do
           | :agent_max_cost
           | :agent_api_base_url
           | :agent_api_endpoints
+          | :agent_compaction_threshold
+          | :agent_compaction_keep_recent
+          | :agent_approval_timeout
+          | :agent_subagent_timeout
+          | :agent_mention_max_file_size
+          | :agent_notify_debounce
           | :confirm_quit
           | :font_family
           | :font_size
@@ -194,6 +200,12 @@ defmodule Minga.Config.Options do
     {:agent_max_cost, :float_or_nil, nil},
     {:agent_api_base_url, :string, ""},
     {:agent_api_endpoints, :map_or_nil, nil},
+    {:agent_compaction_threshold, :float_or_nil, 0.8},
+    {:agent_compaction_keep_recent, :pos_integer, 6},
+    {:agent_approval_timeout, :pos_integer, 300_000},
+    {:agent_subagent_timeout, :pos_integer, 300_000},
+    {:agent_mention_max_file_size, :pos_integer, 262_144},
+    {:agent_notify_debounce, :pos_integer, 5_000},
     {:confirm_quit, :boolean, true},
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},

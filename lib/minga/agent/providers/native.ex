@@ -32,6 +32,7 @@ defmodule Minga.Agent.Providers.Native do
   use GenServer
 
   alias Minga.Agent.Compaction
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.ContextArtifact
   alias Minga.Agent.CostCalculator
   alias Minga.Agent.Credentials
@@ -53,7 +54,7 @@ defmodule Minga.Agent.Providers.Native do
   alias ReqLLM.StreamResponse
   alias ReqLLM.ToolCall
 
-  @default_model "anthropic:claude-sonnet-4-20250514"
+  # Thinking levels and cycle order (not config-driven; mode-specific constants).
 
   @thinking_levels %{
     "off" => 0,
@@ -69,6 +70,7 @@ defmodule Minga.Agent.Providers.Native do
     @enforce_keys [
       :provider_pid,
       :model,
+      :config,
       :tools,
       :thinking_level,
       :max_tokens,
@@ -80,6 +82,7 @@ defmodule Minga.Agent.Providers.Native do
     defstruct [
       :provider_pid,
       :model,
+      :config,
       :tools,
       :thinking_level,
       :max_tokens,
@@ -94,6 +97,7 @@ defmodule Minga.Agent.Providers.Native do
     @type t :: %__MODULE__{
             provider_pid: pid(),
             model: String.t(),
+            config: Minga.Agent.Config.t(),
             tools: [ReqLLM.Tool.t()],
             thinking_level: String.t(),
             max_tokens: pos_integer(),
@@ -117,6 +121,7 @@ defmodule Minga.Agent.Providers.Native do
   @type state :: %{
           subscriber: pid(),
           model: String.t(),
+          config: AgentConfig.t(),
           context: Context.t(),
           tools: [ReqLLM.Tool.t()],
           project_root: String.t(),
@@ -215,16 +220,17 @@ defmodule Minga.Agent.Providers.Native do
   @impl GenServer
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
+    config = Keyword.get(opts, :config) || AgentConfig.resolve()
+
     subscriber = Keyword.fetch!(opts, :subscriber)
-    model = Keyword.get(opts, :model, @default_model)
+    model = Keyword.get(opts, :model, config.model)
     thinking_level = Keyword.get(opts, :thinking_level, "off")
     project_root = Keyword.get(opts, :project_root) || detect_project_root()
 
-    max_tokens = Keyword.get(opts, :max_tokens) || read_config_max_tokens()
-    max_retries = Keyword.get(opts, :max_retries) || read_config_max_retries()
-    max_turns = Keyword.get(opts, :max_turns) || read_config_max_turns()
-    max_cost = Keyword.get(opts, :max_cost, :not_set)
-    max_cost = if max_cost == :not_set, do: read_config_max_cost(), else: max_cost
+    max_tokens = Keyword.get(opts, :max_tokens, config.max_tokens)
+    max_retries = Keyword.get(opts, :max_retries, config.max_retries)
+    max_turns = Keyword.get(opts, :max_turns, config.max_turns)
+    max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     provider_pid = self()
     base_tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
@@ -241,6 +247,7 @@ defmodule Minga.Agent.Providers.Native do
     state = %{
       subscriber: subscriber,
       model: model,
+      config: config,
       context: context,
       tools: tools,
       project_root: project_root,
@@ -297,6 +304,7 @@ defmodule Minga.Agent.Providers.Native do
       lctx = %LoopCtx{
         provider_pid: self(),
         model: state.model,
+        config: state.config,
         tools: state.tools,
         thinking_level: state.thinking_level,
         max_tokens: state.max_tokens,
@@ -350,6 +358,7 @@ defmodule Minga.Agent.Providers.Native do
     lctx = %LoopCtx{
       provider_pid: self(),
       model: state.model,
+      config: state.config,
       tools: state.tools,
       thinking_level: state.thinking_level,
       max_tokens: state.max_tokens,
@@ -471,7 +480,7 @@ defmodule Minga.Agent.Providers.Native do
   def handle_call(:compact, _from, state) do
     compact_opts = [
       model: state.model,
-      llm_client: summary_client(state.llm_client)
+      llm_client: summary_client(state.llm_client, state.config)
     ]
 
     case Compaction.compact(state.context, compact_opts) do
@@ -669,7 +678,8 @@ defmodule Minga.Agent.Providers.Native do
     # Check if context needs compaction before the API call
     context = maybe_compact_context(lctx, context)
 
-    stream_opts = build_stream_opts(lctx.model, lctx.tools, lctx.thinking_level, lctx.max_tokens)
+    stream_opts =
+      build_stream_opts(lctx.model, lctx.tools, lctx.thinking_level, lctx.max_tokens, lctx.config)
 
     # Emit pre-send token estimate so the context bar updates before the API call
     emit_context_usage(lctx, context)
@@ -821,7 +831,7 @@ defmodule Minga.Agent.Providers.Native do
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
     context = Context.append(context, assistant_msg)
 
-    context = execute_tools(lctx.provider_pid, context, tool_calls, lctx.tools)
+    context = execute_tools(lctx.provider_pid, context, tool_calls, lctx.tools, lctx.config)
     send(lctx.provider_pid, {:agent_context_update, context})
 
     # Track cost from this turn and increment turn count for safety checks
@@ -839,16 +849,17 @@ defmodule Minga.Agent.Providers.Native do
     run_agent_loop(lctx, context)
   end
 
-  @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()]) :: Context.t()
-  defp execute_tools(provider_pid, context, tool_calls, available_tools) do
-    initial_mode = approval_mode_from_config()
+  @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()], AgentConfig.t()) ::
+          Context.t()
+  defp execute_tools(provider_pid, context, tool_calls, available_tools, config) do
+    initial_mode = approval_mode(config)
 
     {final_ctx, _mode} =
       Enum.reduce(tool_calls, {context, initial_mode}, fn tool_call, {ctx, approval_mode} ->
         before_content = capture_file_before(tool_call)
 
         {result_text, is_error, new_mode} =
-          execute_with_approval(provider_pid, tool_call, available_tools, approval_mode)
+          execute_with_approval(provider_pid, tool_call, available_tools, approval_mode, config)
 
         send(
           provider_pid,
@@ -872,11 +883,11 @@ defmodule Minga.Agent.Providers.Native do
 
   @typep approval_mode :: :none | :ask | :ask_all | :approve_all
 
-  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
+  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode(), AgentConfig.t()) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_approval(provider_pid, tool_call, available_tools, mode) do
+  defp execute_with_approval(provider_pid, tool_call, available_tools, mode, config) do
     # Per-tool permissions override the global approval mode.
-    case tool_permission(tool_call.name) do
+    case tool_permission(tool_call.name, config) do
       :allow ->
         {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
         {result, is_error, mode}
@@ -885,33 +896,39 @@ defmodule Minga.Agent.Providers.Native do
         {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode}
 
       :ask ->
-        request_approval(provider_pid, tool_call, available_tools)
+        request_approval(provider_pid, tool_call, available_tools, config)
 
       nil ->
         # No per-tool override; fall through to global approval mode.
-        execute_with_global_mode(provider_pid, tool_call, available_tools, mode)
+        execute_with_global_mode(provider_pid, tool_call, available_tools, mode, config)
     end
   end
 
-  @spec execute_with_global_mode(pid(), map(), [ReqLLM.Tool.t()], approval_mode()) ::
+  @spec execute_with_global_mode(
+          pid(),
+          map(),
+          [ReqLLM.Tool.t()],
+          approval_mode(),
+          AgentConfig.t()
+        ) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :none) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :none, _config) do
     {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :none}
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :approve_all) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :approve_all, _config) do
     {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
     {result, is_error, :approve_all}
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask_all) do
-    request_approval(provider_pid, tool_call, available_tools)
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask_all, config) do
+    request_approval(provider_pid, tool_call, available_tools, config)
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask) do
+  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask, config) do
     if Tools.destructive?(tool_call.name) do
-      request_approval(provider_pid, tool_call, available_tools)
+      request_approval(provider_pid, tool_call, available_tools, config)
     else
       {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
       {result, is_error, :ask}
@@ -920,9 +937,9 @@ defmodule Minga.Agent.Providers.Native do
 
   # Looks up per-tool permission from config. Returns :allow, :deny, :ask, or nil
   # (no override for this tool).
-  @spec tool_permission(String.t()) :: :allow | :deny | :ask | nil
-  defp tool_permission(tool_name) do
-    case Options.get(:agent_tool_permissions) do
+  @spec tool_permission(String.t(), AgentConfig.t()) :: :allow | :deny | :ask | nil
+  defp tool_permission(tool_name, config) do
+    case config.tool_permissions do
       nil ->
         nil
 
@@ -937,29 +954,20 @@ defmodule Minga.Agent.Providers.Native do
           _ -> nil
         end
     end
-  rescue
-    ArgumentError -> nil
-  catch
-    :exit, _ -> nil
   end
 
-  @spec approval_mode_from_config() :: approval_mode()
-  defp approval_mode_from_config do
-    case Options.get(:agent_tool_approval) do
+  @spec approval_mode(AgentConfig.t()) :: approval_mode()
+  defp approval_mode(config) do
+    case config.tool_approval do
       :none -> :none
       :all -> :ask_all
       :destructive -> :ask
     end
-  rescue
-    # Options agent not started (tests, standalone usage)
-    _ -> :ask
   end
 
-  @approval_timeout_ms 300_000
-
-  @spec request_approval(pid(), map(), [ReqLLM.Tool.t()]) ::
+  @spec request_approval(pid(), map(), [ReqLLM.Tool.t()], AgentConfig.t()) ::
           {String.t(), boolean(), :ask | :approve_all}
-  defp request_approval(provider_pid, tool_call, available_tools) do
+  defp request_approval(provider_pid, tool_call, available_tools, config) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send(
       provider_pid,
@@ -985,7 +993,7 @@ defmodule Minga.Agent.Providers.Native do
       {:tool_approval_response, _tool_call_id, :reject} ->
         {"Tool rejected by user", true, :ask}
     after
-      @approval_timeout_ms ->
+      config.approval_timeout_ms ->
         {"Tool approval timed out", true, :ask}
     end
   end
@@ -1084,7 +1092,7 @@ defmodule Minga.Agent.Providers.Native do
   defp maybe_compact_context(lctx, context) do
     compact_opts = [
       model: lctx.model,
-      llm_client: summary_client(lctx.llm_client)
+      llm_client: summary_client(lctx.llm_client, lctx.config)
     ]
 
     case Compaction.maybe_compact(context, compact_opts) do
@@ -1106,14 +1114,20 @@ defmodule Minga.Agent.Providers.Native do
   # Used by the Compaction module which doesn't need streaming.
   # Makes a synchronous LLM call (no streaming, no tool calls).
   # Used for meta-operations like summarization.
-  @spec call_llm_sync(llm_client(), String.t(), [map()], keyword()) ::
+  @spec call_llm_sync(llm_client(), String.t(), [map()], keyword(), AgentConfig.t()) ::
           {:ok, String.t()} | {:error, term()}
   @spec generate_and_save_summary(state(), [map()]) ::
           {:ok, String.t(), String.t()} | {:error, String.t()}
   defp generate_and_save_summary(state, messages) do
     summary_messages = messages ++ [Context.user(ContextArtifact.summary_prompt())]
 
-    case call_llm_sync(state.llm_client, state.model, summary_messages, max_tokens: 4096) do
+    case call_llm_sync(
+           state.llm_client,
+           state.model,
+           summary_messages,
+           [max_tokens: 4096],
+           state.config
+         ) do
       {:ok, summary_text} ->
         case ContextArtifact.save(summary_text, project_root: state.project_root) do
           {:ok, path} -> {:ok, summary_text, path}
@@ -1125,11 +1139,11 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  defp call_llm_sync(llm_client, model, messages, opts) do
+  defp call_llm_sync(llm_client, model, messages, opts, config) do
     stream_opts =
       opts
       |> Keyword.take([:max_tokens])
-      |> maybe_add_base_url(model)
+      |> maybe_add_base_url(model, config)
 
     with {:ok, stream_response} <- llm_client.(model, messages, stream_opts),
          {:ok, response} <- StreamResponse.process_stream(stream_response) do
@@ -1137,10 +1151,10 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @spec summary_client(llm_client()) :: Compaction.summary_fn()
-  defp summary_client(llm_client) do
+  @spec summary_client(llm_client(), AgentConfig.t()) :: Compaction.summary_fn()
+  defp summary_client(llm_client, config) do
     fn model, messages, opts ->
-      opts = maybe_add_base_url(opts, model)
+      opts = maybe_add_base_url(opts, model, config)
 
       with {:ok, stream_response} <- llm_client.(model, messages, opts),
            {:ok, response} <- StreamResponse.process_stream(stream_response) do
@@ -1149,16 +1163,23 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @spec build_stream_opts(String.t(), [ReqLLM.Tool.t()], String.t(), pos_integer()) :: keyword()
-  defp build_stream_opts(model, tools, thinking_level, max_tokens) do
+  @spec build_stream_opts(
+          String.t(),
+          [ReqLLM.Tool.t()],
+          String.t(),
+          pos_integer(),
+          AgentConfig.t()
+        ) ::
+          keyword()
+  defp build_stream_opts(model, tools, thinking_level, max_tokens, config) do
     opts = [tools: tools, max_tokens: max_tokens]
 
     # Inject custom base URL if configured (for API gateways, load balancers, etc.)
-    opts = maybe_add_base_url(opts, model)
+    opts = maybe_add_base_url(opts, model, config)
 
     # Enable Anthropic prompt caching when the model is Anthropic
     opts =
-      if anthropic_model?(model) and prompt_cache_enabled?() do
+      if anthropic_model?(model) and prompt_cache_enabled?(config) do
         Keyword.put(opts, :provider_options, anthropic_prompt_cache: true)
       else
         opts
@@ -1189,14 +1210,8 @@ defmodule Minga.Agent.Providers.Native do
       not String.contains?(model, ":")
   end
 
-  @spec prompt_cache_enabled?() :: boolean()
-  defp prompt_cache_enabled? do
-    Options.get(:agent_prompt_cache)
-  rescue
-    _ -> true
-  catch
-    :exit, _ -> true
-  end
+  @spec prompt_cache_enabled?(AgentConfig.t()) :: boolean()
+  defp prompt_cache_enabled?(config), do: config.prompt_cache
 
   # Resolves the API base URL for the current request. Precedence:
   #
@@ -1204,12 +1219,12 @@ defmodule Minga.Agent.Providers.Native do
   # 2. Per-provider endpoint from :agent_api_endpoints map
   # 3. Global :agent_api_base_url config
   # 4. No override (use provider default)
-  @spec maybe_add_base_url(keyword(), String.t()) :: keyword()
-  defp maybe_add_base_url(opts, model) do
+  @spec maybe_add_base_url(keyword(), String.t(), AgentConfig.t()) :: keyword()
+  defp maybe_add_base_url(opts, model, config) do
     url =
       non_empty(System.get_env("MINGA_API_BASE_URL")) ||
-        per_provider_url(model) ||
-        non_empty(read_config_string(:agent_api_base_url))
+        per_provider_url(model, config) ||
+        non_empty(config.api_base_url)
 
     if url do
       Keyword.put(opts, :base_url, url)
@@ -1218,11 +1233,11 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @spec per_provider_url(String.t()) :: String.t() | nil
-  defp per_provider_url(model) do
+  @spec per_provider_url(String.t(), AgentConfig.t()) :: String.t() | nil
+  defp per_provider_url(model, config) do
     provider = strip_provider_prefix_to_provider(model)
 
-    case read_config_endpoints() do
+    case config.api_endpoints do
       endpoints when is_map(endpoints) -> non_empty(Map.get(endpoints, provider))
       _ -> nil
     end
@@ -1234,15 +1249,6 @@ defmodule Minga.Agent.Providers.Native do
       [provider, _name] -> provider
       [_bare] -> "anthropic"
     end
-  end
-
-  @spec read_config_endpoints() :: map() | nil
-  defp read_config_endpoints do
-    Options.get(:agent_api_endpoints)
-  rescue
-    _ -> nil
-  catch
-    :exit, _ -> nil
   end
 
   @spec non_empty(String.t() | nil) :: String.t() | nil
@@ -1457,28 +1463,9 @@ defmodule Minga.Agent.Providers.Native do
     end
   end
 
-  @default_max_tokens 16_384
-
-  @spec read_config_max_tokens() :: pos_integer()
-  defp read_config_max_tokens do
-    Options.get(:agent_max_tokens)
-  rescue
-    _ -> @default_max_tokens
-  catch
-    :exit, _ -> @default_max_tokens
-  end
-
-  @default_max_retries 3
-
-  @spec read_config_max_retries() :: non_neg_integer()
-  defp read_config_max_retries do
-    Options.get(:agent_max_retries)
-  rescue
-    _ -> @default_max_retries
-  catch
-    :exit, _ -> @default_max_retries
-  end
-
+  # read_config_model_list is still needed by cycle_model which reads
+  # the list at call time (not at init). This will migrate when the
+  # remaining consumer functions are updated to use config from state.
   @spec read_config_model_list() :: [String.t()]
   defp read_config_model_list do
     Options.get(:agent_models)
@@ -1486,26 +1473,6 @@ defmodule Minga.Agent.Providers.Native do
     _ -> []
   catch
     :exit, _ -> []
-  end
-
-  @default_max_turns 100
-
-  @spec read_config_max_turns() :: pos_integer()
-  defp read_config_max_turns do
-    Options.get(:agent_max_turns)
-  rescue
-    ArgumentError -> @default_max_turns
-  catch
-    :exit, _ -> @default_max_turns
-  end
-
-  @spec read_config_max_cost() :: float() | nil
-  defp read_config_max_cost do
-    Options.get(:agent_max_cost)
-  rescue
-    ArgumentError -> nil
-  catch
-    :exit, _ -> nil
   end
 
   # Works with both LoopCtx and state since both have max_cost/session_cost fields.
