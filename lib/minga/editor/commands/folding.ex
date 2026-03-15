@@ -81,8 +81,8 @@ defmodule Minga.Editor.Commands.Folding do
     end
   end
 
-  @spec toggle_decoration_fold_on_buffer(pid() | nil) :: :ok
-  defp toggle_decoration_fold_on_buffer(buf) when is_pid(buf) do
+  @spec toggle_decoration_fold_on_buffer(pid()) :: :ok
+  defp toggle_decoration_fold_on_buffer(buf) do
     {cursor_line, _} = BufferServer.cursor(buf)
     decs = BufferServer.decorations(buf)
 
@@ -96,6 +96,4 @@ defmodule Minga.Editor.Commands.Folding do
   catch
     :exit, _ -> :ok
   end
-
-  defp toggle_decoration_fold_on_buffer(_buf), do: :ok
 end
