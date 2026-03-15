@@ -9,6 +9,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -90,6 +91,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         nil
       end
 
+    decorations = window_decorations(window)
+
     %Context{
       viewport: viewport,
       visual_selection: visual_selection,
@@ -103,6 +106,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       nav_flash_bg: state.theme.editor.nav_flash_bg,
       editor_bg: state.theme.editor.bg,
       has_sign_column: has_sign_column,
+      decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_window(state, window),
       git_signs: git_signs_for_window(state, window),
       search_colors: state.theme.search,
@@ -369,6 +373,20 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   # ── Window data ────────────────────────────────────────────────────────────
 
+  @doc "Returns the decorations for a window's buffer."
+  @spec window_decorations(Window.t()) :: Decorations.t()
+  def window_decorations(%{buffer: buf}) when is_pid(buf) do
+    if Process.alive?(buf) do
+      BufferServer.decorations(buf)
+    else
+      Decorations.new()
+    end
+  catch
+    :exit, _ -> Decorations.new()
+  end
+
+  def window_decorations(_window), do: Decorations.new()
+
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
   def window_highlight(state, window) do
@@ -465,7 +483,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       ctx.git_signs,
       ctx.viewport.left,
       is_active,
-      ctx.confirm_match
+      ctx.confirm_match,
+      ctx.decorations.version
     }
   end
 

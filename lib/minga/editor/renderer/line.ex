@@ -14,6 +14,7 @@ defmodule Minga.Editor.Renderer.Line do
   All render functions return `DisplayList.draw()` tuples.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
@@ -38,9 +39,29 @@ defmodule Minga.Editor.Renderer.Line do
       |> display_drop(ctx.viewport.left)
       |> display_take(ctx.content_w)
 
+    # Query decoration highlights once per line, reuse across render paths
+    line_highlights =
+      if Decorations.empty?(ctx.decorations) do
+        []
+      else
+        Decorations.highlights_for_line(ctx.decorations, buf_line)
+      end
+
     case selection_cols_for_line(buf_line, line_display_len, ctx.visual_selection) do
       nil when ctx.highlight != nil ->
-        render_highlighted_line(line_text, screen_row, ctx, line_byte_offset)
+        render_highlighted_line(
+          line_text,
+          screen_row,
+          buf_line,
+          ctx,
+          line_byte_offset,
+          line_highlights
+        )
+
+      nil when line_highlights != [] ->
+        # No syntax highlighting but has decorations: render through the
+        # styled-segment path so decorations are applied
+        render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
 
       nil ->
         visible_graphemes = Enum.map(visible_pairs, fn {g, _} -> g end)
@@ -217,30 +238,124 @@ defmodule Minga.Editor.Renderer.Line do
   defp selection_cols_for_line(_buf_line, _line_display_len, {:char, _start_pos, _end_pos}),
     do: :full
 
+  # ── Decorated plain line (no tree-sitter, has decorations) ──────────────────
+
+  # Renders a plain-text line (no tree-sitter) with decoration highlight ranges.
+  # Uses the same segment-based rendering as syntax-highlighted lines, but
+  # starts with the entire line as a single unstyled segment.
+  @spec render_decorated_plain_line(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t(),
+          [Decorations.highlight_range()]
+        ) :: [DisplayList.draw()]
+  defp render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights) do
+    segments = [{line_text, []}]
+    segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
+    render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
   # ── Syntax highlighting ──────────────────────────────────────────────────────
 
-  @spec render_highlighted_line(String.t(), non_neg_integer(), Context.t(), non_neg_integer()) ::
+  @spec render_highlighted_line(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t(),
+          non_neg_integer(),
+          [Decorations.highlight_range()]
+        ) ::
           [DisplayList.draw()]
-  defp render_highlighted_line(line_text, screen_row, ctx, line_byte_offset) do
+  defp render_highlighted_line(
+         line_text,
+         screen_row,
+         buf_line,
+         ctx,
+         line_byte_offset,
+         line_highlights
+       ) do
     segments = Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
 
-    # Apply horizontal scroll: track display column, skip segments before
-    # viewport.left, clip segments that straddle the boundary.
-    left = ctx.viewport.left
-    max_col = ctx.content_w
+    # Merge decoration highlight ranges with syntax segments (pre-queried, no double lookup)
+    segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
 
+    render_segments_with_scroll(segments, screen_row, ctx)
+  end
+
+  # Shared rendering for styled segments with horizontal scroll clipping.
+  # Used by both syntax-highlighted and decorated-plain-text paths.
+  @spec render_segments_with_scroll(
+          [{String.t(), keyword()}],
+          non_neg_integer(),
+          Context.t()
+        ) :: [DisplayList.draw()]
+  defp render_segments_with_scroll(segments, screen_row, ctx) do
     {commands, _screen_col, _buf_col} =
       Enum.reduce(segments, {[], 0, 0}, fn {text, style}, {cmds, screen_col, buf_col} ->
-        seg_end = buf_col + Unicode.display_width(text)
-
-        cond do
-          seg_end <= left -> {cmds, screen_col, seg_end}
-          screen_col >= max_col -> {cmds, screen_col, seg_end}
-          true -> clip_and_draw(text, style, screen_row, ctx, cmds, screen_col, buf_col, seg_end)
-        end
+        render_segment_with_scroll(text, style, screen_row, ctx, cmds, screen_col, buf_col)
       end)
 
     Enum.reverse(commands)
+  end
+
+  @spec render_segment_with_scroll(
+          String.t(),
+          keyword(),
+          non_neg_integer(),
+          Context.t(),
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
+  defp render_segment_with_scroll(text, style, screen_row, ctx, cmds, screen_col, buf_col) do
+    seg_end = buf_col + Unicode.display_width(text)
+    scroll_segment(seg_end, text, style, screen_row, ctx, cmds, screen_col, buf_col)
+  end
+
+  # Segment is entirely before the viewport left edge: skip
+  @spec scroll_segment(
+          non_neg_integer(),
+          String.t(),
+          keyword(),
+          non_neg_integer(),
+          Context.t(),
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {[DisplayList.draw()], non_neg_integer(), non_neg_integer()}
+  defp scroll_segment(
+         seg_end,
+         _text,
+         _style,
+         _screen_row,
+         %{viewport: %{left: left}},
+         cmds,
+         screen_col,
+         _buf_col
+       )
+       when seg_end <= left do
+    {cmds, screen_col, seg_end}
+  end
+
+  # Already past the right edge of the viewport: skip
+  defp scroll_segment(
+         seg_end,
+         _text,
+         _style,
+         _screen_row,
+         %{content_w: cw},
+         cmds,
+         screen_col,
+         _buf_col
+       )
+       when screen_col >= cw do
+    {cmds, screen_col, seg_end}
+  end
+
+  # Segment is visible: clip and draw
+  defp scroll_segment(seg_end, text, style, screen_row, ctx, cmds, screen_col, buf_col) do
+    clip_and_draw(text, style, screen_row, ctx, cmds, screen_col, buf_col, seg_end)
   end
 
   @spec clip_and_draw(

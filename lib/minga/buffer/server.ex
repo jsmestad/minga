@@ -18,6 +18,7 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.Unicode
@@ -471,6 +472,58 @@ defmodule Minga.Buffer.Server do
   def apply_navigable_snapshot(server, %BufferSnapshot{document: new_doc, scroll: scroll}) do
     apply_snapshot(server, new_doc)
     scroll
+  end
+
+  # ── Decoration API ──
+
+  @doc """
+  Adds a highlight range decoration to the buffer.
+
+  Returns the decoration ID (a reference) for later removal.
+  See `Minga.Buffer.Decorations.add_highlight/4` for options.
+  """
+  @spec add_highlight(
+          GenServer.server(),
+          Decorations.highlight_range_pos(),
+          Decorations.highlight_range_pos(),
+          keyword()
+        ) :: reference()
+  def add_highlight(server, start_pos, end_pos, opts) do
+    GenServer.call(server, {:add_highlight, start_pos, end_pos, opts})
+  end
+
+  @doc "Removes a highlight range by ID."
+  @spec remove_highlight(GenServer.server(), reference()) :: :ok
+  def remove_highlight(server, id) do
+    GenServer.call(server, {:remove_highlight, id})
+  end
+
+  @doc "Removes all highlight ranges in a group."
+  @spec remove_highlight_group(GenServer.server(), atom()) :: :ok
+  def remove_highlight_group(server, group) when is_atom(group) do
+    GenServer.call(server, {:remove_highlight_group, group})
+  end
+
+  @doc """
+  Executes a batch of decoration operations. The function receives and
+  returns a `Decorations` struct. All operations are applied with a
+  single tree rebuild.
+  """
+  @spec batch_decorations(GenServer.server(), (Decorations.t() -> Decorations.t())) :: :ok
+  def batch_decorations(server, fun) when is_function(fun, 1) do
+    GenServer.call(server, {:batch_decorations, fun})
+  end
+
+  @doc "Returns the decorations struct for read-only access (e.g., by the render pipeline)."
+  @spec decorations(GenServer.server()) :: Decorations.t()
+  def decorations(server) do
+    GenServer.call(server, :decorations)
+  end
+
+  @doc "Returns the decorations version for cheap change detection."
+  @spec decorations_version(GenServer.server()) :: non_neg_integer()
+  def decorations_version(server) do
+    GenServer.call(server, :decorations_version)
   end
 
   # ── Server Callbacks ──
@@ -1119,6 +1172,36 @@ defmodule Minga.Buffer.Server do
     {:reply, :ok, BufState.break_undo_coalescing(state)}
   end
 
+  # ── Decoration callbacks ──
+
+  def handle_call({:add_highlight, start_pos, end_pos, opts}, _from, state) do
+    {id, decs} = Decorations.add_highlight(state.decorations, start_pos, end_pos, opts)
+    {:reply, id, %{state | decorations: decs}}
+  end
+
+  def handle_call({:remove_highlight, id}, _from, state) do
+    decs = Decorations.remove_highlight(state.decorations, id)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call({:remove_highlight_group, group}, _from, state) do
+    decs = Decorations.remove_group(state.decorations, group)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call({:batch_decorations, fun}, _from, state) do
+    decs = Decorations.batch(state.decorations, fun)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call(:decorations, _from, state) do
+    {:reply, state.decorations, state}
+  end
+
+  def handle_call(:decorations_version, _from, state) do
+    {:reply, state.decorations.version, state}
+  end
+
   # ── Private ──
 
   # Resolves an option using the chain: buffer-local → filetype → global.
@@ -1228,7 +1311,22 @@ defmodule Minga.Buffer.Server do
 
   @spec record_edit(state(), EditDelta.t()) :: state()
   defp record_edit(state, delta) do
-    %{state | pending_edits: [delta | state.pending_edits]}
+    state = %{state | pending_edits: [delta | state.pending_edits]}
+
+    # Adjust decoration anchors based on the edit
+    if Decorations.empty?(state.decorations) do
+      state
+    else
+      adjusted =
+        Decorations.adjust_for_edit(
+          state.decorations,
+          delta.start_position,
+          delta.old_end_position,
+          delta.new_end_position
+        )
+
+      %{state | decorations: adjusted}
+    end
   end
 
   # Clear pending edits to force HighlightSync into full content sync.
