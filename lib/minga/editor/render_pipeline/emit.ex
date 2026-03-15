@@ -15,6 +15,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.Title
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.Telemetry
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -27,10 +28,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec emit(Frame.t(), state()) :: :ok
   def emit(frame, state) do
     commands = DisplayList.to_commands(frame)
-    PortManager.send_commands(state.port_manager, commands)
-    send_title(state)
-    send_window_bg(state)
-    :ok
+    byte_count = IO.iodata_length(commands)
+
+    Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
+      PortManager.send_commands(state.port_manager, commands)
+      send_title(state)
+      send_window_bg(state)
+      :ok
+    end)
   end
 
   @spec send_title(state()) :: :ok

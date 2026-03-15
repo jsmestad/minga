@@ -385,7 +385,9 @@ defmodule Minga.Editor.Commands do
         state
 
       {:ok, %Command{execute: fun}} ->
-        fun.(state)
+        Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
+          fun.(state)
+        end)
 
       :error ->
         state

@@ -34,6 +34,7 @@ defmodule Minga.Application do
   alias Minga.Agent.SessionStore
   alias Minga.Config.Options
   alias Minga.Highlight.Grammar
+  alias Minga.Telemetry.DevHandler
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
@@ -43,6 +44,7 @@ defmodule Minga.Application do
     # messages while the Editor is restarting. The Editor flushes it on init.
     Minga.LoggerHandler.ensure_buffer_table()
     Grammar.init_registry()
+    DevHandler.attach()
 
     base_children = [
       Minga.Language.Registry,
