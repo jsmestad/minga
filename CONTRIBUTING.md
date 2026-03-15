@@ -94,6 +94,60 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 2. Add decoder + handler in `zig/src/protocol.zig` and `zig/src/renderer.zig`
 3. Test encode/decode round-trip on both sides
 
+## Performance Debugging with Telemetry
+
+Minga instruments the keystroke-to-render critical path with `:telemetry` spans. Set `:log_level_render` to `:debug` in your config to see per-stage timing in `*Messages*` (press `SPC b m` to view):
+
+```elixir
+# In ~/.config/minga/config.exs
+set :log_level_render, :debug
+```
+
+This shows output like:
+
+```
+[render:invalidation] 0µs
+[render:layout] 12µs
+[render:scroll] 45µs
+[render:content] 89µs
+[render:chrome] 34µs
+[render:compose] 18µs
+[render:emit] 22µs
+[render:total] 224µs
+[input:dispatch] 312µs
+[command:move_down] 8µs
+[port:emit] 48µs (1234 bytes)
+```
+
+### Available telemetry events
+
+| Event | Metadata | What it measures |
+|-------|----------|------------------|
+| `[:minga, :render, :pipeline]` | `window_count` | Full render frame |
+| `[:minga, :render, :stage]` | `stage` atom | Individual render stage |
+| `[:minga, :input, :dispatch]` | | Keystroke through input router |
+| `[:minga, :command, :execute]` | `command` atom | Named command execution |
+| `[:minga, :port, :emit]` | `byte_count` | Protocol encoding + port write |
+
+### Attaching custom handlers
+
+For deeper analysis (histograms, percentile tracking), attach your own handler in IEx or a config file:
+
+```elixir
+:telemetry.attach("my-handler", [:minga, :render, :pipeline, :stop], fn _event, measurements, metadata, _config ->
+  duration_us = System.convert_time_unit(measurements.duration, :native, :microsecond)
+  IO.puts("Frame: #{duration_us}µs, windows: #{metadata.window_count}")
+end, nil)
+```
+
+### Running the overhead benchmark
+
+To verify telemetry overhead is negligible:
+
+```bash
+mix run benchmarks/telemetry_overhead.exs
+```
+
 ## Commit Messages
 
 ```
