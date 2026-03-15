@@ -230,20 +230,44 @@ defmodule Minga.Editor.RenderPipeline.Content do
   # input from ViewRenderer.
   @spec render_agent_chat_window(state(), Window.t(), Window.id(), Layout.window_layout()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
+  @sidebar_width 28
+
   defp render_agent_chat_window(state, window, _win_id, win_layout) do
     {row_off, col_off, width, height} = win_layout.content
     buf = window.buffer
 
+    # Split the window rect into chat content and sidebar.
+    # Sidebar only shows when the window is wide enough (> 80 cols).
+    {chat_width, sidebar_draws} =
+      if width > 80 do
+        sw = min(@sidebar_width, div(width, 3))
+        chat_w = width - sw - 1
+        sidebar_col = col_off + chat_w + 1
+        sidebar_rect = {row_off, sidebar_col, sw, height}
+
+        separator_draws =
+          for row <- 0..(height - 1) do
+            DisplayList.draw(row_off + row, col_off + chat_w, "│",
+              fg: state.theme.editor.split_border_fg
+            )
+          end
+
+        dashboard = ViewRenderer.render_dashboard_only(state, sidebar_rect)
+        {chat_w, separator_draws ++ dashboard}
+      else
+        {width, []}
+      end
+
     # Compute prompt height and subdivide the content rect.
     # Uses the same layout math as ViewRenderer.render_in_rect to keep
     # prompt position consistent with the old rendering path.
-    prompt_height = ViewRenderer.prompt_height(state, width)
+    prompt_height = ViewRenderer.prompt_height(state, chat_width)
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)
     prompt_row = row_off + chat_height + input_v_gap
 
     # Render the prompt (agent chrome, not buffer content)
-    prompt_rect = {prompt_row, col_off, width, prompt_height}
+    prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
     prompt_draws = ViewRenderer.render_prompt_only(state, prompt_rect)
 
     # Render the chat content through the standard buffer pipeline
@@ -251,7 +275,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     {cursor_line, cursor_byte_col} = agent_window_cursor(window, buf, is_active)
 
     line_count = BufferServer.line_count(buf)
-    viewport = Viewport.new(chat_height, width, 0)
+    viewport = Viewport.new(chat_height, chat_width, 0)
     viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buf)
     visible_rows = Viewport.content_rows(viewport)
     {first_line, _} = Viewport.visible_range(viewport)
@@ -266,7 +290,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
     line_number_style = BufferServer.get_option(buf, :line_numbers)
     gutter_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
-    content_w = max(width - gutter_w, 1)
+    content_w = max(chat_width - gutter_w, 1)
 
     # Build render context (includes decorations from the buffer)
     render_ctx =
@@ -375,7 +399,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     frame = %WindowFrame{
       rect: {0, 0, width, height},
       gutter: DisplayList.draws_to_layer(gutter_draws),
-      lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws),
+      lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws ++ sidebar_draws),
       tilde_lines: DisplayList.draws_to_layer(tilde_draws),
       modeline: %{},
       cursor: final_cursor

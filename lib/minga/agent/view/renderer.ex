@@ -180,6 +180,13 @@ defmodule Minga.Agent.View.Renderer do
     render_input_from_input(input, row, box_col, box_width)
   end
 
+  @doc "Renders the agent dashboard sidebar (Context, Model, LSP, Directory)."
+  @spec render_dashboard_only(EditorState.t(), rect()) :: [DisplayList.draw()]
+  def render_dashboard_only(%EditorState{} = state, rect) do
+    input = extract_input(state)
+    render_dashboard(input, rect)
+  end
+
   @doc """
   Renders agent chat with the sidebar (file viewer/dashboard).
 
