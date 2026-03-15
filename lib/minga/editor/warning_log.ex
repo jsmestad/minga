@@ -38,6 +38,26 @@ defmodule Minga.Editor.WarningLog do
     BufferServer.line_count(buf)
   end
 
+  @doc """
+  Marks the warnings popup as dismissed if the active window is the
+  `*Warnings*` buffer. Called when the user closes a popup with `q`.
+
+  Once dismissed, `open_warnings_popup_if_needed` in the Editor will
+  skip auto-opening until the user explicitly re-opens via `SPC b W`.
+  """
+  @spec mark_dismissed_if_warnings(EditorState.t()) :: EditorState.t()
+  def mark_dismissed_if_warnings(%{buffers: %{warnings: nil}} = state), do: state
+
+  def mark_dismissed_if_warnings(state) do
+    active_window = Map.get(state.windows.map, state.windows.active)
+
+    if active_window != nil and active_window.buffer == state.buffers.warnings do
+      %{state | warnings_popup_dismissed: true}
+    else
+      state
+    end
+  end
+
   @spec maybe_trim(pid()) :: :ok
   defp maybe_trim(buf) do
     line_count = BufferServer.line_count(buf)
