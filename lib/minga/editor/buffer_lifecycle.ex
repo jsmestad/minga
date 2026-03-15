@@ -103,7 +103,9 @@ defmodule Minga.Editor.BufferLifecycle do
 
     state
   rescue
-    _ -> state
+    e ->
+      Minga.Log.warning(:editor, "Save event broadcast failed: #{Exception.message(e)}")
+      state
   catch
     :exit, _ -> state
   end

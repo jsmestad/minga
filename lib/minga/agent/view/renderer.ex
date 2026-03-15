@@ -391,8 +391,6 @@ defmodule Minga.Agent.View.Renderer do
   @spec safe_lsp_servers() :: [atom()]
   defp safe_lsp_servers do
     Minga.LSP.Supervisor.active_servers()
-  rescue
-    _ -> []
   catch
     :exit, _ -> []
   end

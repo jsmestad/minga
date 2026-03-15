@@ -805,10 +805,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec confirm_quit_enabled?() :: boolean()
   defp confirm_quit_enabled? do
     ConfigOptions.get(:confirm_quit)
-  rescue
-    _ -> true
-  catch
-    :exit, _ -> true
   end
 
   @spec last_tab?(state()) :: boolean()

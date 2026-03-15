@@ -491,6 +491,10 @@ Additional hot functions in the render path and buffer operations could benefit 
 
 ## 15. Benchmarking Strategy
 
+### Telemetry
+
+The keystroke-to-render critical path is instrumented with `:telemetry` spans. Set `:log_level_render` to `:debug` to see per-stage timing in `*Messages*`. See [CONTRIBUTING.md](../CONTRIBUTING.md#performance-debugging-with-telemetry) for the full event list, example output, and how to attach custom handlers for histograms or percentile tracking.
+
 ### Tools
 
 - **`Benchee`** micro-benchmarks for individual functions

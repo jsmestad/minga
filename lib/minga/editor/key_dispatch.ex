@@ -130,8 +130,6 @@ defmodule Minga.Editor.KeyDispatch do
       end
 
     buf != nil and BufferServer.read_only?(buf)
-  rescue
-    _ -> false
   catch
     :exit, _ -> false
   end

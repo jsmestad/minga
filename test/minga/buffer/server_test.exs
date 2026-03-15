@@ -7,6 +7,13 @@ defmodule Minga.Buffer.ServerTest do
 
   @moduletag :tmp_dir
 
+  describe "child_spec/1" do
+    test "uses restart: :temporary so crashed buffers stay dead" do
+      spec = Server.child_spec(file_path: "test.ex")
+      assert spec.restart == :temporary
+    end
+  end
+
   describe "start_link/1" do
     test "starts with empty content by default" do
       {:ok, pid} = Server.start_link()

@@ -21,9 +21,11 @@ defmodule Minga.Editor.RenderPipeline do
 
   ## Observability
 
-  Each stage logs its name and elapsed time via `Minga.Log.debug(:render, ...)`.
-  Set `:log_level_render` to `:debug` to see per-stage timing. At the
-  default level (`:info`), these calls are suppressed.
+  Each stage is wrapped in a `:telemetry` span (`[:minga, :render, :stage]`)
+  with `%{stage: atom}` metadata. The full pipeline is wrapped in
+  `[:minga, :render, :pipeline]`. The `Minga.Telemetry.DevHandler` routes
+  durations through `Minga.Log.debug(:render, ...)` when `:log_level_render`
+  is set to `:debug`. Attach custom handlers for histograms or alerting.
   """
 
   alias Minga.Editor.Layout
@@ -33,6 +35,8 @@ defmodule Minga.Editor.RenderPipeline do
   alias Minga.Editor.RenderPipeline.Emit
   alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.WindowTree
+  alias Minga.Telemetry
 
   # ── Invalidation stub ──────────────────────────────────────────────────────
 
@@ -65,19 +69,30 @@ defmodule Minga.Editor.RenderPipeline do
   """
   @spec run(state()) :: state()
   def run(state) do
-    # Pre-pipeline: sync cursor
-    state = EditorState.sync_active_window_cursor(state)
+    window_count = window_count(state)
 
-    # Stage 1: Invalidation (global triggers: visual selection, search, theme)
-    state = timed(:invalidation, fn -> invalidate(state) end)
+    Telemetry.span([:minga, :render, :pipeline], %{window_count: window_count}, fn ->
+      # Pre-pipeline: sync cursor
+      state = EditorState.sync_active_window_cursor(state)
 
-    # Stage 2: Layout
-    state = timed(:layout, fn -> compute_layout(state) end)
-    layout = Layout.get(state)
+      # Stage 1: Invalidation (global triggers: visual selection, search, theme)
+      state =
+        Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
+          invalidate(state)
+        end)
 
-    debug_layout(state, layout)
+      # Stage 2: Layout
+      state =
+        Telemetry.span([:minga, :render, :stage], %{stage: :layout}, fn ->
+          compute_layout(state)
+        end)
 
-    run_windows_pipeline(state, layout)
+      layout = Layout.get(state)
+
+      debug_layout(state, layout)
+
+      run_windows_pipeline(state, layout)
+    end)
   end
 
   @doc """
@@ -90,15 +105,22 @@ defmodule Minga.Editor.RenderPipeline do
   @spec run_windows_pipeline(state(), Layout.t()) :: state()
   def run_windows_pipeline(state, layout) do
     # Stage 3: Scroll (also runs per-window invalidation detection)
-    {scrolls, state} = timed(:scroll, fn -> Scroll.scroll_windows(state, layout) end)
+    {scrolls, state} =
+      Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
+        Scroll.scroll_windows(state, layout)
+      end)
 
     # Stage 4: Content (skips clean lines, updates window caches)
     {buffer_frames, cursor_info, state} =
-      timed(:content, fn -> Content.build_content(state, scrolls) end)
+      Telemetry.span([:minga, :render, :stage], %{stage: :content}, fn ->
+        Content.build_content(state, scrolls)
+      end)
 
     # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
     {agent_chat_frames, agent_cursor, state} =
-      timed(:agent_content, fn -> Content.build_agent_chat_content(state, layout) end)
+      Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
+        Content.build_agent_chat_content(state, layout)
+      end)
 
     # If the agent chat window set a cursor, use it (overrides buffer cursor).
     cursor_info = if agent_cursor != nil, do: agent_cursor, else: cursor_info
@@ -107,7 +129,9 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Stage 5: Chrome
     chrome =
-      timed(:chrome, fn -> Chrome.build_chrome(state, layout, scrolls, cursor_info) end)
+      Telemetry.span([:minga, :render, :stage], %{stage: :chrome}, fn ->
+        Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      end)
 
     # Cache click regions on state for mouse hit-testing
     state = %{state | modeline_click_regions: chrome.modeline_click_regions}
@@ -115,12 +139,14 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Stage 6: Compose
     frame =
-      timed(:compose, fn ->
+      Telemetry.span([:minga, :render, :stage], %{stage: :compose}, fn ->
         Compose.compose_windows(window_frames, chrome, cursor_info, state)
       end)
 
     # Stage 7: Emit
-    timed(:emit, fn -> Emit.emit(frame, state) end)
+    Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
+      Emit.emit(frame, state)
+    end)
 
     state
   end
@@ -160,15 +186,11 @@ defmodule Minga.Editor.RenderPipeline do
     Layout.put(state)
   end
 
-  # ── Observability ──────────────────────────────────────────────────────────
+  @spec window_count(state()) :: non_neg_integer()
+  defp window_count(%{windows: %{tree: nil}}), do: 0
 
-  @spec timed(atom(), (-> result)) :: result when result: var
-  defp timed(stage, fun) do
-    start = System.monotonic_time(:microsecond)
-    result = fun.()
-    elapsed = System.monotonic_time(:microsecond) - start
-    Minga.Log.debug(:render, "[render:#{stage}] #{elapsed}µs")
-    result
+  defp window_count(%{windows: %{tree: tree}}) do
+    WindowTree.count(tree)
   end
 
   @spec debug_layout(state(), Layout.t()) :: :ok
@@ -188,6 +210,8 @@ defmodule Minga.Editor.RenderPipeline do
     File.write("/tmp/minga_layout_debug.log", Enum.join(log_lines, "\n"), [:append])
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.debug(:render, "Layout debug write failed: #{Exception.message(e)}")
+      :ok
   end
 end

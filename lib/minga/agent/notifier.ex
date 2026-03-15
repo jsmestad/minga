@@ -63,10 +63,6 @@ defmodule Minga.Agent.Notifier do
       false -> false
       _ -> true
     end
-  rescue
-    _ -> true
-  catch
-    :exit, _ -> true
   end
 
   @spec active_triggers() :: [trigger()]
@@ -75,10 +71,6 @@ defmodule Minga.Agent.Notifier do
       triggers when is_list(triggers) -> triggers
       _ -> [:approval, :complete, :error]
     end
-  rescue
-    _ -> [:approval, :complete, :error]
-  catch
-    :exit, _ -> [:approval, :complete, :error]
   end
 
   @spec debounced?() :: boolean()
@@ -101,7 +93,9 @@ defmodule Minga.Agent.Notifier do
     IO.write(:stderr, "\a")
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.debug(:agent, "Bell notification failed: #{Exception.message(e)}")
+      :ok
   end
 
   @spec send_os_notification(trigger(), String.t()) :: :ok
@@ -124,7 +118,9 @@ defmodule Minga.Agent.Notifier do
 
     :ok
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.debug(:agent, "OS notification failed: #{Exception.message(e)}")
+      :ok
   end
 
   @spec escape_applescript(String.t()) :: String.t()

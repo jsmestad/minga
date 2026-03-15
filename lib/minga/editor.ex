@@ -311,7 +311,12 @@ defmodule Minga.Editor do
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     state = cancel_nav_flash(state)
-    new_state = Input.Router.dispatch(state, codepoint, modifiers)
+
+    new_state =
+      Minga.Telemetry.span([:minga, :input, :dispatch], %{}, fn ->
+        Input.Router.dispatch(state, codepoint, modifiers)
+      end)
+
     {:noreply, new_state}
   end
 

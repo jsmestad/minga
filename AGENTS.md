@@ -18,6 +18,12 @@ lib/
   minga.ex                    # Root module
   minga/
     application.ex            # OTP application / supervisor tree
+    foundation/
+      supervisor.ex           # Foundation supervisor (Events, Config, Keymap, etc.)
+    services/
+      supervisor.ex           # Services supervisor (Git, Extensions, LSP, Diagnostics, etc.)
+    runtime/
+      supervisor.ex           # Runtime supervisor (Watchdog, FileWatcher, Editor.Supervisor)
     buffer/
       document.ex           # Pure data structure (no GenServer)
       server.ex               # GenServer wrapper for gap buffer
@@ -32,6 +38,7 @@ lib/
       manager.ex              # GenServer managing the tree-sitter parser Port
     editor.ex                 # Editor orchestration GenServer
     editor/
+      supervisor.ex           # Editor supervisor (Parser, Port, Editor)
       layout.ex               # Pure layout computation (single source of truth for all rects)
       viewport.ex             # Viewport scrolling logic
     mode/
@@ -292,6 +299,36 @@ For direct writes to `*Messages*` without Logger (e.g., inside the Editor GenSer
 - Include relevant context (file paths, server names, error reasons) so the user doesn't have to guess.
 - Don't log per-keystroke or per-frame events to `*Messages*`. Those belong in the log file only (via `Minga.Log.debug`).
 - When in doubt, log it. A message the user never reads costs nothing. A missing message when debugging costs time.
+
+### Telemetry and Performance Debugging
+
+The keystroke-to-render critical path is instrumented with `:telemetry` spans via `Minga.Telemetry`. When diagnosing performance issues or adding new instrumented code paths, use these spans instead of ad-hoc timing.
+
+**Viewing timing data:** Set `:log_level_render` to `:debug` to see per-stage render timing in `*Messages*`. The `Minga.Telemetry.DevHandler` (always attached at startup) routes span durations through `Minga.Log.debug`.
+
+**Available spans:**
+
+| Event | Metadata | What it measures |
+|-------|----------|------------------|
+| `[:minga, :render, :pipeline]` | `window_count` | Full render frame |
+| `[:minga, :render, :stage]` | `stage` atom | Individual render stage (invalidation, layout, scroll, content, agent_content, chrome, compose, emit) |
+| `[:minga, :input, :dispatch]` | | Keystroke dispatch through input router |
+| `[:minga, :command, :execute]` | `command` atom | Named command execution |
+| `[:minga, :port, :emit]` | `byte_count` | Protocol encoding + port write |
+
+**Adding new spans:** Use `Minga.Telemetry.span/3` (not raw `:telemetry.span/3`). It handles the metadata passthrough correctly for telemetry 1.3:
+
+```elixir
+result = Minga.Telemetry.span([:minga, :my_domain, :operation], %{key: :value}, fn ->
+  do_expensive_work()
+end)
+```
+
+For fire-and-forget measurements (no duration), use `Minga.Telemetry.execute/3`.
+
+**Do not** add ad-hoc `System.monotonic_time` timing or `Minga.Log.debug` timing strings. Use telemetry spans so all performance data is structured and aggregatable.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#performance-debugging-with-telemetry) for the full usage guide including custom handler examples.
 
 ### Commit Messages
 
