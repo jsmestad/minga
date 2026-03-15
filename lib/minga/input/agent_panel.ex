@@ -19,6 +19,7 @@ defmodule Minga.Input.AgentPanel do
 
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
+  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -127,7 +128,15 @@ defmodule Minga.Input.AgentPanel do
   @spec panel_nav_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:panel, EditorState.t()} | :delegate
   defp panel_nav_key(state, cp, _mods) when cp in [?q, 27] do
-    {:panel, AgentCommands.toggle_panel(state)}
+    # Close the agent split if one exists, otherwise just unfocus input
+    state =
+      if LayoutPreset.has_agent_chat?(state) do
+        AgentCommands.toggle_agent_split(state)
+      else
+        AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+      end
+
+    {:panel, state}
   end
 
   defp panel_nav_key(state, ?i, _mods) do

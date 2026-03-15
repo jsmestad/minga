@@ -105,7 +105,6 @@ defmodule Minga.Command.RegistryTest do
           :fold_open_all,
 
           # Agent
-          :toggle_agent_panel,
           :toggle_agentic_view,
           :cycle_agent_tabs,
           :agent_abort,
@@ -175,7 +174,7 @@ defmodule Minga.Command.RegistryTest do
       end
 
       # Commands that work without a buffer
-      for name <- [:command_palette, :find_file, :toggle_agent_panel, :new_buffer] do
+      for name <- [:command_palette, :find_file, :toggle_agentic_view, :new_buffer] do
         {:ok, cmd} = Registry.lookup(r, name)
 
         refute cmd.requires_buffer,

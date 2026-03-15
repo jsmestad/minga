@@ -111,8 +111,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
     # File tree
     tree_draws = TreeRenderer.render(state)
 
-    # Agent panel sidebar
-    agent_draws = ChromeHelpers.render_agent_panel_from_layout(state, layout)
+    # Agent panel: rendered through buffer pipeline via {:agent_chat, _} windows.
+    agent_draws = []
 
     # Minibuffer
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer

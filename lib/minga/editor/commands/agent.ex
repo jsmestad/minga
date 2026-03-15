@@ -40,36 +40,6 @@ defmodule Minga.Editor.Commands.Agent do
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
-  @doc "Toggles the agent chat panel."
-  @spec toggle_panel(state()) :: state()
-  def toggle_panel(state) do
-    panel = AgentAccess.panel(state)
-
-    if panel.visible and not AgentAccess.input_focused?(state) do
-      update_agent(state, &AgentState.focus_input(&1, true))
-    else
-      state = update_agent(state, &AgentState.toggle_panel/1)
-
-      state =
-        if AgentAccess.panel(state).visible and AgentAccess.session(state) == nil do
-          AgentSession.start_agent_session(state)
-        else
-          state
-        end
-
-      state =
-        if AgentAccess.panel(state).visible do
-          update_agent(state, &AgentState.focus_input(&1, true))
-        else
-          update_agent(state, &AgentState.focus_input(&1, false))
-        end
-
-      state
-      |> Layout.invalidate()
-      |> EditorState.invalidate_all_windows()
-    end
-  end
-
   @doc "Legacy alias for `toggle_agent_split/1`."
   @spec toggle_agentic_view(state()) :: state()
   def toggle_agentic_view(state), do: toggle_agent_split(state)
@@ -1059,7 +1029,6 @@ defmodule Minga.Editor.Commands.Agent do
   # Maps command name atoms to their implementing function names.
   # All agent commands work without a buffer.
   @agent_command_specs [
-    {:toggle_agent_panel, "Toggle AI agent panel", :toggle_panel},
     {:toggle_agentic_view, "Toggle agent split pane", :toggle_agentic_view},
     {:toggle_agent_split, "Toggle agent split", :toggle_agent_split},
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
