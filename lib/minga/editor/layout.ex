@@ -52,11 +52,13 @@ defmodule Minga.Editor.Layout do
   - `total` — the full window rect (from WindowTree.layout)
   - `content` — the text area within the window (total minus modeline)
   - `modeline` — one row at the bottom of the window
+  - `sidebar` — optional info panel (agent chat dashboard)
   """
   @type window_layout :: %{
           total: rect(),
           content: rect(),
-          modeline: rect()
+          modeline: rect(),
+          sidebar: rect() | nil
         }
 
   @typedoc "Complete layout for one frame."
@@ -303,12 +305,18 @@ defmodule Minga.Editor.Layout do
   # Subdivides a window rect into content and modeline sub-rects.
   # When the window is too short for both (height < 2), content gets
   # all the space and modeline collapses to zero height (hidden).
+  # Minimum total window width before a sidebar is carved out.
+  @sidebar_threshold 80
+  # Preferred sidebar column count (capped at 1/3 of window width).
+  @sidebar_preferred_width 28
+
   @spec subdivide_window(rect()) :: window_layout()
   defp subdivide_window({row, col, width, height}) when height < 2 do
     %{
       total: {row, col, width, height},
       content: {row, col, width, height},
-      modeline: {row + height, col, width, 0}
+      modeline: {row + height, col, width, 0},
+      sidebar: nil
     }
   end
 
@@ -319,9 +327,29 @@ defmodule Minga.Editor.Layout do
     %{
       total: {row, col, width, height},
       content: {row, col, width, content_height},
-      modeline: {modeline_row, col, width, 1}
+      modeline: {modeline_row, col, width, 1},
+      sidebar: nil
     }
   end
+
+  @doc """
+  Splits a window layout's content rect to carve out a sidebar.
+
+  Returns the layout with `content` narrowed and `sidebar` set to
+  the right-hand info panel rect. Only applied when the content width
+  exceeds `@sidebar_threshold`.
+  """
+  @spec add_sidebar(window_layout()) :: window_layout()
+  def add_sidebar(%{content: {row, col, width, height}} = layout)
+      when width > @sidebar_threshold do
+    sw = min(@sidebar_preferred_width, div(width, 3))
+    chat_w = width - sw - 1
+    sidebar_col = col + chat_w + 1
+
+    %{layout | content: {row, col, chat_w, height}, sidebar: {row, sidebar_col, sw, height}}
+  end
+
+  def add_sidebar(layout), do: layout
 
   # ── Queries ────────────────────────────────────────────────────────────────
 
