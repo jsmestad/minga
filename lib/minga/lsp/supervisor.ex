@@ -111,6 +111,74 @@ defmodule Minga.LSP.Supervisor do
     |> Enum.sort()
   end
 
+  @doc """
+  Stops an LSP client by sending shutdown + exit, then terminating the child.
+
+  Returns `:ok` on success, `{:error, :not_found}` if no matching client exists.
+  """
+  # Short timeout for shutdown attempts. Users run :LspStop when
+  # the server is misbehaving, so we can't afford to block long.
+  @stop_timeout 3_000
+
+  @spec stop_client(GenServer.server(), {atom(), String.t()}) :: :ok | {:error, :not_found}
+  def stop_client(supervisor \\ __MODULE__, key) do
+    case find_client(supervisor, key) do
+      {:ok, pid} ->
+        # Try graceful shutdown with a short timeout. If the server
+        # is unresponsive, skip straight to force-terminate.
+        try do
+          GenServer.call(pid, :shutdown, @stop_timeout)
+        catch
+          :exit, _ -> :ok
+        end
+
+        # Force-terminate the child so the supervisor doesn't restart it
+        DynamicSupervisor.terminate_child(supervisor, pid)
+        :ok
+
+      :not_found ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Restarts an LSP client: stops the existing one and starts a fresh one.
+
+  Returns `{:ok, new_pid}` on success, `{:error, reason}` on failure.
+  """
+  @spec restart_client(GenServer.server(), {atom(), String.t()}) ::
+          {:ok, pid()} | {:error, term()}
+  def restart_client(supervisor \\ __MODULE__, {server_name, root_path} = key) do
+    # Find the server config from the existing client before stopping it
+    config =
+      case find_client(supervisor, key) do
+        {:ok, pid} ->
+          try do
+            GenServer.call(pid, :server_config)
+          catch
+            :exit, _ -> nil
+          end
+
+        :not_found ->
+          nil
+      end
+
+    # Stop the existing client
+    stop_client(supervisor, key)
+
+    case config do
+      nil ->
+        # No existing client found, try to find config from registry
+        case ServerRegistry.find_config(server_name) do
+          nil -> {:error, :no_config}
+          cfg -> ensure_client(supervisor, cfg, root_path)
+        end
+
+      cfg ->
+        ensure_client(supervisor, cfg, root_path)
+    end
+  end
+
   # ── Supervisor Callbacks ───────────────────────────────────────────────────
 
   @impl true

@@ -10,9 +10,10 @@ defmodule Minga.Editor.BufferLifecycle do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Hooks, as: ConfigHooks
   alias Minga.Editor.DocumentSync
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
+  alias Minga.Editor.Modeline
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.LSP.Client
   alias Minga.Mode
 
   @type state :: EditorState.t()
@@ -48,8 +49,52 @@ defmodule Minga.Editor.BufferLifecycle do
   def refresh_lsp_status(%{buffers: %{active: nil}} = state), do: %{state | lsp_status: :none}
 
   def refresh_lsp_status(%{buffers: %{active: buf}} = state) do
-    %{state | lsp_status: ChromeHelpers.lsp_status_for_buffer(state, buf)}
+    %{state | lsp_status: lsp_status_for_buffer(state, buf)}
   end
+
+  @doc """
+  Queries the LSP status for a buffer by calling each attached client.
+
+  Returns the aggregate status: `:ready` if any client is ready,
+  `:error` if any crashed, `:initializing`/`:starting` if connecting,
+  or `:none` if no LSP clients are attached.
+  """
+  @spec lsp_status_for_buffer(state(), pid() | nil) :: Modeline.lsp_status()
+  def lsp_status_for_buffer(_state, nil), do: :none
+
+  def lsp_status_for_buffer(state, buffer_pid) do
+    clients = DocumentSync.clients_for_buffer(state.lsp, buffer_pid)
+
+    case clients do
+      [] -> :none
+      pids -> pids |> Enum.map(&query_client_status/1) |> aggregate_lsp_status()
+    end
+  end
+
+  @spec query_client_status(pid()) :: Client.State.status() | :error
+  defp query_client_status(pid) do
+    Client.status(pid)
+  catch
+    :exit, _ -> :error
+  end
+
+  @spec aggregate_lsp_status([Client.State.status() | :error]) :: Modeline.lsp_status()
+  defp aggregate_lsp_status(statuses) do
+    Enum.reduce(statuses, :none, &merge_lsp_status/2)
+  end
+
+  # Priority: ready > error > initializing > starting > none
+  @spec merge_lsp_status(Client.State.status() | :error, Modeline.lsp_status()) ::
+          Modeline.lsp_status()
+  defp merge_lsp_status(:ready, _acc), do: :ready
+  defp merge_lsp_status(_status, :ready), do: :ready
+  defp merge_lsp_status(:error, _acc), do: :error
+  defp merge_lsp_status(_status, :error), do: :error
+  defp merge_lsp_status(:initializing, _acc), do: :initializing
+  defp merge_lsp_status(_status, :initializing), do: :initializing
+  defp merge_lsp_status(:starting, _acc), do: :starting
+  defp merge_lsp_status(_status, :starting), do: :starting
+  defp merge_lsp_status(_status, acc), do: acc
 
   @doc "Notifies the LSP server that the active buffer changed."
   @spec lsp_buffer_changed(state()) :: state()

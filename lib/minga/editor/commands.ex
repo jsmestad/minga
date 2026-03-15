@@ -32,6 +32,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Folding
   alias Minga.Editor.Commands.Git, as: GitCommands
   alias Minga.Editor.Commands.Help
+  alias Minga.Editor.Commands.Lsp, as: LspCommands
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
@@ -572,9 +573,10 @@ defmodule Minga.Editor.Commands do
     Diagnostics.execute(state, :prev_diagnostic)
   end
 
-  def execute(state, :lsp_info) do
-    Diagnostics.execute(state, :lsp_info)
-  end
+  def execute(state, :lsp_info), do: LspCommands.execute(state, :lsp_info)
+  def execute(state, :lsp_restart), do: LspCommands.execute(state, :lsp_restart)
+  def execute(state, :lsp_stop), do: LspCommands.execute(state, :lsp_stop)
+  def execute(state, :lsp_start), do: LspCommands.execute(state, :lsp_start)
 
   def execute(state, :filetype_menu) do
     # TODO: open SPC m which-key popup for the active buffer's filetype
@@ -678,7 +680,16 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:execute_ex_command, {:lsp_info, []}}),
-    do: Diagnostics.execute(state, :lsp_info)
+    do: LspCommands.execute(state, :lsp_info)
+
+  def execute(state, {:execute_ex_command, {:lsp_restart, []}}),
+    do: LspCommands.execute(state, :lsp_restart)
+
+  def execute(state, {:execute_ex_command, {:lsp_stop, []}}),
+    do: LspCommands.execute(state, :lsp_stop)
+
+  def execute(state, {:execute_ex_command, {:lsp_start, []}}),
+    do: LspCommands.execute(state, :lsp_start)
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
     execute(state, :extension_list)

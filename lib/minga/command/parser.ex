@@ -124,6 +124,12 @@ defmodule Minga.Command.Parser do
   defp do_parse("rh"), do: {:reload_highlights, []}
   defp do_parse("LspInfo"), do: {:lsp_info, []}
   defp do_parse("lspinfo"), do: {:lsp_info, []}
+  defp do_parse("LspRestart"), do: {:lsp_restart, []}
+  defp do_parse("lsprestart"), do: {:lsp_restart, []}
+  defp do_parse("LspStop"), do: {:lsp_stop, []}
+  defp do_parse("lspstop"), do: {:lsp_stop, []}
+  defp do_parse("LspStart"), do: {:lsp_start, []}
+  defp do_parse("lspstart"), do: {:lsp_start, []}
   defp do_parse("extensions"), do: {:extensions, []}
   defp do_parse("ext"), do: {:extensions, []}
   defp do_parse("ExtUpdate"), do: {:extension_update, []}
