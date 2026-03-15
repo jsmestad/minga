@@ -251,6 +251,11 @@ defmodule Minga.Editor.Commands.Agent do
       {:error, reason} ->
         %{state | status_msg: "Agent error: #{inspect(reason)}"}
     end
+  catch
+    # The :DOWN monitor clears stale session PIDs, but there's a race window:
+    # the session can die while we're mid-call (before :DOWN is processed).
+    # This is the user-facing hot path (Enter to send), so catch it here.
+    :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
   end
 
   @spec resolve_mentions(String.t(), keyword()) ::
@@ -302,6 +307,8 @@ defmodule Minga.Editor.Commands.Agent do
       Session.abort(AgentAccess.session(state))
       state
     end
+  catch
+    :exit, _ -> state
   end
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
