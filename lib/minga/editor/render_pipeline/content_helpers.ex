@@ -226,15 +226,38 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     } = opts
 
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-    max_rows = length(visible_line_map)
+    wrap_on = Map.get(opts, :wrap_on, false)
 
-    {gutters, contents_rev, window} =
-      visible_line_map
-      |> Enum.with_index()
-      |> Enum.reduce({[], [], window}, fn {{buf_line, fold_info}, screen_row}, {g, c, win} ->
+    # Pre-compute wrap map for all visible buffer lines in one batch call
+    # (more efficient than per-line WrapMap.compute during the reduce).
+    wrap_index =
+      precompute_wrap_index(
+        wrap_on,
+        visible_line_map,
+        lines,
+        first_line,
+        ctx.content_w,
+        ctx.decorations
+      )
+
+    render_opts = %{
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      sign_w: sign_w,
+      row_off: row_off,
+      col_off: col_off,
+      lines: lines,
+      first_line: first_line,
+      wrap_index: wrap_index
+    }
+
+    {gutters, contents_rev, screen_row, window} =
+      Enum.reduce(visible_line_map, {[], [], 0, window}, fn {buf_line, fold_info},
+                                                            {g, c, screen_row, win} ->
         case fold_info do
           {:virtual_line, vt} ->
-            # Virtual lines render their own styled segments, no buffer content
             render_pos = %RenderPosition{
               screen_row: screen_row,
               gutter_w: gutter_w,
@@ -244,7 +267,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             }
 
             c_cmds = render_virtual_line_entry(vt, render_pos)
-            {g, prepend_all(c, c_cmds), win}
+            {g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           {:block, block, line_idx} ->
             render_pos = %RenderPosition{
@@ -256,7 +279,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             }
 
             c_cmds = render_block_entry(block, line_idx, render_pos)
-            {g, prepend_all(c, c_cmds), win}
+            {g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
@@ -271,29 +294,15 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             fold_g = fold_gutter_indicator(fold_info, render_pos)
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
             c_cmds = render_placeholder_segments(segments, render_pos)
-            {fold_g ++ g, prepend_all(c, c_cmds), win}
+            {fold_g ++ g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           _ ->
-            line_index = buf_line - first_line
-            line_text = Enum.at(lines, line_index, "")
-            display_text = fold_display_text(line_text, fold_info)
-
-            render_folded_line(
-              win,
+            render_normal_entry(
               buf_line,
-              display_text,
               fold_info,
               screen_row,
-              %{
-                cursor_line: cursor_line,
-                ctx: ctx,
-                ln_style: ln_style,
-                gutter_w: gutter_w,
-                sign_w: sign_w,
-                max_rows: max_rows,
-                row_off: row_off,
-                col_off: col_off
-              },
+              render_opts,
+              win,
               {g, c}
             )
         end
@@ -302,7 +311,84 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     # Clean up per-frame block render cache from process dictionary
     clear_block_render_cache()
 
-    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(visible_line_map), window}
+    {Enum.reverse(gutters), Enum.reverse(contents_rev), screen_row, window}
+  end
+
+  defp render_normal_entry(buf_line, fold_info, screen_row, render_opts, win, {g, c}) do
+    %{lines: lines, first_line: first_line, wrap_index: wrap_index} = render_opts
+
+    line_index = buf_line - first_line
+    line_text = Enum.at(lines, line_index, "")
+    display_text = fold_display_text(line_text, fold_info)
+
+    wrap_entry = Map.get(wrap_index, buf_line)
+    rows_for_line = if wrap_entry, do: length(wrap_entry), else: 1
+
+    line_opts =
+      render_opts
+      |> Map.put(:max_rows, screen_row + rows_for_line)
+      |> Map.put(:wrap_entry, wrap_entry)
+
+    {new_g, new_c, win} =
+      render_folded_line(win, buf_line, display_text, fold_info, screen_row, line_opts, {g, c})
+
+    {new_g, new_c, screen_row + rows_for_line, win}
+  end
+
+  # Pre-computes wrap entries for all buffer lines in the visible_line_map
+  # in a single batch WrapMap.compute call. Returns %{buf_line => wrap_entry}.
+  @spec precompute_wrap_index(
+          boolean(),
+          [{non_neg_integer(), term()}],
+          [String.t()],
+          non_neg_integer(),
+          pos_integer(),
+          Decorations.t()
+        ) :: %{non_neg_integer() => WrapMap.wrap_entry()}
+  defp precompute_wrap_index(false, _vlm, _lines, _first, _w, _decs), do: %{}
+
+  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width, decorations) do
+    # Extract buffer lines that need wrapping (skip virtual lines, blocks, folds)
+    buffer_entries =
+      visible_line_map
+      |> Enum.filter(fn {_buf_line, fold_info} ->
+        match?(:normal, fold_info) or match?({:fold_start, _}, fold_info)
+      end)
+      |> Enum.map(fn {buf_line, fold_info} ->
+        line_index = buf_line - first_line
+        line_text = Enum.at(lines, line_index, "")
+        display_text = fold_display_text(line_text, fold_info)
+        {buf_line, display_text}
+      end)
+
+    # Compute wrap entries per-line, adjusting width for inline virtual text.
+    # Inline VTs (e.g., "▎ " border) displace content rightward, so the
+    # available text width is content_w minus the VT display width.
+    wrap_entries =
+      Enum.map(buffer_entries, fn {buf_line, text} ->
+        vt_width = inline_vt_width(decorations, buf_line)
+        wrap_w = max(width - vt_width, 10)
+
+        [entry] = WrapMap.compute([text], wrap_w)
+        entry
+      end)
+
+    buf_lines = Enum.map(buffer_entries, &elem(&1, 0))
+
+    buf_lines
+    |> Enum.zip(wrap_entries)
+    |> Map.new()
+  end
+
+  # Returns the total display width of inline virtual texts on a line.
+  @spec inline_vt_width(Decorations.t(), non_neg_integer()) :: non_neg_integer()
+  defp inline_vt_width(decorations, buf_line) do
+    decorations
+    |> Decorations.inline_virtual_texts_for_line(buf_line)
+    |> Enum.reduce(0, fn vt, acc ->
+      seg_width = Enum.reduce(vt.segments, 0, fn {text, _style}, w -> w + String.length(text) end)
+      acc + seg_width
+    end)
   end
 
   defp clear_block_render_cache do
@@ -349,6 +435,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           {[DisplayList.draw()], [DisplayList.draw()]}
         ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
   defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
+    wrap_entry = Map.get(render_opts, :wrap_entry)
+
     if Window.dirty?(win, buf_line) do
       fold_pos = %RenderPosition{
         screen_row: screen_row,
@@ -371,7 +459,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           ln_style: render_opts.ln_style,
           gutter_w: render_opts.gutter_w,
           sign_w: render_opts.sign_w,
-          wrap_entry: nil,
+          wrap_entry: wrap_entry,
           max_rows: render_opts.max_rows,
           row_offset: render_opts.row_off,
           col_offset: render_opts.col_off
@@ -537,21 +625,44 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   # The current confirm match gets a different bg and higher priority.
   # Only rebuilds search decorations when the match set changes.
   # Uses a fingerprint of the matches to detect changes.
-  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
+  @typedoc "Search decoration cache: {search_fingerprint, base_version, merged_decorations}"
+  @type search_cache ::
+          {term(), non_neg_integer(), Decorations.t()} | nil
+
+  @doc """
+  Merges search match highlights into a decorations struct, with caching.
+
+  Returns `{merged_decorations, updated_cache}`. The cache is keyed on both
+  the search fingerprint (matches + confirm) AND the base decoration version.
+  When the base version changes (e.g., agent chat decorations updated between
+  frames), the cache misses and search highlights are rebuilt on the fresh base.
+  """
+  @spec merge_search_decorations(
+          Decorations.t(),
+          [Minga.Search.Match.t()],
+          Minga.Search.Match.t() | nil,
+          map(),
+          search_cache()
+        ) :: {Decorations.t(), search_cache()}
+  def merge_search_decorations(decs, matches, confirm_match, colors, cached) do
     fingerprint = {matches, confirm_match}
-    cached = Process.get(:search_decoration_cache)
 
     case cached do
-      {^fingerprint, cached_decs} ->
-        # Same matches as last frame: reuse the merged decorations, but
-        # update the base version to match the fresh buffer decorations
-        %{cached_decs | version: decs.version + 1}
+      {^fingerprint, base_version, cached_decs} when base_version == decs.version ->
+        {cached_decs, cached}
 
       _ ->
         result = rebuild_search_decorations(decs, matches, confirm_match, colors)
-        Process.put(:search_decoration_cache, {fingerprint, result})
-        result
+        new_cache = {fingerprint, decs.version, result}
+        {result, new_cache}
     end
+  end
+
+  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
+    cached = Process.get(:search_decoration_cache)
+    {result, new_cache} = merge_search_decorations(decs, matches, confirm_match, colors, cached)
+    Process.put(:search_decoration_cache, new_cache)
+    result
   end
 
   defp rebuild_search_decorations(decs, [], _confirm, _colors) do
@@ -705,6 +816,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       ctx.diagnostic_signs,
       ctx.git_signs,
       ctx.viewport.left,
+      ctx.viewport.cols,
+      ctx.content_w,
       is_active,
       ctx.confirm_match,
       ctx.decorations.version

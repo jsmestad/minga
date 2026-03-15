@@ -22,7 +22,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Editor.Window.Content
+
   alias Minga.Git.Tracker, as: GitTracker
 
   defmodule WindowScroll do
@@ -121,8 +121,8 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     |> Enum.reduce({%{}, state}, fn {win_id, win_layout}, {acc, st} ->
       window = Map.get(st.windows.map, win_id)
 
-      if window == nil or window.buffer == nil or Content.agent_chat?(window.content) do
-        # Skip nil windows and agent chat windows (rendered separately)
+      if window == nil or window.buffer == nil or match?({:agent_chat, _}, window.content) do
+        # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
         {acc, st}
       else
         is_active = win_id == state.windows.active

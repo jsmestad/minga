@@ -3,13 +3,11 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   Helper functions for the Chrome stage of the render pipeline.
 
   Renders modelines, tab bars, window separators, which-key popups,
-  agent panels, and snapshot display names.
+  and snapshot display names.
 
   Extracted from `RenderPipeline` to reduce module size.
   """
 
-  alias Minga.Agent.ChatRenderer
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Config.Options
   alias Minga.Editor.DisplayList
@@ -430,55 +428,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   end
 
   # ── Agent panel ────────────────────────────────────────────────────────────
-
-  @doc "Renders the agent panel sidebar from the layout rect."
-  @spec render_agent_panel_from_layout(state(), Layout.t()) :: [DisplayList.draw()]
-  def render_agent_panel_from_layout(_state, %{agent_panel: nil}), do: []
-
-  def render_agent_panel_from_layout(state, %{agent_panel: rect}) do
-    agent = AgentAccess.agent(state)
-    panel = AgentAccess.panel(state)
-    session = AgentAccess.session(state)
-
-    messages =
-      if session do
-        try do
-          Session.messages(session)
-        catch
-          :exit, _ -> []
-        end
-      else
-        []
-      end
-
-    usage =
-      if session do
-        try do
-          Session.usage(session)
-        catch
-          :exit, _ -> %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
-        end
-      else
-        %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
-      end
-
-    panel_state = %{
-      messages: messages,
-      status: agent.status || :idle,
-      input_lines: PanelState.input_lines(panel),
-      scroll: panel.scroll,
-      spinner_frame: panel.spinner_frame,
-      usage: usage,
-      model_name: panel.model_name,
-      thinking_level: panel.thinking_level,
-      display_start_index: panel.display_start_index,
-      error_message: agent.error,
-      pending_approval: agent.pending_approval,
-      mention_completion: panel.mention_completion
-    }
-
-    ChatRenderer.render(rect, panel_state, state.theme)
-  end
 
   # ── Snapshot display name ──────────────────────────────────────────────────
 

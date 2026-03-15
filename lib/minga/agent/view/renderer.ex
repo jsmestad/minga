@@ -133,15 +133,18 @@ defmodule Minga.Agent.View.Renderer do
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
-  Renders agent chat content within a bounded window rect.
+  Computes the input prompt height for a given chat width.
 
-  Used when the agent chat is hosted in a window pane (window split) rather
-  than as a full-screen surface. Renders chat messages in the top portion
-  and the prompt input at the bottom, without title bar, modeline,
-  separator, or file viewer.
-
-  Returns a flat list of draw commands positioned within the given rect.
+  Used by Content stage to determine how much space to reserve for
+  the prompt at the bottom of the agent chat window.
   """
+  @spec prompt_height(state(), pos_integer()) :: pos_integer()
+  def prompt_height(%EditorState{} = state, chat_width) do
+    input = extract_input(state)
+    box_width = max(chat_width - 2 * @input_h_margin, 10)
+    compute_input_height(input.panel.input_lines, input_inner_width(box_width))
+  end
+
   @spec render_in_rect(state(), rect()) :: [DisplayList.draw()]
   def render_in_rect(%EditorState{} = state, {row, col, width, height}) do
     input = extract_input(state)
@@ -161,6 +164,27 @@ defmodule Minga.Agent.View.Renderer do
     input_draws = render_input_from_input(input, input_row, box_col, box_width)
 
     chat_draws ++ input_draws
+  end
+
+  @doc """
+  Renders only the prompt input area into the given rect.
+
+  Used by the Content stage when the chat content is rendered through
+  the standard buffer pipeline with decorations.
+  """
+  @spec render_prompt_only(state(), rect()) :: [DisplayList.draw()]
+  def render_prompt_only(%EditorState{} = state, {row, col, width, _height}) do
+    input = extract_input(state)
+    box_width = max(width - 2 * @input_h_margin, 10)
+    box_col = col + @input_h_margin
+    render_input_from_input(input, row, box_col, box_width)
+  end
+
+  @doc "Renders the agent dashboard sidebar (Context, Model, LSP, Directory)."
+  @spec render_dashboard_only(EditorState.t(), rect()) :: [DisplayList.draw()]
+  def render_dashboard_only(%EditorState{} = state, rect) do
+    input = extract_input(state)
+    render_dashboard(input, rect)
   end
 
   @doc """

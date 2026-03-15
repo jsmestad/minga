@@ -51,7 +51,8 @@ defmodule Minga.Credo.DomainBoundaryCheck do
   @allowed_agent_buffer_modules [
     "Minga.Agent.View.Renderer",
     "Minga.Agent.PanelState",
-    "Minga.Agent.BufferSync"
+    "Minga.Agent.BufferSync",
+    "Minga.Agent.ChatDecorations"
   ]
 
   @impl Credo.Check

@@ -556,4 +556,70 @@ defmodule Minga.Editor.LayoutTest do
   defp rects_overlap?({r1, c1, w1, h1}, {r2, c2, w2, h2}) do
     not (c1 + w1 <= c2 or c2 + w2 <= c1 or r1 + h1 <= r2 or r2 + h2 <= r1)
   end
+
+  describe "add_sidebar/1" do
+    test "returns nil sidebar when window is too narrow" do
+      layout = %{
+        content: {0, 0, 80, 40},
+        modeline: {40, 0, 80, 1},
+        total: {0, 0, 80, 41},
+        sidebar: nil
+      }
+
+      result = Layout.add_sidebar(layout)
+
+      assert result.sidebar == nil
+      assert result.content == {0, 0, 80, 40}
+    end
+
+    test "carves out sidebar when window exceeds threshold" do
+      layout = %{
+        content: {0, 0, 120, 40},
+        modeline: {40, 0, 120, 1},
+        total: {0, 0, 120, 41},
+        sidebar: nil
+      }
+
+      result = Layout.add_sidebar(layout)
+
+      {_, _, chat_w, _} = result.content
+      {_, sidebar_col, sidebar_w, _} = result.sidebar
+
+      # chat + 1 separator + sidebar = original width
+      assert chat_w + 1 + sidebar_w == 120
+      # sidebar starts after chat + separator
+      assert sidebar_col == chat_w + 1
+    end
+
+    test "caps sidebar at one-third of window width" do
+      layout = %{
+        content: {0, 0, 90, 40},
+        modeline: {40, 0, 90, 1},
+        total: {0, 0, 90, 41},
+        sidebar: nil
+      }
+
+      result = Layout.add_sidebar(layout)
+
+      {_, _, sidebar_w, _} = result.sidebar
+      assert sidebar_w == min(28, div(90, 3))
+    end
+
+    test "sidebar preserves row offset and height from content" do
+      layout = %{
+        content: {5, 10, 120, 30},
+        modeline: {35, 10, 120, 1},
+        total: {5, 10, 120, 31},
+        sidebar: nil
+      }
+
+      result = Layout.add_sidebar(layout)
+
+      {sr, _, _, sh} = result.sidebar
+      {cr, _, _, ch} = result.content
+
+      assert sr == cr
+      assert sh == ch
+    end
+  end
 end

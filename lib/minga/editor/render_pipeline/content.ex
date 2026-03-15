@@ -9,15 +9,17 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   alias Minga.Agent.View.Renderer, as: ViewRenderer
   alias Minga.Buffer.Decorations
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, WindowFrame}
+  alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
   alias Minga.Editor.Modeline
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
 
@@ -53,19 +55,13 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   Returns an empty list if no agent chat windows exist.
   """
-  @spec build_agent_chat_content(state(), Layout.t()) :: [WindowFrame.t()]
+  @spec build_agent_chat_content(state(), Layout.t()) ::
+          {[WindowFrame.t()], Cursor.t() | nil, state()}
   def build_agent_chat_content(state, layout) do
     layout.window_layouts
-    |> Enum.flat_map(fn {win_id, win_layout} ->
-      window = Map.get(state.windows.map, win_id)
-
-      case window do
-        %Window{content: {:agent_chat, _buf}} ->
-          [render_agent_chat_window(state, window, win_layout)]
-
-        _ ->
-          []
-      end
+    |> Enum.reduce({[], nil, state}, fn {win_id, win_layout}, {frames, cursor, st} ->
+      window = Map.get(st.windows.map, win_id)
+      maybe_render_agent_window(window, win_id, win_layout, frames, cursor, st)
     end)
   end
 
@@ -212,65 +208,230 @@ defmodule Minga.Editor.RenderPipeline.Content do
     {win_frame, cursor_info, state}
   end
 
-  # Minimum sidebar width (cols). Below this threshold, the agent chat
-  # renders in compact mode (chat+input only, no sidebar).
-  @sidebar_min_cols 20
+  defp maybe_render_agent_window(
+         %Window{content: {:agent_chat, _}} = window,
+         win_id,
+         win_layout,
+         frames,
+         cursor,
+         st
+       ) do
+    {frame, ci, st} = render_agent_chat_window(st, window, win_id, win_layout)
+    new_cursor = if ci != nil, do: ci, else: cursor
+    {[frame | frames], new_cursor, st}
+  end
 
-  @spec render_agent_chat_window(state(), Window.t(), Layout.window_layout()) :: WindowFrame.t()
-  defp render_agent_chat_window(state, _window, win_layout) do
-    {_row_off, _col_off, width, height} = win_layout.content
+  defp maybe_render_agent_window(_window, _win_id, _win_layout, frames, cursor, st) do
+    {frames, cursor, st}
+  end
 
-    # Compute the sidebar split from the content rect and chat_width_pct.
-    # This is an agent-specific layout concern, so it lives here in the
-    # agent content stage (4b), not in the generic Layout module.
-    sidebar = compute_agent_sidebar(state, win_layout.content)
+  # Renders an agent chat window: buffer content through the standard
+  # pipeline (for decorations, visual mode, search) plus the prompt
+  # input from ViewRenderer.
+  @spec render_agent_chat_window(state(), Window.t(), Window.id(), Layout.window_layout()) ::
+          {WindowFrame.t(), Cursor.t() | nil, state()}
+  defp render_agent_chat_window(state, window, _win_id, win_layout) do
+    # Split the content rect to carve out a sidebar when wide enough.
+    win_layout = Layout.add_sidebar(win_layout)
+    {row_off, col_off, chat_width, height} = win_layout.content
 
-    {draws, chat_rect} =
-      case sidebar do
-        {chat_rect, sidebar_rect} ->
-          {ViewRenderer.render_with_sidebar(state, chat_rect, sidebar_rect), chat_rect}
+    buf = window.buffer
+
+    # Render the sidebar (dashboard) if the layout carved one out.
+    sidebar_draws =
+      case win_layout.sidebar do
+        {sr, sc, sw, sh} ->
+          separator_col = sc - 1
+
+          separator =
+            for row <- 0..(sh - 1) do
+              DisplayList.draw(sr + row, separator_col, "│",
+                fg: state.theme.editor.split_border_fg
+              )
+            end
+
+          separator ++ ViewRenderer.render_dashboard_only(state, {sr, sc, sw, sh})
 
         nil ->
-          {ViewRenderer.render_in_rect(state, win_layout.content), win_layout.content}
+          []
       end
 
-    # Cursor position within the chat input area.
-    agent_cursor =
-      case ViewRenderer.cursor_position_in_rect(state, chat_rect) do
+    # Compute prompt height and subdivide the content rect.
+    # Uses the same layout math as ViewRenderer.render_in_rect to keep
+    # prompt position consistent with the old rendering path.
+    prompt_height = ViewRenderer.prompt_height(state, chat_width)
+    input_v_gap = 1
+    chat_height = max(height - prompt_height - input_v_gap, 1)
+    prompt_row = row_off + chat_height + input_v_gap
+
+    # Render the prompt (agent chrome, not buffer content)
+    prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
+    prompt_draws = ViewRenderer.render_prompt_only(state, prompt_rect)
+
+    # Render the chat content through the standard buffer pipeline
+    is_active = agent_window_active?(state, window)
+    {cursor_line, cursor_byte_col} = agent_window_cursor(window, buf, is_active)
+
+    line_count = BufferServer.line_count(buf)
+    viewport = Viewport.new(chat_height, chat_width, 0)
+    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buf)
+    visible_rows = Viewport.content_rows(viewport)
+    {first_line, _} = Viewport.visible_range(viewport)
+
+    # Fetch enough lines to cover decorations that consume screen rows.
+    # Over-fetch slightly so block decorations don't cause missing lines.
+    fetch_rows = visible_rows + div(visible_rows, 2)
+    snapshot = BufferServer.render_snapshot(buf, first_line, fetch_rows)
+
+    cursor_line_text = cursor_text_from_snapshot(snapshot.lines, cursor_line, first_line)
+
+    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
+    line_number_style = BufferServer.get_option(buf, :line_numbers)
+    gutter_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+    content_w = max(chat_width - gutter_w, 1)
+
+    # Build render context (includes decorations from the buffer)
+    render_ctx =
+      ContentHelpers.build_render_ctx(state, window, %{
+        viewport: viewport,
+        cursor: {cursor_line, cursor_byte_col},
+        lines: snapshot.lines,
+        first_line: first_line,
+        preview_matches: [],
+        gutter_w: gutter_w,
+        content_w: content_w,
+        has_sign_column: false,
+        is_active: is_active
+      })
+
+    # Compute the display map (block decorations, fold regions, virtual lines).
+    # Without this, the sequential fast path skips all decoration rendering.
+    decorations = render_ctx.decorations
+    fold_map = window.fold_map
+
+    visible_line_map =
+      case DisplayMap.compute(
+             fold_map,
+             decorations,
+             first_line,
+             visible_rows,
+             line_count,
+             content_w
+           ) do
+        nil -> nil
+        %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
+      end
+
+    # Detect context changes to invalidate dirty-line cache
+    ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
+    window = Window.detect_context_change(window, ctx_fp)
+
+    # Render lines
+    ln_style = if line_number_style == :none, do: :none, else: :absolute
+
+    opts = %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: render_ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      first_byte_off: 0,
+      row_off: row_off,
+      col_off: col_off,
+      window: window,
+      buffer: buf,
+      visible_line_map: visible_line_map,
+      fold_map: fold_map,
+      wrap_on: true
+    }
+
+    {gutter_draws, line_draws, rendered_rows, window} =
+      ContentHelpers.render_lines_nowrap(snapshot.lines, opts)
+
+    # Snapshot render state so future frames can detect changes.
+    # Without this, dirty_lines stays empty and content is never re-rendered.
+    buf_version = BufferServer.version(buf)
+    last_visible = first_line + length(snapshot.lines) - 1
+
+    window =
+      window
+      |> Window.snapshot_after_render(
+        viewport.top,
+        gutter_w,
+        line_count,
+        cursor_line,
+        buf_version,
+        ctx_fp
+      )
+      |> Window.prune_cache(first_line, last_visible)
+
+    # Persist the updated window back to state
+    state = put_in(state.windows.map[window.id], window)
+
+    tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
+
+    buf_cursor =
+      if is_active do
+        adjusted_cc =
+          Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
+
+        cr = cursor_line - viewport.top + row_off
+        cc = gutter_w + adjusted_cc - viewport.left + col_off
+        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim))
+      else
+        nil
+      end
+
+    # Prompt cursor (overrides buffer cursor when input is focused).
+    # cursor_position_in_rect needs the full content rect to compute
+    # the prompt position correctly (it subdivides internally).
+    full_rect = {row_off, col_off, chat_width, height}
+
+    prompt_cursor =
+      case ViewRenderer.cursor_position_in_rect(state, full_rect) do
         {row, col} -> Cursor.new(row, col, :beam)
         nil -> nil
       end
 
-    # Use {0, 0} for the rect origin. The agent renderer's draws already
-    # use absolute screen coordinates (they include row_off/col_off from
-    # the rect passed to render_with_sidebar / render_in_rect). Buffer
-    # windows also use {0, 0} for the same reason. DisplayList.to_commands
-    # offsets draws by the frame rect origin, so using {0, 0} avoids
-    # double-offsetting.
-    %WindowFrame{
-      rect: {0, 0, width, height},
-      gutter: %{},
-      lines: DisplayList.draws_to_layer(draws),
-      tilde_lines: %{},
+    final_cursor = if prompt_cursor != nil, do: prompt_cursor, else: buf_cursor
+
+    frame = %WindowFrame{
+      rect: {0, 0, chat_width, height},
+      gutter: DisplayList.draws_to_layer(gutter_draws),
+      lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws ++ sidebar_draws),
+      tilde_lines: DisplayList.draws_to_layer(tilde_draws),
       modeline: %{},
-      cursor: agent_cursor
+      cursor: final_cursor
     }
+
+    {frame, final_cursor, state}
   end
 
-  # Splits a content rect into chat (left) and sidebar (right) rects
-  # if there's enough horizontal space. Returns {chat_rect, sidebar_rect}
-  # or nil if the sidebar doesn't fit.
-  @spec compute_agent_sidebar(state(), Layout.rect()) :: {Layout.rect(), Layout.rect()} | nil
-  defp compute_agent_sidebar(state, {row, col, width, height}) do
-    chat_width_pct = AgentAccess.agentic(state).chat_width_pct
-    chat_width = max(div(width * chat_width_pct, 100), 20)
-    sidebar_width = width - chat_width - 1
+  defp agent_window_active?(state, window) do
+    window.buffer == state.buffers.active or
+      Map.get(state.windows.map, state.windows.active) == window
+  end
 
-    if sidebar_width >= @sidebar_min_cols do
-      sidebar_col = col + chat_width + 1
-      {{row, col, chat_width, height}, {row, sidebar_col, sidebar_width, height}}
+  defp agent_window_cursor(_window, buf, true), do: BufferServer.cursor(buf)
+  defp agent_window_cursor(window, _buf, false), do: window.cursor
+
+  defp cursor_text_from_snapshot(lines, cursor_line, first_line) do
+    idx = cursor_line - first_line
+
+    if idx >= 0 and idx < length(lines) do
+      Enum.at(lines, idx, "")
     else
-      nil
+      ""
+    end
+  end
+
+  defp build_tilde_draws(rendered_rows, chat_height, row_off, col_off) do
+    if rendered_rows < chat_height do
+      for r <- rendered_rows..(chat_height - 1) do
+        DisplayList.draw(r + row_off, col_off, "~", fg: 0x555555)
+      end
+    else
+      []
     end
   end
 end

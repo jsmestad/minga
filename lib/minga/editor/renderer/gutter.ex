@@ -76,7 +76,8 @@ defmodule Minga.Editor.Renderer.Gutter do
           line_number_style(),
           colors()
         ) :: DisplayList.draw() | []
-  def render_number(_screen_row, _col_offset, _buf_line, _cursor_line, 0, :none, _colors),
+  # :none means no line numbers; return nothing regardless of allocated width.
+  def render_number(_screen_row, _col_offset, _buf_line, _cursor_line, _w, :none, _colors),
     do: []
 
   def render_number(screen_row, col_offset, buf_line, cursor_line, line_number_w, style, colors) do

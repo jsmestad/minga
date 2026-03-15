@@ -30,6 +30,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
@@ -215,7 +216,11 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    %{state | mouse: MouseState.stop_drag(state.mouse)}
+    state = %{state | mouse: MouseState.stop_drag(state.mouse)}
+
+    # Auto-copy selection to system clipboard on mouse release.
+    # Standard terminal behavior: selecting text copies it.
+    auto_copy_selection(state)
   end
 
   def handle(%{mouse: %MouseState{dragging: true}} = state, _r, _c, :left, _m, :release, _cc) do
@@ -862,6 +867,40 @@ defmodule Minga.Editor.Mouse do
     adjusted_col = adjust_col_for_virtual_text(buf, target_line, target_col)
     {target_line, clamp_col_to_line(buf, target_line, adjusted_col)}
   end
+
+  @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
+  defp auto_copy_selection(
+         %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}} = state
+       )
+       when is_pid(buf) do
+    text = selection_text(buf, ms)
+    maybe_copy_to_clipboard(text)
+    state
+  catch
+    :exit, _ -> state
+  end
+
+  defp auto_copy_selection(state), do: state
+
+  @spec selection_text(pid(), map()) :: String.t() | nil
+  defp selection_text(buf, %{visual_type: :char} = ms) do
+    BufferServer.get_range(buf, ms.visual_anchor, BufferServer.cursor(buf))
+  end
+
+  defp selection_text(buf, %{visual_type: :line} = ms) do
+    {a_line, _} = ms.visual_anchor
+    {c_line, _} = BufferServer.cursor(buf)
+    BufferServer.get_lines_content(buf, min(a_line, c_line), max(a_line, c_line))
+  end
+
+  defp maybe_copy_to_clipboard(text) when is_binary(text) and text != "" do
+    case Options.get(:clipboard) do
+      :none -> :ok
+      _ -> Minga.Clipboard.write(text)
+    end
+  end
+
+  defp maybe_copy_to_clipboard(_text), do: :ok
 
   @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
