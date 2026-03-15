@@ -2,7 +2,10 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
+  alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.ContentHelpers
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
 
   @search_colors %Minga.Theme.Search{
     highlight_bg: 0xECBE7B,
@@ -90,6 +93,100 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
       # Different matches: must rebuild, not return cached
       highlights = Decorations.highlights_for_line(result2, 1)
       assert highlights != [], "new search match on line 1 should produce a highlight"
+    end
+  end
+
+  describe "render_lines_nowrap with visible_line_map and wrap_on" do
+    setup do
+      buf = start_supervised!({Minga.Buffer.Server, content: ""})
+      viewport = Viewport.new(20, 20, 0)
+
+      ctx = %Context{
+        viewport: viewport,
+        gutter_w: 3,
+        content_w: 10,
+        decorations: Decorations.new()
+      }
+
+      window = %Window{
+        id: 1,
+        content: Window.Content.buffer(buf),
+        buffer: buf,
+        viewport: viewport,
+        dirty_lines: :all
+      }
+
+      %{buf: buf, ctx: ctx, window: window}
+    end
+
+    test "wrapped lines at screen_row > 0 render all visual rows", %{ctx: ctx, window: window} do
+      # Line 0: short (1 row). Line 1: long, wraps to 2+ rows at content_w=10.
+      lines = ["short", "this line is longer than ten columns wide"]
+
+      # Both are normal buffer lines
+      visible_line_map = [{0, :normal}, {1, :normal}]
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 3,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        visible_line_map: visible_line_map,
+        fold_map: %Minga.Editor.FoldMap{folds: []},
+        wrap_on: true
+      }
+
+      {_gutter_draws, line_draws, rendered_rows, _window} =
+        ContentHelpers.render_lines_nowrap(lines, opts)
+
+      # Line 0 takes 1 row. Line 1 wraps to multiple rows at width 10.
+      # Total rendered_rows must be > 2 (proving wrapping happened).
+      assert rendered_rows > 2,
+             "expected wrapped lines to consume more than 2 rows, got #{rendered_rows}"
+
+      # There must be draw commands for rows beyond row 1 (the wrap continuation rows).
+      # Each draw is a {row, col, text, style} tuple.
+      draw_rows = line_draws |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
+
+      assert length(draw_rows) > 2,
+             "expected draw commands on 3+ rows for wrapped content, got rows: #{inspect(draw_rows)}"
+    end
+
+    test "multiple wrapped lines each get correct row count", %{ctx: ctx, window: window} do
+      # Three lines, each longer than content_w=10
+      lines = [
+        "first line that wraps around",
+        "second line also wraps here",
+        "third wrapping line content"
+      ]
+
+      visible_line_map = [{0, :normal}, {1, :normal}, {2, :normal}]
+
+      opts = %{
+        first_line: 0,
+        cursor_line: 0,
+        ctx: ctx,
+        ln_style: :absolute,
+        gutter_w: 3,
+        row_off: 0,
+        col_off: 0,
+        window: window,
+        visible_line_map: visible_line_map,
+        fold_map: %Minga.Editor.FoldMap{folds: []},
+        wrap_on: true
+      }
+
+      {_gutter_draws, _line_draws, rendered_rows, _window} =
+        ContentHelpers.render_lines_nowrap(lines, opts)
+
+      # Each 27-28 char line at width 10 should wrap to 3 rows.
+      # Total should be ~9 rows (3 lines × 3 rows each).
+      assert rendered_rows >= 6,
+             "expected at least 6 rendered rows for 3 wrapped lines, got #{rendered_rows}"
     end
   end
 end

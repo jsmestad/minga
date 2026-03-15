@@ -228,6 +228,11 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
     wrap_on = Map.get(opts, :wrap_on, false)
 
+    # Pre-compute wrap map for all visible buffer lines in one batch call
+    # (more efficient than per-line WrapMap.compute during the reduce).
+    wrap_index =
+      precompute_wrap_index(wrap_on, visible_line_map, lines, first_line, ctx.content_w)
+
     render_opts = %{
       cursor_line: cursor_line,
       ctx: ctx,
@@ -238,7 +243,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       col_off: col_off,
       lines: lines,
       first_line: first_line,
-      wrap_on: wrap_on
+      wrap_index: wrap_index
     }
 
     {gutters, contents_rev, screen_row, window} =
@@ -303,35 +308,58 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   defp render_normal_entry(buf_line, fold_info, screen_row, render_opts, win, {g, c}) do
-    %{lines: lines, first_line: first_line, wrap_on: wrap_on, ctx: ctx} = render_opts
+    %{lines: lines, first_line: first_line, wrap_index: wrap_index} = render_opts
     line_index = buf_line - first_line
     line_text = Enum.at(lines, line_index, "")
     display_text = fold_display_text(line_text, fold_info)
 
-    wrap_entry = maybe_compute_wrap(wrap_on, display_text, ctx.content_w)
+    wrap_entry = Map.get(wrap_index, buf_line)
     rows_for_line = if wrap_entry, do: length(wrap_entry), else: 1
 
+    line_opts =
+      render_opts
+      |> Map.put(:max_rows, screen_row + rows_for_line)
+      |> Map.put(:wrap_entry, wrap_entry)
+
     {new_g, new_c, win} =
-      render_folded_line(
-        win,
-        buf_line,
-        display_text,
-        fold_info,
-        screen_row,
-        Map.put(render_opts, :max_rows, rows_for_line),
-        {g, c},
-        wrap_entry
-      )
+      render_folded_line(win, buf_line, display_text, fold_info, screen_row, line_opts, {g, c})
 
     {new_g, new_c, screen_row + rows_for_line, win}
   end
 
-  @spec maybe_compute_wrap(boolean(), String.t(), pos_integer()) :: WrapMap.wrap_entry() | nil
-  defp maybe_compute_wrap(false, _text, _width), do: nil
+  # Pre-computes wrap entries for all buffer lines in the visible_line_map
+  # in a single batch WrapMap.compute call. Returns %{buf_line => wrap_entry}.
+  @spec precompute_wrap_index(
+          boolean(),
+          [{non_neg_integer(), term()}],
+          [String.t()],
+          non_neg_integer(),
+          pos_integer()
+        ) :: %{non_neg_integer() => WrapMap.wrap_entry()}
+  defp precompute_wrap_index(false, _visible_line_map, _lines, _first_line, _width), do: %{}
 
-  defp maybe_compute_wrap(true, text, width) do
-    [entry] = WrapMap.compute([text], width)
-    entry
+  defp precompute_wrap_index(true, visible_line_map, lines, first_line, width) do
+    # Extract buffer lines that need wrapping (skip virtual lines, blocks, folds)
+    buffer_entries =
+      visible_line_map
+      |> Enum.filter(fn {_buf_line, fold_info} ->
+        match?(:normal, fold_info) or match?({:fold_start, _}, fold_info)
+      end)
+      |> Enum.map(fn {buf_line, fold_info} ->
+        line_index = buf_line - first_line
+        line_text = Enum.at(lines, line_index, "")
+        display_text = fold_display_text(line_text, fold_info)
+        {buf_line, display_text}
+      end)
+
+    texts = Enum.map(buffer_entries, &elem(&1, 1))
+    buf_lines = Enum.map(buffer_entries, &elem(&1, 0))
+
+    wrap_entries = WrapMap.compute(texts, width)
+
+    buf_lines
+    |> Enum.zip(wrap_entries)
+    |> Map.new()
   end
 
   defp clear_block_render_cache do
@@ -375,19 +403,11 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           :normal | {:fold_start, pos_integer()},
           non_neg_integer(),
           map(),
-          {[DisplayList.draw()], [DisplayList.draw()]},
-          WrapMap.wrap_entry() | nil
+          {[DisplayList.draw()], [DisplayList.draw()]}
         ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
-  defp render_folded_line(
-         win,
-         buf_line,
-         display_text,
-         fold_info,
-         screen_row,
-         render_opts,
-         {g, c},
-         wrap_entry
-       ) do
+  defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
+    wrap_entry = Map.get(render_opts, :wrap_entry)
+
     if Window.dirty?(win, buf_line) do
       fold_pos = %RenderPosition{
         screen_row: screen_row,
