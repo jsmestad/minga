@@ -17,7 +17,6 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
@@ -28,6 +27,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.WrapMap
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
@@ -634,7 +634,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   def diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(DocumentSync.path_to_uri(path))
+      path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
     end
   end
 

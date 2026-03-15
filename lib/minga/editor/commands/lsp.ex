@@ -10,14 +10,13 @@ defmodule Minga.Editor.Commands.Lsp do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.BufferLifecycle
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.HoverPopup
+  alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
-
-  alias Minga.Editor.LspActions
+  alias Minga.LSP.SyncServer
 
   @type state :: EditorState.t()
 
@@ -139,8 +138,8 @@ defmodule Minga.Editor.Commands.Lsp do
       case LSPSupervisor.ensure_client(config, root) do
         {:ok, _pid} ->
           Minga.Log.info(:lsp, "Started LSP server #{config.name}")
-          new_lsp = DocumentSync.on_buffer_open(st.lsp, buf)
-          {[{:ok, config.name} | results], %{st | lsp: new_lsp}}
+          maybe_broadcast_buffer_opened(buf)
+          {[{:ok, config.name} | results], st}
 
         {:error, reason} ->
           Minga.Log.warning(:lsp, "Failed to start #{config.name}: #{inspect(reason)}")
@@ -151,9 +150,22 @@ defmodule Minga.Editor.Commands.Lsp do
 
   # ── Private: helpers ─────────────────────────────────────────────────────
 
+  # Re-broadcasts :buffer_opened so SyncServer attaches clients for newly
+  # started LSP servers.
+  @spec maybe_broadcast_buffer_opened(pid()) :: :ok
+  defp maybe_broadcast_buffer_opened(buf) do
+    path = BufferServer.file_path(buf)
+
+    if path do
+      Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path})
+    end
+
+    :ok
+  end
+
   @spec clients_and_keys_for_active(state()) :: [{atom(), {atom(), String.t()}}]
-  defp clients_and_keys_for_active(%{buffers: %{active: buf}} = state) do
-    clients = DocumentSync.clients_for_buffer(state.lsp, buf)
+  defp clients_and_keys_for_active(%{buffers: %{active: buf}} = _state) do
+    clients = SyncServer.clients_for_buffer(buf)
     Enum.flat_map(clients, &client_name_and_key/1)
   end
 

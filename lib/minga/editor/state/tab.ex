@@ -39,7 +39,7 @@ defmodule Minga.Editor.State.Tab do
           optional(:viewport) => term(),
           optional(:mouse) => term(),
           optional(:highlight) => term(),
-          optional(:lsp) => term(),
+          optional(:lsp_pending) => term(),
           optional(:completion) => term(),
           optional(:completion_trigger) => term(),
           optional(:injection_ranges) => term(),

@@ -3,16 +3,16 @@ defmodule Minga.Editor.LspActions do
   One-shot LSP request/response handlers for go-to-definition and hover.
 
   Follows the same async pattern as completion: sends a request via
-  `Client.request/3`, stores the reference in `state.lsp.pending`, and
+  `Client.request/3`, stores the reference in `state.lsp_pending`, and
   processes the response when it arrives in `Editor.handle_info`.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
 
   @type state :: EditorState.t()
 
@@ -172,8 +172,8 @@ defmodule Minga.Editor.LspActions do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec lsp_client_for(state(), pid()) :: pid() | nil
-  defp lsp_client_for(state, buffer_pid) do
-    case DocumentSync.clients_for_buffer(state.lsp, buffer_pid) do
+  defp lsp_client_for(_state, buffer_pid) do
+    case SyncServer.clients_for_buffer(buffer_pid) do
       [client | _] -> client
       [] -> nil
     end
@@ -188,7 +188,7 @@ defmodule Minga.Editor.LspActions do
         %{state | status_msg: "Buffer has no file path"}
 
       path ->
-        uri = DocumentSync.path_to_uri(path)
+        uri = SyncServer.path_to_uri(path)
         {line, col} = BufferServer.cursor(buffer_pid)
 
         params = %{
@@ -197,7 +197,7 @@ defmodule Minga.Editor.LspActions do
         }
 
         ref = Client.request(client, method, params)
-        put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, kind))
+        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, kind))
     end
   end
 
@@ -225,7 +225,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec jump_to_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   defp jump_to_location(state, uri, line, col) do
-    target_path = DocumentSync.uri_to_path(uri)
+    target_path = SyncServer.uri_to_path(uri)
     current_path = BufferServer.file_path(state.buffers.active)
 
     # Set jump mark before navigating

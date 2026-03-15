@@ -8,13 +8,12 @@ defmodule Minga.Editor.CompletionHandling do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
-  alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.CompletionTrigger
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
 
   @resolve_debounce_ms 150
 
@@ -70,7 +69,7 @@ defmodule Minga.Editor.CompletionHandling do
 
         client ->
           ref = Client.request(client, "completionItem/resolve", item.raw)
-          put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, :completion_resolve))
+          put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :completion_resolve))
       end
     end
   end
@@ -162,7 +161,7 @@ defmodule Minga.Editor.CompletionHandling do
     end
 
     Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
-    state = BufferLifecycle.lsp_buffer_changed(state)
+    SyncServer.notify_change(buf)
     GitTracker.notify_change(buf)
     state
   end
@@ -181,7 +180,7 @@ defmodule Minga.Editor.CompletionHandling do
     )
 
     Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
-    state = BufferLifecycle.lsp_buffer_changed(state)
+    SyncServer.notify_change(buf)
     GitTracker.notify_change(buf)
     state
   end
@@ -231,7 +230,7 @@ defmodule Minga.Editor.CompletionHandling do
 
       char ->
         {new_bridge, _comp} =
-          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf, state.lsp)
+          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf)
 
         %{state | completion_trigger: new_bridge}
     end
@@ -354,7 +353,7 @@ defmodule Minga.Editor.CompletionHandling do
         file_path = BufferServer.file_path(buf)
 
         if file_path do
-          uri = DocumentSync.path_to_uri(file_path)
+          uri = SyncServer.path_to_uri(file_path)
           {line, col} = BufferServer.cursor(buf)
 
           params = %{
@@ -363,7 +362,7 @@ defmodule Minga.Editor.CompletionHandling do
           }
 
           ref = Client.request(client, "textDocument/signatureHelp", params)
-          put_in(state.lsp.pending, Map.put(state.lsp.pending, ref, :signature_help))
+          put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :signature_help))
         else
           state
         end
@@ -387,8 +386,8 @@ defmodule Minga.Editor.CompletionHandling do
   end
 
   @spec lsp_client_for(EditorState.t(), pid()) :: pid() | nil
-  defp lsp_client_for(state, buffer_pid) do
-    case DocumentSync.clients_for_buffer(state.lsp, buffer_pid) do
+  defp lsp_client_for(_state, buffer_pid) do
+    case SyncServer.clients_for_buffer(buffer_pid) do
       [client | _] -> client
       [] -> nil
     end

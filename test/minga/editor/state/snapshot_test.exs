@@ -59,7 +59,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert ctx.viewport == state.viewport
       assert ctx.mouse == state.mouse
       assert ctx.highlight == state.highlight
-      assert ctx.lsp == state.lsp
+      assert ctx.lsp_pending == state.lsp_pending
       assert ctx.completion == state.completion
       assert ctx.completion_trigger == state.completion_trigger
       assert ctx.injection_ranges == state.injection_ranges

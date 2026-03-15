@@ -63,6 +63,7 @@ defmodule Minga.Application do
       Minga.Config.Loader,
       Minga.Diagnostics,
       Minga.LSP.Supervisor,
+      Minga.LSP.SyncServer,
       Minga.Project,
       Minga.Agent.Supervisor
     ]
