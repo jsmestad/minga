@@ -8,7 +8,13 @@ defmodule Minga.ProjectTest do
   # Start a private Project GenServer for each test to avoid global state.
   defp start_project!(opts \\ []) do
     name = :"project_#{System.unique_integer([:positive])}"
-    {:ok, pid} = Project.start_link(Keyword.put(opts, :name, name))
+
+    {:ok, pid} =
+      opts
+      |> Keyword.put(:name, name)
+      |> Keyword.put_new(:subscribe, false)
+      |> Project.start_link()
+
     {pid, name}
   end
 
