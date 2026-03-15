@@ -11,6 +11,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
+  alias Minga.Git.Tracker, as: GitTracker
 
   @moduletag :tmp_dir
 
@@ -228,11 +229,31 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       case Minga.Git.root_for(Path.join(dir, "other.ex")) do
         {:ok, _root} ->
-          assert Map.has_key?(state.git_buffers, buf),
+          # Git.Tracker handles git buffer lifecycle via the event bus.
+          # Poll until the async event is processed.
+          assert poll_until(fn -> GitTracker.tracked?(buf) end, 500, 10),
                  "Expected git buffer to be started for file opened from tree"
 
         :not_git ->
           :ok
+      end
+    end
+  end
+
+  defp poll_until(condition, timeout, interval) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_poll_until(condition, interval, deadline)
+  end
+
+  defp do_poll_until(condition, interval, deadline) do
+    if condition.() do
+      true
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        false
+      else
+        Process.sleep(interval)
+        do_poll_until(condition, interval, deadline)
       end
     end
   end

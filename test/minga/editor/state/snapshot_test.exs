@@ -62,7 +62,6 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert ctx.lsp == state.lsp
       assert ctx.completion == state.completion
       assert ctx.completion_trigger == state.completion_trigger
-      assert ctx.git_buffers == state.git_buffers
       assert ctx.injection_ranges == state.injection_ranges
       assert ctx.search == state.search
       assert ctx.pending_conflict == state.pending_conflict

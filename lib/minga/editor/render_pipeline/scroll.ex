@@ -23,6 +23,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
+  alias Minga.Git.Tracker, as: GitTracker
 
   defmodule WindowScroll do
     @moduledoc """
@@ -346,9 +347,9 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
 
   @spec gutter_dimensions(state(), pid(), atom(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
-  defp gutter_dimensions(state, buf, line_number_style, line_count) do
+  defp gutter_dimensions(_state, buf, line_number_style, line_count) do
     has_sign_column =
-      Map.has_key?(state.git_buffers, buf) or BufferServer.file_path(buf) != nil
+      GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
 
     sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
 

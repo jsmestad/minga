@@ -38,6 +38,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Capabilities
@@ -630,7 +631,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(%{buffers: %{active: buf}, git_buffers: git_buffers}, total_lines) do
+  defp gutter_width(%{buffers: %{active: buf}}, total_lines) do
     ln_style =
       if buf, do: BufferServer.get_option(buf, :line_numbers), else: :none
 
@@ -641,7 +642,7 @@ defmodule Minga.Editor.Mouse do
     # registered. This must match render_pipeline.ex's gutter_dimensions/4.
     has_sign_column =
       buf != nil and
-        (Map.has_key?(git_buffers, buf) or BufferServer.file_path(buf) != nil)
+        (GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil)
 
     sign_w =
       if has_sign_column, do: Gutter.sign_column_width(), else: 0
