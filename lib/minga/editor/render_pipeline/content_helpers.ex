@@ -72,9 +72,12 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       is_active: is_active
     } = params
 
+    decorations = window_decorations(window)
+
     visual_selection =
       if is_active do
-        visual_selection_grapheme_bounds(state, cursor, lines, first_line)
+        sel = visual_selection_grapheme_bounds(state, cursor, lines, first_line)
+        adjust_selection_for_virtual_text(sel, decorations)
       else
         nil
       end
@@ -91,8 +94,6 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       else
         nil
       end
-
-    decorations = window_decorations(window)
 
     %Context{
       viewport: viewport,
@@ -448,6 +449,18 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   def prepend_all(acc, new_items), do: Enum.reduce(new_items, acc, fn item, a -> [item | a] end)
 
   # ── Window data ────────────────────────────────────────────────────────────
+
+  # Adjusts visual selection display columns to account for inline virtual
+  # text that displaces buffer content rightward.
+  @spec adjust_selection_for_virtual_text(visual_selection(), Decorations.t()) ::
+          visual_selection()
+  defp adjust_selection_for_virtual_text(nil, _decs), do: nil
+  defp adjust_selection_for_virtual_text({:line, _, _} = sel, _decs), do: sel
+
+  defp adjust_selection_for_virtual_text({:char, {sl, sc}, {el, ec}}, decs) do
+    {:char, {sl, Decorations.buf_col_to_display_col(decs, sl, sc)},
+     {el, Decorations.buf_col_to_display_col(decs, el, ec)}}
+  end
 
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()

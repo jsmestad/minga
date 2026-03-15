@@ -150,6 +150,28 @@ defmodule Minga.Editor.DisplayMapTest do
       assert 15 in visible_lines
     end
 
+    test "nested decoration folds: outer hides inner" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+      {_id1, decs} = Decorations.add_fold_region(decs, 5, 15, closed: true)
+      {_id2, decs} = Decorations.add_fold_region(decs, 8, 12, closed: true)
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+      entries = DisplayMap.to_visible_line_map(dm)
+
+      visible_lines = Enum.map(entries, fn {line, _} -> line end)
+
+      # Outer fold at 5-15 hides everything inside (including inner fold at 8-12)
+      # Line 5 shows as decoration fold start
+      assert 5 in visible_lines
+      refute 8 in visible_lines
+      refute 12 in visible_lines
+      refute 15 in visible_lines
+
+      # Line 16 is visible (after outer fold)
+      assert 16 in visible_lines
+    end
+
     test "decoration fold nested inside window fold is hidden entirely" do
       # Window fold at 2-20 hides everything including any decoration folds inside
       fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(2, 20))
@@ -287,6 +309,49 @@ defmodule Minga.Editor.DisplayMapTest do
       assert DisplayMap.buf_line_for_display_row(dm, 0) == 0
       assert DisplayMap.buf_line_for_display_row(dm, 3) == 3
       assert DisplayMap.buf_line_for_display_row(dm, 4) == 7
+    end
+  end
+
+  # ── next/prev visible line ────────────────────────────────────────────────
+
+  describe "next_visible_line/2 and prev_visible_line/2" do
+    test "skips over window fold" do
+      fm = FoldMap.new() |> FoldMap.fold(FoldRange.new!(5, 10))
+      decs = Decorations.new()
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      assert DisplayMap.next_visible_line(dm, 4) == 5
+      # Line 5 is fold start; next visible after it should be 11
+      assert DisplayMap.next_visible_line(dm, 5) == 11
+      assert DisplayMap.prev_visible_line(dm, 11) == 5
+    end
+
+    test "skips over decoration fold" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_fold_region(decs, 5, 10, closed: true)
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      assert DisplayMap.next_visible_line(dm, 5) == 11
+      assert DisplayMap.prev_visible_line(dm, 11) == 5
+    end
+
+    test "skips over virtual lines" do
+      fm = FoldMap.new()
+      decs = Decorations.new()
+
+      {_, decs} =
+        Decorations.add_virtual_text(decs, {5, 0},
+          segments: [{"header", []}],
+          placement: :above
+        )
+
+      dm = DisplayMap.compute(fm, decs, 0, 20, 25)
+
+      # next_visible_line after line 4 should be 5 (the virtual line is
+      # not a buffer line, so it's skipped)
+      assert DisplayMap.next_visible_line(dm, 4) == 5
     end
   end
 
