@@ -143,6 +143,9 @@ defmodule Minga.Editor do
     state = Startup.apply_config_options(state)
     Minga.Diagnostics.subscribe()
 
+    # Refresh file tree git status when any buffer is saved.
+    Minga.Events.subscribe(:buffer_saved)
+
     {:ok, state}
   end
 
@@ -585,6 +588,10 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  def handle_info({:minga_event, :buffer_saved, _payload}, state) do
+    {:noreply, refresh_tree_git_status(state)}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -978,7 +985,15 @@ defmodule Minga.Editor do
     end)
   end
 
-  # ── Config options ──────────────────────────────────────────────────────
+  # ── File tree helpers ────────────────────────────────────────────────────
+
+  @spec refresh_tree_git_status(state()) :: state()
+  defp refresh_tree_git_status(%{file_tree: %{tree: nil}} = state), do: state
+
+  defp refresh_tree_git_status(%{file_tree: %{tree: tree}} = state) do
+    updated_tree = Minga.FileTree.refresh_git_status(tree)
+    put_in(state.file_tree.tree, updated_tree)
+  end
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 

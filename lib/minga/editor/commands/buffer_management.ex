@@ -40,7 +40,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
         name = Helpers.buffer_display_name(buf)
 
         %{state | status_msg: "Wrote #{name}"}
-        |> refresh_tree_git_status()
 
       {:error, :file_changed} ->
         %{state | status_msg: "WARNING: File changed on disk. Use :w! to force save."}
@@ -957,15 +956,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
       {id, _window} -> {:ok, id}
       nil -> :none
     end
-  end
-
-  # Refreshes git status in the file tree (if open) after file operations.
-  @spec refresh_tree_git_status(EditorState.t()) :: EditorState.t()
-  defp refresh_tree_git_status(%{file_tree: %{tree: nil}} = state), do: state
-
-  defp refresh_tree_git_status(%{file_tree: %{tree: tree}} = state) do
-    updated_tree = Minga.FileTree.refresh_git_status(tree)
-    put_in(state.file_tree.tree, updated_tree)
   end
 
   # Creates an empty buffer when the last buffer is killed.

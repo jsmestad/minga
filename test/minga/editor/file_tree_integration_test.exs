@@ -240,6 +240,28 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
     end
   end
 
+  describe "file tree git status refresh on save" do
+    test "Editor subscribes to :buffer_saved and refreshes file tree git status", %{tmp_dir: dir} do
+      file = Path.join(dir, "save_test.ex")
+      File.write!(file, "x = 1\n")
+      ctx = start_editor(file)
+
+      # Open the file tree
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.file_tree.tree != nil
+
+      # Broadcast a :buffer_saved event (simulating what lsp_after_save does)
+      Minga.Events.broadcast(:buffer_saved, %{buffer: state.buffers.active, path: file})
+
+      # A synchronous call to the Editor flushes its mailbox, guaranteeing
+      # the :minga_event handle_info has been processed before we inspect state.
+      state = :sys.get_state(ctx.editor)
+
+      # The tree should still be present (refresh didn't crash or nil it out)
+      assert state.file_tree.tree != nil
+    end
+  end
+
   defp poll_until(condition, timeout, interval) do
     deadline = System.monotonic_time(:millisecond) + timeout
     do_poll_until(condition, interval, deadline)
