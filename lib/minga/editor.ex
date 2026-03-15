@@ -152,6 +152,16 @@ defmodule Minga.Editor do
     # Refresh file tree git status when any buffer is saved.
     Minga.Events.subscribe(:buffer_saved)
 
+    # Monitor all initial buffers so we get :DOWN when they die.
+    all_initial_pids =
+      state.buffers.list ++
+        Enum.filter(
+          [state.buffers.messages, state.buffers.warnings, state.buffers.help],
+          &is_pid/1
+        )
+
+    state = EditorState.monitor_buffers(state, all_initial_pids)
+
     {:ok, state}
   end
 
@@ -592,6 +602,16 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
     {:noreply, refresh_tree_git_status(state)}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    if Map.has_key?(state.buffer_monitors, pid) do
+      Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
+      state = EditorState.remove_dead_buffer(state, pid)
+      {:noreply, Renderer.render(state)}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info(_msg, state) do
