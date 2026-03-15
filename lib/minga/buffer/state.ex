@@ -50,7 +50,8 @@ defmodule Minga.Buffer.State do
             persistent: false,
             pending_edits: [],
             decorations: %Decorations{},
-            options: %{}
+            options: %{},
+            explicit_options: MapSet.new()
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -71,7 +72,8 @@ defmodule Minga.Buffer.State do
           persistent: boolean(),
           pending_edits: [EditDelta.t()],
           decorations: Decorations.t(),
-          options: %{atom() => term()}
+          options: %{atom() => term()},
+          explicit_options: MapSet.t(atom())
         }
 
   @max_undo_stack 1000
