@@ -63,4 +63,55 @@ defmodule Minga.Input.Hover do
   def handle_key(%{hover_popup: %HoverPopup{focused: false}} = state, _cp, _mods) do
     {:passthrough, %{state | hover_popup: nil}}
   end
+
+  # ── Mouse handling ──────────────────────────────────────────────────────
+
+  @impl true
+  @spec handle_mouse(
+          EditorState.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: Minga.Input.Handler.result()
+
+  def handle_mouse(%{hover_popup: nil} = state, _row, _col, _btn, _mods, _type, _cc) do
+    {:passthrough, state}
+  end
+
+  # Scroll wheel when focused: scroll the hover content
+  def handle_mouse(
+        %{hover_popup: %HoverPopup{focused: true}} = state,
+        _r,
+        _c,
+        :wheel_down,
+        _m,
+        _t,
+        _cc
+      ) do
+    {:handled, %{state | hover_popup: HoverPopup.scroll_down(state.hover_popup)}}
+  end
+
+  def handle_mouse(
+        %{hover_popup: %HoverPopup{focused: true}} = state,
+        _r,
+        _c,
+        :wheel_up,
+        _m,
+        _t,
+        _cc
+      ) do
+    {:handled, %{state | hover_popup: HoverPopup.scroll_up(state.hover_popup)}}
+  end
+
+  # Any click dismisses hover
+  def handle_mouse(%{hover_popup: %HoverPopup{}} = state, _r, _c, :left, _m, :press, _cc) do
+    {:passthrough, %{state | hover_popup: nil}}
+  end
+
+  def handle_mouse(state, _row, _col, _btn, _mods, _type, _cc) do
+    {:passthrough, state}
+  end
 end
