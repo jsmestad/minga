@@ -690,7 +690,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
           "[unknown]"
         end
 
-      if buf && Process.alive?(buf), do: GenServer.stop(buf, :normal)
+      if buf && Process.alive?(buf) do
+        path = BufferServer.file_path(buf) || :scratch
+
+        Minga.Events.broadcast(
+          :buffer_closed,
+          %Minga.Events.BufferClosedEvent{buffer: buf, path: path}
+        )
+
+        GenServer.stop(buf, :normal)
+      end
+
       Minga.Editor.log_to_messages("Closed: #{buf_name}")
 
       new_buffers = List.delete_at(buffers, idx)

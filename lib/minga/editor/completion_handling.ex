@@ -161,6 +161,7 @@ defmodule Minga.Editor.CompletionHandling do
       BufferServer.insert_text(buf, text)
     end
 
+    Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
     state = BufferLifecycle.lsp_buffer_changed(state)
     GitTracker.notify_change(buf)
     state
@@ -179,6 +180,7 @@ defmodule Minga.Editor.CompletionHandling do
       edit.new_text
     )
 
+    Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
     state = BufferLifecycle.lsp_buffer_changed(state)
     GitTracker.notify_change(buf)
     state

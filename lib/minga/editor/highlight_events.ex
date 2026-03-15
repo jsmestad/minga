@@ -108,7 +108,12 @@ defmodule Minga.Editor.HighlightEvents do
     state =
       if content_changed do
         buf = state.buffers.active
-        if buf, do: GitTracker.notify_change(buf)
+
+        if buf do
+          Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
+          GitTracker.notify_change(buf)
+        end
+
         BufferLifecycle.lsp_buffer_changed(state)
       else
         state

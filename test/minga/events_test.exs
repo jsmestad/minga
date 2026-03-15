@@ -89,6 +89,45 @@ defmodule Minga.EventsTest do
     end
   end
 
+  describe "buffer_closed event" do
+    test "subscriber receives buffer_closed with buffer and path" do
+      buf = fake_buffer()
+      Events.subscribe(:buffer_closed)
+
+      Events.broadcast(
+        :buffer_closed,
+        %Events.BufferClosedEvent{buffer: buf, path: "/closed.ex"}
+      )
+
+      assert_receive {:minga_event, :buffer_closed,
+                      %Events.BufferClosedEvent{buffer: ^buf, path: "/closed.ex"}}
+    end
+
+    test "buffer_closed with scratch buffer (unnamed)" do
+      buf = fake_buffer()
+      Events.subscribe(:buffer_closed)
+
+      Events.broadcast(
+        :buffer_closed,
+        %Events.BufferClosedEvent{buffer: buf, path: :scratch}
+      )
+
+      assert_receive {:minga_event, :buffer_closed,
+                      %Events.BufferClosedEvent{buffer: ^buf, path: :scratch}}
+    end
+  end
+
+  describe "buffer_changed event" do
+    test "subscriber receives buffer_changed with buffer pid" do
+      buf = fake_buffer()
+      Events.subscribe(:buffer_changed)
+
+      Events.broadcast(:buffer_changed, %Events.BufferChangedEvent{buffer: buf})
+
+      assert_receive {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: ^buf}}
+    end
+  end
+
   describe "subscribe/2 with metadata" do
     test "subscribe with metadata value" do
       Events.subscribe(:mode_changed, :my_component)
