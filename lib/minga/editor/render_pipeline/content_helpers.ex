@@ -596,11 +596,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
-    if Process.alive?(buf) do
-      BufferServer.decorations(buf)
-    else
-      Decorations.new()
-    end
+    BufferServer.decorations(buf)
   catch
     :exit, _ -> Decorations.new()
   end
@@ -624,8 +620,15 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   def git_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
     case GitTracker.lookup(buf) do
-      nil -> %{}
-      git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
+      nil ->
+        %{}
+
+      git_pid ->
+        try do
+          GitBuffer.signs(git_pid)
+        catch
+          :exit, _ -> %{}
+        end
     end
   end
 

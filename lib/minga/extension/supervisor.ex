@@ -148,8 +148,12 @@ defmodule Minga.Extension.Supervisor do
   """
   @spec stop_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
   def stop_extension(supervisor, registry, name, entry) do
-    if is_pid(entry.pid) and Process.alive?(entry.pid) do
-      DynamicSupervisor.terminate_child(supervisor, entry.pid)
+    if is_pid(entry.pid) do
+      try do
+        DynamicSupervisor.terminate_child(supervisor, entry.pid)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     if entry.module do

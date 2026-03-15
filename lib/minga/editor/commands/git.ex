@@ -158,8 +158,15 @@ defmodule Minga.Editor.Commands.Git do
   defp with_git_buffer(%{buffers: %{active: buf}} = state, fun)
        when is_pid(buf) do
     case GitTracker.lookup(buf) do
-      nil -> %{state | status_msg: "Not in a git repository"}
-      git_pid -> if Process.alive?(git_pid), do: fun.(git_pid, buf), else: state
+      nil ->
+        %{state | status_msg: "Not in a git repository"}
+
+      git_pid ->
+        try do
+          fun.(git_pid, buf)
+        catch
+          :exit, _ -> state
+        end
     end
   end
 

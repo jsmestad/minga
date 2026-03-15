@@ -61,11 +61,10 @@ defmodule Minga.Editor.Commands.Help do
   @spec ensure_help_buffer(state()) :: {state(), pid()}
   defp ensure_help_buffer(%{buffers: %{help: buf}} = state)
        when is_pid(buf) and buf != nil do
-    if Process.alive?(buf) do
-      {state, buf}
-    else
-      start_help_buffer(state)
-    end
+    BufferServer.buffer_name(buf)
+    {state, buf}
+  catch
+    :exit, _ -> start_help_buffer(state)
   end
 
   defp ensure_help_buffer(state) do

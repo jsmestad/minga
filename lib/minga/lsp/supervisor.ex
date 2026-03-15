@@ -65,7 +65,7 @@ defmodule Minga.LSP.Supervisor do
     supervisor
     |> DynamicSupervisor.which_children()
     |> Enum.find_value(:not_found, fn {_, pid, _, _} ->
-      if is_pid(pid) and Process.alive?(pid) do
+      if is_pid(pid) do
         try do
           if Client.server_name(pid) == server_name and
                GenServer.call(pid, :root_path) == root_path do
@@ -85,7 +85,7 @@ defmodule Minga.LSP.Supervisor do
   def all_clients(supervisor \\ __MODULE__) do
     supervisor
     |> DynamicSupervisor.which_children()
-    |> Enum.filter(fn {_, pid, _, _} -> is_pid(pid) and Process.alive?(pid) end)
+    |> Enum.filter(fn {_, pid, _, _} -> is_pid(pid) end)
     |> Enum.map(fn {_, pid, _, _} -> pid end)
   end
 

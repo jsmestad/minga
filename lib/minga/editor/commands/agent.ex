@@ -20,6 +20,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.View.Preview
   alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.AgentSession
@@ -99,11 +100,16 @@ defmodule Minga.Editor.Commands.Agent do
   defp ensure_agent_state(state) do
     agent = AgentAccess.agent(state)
 
-    if agent.buffer == nil or not is_pid(agent.buffer) or not Process.alive?(agent.buffer) do
-      # Create the agent buffer and ensure agent tab exists for state storage
+    if agent.buffer == nil or not is_pid(agent.buffer) do
       ensure_agent_tab(state)
     else
-      state
+      try do
+        # Verify the buffer is responsive
+        BufferServer.buffer_name(agent.buffer)
+        state
+      catch
+        :exit, _ -> ensure_agent_tab(state)
+      end
     end
   end
 
@@ -131,8 +137,13 @@ defmodule Minga.Editor.Commands.Agent do
   defp ensure_agent_buffer(state) do
     agent = AgentAccess.agent(state)
 
-    if is_pid(agent.buffer) and Process.alive?(agent.buffer) do
-      state
+    if is_pid(agent.buffer) do
+      try do
+        BufferServer.buffer_name(agent.buffer)
+        state
+      catch
+        :exit, _ -> create_agent_buffer(state)
+      end
     else
       create_agent_buffer(state)
     end
@@ -153,13 +164,19 @@ defmodule Minga.Editor.Commands.Agent do
   defp apply_agent_split(state) do
     agent = AgentAccess.agent(state)
 
-    if is_pid(agent.buffer) and Process.alive?(agent.buffer) do
-      state
-      |> LayoutPreset.apply(:agent_right, agent.buffer)
-      |> Layout.invalidate()
-      |> EditorState.invalidate_all_windows()
-      |> maybe_start_session()
-      |> then(&update_agent(&1, fn a -> AgentState.focus_input(a, true) end))
+    if is_pid(agent.buffer) do
+      try do
+        BufferServer.buffer_name(agent.buffer)
+
+        state
+        |> LayoutPreset.apply(:agent_right, agent.buffer)
+        |> Layout.invalidate()
+        |> EditorState.invalidate_all_windows()
+        |> maybe_start_session()
+        |> then(&update_agent(&1, fn a -> AgentState.focus_input(a, true) end))
+      catch
+        :exit, _ -> state
+      end
     else
       state
     end

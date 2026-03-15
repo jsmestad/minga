@@ -485,8 +485,13 @@ defmodule Minga.Editor.TreeRenderer do
   @spec compute_dirty_paths(EditorState.t()) :: MapSet.t(String.t())
   defp compute_dirty_paths(%{buffers: %{list: buffer_list}}) do
     buffer_list
-    |> Enum.filter(fn pid -> Process.alive?(pid) and BufferServer.dirty?(pid) end)
-    |> Enum.map(fn pid -> BufferServer.file_path(pid) end)
+    |> Enum.flat_map(fn pid ->
+      try do
+        if BufferServer.dirty?(pid), do: [BufferServer.file_path(pid)], else: []
+      catch
+        :exit, _ -> []
+      end
+    end)
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&Path.expand/1)
     |> MapSet.new()

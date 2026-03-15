@@ -156,17 +156,21 @@ defmodule Minga.Input.AgentPanel do
     panel = AgentAccess.panel(state)
     prompt_pid = panel.prompt_buffer
 
-    if is_pid(prompt_pid) and Process.alive?(prompt_pid) do
-      real_active = state.buffers.active
-      state = put_in(state.buffers.active, prompt_pid)
-      state = Minga.Editor.do_handle_key(state, cp, mods)
+    if is_pid(prompt_pid) do
+      try do
+        real_active = state.buffers.active
+        state = put_in(state.buffers.active, prompt_pid)
+        state = Minga.Editor.do_handle_key(state, cp, mods)
 
-      # Only restore if a command didn't legitimately change buffers.active.
-      # Same guard as AgentChatNav.delegate_to_mode_fsm/4.
-      if state.buffers.active == prompt_pid do
-        put_in(state.buffers.active, real_active)
-      else
-        state
+        # Only restore if a command didn't legitimately change buffers.active.
+        # Same guard as AgentChatNav.delegate_to_mode_fsm/4.
+        if state.buffers.active == prompt_pid do
+          put_in(state.buffers.active, real_active)
+        else
+          state
+        end
+      catch
+        :exit, _ -> state
       end
     else
       # No prompt buffer, try scope bindings
@@ -188,8 +192,12 @@ defmodule Minga.Input.AgentPanel do
   defp delegate_to_mode_fsm(state, cp, mods) do
     buf = AgentAccess.agent(state).buffer
 
-    if is_pid(buf) and Process.alive?(buf) do
-      AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
+    if is_pid(buf) do
+      try do
+        AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
+      catch
+        :exit, _ -> state
+      end
     else
       state
     end

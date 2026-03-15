@@ -67,10 +67,14 @@ defmodule Minga.Picker.BufferSource do
     special_fields = [bs.messages, bs.warnings]
 
     special_fields
-    |> Enum.reject(&is_nil/1)
-    |> Enum.filter(&Process.alive?/1)
-    |> Enum.reject(fn pid -> Enum.member?(list, pid) end)
-    |> Enum.map(fn pid -> format_candidate(pid, {:pid, pid}) end)
+    |> Enum.reject(fn pid -> is_nil(pid) or Enum.member?(list, pid) end)
+    |> Enum.flat_map(fn pid ->
+      try do
+        [format_candidate(pid, {:pid, pid})]
+      catch
+        :exit, _ -> []
+      end
+    end)
   end
 
   @impl true
@@ -112,8 +116,10 @@ defmodule Minga.Picker.BufferSource do
 
     pid = Enum.at(buffers, idx)
 
-    if Process.alive?(pid) do
+    try do
       DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, pid)
+    catch
+      :exit, _ -> :ok
     end
 
     new_buffers = List.delete_at(buffers, idx)
@@ -149,7 +155,9 @@ defmodule Minga.Picker.BufferSource do
   # appear when include_special is true.
   @spec reject_buffer?(pid(), boolean()) :: boolean()
   defp reject_buffer?(buf, include_special) do
-    Process.alive?(buf) and do_reject?(buf, include_special)
+    do_reject?(buf, include_special)
+  catch
+    :exit, _ -> true
   end
 
   @spec do_reject?(pid(), boolean()) :: boolean()
