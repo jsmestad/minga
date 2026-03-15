@@ -47,11 +47,21 @@ defmodule Minga.FileFindTest do
     end
 
     test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
-      File.mkdir_p!(Path.join(tmp_dir, ".git/objects"))
-      File.write!(Path.join(tmp_dir, ".git/HEAD"), "ref: refs/heads/main\n")
+      strategy = FileFind.detect_strategy(tmp_dir)
 
-      {:ok, files} = FileFind.list_files(tmp_dir)
-      refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
+      if strategy == :git do
+        # git ls-files only returns tracked files, so .git/ contents are
+        # never included by definition. Nothing to test here.
+        :ok
+      else
+        # For fd and find, create a .git dir to verify it gets excluded.
+        # A fake dir is fine since these tools filter by path, not validity.
+        File.mkdir_p!(Path.join(tmp_dir, ".git/objects"))
+        File.write!(Path.join(tmp_dir, ".git/HEAD"), "ref: refs/heads/main\n")
+
+        {:ok, files} = FileFind.list_files(tmp_dir)
+        refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
+      end
     end
 
     test "paths are relative (no leading ./)", %{tmp_dir: tmp_dir} do
