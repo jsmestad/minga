@@ -167,15 +167,7 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
-        new_state = Commands.add_buffer(state, pid)
-        new_state = log_message(new_state, "Opened: #{file_path}")
-        new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
-
-        Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
-          buffer: pid,
-          path: file_path
-        })
-
+        new_state = register_buffer(state, pid, file_path)
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
         new_state = Renderer.render(new_state)
         {:reply, :ok, new_state}
@@ -901,11 +893,25 @@ defmodule Minga.Editor do
   @doc false
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
-    new_state = Commands.add_buffer(state, pid)
-    new_state = log_message(new_state, "Opened: #{path}")
-    new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
-    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{buffer: pid, path: path})
+    new_state = register_buffer(state, pid, path)
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
+  end
+
+  # Shared buffer registration: adds buffer to the list, logs, refreshes
+  # LSP status, and broadcasts :buffer_opened so event bus subscribers
+  # (Git.Tracker, FileWatcher, Project, SyncServer, Config.Hooks) react.
+  @spec register_buffer(state(), pid(), String.t()) :: state()
+  defp register_buffer(state, buffer_pid, file_path) do
+    state = Commands.add_buffer(state, buffer_pid)
+    state = log_message(state, "Opened: #{file_path}")
+    state = BufferLifecycle.lsp_buffer_opened(state, buffer_pid)
+
+    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
+      buffer: buffer_pid,
+      path: file_path
+    })
+
+    state
   end
 
   @spec log_message(state(), String.t()) :: state()
