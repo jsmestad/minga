@@ -37,6 +37,7 @@ defmodule Minga.Buffer.Decorations do
   at once (e.g., agent chat sync or LSP diagnostic refresh).
   """
 
+  alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Decorations.HighlightRange
   alias Minga.Buffer.Decorations.VirtualText
   alias Minga.Buffer.IntervalTree
@@ -70,12 +71,14 @@ defmodule Minga.Buffer.Decorations do
 
   - `highlights`: interval tree of highlight ranges
   - `virtual_texts`: list of virtual text decorations (queried by line, not range)
+  - `fold_regions`: list of buffer-level fold regions (per-buffer, not per-window)
   - `pending`: list of pending operations during a batch (nil when not batching)
   - `version`: monotonically increasing version for change detection by the render pipeline
   """
   @type t :: %__MODULE__{
           highlights: IntervalTree.t(),
           virtual_texts: [VirtualText.t()],
+          fold_regions: [FoldRegion.t()],
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()}] | nil,
           version: non_neg_integer()
@@ -84,6 +87,7 @@ defmodule Minga.Buffer.Decorations do
   @enforce_keys []
   defstruct highlights: nil,
             virtual_texts: [],
+            fold_regions: [],
             pending: nil,
             version: 0
 
@@ -304,6 +308,82 @@ defmodule Minga.Buffer.Decorations do
     end)
   end
 
+  # ── Fold region API ──────────────────────────────────────────────────────
+
+  @doc """
+  Adds a buffer-level fold region. Returns `{id, updated_decorations}`.
+
+  ## Options
+
+  - `:closed` (optional, default true) - initial fold state
+  - `:placeholder` (optional) - render callback `(start_line, end_line, width) -> [{text, style}]`
+
+  ## Examples
+
+      {id, decs} = Decorations.add_fold_region(decs, 10, 25,
+        closed: true,
+        placeholder: fn s, e, _w -> [{"💭 Thinking (\#{e - s} lines)...", [fg: 0x555555]}] end
+      )
+  """
+  @spec add_fold_region(t(), non_neg_integer(), non_neg_integer(), keyword()) ::
+          {reference(), t()}
+  def add_fold_region(%__MODULE__{} = decs, start_line, end_line, opts \\ [])
+      when start_line < end_line do
+    id = make_ref()
+
+    fold = %FoldRegion{
+      id: id,
+      start_line: start_line,
+      end_line: end_line,
+      closed: Keyword.get(opts, :closed, true),
+      placeholder: Keyword.get(opts, :placeholder)
+    }
+
+    {id, %{decs | fold_regions: [fold | decs.fold_regions], version: decs.version + 1}}
+  end
+
+  @doc "Removes a fold region by ID."
+  @spec remove_fold_region(t(), reference()) :: t()
+  def remove_fold_region(%__MODULE__{} = decs, id) do
+    new_folds = Enum.reject(decs.fold_regions, fn f -> f.id == id end)
+
+    if length(new_folds) == length(decs.fold_regions) do
+      decs
+    else
+      %{decs | fold_regions: new_folds, version: decs.version + 1}
+    end
+  end
+
+  @doc "Toggles a fold region's open/closed state by ID."
+  @spec toggle_fold_region(t(), reference()) :: t()
+  def toggle_fold_region(%__MODULE__{} = decs, id) do
+    new_folds =
+      Enum.map(decs.fold_regions, fn fold ->
+        if fold.id == id, do: %{fold | closed: not fold.closed}, else: fold
+      end)
+
+    %{decs | fold_regions: new_folds, version: decs.version + 1}
+  end
+
+  @doc "Returns the fold region containing the given line, or nil."
+  @spec fold_region_at(t(), non_neg_integer()) :: FoldRegion.t() | nil
+  def fold_region_at(%__MODULE__{fold_regions: folds}, line) do
+    Enum.find(folds, fn fold -> FoldRegion.contains?(fold, line) end)
+  end
+
+  @doc "Returns all closed fold regions, sorted by start_line."
+  @spec closed_fold_regions(t()) :: [FoldRegion.t()]
+  def closed_fold_regions(%__MODULE__{fold_regions: folds}) do
+    folds
+    |> Enum.filter(fn f -> f.closed end)
+    |> Enum.sort_by(fn f -> f.start_line end)
+  end
+
+  @doc "Returns true if there are any fold regions."
+  @spec has_fold_regions?(t()) :: boolean()
+  def has_fold_regions?(%__MODULE__{fold_regions: []}), do: false
+  def has_fold_regions?(%__MODULE__{}), do: true
+
   # ── Column mapping (inline virtual text) ─────────────────────────────────
 
   @doc """
@@ -495,11 +575,10 @@ defmodule Minga.Buffer.Decorations do
   Returns true if there are no decorations of any kind.
   """
   @spec empty?(t()) :: boolean()
-  def empty?(%__MODULE__{highlights: nil, virtual_texts: []}), do: true
-  def empty?(%__MODULE__{highlights: nil, virtual_texts: _}), do: false
+  def empty?(%__MODULE__{highlights: nil, virtual_texts: [], fold_regions: []}), do: true
 
-  def empty?(%__MODULE__{highlights: hl, virtual_texts: vts}) do
-    IntervalTree.empty?(hl) and vts == []
+  def empty?(%__MODULE__{highlights: hl, virtual_texts: vts, fold_regions: folds}) do
+    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == []
   end
 
   # ── Anchor adjustment ───────────────────────────────────────────────────
@@ -526,12 +605,8 @@ defmodule Minga.Buffer.Decorations do
           IntervalTree.position(),
           IntervalTree.position()
         ) :: t()
-  def adjust_for_edit(
-        %__MODULE__{highlights: nil, virtual_texts: []} = decs,
-        _edit_start,
-        _edit_end,
-        _new_end
-      ),
+  def adjust_for_edit(%__MODULE__{} = decs, _edit_start, _edit_end, _new_end)
+      when decs.highlights == nil and decs.virtual_texts == [] and decs.fold_regions == [],
       do: decs
 
   def adjust_for_edit(%__MODULE__{} = decs, edit_start, edit_end, new_end) do
@@ -552,8 +627,15 @@ defmodule Minga.Buffer.Decorations do
       end
 
     new_vts = adjust_virtual_texts(decs.virtual_texts, ctx)
+    new_folds = adjust_fold_regions(decs.fold_regions, ctx)
 
-    %{decs | highlights: new_highlights, virtual_texts: new_vts, version: decs.version + 1}
+    %{
+      decs
+      | highlights: new_highlights,
+        virtual_texts: new_vts,
+        fold_regions: new_folds,
+        version: decs.version + 1
+    }
   end
 
   @spec adjust_virtual_texts([VirtualText.t()], edit_ctx()) :: [VirtualText.t()]
@@ -578,6 +660,48 @@ defmodule Minga.Buffer.Decorations do
   end
 
   defp adjust_anchor_position(_anchor, ctx), do: ctx.new_end
+
+  @spec adjust_fold_regions([FoldRegion.t()], edit_ctx()) :: [FoldRegion.t()]
+  defp adjust_fold_regions([], _ctx), do: []
+
+  defp adjust_fold_regions(folds, ctx) do
+    {edit_start_line, _} = ctx.edit_start
+    {edit_end_line, _} = ctx.edit_end
+
+    Enum.filter(folds, fn fold ->
+      # Remove folds that are entirely within the deleted region
+      not (ctx.is_delete and edit_start_line <= fold.start_line and edit_end_line >= fold.end_line)
+    end)
+    |> Enum.map(fn fold ->
+      adjust_fold_lines(fold, edit_start_line, edit_end_line, ctx.line_delta, ctx.is_delete)
+    end)
+  end
+
+  @spec adjust_fold_lines(
+          FoldRegion.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          integer(),
+          boolean()
+        ) ::
+          FoldRegion.t()
+  defp adjust_fold_lines(fold, _edit_start_line, edit_end_line, line_delta, _is_delete)
+       when fold.start_line > edit_end_line do
+    # Fold is entirely after the edit: shift both lines
+    %{fold | start_line: fold.start_line + line_delta, end_line: fold.end_line + line_delta}
+  end
+
+  defp adjust_fold_lines(fold, edit_start_line, _edit_end_line, _line_delta, _is_delete)
+       when fold.end_line < edit_start_line do
+    # Fold is entirely before the edit: no change
+    fold
+  end
+
+  defp adjust_fold_lines(fold, _edit_start_line, _edit_end_line, line_delta, _is_delete) do
+    # Fold overlaps the edit: adjust end_line, clamp to valid range
+    new_end = max(fold.start_line + 1, fold.end_line + line_delta)
+    %{fold | end_line: new_end}
+  end
 
   @typep edit_ctx :: %{
            edit_start: IntervalTree.position(),
