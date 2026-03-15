@@ -537,21 +537,44 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   # The current confirm match gets a different bg and higher priority.
   # Only rebuilds search decorations when the match set changes.
   # Uses a fingerprint of the matches to detect changes.
-  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
+  @typedoc "Search decoration cache: {search_fingerprint, base_version, merged_decorations}"
+  @type search_cache ::
+          {term(), non_neg_integer(), Decorations.t()} | nil
+
+  @doc """
+  Merges search match highlights into a decorations struct, with caching.
+
+  Returns `{merged_decorations, updated_cache}`. The cache is keyed on both
+  the search fingerprint (matches + confirm) AND the base decoration version.
+  When the base version changes (e.g., agent chat decorations updated between
+  frames), the cache misses and search highlights are rebuilt on the fresh base.
+  """
+  @spec merge_search_decorations(
+          Decorations.t(),
+          [Minga.Search.Match.t()],
+          Minga.Search.Match.t() | nil,
+          map(),
+          search_cache()
+        ) :: {Decorations.t(), search_cache()}
+  def merge_search_decorations(decs, matches, confirm_match, colors, cached) do
     fingerprint = {matches, confirm_match}
-    cached = Process.get(:search_decoration_cache)
 
     case cached do
-      {^fingerprint, cached_decs} ->
-        # Same matches as last frame: reuse the merged decorations, but
-        # update the base version to match the fresh buffer decorations
-        %{cached_decs | version: decs.version + 1}
+      {^fingerprint, base_version, cached_decs} when base_version == decs.version ->
+        {cached_decs, cached}
 
       _ ->
         result = rebuild_search_decorations(decs, matches, confirm_match, colors)
-        Process.put(:search_decoration_cache, {fingerprint, result})
-        result
+        new_cache = {fingerprint, decs.version, result}
+        {result, new_cache}
     end
+  end
+
+  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
+    cached = Process.get(:search_decoration_cache)
+    {result, new_cache} = merge_search_decorations(decs, matches, confirm_match, colors, cached)
+    Process.put(:search_decoration_cache, new_cache)
+    result
   end
 
   defp rebuild_search_decorations(decs, [], _confirm, _colors) do

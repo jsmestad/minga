@@ -130,7 +130,8 @@ defmodule Minga.Editor.Window do
       id: id,
       content: Content.agent_chat(agent_buffer),
       buffer: agent_buffer,
-      viewport: Viewport.new(rows, cols)
+      viewport: Viewport.new(rows, cols),
+      dirty_lines: :all
     }
   end
 

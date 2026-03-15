@@ -28,8 +28,12 @@ defmodule Minga.Agent.BufferSync do
            unlisted: true,
            persistent: true
          ) do
-      {:ok, pid} -> pid
-      _ -> nil
+      {:ok, pid} ->
+        BufferServer.set_option(pid, :line_numbers, :none)
+        pid
+
+      _ ->
+        nil
     end
   end
 
@@ -45,8 +49,16 @@ defmodule Minga.Agent.BufferSync do
     BufferServer.replace_content_force(pid, text)
 
     # Apply decorations using pre-computed line offsets (no re-derivation)
-    agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
-    ChatDecorations.apply(pid, messages, line_offsets, agent_theme, opts)
+    try do
+      agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
+      ChatDecorations.apply(pid, messages, line_offsets, agent_theme, opts)
+    rescue
+      e ->
+        Minga.Log.error(
+          :agent,
+          "[buffer_sync] decoration apply failed: #{Exception.message(e)}"
+        )
+    end
 
     # Move cursor to end (auto-scroll)
     line_count = BufferServer.line_count(pid)

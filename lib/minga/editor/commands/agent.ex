@@ -32,6 +32,9 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Windows
+  alias Minga.Editor.Window
+  alias Minga.Editor.WindowTree
   alias Minga.Input.AgentPanel
 
   @typedoc "Internal editor state."
@@ -111,12 +114,29 @@ defmodule Minga.Editor.Commands.Agent do
   defp ensure_agent_tab(state) do
     case find_agent_tab(state) do
       nil ->
+        state = ensure_agent_buffer(state)
+        agent_buf = AgentAccess.agent(state).buffer
+
+        # Build a windows context with an agent_chat window so the tab
+        # renders through the buffer pipeline (not the old ChatRenderer).
+        win_id = 1
+        rows = max(state.viewport.rows, 1)
+        cols = max(state.viewport.cols, 1)
+        agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+        windows = %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => agent_window},
+          active: win_id,
+          next_id: win_id + 1
+        }
+
+        context = %{keymap_scope: :agent, windows: windows}
+
         # Create agent tab in the background (don't switch to it)
         {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
         agent_tab = TabBar.find_by_kind(tb, :agent)
-        tb = TabBar.update_context(tb, agent_tab.id, %{keymap_scope: :agent})
-
-        state = ensure_agent_buffer(state)
+        tb = TabBar.update_context(tb, agent_tab.id, context)
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}

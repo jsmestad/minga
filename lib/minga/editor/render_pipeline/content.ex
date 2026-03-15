@@ -13,6 +13,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, WindowFrame}
+  alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
   alias Minga.Editor.Modeline
@@ -255,12 +256,16 @@ defmodule Minga.Editor.RenderPipeline.Content do
     visible_rows = Viewport.content_rows(viewport)
     {first_line, _} = Viewport.visible_range(viewport)
 
-    snapshot = BufferServer.render_snapshot(buf, first_line, visible_rows)
+    # Fetch enough lines to cover decorations that consume screen rows.
+    # Over-fetch slightly so block decorations don't cause missing lines.
+    fetch_rows = visible_rows + div(visible_rows, 2)
+    snapshot = BufferServer.render_snapshot(buf, first_line, fetch_rows)
 
     cursor_line_text = cursor_text_from_snapshot(snapshot.lines, cursor_line, first_line)
 
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
-    gutter_w = Viewport.gutter_width(line_count)
+    line_number_style = BufferServer.get_option(buf, :line_numbers)
+    gutter_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
     content_w = max(width - gutter_w, 1)
 
     # Build render context (includes decorations from the buffer)
@@ -277,8 +282,29 @@ defmodule Minga.Editor.RenderPipeline.Content do
         is_active: is_active
       })
 
+    # Compute the display map (block decorations, fold regions, virtual lines).
+    # Without this, the sequential fast path skips all decoration rendering.
+    decorations = render_ctx.decorations
+    fold_map = window.fold_map
+
+    visible_line_map =
+      case DisplayMap.compute(
+             fold_map,
+             decorations,
+             first_line,
+             visible_rows,
+             line_count,
+             content_w
+           ) do
+        nil -> nil
+        %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
+      end
+
+    # Detect context changes to invalidate dirty-line cache
+    ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
+    window = Window.detect_context_change(window, ctx_fp)
+
     # Render lines
-    line_number_style = BufferServer.get_option(buf, :line_numbers)
     ln_style = if line_number_style == :none, do: :none, else: :absolute
 
     opts = %{
@@ -291,11 +317,33 @@ defmodule Minga.Editor.RenderPipeline.Content do
       row_off: row_off,
       col_off: col_off,
       window: window,
-      buffer: buf
+      buffer: buf,
+      visible_line_map: visible_line_map,
+      fold_map: fold_map
     }
 
-    {gutter_draws, line_draws, rendered_rows, _window} =
+    {gutter_draws, line_draws, rendered_rows, window} =
       ContentHelpers.render_lines_nowrap(snapshot.lines, opts)
+
+    # Snapshot render state so future frames can detect changes.
+    # Without this, dirty_lines stays empty and content is never re-rendered.
+    buf_version = BufferServer.version(buf)
+    last_visible = first_line + length(snapshot.lines) - 1
+
+    window =
+      window
+      |> Window.snapshot_after_render(
+        viewport.top,
+        gutter_w,
+        line_count,
+        cursor_line,
+        buf_version,
+        ctx_fp
+      )
+      |> Window.prune_cache(first_line, last_visible)
+
+    # Persist the updated window back to state
+    state = put_in(state.windows.map[window.id], window)
 
     tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
 

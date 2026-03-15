@@ -191,7 +191,7 @@ defmodule Minga.Buffer.Decorations do
   """
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = decs) do
-    %__MODULE__{version: decs.version + 1}
+    %__MODULE__{version: decs.version + 1, pending: decs.pending}
   end
 
   # ── Virtual text API ──────────────────────────────────────────────────────

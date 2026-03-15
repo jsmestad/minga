@@ -27,8 +27,9 @@ defmodule Minga.Agent.ChatDecorations do
   @spec apply(pid(), [term()], [line_offset()], Minga.Theme.Agent.t(), keyword()) :: :ok
   def apply(buf, messages, line_offsets, agent_theme, opts \\ []) do
     BufferServer.batch_decorations(buf, fn decs ->
-      decs = Decorations.clear(decs)
-      build_decorations(decs, messages, line_offsets, agent_theme, opts)
+      decs
+      |> Decorations.clear()
+      |> build_decorations(messages, line_offsets, agent_theme, opts)
     end)
 
     :ok
