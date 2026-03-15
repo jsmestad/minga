@@ -30,6 +30,10 @@ defmodule Minga.Agent.BufferSync do
          ) do
       {:ok, pid} ->
         BufferServer.set_option(pid, :line_numbers, :none)
+        # Word wrapping is desired but currently mutually exclusive with
+        # DisplayMap (block decorations). Leave off until that interaction
+        # is resolved. See render_pipeline/content.ex line ~135.
+        # BufferServer.set_option(pid, :wrap, true)
         pid
 
       _ ->
@@ -66,19 +70,18 @@ defmodule Minga.Agent.BufferSync do
     :ok
   end
 
-  # Converts messages to markdown and returns {text, line_offsets} where
-  # line_offsets is [{msg_index, start_line, line_count}]. Used by
-  # ChatDecorations to place decorations without re-deriving markdown.
+  @doc false
   @spec messages_to_markdown_with_offsets([term()]) ::
           {String.t(), [ChatDecorations.line_offset()]}
-  defp messages_to_markdown_with_offsets(messages) do
+  def messages_to_markdown_with_offsets(messages) do
     {parts, offsets, _line} =
       messages
       |> Enum.with_index()
       |> Enum.reduce({[], [], 0}, fn {msg, idx}, {parts, offsets, line} ->
         md = message_to_markdown(msg)
         line_count = md |> String.split("\n") |> length()
-        separator_lines = if parts == [], do: 0, else: 2
+        # "\n\n" join adds 1 empty line between messages
+        separator_lines = if parts == [], do: 0, else: 1
         start = line + separator_lines
 
         {[md | parts], [{idx, start, line_count} | offsets], start + line_count}
@@ -88,47 +91,28 @@ defmodule Minga.Agent.BufferSync do
     {text, Enum.reverse(offsets)}
   end
 
+  # Buffer text is content only. Visual headers (▎ You, ▎ Agent, ┌─ ✓ bash)
+  # are rendered by block decorations in ChatDecorations, not by markdown.
   @spec message_to_markdown(term()) :: String.t()
-  defp message_to_markdown({:user, text, _attachments}) do
-    message_to_markdown({:user, text})
-  end
-
-  defp message_to_markdown({:user, text}) do
-    "## You\n\n#{text}"
-  end
-
-  defp message_to_markdown({:assistant, text}) do
-    "## Agent\n\n#{text}"
-  end
-
-  defp message_to_markdown({:thinking, text, _collapsed}) do
-    "> **Thinking**\n>\n> #{String.replace(text, "\n", "\n> ")}"
-  end
+  defp message_to_markdown({:user, text, _attachments}), do: message_to_markdown({:user, text})
+  defp message_to_markdown({:user, text}), do: text
+  defp message_to_markdown({:assistant, text}), do: text
+  defp message_to_markdown({:thinking, text, _collapsed}), do: text
 
   defp message_to_markdown({:usage, %{input: i, output: o, cost: c}}) when is_integer(c) do
-    "*↑#{i} ↓#{o} $#{Float.round(c * 1.0, 3)}*"
+    "↑#{i} ↓#{o} $#{Float.round(c * 1.0, 3)}"
   end
 
   defp message_to_markdown({:usage, %{input: i, output: o, cost: c}}) when is_float(c) do
-    "*↑#{i} ↓#{o} $#{Float.round(c, 3)}*"
+    "↑#{i} ↓#{o} $#{Float.round(c, 3)}"
   end
 
   defp message_to_markdown({:tool_call, tc}) do
-    status =
-      case tc.status do
-        :running -> "⟳"
-        :complete -> "✓"
-        :error -> "✗"
-      end
-
-    result_text =
-      if tc.result != "" do
-        "\n```\n#{String.slice(tc.result, 0, 500)}\n```"
-      else
-        ""
-      end
-
-    "### #{status} #{tc.name}\n#{result_text}"
+    if tc.result != "" do
+      String.slice(tc.result, 0, 500)
+    else
+      ""
+    end
   end
 
   defp message_to_markdown(_other), do: ""

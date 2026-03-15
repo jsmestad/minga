@@ -114,8 +114,7 @@ defmodule Minga.Agent.ChatDecorations do
     decs = add_border_highlights(decs, line, line_count, theme.assistant_border)
 
     # Code block background highlights (lines between ``` fences)
-    md_text = "## Agent\n\n#{text}"
-    add_code_block_highlights(decs, md_text, line, theme.code_bg)
+    add_code_block_highlights(decs, text, line, theme.code_bg)
   end
 
   defp apply_message_decorations(
