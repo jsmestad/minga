@@ -61,4 +61,18 @@ Test infrastructure:
 
 ## What's Been Tried
 
-(nothing yet, establishing baseline)
+### Git.Backend DI (major win)
+Extracted `Minga.Git` into a delegator + `Git.Backend` behaviour + `Git.System` (production) + `Git.Stub` (test). All callers of `Minga.Git` now go through the configurable backend. In tests, the ETS-backed `Git.Stub` returns canned data without spawning OS processes. This eliminated the biggest source of concurrent subprocess spawning.
+
+### FileTree.GitStatus refactor
+Replaced raw `System.cmd("git", ["status", ...])` in `FileTree.GitStatus` with `Minga.Git.status/1` (goes through backend). Removed duplicate porcelain parsing code.
+
+### Clipboard buffer-local DI
+`EditorCase.start_editor` now injects `clipboard: :none` directly on the buffer via `BufferServer.set_option`. This prevents the Mox `UnexpectedCallError` that occurred when `Options.reset()` in one test leaked `:unnamedplus` into another test's Editor process.
+
+### Extension test restructuring
+Split `Extension.GitTest` into pure unit tests (async: true) and integration tests that spawn real git (async: false). Tests were previously deleted; reviewer caught it and they were restored.
+
+### Dead ends
+- `max_cases: 4` eliminated failures but slowed tests by 45%. Not worth it.
+- Marking `file_find_test` and `project_search_test` as `async: false` was rejected as a workaround; their OS process spawning is marginal (~10 calls total).
