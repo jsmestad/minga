@@ -331,7 +331,14 @@ defmodule Minga.Buffer.Decorations do
   """
   @spec add_fold_region(t(), non_neg_integer(), non_neg_integer(), keyword()) ::
           {reference(), t()}
-  def add_fold_region(%__MODULE__{} = decs, start_line, end_line, opts \\ [])
+  def add_fold_region(decs, start_line, end_line, opts \\ [])
+
+  # Single-line range has nothing to fold; return unchanged.
+  def add_fold_region(%__MODULE__{} = decs, line, line, _opts) when is_integer(line) do
+    {make_ref(), decs}
+  end
+
+  def add_fold_region(%__MODULE__{} = decs, start_line, end_line, opts)
       when start_line < end_line do
     id = make_ref()
 

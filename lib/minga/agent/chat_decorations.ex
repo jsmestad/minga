@@ -54,13 +54,29 @@ defmodule Minga.Agent.ChatDecorations do
     |> Enum.reduce(decs, fn {msg, idx}, d ->
       case Map.get(offset_map, idx) do
         {start_line, line_count} ->
+          log_decoration(msg, idx, start_line, line_count)
           is_last = idx == last_idx
           apply_message_decorations(d, msg, start_line, line_count, theme, streaming and is_last)
 
         nil ->
+          Minga.Log.warning(:agent, "[chat_decs] no offset for msg idx=#{idx}")
           d
       end
     end)
+  end
+
+  defp log_decoration(msg, idx, start_line, line_count) do
+    msg_type =
+      case msg do
+        {t, _} -> t
+        {t, _, _} -> t
+        _ -> :unknown
+      end
+
+    Minga.Log.debug(
+      :agent,
+      "[chat_decs] #{msg_type} idx=#{idx} start=#{start_line} lines=#{line_count}"
+    )
   end
 
   # ── Per-message decoration builders ──────────────────────────────────────
@@ -111,7 +127,7 @@ defmodule Minga.Agent.ChatDecorations do
         decs
       end
 
-    decs = add_border_highlights(decs, line, line_count, theme.assistant_border)
+    decs = add_border_virtual_text(decs, line, line_count, theme.assistant_border)
 
     # Code block background highlights (lines between ``` fences)
     add_code_block_highlights(decs, text, line, theme.code_bg)
@@ -256,22 +272,25 @@ defmodule Minga.Agent.ChatDecorations do
 
   # Adds a colored border highlight on the first 2 columns of each content line.
   # This creates the vertical "▎" border effect on the left edge of each message.
-  @spec add_border_highlights(
+  # Adds an inline virtual text "▎ " at column 0 of each content line.
+  # The border character lives in the decoration layer, not the buffer text,
+  # so yank/search/clipboard stay clean.
+  @spec add_border_virtual_text(
           Decorations.t(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
         ) ::
           Decorations.t()
-  defp add_border_highlights(decs, start_line, line_count, border_fg) do
+  defp add_border_virtual_text(decs, start_line, line_count, border_fg) do
     Enum.reduce(0..(line_count - 1), decs, fn offset, d ->
       line = start_line + offset
 
       {_id, d} =
-        Decorations.add_highlight(d, {line, 0}, {line, 2},
-          style: [fg: border_fg],
-          priority: -15,
-          group: :chat_border
+        Decorations.add_virtual_text(d, {line, 0},
+          segments: [{"▎ ", [fg: border_fg]}],
+          placement: :inline,
+          priority: 10
         )
 
       d
@@ -301,6 +320,6 @@ defmodule Minga.Agent.ChatDecorations do
       )
 
     # Colored border prefix on each content line
-    add_border_highlights(decs, line, line_count, theme.user_border)
+    add_border_virtual_text(decs, line, line_count, theme.user_border)
   end
 end

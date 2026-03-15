@@ -1154,4 +1154,24 @@ defmodule Minga.Agent.Session do
       String.upcase(first) <> rest
     end)
   end
+
+  @impl GenServer
+  def terminate(reason, _state) do
+    case reason do
+      :normal ->
+        :ok
+
+      :shutdown ->
+        :ok
+
+      {:shutdown, _} ->
+        :ok
+
+      _ ->
+        Minga.Log.error(
+          :agent,
+          "[Agent.Session] crashed: #{inspect(reason, pretty: true, limit: 1000)}"
+        )
+    end
+  end
 end

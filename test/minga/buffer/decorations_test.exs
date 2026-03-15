@@ -602,4 +602,22 @@ defmodule Minga.Buffer.DecorationsTest do
       assert Decorations.merge_style_props([], overlay) == overlay
     end
   end
+
+  describe "add_fold_region/4" do
+    test "single-line range is a no-op (start == end)" do
+      decs = Decorations.new()
+      {_id, result} = Decorations.add_fold_region(decs, 5, 5, closed: true)
+
+      assert result.fold_regions == []
+      assert result.version == decs.version
+    end
+
+    test "valid range adds a fold region" do
+      decs = Decorations.new()
+      {_id, result} = Decorations.add_fold_region(decs, 5, 10, closed: true)
+
+      assert length(result.fold_regions) == 1
+      assert result.version == decs.version + 1
+    end
+  end
 end

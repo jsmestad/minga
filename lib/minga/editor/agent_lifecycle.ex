@@ -143,6 +143,8 @@ defmodule Minga.Editor.AgentLifecycle do
 
   @spec update_tab_from_session(state(), TabBar.t(), Tab.id(), pid()) :: state()
   defp update_tab_from_session(state, tb, active_id, session) do
+    # Session may be dead before :DOWN is processed (same race as sync_buffer).
+    # Empty list from catch is safe here: first_user_message([]) returns nil.
     messages =
       try do
         AgentSession.messages(session)

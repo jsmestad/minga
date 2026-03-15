@@ -550,6 +550,8 @@ defmodule Minga.Editor do
   # writes agent/agentic fields on EditorState directly.
 
   def handle_info({:agent_event, session_pid, event}, state) do
+    Minga.Log.debug(:agent, "[event] #{inspect(event)}")
+
     if AgentAccess.session(state) == session_pid do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
@@ -572,7 +574,11 @@ defmodule Minga.Editor do
   # throughout Commands.Agent prevent further calls to the dead process.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     if AgentAccess.session(state) == pid and AgentAccess.agent(state).session_monitor == ref do
-      Minga.Log.warning(:agent, "[Agent] Session terminated: #{inspect(reason)}")
+      Minga.Log.error(
+        :agent,
+        "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
+      )
+
       state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
       state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
       {:noreply, state}

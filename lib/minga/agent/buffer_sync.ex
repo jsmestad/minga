@@ -49,7 +49,22 @@ defmodule Minga.Agent.BufferSync do
   """
   @spec sync(pid(), [term()], keyword()) :: :ok
   def sync(pid, messages, opts \\ []) do
+    msg_types =
+      Enum.map(messages, fn
+        {type, _} -> type
+        {type, _, _} -> type
+        other -> other
+      end)
+
+    Minga.Log.debug(:agent, "[buffer_sync] sync #{length(messages)} msgs: #{inspect(msg_types)}")
+
     {text, line_offsets} = messages_to_markdown_with_offsets(messages)
+
+    Minga.Log.debug(
+      :agent,
+      "[buffer_sync] offsets: #{inspect(line_offsets)}, text_lines: #{length(String.split(text, "\n"))}"
+    )
+
     BufferServer.replace_content_force(pid, text)
 
     # Apply decorations using pre-computed line offsets (no re-derivation)
@@ -60,7 +75,7 @@ defmodule Minga.Agent.BufferSync do
       e ->
         Minga.Log.error(
           :agent,
-          "[buffer_sync] decoration apply failed: #{Exception.message(e)}"
+          "[buffer_sync] decoration apply failed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
         )
     end
 
