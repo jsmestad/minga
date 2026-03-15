@@ -141,6 +141,10 @@ defmodule Minga.Project do
   @impl true
   @spec init(keyword()) :: {:ok, t()}
   def init(_opts) do
+    # Subscribe to buffer-open events so we detect projects and record
+    # recent files automatically, without the Editor wiring it up.
+    Minga.Events.subscribe(:buffer_opened)
+
     known = load_known_projects()
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
     {:ok, %__MODULE__{known_projects: known, recent_files: recent}}
@@ -172,23 +176,7 @@ defmodule Minga.Project do
   @impl true
   @spec handle_cast(term(), t()) :: {:noreply, t()}
   def handle_cast({:detect_and_set, file_path}, state) do
-    case Detector.detect(file_path) do
-      {:ok, root, type} ->
-        if root == state.current_root do
-          {:noreply, state}
-        else
-          state =
-            state
-            |> set_project(root, type)
-            |> add_to_known(root)
-            |> start_rebuild()
-
-          {:noreply, state}
-        end
-
-      :none ->
-        {:noreply, state}
-    end
+    {:noreply, do_detect_and_set(state, file_path)}
   end
 
   def handle_cast({:switch, root_path}, state) do
@@ -230,23 +218,7 @@ defmodule Minga.Project do
   end
 
   def handle_cast({:record_file, file_path}, state) do
-    expanded = Path.expand(file_path)
-    root = state.current_root
-
-    case make_relative(expanded, root) do
-      nil ->
-        {:noreply, state}
-
-      rel_path ->
-        limit = recent_files_limit()
-        existing = Map.get(state.recent_files, root, [])
-        updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
-        updated = Enum.take(updated, limit)
-        new_recent = Map.put(state.recent_files, root, updated)
-        state = %{state | recent_files: new_recent}
-        if persist_recent_files?(), do: persist_recent_files(new_recent)
-        {:noreply, state}
-    end
+    {:noreply, do_record_file(state, file_path)}
   end
 
   def handle_cast({:remove, root_path}, state) do
@@ -279,11 +251,58 @@ defmodule Minga.Project do
     {:noreply, %{state | rebuilding?: false, rebuild_ref: nil}}
   end
 
+  def handle_info({:minga_event, :buffer_opened, %{path: path}}, state) do
+    state = do_detect_and_set(state, path)
+    state = do_record_file(state, path)
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec do_detect_and_set(t(), String.t()) :: t()
+  defp do_detect_and_set(state, file_path) do
+    case Detector.detect(file_path) do
+      {:ok, root, type} ->
+        if root == state.current_root do
+          state
+        else
+          state
+          |> set_project(root, type)
+          |> add_to_known(root)
+          |> start_rebuild()
+        end
+
+      :none ->
+        state
+    end
+  end
+
+  @spec do_record_file(t(), String.t()) :: t()
+  defp do_record_file(%{current_root: nil} = state, _file_path), do: state
+
+  defp do_record_file(state, file_path) do
+    expanded = Path.expand(file_path)
+    root = state.current_root
+
+    case make_relative(expanded, root) do
+      nil ->
+        state
+
+      rel_path ->
+        limit = recent_files_limit()
+        existing = Map.get(state.recent_files, root, [])
+        updated = [rel_path | Enum.reject(existing, &(&1 == rel_path))]
+        updated = Enum.take(updated, limit)
+        new_recent = Map.put(state.recent_files, root, updated)
+        state = %{state | recent_files: new_recent}
+        if persist_recent_files?(), do: persist_recent_files(new_recent)
+        state
+    end
+  end
 
   @spec set_project(t(), String.t(), Detector.project_type() | nil) :: t()
   defp set_project(state, root, type) do
