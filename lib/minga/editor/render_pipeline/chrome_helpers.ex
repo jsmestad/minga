@@ -13,7 +13,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Agent.Session
   alias Minga.Config.Options
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DocumentSync
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
   alias Minga.Editor.MacroRecorder
@@ -23,7 +22,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
-  alias Minga.LSP.Client
   alias Minga.Theme
   alias Minga.WhichKey
 
@@ -540,50 +538,4 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     collect_separators(top, {row, col, width, top_height}) ++
       collect_separators(bottom, {row + top_height, col, width, bottom_height})
   end
-
-  # ── LSP status helpers ──────────────────────────────────────────────────
-
-  @doc """
-  Queries the LSP status for a buffer by calling each attached client.
-
-  This is an action (synchronous GenServer calls) and must NOT be called
-  from the render pipeline. The Editor calls this reactively when LSP
-  events arrive and caches the result in `state.lsp_status`.
-  """
-  @spec lsp_status_for_buffer(state(), pid() | nil) :: Modeline.lsp_status()
-  def lsp_status_for_buffer(_state, nil), do: :none
-
-  def lsp_status_for_buffer(state, buffer_pid) do
-    clients = DocumentSync.clients_for_buffer(state.lsp, buffer_pid)
-
-    case clients do
-      [] -> :none
-      pids -> pids |> Enum.map(&query_client_status/1) |> aggregate_lsp_status()
-    end
-  end
-
-  @spec query_client_status(pid()) :: Client.State.status() | :error
-  defp query_client_status(pid) do
-    Client.status(pid)
-  catch
-    :exit, _ -> :error
-  end
-
-  @spec aggregate_lsp_status([Client.State.status() | :error]) :: Modeline.lsp_status()
-  defp aggregate_lsp_status(statuses) do
-    Enum.reduce(statuses, :none, &merge_lsp_status/2)
-  end
-
-  # Priority: ready > error > initializing > starting > none
-  @spec merge_lsp_status(Client.State.status() | :error, Modeline.lsp_status()) ::
-          Modeline.lsp_status()
-  defp merge_lsp_status(:ready, _acc), do: :ready
-  defp merge_lsp_status(_status, :ready), do: :ready
-  defp merge_lsp_status(:error, _acc), do: :error
-  defp merge_lsp_status(_status, :error), do: :error
-  defp merge_lsp_status(:initializing, _acc), do: :initializing
-  defp merge_lsp_status(_status, :initializing), do: :initializing
-  defp merge_lsp_status(:starting, _acc), do: :starting
-  defp merge_lsp_status(_status, :starting), do: :starting
-  defp merge_lsp_status(_status, acc), do: acc
 end

@@ -75,6 +75,10 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
     {[{?c, @none}, {?g, @none}], :goto_definition, "Go to definition"},
     {[{?c, @none}, {?k, @none}], :hover, "Hover documentation"},
+    {[{?c, @none}, {?l, @none}, {?i, @none}], :lsp_info, "LSP info"},
+    {[{?c, @none}, {?l, @none}, {?r, @none}], :lsp_restart, "Restart LSP"},
+    {[{?c, @none}, {?l, @none}, {?s, @none}], :lsp_stop, "Stop LSP"},
+    {[{?c, @none}, {?l, @none}, {?S, @none}], :lsp_start, "Start LSP"},
 
     # ── Git ──────────────────────────────────────────────────────────────────────
     {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
@@ -135,6 +139,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}], "+buffer"},
     {[{?p, @none}], "+project"},
     {[{?c, @none}], "+code"},
+    {[{?c, @none}, {?l, @none}], "+LSP"},
     {[{?g, @none}], "+git"},
     {[{?w, @none}], "+window"},
     {[{?q, @none}], "+quit"},

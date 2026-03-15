@@ -90,4 +90,16 @@ defmodule Minga.LSP.ServerRegistry do
     |> servers_for()
     |> Enum.filter(&available?/1)
   end
+
+  @doc """
+  Finds a server config by name across all filetypes.
+
+  Returns `nil` if no server with the given name is registered.
+  """
+  @spec find_config(atom()) :: server_config() | nil
+  def find_config(server_name) when is_atom(server_name) do
+    LangRegistry.all()
+    |> Enum.flat_map(fn lang -> lang.language_servers end)
+    |> Enum.find(fn %ServerConfig{name: name} -> name == server_name end)
+  end
 end
