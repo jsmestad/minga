@@ -344,7 +344,7 @@ defmodule Minga.Config do
 
   ## Split mode (default)
 
-      popup "*Warnings*", side: :bottom, size: {:percent, 30}, focus: true
+      popup "*Warnings*", side: :bottom, size: {:percent, 30}, focus: false
       popup "*compilation*", side: :bottom, size: {:percent, 25}, focus: false
       popup ~r/\\*grep/, side: :right, size: {:percent, 40}, focus: true
 
