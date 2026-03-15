@@ -83,11 +83,8 @@ defmodule Minga.Git.Tracker do
         :ok
 
       git_pid ->
-        if Process.alive?(git_pid) do
-          {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-          GitBuffer.update(git_pid, content)
-        end
-
+        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        GitBuffer.update(git_pid, content)
         :ok
     end
   catch
@@ -174,11 +171,8 @@ defmodule Minga.Git.Tracker do
         :ok
 
       git_pid ->
-        if Process.alive?(git_pid) do
-          {content, _cursor} = BufferServer.content_and_cursor(buf)
-          GitBuffer.invalidate_base(git_pid, content)
-        end
-
+        {content, _cursor} = BufferServer.content_and_cursor(buf)
+        GitBuffer.invalidate_base(git_pid, content)
         :ok
     end
   catch

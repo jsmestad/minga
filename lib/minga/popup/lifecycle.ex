@@ -212,7 +212,7 @@ defmodule Minga.Popup.Lifecycle do
 
     # Fetch buffer lines (with a short timeout to avoid blocking the render)
     lines =
-      if is_pid(buffer_pid) and Process.alive?(buffer_pid) do
+      if is_pid(buffer_pid) do
         try do
           snapshot = BufferServer.render_snapshot(buffer_pid, 0, interior_h)
           snapshot.lines
@@ -238,7 +238,9 @@ defmodule Minga.Popup.Lifecycle do
 
   @spec buffer_title(pid()) :: String.t() | nil
   defp buffer_title(pid) when is_pid(pid) do
-    if Process.alive?(pid), do: BufferServer.buffer_name(pid), else: nil
+    BufferServer.buffer_name(pid)
+  catch
+    :exit, _ -> nil
   end
 
   defp buffer_title(_), do: nil

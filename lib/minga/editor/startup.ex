@@ -165,8 +165,12 @@ defmodule Minga.Editor.Startup do
 
   def initial_tab_bar(active_buf, _scope) do
     file_label =
-      if active_buf && Process.alive?(active_buf) do
-        Commands.Helpers.buffer_display_name(active_buf)
+      if active_buf do
+        try do
+          Commands.Helpers.buffer_display_name(active_buf)
+        catch
+          :exit, _ -> "[no file]"
+        end
       else
         "[no file]"
       end

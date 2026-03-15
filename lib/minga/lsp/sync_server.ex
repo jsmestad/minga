@@ -252,13 +252,14 @@ defmodule Minga.LSP.SyncServer do
   defp notify_clients_change([], _buffer_pid), do: :ok
 
   defp notify_clients_change(clients, buffer_pid) do
-    with true <- Process.alive?(buffer_pid),
-         uri when is_binary(uri) <- buffer_uri(buffer_pid) do
+    with uri when is_binary(uri) <- buffer_uri(buffer_pid) do
       {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
       send_to_alive_clients(clients, fn c -> Client.did_change(c, uri, content) end)
     end
 
     :ok
+  catch
+    :exit, _ -> :ok
   end
 
   @spec buffer_uri(pid()) :: String.t() | nil
@@ -272,7 +273,11 @@ defmodule Minga.LSP.SyncServer do
   @spec send_to_alive_clients([pid()], (pid() -> term())) :: :ok
   defp send_to_alive_clients(clients, fun) do
     Enum.each(clients, fn client ->
-      if Process.alive?(client), do: fun.(client)
+      try do
+        fun.(client)
+      catch
+        :exit, _ -> :ok
+      end
     end)
   end
 

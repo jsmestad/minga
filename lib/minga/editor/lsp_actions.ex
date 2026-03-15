@@ -248,7 +248,11 @@ defmodule Minga.Editor.LspActions do
     # Check if already open
     idx =
       Enum.find_index(state.buffers.list, fn buf ->
-        Process.alive?(buf) and BufferServer.file_path(buf) == file_path
+        try do
+          BufferServer.file_path(buf) == file_path
+        catch
+          :exit, _ -> false
+        end
       end)
 
     case idx do

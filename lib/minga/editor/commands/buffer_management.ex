@@ -481,10 +481,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def apply_filetype_change(state, filetype) when is_atom(filetype) do
     buf = state.buffers.active
 
-    if is_pid(buf) and Process.alive?(buf) do
-      BufferServer.set_filetype(buf, filetype)
-      send(self(), :setup_highlight)
-      %{state | status_msg: "Language: #{filetype}"}
+    if is_pid(buf) do
+      try do
+        BufferServer.set_filetype(buf, filetype)
+        send(self(), :setup_highlight)
+        %{state | status_msg: "Language: #{filetype}"}
+      catch
+        :exit, _ -> %{state | status_msg: "No active buffer"}
+      end
     else
       %{state | status_msg: "No active buffer"}
     end
@@ -676,7 +680,18 @@ defmodule Minga.Editor.Commands.BufferManagement do
     buf = Enum.at(buffers, idx)
 
     # Check if persistent — if so, recreate instead of removing
-    if buf && Process.alive?(buf) && BufferServer.persistent?(buf) do
+    persistent? =
+      if buf do
+        try do
+          BufferServer.persistent?(buf)
+        catch
+          :exit, _ -> false
+        end
+      else
+        false
+      end
+
+    if persistent? do
       # Clear buffer content instead of killing it
       :sys.replace_state(buf, fn s ->
         %{s | document: Document.new("")}
@@ -685,21 +700,29 @@ defmodule Minga.Editor.Commands.BufferManagement do
       %{state | status_msg: "Buffer is persistent — content cleared"}
     else
       buf_name =
-        if buf && Process.alive?(buf) do
-          Helpers.buffer_display_name(buf)
+        if buf do
+          try do
+            Helpers.buffer_display_name(buf)
+          catch
+            :exit, _ -> "[unknown]"
+          end
         else
           "[unknown]"
         end
 
-      if buf && Process.alive?(buf) do
-        path = BufferServer.file_path(buf) || :scratch
+      if buf do
+        try do
+          path = BufferServer.file_path(buf) || :scratch
 
-        Minga.Events.broadcast(
-          :buffer_closed,
-          %Minga.Events.BufferClosedEvent{buffer: buf, path: path}
-        )
+          Minga.Events.broadcast(
+            :buffer_closed,
+            %Minga.Events.BufferClosedEvent{buffer: buf, path: path}
+          )
 
-        GenServer.stop(buf, :normal)
+          GenServer.stop(buf, :normal)
+        catch
+          :exit, _ -> :ok
+        end
       end
 
       Minga.Editor.log_to_messages("Closed: #{buf_name}")
@@ -744,12 +767,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
         :exit, _ -> :ok
       end
 
-      if Process.alive?(session) do
-        try do
-          GenServer.stop(session, :normal)
-        catch
-          :exit, _ -> :ok
-        end
+      try do
+        GenServer.stop(session, :normal)
+      catch
+        :exit, _ -> :ok
       end
     end
 
@@ -798,7 +819,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec any_buffer_dirty?(state()) :: boolean()
   defp any_buffer_dirty?(state) do
     Enum.any?(state.buffers.list, fn pid ->
-      Process.alive?(pid) and BufferServer.dirty?(pid)
+      try do
+        BufferServer.dirty?(pid)
+      catch
+        :exit, _ -> false
+      end
     end)
   end
 
@@ -841,8 +866,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec save_all_buffers(state()) :: state()
   defp save_all_buffers(state) do
     Enum.each(state.buffers.list, fn buf ->
-      if Process.alive?(buf) and BufferServer.dirty?(buf) do
-        BufferServer.save(buf)
+      try do
+        if BufferServer.dirty?(buf), do: BufferServer.save(buf)
+      catch
+        :exit, _ -> :ok
       end
     end)
 
@@ -898,7 +925,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
   defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
     Enum.find_index(buffers, fn buf ->
-      Process.alive?(buf) && BufferServer.file_path(buf) == file_path
+      try do
+        BufferServer.file_path(buf) == file_path
+      catch
+        :exit, _ -> false
+      end
     end)
   end
 
@@ -906,8 +937,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp next_new_buffer_number(buffers) do
     existing =
       buffers
-      |> Enum.filter(&Process.alive?/1)
-      |> Enum.map(&BufferServer.buffer_name/1)
+      |> Enum.flat_map(fn buf ->
+        try do
+          [BufferServer.buffer_name(buf)]
+        catch
+          :exit, _ -> []
+        end
+      end)
       |> Enum.flat_map(fn
         "[new " <> rest ->
           case Integer.parse(String.trim_trailing(rest, "]")) do

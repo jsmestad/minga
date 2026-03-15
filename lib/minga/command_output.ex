@@ -147,8 +147,12 @@ defmodule Minga.CommandOutput do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) when is_binary(data) do
-    if state.buffer && Process.alive?(state.buffer) do
-      BufferServer.append(state.buffer, data)
+    if state.buffer do
+      try do
+        BufferServer.append(state.buffer, data)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     {:noreply, state}
@@ -157,8 +161,12 @@ defmodule Minga.CommandOutput do
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     status_line = "\n\n[Process exited with code #{code}]"
 
-    if state.buffer && Process.alive?(state.buffer) do
-      BufferServer.append(state.buffer, status_line)
+    if state.buffer do
+      try do
+        BufferServer.append(state.buffer, status_line)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     {:noreply, %{state | port: nil, exit_code: code, running?: false}}
@@ -184,11 +192,10 @@ defmodule Minga.CommandOutput do
 
   @spec ensure_buffer(t()) :: t()
   defp ensure_buffer(%{buffer: buf} = state) when is_pid(buf) do
-    if Process.alive?(buf) do
-      state
-    else
-      create_buffer(state)
-    end
+    BufferServer.buffer_name(buf)
+    state
+  catch
+    :exit, _ -> create_buffer(state)
   end
 
   defp ensure_buffer(state), do: create_buffer(state)

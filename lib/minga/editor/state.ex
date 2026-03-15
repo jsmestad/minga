@@ -546,7 +546,9 @@ defmodule Minga.Editor.State do
 
   @spec buffer_label(pid()) :: String.t()
   defp buffer_label(pid) when is_pid(pid) do
-    if Process.alive?(pid), do: live_buffer_label(pid), else: "[dead]"
+    live_buffer_label(pid)
+  catch
+    :exit, _ -> "[dead]"
   end
 
   defp buffer_label(_), do: "[unknown]"
@@ -626,15 +628,19 @@ defmodule Minga.Editor.State do
     buf = state.buffers.active
 
     windows =
-      if buf && Process.alive?(buf) do
-        window = Window.new(win_id, buf, max(rows, 1), max(cols, 1))
+      if buf do
+        try do
+          window = Window.new(win_id, buf, max(rows, 1), max(cols, 1))
 
-        %Windows{
-          tree: WindowTree.new(win_id),
-          map: %{win_id => window},
-          active: win_id,
-          next_id: win_id + 1
-        }
+          %Windows{
+            tree: WindowTree.new(win_id),
+            map: %{win_id => window},
+            active: win_id,
+            next_id: win_id + 1
+          }
+        catch
+          :exit, _ -> %Windows{}
+        end
       else
         %Windows{}
       end

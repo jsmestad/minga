@@ -175,17 +175,24 @@ defmodule Minga.FileWatcher do
 
   @spec ensure_watcher(pid() | nil, %{String.t() => pos_integer()}) :: pid() | nil
   defp ensure_watcher(existing_watcher, dirs) when map_size(dirs) == 0 do
-    if existing_watcher && Process.alive?(existing_watcher) do
-      GenServer.stop(existing_watcher)
+    if existing_watcher do
+      try do
+        GenServer.stop(existing_watcher)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     nil
   end
 
   defp ensure_watcher(existing_watcher, dirs) do
-    if existing_watcher && Process.alive?(existing_watcher) do
-      # Restart watcher with updated directory list
-      GenServer.stop(existing_watcher)
+    if existing_watcher do
+      try do
+        GenServer.stop(existing_watcher)
+      catch
+        :exit, _ -> :ok
+      end
     end
 
     dir_list = Map.keys(dirs)

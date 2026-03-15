@@ -84,7 +84,10 @@ defmodule Minga.Agent.PanelState do
   @spec ensure_prompt_buffer(t()) :: t()
   def ensure_prompt_buffer(%__MODULE__{prompt_buffer: pid} = state)
       when is_pid(pid) do
-    if Process.alive?(pid), do: state, else: start_prompt_buffer(state, "")
+    BufferServer.buffer_name(pid)
+    state
+  catch
+    :exit, _ -> start_prompt_buffer(state, "")
   end
 
   def ensure_prompt_buffer(%__MODULE__{} = state), do: start_prompt_buffer(state, "")

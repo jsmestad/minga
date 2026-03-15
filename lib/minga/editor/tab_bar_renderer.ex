@@ -418,7 +418,15 @@ defmodule Minga.Editor.TabBarRenderer do
   defp tab_dirty_marker(%Tab{kind: :file} = tab, _colors) do
     buf = tab_active_buffer(tab)
 
-    if is_pid(buf) and Process.alive?(buf) and BufferServer.dirty?(buf), do: " ●", else: ""
+    if is_pid(buf) do
+      try do
+        if BufferServer.dirty?(buf), do: " ●", else: ""
+      catch
+        :exit, _ -> ""
+      end
+    else
+      ""
+    end
   end
 
   defp tab_dirty_marker(_, _), do: ""

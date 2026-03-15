@@ -85,7 +85,11 @@ defmodule Minga.Editor.FileWatcherHelpers do
     expanded = Path.expand(path)
 
     Enum.find(buffers, fn buf ->
-      Process.alive?(buf) and BufferServer.file_path(buf) == expanded
+      try do
+        BufferServer.file_path(buf) == expanded
+      catch
+        :exit, _ -> false
+      end
     end)
   end
 
