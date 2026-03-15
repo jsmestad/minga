@@ -591,20 +591,26 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # Agent session process died. Clear the stale PID from state so nil-checks
-  # throughout Commands.Agent prevent further calls to the dead process.
+  # Process died. Check agent session first, then buffer monitors.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    if AgentAccess.session(state) == pid and AgentAccess.agent(state).session_monitor == ref do
-      Minga.Log.error(
-        :agent,
-        "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
-      )
+    cond do
+      AgentAccess.session(state) == pid and AgentAccess.agent(state).session_monitor == ref ->
+        Minga.Log.error(
+          :agent,
+          "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
+        )
 
-      state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
-      state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
-      {:noreply, state}
-    else
-      {:noreply, state}
+        state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+        state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
+        {:noreply, state}
+
+      Map.has_key?(state.buffer_monitors, pid) ->
+        Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
+        state = EditorState.remove_dead_buffer(state, pid)
+        {:noreply, Renderer.render(state)}
+
+      true ->
+        {:noreply, state}
     end
   end
 
@@ -622,16 +628,6 @@ defmodule Minga.Editor do
 
   def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
     {:noreply, refresh_tree_git_status(state)}
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    if Map.has_key?(state.buffer_monitors, pid) do
-      Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
-      state = EditorState.remove_dead_buffer(state, pid)
-      {:noreply, Renderer.render(state)}
-    else
-      {:noreply, state}
-    end
   end
 
   def handle_info(_msg, state) do
