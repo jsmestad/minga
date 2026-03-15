@@ -145,11 +145,11 @@ defmodule Minga.Input.AgentChatNav do
 
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
-    # Block mode transitions: chat content is read-only, always normal mode.
-    # The Mode FSM may try to enter insert/visual/etc. from vim keys that
-    # the scope trie didn't intercept. Reset to normal.
+    # Allow visual mode (for text selection and yank) but block insert mode
+    # (chat content is read-only). Other modes like operator-pending, search,
+    # and command are also allowed since they're needed for full vim grammar.
     state =
-      if state.vim.mode != :normal do
+      if state.vim.mode == :insert do
         %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
       else
         state

@@ -47,7 +47,9 @@ defmodule Minga.Editor.Commands.Visual do
           {text <> "\n", :linewise}
       end
 
-    Helpers.put_register(state, yanked, :delete, reg_type)
+    state = Helpers.put_register(state, yanked, :delete, reg_type)
+    if agent_chat_window?(state), do: Minga.Clipboard.write(yanked)
+    state
   end
 
   def execute(
@@ -71,7 +73,13 @@ defmodule Minga.Editor.Commands.Visual do
           {BufferServer.get_lines_content(buf, start_line, end_line) <> "\n", :linewise}
       end
 
-    Helpers.put_register(state, yanked, :yank, reg_type)
+    state = Helpers.put_register(state, yanked, :yank, reg_type)
+
+    # Auto-copy to system clipboard when yanking from the agent chat buffer,
+    # since the primary use case is copying text out of the chat.
+    if agent_chat_window?(state), do: Minga.Clipboard.write(yanked)
+
+    state
   end
 
   def execute(
@@ -122,5 +130,14 @@ defmodule Minga.Editor.Commands.Visual do
         execute: fn state -> execute(state, name) end
       }
     end)
+  end
+
+  # Checks if the active window is an agent chat window by inspecting
+  # the window's content field (structural check, no GenServer call).
+  defp agent_chat_window?(state) do
+    case EditorState.active_window_struct(state) do
+      %{content: {:agent_chat, _}} -> true
+      _ -> false
+    end
   end
 end

@@ -215,7 +215,11 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    %{state | mouse: MouseState.stop_drag(state.mouse)}
+    state = %{state | mouse: MouseState.stop_drag(state.mouse)}
+
+    # Auto-copy selection to system clipboard on mouse release.
+    # Standard terminal behavior: selecting text copies it.
+    auto_copy_selection(state)
   end
 
   def handle(%{mouse: %MouseState{dragging: true}} = state, _r, _c, :left, _m, :release, _cc) do
@@ -865,6 +869,38 @@ defmodule Minga.Editor.Mouse do
 
   @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
+  @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
+  defp auto_copy_selection(
+         %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}} = state
+       )
+       when is_pid(buf) do
+    if Process.alive?(buf) do
+      cursor = BufferServer.cursor(buf)
+
+      text =
+        case ms.visual_type do
+          :char ->
+            BufferServer.get_range(buf, ms.visual_anchor, cursor)
+
+          :line ->
+            {a_line, _} = ms.visual_anchor
+            {c_line, _} = cursor
+            BufferServer.get_lines_content(buf, min(a_line, c_line), max(a_line, c_line))
+        end
+
+      if is_binary(text) and text != "" do
+        case Minga.Config.Options.get(:clipboard) do
+          :none -> :ok
+          _ -> Minga.Clipboard.write(text)
+        end
+      end
+    end
+
+    state
+  end
+
+  defp auto_copy_selection(state), do: state
+
   defp adjust_col_for_virtual_text(buf, line, display_col) do
     Decorations.display_col_to_buf_col(BufferServer.decorations(buf), line, display_col)
   catch

@@ -7,6 +7,7 @@ defmodule Minga.Agent.BufferSync do
   the conversation, with tree-sitter markdown highlighting.
   """
 
+  alias Minga.Agent.ChatDecorations
   alias Minga.Buffer.Server, as: BufferServer
 
   @doc """
@@ -38,10 +39,14 @@ defmodule Minga.Agent.BufferSync do
   Each message is rendered as a markdown section with a header.
   The buffer cursor is moved to the end (auto-scroll).
   """
-  @spec sync(pid(), [term()]) :: :ok
-  def sync(pid, messages) do
-    text = messages_to_markdown(messages)
+  @spec sync(pid(), [term()], keyword()) :: :ok
+  def sync(pid, messages, opts \\ []) do
+    {text, line_offsets} = messages_to_markdown_with_offsets(messages)
     BufferServer.replace_content_force(pid, text)
+
+    # Apply decorations using pre-computed line offsets (no re-derivation)
+    agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
+    ChatDecorations.apply(pid, messages, line_offsets, agent_theme, opts)
 
     # Move cursor to end (auto-scroll)
     line_count = BufferServer.line_count(pid)
@@ -49,9 +54,26 @@ defmodule Minga.Agent.BufferSync do
     :ok
   end
 
-  @spec messages_to_markdown([term()]) :: String.t()
-  defp messages_to_markdown(messages) do
-    Enum.map_join(messages, "\n\n", &message_to_markdown/1)
+  # Converts messages to markdown and returns {text, line_offsets} where
+  # line_offsets is [{msg_index, start_line, line_count}]. Used by
+  # ChatDecorations to place decorations without re-deriving markdown.
+  @spec messages_to_markdown_with_offsets([term()]) ::
+          {String.t(), [ChatDecorations.line_offset()]}
+  defp messages_to_markdown_with_offsets(messages) do
+    {parts, offsets, _line} =
+      messages
+      |> Enum.with_index()
+      |> Enum.reduce({[], [], 0}, fn {msg, idx}, {parts, offsets, line} ->
+        md = message_to_markdown(msg)
+        line_count = md |> String.split("\n") |> length()
+        separator_lines = if parts == [], do: 0, else: 2
+        start = line + separator_lines
+
+        {[md | parts], [{idx, start, line_count} | offsets], start + line_count}
+      end)
+
+    text = parts |> Enum.reverse() |> Enum.join("\n\n")
+    {text, Enum.reverse(offsets)}
   end
 
   @spec message_to_markdown(term()) :: String.t()
@@ -98,4 +120,9 @@ defmodule Minga.Agent.BufferSync do
   end
 
   defp message_to_markdown(_other), do: ""
+
+  defp default_agent_theme do
+    theme = Minga.Theme.get!(Minga.Theme.default())
+    Minga.Theme.agent_theme(theme)
+  end
 end

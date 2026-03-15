@@ -75,7 +75,7 @@ defmodule Minga.Input.AgentMouse do
 
     case identify_agent_region(state, layout, row, col) do
       {:agent_chat_window, win_id} ->
-        {:handled, dispatch_window(state, layout, win_id, row, col, evt)}
+        dispatch_window(state, layout, win_id, row, col, evt)
 
       {:agent_panel, panel_rect} ->
         {:handled, dispatch_panel(state, panel_rect, row, col, evt)}
@@ -138,26 +138,51 @@ defmodule Minga.Input.AgentMouse do
           integer(),
           mouse_event()
         ) ::
-          EditorState.t()
+          {:handled | :passthrough, EditorState.t()}
 
   defp dispatch_window(state, layout, win_id, _row, col, %{
          button: :wheel_down,
          event_type: :press
        }) do
-    scroll_in_window(state, layout, win_id, col, @scroll_lines)
+    {:handled, scroll_in_window(state, layout, win_id, col, @scroll_lines)}
   end
 
   defp dispatch_window(state, layout, win_id, _row, col, %{button: :wheel_up, event_type: :press}) do
-    scroll_in_window(state, layout, win_id, col, -@scroll_lines)
+    {:handled, scroll_in_window(state, layout, win_id, col, -@scroll_lines)}
   end
 
   defp dispatch_window(state, layout, win_id, row, col, %{button: :left, event_type: :press}) do
     state = maybe_focus_window(state, win_id)
     content_rect = window_content_rect(layout, win_id)
-    handle_agent_click(state, content_rect, row, col)
+
+    if click_in_prompt?(content_rect, row, state) do
+      {:handled, handle_agent_click(state, content_rect, row, col)}
+    else
+      # Chat content click: unfocus the prompt input, then passthrough
+      # to ModeFSM for standard buffer mouse handling
+      state = unfocus_input(state)
+      {:passthrough, state}
+    end
   end
 
-  defp dispatch_window(state, _layout, _win_id, _row, _col, _evt), do: state
+  # Drag and release: passthrough to ModeFSM for visual mode selection
+  defp dispatch_window(state, _layout, _win_id, _row, _col, %{button: :left}) do
+    {:passthrough, state}
+  end
+
+  defp dispatch_window(state, _layout, _win_id, _row, _col, _evt), do: {:handled, state}
+
+  @spec unfocus_input(EditorState.t()) :: EditorState.t()
+  defp unfocus_input(state) do
+    AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+  end
+
+  @spec click_in_prompt?(Layout.rect(), non_neg_integer(), EditorState.t()) :: boolean()
+  defp click_in_prompt?({row_off, _col, width, height}, click_row, state) do
+    prompt_h = ViewRenderer.prompt_height(state, width)
+    chat_h = max(height - prompt_h - 1, 1)
+    click_row >= row_off + chat_h
+  end
 
   @spec maybe_focus_window(EditorState.t(), pos_integer()) :: EditorState.t()
   defp maybe_focus_window(state, win_id) do

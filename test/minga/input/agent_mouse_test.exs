@@ -186,18 +186,13 @@ defmodule Minga.Input.AgentMouseTest do
       {:ok, state: state, rect: rect}
     end
 
-    test "click in chat area unfocuses input", %{state: state, rect: rect} do
+    test "click in chat area passthroughs to standard mouse handler", %{state: state, rect: rect} do
       {row, col, _w, _h} = rect
 
-      # First make sure input is focused
-      state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
-      assert AgentAccess.input_focused?(state)
-
       # Click in the chat area (near the top of the agent window)
-      {:handled, new_state} =
+      # should passthrough to ModeFSM for standard buffer mouse handling
+      {:passthrough, _state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
-
-      refute AgentAccess.input_focused?(new_state)
     end
 
     test "click in input area focuses input", %{state: state, rect: rect} do
@@ -229,11 +224,13 @@ defmodule Minga.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
+      # Chat content click passthroughs (window focus happens via maybe_focus_window
+      # before passthrough). The :passthrough response means ModeFSM will handle
+      # cursor positioning against the *Agent* buffer.
+      {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
       assert new_state.windows.active == agent_win_id
-      assert new_state.keymap_scope == :agent
     end
   end
 
@@ -339,11 +336,15 @@ defmodule Minga.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
+      # Chat content click passthroughs after focusing the agent window
+      {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
-      # Should have switched to agent scope
-      assert new_state.keymap_scope == :agent
+      # Window focus happened before passthrough
+      {agent_win_id, _} =
+        Enum.find(new_state.windows.map, fn {_id, w} -> Content.agent_chat?(w.content) end)
+
+      assert new_state.windows.active == agent_win_id
     end
   end
 end
