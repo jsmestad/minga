@@ -198,8 +198,17 @@ defmodule Minga.Agent.ChatDecorations do
     decs
   end
 
-  defp apply_message_decorations(decs, {:usage, _usage}, _line, _line_count, _theme, _streaming),
-    do: decs
+  defp apply_message_decorations(decs, {:usage, _usage}, line, line_count, theme, _streaming) do
+    # Dim the usage stats line
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.usage_fg],
+        priority: 10,
+        group: :chat_usage
+      )
+
+    decs
+  end
 
   defp apply_message_decorations(decs, _other, _line, _line_count, _theme, _streaming), do: decs
 

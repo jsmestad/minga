@@ -83,7 +83,12 @@ defmodule Minga.Editor.AgentLifecycle do
           :exit, _ -> []
         end
 
-      AgentBufferSync.sync(agent.buffer, messages)
+      # Don't clear the buffer when the session is dead and returns no messages.
+      # The buffer should preserve its last-known content.
+      if messages != [] do
+        AgentBufferSync.sync(agent.buffer, messages)
+      end
+
       state
     else
       state

@@ -101,14 +101,18 @@ defmodule Minga.Agent.ChatDecorationsTest do
       assert length(above3) == 1
     end
 
-    test "usage messages produce no decorations" do
+    test "usage messages get a dim highlight" do
       decs = Decorations.new()
       messages = [{:usage, %{input: 100, output: 50, cost: 0.001}}]
       offsets = [{0, 0, 1}]
 
       result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())
 
-      assert Decorations.empty?(result)
+      # Usage gets a highlight decoration for dim styling, but no block decorations
+      {above, below} = Decorations.blocks_for_line(result, 0)
+      assert above == []
+      assert below == []
+      refute Decorations.empty?(result)
     end
   end
 end
