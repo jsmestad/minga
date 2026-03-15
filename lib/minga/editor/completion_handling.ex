@@ -126,7 +126,9 @@ defmodule Minga.Editor.CompletionHandling do
     if state.vim.mode == :insert and old_mode == :insert do
       maybe_update(state, codepoint, modifiers)
     else
-      dismiss(state)
+      state = dismiss(state)
+      # Dismiss signature help when leaving insert mode
+      %{state | signature_help: nil}
     end
   end
 
@@ -300,22 +302,39 @@ defmodule Minga.Editor.CompletionHandling do
   @spec maybe_trigger_signature_help(EditorState.t(), pid(), non_neg_integer()) ::
           EditorState.t()
   defp maybe_trigger_signature_help(state, buf, codepoint) do
-    case codepoint do
-      # ( triggers signature help
-      ?( ->
-        send_signature_help_request(state, buf)
+    char = codepoint_to_char(codepoint)
 
-      # , re-triggers (next parameter)
-      ?, ->
-        send_signature_help_request(state, buf)
-
-      # ) dismisses signature help
-      ?) ->
+    cond do
+      # ) always dismisses signature help
+      codepoint == ?) ->
         %{state | signature_help: nil}
 
-      _ ->
+      # Check if the character is a server-declared signature trigger
+      char != nil and signature_trigger_char?(state, buf, char) ->
+        send_signature_help_request(state, buf)
+
+      # Fallback: ( and , are universal signature triggers
+      codepoint in [?(, ?,] ->
+        send_signature_help_request(state, buf)
+
+      true ->
         state
     end
+  end
+
+  @spec signature_trigger_char?(EditorState.t(), pid(), String.t()) :: boolean()
+  defp signature_trigger_char?(state, buf, char) do
+    client = lsp_client_for(state, buf)
+
+    if client do
+      caps = Client.capabilities(client)
+      trigger_chars = get_in(caps, ["signatureHelpProvider", "triggerCharacters"]) || []
+      char in trigger_chars
+    else
+      false
+    end
+  catch
+    :exit, _ -> false
   end
 
   @spec send_signature_help_request(EditorState.t(), pid()) :: EditorState.t()

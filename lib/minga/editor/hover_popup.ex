@@ -36,7 +36,7 @@ defmodule Minga.Editor.HoverPopup do
           focused: boolean()
         }
 
-  @max_width 80
+  @max_width 60
   @max_height 20
   @min_width 30
 

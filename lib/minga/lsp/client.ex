@@ -76,6 +76,18 @@ defmodule Minga.LSP.Client do
     GenServer.call(server, :encoding)
   end
 
+  @doc "Returns the project root path."
+  @spec root_path(GenServer.server()) :: String.t()
+  def root_path(server) do
+    GenServer.call(server, :root_path)
+  end
+
+  @doc "Returns the monotonic start time (seconds) for uptime calculation."
+  @spec started_at(GenServer.server()) :: integer() | nil
+  def started_at(server) do
+    GenServer.call(server, :started_at)
+  end
+
   @doc """
   Notifies the server that a document was opened.
 
@@ -153,7 +165,8 @@ defmodule Minga.LSP.Client do
           server_config: server_config,
           root_path: root_path,
           port: port,
-          encoding: :utf16
+          encoding: :utf16,
+          started_at: System.monotonic_time(:second)
         }
 
         Process.put(:diagnostics_server, diagnostics)
@@ -192,6 +205,10 @@ defmodule Minga.LSP.Client do
 
   def handle_call(:server_config, _from, state) do
     {:reply, state.server_config, state}
+  end
+
+  def handle_call(:started_at, _from, state) do
+    {:reply, state.started_at, state}
   end
 
   def handle_call({:subscribe, pid}, _from, state) do

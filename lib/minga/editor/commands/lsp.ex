@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.Lsp do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.DocumentSync
+  alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.ServerRegistry
@@ -26,8 +27,11 @@ defmodule Minga.Editor.Commands.Lsp do
         %{state | status_msg: "No language servers running"}
 
       _ ->
-        info = Enum.map_join(clients, " | ", &format_client_info/1)
-        %{state | status_msg: "LSP: #{info}"}
+        markdown = build_lsp_info_markdown(clients)
+        vp = state.viewport
+        popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4))
+        popup = HoverPopup.focus(popup)
+        %{state | hover_popup: popup}
     end
   end
 
@@ -92,16 +96,6 @@ defmodule Minga.Editor.Commands.Lsp do
 
   # ── Private: per-client operations ────────────────────────────────────────
 
-  @spec format_client_info(pid()) :: String.t()
-  defp format_client_info(pid) do
-    name = Client.server_name(pid)
-    status = Client.status(pid)
-    encoding = Client.encoding(pid)
-    "#{name}: #{status} (#{encoding})"
-  catch
-    :exit, _ -> "unknown: dead"
-  end
-
   @spec restart_one({atom(), {atom(), String.t()}}) :: {:ok, atom()} | {:error, atom(), term()}
   defp restart_one({name, key}) do
     case LSPSupervisor.restart_client(key) do
@@ -155,7 +149,7 @@ defmodule Minga.Editor.Commands.Lsp do
   @spec client_name_and_key(pid()) :: [{atom(), {atom(), String.t()}}]
   defp client_name_and_key(pid) do
     name = Client.server_name(pid)
-    root = GenServer.call(pid, :root_path)
+    root = Client.root_path(pid)
     [{name, {name, root}}]
   catch
     :exit, _ -> []
@@ -172,4 +166,47 @@ defmodule Minga.Editor.Commands.Lsp do
 
     Enum.join(parts, ", ")
   end
+
+  @spec build_lsp_info_markdown([pid()]) :: String.t()
+  defp build_lsp_info_markdown(clients) do
+    header = "# LSP Servers\n\n"
+
+    rows =
+      Enum.map_join(clients, "\n\n", fn pid ->
+        info = gather_client_info(pid)
+
+        """
+        **#{info.name}** `#{info.status}`
+        - Root: `#{info.root}`
+        - Encoding: #{info.encoding}
+        - Uptime: #{info.uptime}\
+        """
+      end)
+
+    header <> rows
+  end
+
+  @spec gather_client_info(pid()) :: map()
+  defp gather_client_info(pid) do
+    name = Client.server_name(pid)
+    status = Client.status(pid)
+    encoding = Client.encoding(pid)
+    root = Client.root_path(pid)
+    uptime = pid |> Client.started_at() |> format_uptime()
+    %{name: name, status: status, encoding: encoding, root: root, uptime: uptime}
+  catch
+    :exit, _ -> %{name: "unknown", status: :dead, encoding: "?", root: "?", uptime: "?"}
+  end
+
+  @spec format_uptime(integer() | nil) :: String.t()
+  defp format_uptime(nil), do: "unknown"
+
+  defp format_uptime(started_at) do
+    (System.monotonic_time(:second) - started_at) |> format_elapsed()
+  end
+
+  @spec format_elapsed(integer()) :: String.t()
+  defp format_elapsed(s) when s < 60, do: "#{s}s"
+  defp format_elapsed(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
+  defp format_elapsed(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
 end
