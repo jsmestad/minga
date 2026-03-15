@@ -195,8 +195,8 @@ For targeted checks:
 
 ```bash
 mix lint                          # Format + credo + compile + dialyzer (no tests)
-mix test --warnings-as-errors     # Tests only
-mix test test/minga/foo_test.exs  # Single file (faster iteration)
+mix test.llm                      # Tests with LLM-optimized output
+mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
 mix test --failed                 # Re-run only previously failed tests
 ```
 
@@ -226,7 +226,18 @@ end
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
 - **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
-- Run with `mix test --warnings-as-errors`
+**Running tests (prefer these aliases over raw `mix test`):**
+
+```bash
+mix test.llm                              # Default for LLM agents. Module-level summary, stops at 5 failures.
+mix test.llm test/minga/buffer/           # Scoped to a directory
+mix test.debug test/minga/foo_test.exs    # Verbose per-test names (--trace), stops at 3 failures. Use when iterating on a specific file.
+mix test.quick                            # Only runs tests affected by changed modules (--stale), stops at 5 failures.
+mix test                                  # Full suite, default ExUnit output. Use for CI or final verification.
+mix test --failed                         # Re-run only tests that failed last time.
+```
+
+`mix test.llm` uses a custom formatter (`Minga.Test.LLMFormatter` in `test/support/llm_formatter.ex`) that outputs one line per module with the file path, and groups all failure locations at the end with copy-pasteable `mix test file:line` commands. No dots, no ANSI colors.
 
 **Process synchronization in tests:**
 
@@ -237,8 +248,8 @@ end
 **Debugging test failures:**
 
 ```bash
-mix test test/minga/foo_test.exs          # Run one file
-mix test test/minga/foo_test.exs:42       # Run one test (line number)
+mix test.debug test/minga/foo_test.exs    # One file, verbose names, stops at 3 failures
+mix test.llm test/minga/foo_test.exs:42   # One test (line number)
 mix test --failed                         # Re-run only failures from last run
 mix test --seed 12345                     # Reproduce a specific run order
 ```

@@ -183,6 +183,16 @@ defmodule Minga.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support", "test/perf"]
   defp elixirc_paths(_), do: ["lib"]
 
+  def cli do
+    [
+      preferred_envs: [
+        "test.llm": :test,
+        "test.debug": :test,
+        "test.quick": :test
+      ]
+    ]
+  end
+
   def application do
     [
       extra_applications: [
@@ -267,6 +277,11 @@ defmodule Minga.MixProject do
         '"
       ],
       test: ["test --warnings-as-errors"],
+      "test.llm": [
+        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5"
+      ],
+      "test.debug": ["test --warnings-as-errors --trace --max-failures 3"],
+      "test.quick": ["test --warnings-as-errors --stale --max-failures 5"],
       lint: [
         "format --check-formatted",
         "credo --strict",
