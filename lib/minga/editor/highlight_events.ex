@@ -7,11 +7,12 @@ defmodule Minga.Editor.HighlightEvents do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.BufferLifecycle
+
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.LSP.SyncServer
 
   @doc """
   Handles `:highlight_names` events from the parser.
@@ -108,8 +109,14 @@ defmodule Minga.Editor.HighlightEvents do
     state =
       if content_changed do
         buf = state.buffers.active
-        if buf, do: GitTracker.notify_change(buf)
-        BufferLifecycle.lsp_buffer_changed(state)
+
+        if buf do
+          Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
+          SyncServer.notify_change(buf)
+          GitTracker.notify_change(buf)
+        end
+
+        state
       else
         state
       end

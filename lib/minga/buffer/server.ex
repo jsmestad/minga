@@ -621,7 +621,8 @@ defmodule Minga.Buffer.Server do
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
           persistent: Keyword.get(opts, :persistent, false),
-          options: seed_options(filetype)
+          options: seed_options(filetype),
+          explicit_options: MapSet.new()
         }
 
         {:ok, state}
@@ -999,7 +1000,21 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:set_filetype, filetype}, _from, state) do
-    new_state = %{state | filetype: filetype, options: seed_options(filetype)}
+    # Reseed from global defaults for the new filetype, but preserve any
+    # options that were explicitly set via set_option (e.g., clipboard: :none
+    # injected by test setup). Without this, set_filetype would wipe out
+    # per-buffer overrides and re-read from the global Config.Options.
+    seeded = seed_options(filetype)
+
+    merged =
+      Enum.reduce(state.explicit_options, seeded, fn name, opts ->
+        case Map.fetch(state.options, name) do
+          {:ok, value} -> Map.put(opts, name, value)
+          :error -> opts
+        end
+      end)
+
+    new_state = %{state | filetype: filetype, options: merged}
     {:reply, :ok, new_state}
   end
 
@@ -1033,7 +1048,12 @@ defmodule Minga.Buffer.Server do
   def handle_call({:set_option, name, value}, _from, state) do
     case Options.validate_option(name, value) do
       :ok ->
-        new_state = %{state | options: Map.put(state.options, name, value)}
+        new_state = %{
+          state
+          | options: Map.put(state.options, name, value),
+            explicit_options: MapSet.put(state.explicit_options, name)
+        }
+
         {:reply, {:ok, value}, new_state}
 
       {:error, _} = err ->

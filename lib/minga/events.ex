@@ -28,9 +28,11 @@ defmodule Minga.Events do
 
   | Topic            | Payload struct    | Required fields              |
   |------------------|-------------------|------------------------------|
-  | `:buffer_saved`  | `BufferEvent`     | `buffer: pid(), path: String.t()` |
-  | `:buffer_opened` | `BufferEvent`     | `buffer: pid(), path: String.t()` |
-  | `:mode_changed`  | `ModeEvent`       | `old: atom(), new: atom()`   |
+  | `:buffer_saved`   | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
+  | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
+  | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
+  | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid()`                   |
+  | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
 
   ## Why Registry?
 
@@ -53,6 +55,22 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{buffer: pid(), path: String.t()}
   end
 
+  defmodule BufferClosedEvent do
+    @moduledoc "Payload for `:buffer_closed` events."
+    @enforce_keys [:buffer, :path]
+    defstruct [:buffer, :path]
+
+    @type t :: %__MODULE__{buffer: pid(), path: String.t() | :scratch}
+  end
+
+  defmodule BufferChangedEvent do
+    @moduledoc "Payload for `:buffer_changed` events."
+    @enforce_keys [:buffer]
+    defstruct [:buffer]
+
+    @type t :: %__MODULE__{buffer: pid()}
+  end
+
   defmodule ModeEvent do
     @moduledoc "Payload for `:mode_changed` events."
     @enforce_keys [:old, :new]
@@ -67,10 +85,13 @@ defmodule Minga.Events do
   @type topic ::
           :buffer_saved
           | :buffer_opened
+          | :buffer_closed
+          | :buffer_changed
           | :mode_changed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
-  @type payload :: BufferEvent.t() | ModeEvent.t()
+  @type payload ::
+          BufferEvent.t() | BufferClosedEvent.t() | BufferChangedEvent.t() | ModeEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -142,6 +163,8 @@ defmodule Minga.Events do
   no-op with negligible cost.
   """
   @spec broadcast(:buffer_saved | :buffer_opened, BufferEvent.t()) :: :ok
+  @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
+  @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->

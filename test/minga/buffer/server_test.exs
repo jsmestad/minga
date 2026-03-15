@@ -764,5 +764,38 @@ defmodule Minga.Buffer.ServerTest do
       Server.set_option(pid, :tab_width, 3)
       assert Server.get_option(pid, :tab_width) == 3
     end
+
+    test "set_filetype preserves explicitly set options" do
+      {:ok, pid} = Server.start_link(content: "hello")
+
+      # Explicitly set clipboard to :none (like EditorCase does)
+      Server.set_option(pid, :clipboard, :none)
+      assert Server.get_option(pid, :clipboard) == :none
+
+      # Change filetype, which reseeds options from global defaults
+      Server.set_filetype(pid, :python)
+
+      # The explicit override should survive the reseed
+      assert Server.get_option(pid, :clipboard) == :none
+    end
+
+    test "set_filetype reseeds non-explicit options for new filetype" do
+      Options.set_for_filetype(:go, :tab_width, 8)
+
+      on_exit(fn ->
+        try do
+          Options.set_for_filetype(:go, :tab_width, 2)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      {:ok, pid} = Server.start_link(content: "hello", filetype: :text)
+      assert Server.get_option(pid, :tab_width) == 2
+
+      # Change to Go filetype; non-explicit tab_width should reseed to 8
+      Server.set_filetype(pid, :go)
+      assert Server.get_option(pid, :tab_width) == 8
+    end
   end
 end

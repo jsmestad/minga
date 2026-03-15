@@ -33,7 +33,7 @@ defmodule Minga.Editor.State do
   alias Minga.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.Dashboard
-  alias Minga.Editor.DocumentSync
+
   alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -75,7 +75,7 @@ defmodule Minga.Editor.State do
     :viewport,
     :mouse,
     :highlight,
-    :lsp,
+    :lsp_pending,
     :completion,
     :completion_trigger,
     :injection_ranges,
@@ -97,7 +97,7 @@ defmodule Minga.Editor.State do
             status_msg: nil,
             pending_conflict: nil,
             highlight: %Highlighting{},
-            lsp: DocumentSync.new(),
+            lsp_pending: %{},
             completion: nil,
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
@@ -136,7 +136,7 @@ defmodule Minga.Editor.State do
           status_msg: String.t() | nil,
           pending_conflict: {pid(), String.t()} | nil,
           highlight: Highlighting.t(),
-          lsp: DocumentSync.t(),
+          lsp_pending: %{reference() => atom()},
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
@@ -649,7 +649,7 @@ defmodule Minga.Editor.State do
       viewport: state.viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
-      lsp: DocumentSync.new(),
+      lsp_pending: %{},
       completion: nil,
       completion_trigger: CompletionTrigger.new(),
       injection_ranges: %{},
@@ -686,7 +686,7 @@ defmodule Minga.Editor.State do
       viewport: ss.viewport,
       mouse: Map.get(ss, :mouse, %Mouse{}),
       highlight: Map.get(ss, :highlight, %Highlighting{}),
-      lsp: Map.get(ss, :lsp, DocumentSync.new()),
+      lsp_pending: Map.get(ss, :lsp_pending, %{}),
       completion: Map.get(ss, :completion),
       completion_trigger: Map.get(ss, :completion_trigger, CompletionTrigger.new()),
       injection_ranges: Map.get(ss, :injection_ranges, %{}),

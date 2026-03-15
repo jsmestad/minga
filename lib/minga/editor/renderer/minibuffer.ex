@@ -13,7 +13,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.DocumentSync
+  alias Minga.LSP.SyncServer
 
   @typedoc """
   Focused input for minibuffer rendering.
@@ -217,7 +217,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
         nil
 
       path ->
-        uri = DocumentSync.path_to_uri(path)
+        uri = SyncServer.path_to_uri(path)
         {cursor_line, _col} = BufferServer.cursor(buf)
         first_on_line(uri, cursor_line)
     end
