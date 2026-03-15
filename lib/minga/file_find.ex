@@ -51,7 +51,7 @@ defmodule Minga.FileFind do
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) do
     cond do
-      executable_available?("fd") -> :fd
+      fd_executable() != nil -> :fd
       git_repo?(root) && executable_available?("git") -> :git
       executable_available?("find") -> :find
       true -> :none
@@ -60,11 +60,12 @@ defmodule Minga.FileFind do
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 
+  # Excludes .git/ contents via --exclude .git
   @spec list_with_fd(String.t()) :: result()
   defp list_with_fd(root) do
     args = ["--type", "f", "--hidden", "--follow", "--exclude", ".git", "."]
 
-    case System.cmd("fd", args, cd: root, stderr_to_stdout: true) do
+    case System.cmd(fd_executable(), args, cd: root, stderr_to_stdout: true) do
       {output, 0} ->
         {:ok, parse_lines(output)}
 
@@ -73,6 +74,7 @@ defmodule Minga.FileFind do
     end
   end
 
+  # Excludes .git/ contents inherently (only returns tracked/staged files)
   @spec list_with_git(String.t()) :: result()
   defp list_with_git(root) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard"]
@@ -86,6 +88,7 @@ defmodule Minga.FileFind do
     end
   end
 
+  # Excludes .git/ contents via -not -path "*/.git/*"
   @spec list_with_find(String.t()) :: result()
   defp list_with_find(root) do
     args = [".", "-type", "f", "-not", "-path", "*/.git/*"]
@@ -117,6 +120,12 @@ defmodule Minga.FileFind do
   @spec executable_available?(String.t()) :: boolean()
   defp executable_available?(name) do
     System.find_executable(name) != nil
+  end
+
+  # Ubuntu's fd-find package installs the binary as `fdfind`.
+  @spec fd_executable() :: String.t() | nil
+  defp fd_executable do
+    System.find_executable("fd") || System.find_executable("fdfind")
   end
 
   @spec git_repo?(String.t()) :: boolean()

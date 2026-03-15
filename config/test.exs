@@ -5,6 +5,11 @@ import Config
 # otherwise pollute test output before ExUnit's capture_log kicks in.
 config :logger, level: :warning
 
+# Use the inert git stub so tests don't spawn git subprocesses. This
+# prevents erl_child_setup EPIPE errors from concurrent async tests.
+# Tests that need real git (git integration tests) override this in setup.
+config :minga, git_module: Minga.Git.Stub
+
 # Speed up CLI tests: the editor isn't running in test, so
 # wait_for_editor always times out. Use fast poll params (5ms × 4 = 20ms)
 # instead of the production default (50ms × 20 = 1s).

@@ -29,10 +29,15 @@ defmodule Minga.FileTree.GitStatus do
   def compute(root_path) when is_binary(root_path) do
     case Minga.Git.root_for(root_path) do
       {:ok, git_root} ->
-        git_root
-        |> run_porcelain()
-        |> parse_porcelain(git_root)
-        |> propagate_to_directories(root_path)
+        case Minga.Git.status(git_root) do
+          {:ok, entries} ->
+            entries
+            |> entries_to_status_map(git_root)
+            |> propagate_to_directories(root_path)
+
+          {:error, _} ->
+            %{}
+        end
 
       :not_git ->
         %{}
@@ -64,76 +69,26 @@ defmodule Minga.FileTree.GitStatus do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec run_porcelain(String.t()) :: String.t()
-  defp run_porcelain(git_root) do
-    case System.cmd("git", ["status", "--porcelain=v1", "-uall"],
-           cd: git_root,
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> output
-      _ -> ""
-    end
-  rescue
-    _ -> ""
-  end
-
-  @spec parse_porcelain(String.t(), String.t()) :: status_map()
-  defp parse_porcelain(output, git_root) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.reduce(%{}, fn line, acc ->
-      case parse_status_line(line, git_root) do
-        {path, status} -> merge_status(acc, path, status)
-        nil -> acc
-      end
+  @spec entries_to_status_map([Minga.Git.status_entry()], String.t()) :: status_map()
+  defp entries_to_status_map(entries, git_root) do
+    Enum.reduce(entries, %{}, fn %{path: path, status: status, staged: staged}, acc ->
+      abs_path = Path.join(git_root, path)
+      file_status = entry_to_file_status(status, staged)
+      merge_status(acc, abs_path, file_status)
     end)
   end
 
-  @spec parse_status_line(String.t(), String.t()) :: {String.t(), file_status()} | nil
-  defp parse_status_line(line, git_root) when byte_size(line) >= 4 do
-    <<x::utf8, y::utf8, ?\s, rest::binary>> = line
-
-    # For renames/copies, the path after " -> " is the current name
-    path_str =
-      case String.split(rest, " -> ") do
-        [_, new_path] -> new_path
-        _ -> rest
-      end
-
-    abs_path = Path.join(git_root, String.trim(path_str))
-    status = classify(x, y)
-
-    if status, do: {abs_path, status}, else: nil
-  end
-
-  defp parse_status_line(_line, _git_root), do: nil
-
-  @spec classify(non_neg_integer(), non_neg_integer()) :: file_status() | nil
-  # Both modified in index and worktree
-  defp classify(?U, _), do: :conflict
-  defp classify(_, ?U), do: :conflict
-  defp classify(?D, ?D), do: :conflict
-  defp classify(?A, ?A), do: :conflict
-
-  # Untracked
-  defp classify(??, ??), do: :untracked
-
-  # Staged (index has changes, worktree clean)
-  defp classify(x, ?\s) when x in [?A, ?M, ?D, ?R, ?C], do: :staged
-
-  # Renamed
-  defp classify(?R, _), do: :renamed
-
-  # Deleted
-  defp classify(?D, _), do: :deleted
-  defp classify(?\s, ?D), do: :deleted
-
-  # Modified in worktree
-  defp classify(_, ?M), do: :modified
-  defp classify(?M, _), do: :modified
-
-  # Ignored or unknown
-  defp classify(_, _), do: nil
+  @spec entry_to_file_status(atom(), boolean()) :: file_status()
+  defp entry_to_file_status(:conflict, _), do: :conflict
+  defp entry_to_file_status(:added, true), do: :staged
+  defp entry_to_file_status(:modified, true), do: :staged
+  defp entry_to_file_status(:deleted, true), do: :staged
+  defp entry_to_file_status(:renamed, _), do: :renamed
+  defp entry_to_file_status(:copied, _), do: :staged
+  defp entry_to_file_status(:untracked, _), do: :untracked
+  defp entry_to_file_status(:modified, false), do: :modified
+  defp entry_to_file_status(:deleted, false), do: :deleted
+  defp entry_to_file_status(_, _), do: :untracked
 
   @spec merge_status(status_map(), String.t(), file_status()) :: status_map()
   defp merge_status(acc, path, new_status) do

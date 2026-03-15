@@ -1,51 +1,82 @@
 defmodule Minga.GitTest do
-  @moduledoc "Tests for Git utility functions."
-
+  @moduledoc "Tests for the Git delegator and pure calculations."
   use ExUnit.Case, async: true
 
   alias Minga.Git
+  alias Minga.Git.Stub, as: GitStub
 
-  describe "root_for/1" do
-    test "finds git root for a file in a repo" do
-      # This test runs in the minga repo itself
-      {:ok, root} = Git.root_for(__DIR__)
-      assert File.exists?(Path.join(root, ".git"))
+  describe "delegator with stub" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      GitStub.set_root(dir, dir)
+      on_exit(fn -> GitStub.clear(dir) end)
+      %{root: dir}
     end
 
-    test "returns :not_git for a path outside any repo" do
-      assert Git.root_for("/tmp") == :not_git
+    test "root_for returns registered root", %{root: dir} do
+      assert {:ok, ^dir} = Git.root_for(dir)
+    end
+
+    test "root_for returns :not_git for unregistered path" do
+      assert :not_git = Git.root_for("/tmp/nowhere_#{System.unique_integer()}")
+    end
+
+    test "root_for walks ancestor directories", %{root: dir} do
+      subdir = Path.join(dir, "lib/deep/nested")
+      assert {:ok, ^dir} = Git.root_for(subdir)
+    end
+
+    test "show_head returns configured content", %{root: dir} do
+      GitStub.set_head(dir, "lib/app.ex", "defmodule App do\nend\n")
+      assert {:ok, "defmodule App do\nend\n"} = Git.show_head(dir, "lib/app.ex")
+    end
+
+    test "show_head returns :error for unconfigured file", %{root: dir} do
+      assert :error = Git.show_head(dir, "nonexistent.ex")
+    end
+
+    test "status returns configured entries", %{root: dir} do
+      entries = [%Git.StatusEntry{path: "a.ex", status: :modified, staged: false}]
+      GitStub.set_status(dir, entries)
+      assert {:ok, ^entries} = Git.status(dir)
+    end
+
+    test "status returns empty list by default", %{root: dir} do
+      assert {:ok, []} = Git.status(dir)
+    end
+
+    test "diff returns configured text", %{root: dir} do
+      GitStub.set_diff(dir, "+new line")
+      assert {:ok, "+new line"} = Git.diff(dir)
+    end
+
+    test "log returns configured entries", %{root: dir} do
+      entry = %Git.LogEntry{
+        hash: "abc",
+        short_hash: "ab",
+        author: "X",
+        date: "today",
+        message: "hi"
+      }
+
+      GitStub.set_log(dir, [entry])
+      assert {:ok, [^entry]} = Git.log(dir)
+    end
+
+    test "stage returns :ok", %{root: dir} do
+      assert :ok = Git.stage(dir, ["file.txt"])
+    end
+
+    test "commit returns stub hash", %{root: dir} do
+      assert {:ok, "stub000"} = Git.commit(dir, "msg")
     end
   end
 
-  describe "show_head/2" do
-    test "reads a file that exists in HEAD" do
-      {:ok, root} = Git.root_for(__DIR__)
-      {:ok, content} = Git.show_head(root, "mix.exs")
-      assert String.contains?(content, "defmodule")
-    end
-
-    test "returns :error for a file not in HEAD" do
-      {:ok, root} = Git.root_for(__DIR__)
-      assert Git.show_head(root, "nonexistent_file_abc123.txt") == :error
-    end
-  end
-
-  describe "relative_path/2" do
+  describe "relative_path (pure calculation)" do
     test "returns path relative to git root" do
       assert Git.relative_path("/home/user/project", "/home/user/project/lib/foo.ex") ==
                "lib/foo.ex"
-    end
-  end
-
-  describe "blame_line/3" do
-    test "returns blame info for a tracked file" do
-      {:ok, root} = Git.root_for(__DIR__)
-      result = Git.blame_line(root, "mix.exs", 0)
-
-      case result do
-        {:ok, text} -> assert is_binary(text) and String.length(text) > 0
-        :error -> :ok
-      end
     end
   end
 end

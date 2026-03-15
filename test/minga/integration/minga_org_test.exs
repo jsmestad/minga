@@ -9,6 +9,9 @@ defmodule Minga.Integration.MingaOrgTest do
   """
   use ExUnit.Case, async: false
 
+  # Clones a real git repo; prevent hangs from blocking the suite
+  @moduletag timeout: 30_000
+
   alias Minga.Filetype
   alias Minga.Filetype.Registry, as: FiletypeRegistry
   alias Minga.Highlight.Grammar, as: HLGrammar
@@ -29,10 +32,17 @@ defmodule Minga.Integration.MingaOrgTest do
 
     File.rm_rf!(clone_dir)
 
-    {_, 0} =
-      System.cmd("git", ["clone", "--depth", "1", @minga_org_repo, clone_dir],
-        stderr_to_stdout: true
-      )
+    # Wrap in a Task to enforce a timeout. System.cmd has no timeout
+    # option, and ExUnit's @moduletag timeout doesn't cover setup_all.
+    # A hung clone to GitHub would block the entire sync test queue.
+    clone_task =
+      Task.async(fn ->
+        System.cmd("git", ["clone", "--depth", "1", @minga_org_repo, clone_dir],
+          stderr_to_stdout: true
+        )
+      end)
+
+    {_, 0} = Task.await(clone_task, 25_000)
 
     # Pre-compile the grammar once so individual tests don't each pay ~330ms.
     source_dir = Path.join([clone_dir, "vendor", "tree-sitter-org", "src"])

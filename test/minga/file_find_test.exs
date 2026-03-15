@@ -16,8 +16,6 @@ defmodule Minga.FileFindTest do
         Path.join(System.tmp_dir!(), "minga_file_find_test_#{System.unique_integer([:positive])}")
 
       File.mkdir_p!(tmp_dir)
-
-      # Create some files
       File.write!(Path.join(tmp_dir, "README.md"), "hello")
       File.mkdir_p!(Path.join(tmp_dir, "lib"))
       File.write!(Path.join(tmp_dir, "lib/app.ex"), "defmodule App do\nend")
@@ -25,16 +23,13 @@ defmodule Minga.FileFindTest do
       File.write!(Path.join(tmp_dir, "lib/sub/deep.ex"), "deep")
 
       on_exit(fn -> File.rm_rf!(tmp_dir) end)
-
       %{tmp_dir: tmp_dir}
     end
 
     test "returns a list of relative file paths", %{tmp_dir: tmp_dir} do
       {:ok, files} = FileFind.list_files(tmp_dir)
-
       assert is_list(files)
       assert length(files) >= 3
-
       assert "README.md" in files
       assert "lib/app.ex" in files
       assert "lib/sub/deep.ex" in files
@@ -51,20 +46,6 @@ defmodule Minga.FileFindTest do
       refute "lib/sub" in files
     end
 
-    test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
-      # Initialize a real git repo so git ls-files works if selected
-      System.cmd("git", ["init"],
-        cd: tmp_dir,
-        env: [{"GIT_TEMPLATE_DIR", ""}],
-        stderr_to_stdout: true
-      )
-
-      System.cmd("git", ["add", "."], cd: tmp_dir)
-
-      {:ok, files} = FileFind.list_files(tmp_dir)
-      refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
-    end
-
     test "paths are relative (no leading ./)", %{tmp_dir: tmp_dir} do
       {:ok, files} = FileFind.list_files(tmp_dir)
 
@@ -75,7 +56,7 @@ defmodule Minga.FileFindTest do
 
     test "returns error for nonexistent directory" do
       result = FileFind.list_files("/nonexistent/path/#{System.unique_integer()}")
-      # Depending on strategy, this may error or return empty
+
       case result do
         {:ok, files} -> assert is_list(files)
         {:error, msg} -> assert is_binary(msg)

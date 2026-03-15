@@ -2,84 +2,67 @@ defmodule Minga.FileTree.GitStatusTest do
   use ExUnit.Case, async: true
 
   alias Minga.FileTree.GitStatus
+  alias Minga.Git.StatusEntry
+  alias Minga.Git.Stub, as: GitStub
 
   @moduletag :tmp_dir
 
+  setup %{tmp_dir: dir} do
+    GitStub.set_root(dir, dir)
+    on_exit(fn -> GitStub.clear(dir) end)
+    %{root: dir}
+  end
+
   describe "compute/1" do
     test "returns empty map for non-git directory" do
-      # Use /tmp directly to avoid being inside the worktree's git repo
-      dir =
-        Path.join(System.tmp_dir!(), "minga_test_no_git_#{:erlang.unique_integer([:positive])}")
-
-      File.mkdir_p!(dir)
-
-      on_exit(fn -> File.rm_rf!(dir) end)
-
-      assert GitStatus.compute(dir) == %{}
+      assert GitStatus.compute("/tmp/not_a_repo_#{System.unique_integer()}") == %{}
     end
 
-    test "detects untracked files in a git repo", %{tmp_dir: tmp_dir} do
-      git_init!(tmp_dir)
-      File.write!(Path.join(tmp_dir, "new_file.txt"), "hello")
+    test "detects untracked files", %{root: dir} do
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "new_file.txt", status: :untracked, staged: false}
+      ])
 
-      status = GitStatus.compute(tmp_dir)
-      assert Map.get(status, Path.join(tmp_dir, "new_file.txt")) == :untracked
+      status = GitStatus.compute(dir)
+      assert Map.get(status, Path.join(dir, "new_file.txt")) == :untracked
     end
 
-    test "detects staged files", %{tmp_dir: tmp_dir} do
-      git_init!(tmp_dir)
-      file_path = Path.join(tmp_dir, "staged.txt")
-      File.write!(file_path, "hello")
-      System.cmd("git", ["add", "staged.txt"], cd: tmp_dir)
+    test "detects staged files", %{root: dir} do
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "staged.txt", status: :added, staged: true}
+      ])
 
-      status = GitStatus.compute(tmp_dir)
-      assert Map.get(status, file_path) == :staged
+      status = GitStatus.compute(dir)
+      assert Map.get(status, Path.join(dir, "staged.txt")) == :staged
     end
 
-    test "detects modified files", %{tmp_dir: tmp_dir} do
-      git_init!(tmp_dir)
-      file_path = Path.join(tmp_dir, "tracked.txt")
-      File.write!(file_path, "original")
-      System.cmd("git", ["add", "tracked.txt"], cd: tmp_dir)
-      System.cmd("git", ["commit", "-m", "init"], cd: tmp_dir)
+    test "detects modified files", %{root: dir} do
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "tracked.txt", status: :modified, staged: false}
+      ])
 
-      # Modify the file
-      File.write!(file_path, "modified")
-
-      status = GitStatus.compute(tmp_dir)
-      assert Map.get(status, file_path) == :modified
+      status = GitStatus.compute(dir)
+      assert Map.get(status, Path.join(dir, "tracked.txt")) == :modified
     end
 
-    test "propagates status to parent directories", %{tmp_dir: tmp_dir} do
-      git_init!(tmp_dir)
-      subdir = Path.join(tmp_dir, "lib")
-      File.mkdir_p!(subdir)
-      File.write!(Path.join(subdir, "app.ex"), "hello")
+    test "propagates status to parent directories", %{root: dir} do
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "lib/app.ex", status: :untracked, staged: false}
+      ])
 
-      status = GitStatus.compute(tmp_dir)
-
-      # The file is untracked
-      assert Map.get(status, Path.join(subdir, "app.ex")) == :untracked
-      # The parent directory should also show untracked
-      assert Map.get(status, subdir) == :untracked
+      status = GitStatus.compute(dir)
+      assert Map.get(status, Path.join(dir, "lib/app.ex")) == :untracked
+      assert Map.get(status, Path.join(dir, "lib")) == :untracked
     end
 
-    test "directory shows worst child status", %{tmp_dir: tmp_dir} do
-      git_init!(tmp_dir)
-      subdir = Path.join(tmp_dir, "src")
-      File.mkdir_p!(subdir)
+    test "directory shows worst child status", %{root: dir} do
+      GitStub.set_status(dir, [
+        %StatusEntry{path: "src/tracked.ex", status: :modified, staged: false},
+        %StatusEntry{path: "src/new.ex", status: :untracked, staged: false}
+      ])
 
-      # Create one tracked+modified file and one untracked file
-      File.write!(Path.join(subdir, "tracked.ex"), "original")
-      System.cmd("git", ["add", "src/tracked.ex"], cd: tmp_dir)
-      System.cmd("git", ["commit", "-m", "init"], cd: tmp_dir)
-      File.write!(Path.join(subdir, "tracked.ex"), "modified")
-      File.write!(Path.join(subdir, "new.ex"), "new")
-
-      status = GitStatus.compute(tmp_dir)
-
-      # modified (severity 5) is worse than untracked (severity 1)
-      assert Map.get(status, subdir) == :modified
+      status = GitStatus.compute(dir)
+      assert Map.get(status, Path.join(dir, "src")) == :modified
     end
   end
 
@@ -101,13 +84,5 @@ defmodule Minga.FileTree.GitStatusTest do
       assert GitStatus.severity(:conflict) > GitStatus.severity(:modified)
       assert GitStatus.severity(:conflict) > GitStatus.severity(:staged)
     end
-  end
-
-  # ── Helpers ──────────────────────────────────────────────────────────────
-
-  defp git_init!(dir) do
-    System.cmd("git", ["init"], cd: dir)
-    System.cmd("git", ["config", "user.email", "test@test.com"], cd: dir)
-    System.cmd("git", ["config", "user.name", "Test"], cd: dir)
   end
 end

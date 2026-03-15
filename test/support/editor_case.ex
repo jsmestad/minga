@@ -48,11 +48,16 @@ defmodule Minga.Test.EditorCase do
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     file_path = Keyword.get(opts, :file_path)
+    clipboard = Keyword.get(opts, :clipboard, :none)
     id = :erlang.unique_integer([:positive])
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
     buffer_opts = [content: content]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
     {:ok, buffer} = BufferServer.start_link(buffer_opts)
+
+    # Inject clipboard mode directly on the buffer so the Editor never
+    # reads the global Config.Options for clipboard. Each test is isolated.
+    BufferServer.set_option(buffer, :clipboard, clipboard)
 
     {:ok, editor} =
       Editor.start_link(
@@ -82,8 +87,13 @@ defmodule Minga.Test.EditorCase do
   def start_editor_with_buffer(buffer, opts \\ []) do
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
+    clipboard = Keyword.get(opts, :clipboard, :none)
     id = :erlang.unique_integer([:positive])
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
+
+    # Inject clipboard mode directly on the buffer so the Editor never
+    # reads the global Config.Options for clipboard. Each test is isolated.
+    BufferServer.set_option(buffer, :clipboard, clipboard)
 
     {:ok, editor} =
       Editor.start_link(
