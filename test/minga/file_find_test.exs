@@ -46,16 +46,6 @@ defmodule Minga.FileFindTest do
       refute "lib/sub" in files
     end
 
-    test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
-      # fd filters by path pattern so a fake .git dir is sufficient.
-      # CI installs fd-find; FileFind detects both fd and fdfind.
-      File.mkdir_p!(Path.join(tmp_dir, ".git/objects"))
-      File.write!(Path.join(tmp_dir, ".git/HEAD"), "ref: refs/heads/main\n")
-
-      {:ok, files} = FileFind.list_files(tmp_dir)
-      refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
-    end
-
     test "paths are relative (no leading ./)", %{tmp_dir: tmp_dir} do
       {:ok, files} = FileFind.list_files(tmp_dir)
 

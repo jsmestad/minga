@@ -60,6 +60,7 @@ defmodule Minga.FileFind do
 
   # ── Strategies ──────────────────────────────────────────────────────────────
 
+  # Excludes .git/ contents via --exclude .git
   @spec list_with_fd(String.t()) :: result()
   defp list_with_fd(root) do
     args = ["--type", "f", "--hidden", "--follow", "--exclude", ".git", "."]
@@ -73,6 +74,7 @@ defmodule Minga.FileFind do
     end
   end
 
+  # Excludes .git/ contents inherently (only returns tracked/staged files)
   @spec list_with_git(String.t()) :: result()
   defp list_with_git(root) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard"]
@@ -86,6 +88,7 @@ defmodule Minga.FileFind do
     end
   end
 
+  # Excludes .git/ contents via -not -path "*/.git/*"
   @spec list_with_find(String.t()) :: result()
   defp list_with_find(root) do
     args = [".", "-type", "f", "-not", "-path", "*/.git/*"]
