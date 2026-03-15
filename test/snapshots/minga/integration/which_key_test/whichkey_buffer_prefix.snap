@@ -20,9 +20,9 @@
 15│   ~
 16│   ~
 17│╭─────────────────────────────────── SPC b ────────────────────────────────────╮
-18││B : Switch buffer (all)  b : Switch buffer        n : Next buffer             │
-19││N : New buffer           d : Kill buffer          p : Previous buffer         │
-20││W : View warnings        m : View messages                                    │
+18││B : Switch buffer (all)  b : Switch buffer        m : View messages           │
+19││N : New buffer           d : Kill buffer          n : Next buffer             │
+20││W : View warnings        l : Set language         p : Previous buffer         │
 21│╰──────────────────────────────────────────────────────────────────────────────╯
 22│ NORMAL  [no file]                                              Text  1:1  Top
 23│

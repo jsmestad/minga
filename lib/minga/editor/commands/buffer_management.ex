@@ -394,6 +394,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     Movement.execute(state, :window_close)
   end
 
+  def execute(state, {:execute_ex_command, {:set_filetype, [name]}}) do
+    case resolve_filetype(name) do
+      {:ok, filetype} -> apply_filetype_change(state, filetype)
+      {:error, message} -> %{state | status_msg: message}
+    end
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Minga.Log.debug(:editor, "Unknown ex command: #{raw}")
     state
@@ -457,6 +464,27 @@ defmodule Minga.Editor.Commands.BufferManagement do
       {:error, reason} ->
         Minga.Log.warning(:editor, "Failed to open config: #{inspect(reason)}")
         state
+    end
+  end
+
+  # ── Filetype change ──────────────────────────────────────────────────────
+
+  @doc """
+  Changes the active buffer's filetype and triggers a highlight reparse.
+
+  Used by the language picker (`LanguageSource.on_select`) and the `:set ft=`
+  ex command. Centralizes the side effects so both paths stay in sync.
+  """
+  @spec apply_filetype_change(state(), atom()) :: state()
+  def apply_filetype_change(state, filetype) when is_atom(filetype) do
+    buf = state.buffers.active
+
+    if is_pid(buf) and Process.alive?(buf) do
+      BufferServer.set_filetype(buf, filetype)
+      send(self(), :setup_highlight)
+      %{state | status_msg: "Language: #{filetype}"}
+    else
+      %{state | status_msg: "No active buffer"}
     end
   end
 
@@ -692,6 +720,20 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec last_tab?(state()) :: boolean()
+  # Validates a filetype name string against the Language registry.
+  # Uses String.to_existing_atom to avoid atom table pollution from typos.
+  @spec resolve_filetype(String.t()) :: {:ok, atom()} | {:error, String.t()}
+  defp resolve_filetype(name) do
+    atom = String.to_existing_atom(name)
+
+    case Minga.Language.Registry.get(atom) do
+      %Minga.Language{} -> {:ok, atom}
+      nil -> {:error, "Unknown language: #{name}"}
+    end
+  rescue
+    ArgumentError -> {:error, "Unknown language: #{name}"}
+  end
+
   defp last_tab?(%{tab_bar: %TabBar{tabs: [_]}}), do: true
   defp last_tab?(%{tab_bar: nil}), do: true
   defp last_tab?(_state), do: false

@@ -85,6 +85,10 @@ defmodule Minga.Editor.Commands do
     PickerUI.open(state, Minga.Picker.ThemeSource)
   end
 
+  def execute(state, :set_language) do
+    PickerUI.open(state, Minga.Picker.LanguageSource)
+  end
+
   def execute(state, :search_project) do
     %{
       state
@@ -579,8 +583,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, :lsp_start), do: LspCommands.execute(state, :lsp_start)
 
   def execute(state, :filetype_menu) do
-    # TODO: open SPC m which-key popup for the active buffer's filetype
-    %{state | status_msg: "Filetype actions not yet implemented (SPC m)"}
+    PickerUI.open(state, Minga.Picker.LanguageSource)
   end
 
   def execute(state, :goto_definition), do: LspActions.goto_definition(state)

@@ -257,6 +257,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :filetype)
   end
 
+  @doc """
+  Changes the buffer's filetype and re-seeds per-filetype options.
+
+  The buffer content is not modified; only metadata (filetype, tab_width,
+  indent_with, etc.) changes. The caller is responsible for triggering
+  a highlight reparse after this call.
+  """
+  @spec set_filetype(GenServer.server(), atom()) :: :ok
+  def set_filetype(server, filetype) when is_atom(filetype) do
+    GenServer.call(server, {:set_filetype, filetype})
+  end
+
   @doc "Returns the buffer name (e.g. `*Messages*`), or `nil` for file buffers."
   @spec buffer_name(GenServer.server()) :: String.t() | nil
   def buffer_name(server) do
@@ -967,6 +979,11 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:filetype, _from, state) do
     {:reply, state.filetype, state}
+  end
+
+  def handle_call({:set_filetype, filetype}, _from, state) do
+    new_state = %{state | filetype: filetype, options: seed_options(filetype)}
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:buffer_name, _from, state) do

@@ -49,6 +49,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?b, @none}, {?m, @none}], :view_messages, "View messages"},
     {[{?b, @none}, {?W, @none}], :view_warnings, "View warnings"},
     {[{?b, @none}, {?N, @none}], :new_buffer, "New buffer"},
+    {[{?b, @none}, {?l, @none}], :set_language, "Set language"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {[{?w, @none}, {?h, @none}], :window_left, "Window left"},
