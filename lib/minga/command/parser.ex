@@ -164,6 +164,11 @@ defmodule Minga.Command.Parser do
   defp do_parse("set wrap"), do: {:set, :wrap}
   defp do_parse("set nowrap"), do: {:set, :nowrap}
 
+  defp do_parse("set ft=" <> name), do: {:set_filetype, [String.trim(name)]}
+  defp do_parse("set filetype=" <> name), do: {:set_filetype, [String.trim(name)]}
+  defp do_parse("setf " <> name), do: {:set_filetype, [String.trim(name)]}
+  defp do_parse("setfiletype " <> name), do: {:set_filetype, [String.trim(name)]}
+
   defp do_parse("setglobal number"), do: {:setglobal, :number}
   defp do_parse("setglobal nu"), do: {:setglobal, :number}
   defp do_parse("setglobal nonumber"), do: {:setglobal, :nonumber}

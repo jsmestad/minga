@@ -63,6 +63,7 @@ defmodule Minga.Command.Registry do
     {:view_messages, "View *Messages* buffer"},
     {:view_warnings, "View *Warnings* buffer"},
     {:new_buffer, "Create new empty buffer"},
+    {:set_language, "Set buffer language"},
     {:command_palette, "Execute command"},
     {:theme_picker, "Pick theme"},
     {:delete_line, "Delete current line"},

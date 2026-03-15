@@ -36,6 +36,7 @@ defmodule Minga.Command.RegistryTest do
           :filetype_menu,
           :find_file,
           :search_project,
+          :set_language,
           :buffer_list,
           :buffer_list_all,
           :buffer_next,

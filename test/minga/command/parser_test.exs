@@ -185,4 +185,26 @@ defmodule Minga.Command.ParserTest do
       assert {:unknown, "wo"} = Parser.parse("wo")
     end
   end
+
+  describe "set filetype commands" do
+    test ":set ft=python parses to set_filetype" do
+      assert {:set_filetype, ["python"]} = Parser.parse("set ft=python")
+    end
+
+    test ":set filetype=elixir parses to set_filetype" do
+      assert {:set_filetype, ["elixir"]} = Parser.parse("set filetype=elixir")
+    end
+
+    test ":setf ruby parses to set_filetype" do
+      assert {:set_filetype, ["ruby"]} = Parser.parse("setf ruby")
+    end
+
+    test ":setfiletype go parses to set_filetype" do
+      assert {:set_filetype, ["go"]} = Parser.parse("setfiletype go")
+    end
+
+    test "trims whitespace from filetype name" do
+      assert {:set_filetype, ["python"]} = Parser.parse("set ft=  python  ")
+    end
+  end
 end
