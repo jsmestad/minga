@@ -144,14 +144,10 @@ defmodule Minga.Config.Hooks do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # Guard for test environments where EventBus may not be running.
-  # In production, Events starts before Hooks in the supervision tree.
   @spec subscribe_to_events() :: :ok
   defp subscribe_to_events do
-    if Process.whereis(Minga.EventBus) do
-      for topic <- Map.keys(@topic_to_event) do
-        Minga.Events.subscribe(topic)
-      end
+    for topic <- Map.keys(@topic_to_event) do
+      Minga.Events.subscribe(topic)
     end
 
     :ok

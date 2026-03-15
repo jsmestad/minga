@@ -46,7 +46,6 @@ defmodule Minga.Editor do
 
   alias Minga.Port.Manager, as: PortManager
 
-  alias Minga.Project
   @typedoc "Options for starting the editor."
   @type start_opt ::
           {:name, GenServer.name()}
@@ -165,9 +164,6 @@ defmodule Minga.Editor do
   def handle_call({:open_file, file_path}, _from, state) do
     case Commands.start_buffer(file_path) do
       {:ok, pid} ->
-        FileWatcherHelpers.maybe_watch_buffer(pid)
-        maybe_detect_project(file_path)
-        maybe_record_file(file_path)
         new_state = Commands.add_buffer(state, pid)
         new_state = log_message(new_state, "Opened: #{file_path}")
         new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)
@@ -870,22 +866,6 @@ defmodule Minga.Editor do
   @spec dispatch_command(state(), Mode.command()) :: state()
   defdelegate dispatch_command(state, cmd), to: KeyDispatch
 
-  # ── Project detection ───────────────────────────────────────────────────────
-
-  @spec maybe_detect_project(String.t()) :: :ok
-  defp maybe_detect_project(file_path) do
-    Project.detect_and_set(file_path)
-  catch
-    :exit, _ -> :ok
-  end
-
-  @spec maybe_record_file(String.t()) :: :ok
-  defp maybe_record_file(file_path) do
-    Project.record_file(file_path)
-  catch
-    :exit, _ -> :ok
-  end
-
   # ── Paste event routing ───────────────────────────────────────────────────
 
   @spec handle_paste_event(state(), String.t()) :: state()
@@ -915,9 +895,6 @@ defmodule Minga.Editor do
   @doc false
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
-    FileWatcherHelpers.maybe_watch_buffer(pid)
-    maybe_detect_project(path)
-    maybe_record_file(path)
     new_state = Commands.add_buffer(state, pid)
     new_state = log_message(new_state, "Opened: #{path}")
     new_state = BufferLifecycle.lsp_buffer_opened(new_state, pid)

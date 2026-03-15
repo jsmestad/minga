@@ -59,7 +59,10 @@ defmodule Minga.Events do
   """
   @spec subscribe(topic()) :: :ok
   def subscribe(topic) when is_atom(topic) do
-    {:ok, _} = Registry.register(@registry, topic, [])
+    if Process.whereis(@registry) do
+      {:ok, _} = Registry.register(@registry, topic, [])
+    end
+
     :ok
   end
 
@@ -71,7 +74,10 @@ defmodule Minga.Events do
   """
   @spec subscribe(topic(), term()) :: :ok
   def subscribe(topic, value) when is_atom(topic) do
-    {:ok, _} = Registry.register(@registry, topic, value)
+    if Process.whereis(@registry) do
+      {:ok, _} = Registry.register(@registry, topic, value)
+    end
+
     :ok
   end
 

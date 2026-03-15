@@ -80,6 +80,9 @@ defmodule Minga.FileWatcher do
     debounce_ms = Keyword.get(opts, :debounce_ms, @default_debounce_ms)
     subscriber = Keyword.get(opts, :subscriber)
 
+    # Subscribe to buffer-open events so we automatically watch new files.
+    Minga.Events.subscribe(:buffer_opened)
+
     state = %__MODULE__{
       subscriber: subscriber,
       debounce_ms: debounce_ms
@@ -96,17 +99,7 @@ defmodule Minga.FileWatcher do
   end
 
   def handle_call({:watch_path, path}, _from, %__MODULE__{} = state) do
-    dir = Path.dirname(path)
-
-    new_dirs =
-      Map.update(state.watched_dirs, dir, 1, &(&1 + 1))
-
-    new_files = MapSet.put(state.watched_files, path)
-
-    new_watcher = ensure_watcher(state.watcher, new_dirs)
-
-    {:reply, :ok,
-     %__MODULE__{state | watched_dirs: new_dirs, watched_files: new_files, watcher: new_watcher}}
+    {:reply, :ok, do_watch_path(state, path)}
   end
 
   def handle_call({:unwatch_path, path}, _from, %__MODULE__{} = state) do
@@ -158,11 +151,24 @@ defmodule Minga.FileWatcher do
     {:noreply, %__MODULE__{state | subscriber: nil}}
   end
 
+  def handle_info({:minga_event, :buffer_opened, %{path: path}}, %__MODULE__{} = state) do
+    {:noreply, do_watch_path(state, Path.expand(path))}
+  end
+
   def handle_info(_msg, %__MODULE__{} = state) do
     {:noreply, state}
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec do_watch_path(state(), String.t()) :: state()
+  defp do_watch_path(%__MODULE__{} = state, path) do
+    dir = Path.dirname(path)
+    new_dirs = Map.update(state.watched_dirs, dir, 1, &(&1 + 1))
+    new_files = MapSet.put(state.watched_files, path)
+    new_watcher = ensure_watcher(state.watcher, new_dirs)
+    %__MODULE__{state | watched_dirs: new_dirs, watched_files: new_files, watcher: new_watcher}
+  end
 
   @spec ensure_watcher(pid() | nil, %{String.t() => pos_integer()}) :: pid() | nil
   defp ensure_watcher(existing_watcher, dirs) when map_size(dirs) == 0 do
