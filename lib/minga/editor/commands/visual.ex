@@ -4,6 +4,8 @@ defmodule Minga.Editor.Commands.Visual do
   visual selection.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Helpers
@@ -12,6 +14,11 @@ defmodule Minga.Editor.Commands.Visual do
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:delete_visual_selection, "Delete visual selection", true},
+    {:yank_visual_selection, "Yank visual selection", true}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -103,5 +110,17 @@ defmodule Minga.Editor.Commands.Visual do
         BufferServer.move_to(buf, end_pos)
         %{state | vim: %{vim | mode_state: new_ms}}
     end
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

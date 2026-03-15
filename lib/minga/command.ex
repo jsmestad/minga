@@ -21,25 +21,33 @@ defmodule Minga.Command do
   * `:toggle` — `true` for boolean toggle, or a function
     `(current_value -> new_value)` for non-boolean cycling
 
+  ## Buffer requirement
+
+  Commands that only make sense with an active buffer set
+  `requires_buffer: true`. The dispatch layer skips these commands
+  (returning state unchanged) when no buffer is active.
+
   ## Example
 
       %Minga.Command{
         name: :save,
         description: "Save the current file",
-        execute: fn state -> Minga.Editor.Commands.execute(state, :save) end
+        execute: fn state -> Minga.Editor.Commands.BufferManagement.execute(state, :save) end,
+        requires_buffer: true
       }
 
       # Scopeable toggle:
       %Minga.Command{
         name: :toggle_wrap,
         description: "Toggle word wrap",
-        execute: fn state -> Minga.Editor.Commands.execute(state, :toggle_wrap) end,
+        execute: fn state -> Minga.Editor.Commands.BufferManagement.execute(state, :toggle_wrap) end,
+        requires_buffer: true,
         scope: %{option: :wrap, toggle: true}
       }
   """
 
   @enforce_keys [:name, :description, :execute]
-  defstruct [:name, :description, :execute, :scope]
+  defstruct [:name, :description, :execute, :scope, requires_buffer: false]
 
   @typedoc """
   Scope descriptor for commands that toggle buffer-local options.
@@ -52,15 +60,17 @@ defmodule Minga.Command do
   @typedoc """
   An editor command struct.
 
-  * `name`        — atom identifier used for registry lookup and keymap binding
-  * `description` — human-readable label shown in which-key popups
-  * `execute`     — function applied to the editor state, returns new state
-  * `scope`       — optional scope descriptor for buffer-local option toggles
+  * `name`            — atom identifier used for registry lookup and keymap binding
+  * `description`     — human-readable label shown in which-key popups
+  * `execute`         — function applied to the editor state, returns new state
+  * `requires_buffer` — when true, command is skipped if no buffer is active
+  * `scope`           — optional scope descriptor for buffer-local option toggles
   """
   @type t :: %__MODULE__{
           name: atom(),
           description: String.t(),
           execute: function(),
+          requires_buffer: boolean(),
           scope: scope() | nil
         }
 

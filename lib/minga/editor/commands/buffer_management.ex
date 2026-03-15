@@ -4,6 +4,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
   ex-command dispatch, and line number style cycling.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Agent.Session
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
@@ -485,6 +487,86 @@ defmodule Minga.Editor.Commands.BufferManagement do
       %{state | status_msg: "Language: #{filetype}"}
     else
       %{state | status_msg: "No active buffer"}
+    end
+  end
+
+  # ── Reload config ──────────────────────────────────────────────────────────
+
+  @spec reload_config(state()) :: state()
+  def reload_config(state) do
+    case ConfigLoader.reload() do
+      :ok ->
+        Minga.Editor.log_to_messages("Config reloaded")
+        %{state | status_msg: "Config reloaded"}
+
+      {:error, msg} ->
+        Minga.Log.warning(:config, "Config reload error: #{msg}")
+        %{state | status_msg: "Config reload error: #{msg}"}
+    end
+  end
+
+  # ── Alternate file ───────────────────────────────────────────────────────
+
+  @spec alternate_file(state()) :: state()
+  def alternate_file(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+    file_path = BufferServer.file_path(buf)
+    filetype = BufferServer.filetype(buf)
+    open_alternate(state, file_path, filetype)
+  end
+
+  def alternate_file(state), do: %{state | status_msg: "No active buffer"}
+
+  @spec open_alternate(state(), String.t() | nil, atom()) :: state()
+  defp open_alternate(state, nil, _filetype), do: %{state | status_msg: "Buffer has no file path"}
+
+  defp open_alternate(state, file_path, filetype) do
+    project_root = Minga.Project.root() || Path.dirname(file_path)
+    candidates = Minga.AlternateFile.candidates(file_path, filetype, project_root)
+
+    case Enum.find(candidates, &File.exists?/1) do
+      nil ->
+        %{state | status_msg: "No alternate file found for #{Path.basename(file_path)}"}
+
+      alt_path ->
+        execute(state, {:execute_ex_command, {:edit, alt_path}})
+    end
+  end
+
+  # ── Tab goto ──────────────────────────────────────────────────────────────
+
+  @spec tab_goto(state(), atom()) :: state()
+  def tab_goto(%{tab_bar: %TabBar{} = tb} = state, cmd) do
+    case parse_tab_goto(cmd) do
+      {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
+      :error -> state
+    end
+  end
+
+  def tab_goto(state, _cmd), do: state
+
+  @spec parse_tab_goto(atom()) :: {:ok, pos_integer()} | :error
+  defp parse_tab_goto(cmd) do
+    case Atom.to_string(cmd) do
+      "tab_goto_" <> id_str ->
+        case Integer.parse(id_str) do
+          {n, ""} -> {:ok, n}
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @spec switch_tab_by_id_or_index(EditorState.t(), TabBar.t(), pos_integer()) :: EditorState.t()
+  defp switch_tab_by_id_or_index(state, tb, n) do
+    if TabBar.has_tab?(tb, n) do
+      EditorState.switch_tab(state, n)
+    else
+      case TabBar.tab_at(tb, n) do
+        %{id: id} -> EditorState.switch_tab(state, id)
+        nil -> state
+      end
     end
   end
 
@@ -983,5 +1065,182 @@ defmodule Minga.Editor.Commands.BufferManagement do
       {:error, _} ->
         %{state | buffers: %{bs | list: [], active_index: 0, active: nil}}
     end
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    standard = [
+      %Minga.Command{
+        name: :save,
+        description: "Save the current file",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :save) end
+      },
+      %Minga.Command{
+        name: :force_save,
+        description: "Force save the current file",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :force_save) end
+      },
+      %Minga.Command{
+        name: :reload,
+        description: "Reload file from disk",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :reload) end
+      },
+      %Minga.Command{
+        name: :quit,
+        description: "Close tab or quit",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :quit) end
+      },
+      %Minga.Command{
+        name: :force_quit,
+        description: "Force close tab or quit",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :force_quit) end
+      },
+      %Minga.Command{
+        name: :quit_all,
+        description: "Quit the editor (all tabs)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :quit_all) end
+      },
+      %Minga.Command{
+        name: :force_quit_all,
+        description: "Force quit the editor (all tabs)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :force_quit_all) end
+      },
+      %Minga.Command{
+        name: :confirm_quit_yes,
+        description: "Confirm quit (yes)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :confirm_quit_yes) end
+      },
+      %Minga.Command{
+        name: :confirm_quit_no,
+        description: "Confirm quit (no)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :confirm_quit_no) end
+      },
+      %Minga.Command{
+        name: :buffer_list,
+        description: "Switch buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :buffer_list) end
+      },
+      %Minga.Command{
+        name: :buffer_list_all,
+        description: "Switch buffer (all)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :buffer_list_all) end
+      },
+      %Minga.Command{
+        name: :buffer_next,
+        description: "Next buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :buffer_next) end
+      },
+      %Minga.Command{
+        name: :buffer_prev,
+        description: "Previous buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :buffer_prev) end
+      },
+      %Minga.Command{
+        name: :kill_buffer,
+        description: "Kill current buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :kill_buffer) end
+      },
+      %Minga.Command{
+        name: :view_messages,
+        description: "View *Messages* buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :view_messages) end
+      },
+      %Minga.Command{
+        name: :view_warnings,
+        description: "View *Warnings* buffer",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :view_warnings) end
+      },
+      %Minga.Command{
+        name: :open_config,
+        description: "Open config file",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :open_config) end
+      },
+      %Minga.Command{
+        name: :tab_next,
+        description: "Next tab",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :tab_next) end
+      },
+      %Minga.Command{
+        name: :tab_prev,
+        description: "Previous tab",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :tab_prev) end
+      },
+      %Minga.Command{
+        name: :new_buffer,
+        description: "Create new empty buffer",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :new_buffer) end
+      },
+      %Minga.Command{
+        name: :reload_config,
+        description: "Reload config",
+        requires_buffer: true,
+        execute: &reload_config/1
+      },
+      %Minga.Command{
+        name: :alternate_file,
+        description: "Switch to alternate file",
+        requires_buffer: true,
+        execute: &alternate_file/1
+      }
+    ]
+
+    tabs =
+      for n <- 1..9 do
+        cmd = String.to_atom("tab_goto_#{n}")
+
+        %Minga.Command{
+          name: cmd,
+          description: "Switch to tab #{n}",
+          requires_buffer: true,
+          execute: fn state -> tab_goto(state, cmd) end
+        }
+      end
+
+    scoped = [
+      %Minga.Command{
+        name: :cycle_line_numbers,
+        description: "Cycle line number style (hybrid → absolute → relative → none)",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :cycle_line_numbers) end,
+        scope: %{
+          option: :line_numbers,
+          toggle: fn
+            :hybrid -> :absolute
+            :absolute -> :relative
+            :relative -> :none
+            :none -> :hybrid
+          end
+        }
+      },
+      %Minga.Command{
+        name: :toggle_wrap,
+        description: "Toggle word wrap",
+        requires_buffer: true,
+        execute: fn state -> execute(state, :toggle_wrap) end,
+        scope: %{option: :wrap, toggle: true}
+      }
+    ]
+
+    standard ++ tabs ++ scoped
   end
 end

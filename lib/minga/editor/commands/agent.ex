@@ -7,6 +7,8 @@ defmodule Minga.Editor.Commands.Agent do
   `state → state` transformations.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffReview
@@ -1025,5 +1027,96 @@ defmodule Minga.Editor.Commands.Agent do
     Session.messages(session)
   catch
     :exit, _ -> []
+  end
+
+  # Maps command name atoms to their implementing function names.
+  # All agent commands work without a buffer.
+  @agent_command_specs [
+    {:toggle_agent_panel, "Toggle AI agent panel", :toggle_panel},
+    {:toggle_agentic_view, "Toggle agent split pane", :toggle_agentic_view},
+    {:toggle_agent_split, "Toggle agent split", :toggle_agent_split},
+    {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
+    {:agent_abort, "Stop AI agent", :abort_agent},
+    {:agent_new_session, "New AI agent session", :new_agent_session},
+    {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
+    {:agent_summarize, "Summarize session to context artifact", :summarize},
+    {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
+    {:agent_scroll_half_down, "Scroll agent chat down", :scroll_chat_down},
+    {:agent_scroll_half_up, "Scroll agent chat up", :scroll_chat_up},
+    {:agent_toggle_collapse, "Toggle collapse at cursor", :scope_toggle_collapse},
+    {:agent_toggle_all_collapse, "Toggle collapse all", :scope_toggle_all_collapse},
+    {:agent_expand_at_cursor, "Expand at cursor", :scope_expand_at_cursor},
+    {:agent_collapse_at_cursor, "Collapse at cursor", :scope_collapse_at_cursor},
+    {:agent_collapse_all, "Collapse all", :scope_collapse_all},
+    {:agent_expand_all, "Expand all", :scope_expand_all},
+    {:agent_next_message, "Next message", :scope_next_message},
+    {:agent_next_code_block, "Next code block", :scope_next_code_block},
+    {:agent_next_tool_call, "Next tool call", :scope_next_tool_call},
+    {:agent_prev_message, "Previous message", :scope_prev_message},
+    {:agent_prev_code_block, "Previous code block", :scope_prev_code_block},
+    {:agent_prev_tool_call, "Previous tool call", :scope_prev_tool_call},
+    {:agent_copy_code_block, "Copy code block", :scope_copy_code_block},
+    {:agent_copy_message, "Copy message", :scope_copy_message},
+    {:agent_open_code_block, "Open code block", :scope_open_code_block},
+    {:agent_focus_input, "Focus agent input", :scope_focus_input},
+    {:agent_unfocus_input, "Unfocus agent input", :scope_unfocus_input},
+    {:agent_unfocus_and_quit, "Unfocus input and quit", :scope_unfocus_and_quit},
+    {:agent_grow_panel, "Grow agent panel", :scope_grow_panel},
+    {:agent_shrink_panel, "Shrink agent panel", :scope_shrink_panel},
+    {:agent_reset_panel, "Reset agent panel size", :scope_reset_panel},
+    {:agent_switch_focus, "Switch agent focus", :scope_switch_focus},
+    {:agent_start_search, "Start agent search", :scope_start_search},
+    {:agent_next_search_match, "Next agent search match", :scope_next_search_match},
+    {:agent_prev_search_match, "Previous agent search match", :scope_prev_search_match},
+    {:agent_session_switcher, "Agent session switcher", :scope_session_switcher},
+    {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
+    {:agent_close, "Close agent panel", :scope_close},
+    {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
+    {:agent_clear_chat, "Clear agent chat", :scope_clear_chat},
+    {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
+    {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
+    {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
+    {:agent_input_backspace, "Agent input backspace", :input_backspace},
+    {:agent_input_up, "Agent input up", :scope_input_up},
+    {:agent_input_down, "Agent input down", :scope_input_down},
+    {:agent_save_buffer, "Save buffer from agent", :scope_save_buffer},
+    {:agent_input_to_normal, "Agent input to normal mode", :input_to_normal},
+    {:agent_accept_hunk, "Accept agent hunk", :scope_accept_hunk},
+    {:agent_reject_hunk, "Reject agent hunk", :scope_reject_hunk},
+    {:agent_accept_all_hunks, "Accept all agent hunks", :scope_accept_all_hunks},
+    {:agent_reject_all_hunks, "Reject all agent hunks", :scope_reject_all_hunks},
+    {:agent_approve_tool, "Approve agent tool", :scope_approve_tool},
+    {:agent_deny_tool, "Deny agent tool", :scope_deny_tool},
+    {:agent_trigger_mention, "Trigger agent mention", :scope_trigger_mention}
+  ]
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    dispatched =
+      Enum.map(@agent_command_specs, fn {cmd_name, desc, fun_name} ->
+        %Minga.Command{
+          name: cmd_name,
+          description: desc,
+          requires_buffer: false,
+          execute: fn state -> apply(__MODULE__, fun_name, [state]) end
+        }
+      end)
+
+    pickers = [
+      %Minga.Command{
+        name: :agent_pick_model,
+        description: "Pick AI agent model",
+        requires_buffer: false,
+        execute: fn state -> PickerUI.open(state, Minga.Picker.AgentModelSource) end
+      },
+      %Minga.Command{
+        name: :agent_session_history,
+        description: "Agent session history",
+        requires_buffer: false,
+        execute: fn state -> PickerUI.open(state, Minga.Picker.SessionHistorySource) end
+      }
+    ]
+
+    dispatched ++ pickers
   end
 end

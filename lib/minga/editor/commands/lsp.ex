@@ -6,6 +6,8 @@ defmodule Minga.Editor.Commands.Lsp do
   language server instances attached to the current buffer.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.DocumentSync
@@ -15,7 +17,16 @@ defmodule Minga.Editor.Commands.Lsp do
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
 
+  alias Minga.Editor.LspActions
+
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:lsp_info, "Show LSP server status", true},
+    {:lsp_restart, "Restart LSP server", true},
+    {:lsp_stop, "Stop LSP server", true},
+    {:lsp_start, "Start LSP server", true}
+  ]
 
   @doc "Shows LSP server status in the minibuffer."
   @spec execute(state(), :lsp_info | :lsp_restart | :lsp_stop | :lsp_start) :: state()
@@ -209,4 +220,34 @@ defmodule Minga.Editor.Commands.Lsp do
   defp format_elapsed(s) when s < 60, do: "#{s}s"
   defp format_elapsed(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
   defp format_elapsed(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    standard =
+      Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+        %Minga.Command{
+          name: name,
+          description: desc,
+          requires_buffer: requires_buffer,
+          execute: fn state -> execute(state, name) end
+        }
+      end)
+
+    lsp_actions = [
+      %Minga.Command{
+        name: :goto_definition,
+        description: "Go to definition",
+        requires_buffer: true,
+        execute: &LspActions.goto_definition/1
+      },
+      %Minga.Command{
+        name: :hover,
+        description: "Hover documentation",
+        requires_buffer: true,
+        execute: &LspActions.hover/1
+      }
+    ]
+
+    standard ++ lsp_actions
+  end
 end

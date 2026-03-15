@@ -3,6 +3,8 @@ defmodule Minga.Editor.Commands.Git do
   Git hunk operations: navigation, stage, revert, preview, and blame.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
@@ -11,6 +13,15 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git.Tracker, as: GitTracker
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:next_git_hunk, "Next git hunk", true},
+    {:prev_git_hunk, "Previous git hunk", true},
+    {:git_stage_hunk, "Stage hunk", true},
+    {:git_revert_hunk, "Revert hunk", true},
+    {:git_preview_hunk, "Preview hunk", true},
+    {:git_blame_line, "Blame line", true}
+  ]
 
   @spec execute(state(), atom()) :: state()
 
@@ -164,5 +175,17 @@ defmodule Minga.Editor.Commands.Git do
   defp get_base_lines(git_pid) do
     # Access the base_lines from the git buffer's state
     :sys.get_state(git_pid).base_lines
+  end
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
   end
 end

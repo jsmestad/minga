@@ -4,6 +4,8 @@ defmodule Minga.Editor.Commands.Movement do
   matching, paragraph jumps, page scroll, and screen-relative positioning.
   """
 
+  @behaviour Minga.Command.Provider
+
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -19,6 +21,47 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Motion.VisualLine
 
   @type state :: EditorState.t()
+
+  @command_specs [
+    {:move_left, "Move cursor left", true},
+    {:move_right, "Move cursor right", true},
+    {:move_up, "Move cursor up", true},
+    {:move_down, "Move cursor down", true},
+    {:move_logical_up, "Move cursor up (logical line)", true},
+    {:move_logical_down, "Move cursor down (logical line)", true},
+    {:move_to_logical_line_start, "Move to logical line start", true},
+    {:move_to_logical_line_end, "Move to logical line end", true},
+    {:move_to_line_start, "Move to line start", true},
+    {:move_to_line_end, "Move to line end", true},
+    {:word_forward, "Move to next word", true},
+    {:word_backward, "Move to previous word", true},
+    {:word_end, "Move to end of word", true},
+    {:word_forward_big, "Move to next WORD", true},
+    {:word_backward_big, "Move to previous WORD", true},
+    {:word_end_big, "Move to end of WORD", true},
+    {:move_to_first_non_blank, "Move to first non-blank character", true},
+    {:move_to_document_start, "Move to document start", true},
+    {:move_to_document_end, "Move to document end", true},
+    {:next_line_first_non_blank, "Move to next line's first non-blank", true},
+    {:prev_line_first_non_blank, "Move to previous line's first non-blank", true},
+    {:repeat_find_char, "Repeat last find-char", true},
+    {:repeat_find_char_reverse, "Repeat last find-char (reverse)", true},
+    {:match_bracket, "Jump to matching bracket", true},
+    {:paragraph_forward, "Move to next paragraph", true},
+    {:paragraph_backward, "Move to previous paragraph", true},
+    {:half_page_down, "Scroll half page down", true},
+    {:half_page_up, "Scroll half page up", true},
+    {:page_down, "Scroll page down", true},
+    {:page_up, "Scroll page up", true},
+    {:window_left, "Focus window left", true},
+    {:window_right, "Focus window right", true},
+    {:window_up, "Focus window up", true},
+    {:window_down, "Focus window down", true},
+    {:split_vertical, "Split window vertically", true},
+    {:split_horizontal, "Split window horizontally", true},
+    {:window_close, "Close window", true},
+    {:describe_key, "Describe key binding", true}
+  ]
 
   @spec execute(state(), Mode.command()) :: state()
 
@@ -518,4 +561,16 @@ defmodule Minga.Editor.Commands.Movement do
   @spec fold_skip_target(FoldMap.t(), non_neg_integer(), :up | :down) :: non_neg_integer()
   defp fold_skip_target(fm, cursor_line, :down), do: FoldMap.next_visible(fm, cursor_line - 1)
   defp fold_skip_target(fm, cursor_line, :up), do: FoldMap.prev_visible(fm, cursor_line + 1)
+
+  @impl Minga.Command.Provider
+  def __commands__ do
+    Enum.map(@command_specs, fn {name, desc, requires_buffer} ->
+      %Minga.Command{
+        name: name,
+        description: desc,
+        requires_buffer: requires_buffer,
+        execute: fn state -> execute(state, name) end
+      }
+    end)
+  end
 end

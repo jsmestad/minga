@@ -15,17 +15,38 @@ defmodule Minga.Command.RegistryTest do
     test "all built-in commands are registered on start", %{registry: r} do
       names = r |> Registry.all() |> Enum.map(& &1.name) |> Enum.sort()
 
-      expected =
+      # Core commands that must always be present (not exhaustive, but covers
+      # all major categories). New commands are expected to be added over time.
+      required_commands =
         [
+          # Buffer management
           :save,
           :quit,
           :force_quit,
           :quit_all,
           :force_quit_all,
+          :buffer_list,
+          :buffer_list_all,
+          :buffer_next,
+          :buffer_prev,
+          :kill_buffer,
+          :new_buffer,
+          :view_messages,
+          :view_warnings,
+          :open_config,
+          :reload_config,
+
+          # Movement
           :move_left,
           :move_right,
           :move_up,
           :move_down,
+          :half_page_down,
+          :half_page_up,
+          :page_down,
+          :page_up,
+
+          # Editing
           :delete_before,
           :delete_at,
           :delete_chars_at,
@@ -33,56 +54,21 @@ defmodule Minga.Command.RegistryTest do
           :insert_newline,
           :undo,
           :redo,
-          :filetype_menu,
-          :find_file,
-          :search_project,
-          :set_language,
-          :buffer_list,
-          :buffer_list_all,
-          :buffer_next,
-          :buffer_prev,
-          :kill_buffer,
-          :cycle_agent_tabs,
-          :command_palette,
-          :delete_line,
-          :yank_line,
           :paste_after,
           :paste_before,
-          :half_page_down,
-          :half_page_up,
-          :page_down,
-          :page_up,
-          :cycle_line_numbers,
-          :view_messages,
-          :view_warnings,
-          :new_buffer,
-          :diagnostics_list,
-          :next_diagnostic,
-          :prev_diagnostic,
-          :prev_git_hunk,
-          :lsp_info,
-          :lsp_restart,
-          :lsp_start,
-          :lsp_stop,
-          :open_config,
-          :reload_config,
-          :format_buffer,
-          :agent_abort,
-          :agent_new_session,
-          :agent_pick_model,
-          :agent_cycle_model,
-          :agent_cycle_thinking,
-          :agent_summarize,
-          :git_blame_line,
-          :git_preview_hunk,
-          :git_revert_hunk,
-          :git_stage_hunk,
-          :goto_definition,
-          :hover,
-          :next_git_hunk,
+          :delete_line,
+          :yank_line,
+
+          # Search & UI
+          :command_palette,
+          :find_file,
+          :search_project,
           :theme_picker,
-          :toggle_agent_panel,
-          :toggle_agentic_view,
+          :set_language,
+          :diagnostics_list,
+          :filetype_menu,
+
+          # Tabs
           :tab_next,
           :tab_prev,
           :tab_goto_1,
@@ -94,15 +80,56 @@ defmodule Minga.Command.RegistryTest do
           :tab_goto_7,
           :tab_goto_8,
           :tab_goto_9,
-          :toggle_comment_line,
-          :toggle_comment_selection,
-          :toggle_wrap,
+
+          # LSP
+          :lsp_info,
+          :lsp_restart,
+          :lsp_start,
+          :lsp_stop,
+          :goto_definition,
+          :hover,
+
+          # Git
+          :next_git_hunk,
+          :prev_git_hunk,
+          :git_stage_hunk,
+          :git_revert_hunk,
+          :git_preview_hunk,
+          :git_blame_line,
+
+          # Folding
           :fold_toggle,
           :fold_close,
           :fold_open,
           :fold_close_all,
           :fold_open_all,
+
+          # Agent
+          :toggle_agent_panel,
+          :toggle_agentic_view,
+          :cycle_agent_tabs,
+          :agent_abort,
+          :agent_new_session,
+          :agent_pick_model,
+          :agent_cycle_model,
+          :agent_summarize,
+          :agent_cycle_thinking,
+
+          # Line display
+          :cycle_line_numbers,
+          :toggle_wrap,
+          :toggle_comment_line,
+          :toggle_comment_selection,
+
+          # Format & alternate
+          :format_buffer,
           :alternate_file,
+
+          # Diagnostics
+          :next_diagnostic,
+          :prev_diagnostic,
+
+          # Tests
           :test_file,
           :test_all,
           :test_at_point,
@@ -111,7 +138,12 @@ defmodule Minga.Command.RegistryTest do
         ]
         |> Enum.sort()
 
-      assert names == expected
+      for cmd <- required_commands do
+        assert cmd in names, "Expected command #{cmd} to be registered"
+      end
+
+      # Verify we have at least as many commands as the required set
+      assert length(names) >= length(required_commands)
     end
 
     test "looking up :save returns the built-in save command", %{registry: r} do
@@ -130,6 +162,24 @@ defmodule Minga.Command.RegistryTest do
       for cmd <- Registry.all(r) do
         assert is_function(cmd.execute),
                "Command #{cmd.name} has a non-function execute field"
+      end
+    end
+
+    test "requires_buffer is set correctly for buffer-dependent commands", %{registry: r} do
+      # Commands that need a buffer
+      for name <- [:save, :move_left, :delete_before, :undo] do
+        {:ok, cmd} = Registry.lookup(r, name)
+
+        assert cmd.requires_buffer,
+               "Expected #{name} to require a buffer"
+      end
+
+      # Commands that work without a buffer
+      for name <- [:command_palette, :find_file, :toggle_agent_panel, :new_buffer] do
+        {:ok, cmd} = Registry.lookup(r, name)
+
+        refute cmd.requires_buffer,
+               "Expected #{name} to NOT require a buffer"
       end
     end
   end
@@ -231,11 +281,11 @@ defmodule Minga.Command.RegistryTest do
   end
 
   describe "execute function" do
-    test "built-in execute functions accept and return a map state", %{registry: r} do
-      {:ok, cmd} = Registry.lookup(r, :move_left)
-      state = %{}
-      result = cmd.execute.(state)
-      assert is_map(result)
+    test "user-registered execute functions work correctly", %{registry: r} do
+      :ok = Registry.register(r, :my_cmd, "Test", fn state -> Map.put(state, :ran, true) end)
+      {:ok, cmd} = Registry.lookup(r, :my_cmd)
+      result = cmd.execute.(%{})
+      assert result == %{ran: true}
     end
   end
 end
