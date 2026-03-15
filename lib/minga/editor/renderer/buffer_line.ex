@@ -18,6 +18,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   All render functions return `DisplayList.draw()` tuples.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.NavFlash
@@ -92,6 +93,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
       LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
 
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+    content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -132,6 +134,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
+    content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -217,6 +220,30 @@ defmodule Minga.Editor.Renderer.BufferLine do
       end)
 
     [fill | tinted]
+  end
+
+  # Applies full-width background fill when the line has a decoration
+  # highlight with a bg color. Without this, decoration bg only colors
+  # existing text characters, not the full terminal width.
+  @spec maybe_apply_decoration_bg([DisplayList.draw()], non_neg_integer(), line_params()) ::
+          [DisplayList.draw()]
+  defp maybe_apply_decoration_bg(cmds, sr, p) do
+    bg = decoration_line_bg(p.ctx.decorations, p.buf_line)
+
+    if bg do
+      apply_line_bg(cmds, sr, bg, p.ctx)
+    else
+      cmds
+    end
+  end
+
+  defp decoration_line_bg(decorations, buf_line) do
+    decorations
+    |> Decorations.highlights_for_line(buf_line)
+    |> Enum.find_value(fn hl ->
+      bg = Keyword.get(hl.style, :bg)
+      if bg && hl.start == {buf_line, 0}, do: bg, else: nil
+    end)
   end
 
   # ── Gutter primitives ───────────────────────────────────────────────────
