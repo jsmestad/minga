@@ -51,19 +51,28 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
     end
 
     test "range query for 30-line viewport completes in under 2ms", %{decs: decs} do
+      # Warmup: prime BEAM JIT and caches
+      Decorations.highlights_for_lines(decs, 5_000, 5_030)
+
       {elapsed_us, results} =
         :timer.tc(fn ->
           Decorations.highlights_for_lines(decs, 5_000, 5_030)
         end)
 
       assert is_list(results)
-      # Allow 2ms for 10k decorations (still well within a 16ms frame budget)
+
       assert elapsed_us < 2_000,
              "Query took #{elapsed_us}µs, expected < 2000µs with 10,000 decorations"
     end
 
     test "range query + style merge for 30 lines completes in under 2ms", %{decs: decs} do
       lines = for _ <- 1..30, do: String.duplicate("x", 80)
+
+      # Warmup: prime BEAM JIT and caches
+      for {line, i} <- Enum.with_index(lines, 5_000) do
+        ranges = Decorations.highlights_for_line(decs, i)
+        Decorations.merge_highlights([{line, []}], ranges, i)
+      end
 
       {elapsed_us, _} =
         :timer.tc(fn ->
