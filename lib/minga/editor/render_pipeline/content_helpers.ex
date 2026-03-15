@@ -226,15 +226,26 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     } = opts
 
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
-    max_rows = length(visible_line_map)
+    wrap_on = Map.get(opts, :wrap_on, false)
 
-    {gutters, contents_rev, window} =
-      visible_line_map
-      |> Enum.with_index()
-      |> Enum.reduce({[], [], window}, fn {{buf_line, fold_info}, screen_row}, {g, c, win} ->
+    render_opts = %{
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      sign_w: sign_w,
+      row_off: row_off,
+      col_off: col_off,
+      lines: lines,
+      first_line: first_line,
+      wrap_on: wrap_on
+    }
+
+    {gutters, contents_rev, screen_row, window} =
+      Enum.reduce(visible_line_map, {[], [], 0, window}, fn {buf_line, fold_info},
+                                                            {g, c, screen_row, win} ->
         case fold_info do
           {:virtual_line, vt} ->
-            # Virtual lines render their own styled segments, no buffer content
             render_pos = %RenderPosition{
               screen_row: screen_row,
               gutter_w: gutter_w,
@@ -244,7 +255,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             }
 
             c_cmds = render_virtual_line_entry(vt, render_pos)
-            {g, prepend_all(c, c_cmds), win}
+            {g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           {:block, block, line_idx} ->
             render_pos = %RenderPosition{
@@ -256,7 +267,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             }
 
             c_cmds = render_block_entry(block, line_idx, render_pos)
-            {g, prepend_all(c, c_cmds), win}
+            {g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
@@ -271,29 +282,15 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             fold_g = fold_gutter_indicator(fold_info, render_pos)
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
             c_cmds = render_placeholder_segments(segments, render_pos)
-            {fold_g ++ g, prepend_all(c, c_cmds), win}
+            {fold_g ++ g, prepend_all(c, c_cmds), screen_row + 1, win}
 
           _ ->
-            line_index = buf_line - first_line
-            line_text = Enum.at(lines, line_index, "")
-            display_text = fold_display_text(line_text, fold_info)
-
-            render_folded_line(
-              win,
+            render_normal_entry(
               buf_line,
-              display_text,
               fold_info,
               screen_row,
-              %{
-                cursor_line: cursor_line,
-                ctx: ctx,
-                ln_style: ln_style,
-                gutter_w: gutter_w,
-                sign_w: sign_w,
-                max_rows: max_rows,
-                row_off: row_off,
-                col_off: col_off
-              },
+              render_opts,
+              win,
               {g, c}
             )
         end
@@ -302,7 +299,39 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     # Clean up per-frame block render cache from process dictionary
     clear_block_render_cache()
 
-    {Enum.reverse(gutters), Enum.reverse(contents_rev), length(visible_line_map), window}
+    {Enum.reverse(gutters), Enum.reverse(contents_rev), screen_row, window}
+  end
+
+  defp render_normal_entry(buf_line, fold_info, screen_row, render_opts, win, {g, c}) do
+    %{lines: lines, first_line: first_line, wrap_on: wrap_on, ctx: ctx} = render_opts
+    line_index = buf_line - first_line
+    line_text = Enum.at(lines, line_index, "")
+    display_text = fold_display_text(line_text, fold_info)
+
+    wrap_entry = maybe_compute_wrap(wrap_on, display_text, ctx.content_w)
+    rows_for_line = if wrap_entry, do: length(wrap_entry), else: 1
+
+    {new_g, new_c, win} =
+      render_folded_line(
+        win,
+        buf_line,
+        display_text,
+        fold_info,
+        screen_row,
+        Map.put(render_opts, :max_rows, rows_for_line),
+        {g, c},
+        wrap_entry
+      )
+
+    {new_g, new_c, screen_row + rows_for_line, win}
+  end
+
+  @spec maybe_compute_wrap(boolean(), String.t(), pos_integer()) :: WrapMap.wrap_entry() | nil
+  defp maybe_compute_wrap(false, _text, _width), do: nil
+
+  defp maybe_compute_wrap(true, text, width) do
+    [entry] = WrapMap.compute([text], width)
+    entry
   end
 
   defp clear_block_render_cache do
@@ -346,9 +375,19 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           :normal | {:fold_start, pos_integer()},
           non_neg_integer(),
           map(),
-          {[DisplayList.draw()], [DisplayList.draw()]}
+          {[DisplayList.draw()], [DisplayList.draw()]},
+          WrapMap.wrap_entry() | nil
         ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
-  defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
+  defp render_folded_line(
+         win,
+         buf_line,
+         display_text,
+         fold_info,
+         screen_row,
+         render_opts,
+         {g, c},
+         wrap_entry
+       ) do
     if Window.dirty?(win, buf_line) do
       fold_pos = %RenderPosition{
         screen_row: screen_row,
@@ -371,7 +410,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           ln_style: render_opts.ln_style,
           gutter_w: render_opts.gutter_w,
           sign_w: render_opts.sign_w,
-          wrap_entry: nil,
+          wrap_entry: wrap_entry,
           max_rows: render_opts.max_rows,
           row_offset: render_opts.row_off,
           col_offset: render_opts.col_off

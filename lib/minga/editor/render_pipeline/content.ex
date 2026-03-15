@@ -340,7 +340,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
       window: window,
       buffer: buf,
       visible_line_map: visible_line_map,
-      fold_map: fold_map
+      fold_map: fold_map,
+      wrap_on: true
     }
 
     {gutter_draws, line_draws, rendered_rows, window} =
@@ -394,7 +395,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     final_cursor = if prompt_cursor != nil, do: prompt_cursor, else: buf_cursor
 
     frame = %WindowFrame{
-      rect: win_layout.total,
+      rect: {0, 0, chat_width, height},
       gutter: DisplayList.draws_to_layer(gutter_draws),
       lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws ++ sidebar_draws),
       tilde_lines: DisplayList.draws_to_layer(tilde_draws),
