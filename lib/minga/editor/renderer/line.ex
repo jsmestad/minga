@@ -18,7 +18,6 @@ defmodule Minga.Editor.Renderer.Line do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
-  alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Highlight
 
   @typedoc "Column range of a selection on a single line (display columns, end exclusive)."
@@ -59,23 +58,14 @@ defmodule Minga.Editor.Renderer.Line do
         )
 
       nil when line_highlights != [] ->
-        # No syntax highlighting but has decorations: render through the
-        # styled-segment path so decorations are applied
+        # No syntax highlighting but has decorations (including search):
+        # render through the styled-segment path
         render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
 
       nil ->
-        visible_graphemes = Enum.map(visible_pairs, fn {g, _} -> g end)
-
-        SearchHighlight.render_line_with_search(
-          visible_graphemes,
-          screen_row,
-          buf_line,
-          ctx.viewport,
-          ctx.search_matches,
-          ctx.gutter_w,
-          ctx.confirm_match,
-          ctx.search_colors
-        )
+        # Plain text, no decorations, no syntax highlighting
+        visible_text = join_pairs(visible_pairs)
+        [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
 
       :full ->
         visible_text = join_pairs(visible_pairs)

@@ -35,18 +35,7 @@ defmodule Minga.Editor.Renderer do
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
-  @typedoc """
-  Represents the bounds of a visual selection for rendering.
-
-  * `nil` — no active selection
-  * `{:char, start_pos, end_pos}` — characterwise selection
-  * `{:line, start_line, end_line}` — linewise selection
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
+  @type visual_selection :: Minga.Editor.Renderer.Context.visual_selection()
 
   @doc """
   Renders the current editor state and returns updated state.

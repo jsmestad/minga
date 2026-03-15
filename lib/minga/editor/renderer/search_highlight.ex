@@ -1,20 +1,17 @@
 defmodule Minga.Editor.Renderer.SearchHighlight do
   @moduledoc """
-  Search match highlighting, substitute preview, and pattern extraction for
-  the renderer.
+  Search match computation, substitute preview, and pattern extraction.
 
-  All render functions return `DisplayList.draw()` tuples.
+  Match positions are computed here. Rendering is handled by the
+  decoration system: search matches become highlight range decorations
+  in `ContentHelpers.maybe_update_search_decorations/4`.
   """
 
-  alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.Viewport
+  alias Minga.Search.Match
 
-  @typedoc "Search color set from the active theme."
-  @type search_colors :: Minga.Theme.Search.t()
-
-  @typedoc "A search match: `{line, col, length}` (absolute buffer coordinates)."
-  @type search_match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  @typedoc "A search match with buffer position and length."
+  @type search_match :: Match.t()
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -51,49 +48,6 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     end
   end
 
-  @doc "Renders a line with search match highlighting spans."
-  @spec render_line_with_search(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          Viewport.t(),
-          [search_match()],
-          non_neg_integer(),
-          search_match() | nil,
-          search_colors()
-        ) :: [DisplayList.draw()]
-  def render_line_with_search(
-        visible_graphemes,
-        screen_row,
-        buf_line,
-        viewport,
-        matches,
-        gutter_w,
-        confirm_match \\ nil,
-        colors \\ %Minga.Theme.Search{
-          highlight_fg: 0x000000,
-          highlight_bg: 0xECBE7B,
-          current_bg: 0xFF6C6B
-        }
-      ) do
-    spans = build_highlight_spans(matches, confirm_match, buf_line, viewport, visible_graphemes)
-
-    case spans do
-      [] ->
-        [DisplayList.draw(screen_row, gutter_w, Enum.join(visible_graphemes))]
-
-      _ ->
-        render_highlighted_spans(
-          visible_graphemes,
-          viewport.left,
-          spans,
-          screen_row,
-          gutter_w,
-          colors
-        )
-    end
-  end
-
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   @spec substitute_preview_lines(
@@ -110,7 +64,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
       {new_line, _count, spans} =
         Minga.Search.substitute_line_with_spans(line, pattern, replacement, global?)
 
-      matches = Enum.map(spans, fn {col, len} -> {line_num, col, len} end)
+      matches = Enum.map(spans, fn {col, len} -> Match.new(line_num, col, len) end)
       {new_line, acc ++ matches}
     end)
   end
@@ -260,165 +214,6 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
       acc |> Enum.reverse() |> Enum.join()
     else
       do_extract_replacement(rest, delimiter, [<<c::utf8>> | acc])
-    end
-  end
-
-  # ── Highlight spans ───────────────────────────────────────────────────────
-  #
-  # A highlight span is `{start_col, end_col, type}` where cols are absolute
-  # buffer coordinates and type is `:search` or `:confirm`. Spans are sorted
-  # by start_col, confirm spans taking priority over search spans for the
-  # same columns.
-
-  @typep highlight_span :: {non_neg_integer(), non_neg_integer(), highlight_type()}
-
-  @spec build_highlight_spans(
-          [search_match()],
-          search_match() | nil,
-          non_neg_integer(),
-          Viewport.t(),
-          [String.t()]
-        ) :: [highlight_span()]
-  defp build_highlight_spans(matches, confirm_match, buf_line, viewport, visible_graphemes) do
-    vis_start = viewport.left
-    vis_end = vis_start + length(visible_graphemes) - 1
-
-    search_spans =
-      matches
-      |> Enum.filter(fn {line, _col, _len} -> line == buf_line end)
-      |> Enum.map(fn {_line, col, len} ->
-        {max(col, vis_start), min(col + len - 1, vis_end), :search}
-      end)
-      |> Enum.filter(fn {s, e, _} -> s <= e end)
-
-    confirm_spans = confirm_span(confirm_match, buf_line, vis_start, vis_end)
-
-    # Confirm spans override search spans for the same region
-    merge_spans(search_spans, confirm_spans)
-  end
-
-  @spec confirm_span(
-          search_match() | nil,
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          [highlight_span()]
-  defp confirm_span(nil, _buf_line, _vis_start, _vis_end), do: []
-
-  defp confirm_span({line, col, len}, buf_line, vis_start, vis_end) do
-    if line == buf_line do
-      s = max(col, vis_start)
-      e = min(col + len - 1, vis_end)
-      if s <= e, do: [{s, e, :confirm}], else: []
-    else
-      []
-    end
-  end
-
-  # Merge confirm spans into search spans. Confirm takes priority.
-  @spec merge_spans([highlight_span()], [highlight_span()]) :: [highlight_span()]
-  defp merge_spans(search_spans, []), do: search_spans
-  defp merge_spans([], confirm_spans), do: confirm_spans
-
-  defp merge_spans(search_spans, confirm_spans) do
-    # Simple approach: concat and sort. Since we classify per-column below,
-    # confirm spans will win because we check them first.
-    (confirm_spans ++ search_spans)
-    |> Enum.sort_by(fn {s, _e, _t} -> s end)
-  end
-
-  @spec render_highlighted_spans(
-          [String.t()],
-          non_neg_integer(),
-          [highlight_span()],
-          non_neg_integer(),
-          non_neg_integer(),
-          search_colors()
-        ) :: [DisplayList.draw()]
-  defp render_highlighted_spans(visible_graphemes, vis_start, spans, screen_row, gutter_w, colors) do
-    visible_graphemes
-    |> Enum.with_index(vis_start)
-    |> chunk_by_highlight_type(spans)
-    |> Enum.flat_map(fn {chars, abs_start_col, hl_type} ->
-      encode_span(chars, abs_start_col, vis_start, hl_type, screen_row, gutter_w, colors)
-    end)
-  end
-
-  @typep highlight_type :: :none | :search | :confirm
-
-  @spec encode_span(
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          highlight_type(),
-          non_neg_integer(),
-          non_neg_integer(),
-          search_colors()
-        ) :: [DisplayList.draw()]
-  defp encode_span(chars, abs_start_col, vis_start, :confirm, screen_row, gutter_w, colors) do
-    screen_col = gutter_w + (abs_start_col - vis_start)
-
-    [
-      DisplayList.draw(screen_row, screen_col, Enum.join(chars),
-        fg: colors.highlight_fg,
-        bg: colors.current_bg
-      )
-    ]
-  end
-
-  defp encode_span(chars, abs_start_col, vis_start, :search, screen_row, gutter_w, colors) do
-    screen_col = gutter_w + (abs_start_col - vis_start)
-
-    [
-      DisplayList.draw(screen_row, screen_col, Enum.join(chars),
-        fg: colors.highlight_fg,
-        bg: colors.highlight_bg
-      )
-    ]
-  end
-
-  defp encode_span(chars, abs_start_col, vis_start, :none, screen_row, gutter_w, _colors) do
-    screen_col = gutter_w + (abs_start_col - vis_start)
-    [DisplayList.draw(screen_row, screen_col, Enum.join(chars))]
-  end
-
-  @spec chunk_by_highlight_type(
-          [{String.t(), non_neg_integer()}],
-          [highlight_span()]
-        ) :: [{[String.t()], non_neg_integer(), highlight_type()}]
-  defp chunk_by_highlight_type(indexed_graphemes, spans) do
-    indexed_graphemes
-    |> Enum.chunk_while(
-      nil,
-      fn {char, col}, acc ->
-        hl_type = classify_col(col, spans)
-
-        case acc do
-          nil ->
-            {:cont, {[char], col, hl_type}}
-
-          {chars, start_col, ^hl_type} ->
-            {:cont, {[char | chars], start_col, hl_type}}
-
-          {chars, start_col, prev_hl} ->
-            {:cont, {Enum.reverse(chars), start_col, prev_hl}, {[char], col, hl_type}}
-        end
-      end,
-      fn
-        nil -> {:cont, []}
-        {chars, start_col, hl} -> {:cont, {Enum.reverse(chars), start_col, hl}, nil}
-      end
-    )
-  end
-
-  # Classify a column against highlight spans.
-  # Confirm spans take priority over search spans (they appear first after merge).
-  @spec classify_col(non_neg_integer(), [highlight_span(), ...]) :: highlight_type()
-  defp classify_col(col, spans) do
-    case Enum.find(spans, fn {s, e, _type} -> col >= s and col <= e end) do
-      nil -> :none
-      {_s, _e, type} -> type
     end
   end
 end

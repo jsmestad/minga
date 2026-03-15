@@ -22,6 +22,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.SearchHighlight
+  alias Minga.Editor.RenderPosition
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
@@ -46,14 +47,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
           buffer: pid()
         }
 
-  @typedoc """
-  Visual selection bounds for rendering.
-  """
-  @type visual_selection ::
-          nil
-          | {:char, {non_neg_integer(), non_neg_integer()},
-             {non_neg_integer(), non_neg_integer()}}
-          | {:line, non_neg_integer(), non_neg_integer()}
+  @type visual_selection :: Context.visual_selection()
 
   # ── Render context ─────────────────────────────────────────────────────────
 
@@ -88,6 +82,21 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         _ -> preview_matches
       end
 
+    confirm_match = if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil)
+
+    # Merge search matches into decorations as highlight ranges so they
+    # compose with tree-sitter syntax colors (bg overlay preserving fg).
+    # Only rebuild when the match set actually changed (avoid per-frame
+    # clear-and-reapply when nothing changed).
+
+    decorations =
+      maybe_update_search_decorations(
+        decorations,
+        search_matches,
+        confirm_match,
+        state.theme.search
+      )
+
     cursorline_bg =
       if is_active and Options.get(:cursorline) do
         state.theme.editor.cursorline_bg
@@ -101,7 +110,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       search_matches: search_matches,
       gutter_w: gutter_w,
       content_w: content_w,
-      confirm_match: if(is_active, do: SearchHighlight.current_confirm_match(state), else: nil),
+      confirm_match: confirm_match,
       highlight: window_highlight(state, window),
       cursorline_bg: cursorline_bg,
       nav_flash: state.nav_flash,
@@ -111,7 +120,6 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_window(state, window),
       git_signs: git_signs_for_window(state, window),
-      search_colors: state.theme.search,
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
     }
@@ -226,32 +234,42 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         case fold_info do
           {:virtual_line, vt} ->
             # Virtual lines render their own styled segments, no buffer content
-            c_cmds = render_virtual_line_entry(vt, screen_row, gutter_w, row_off, col_off)
+            render_pos = %RenderPosition{
+              screen_row: screen_row,
+              gutter_w: gutter_w,
+              row_off: row_off,
+              col_off: col_off,
+              content_w: ctx.content_w
+            }
+
+            c_cmds = render_virtual_line_entry(vt, render_pos)
             {g, prepend_all(c, c_cmds), win}
 
           {:block, block, line_idx} ->
-            # Block decoration: invoke render callback, draw the line_idx-th row
-            c_cmds =
-              render_block_entry(
-                block,
-                line_idx,
-                screen_row,
-                gutter_w,
-                ctx.content_w,
-                row_off,
-                col_off
-              )
+            render_pos = %RenderPosition{
+              screen_row: screen_row,
+              gutter_w: gutter_w,
+              row_off: row_off,
+              col_off: col_off,
+              content_w: ctx.content_w
+            }
 
+            c_cmds = render_block_entry(block, line_idx, render_pos)
             {g, prepend_all(c, c_cmds), win}
 
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
-            # Decoration fold with custom placeholder: invoke the callback
-            fold_g =
-              fold_gutter_indicator(fold_info, screen_row, row_off, col_off)
+            render_pos = %RenderPosition{
+              screen_row: screen_row,
+              gutter_w: gutter_w,
+              row_off: row_off,
+              col_off: col_off,
+              content_w: ctx.content_w
+            }
 
+            fold_g = fold_gutter_indicator(fold_info, render_pos)
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
-            c_cmds = render_placeholder_segments(segments, screen_row, gutter_w, row_off, col_off)
+            c_cmds = render_placeholder_segments(segments, render_pos)
             {fold_g ++ g, prepend_all(c, c_cmds), win}
 
           _ ->
@@ -306,25 +324,19 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   defp fold_display_text(_text, {:virtual_line, _vt}), do: ""
   defp fold_display_text(_text, {:block, _, _}), do: ""
 
-  @spec fold_gutter_indicator(
-          term(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          [DisplayList.draw()]
-  defp fold_gutter_indicator({:fold_start, _}, screen_row, row_off, col_off) do
-    [DisplayList.draw(screen_row + row_off, col_off, "▸")]
+  @spec fold_gutter_indicator(term(), RenderPosition.t()) :: [DisplayList.draw()]
+  defp fold_gutter_indicator({:fold_start, _}, %RenderPosition{} = pos) do
+    [DisplayList.draw(pos.screen_row + pos.row_off, pos.col_off, "▸")]
   end
 
-  defp fold_gutter_indicator(:normal, _screen_row, _row_off, _col_off), do: []
+  defp fold_gutter_indicator(:normal, _pos), do: []
 
-  defp fold_gutter_indicator({:decoration_fold, _}, screen_row, row_off, col_off) do
-    [DisplayList.draw(screen_row + row_off, col_off, "▸")]
+  defp fold_gutter_indicator({:decoration_fold, _}, %RenderPosition{} = pos) do
+    [DisplayList.draw(pos.screen_row + pos.row_off, pos.col_off, "▸")]
   end
 
-  defp fold_gutter_indicator({:virtual_line, _}, _screen_row, _row_off, _col_off), do: []
-  defp fold_gutter_indicator({:block, _, _}, _screen_row, _row_off, _col_off), do: []
+  defp fold_gutter_indicator({:virtual_line, _}, _pos), do: []
+  defp fold_gutter_indicator({:block, _, _}, _pos), do: []
 
   @spec render_folded_line(
           Window.t(),
@@ -337,8 +349,15 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         ) :: {[DisplayList.draw()], [DisplayList.draw()], Window.t()}
   defp render_folded_line(win, buf_line, display_text, fold_info, screen_row, render_opts, {g, c}) do
     if Window.dirty?(win, buf_line) do
-      fold_g =
-        fold_gutter_indicator(fold_info, screen_row, render_opts.row_off, render_opts.col_off)
+      fold_pos = %RenderPosition{
+        screen_row: screen_row,
+        gutter_w: render_opts.gutter_w,
+        row_off: render_opts.row_off,
+        col_off: render_opts.col_off,
+        content_w: render_opts.ctx.content_w
+      }
+
+      fold_g = fold_gutter_indicator(fold_info, fold_pos)
 
       {g_cmds, c_cmds, _rows} =
         BufferLine.render(%{
@@ -430,39 +449,26 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   # Renders a virtual line entry (from DisplayMap) into draw commands.
   # Virtual lines have no buffer content; they render their styled segments
   # directly with no line number in the gutter.
-  @spec render_virtual_line_entry(
-          Decorations.VirtualText.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: [DisplayList.draw()]
-  defp render_virtual_line_entry(vt, screen_row, gutter_w, row_off, col_off) do
-    row = screen_row + row_off
-
-    {draws, _col} =
-      Enum.reduce(vt.segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
-        width = Unicode.display_width(text)
-        draw = DisplayList.draw(row, col, text, style)
-        {[draw | acc], col + width}
-      end)
-
-    Enum.reverse(draws)
+  @spec render_virtual_line_entry(Decorations.VirtualText.t(), RenderPosition.t()) ::
+          [DisplayList.draw()]
+  defp render_virtual_line_entry(vt, pos) do
+    render_styled_segments(vt.segments, pos)
   end
 
-  # Renders styled segments from a fold placeholder callback into draw commands.
-  @spec render_placeholder_segments(
-          [{String.t(), keyword()}],
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: [DisplayList.draw()]
-  defp render_placeholder_segments(segments, screen_row, gutter_w, row_off, col_off) do
-    row = screen_row + row_off
+  @spec render_placeholder_segments([{String.t(), keyword()}], RenderPosition.t()) ::
+          [DisplayList.draw()]
+  defp render_placeholder_segments(segments, pos) do
+    render_styled_segments(segments, pos)
+  end
+
+  # Shared renderer for styled segments at a screen position.
+  @spec render_styled_segments([{String.t(), keyword()}], RenderPosition.t()) ::
+          [DisplayList.draw()]
+  defp render_styled_segments(segments, %RenderPosition{} = pos) do
+    row = pos.screen_row + pos.row_off
 
     {draws, _col} =
-      Enum.reduce(segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
+      Enum.reduce(segments, {[], pos.gutter_w + pos.col_off}, fn {text, style}, {acc, col} ->
         width = Unicode.display_width(text)
         draw = DisplayList.draw(row, col, text, style)
         {[draw | acc], col + width}
@@ -473,16 +479,9 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   # Renders a single row of a block decoration by invoking its render callback
   # and extracting the line_idx-th row from the result.
-  @spec render_block_entry(
-          Decorations.BlockDecoration.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: [DisplayList.draw()]
-  defp render_block_entry(block, line_idx, screen_row, gutter_w, content_w, row_off, col_off) do
+  @spec render_block_entry(Decorations.BlockDecoration.t(), non_neg_integer(), RenderPosition.t()) ::
+          [DisplayList.draw()]
+  defp render_block_entry(block, line_idx, pos) do
     # Cache render callback result per block ID to avoid re-invoking
     # for each line_idx of a multi-line block.
     cache_key = {:block_render_cache, block.id}
@@ -490,7 +489,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     lines =
       case Process.get(cache_key) do
         nil ->
-          result = block.render.(content_w)
+          result = block.render.(pos.content_w)
           normalized = Decorations.BlockDecoration.normalize_render_result(result)
           Process.put(cache_key, normalized)
           normalized
@@ -500,10 +499,10 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       end
 
     segments = Enum.at(lines, line_idx, [])
-    row = screen_row + row_off
+    row = pos.screen_row + pos.row_off
 
     {draws, _col} =
-      Enum.reduce(segments, {[], gutter_w + col_off}, fn {text, style}, {acc, col} ->
+      Enum.reduce(segments, {[], pos.gutter_w + pos.col_off}, fn {text, style}, {acc, col} ->
         width = Unicode.display_width(text)
         draw = DisplayList.draw(row, col, text, style)
         {[draw | acc], col + width}
@@ -529,6 +528,68 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   defp adjust_selection_for_virtual_text({:char, {sl, sc}, {el, ec}}, decs) do
     {:char, {sl, Decorations.buf_col_to_display_col(decs, sl, sc)},
      {el, Decorations.buf_col_to_display_col(decs, el, ec)}}
+  end
+
+  # Converts search matches into highlight range decorations and merges
+  # them into the decorations struct. Search highlights use a lower priority
+  # than user decorations so they don't override intentional styling.
+  # The current confirm match gets a different bg and higher priority.
+  # Only rebuilds search decorations when the match set changes.
+  # Uses a fingerprint of the matches to detect changes.
+  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
+    fingerprint = {matches, confirm_match}
+    cached = Process.get(:search_decoration_cache)
+
+    case cached do
+      {^fingerprint, cached_decs} ->
+        # Same matches as last frame: reuse the merged decorations, but
+        # update the base version to match the fresh buffer decorations
+        %{cached_decs | version: decs.version + 1}
+
+      _ ->
+        result = rebuild_search_decorations(decs, matches, confirm_match, colors)
+        Process.put(:search_decoration_cache, {fingerprint, result})
+        result
+    end
+  end
+
+  defp rebuild_search_decorations(decs, [], _confirm, _colors) do
+    Decorations.remove_group(decs, :search)
+  end
+
+  defp rebuild_search_decorations(decs, matches, confirm_match, colors) do
+    Decorations.batch(decs, fn d ->
+      d = Decorations.remove_group(d, :search)
+
+      Enum.reduce(matches, d, fn match, acc ->
+        add_search_highlight(acc, match, confirm_match, colors)
+      end)
+    end)
+  end
+
+  defp add_search_highlight(
+         decs,
+         %Minga.Search.Match{line: line, col: col, length: len} = match,
+         confirm_match,
+         colors
+       ) do
+    is_confirm = confirm_match != nil and match == confirm_match
+
+    {style, priority} =
+      if is_confirm do
+        {[bg: colors.current_bg, fg: colors.highlight_fg], -5}
+      else
+        {[bg: colors.highlight_bg, fg: colors.highlight_fg], -10}
+      end
+
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, col}, {line, col + len},
+        style: style,
+        priority: priority,
+        group: :search
+      )
+
+    decs
   end
 
   @doc "Returns the decorations for a window's buffer."
