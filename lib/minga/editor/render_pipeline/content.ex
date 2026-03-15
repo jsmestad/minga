@@ -230,32 +230,29 @@ defmodule Minga.Editor.RenderPipeline.Content do
   # input from ViewRenderer.
   @spec render_agent_chat_window(state(), Window.t(), Window.id(), Layout.window_layout()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
-  @sidebar_width 28
-
   defp render_agent_chat_window(state, window, _win_id, win_layout) do
-    {row_off, col_off, width, height} = win_layout.content
+    # Split the content rect to carve out a sidebar when wide enough.
+    win_layout = Layout.add_sidebar(win_layout)
+    {row_off, col_off, chat_width, height} = win_layout.content
     buf = window.buffer
 
-    # Split the window rect into chat content and sidebar.
-    # Sidebar only shows when the window is wide enough (> 80 cols).
-    {chat_width, sidebar_draws} =
-      if width > 80 do
-        sw = min(@sidebar_width, div(width, 3))
-        chat_w = width - sw - 1
-        sidebar_col = col_off + chat_w + 1
-        sidebar_rect = {row_off, sidebar_col, sw, height}
+    # Render the sidebar (dashboard) if the layout carved one out.
+    sidebar_draws =
+      case win_layout.sidebar do
+        {sr, sc, sw, sh} ->
+          separator_col = sc - 1
 
-        separator_draws =
-          for row <- 0..(height - 1) do
-            DisplayList.draw(row_off + row, col_off + chat_w, "│",
-              fg: state.theme.editor.split_border_fg
-            )
-          end
+          separator =
+            for row <- 0..(sh - 1) do
+              DisplayList.draw(sr + row, separator_col, "│",
+                fg: state.theme.editor.split_border_fg
+              )
+            end
 
-        dashboard = ViewRenderer.render_dashboard_only(state, sidebar_rect)
-        {chat_w, separator_draws ++ dashboard}
-      else
-        {width, []}
+          separator ++ ViewRenderer.render_dashboard_only(state, {sr, sc, sw, sh})
+
+        nil ->
+          []
       end
 
     # Compute prompt height and subdivide the content rect.
@@ -386,7 +383,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Prompt cursor (overrides buffer cursor when input is focused).
     # cursor_position_in_rect needs the full content rect to compute
     # the prompt position correctly (it subdivides internally).
-    full_rect = {row_off, col_off, width, height}
+    full_rect = {row_off, col_off, chat_width, height}
 
     prompt_cursor =
       case ViewRenderer.cursor_position_in_rect(state, full_rect) do
@@ -397,7 +394,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     final_cursor = if prompt_cursor != nil, do: prompt_cursor, else: buf_cursor
 
     frame = %WindowFrame{
-      rect: {0, 0, width, height},
+      rect: win_layout.total,
       gutter: DisplayList.draws_to_layer(gutter_draws),
       lines: DisplayList.draws_to_layer(line_draws ++ prompt_draws ++ sidebar_draws),
       tilde_lines: DisplayList.draws_to_layer(tilde_draws),
