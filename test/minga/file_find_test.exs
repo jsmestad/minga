@@ -46,37 +46,14 @@ defmodule Minga.FileFindTest do
       refute "lib/sub" in files
     end
 
-    @tag :tmp_dir
-    test "excludes .git directory contents" do
-      # list_files re-detects the strategy after each call, so creating
-      # a fake .git dir can switch the strategy from :find to :git
-      # mid-test. Use a dedicated tmp_dir and only run the assertion
-      # when we know fd is available (fd always works with a fake .git
-      # because it filters by path pattern, not repo validity).
-      if System.find_executable("fd") do
-        dir =
-          Path.join(
-            System.tmp_dir!(),
-            "minga_git_excl_test_#{System.unique_integer([:positive])}"
-          )
+    test "excludes .git directory contents", %{tmp_dir: tmp_dir} do
+      # fd filters by path pattern so a fake .git dir is sufficient.
+      # CI installs fd-find; FileFind detects both fd and fdfind.
+      File.mkdir_p!(Path.join(tmp_dir, ".git/objects"))
+      File.write!(Path.join(tmp_dir, ".git/HEAD"), "ref: refs/heads/main\n")
 
-        File.mkdir_p!(dir)
-        File.write!(Path.join(dir, "real.txt"), "keep")
-        File.mkdir_p!(Path.join(dir, ".git/objects"))
-        File.write!(Path.join(dir, ".git/HEAD"), "ref: refs/heads/main\n")
-
-        on_exit(fn -> File.rm_rf!(dir) end)
-
-        {:ok, files} = FileFind.list_files(dir)
-        refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
-        assert "real.txt" in files
-      else
-        # On CI without fd, the strategy is :git or :find.
-        # :git inherently excludes .git/ (only tracked files).
-        # :find uses -not -path "*/.git/*" which is baked into the args.
-        # Both are verified by their implementation, not by this test.
-        :ok
-      end
+      {:ok, files} = FileFind.list_files(tmp_dir)
+      refute Enum.any?(files, &String.starts_with?(&1, ".git/"))
     end
 
     test "paths are relative (no leading ./)", %{tmp_dir: tmp_dir} do

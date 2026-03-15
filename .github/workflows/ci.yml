@@ -67,6 +67,9 @@ jobs:
           key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
           restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      - name: Install fd (used by FileFind)
+        run: sudo apt-get install -y fd-find
+
       - run: mix deps.get
       - run: mix test --warnings-as-errors
 
