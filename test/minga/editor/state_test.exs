@@ -382,4 +382,86 @@ defmodule Minga.Editor.StateTest do
       end
     end
   end
+
+  describe "buffer monitoring" do
+    test "monitor_buffer/2 stores a monitor ref for the pid" do
+      buf = start_buffer()
+      state = new_state() |> EditorState.monitor_buffer(buf)
+
+      assert Map.has_key?(state.buffer_monitors, buf)
+      assert is_reference(state.buffer_monitors[buf])
+    end
+
+    test "monitor_buffer/2 is idempotent" do
+      buf = start_buffer()
+      state = new_state() |> EditorState.monitor_buffer(buf)
+      ref = state.buffer_monitors[buf]
+
+      state2 = EditorState.monitor_buffer(state, buf)
+      assert state2.buffer_monitors[buf] == ref
+      assert map_size(state2.buffer_monitors) == 1
+    end
+
+    test "monitor_buffers/2 monitors multiple pids" do
+      buf1 = start_buffer("one")
+      buf2 = start_buffer("two")
+      state = new_state() |> EditorState.monitor_buffers([buf1, buf2])
+
+      assert map_size(state.buffer_monitors) == 2
+      assert Map.has_key?(state.buffer_monitors, buf1)
+      assert Map.has_key?(state.buffer_monitors, buf2)
+    end
+
+    test "remove_dead_buffer/2 removes pid from buffer list" do
+      buf1 = start_buffer("one")
+      buf2 = start_buffer("two")
+
+      state =
+        new_state()
+        |> EditorState.add_buffer(buf1)
+        |> EditorState.add_buffer(buf2)
+        |> EditorState.monitor_buffer(buf1)
+        |> EditorState.monitor_buffer(buf2)
+
+      state = EditorState.remove_dead_buffer(state, buf1)
+
+      refute buf1 in state.buffers.list
+      assert buf2 in state.buffers.list
+      refute Map.has_key?(state.buffer_monitors, buf1)
+      assert Map.has_key?(state.buffer_monitors, buf2)
+    end
+
+    test "remove_dead_buffer/2 switches active to next buffer" do
+      buf1 = start_buffer("one")
+      buf2 = start_buffer("two")
+
+      state =
+        new_state()
+        |> EditorState.add_buffer(buf1)
+        |> EditorState.add_buffer(buf2)
+
+      # buf2 is active (last added)
+      assert state.buffers.active == buf2
+
+      state = EditorState.remove_dead_buffer(state, buf2)
+
+      assert state.buffers.active == buf1
+      assert state.buffers.list == [buf1]
+    end
+
+    test "remove_dead_buffer/2 clears special buffer slot" do
+      buf = start_buffer()
+
+      state = %{
+        new_state()
+        | buffers: %Buffers{messages: buf, list: [buf], active: buf, active_index: 0}
+      }
+
+      state = EditorState.monitor_buffer(state, buf)
+      state = EditorState.remove_dead_buffer(state, buf)
+
+      assert state.buffers.messages == nil
+      assert state.buffers.list == []
+    end
+  end
 end

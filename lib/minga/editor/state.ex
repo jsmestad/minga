@@ -122,7 +122,8 @@ defmodule Minga.Editor.State do
             nav_flash: nil,
             last_cursor_line: nil,
             last_test_command: nil,
-            pending_quit: nil
+            pending_quit: nil,
+            buffer_monitors: %{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -166,7 +167,8 @@ defmodule Minga.Editor.State do
           nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
-          pending_quit: :quit | :quit_all | nil
+          pending_quit: :quit | :quit_all | nil,
+          buffer_monitors: %{pid() => reference()}
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -182,6 +184,83 @@ defmodule Minga.Editor.State do
   @doc "Returns the active buffer index."
   @spec active_buffer(t()) :: non_neg_integer()
   def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
+
+  # ── Buffer monitoring ──────────────────────────────────────────────────────
+
+  @doc """
+  Monitors a buffer pid so the Editor receives `:DOWN` when it dies.
+
+  Idempotent: if the pid is already monitored, returns state unchanged.
+  """
+  @spec monitor_buffer(t(), pid()) :: t()
+  def monitor_buffer(%__MODULE__{buffer_monitors: monitors} = state, pid)
+      when is_pid(pid) do
+    if Map.has_key?(monitors, pid) do
+      state
+    else
+      ref = Process.monitor(pid)
+      %{state | buffer_monitors: Map.put(monitors, pid, ref)}
+    end
+  end
+
+  def monitor_buffer(state, _), do: state
+
+  @doc """
+  Monitors a list of buffer pids. Convenience wrapper around `monitor_buffer/2`.
+  """
+  @spec monitor_buffers(t(), [pid()]) :: t()
+  def monitor_buffers(state, pids) when is_list(pids) do
+    Enum.reduce(pids, state, &monitor_buffer(&2, &1))
+  end
+
+  @doc """
+  Removes a dead buffer pid from all state locations.
+
+  Called from the Editor's `:DOWN` handler. Removes the pid from the buffer
+  list, clears it from special buffer slots (messages, warnings, help), and
+  switches to another buffer if the active one died. Also cleans up the
+  monitor ref.
+  """
+  @spec remove_dead_buffer(t(), pid()) :: t()
+  def remove_dead_buffer(
+        %__MODULE__{buffers: %Buffers{} = bs, buffer_monitors: monitors} = state,
+        pid
+      ) do
+    # Clean up monitor ref
+    monitors = Map.delete(monitors, pid)
+
+    # Remove from buffer list
+    new_list = Enum.reject(bs.list, &(&1 == pid))
+
+    # Clear special buffer slots if they match
+    messages = if bs.messages == pid, do: nil, else: bs.messages
+    warnings = if bs.warnings == pid, do: nil, else: bs.warnings
+    help = if bs.help == pid, do: nil, else: bs.help
+
+    # Determine new active buffer
+    {new_active, new_index} =
+      case new_list do
+        [] ->
+          {nil, 0}
+
+        _ ->
+          new_index = min(bs.active_index, length(new_list) - 1)
+          {Enum.at(new_list, new_index), new_index}
+      end
+
+    new_bs = %Buffers{
+      bs
+      | list: new_list,
+        active: new_active,
+        active_index: new_index,
+        messages: messages,
+        warnings: warnings,
+        help: help
+    }
+
+    %{state | buffers: new_bs, buffer_monitors: monitors}
+    |> sync_active_window_buffer()
+  end
 
   # ── Active content context ───────────────────────────────────────────────────
 
@@ -383,6 +462,7 @@ defmodule Minga.Editor.State do
 
     # Add the buffer to the pool (Buffers.add auto-activates it)
     state = %{state | buffers: Buffers.add(bs, pid)}
+    state = monitor_buffer(state, pid)
 
     case active_tab.kind do
       :file ->
@@ -395,6 +475,7 @@ defmodule Minga.Editor.State do
 
   def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
     %{state | buffers: Buffers.add(bs, pid)}
+    |> monitor_buffer(pid)
     |> sync_active_window_buffer()
   end
 
