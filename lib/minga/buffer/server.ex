@@ -544,6 +544,23 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:remove_virtual_text, id})
   end
 
+  @doc """
+  Adds a block decoration to the buffer.
+
+  Returns the decoration ID for later removal.
+  See `Minga.Buffer.Decorations.add_block_decoration/3` for options.
+  """
+  @spec add_block_decoration(GenServer.server(), non_neg_integer(), keyword()) :: reference()
+  def add_block_decoration(server, anchor_line, opts) do
+    GenServer.call(server, {:add_block_decoration, anchor_line, opts})
+  end
+
+  @doc "Removes a block decoration by ID."
+  @spec remove_block_decoration(GenServer.server(), reference()) :: :ok
+  def remove_block_decoration(server, id) do
+    GenServer.call(server, {:remove_block_decoration, id})
+  end
+
   @doc "Returns the decorations struct for read-only access (e.g., by the render pipeline)."
   @spec decorations(GenServer.server()) :: Decorations.t()
   def decorations(server) do
@@ -1236,6 +1253,16 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:remove_virtual_text, id}, _from, state) do
     decs = Decorations.remove_virtual_text(state.decorations, id)
+    {:reply, :ok, %{state | decorations: decs}}
+  end
+
+  def handle_call({:add_block_decoration, anchor_line, opts}, _from, state) do
+    {id, decs} = Decorations.add_block_decoration(state.decorations, anchor_line, opts)
+    {:reply, id, %{state | decorations: decs}}
+  end
+
+  def handle_call({:remove_block_decoration, id}, _from, state) do
+    decs = Decorations.remove_block_decoration(state.decorations, id)
     {:reply, :ok, %{state | decorations: decs}}
   end
 

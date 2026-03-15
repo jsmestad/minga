@@ -30,6 +30,8 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Editor.DisplayMap
+  alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.State, as: EditorState
@@ -692,15 +694,24 @@ defmodule Minga.Editor.Mouse do
 
     case Layout.active_window_layout(layout, state) do
       %{content: {win_row, win_col, content_w, win_h}} ->
+        window = EditorState.active_window_struct(state)
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = BufferServer.cursor(buf)
         scroll_top = render_scroll_top(win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
-        target_line = local_row + scroll_top
 
-        resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
+        resolve_with_display_map(
+          buf,
+          window,
+          local_row,
+          local_col,
+          scroll_top,
+          win_h,
+          content_w,
+          total_lines
+        )
 
       nil ->
         nil
@@ -724,13 +735,116 @@ defmodule Minga.Editor.Mouse do
         scroll_top = render_scroll_top(content_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0)
-        target_line = local_row + scroll_top
 
-        resolve_buffer_pos(buf, local_row, content_h, target_line, local_col, total_lines)
+        resolve_with_display_map(
+          buf,
+          window,
+          local_row,
+          local_col,
+          scroll_top,
+          content_h,
+          content_w,
+          total_lines
+        )
 
       :error ->
         nil
     end
+  end
+
+  # Resolves a click position using the DisplayMap to correctly handle
+  # block decorations, virtual lines, and folds. If the clicked display
+  # row is a block decoration, dispatches on_click and returns nil.
+  @spec resolve_with_display_map(
+          pid(),
+          Window.t() | nil,
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp resolve_with_display_map(
+         buf,
+         window,
+         local_row,
+         local_col,
+         scroll_top,
+         win_h,
+         content_w,
+         total_lines
+       ) do
+    decs = BufferServer.decorations(buf)
+    fold_map = if window, do: window.fold_map, else: FoldMap.new()
+
+    case DisplayMap.compute(fold_map, decs, scroll_top, win_h, total_lines, content_w) do
+      nil ->
+        # No display map needed, use direct line mapping
+        target_line = local_row + scroll_top
+        resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
+
+      %DisplayMap{} = dm ->
+        # Look up what's at this display row
+        case DisplayMap.buf_line_for_display_row(dm, local_row) do
+          nil ->
+            nil
+
+          target_line ->
+            entry = Enum.at(dm.entries, local_row)
+
+            handle_display_row_click(
+              entry,
+              buf,
+              local_row,
+              local_col,
+              win_h,
+              target_line,
+              total_lines
+            )
+        end
+    end
+  catch
+    :exit, _ ->
+      target_line = local_row + scroll_top
+      resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
+  end
+
+  defp handle_display_row_click(
+         {_line, {:block, block, line_idx}},
+         _buf,
+         _row,
+         col,
+         _win_h,
+         _target,
+         _total
+       ) do
+    if block.on_click, do: block.on_click.(line_idx, col)
+    nil
+  end
+
+  defp handle_display_row_click(
+         {_line, {:virtual_line, _}},
+         _buf,
+         _row,
+         _col,
+         _win_h,
+         _target,
+         _total
+       ) do
+    nil
+  end
+
+  defp handle_display_row_click(
+         _entry,
+         buf,
+         local_row,
+         local_col,
+         win_h,
+         target_line,
+         total_lines
+       ) do
+    resolve_buffer_pos(buf, local_row, win_h, target_line, local_col, total_lines)
   end
 
   defp resolve_buffer_pos(_buf, row, visible_rows, _line, _col, _total)
