@@ -30,6 +30,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
+  alias Minga.Config.Options
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
@@ -867,40 +868,42 @@ defmodule Minga.Editor.Mouse do
     {target_line, clamp_col_to_line(buf, target_line, adjusted_col)}
   end
 
-  @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
   defp auto_copy_selection(
          %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}} = state
        )
        when is_pid(buf) do
-    if Process.alive?(buf) do
-      cursor = BufferServer.cursor(buf)
-
-      text =
-        case ms.visual_type do
-          :char ->
-            BufferServer.get_range(buf, ms.visual_anchor, cursor)
-
-          :line ->
-            {a_line, _} = ms.visual_anchor
-            {c_line, _} = cursor
-            BufferServer.get_lines_content(buf, min(a_line, c_line), max(a_line, c_line))
-        end
-
-      if is_binary(text) and text != "" do
-        case Minga.Config.Options.get(:clipboard) do
-          :none -> :ok
-          _ -> Minga.Clipboard.write(text)
-        end
-      end
-    end
-
+    text = selection_text(buf, ms)
+    maybe_copy_to_clipboard(text)
     state
+  catch
+    :exit, _ -> state
   end
 
   defp auto_copy_selection(state), do: state
 
+  @spec selection_text(pid(), map()) :: String.t() | nil
+  defp selection_text(buf, %{visual_type: :char} = ms) do
+    BufferServer.get_range(buf, ms.visual_anchor, BufferServer.cursor(buf))
+  end
+
+  defp selection_text(buf, %{visual_type: :line} = ms) do
+    {a_line, _} = ms.visual_anchor
+    {c_line, _} = BufferServer.cursor(buf)
+    BufferServer.get_lines_content(buf, min(a_line, c_line), max(a_line, c_line))
+  end
+
+  defp maybe_copy_to_clipboard(text) when is_binary(text) and text != "" do
+    case Options.get(:clipboard) do
+      :none -> :ok
+      _ -> Minga.Clipboard.write(text)
+    end
+  end
+
+  defp maybe_copy_to_clipboard(_text), do: :ok
+
+  @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
   defp adjust_col_for_virtual_text(buf, line, display_col) do
     Decorations.display_col_to_buf_col(BufferServer.decorations(buf), line, display_col)
   catch
