@@ -367,7 +367,9 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     wrap_entries =
       Enum.map(buffer_entries, fn {buf_line, text} ->
         vt_width = inline_vt_width(decorations, buf_line)
-        [entry] = WrapMap.compute([text], max(width - vt_width, 10))
+        wrap_w = max(width - vt_width, 10)
+
+        [entry] = WrapMap.compute([text], wrap_w)
         entry
       end)
 
@@ -811,6 +813,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       ctx.diagnostic_signs,
       ctx.git_signs,
       ctx.viewport.left,
+      ctx.viewport.cols,
+      ctx.content_w,
       is_active,
       ctx.confirm_match,
       ctx.decorations.version

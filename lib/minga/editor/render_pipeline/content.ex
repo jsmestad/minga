@@ -234,6 +234,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Split the content rect to carve out a sidebar when wide enough.
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
+
     buf = window.buffer
 
     # Render the sidebar (dashboard) if the layout carved one out.
