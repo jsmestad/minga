@@ -6,9 +6,9 @@ defmodule Minga.Agent.ChatDecorations do
   block decorations, virtual text, and fold regions on the `*Agent*`
   buffer. The buffer rendering pipeline handles the actual drawing.
 
-  This replaces the standalone `ChatRenderer` which built draw commands
-  directly. By using decorations, the chat gets visual mode selection,
-  yank, mouse drag, and search for free via the standard buffer pipeline.
+  By using decorations instead of a custom renderer, the chat gets visual
+  mode selection, yank, mouse drag, and search for free via the standard
+  buffer pipeline.
   """
 
   alias Minga.Buffer.Decorations

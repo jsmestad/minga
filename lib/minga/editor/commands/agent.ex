@@ -10,7 +10,6 @@ defmodule Minga.Editor.Commands.Agent do
   @behaviour Minga.Command.Provider
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.ChatRenderer
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
@@ -94,7 +93,7 @@ defmodule Minga.Editor.Commands.Agent do
         agent_buf = AgentAccess.agent(state).buffer
 
         # Build a windows context with an agent_chat window so the tab
-        # renders through the buffer pipeline (not the old ChatRenderer).
+        # renders through the buffer pipeline.
         win_id = 1
         rows = max(state.viewport.rows, 1)
         cols = max(state.viewport.cols, 1)
@@ -919,22 +918,20 @@ defmodule Minga.Editor.Commands.Agent do
   end
 
   @spec scroll_context(state()) ::
-          {non_neg_integer(), Message.t(), ChatRenderer.line_type()} | nil
+          {non_neg_integer(), Message.t(), AgentBufferSync.line_type()} | nil
   defp scroll_context(state) do
     session = AgentAccess.session(state)
     panel = AgentAccess.panel(state)
 
     if session do
       messages = safe_messages(session)
-      theme = state.theme
-      width = state.viewport.cols
 
-      line_map =
-        ChatRenderer.line_message_map(messages, width, theme, panel.display_start_index)
+      # Use the cached line index from sync, falling back to recompute
+      line_map = cached_or_compute_line_index(panel, messages)
 
-      # Use Scroll.resolve to get the effective scroll position, treating
-      # the line_map length as content and 1 as "visible" to get the
-      # line index at the current scroll position.
+      # panel.scroll.offset is synced to the buffer cursor line by
+      # AgentChatNav.sync_scroll_to_cursor, so it maps directly to
+      # buffer line numbers.
       total = length(line_map)
       target = Minga.Scroll.resolve(panel.scroll, total, 1)
 
@@ -990,13 +987,7 @@ defmodule Minga.Editor.Commands.Agent do
     panel = AgentAccess.panel(state)
     messages = safe_messages(session)
 
-    line_map =
-      ChatRenderer.line_message_map(
-        messages,
-        state.viewport.cols,
-        state.theme,
-        panel.display_start_index
-      )
+    line_map = cached_or_compute_line_index(panel, messages)
 
     total = length(line_map)
     target = Minga.Scroll.resolve(panel.scroll, total, 1)
@@ -1020,7 +1011,10 @@ defmodule Minga.Editor.Commands.Agent do
     min(idx, length(blocks) - 1)
   end
 
-  @spec count_code_block_at([{non_neg_integer(), ChatRenderer.line_type()}], non_neg_integer()) ::
+  @spec count_code_block_at(
+          [{non_neg_integer(), AgentBufferSync.line_type()}],
+          non_neg_integer()
+        ) ::
           non_neg_integer()
   defp count_code_block_at(lines, target_offset) do
     lines
@@ -1041,6 +1035,18 @@ defmodule Minga.Editor.Commands.Agent do
     Session.messages(session)
   catch
     :exit, _ -> []
+  end
+
+  # Returns the cached line index from the panel state if available,
+  # otherwise recomputes from messages. The cache is populated by
+  # sync_buffer in AgentLifecycle on every message update.
+  @spec cached_or_compute_line_index(PanelState.t(), [Message.t()]) ::
+          [{non_neg_integer(), AgentBufferSync.line_type()}]
+  defp cached_or_compute_line_index(panel, messages) do
+    case panel.cached_line_index do
+      [] -> AgentBufferSync.line_message_index(messages)
+      cached -> cached
+    end
   end
 
   # Maps command name atoms to their implementing function names.

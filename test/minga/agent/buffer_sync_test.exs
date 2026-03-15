@@ -2,143 +2,122 @@ defmodule Minga.Agent.BufferSyncTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync
-  alias Minga.Buffer.Server, as: BufferServer
 
-  describe "start_buffer/0" do
-    test "creates a nofile markdown buffer" do
-      pid = BufferSync.start_buffer()
+  describe "line_message_index/1" do
+    test "returns empty list for no messages" do
+      assert BufferSync.line_message_index([]) == []
+    end
 
-      assert is_pid(pid)
-      assert BufferServer.buffer_type(pid) == :nofile
-      assert BufferServer.read_only?(pid)
-      assert BufferServer.buffer_name(pid) == "*Agent*"
-      assert BufferServer.filetype(pid) == :markdown
-      assert BufferServer.unlisted?(pid)
-      assert BufferServer.persistent?(pid)
+    test "maps a single user message" do
+      messages = [{:user, "hello world"}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :text}] = index
+    end
+
+    test "maps a multiline user message" do
+      messages = [{:user, "line 1\nline 2\nline 3"}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :text}, {0, :text}, {0, :text}] = index
+    end
+
+    test "maps multiple messages with separator lines" do
+      messages = [{:user, "hello"}, {:assistant, "world"}]
+      index = BufferSync.line_message_index(messages)
+
+      # "hello\n\nworld" → ["hello", "", "world"]
+      # Line 0: user msg (idx 0), Line 1: separator, Line 2: assistant msg (idx 1)
+      assert [{0, :text}, {0, :empty}, {1, :text}] = index
+    end
+
+    test "classifies assistant code blocks as :code" do
+      messages = [{:assistant, "text\n```elixir\ncode here\n```\nmore text"}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [
+               {0, :text},
+               {0, :code},
+               {0, :code},
+               {0, :code},
+               {0, :text}
+             ] = index
+    end
+
+    test "classifies tool_call lines as :tool" do
+      tc = %{name: "bash", args: %{}, result: "output", status: :complete, collapsed: false}
+      messages = [{:tool_call, tc}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :tool}] = index
+    end
+
+    test "classifies thinking lines as :thinking" do
+      messages = [{:thinking, "hmm...\nlet me think", false}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :thinking}, {0, :thinking}] = index
+    end
+
+    test "classifies usage lines as :usage" do
+      messages = [{:usage, %{input: 100, output: 50, cost: 0.01}}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :usage}] = index
+    end
+
+    test "handles mixed message types" do
+      messages = [
+        {:user, "question"},
+        {:assistant, "answer with\n```\ncode\n```"}
+      ]
+
+      index = BufferSync.line_message_index(messages)
+
+      assert [
+               {0, :text},
+               {0, :empty},
+               {1, :text},
+               {1, :code},
+               {1, :code},
+               {1, :code}
+             ] = index
+    end
+
+    test "empty tool_call result produces single line" do
+      tc = %{name: "bash", args: %{}, result: "", status: :running, collapsed: false}
+      messages = [{:tool_call, tc}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :tool}] = index
     end
   end
 
-  describe "sync/2" do
-    test "writes user message content (no markdown header)" do
-      pid = BufferSync.start_buffer()
-      BufferSync.sync(pid, [{:user, "Hello agent"}])
-
-      content = BufferServer.content(pid)
-      refute content =~ "## You", "block decorations handle headers, not buffer text"
-      assert content =~ "Hello agent"
+  describe "message_start_line/2" do
+    test "returns 0 for first message" do
+      messages = [{:user, "hello"}, {:assistant, "world"}]
+      assert BufferSync.message_start_line(messages, 0) == 0
     end
 
-    test "writes assistant message content (no markdown header)" do
-      pid = BufferSync.start_buffer()
-      BufferSync.sync(pid, [{:assistant, "Here is my response"}])
-
-      content = BufferServer.content(pid)
-      refute content =~ "## Agent", "block decorations handle headers, not buffer text"
-      assert content =~ "Here is my response"
+    test "returns correct start for second message" do
+      messages = [{:user, "hello"}, {:assistant, "world"}]
+      # "hello\n\nworld" → line 0: hello, line 1: separator, line 2: world
+      assert BufferSync.message_start_line(messages, 1) == 2
     end
 
-    test "writes thinking block content (no blockquote prefix)" do
-      pid = BufferSync.start_buffer()
-      BufferSync.sync(pid, [{:thinking, "Let me think about this", false}])
-
-      content = BufferServer.content(pid)
-      refute content =~ "> **Thinking**", "fold decorations handle thinking display"
-      assert content =~ "Let me think about this"
+    test "returns nil for out-of-range index" do
+      messages = [{:user, "hello"}]
+      assert BufferSync.message_start_line(messages, 5) == nil
     end
 
-    test "writes tool call result (no status header)" do
-      pid = BufferSync.start_buffer()
-
-      tc = %{
-        name: "read_file",
-        status: :complete,
-        result: "file content here",
-        args: %{},
-        collapsed: false
-      }
-
-      BufferSync.sync(pid, [{:tool_call, tc}])
-
-      content = BufferServer.content(pid)
-      refute content =~ "### ✓ read_file", "block decorations handle tool headers"
-      assert content =~ "file content here"
+    test "accounts for multiline messages" do
+      messages = [{:user, "line 1\nline 2\nline 3"}, {:assistant, "response"}]
+      # Lines: 0-2 user (3 lines), 3 separator, 4 response
+      assert BufferSync.message_start_line(messages, 1) == 4
     end
 
-    test "handles full conversation" do
-      pid = BufferSync.start_buffer()
-
-      messages = [
-        {:user, "Fix the bug"},
-        {:assistant, "I'll look at the code"},
-        {:tool_call,
-         %{name: "read", status: :complete, result: "code", args: %{}, collapsed: false}},
-        {:assistant, "Found and fixed it"}
-      ]
-
-      BufferSync.sync(pid, messages)
-      content = BufferServer.content(pid)
-
-      assert content =~ "Fix the bug"
-      assert content =~ "I'll look at the code"
-      assert content =~ "code"
-      assert content =~ "Found and fixed it"
-      refute content =~ "## You"
-      refute content =~ "## Agent"
-    end
-  end
-
-  describe "messages_to_markdown_with_offsets/1" do
-    test "computes correct line offsets for single-line messages" do
-      messages = [
-        {:user, "hey"},
-        {:assistant, "response"},
-        {:usage, %{input: 1, output: 2, cost: 0.01}}
-      ]
-
-      {text, offsets} = BufferSync.messages_to_markdown_with_offsets(messages)
-
-      assert offsets == [{0, 0, 1}, {1, 2, 1}, {2, 4, 1}]
-      assert text == "hey\n\nresponse\n\n↑1 ↓2 $0.01"
-    end
-
-    test "computes correct offsets for multi-line messages" do
-      messages = [{:user, "line1\nline2"}, {:assistant, "a\nb\nc"}]
-      {_text, offsets} = BufferSync.messages_to_markdown_with_offsets(messages)
-
-      # user: 2 lines at 0, assistant: 3 lines at 0+2+1=3
-      assert offsets == [{0, 0, 2}, {1, 3, 3}]
-    end
-
-    test "handles single message with no separator" do
-      {_text, offsets} = BufferSync.messages_to_markdown_with_offsets([{:user, "solo"}])
-      assert offsets == [{0, 0, 1}]
-    end
-
-    test "handles empty message list" do
-      {text, offsets} = BufferSync.messages_to_markdown_with_offsets([])
-      assert offsets == []
-      assert text == ""
-    end
-
-    test "offset start_line matches actual position in joined text" do
-      messages = [{:user, "hello"}, {:assistant, "world"}, {:user, "again"}]
-      {text, offsets} = BufferSync.messages_to_markdown_with_offsets(messages)
-      lines = String.split(text, "\n")
-
-      for {_idx, start, _count} <- offsets do
-        # The line at the computed offset should be non-empty message content
-        assert Enum.at(lines, start) != "", "line at offset #{start} should have content"
-      end
-    end
-
-    test "cursor moves to end after sync" do
-      pid = BufferSync.start_buffer()
-      messages = [{:user, "line 1"}, {:assistant, "line 2\nline 3\nline 4"}]
-      BufferSync.sync(pid, messages)
-
-      {cursor_line, _col} = BufferServer.cursor(pid)
-      line_count = BufferServer.line_count(pid)
-      assert cursor_line == line_count - 1
+    test "returns nil for empty message list" do
+      assert BufferSync.message_start_line([], 0) == nil
     end
   end
 end

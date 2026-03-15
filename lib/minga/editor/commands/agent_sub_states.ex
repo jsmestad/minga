@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   Extracted from `Commands.Agent` to reduce module size.
   """
 
-  alias Minga.Agent.ChatRenderer
+  alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
@@ -373,15 +373,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     session = AgentAccess.session(state)
     messages = if session, do: safe_messages(session), else: []
 
-    line_map =
-      ChatRenderer.line_message_map(
-        messages,
-        state.viewport.cols,
-        state.theme,
-        AgentAccess.panel(state).display_start_index
-      )
-
-    case Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) do
+    case AgentBufferSync.message_start_line(messages, msg_idx) do
       nil -> state
       line_idx -> update_agent(state, &AgentState.set_scroll(&1, line_idx))
     end

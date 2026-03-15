@@ -14,6 +14,7 @@ defmodule Minga.Agent.PanelState do
   focus tracking.
   """
 
+  alias Minga.Agent.BufferSync
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Scroll
 
@@ -40,7 +41,8 @@ defmodule Minga.Agent.PanelState do
           input_focused: boolean(),
           display_start_index: non_neg_integer(),
           mention_completion: Minga.Agent.FileMention.completion() | nil,
-          pasted_blocks: [paste_block()]
+          pasted_blocks: [paste_block()],
+          cached_line_index: [{non_neg_integer(), BufferSync.line_type()}]
         }
 
   # Placeholder prefix used in input lines to represent a collapsed paste block.
@@ -65,7 +67,8 @@ defmodule Minga.Agent.PanelState do
             input_focused: false,
             display_start_index: 0,
             mention_completion: nil,
-            pasted_blocks: []
+            pasted_blocks: [],
+            cached_line_index: []
 
   @doc "Creates a new panel state."
   @spec new() :: t()
