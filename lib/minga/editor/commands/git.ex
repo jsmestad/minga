@@ -8,6 +8,7 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Diff
+  alias Minga.Git.Tracker, as: GitTracker
 
   @type state :: EditorState.t()
 
@@ -143,9 +144,9 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   @spec with_git_buffer(state(), (pid(), pid() -> state())) :: state()
-  defp with_git_buffer(%{buffers: %{active: buf}, git_buffers: git_buffers} = state, fun)
+  defp with_git_buffer(%{buffers: %{active: buf}} = state, fun)
        when is_pid(buf) do
-    case Map.get(git_buffers, buf) do
+    case GitTracker.lookup(buf) do
       nil -> %{state | status_msg: "Not in a git repository"}
       git_pid -> if Process.alive?(git_pid), do: fun.(git_pid, buf), else: state
     end

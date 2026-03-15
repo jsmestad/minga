@@ -42,7 +42,6 @@ defmodule Minga.Editor.State.Tab do
           optional(:lsp) => term(),
           optional(:completion) => term(),
           optional(:completion_trigger) => term(),
-          optional(:git_buffers) => term(),
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
           optional(:pending_conflict) => term(),

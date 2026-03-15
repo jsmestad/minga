@@ -13,6 +13,7 @@ defmodule Minga.Editor.CompletionHandling do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.Client
 
   @resolve_debounce_ms 150
@@ -160,7 +161,9 @@ defmodule Minga.Editor.CompletionHandling do
       BufferServer.insert_text(buf, text)
     end
 
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
+    state = BufferLifecycle.lsp_buffer_changed(state)
+    GitTracker.notify_change(buf)
+    state
   end
 
   defp accept_text(state, _completion, _text), do: state
@@ -176,7 +179,9 @@ defmodule Minga.Editor.CompletionHandling do
       edit.new_text
     )
 
-    state |> BufferLifecycle.lsp_buffer_changed() |> BufferLifecycle.git_buffer_changed()
+    state = BufferLifecycle.lsp_buffer_changed(state)
+    GitTracker.notify_change(buf)
+    state
   end
 
   defp apply_text_edit(state, _edit), do: state

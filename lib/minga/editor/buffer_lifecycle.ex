@@ -12,7 +12,6 @@ defmodule Minga.Editor.BufferLifecycle do
   alias Minga.Editor.DocumentSync
   alias Minga.Editor.Modeline
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.LSP.Client
   alias Minga.Mode
 
@@ -152,60 +151,4 @@ defmodule Minga.Editor.BufferLifecycle do
   end
 
   def lsp_after_kill(state, _cmd, _old_buffer), do: state
-
-  # ── Git buffer lifecycle ───────────────────────────────────────────────
-
-  @doc "Starts a Git buffer tracker for a newly opened file buffer."
-  @spec git_buffer_opened(state(), pid()) :: state()
-  def git_buffer_opened(state, buffer_pid) do
-    with path when is_binary(path) <- BufferServer.file_path(buffer_pid),
-         {:ok, git_root} <- Minga.Git.root_for(path) do
-      start_git_buffer(state, buffer_pid, git_root, path)
-    else
-      _ -> state
-    end
-  end
-
-  @doc "Notifies the Git buffer tracker that the active buffer changed."
-  @spec git_buffer_changed(state()) :: state()
-  def git_buffer_changed(%{buffers: %{active: nil}} = state), do: state
-
-  def git_buffer_changed(%{buffers: %{active: buf}} = state) do
-    case Map.get(state.git_buffers, buf) do
-      nil -> state
-      git_pid -> git_buffer_update(state, buf, git_pid)
-    end
-  end
-
-  # ── Private helpers ──────────────────────────────────────────────────────
-
-  @spec start_git_buffer(state(), pid(), String.t(), String.t()) :: state()
-  defp start_git_buffer(state, buffer_pid, git_root, path) do
-    {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-
-    case DynamicSupervisor.start_child(
-           Minga.Buffer.Supervisor,
-           {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
-         ) do
-      {:ok, git_pid} ->
-        rel_path = Path.relative_to(path, git_root)
-
-        Minga.Editor.log_to_messages("Git: tracking #{rel_path}")
-        %{state | git_buffers: Map.put(state.git_buffers, buffer_pid, git_pid)}
-
-      {:error, reason} ->
-        Minga.Log.warning(:editor, "Failed to start git buffer: #{inspect(reason)}")
-        state
-    end
-  end
-
-  @spec git_buffer_update(state(), pid(), pid()) :: state()
-  defp git_buffer_update(state, buf, git_pid) do
-    if Process.alive?(git_pid) do
-      {content, _cursor} = BufferServer.content_and_cursor(buf)
-      GitBuffer.update(git_pid, content)
-    end
-
-    state
-  end
 end

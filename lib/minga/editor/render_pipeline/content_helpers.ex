@@ -26,6 +26,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
@@ -560,8 +561,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   @doc "Returns git signs for a window's buffer."
   @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  def git_signs_for_window(%{git_buffers: git_buffers}, %{buffer: buf}) when is_pid(buf) do
-    case Map.get(git_buffers, buf) do
+  def git_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
+    case GitTracker.lookup(buf) do
       nil -> %{}
       git_pid -> if Process.alive?(git_pid), do: GitBuffer.signs(git_pid), else: %{}
     end
