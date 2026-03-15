@@ -141,19 +141,54 @@ defmodule Minga.Agent.ChatDecorations do
          theme,
          _streaming
        ) do
-    if collapsed do
-      {_id, decs} =
-        Decorations.add_fold_region(decs, line, line + line_count - 1,
-          closed: true,
-          placeholder: fn _s, _e, _w ->
-            [{"💭 Thinking (#{line_count} lines)...", [fg: theme.thinking_fg, italic: true]}]
-          end
-        )
+    # Header
+    {_id, decs} =
+      Decorations.add_block_decoration(decs, line,
+        placement: :above,
+        render: fn _w ->
+          [{"┌─ 💭 Thinking", [fg: theme.thinking_fg, italic: true]}]
+        end,
+        priority: 5
+      )
 
-      decs
-    else
-      decs
-    end
+    # Fold collapsed thinking blocks
+    decs =
+      if collapsed do
+        {_id, decs} =
+          Decorations.add_fold_region(decs, line, line + line_count - 1,
+            closed: true,
+            placeholder: fn _s, _e, _w ->
+              [{"└─ 💭 Thinking (#{line_count} lines)...", [fg: theme.thinking_fg, italic: true]}]
+            end
+          )
+
+        decs
+      else
+        decs
+      end
+
+    # Dim thinking text
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.thinking_fg],
+        priority: 5,
+        group: :chat_thinking
+      )
+
+    # Left border (│) and bottom border (└─)
+    decs = add_tool_border_virtual_text(decs, line, line_count, theme.thinking_fg)
+    last_line = line + line_count - 1
+
+    {_id, decs} =
+      Decorations.add_block_decoration(decs, last_line,
+        placement: :below,
+        render: fn _w ->
+          [{"└─", [fg: theme.thinking_fg]}]
+        end,
+        priority: 5
+      )
+
+    decs
   end
 
   defp apply_message_decorations(decs, {:tool_call, tc}, line, line_count, theme, _streaming) do
@@ -173,43 +208,61 @@ defmodule Minga.Agent.ChatDecorations do
 
     has_result = tc.result != ""
 
+    # Build header text with timing and command info
+    duration_text = format_tool_duration(tc)
+    command_text = format_tool_command(tc)
+    header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{command_text}"
+
     # Block decoration: tool header
     {_id, decs} =
       Decorations.add_block_decoration(decs, line,
         placement: :above,
         render: fn _w ->
-          [{"┌─ #{status_icon} #{tc.name}", [fg: status_fg, bold: true]}]
+          [{header_text, [fg: status_fg, bold: true]}]
         end,
         priority: 5
       )
 
     # Fold region for tool output (collapsible with za)
+    fold_placeholder = "└─ #{status_icon} #{tc.name} (#{line_count} lines)"
+
     decs =
-      if has_result and tc.status != :running and line_count > 2 do
-        # Header takes first few lines; fold the rest (tool output)
-        header_lines = 1
-        fold_start = line + header_lines
-        fold_end = line + line_count - 1
+      if has_result and tc.status != :running do
+        {_id, decs} =
+          Decorations.add_fold_region(decs, line, line + line_count - 1,
+            closed: tc.collapsed,
+            placeholder: fn _s, _e, _w ->
+              [{fold_placeholder, [fg: status_fg, italic: true]}]
+            end
+          )
 
-        if fold_end > fold_start do
-          {_id, decs} =
-            Decorations.add_fold_region(decs, fold_start, fold_end,
-              closed: false,
-              placeholder: fn _s, _e, _w ->
-                [
-                  {"└─ #{status_icon} #{tc.name} (#{line_count - 1} lines)",
-                   [fg: status_fg, italic: true]}
-                ]
-              end
-            )
-
-          decs
-        else
-          decs
-        end
+        decs
       else
         decs
       end
+
+    # Dim tool output text
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.text_fg],
+        priority: -10,
+        group: :chat_tool
+      )
+
+    # Left border (│) on each content line
+    decs = add_tool_border_virtual_text(decs, line, line_count, theme.tool_border)
+
+    # Bottom border
+    last_line = line + line_count - 1
+
+    {_id, decs} =
+      Decorations.add_block_decoration(decs, last_line,
+        placement: :below,
+        render: fn _w ->
+          [{"└─", [fg: status_fg]}]
+        end,
+        priority: 5
+      )
 
     decs
   end
@@ -272,6 +325,29 @@ defmodule Minga.Agent.ChatDecorations do
 
   # Adds a colored border highlight on the first 2 columns of each content line.
   # This creates the vertical "▎" border effect on the left edge of each message.
+  # Adds an inline virtual text "│ " at column 0 of each tool output line.
+  @spec add_tool_border_virtual_text(
+          Decorations.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          Decorations.t()
+  defp add_tool_border_virtual_text(decs, start_line, line_count, border_fg) do
+    Enum.reduce(0..(line_count - 1), decs, fn offset, d ->
+      line = start_line + offset
+
+      {_id, d} =
+        Decorations.add_virtual_text(d, {line, 0},
+          segments: [{"│ ", [fg: border_fg]}],
+          placement: :inline,
+          priority: 10
+        )
+
+      d
+    end)
+  end
+
   # Adds an inline virtual text "▎ " at column 0 of each content line.
   # The border character lives in the decoration layer, not the buffer text,
   # so yank/search/clipboard stay clean.
@@ -298,6 +374,34 @@ defmodule Minga.Agent.ChatDecorations do
   end
 
   # Spinner frame that cycles based on system time (changes each render frame)
+  defp format_tool_duration(%{duration_ms: ms}) when is_integer(ms) and ms < 1000,
+    do: " (#{ms}ms)"
+
+  defp format_tool_duration(%{duration_ms: ms}) when is_integer(ms),
+    do: " (#{Float.round(ms / 1000, 1)}s)"
+
+  defp format_tool_duration(_tc), do: ""
+
+  defp format_tool_command(%{name: "bash", args: %{"command" => cmd}}) do
+    truncated = String.slice(cmd, 0, 60)
+    suffix = if String.length(cmd) > 60, do: "...", else: ""
+    " (command: \"#{truncated}#{suffix}\")"
+  end
+
+  defp format_tool_command(%{name: "read", args: %{"path" => path}}) do
+    " (#{path})"
+  end
+
+  defp format_tool_command(%{name: "write", args: %{"path" => path}}) do
+    " (#{path})"
+  end
+
+  defp format_tool_command(%{name: "edit", args: %{"path" => path}}) do
+    " (#{path})"
+  end
+
+  defp format_tool_command(_tc), do: ""
+
   @spinner_frames ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   defp spinner_frame do
     idx = rem(div(System.monotonic_time(:millisecond), 100), length(@spinner_frames))

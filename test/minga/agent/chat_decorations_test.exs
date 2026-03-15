@@ -55,7 +55,13 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "tool call gets header block and output fold" do
-      tc = %{name: "read_file", status: :complete, result: "file content here\nline 2\nline 3"}
+      tc = %{
+        name: "read_file",
+        status: :complete,
+        result: "file content here\nline 2\nline 3",
+        collapsed: false
+      }
+
       decs = Decorations.new()
       messages = [{:tool_call, tc}]
       offsets = [{0, 0, 6}]
@@ -68,7 +74,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "running tool call has no fold (still streaming)" do
-      tc = %{name: "shell", status: :running, result: ""}
+      tc = %{name: "shell", status: :running, result: "", collapsed: false}
       decs = Decorations.new()
       messages = [{:tool_call, tc}]
       offsets = [{0, 0, 1}]
