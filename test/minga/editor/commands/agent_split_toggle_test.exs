@@ -2,9 +2,8 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.LayoutPreset
@@ -35,7 +34,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     # Create agent buffer (needed for split pane behavior)
     agent_buf = BufferSync.start_buffer()
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: false,
       input_focused: false,
       scroll: Minga.Scroll.new(),
@@ -57,7 +56,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     active = Keyword.get(opts, :active, false)
 
-    agentic = %ViewState{
+    agentic = %UIState{
       active: active,
       focus: :chat,
       preview: Preview.new(),
@@ -80,7 +79,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       tab_bar: tb,
       windows: %Minga.Editor.State.Windows{
         tree: {:leaf, 1},
@@ -99,7 +98,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       # Switch back to file tab so switch_tab properly snapshots it
       tb = TabBar.switch_to(tb, file_tab.id)
 
-      state = %{state | tab_bar: tb, agentic: %{agentic | active: true, focus: :chat}}
+      state = %{state | tab_bar: tb, agent_ui: %{agentic | active: true, focus: :chat}}
       EditorState.switch_tab(state, at.id)
     else
       # Always store an agent tab so AgentAccess can find it.

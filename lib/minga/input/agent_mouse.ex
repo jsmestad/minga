@@ -26,9 +26,8 @@ defmodule Minga.Input.AgentMouse do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Renderer, as: ViewRenderer
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -203,8 +202,8 @@ defmodule Minga.Input.AgentMouse do
           EditorState.t()
   defp scroll_in_window(state, layout, win_id, col, delta) do
     {_cr, cc, cw, _ch} = window_content_rect(layout, win_id)
-    agentic = AgentAccess.agentic(state)
-    chat_width = max(div(cw * agentic.chat_width_pct, 100), 20)
+    agent_ui = AgentAccess.agent_ui(state)
+    chat_width = max(div(cw * agent_ui.chat_width_pct, 100), 20)
     chat_right_edge = cc + chat_width
 
     if col < chat_right_edge do
@@ -239,7 +238,7 @@ defmodule Minga.Input.AgentMouse do
           EditorState.t()
   defp handle_agent_click(state, {cr, _cc, cw, ch}, row, _col) do
     panel = AgentAccess.panel(state)
-    input_lines = PanelState.input_lines(panel)
+    input_lines = UIState.input_lines(panel)
     box_width = ViewRenderer.input_box_width(cw)
     inner_width = ViewRenderer.input_inner_width(box_width)
     input_height = ViewRenderer.compute_input_height(input_lines, inner_width)
@@ -268,10 +267,10 @@ defmodule Minga.Input.AgentMouse do
 
   @spec scroll_preview(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()
   defp scroll_preview(state, delta) when delta > 0 do
-    AgentAccess.update_agentic(state, &ViewState.scroll_viewer_down(&1, delta))
+    AgentAccess.update_agent_ui(state, &UIState.scroll_viewer_down(&1, delta))
   end
 
   defp scroll_preview(state, delta) when delta < 0 do
-    AgentAccess.update_agentic(state, &ViewState.scroll_viewer_up(&1, abs(delta)))
+    AgentAccess.update_agent_ui(state, &UIState.scroll_viewer_up(&1, abs(delta)))
   end
 end

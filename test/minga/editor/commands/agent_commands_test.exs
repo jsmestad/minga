@@ -12,8 +12,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -37,7 +36,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
       prompt_buffer: prompt_buf,
@@ -62,7 +61,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
-    agentic = %ViewState{}
+    agentic = %UIState{}
 
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
@@ -79,7 +78,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         next_id: 2
       },
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       tab_bar: tb,
       focus_stack: Input.default_stack()
     }
@@ -98,7 +97,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
       state =
         AgentAccess.update_agent(state, fn agent ->
-          panel = PanelState.ensure_prompt_buffer(agent.panel)
+          panel = UIState.ensure_prompt_buffer(agent.panel)
           BufferServer.replace_content(panel.prompt_buffer, "hello agent")
           %{agent | panel: panel}
         end)
@@ -139,7 +138,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_char(state, "a")
 
-      assert PanelState.input_text(AgentAccess.panel(new_state)) == "a"
+      assert UIState.input_text(AgentAccess.panel(new_state)) == "a"
     end
 
     test "inserts multiple characters sequentially" do
@@ -150,7 +149,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("h")
         |> AgentCommands.input_char("i")
 
-      assert PanelState.input_text(AgentAccess.panel(state)) == "hi"
+      assert UIState.input_text(AgentAccess.panel(state)) == "hi"
     end
   end
 
@@ -169,7 +168,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         |> AgentCommands.input_char("b")
         |> AgentCommands.input_backspace()
 
-      assert PanelState.input_text(AgentAccess.panel(state)) == "a"
+      assert UIState.input_text(AgentAccess.panel(state)) == "a"
     end
   end
 
@@ -183,7 +182,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_paste(state, "pasted")
 
-      text = PanelState.input_text(AgentAccess.panel(new_state))
+      text = UIState.input_text(AgentAccess.panel(new_state))
       assert text =~ "pasted"
     end
   end
@@ -235,26 +234,26 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_agentic(state, fn agentic ->
+        AgentAccess.update_agent_ui(state, fn agentic ->
           %{agentic | active: true, focus: :chat}
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.agentic(new_state).focus == :file_viewer
+      assert AgentAccess.agent_ui(new_state).focus == :file_viewer
     end
 
     test "switches from non-chat back to chat" do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_agentic(state, fn agentic ->
+        AgentAccess.update_agent_ui(state, fn agentic ->
           %{agentic | active: true, focus: :file_viewer}
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.agentic(new_state).focus == :chat
+      assert AgentAccess.agent_ui(new_state).focus == :chat
     end
   end
 
@@ -266,7 +265,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       new_state = AgentCommands.toggle_paste_expand(state)
 
       # Should not crash, input stays the same
-      assert PanelState.input_text(AgentAccess.panel(new_state)) == ""
+      assert UIState.input_text(AgentAccess.panel(new_state)) == ""
     end
   end
 

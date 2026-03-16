@@ -10,10 +10,9 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
   alias Minga.Agent.FileMention
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -30,31 +29,31 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Handles a key during active search input."
   @spec handle_search_key(state(), non_neg_integer()) :: state()
   def handle_search_key(state, 13) do
-    update_agentic(state, &ViewState.confirm_search/1)
+    update_agent_ui(state, &UIState.confirm_search/1)
   end
 
   def handle_search_key(state, 27) do
-    saved = ViewState.search_saved_scroll(AgentAccess.agentic(state))
-    state = update_agentic(state, &ViewState.cancel_search/1)
+    saved = UIState.search_saved_scroll(AgentAccess.agent_ui(state))
+    state = update_agent_ui(state, &UIState.cancel_search/1)
     if saved, do: update_agent(state, &AgentState.set_scroll(&1, saved)), else: state
   end
 
   def handle_search_key(state, 127) do
-    query = ViewState.search_query(AgentAccess.agentic(state)) || ""
+    query = UIState.search_query(AgentAccess.agent_ui(state)) || ""
 
     if query == "" do
       handle_search_key(state, 27)
     else
       new_query = String.slice(query, 0..-2//1)
-      state = update_agentic(state, &ViewState.update_search_query(&1, new_query))
+      state = update_agent_ui(state, &UIState.update_search_query(&1, new_query))
       run_search(state, new_query)
     end
   end
 
   def handle_search_key(state, cp) when cp >= 32 and cp <= 126 do
     char = <<cp::utf8>>
-    query = (ViewState.search_query(AgentAccess.agentic(state)) || "") <> char
-    state = update_agentic(state, &ViewState.update_search_query(&1, query))
+    query = (UIState.search_query(AgentAccess.agent_ui(state)) || "") <> char
+    state = update_agent_ui(state, &UIState.update_search_query(&1, query))
     run_search(state, query)
   end
 
@@ -64,16 +63,16 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @spec start_search(state()) :: state()
   def start_search(state) do
     scroll = AgentAccess.panel(state).scroll.offset
-    update_agentic(state, &ViewState.start_search(&1, scroll))
+    update_agent_ui(state, &UIState.start_search(&1, scroll))
   end
 
   @doc "Jumps to the next search match."
   @spec next_match(state()) :: state()
   def next_match(state) do
-    if AgentAccess.agentic(state).search.input_active do
+    if AgentAccess.agent_ui(state).search.input_active do
       state
     else
-      state = update_agentic(state, &ViewState.next_search_match/1)
+      state = update_agent_ui(state, &UIState.next_search_match/1)
       scroll_to_current_match(state)
     end
   end
@@ -81,10 +80,10 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Jumps to the previous search match."
   @spec prev_match(state()) :: state()
   def prev_match(state) do
-    if AgentAccess.agentic(state).search.input_active do
+    if AgentAccess.agent_ui(state).search.input_active do
       state
     else
-      state = update_agentic(state, &ViewState.prev_search_match/1)
+      state = update_agent_ui(state, &UIState.prev_search_match/1)
       scroll_to_current_match(state)
     end
   end
@@ -152,7 +151,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Accepts the current diff hunk during review."
   @spec accept_hunk(state()) :: state()
   def accept_hunk(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, _review}} ->
         state =
           update_preview(
@@ -170,7 +169,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Rejects the current diff hunk during review."
   @spec reject_hunk(state()) :: state()
   def reject_hunk(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, review}} ->
         hunk = DiffReview.current_hunk(review)
         if hunk, do: revert_hunk_on_disk(review.path, hunk)
@@ -191,7 +190,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Accepts all remaining diff hunks."
   @spec accept_all_hunks(state()) :: state()
   def accept_all_hunks(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, _}} ->
         state =
           update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
@@ -206,7 +205,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Rejects all remaining diff hunks."
   @spec reject_all_hunks(state()) :: state()
   def reject_all_hunks(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, review}} ->
         unresolved_hunks =
           review.hunks
@@ -280,15 +279,15 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @spec should_trigger_mention?(state()) :: boolean()
   defp should_trigger_mention?(state) do
     panel = AgentAccess.panel(state)
-    {line, col} = PanelState.input_cursor(panel)
-    current_line = Enum.at(PanelState.input_lines(panel), line, "")
+    {line, col} = UIState.input_cursor(panel)
+    current_line = Enum.at(UIState.input_lines(panel), line, "")
     col == 0 or String.at(current_line, col - 1) in [" ", "\t", nil]
   end
 
   @spec start_mention_completion(state()) :: state()
   defp start_mention_completion(state) do
     files = list_project_files()
-    {line, col} = PanelState.input_cursor(AgentAccess.panel(state))
+    {line, col} = UIState.input_cursor(AgentAccess.panel(state))
     completion = FileMention.new_completion(files, line, col - 1)
     update_panel(state, fn p -> %{p | mention_completion: completion} end)
   end
@@ -303,8 +302,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
       path ->
         panel = AgentAccess.panel(state)
-        {line, _col} = PanelState.input_cursor(panel)
-        lines = PanelState.input_lines(panel)
+        {line, _col} = UIState.input_cursor(panel)
+        lines = UIState.input_lines(panel)
         current = Enum.at(lines, line)
         anchor_col = comp.anchor_col
 
@@ -350,13 +349,13 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     session = AgentAccess.session(state)
     messages = if session, do: safe_messages(session), else: []
     matches = ChatSearch.find_matches(messages, query)
-    state = update_agentic(state, &ViewState.set_search_matches(&1, matches))
+    state = update_agent_ui(state, &UIState.set_search_matches(&1, matches))
     if matches != [], do: scroll_to_current_match(state), else: state
   end
 
   @spec scroll_to_current_match(state()) :: state()
   defp scroll_to_current_match(state) do
-    case AgentAccess.agentic(state).search do
+    case AgentAccess.agent_ui(state).search do
       nil ->
         state
 
@@ -381,7 +380,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec maybe_finish_review(state()) :: state()
   defp maybe_finish_review(state) do
-    case Preview.diff_review(AgentAccess.agentic(state).preview) do
+    case Preview.diff_review(AgentAccess.agent_ui(state).preview) do
       %DiffReview{} = review ->
         if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
 
@@ -433,13 +432,13 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
-  @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
-  defp update_agentic(state, fun), do: AgentAccess.update_agentic(state, fun)
+  @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
+  defp update_agent_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agentic(state, fn agentic ->
-      %{agentic | preview: fun.(agentic.preview)}
+    AgentAccess.update_agent_ui(state, fn ui ->
+      %{ui | preview: fun.(ui.preview)}
     end)
   end
 

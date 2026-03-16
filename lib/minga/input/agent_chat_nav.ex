@@ -47,7 +47,7 @@ defmodule Minga.Input.AgentChatNav do
 
   import Bitwise
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -62,9 +62,9 @@ defmodule Minga.Input.AgentChatNav do
     if panel.input_focused do
       {:passthrough, state}
     else
-      agentic = AgentAccess.agentic(state)
+      agent_ui = AgentAccess.agent_ui(state)
 
-      case agentic.focus do
+      case agent_ui.focus do
         :chat -> handle_chat_nav(state, cp, mods)
         :file_viewer -> handle_viewer_nav(state, cp, mods)
       end
@@ -100,7 +100,7 @@ defmodule Minga.Input.AgentChatNav do
   defp handle_viewer_nav(state, cp, mods) do
     case viewer_nav_command(cp, mods) do
       {:scroll, fun} ->
-        {:handled, AgentAccess.update_agentic(state, fun)}
+        {:handled, AgentAccess.update_agent_ui(state, fun)}
 
       :passthrough ->
         {:passthrough, state}
@@ -110,17 +110,17 @@ defmodule Minga.Input.AgentChatNav do
   @ctrl Minga.Port.Protocol.mod_ctrl()
 
   @spec viewer_nav_command(non_neg_integer(), non_neg_integer()) ::
-          {:scroll, (ViewState.t() -> ViewState.t())} | :passthrough
-  defp viewer_nav_command(?j, 0), do: {:scroll, &ViewState.scroll_viewer_down(&1, 1)}
-  defp viewer_nav_command(?k, 0), do: {:scroll, &ViewState.scroll_viewer_up(&1, 1)}
+          {:scroll, (UIState.t() -> UIState.t())} | :passthrough
+  defp viewer_nav_command(?j, 0), do: {:scroll, &UIState.scroll_viewer_down(&1, 1)}
+  defp viewer_nav_command(?k, 0), do: {:scroll, &UIState.scroll_viewer_up(&1, 1)}
 
   defp viewer_nav_command(?d, mods) when band(mods, @ctrl) != 0,
-    do: {:scroll, &ViewState.scroll_viewer_down(&1, 10)}
+    do: {:scroll, &UIState.scroll_viewer_down(&1, 10)}
 
   defp viewer_nav_command(?u, mods) when band(mods, @ctrl) != 0,
-    do: {:scroll, &ViewState.scroll_viewer_up(&1, 10)}
+    do: {:scroll, &UIState.scroll_viewer_up(&1, 10)}
 
-  defp viewer_nav_command(?G, 0), do: {:scroll, &ViewState.scroll_viewer_to_bottom/1}
+  defp viewer_nav_command(?G, 0), do: {:scroll, &UIState.scroll_viewer_to_bottom/1}
   defp viewer_nav_command(_cp, _mods), do: :passthrough
 
   # ── Shared dispatch ─────────────────────────────────────────────────────

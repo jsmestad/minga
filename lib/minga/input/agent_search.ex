@@ -18,9 +18,9 @@ defmodule Minga.Input.AgentSearch do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
   def handle_key(state, cp, _mods) do
-    agentic = AgentAccess.agentic(state)
+    agent_ui = AgentAccess.agent_ui(state)
 
-    if agentic.search && agentic.search.input_active do
+    if agent_ui.search && agent_ui.search.input_active do
       {:handled, AgentCommands.handle_search_key(state, cp)}
     else
       {:passthrough, state}

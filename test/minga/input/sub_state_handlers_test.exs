@@ -11,9 +11,8 @@ defmodule Minga.Input.SubStateHandlersTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.DiffReview, as: DiffReviewData
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -33,7 +32,7 @@ defmodule Minga.Input.SubStateHandlersTest do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
       scroll: Scroll.new(),
@@ -50,7 +49,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       pending_approval: Keyword.get(opts, :pending_approval, nil)
     }
 
-    agentic = %ViewState{
+    agentic = %UIState{
       active: Keyword.get(opts, :agentic_active, false),
       focus: Keyword.get(opts, :focus, :chat)
     }
@@ -70,7 +69,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       tab_bar: tab_bar
     }
   end
@@ -84,7 +83,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true)
 
       state =
-        AgentAccess.update_agentic(state, fn agentic -> ViewState.start_search(agentic, 0) end)
+        AgentAccess.update_agent_ui(state, fn agentic -> UIState.start_search(agentic, 0) end)
 
       {:handled, _new_state} = AgentSearch.handle_key(state, ?h, 0)
     end
@@ -202,7 +201,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
 
       state =
-        AgentAccess.update_agentic(state, fn agentic ->
+        AgentAccess.update_agent_ui(state, fn agentic ->
           %{agentic | preview: %Preview{content: {:diff, review}}}
         end)
 

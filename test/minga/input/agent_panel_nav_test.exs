@@ -2,8 +2,7 @@ defmodule Minga.Input.AgentPanelNavTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -36,7 +35,7 @@ defmodule Minga.Input.AgentPanelNavTest do
     ])
 
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
-    panel = %{PanelState.new() | visible: true, input_focused: false, prompt_buffer: prompt_buf}
+    panel = %{UIState.new() | visible: true, input_focused: false, prompt_buffer: prompt_buf}
 
     agent = %AgentState{
       panel: panel,
@@ -47,13 +46,13 @@ defmodule Minga.Input.AgentPanelNavTest do
       spinner_timer: nil
     }
 
-    agentic = %ViewState{}
+    agentic = %UIState{}
 
     %EditorState{
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       buffers: %{active: nil, list: [], recent: []},
       vim: VimState.new(),
       status_msg: nil,
@@ -160,7 +159,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
-      assert PanelState.input_text(AgentAccess.panel(new_state)) =~ "a"
+      assert UIState.input_text(AgentAccess.panel(new_state)) =~ "a"
     end
 
     test "Ctrl+D scrolls chat while in input mode" do
@@ -202,7 +201,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
-      assert length(PanelState.input_lines(AgentAccess.panel(new_state))) > 1
+      assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1
     end
 
     test "Backspace on empty input is safe" do

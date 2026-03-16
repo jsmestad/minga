@@ -2,7 +2,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Events, as: AgentEvents
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -25,7 +25,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
       vim: VimState.new(),
       keymap_scope: :editor,
       agent: %AgentState{session: session, status: :idle},
-      agentic: ViewState.new(),
+      agent_ui: UIState.new(),
       file_tree: nil
     }
 

@@ -3,13 +3,13 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
   alias Minga.Picker.Item
 
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
-  alias Minga.Editor.State.{Tab, TabBar}
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
@@ -149,7 +149,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       agent: %AgentState{session: session_pid, status: :idle},
-      agentic: %ViewState{active: true, focus: :chat},
+      agent_ui: %UIState{active: true, focus: :chat},
       windows: %Windows{},
       file_tree: nil,
       vim: VimState.new(),
@@ -160,8 +160,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
-    agent = %AgentState{session: session_pid, status: :idle, panel: PanelState.new()}
-    agentic = %ViewState{active: true, focus: :chat}
+    agent = %AgentState{session: session_pid, status: :idle, panel: UIState.new()}
+    agentic = %UIState{active: true, focus: :chat}
 
     %EditorState{
       port_manager: self(),
@@ -172,7 +172,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       vim: VimState.new(),
       keymap_scope: :agent,
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       file_tree: nil
     }
   end
@@ -186,8 +186,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # First agent tab is active
     tb = TabBar.switch_to(tb, tab1.id)
 
-    agent = %AgentState{session: session1, status: :idle, panel: PanelState.new()}
-    agentic = %ViewState{active: true, focus: :chat}
+    agent = %AgentState{session: session1, status: :idle, panel: UIState.new()}
+    agentic = %UIState{active: true, focus: :chat}
 
     %EditorState{
       port_manager: self(),
@@ -198,7 +198,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       vim: VimState.new(),
       keymap_scope: :agent,
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       file_tree: nil
     }
   end
@@ -210,7 +210,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       agent: %AgentState{session: session_pid, status: :idle},
-      agentic: %ViewState{active: true, focus: :chat},
+      agent_ui: %UIState{active: true, focus: :chat},
       windows: %Windows{},
       file_tree: nil,
       vim: VimState.new(),
@@ -223,8 +223,8 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # File tab (1) is active
     tb = TabBar.switch_to(tb, 1)
 
-    agent = %AgentState{panel: PanelState.new()}
-    agentic = %ViewState{}
+    agent = %AgentState{panel: UIState.new()}
+    agentic = %UIState{}
 
     %EditorState{
       port_manager: self(),
@@ -235,7 +235,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
       vim: VimState.new(),
       keymap_scope: :editor,
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       file_tree: nil
     }
   end

@@ -11,10 +11,10 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Agent.Credentials
   alias Minga.Agent.Instructions
   alias Minga.Agent.Memory
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SessionExport
   alias Minga.Agent.Skills
+  alias Minga.Agent.UIState
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
@@ -775,7 +775,7 @@ defmodule Minga.Agent.SlashCommand do
     end
   end
 
-  # Silence the "unused alias" warning; PanelState is used transitively
+  # Silence the "unused alias" warning; UIState is used transitively
   # via AgentCommands which is called from dispatch.
-  _ = @moduledoc && PanelState
+  _ = @moduledoc && UIState
 end

@@ -1,8 +1,7 @@
 defmodule Minga.Input.AgentMouseTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Layout
   alias Minga.Editor.LayoutPreset
@@ -26,7 +25,7 @@ defmodule Minga.Input.AgentMouseTest do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld\nfoo\nbar\nbaz")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
       scroll: Minga.Scroll.new(),
@@ -46,7 +45,7 @@ defmodule Minga.Input.AgentMouseTest do
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
-    agentic = ViewState.new()
+    agentic = UIState.new()
     tab_bar = TabBar.new(Tab.new_file(1, "[no file]"))
 
     win_id = 1
@@ -60,7 +59,7 @@ defmodule Minga.Input.AgentMouseTest do
       focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       tab_bar: tab_bar,
       windows: %Windows{
         tree: {:leaf, win_id},

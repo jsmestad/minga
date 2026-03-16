@@ -2,7 +2,7 @@ defmodule Minga.Editor.LayoutTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -50,7 +50,7 @@ defmodule Minga.Editor.LayoutTest do
   defp with_agent_panel(state) do
     default_panel = %AgentState{} |> Map.get(:panel)
     agent = %AgentState{panel: %{default_panel | visible: true}}
-    agentic = ViewState.new()
+    agentic = UIState.new()
     agent_ctx = %{keymap_scope: :agent}
 
     # Ensure a file tab exists and is active, then add a background agent tab.
@@ -63,7 +63,7 @@ defmodule Minga.Editor.LayoutTest do
     # Keep the file tab active
     tb = TabBar.switch_to(tb, file_tab.id)
 
-    %{state | tab_bar: tb, agent: agent, agentic: agentic}
+    %{state | tab_bar: tb, agent: agent, agent_ui: agentic}
   end
 
   defp with_vsplit(state) do

@@ -14,11 +14,10 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.FileMention
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
   alias Minga.Agent.SlashCommand
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
   alias Minga.Editor.Commands
@@ -208,14 +207,14 @@ defmodule Minga.Editor.Commands.Agent do
     panel = AgentAccess.panel(state)
 
     cond do
-      PanelState.input_empty?(panel) ->
+      UIState.input_empty?(panel) ->
         state
 
       AgentAccess.session(state) == nil ->
         %{state | status_msg: "No agent session, try closing and reopening the panel"}
 
       true ->
-        text = PanelState.prompt_text(panel)
+        text = UIState.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
           state = update_agent(state, &AgentState.clear_input_and_scroll/1)
@@ -244,8 +243,8 @@ defmodule Minga.Editor.Commands.Agent do
          :ok <- Session.send_prompt(AgentAccess.session(state), resolved) do
       state = update_agent(state, &AgentState.clear_input_and_scroll/1)
 
-      AgentAccess.update_agentic(state, fn _ ->
-        ViewState.clear_baselines(AgentAccess.agentic(state))
+      AgentAccess.update_agent_ui(state, fn _ ->
+        UIState.clear_baselines(AgentAccess.agent_ui(state))
       end)
     else
       {:error, :provider_not_ready} ->
@@ -342,7 +341,7 @@ defmodule Minga.Editor.Commands.Agent do
         %AgentState{buffer: AgentAccess.agent(state).buffer}
       end)
 
-    state = AgentAccess.update_agentic(state, fn _a -> ViewState.new() end)
+    state = AgentAccess.update_agent_ui(state, fn _a -> UIState.new() end)
     AgentSession.start_agent_session(state)
   end
 
@@ -526,7 +525,7 @@ defmodule Minga.Editor.Commands.Agent do
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
   #
   # These commands are bound in Keymap.Scope.Agent and dispatched through the
-  # scope resolution system. Focus-aware commands check state.agentic.focus to
+  # scope resolution system. Focus-aware commands check state.agent_ui.focus to
   # route to the correct panel (chat vs file viewer).
 
   # ── Fold / Collapse ────────────────────────────────────────────────────────
@@ -564,7 +563,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
   def scope_next_code_block(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
 
@@ -584,7 +583,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
   def scope_prev_code_block(state) do
-    case AgentAccess.agentic(state).preview do
+    case AgentAccess.agent_ui(state).preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
 
@@ -692,23 +691,23 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Grows the chat panel width."
   @spec scope_grow_panel(state()) :: state()
-  def scope_grow_panel(state), do: update_agentic(state, &ViewState.grow_chat/1)
+  def scope_grow_panel(state), do: update_agent_ui(state, &UIState.grow_chat/1)
 
   @doc "Shrinks the chat panel width."
   @spec scope_shrink_panel(state()) :: state()
-  def scope_shrink_panel(state), do: update_agentic(state, &ViewState.shrink_chat/1)
+  def scope_shrink_panel(state), do: update_agent_ui(state, &UIState.shrink_chat/1)
 
   @doc "Resets the panel split to the default ratio."
   @spec scope_reset_panel(state()) :: state()
-  def scope_reset_panel(state), do: update_agentic(state, &ViewState.reset_split/1)
+  def scope_reset_panel(state), do: update_agent_ui(state, &UIState.reset_split/1)
 
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
   def scope_switch_focus(state) do
-    if AgentAccess.agentic(state).focus == :chat do
-      update_agentic(state, &ViewState.set_focus(&1, :file_viewer))
+    if AgentAccess.agent_ui(state).focus == :chat do
+      update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
     else
-      update_agentic(state, &ViewState.set_focus(&1, :chat))
+      update_agent_ui(state, &UIState.set_focus(&1, :chat))
     end
   end
 
@@ -735,7 +734,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   @doc "Toggles the help overlay."
   @spec scope_toggle_help(state()) :: state()
-  def scope_toggle_help(state), do: update_agentic(state, &ViewState.toggle_help/1)
+  def scope_toggle_help(state), do: update_agent_ui(state, &UIState.toggle_help/1)
 
   # ── Close / dismiss ────────────────────────────────────────────────────────
 
@@ -746,8 +745,8 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Dismisses active overlays or does nothing (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
   def scope_dismiss_or_noop(state) do
-    if AgentAccess.agentic(state).help_visible do
-      update_agentic(state, &ViewState.dismiss_help/1)
+    if AgentAccess.agent_ui(state).help_visible do
+      update_agent_ui(state, &UIState.dismiss_help/1)
     else
       state
     end
@@ -776,7 +775,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Submits if input has text, aborts if agent is active."
   @spec scope_submit_or_abort(state()) :: state()
   def scope_submit_or_abort(state) do
-    if PanelState.prompt_text(AgentAccess.panel(state)) != "" do
+    if UIState.prompt_text(AgentAccess.panel(state)) != "" do
       submit_prompt(state)
     else
       abort_if_active(state)
@@ -787,7 +786,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_input_up(state()) :: state()
   def scope_input_up(state) do
     panel = AgentAccess.panel(state)
-    {line, _col} = PanelState.input_cursor(panel)
+    {line, _col} = UIState.input_cursor(panel)
 
     if line == 0 do
       update_agent(state, &AgentState.history_prev/1)
@@ -800,8 +799,8 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_input_down(state()) :: state()
   def scope_input_down(state) do
     panel = AgentAccess.panel(state)
-    {line, _col} = PanelState.input_cursor(panel)
-    max_line = PanelState.input_line_count(panel) - 1
+    {line, _col} = UIState.input_cursor(panel)
+    max_line = UIState.input_line_count(panel) - 1
 
     if line >= max_line do
       update_agent(state, &AgentState.history_next/1)
@@ -886,12 +885,12 @@ defmodule Minga.Editor.Commands.Agent do
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
-  @spec update_agentic(state(), (ViewState.t() -> ViewState.t())) :: state()
-  defp update_agentic(state, fun), do: AgentAccess.update_agentic(state, fun)
+  @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
+  defp update_agent_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
+    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
   end
 
   @spec panel_height(state()) :: non_neg_integer()
@@ -952,14 +951,14 @@ defmodule Minga.Editor.Commands.Agent do
           Session.add_system_message(AgentAccess.session(state), "Copied #{label} to clipboard")
         end
 
-        update_agentic(state, &ViewState.push_toast(&1, "Copied #{label}", :info))
+        update_agent_ui(state, &UIState.push_toast(&1, "Copied #{label}", :info))
 
       _error ->
         if AgentAccess.session(state) do
           Session.add_system_message(AgentAccess.session(state), "Clipboard write failed", :error)
         end
 
-        update_agentic(state, &ViewState.push_toast(&1, "Clipboard write failed", :error))
+        update_agent_ui(state, &UIState.push_toast(&1, "Clipboard write failed", :error))
     end
 
     state
@@ -1040,7 +1039,7 @@ defmodule Minga.Editor.Commands.Agent do
   # Returns the cached line index from the panel state if available,
   # otherwise recomputes from messages. The cache is populated by
   # sync_buffer in AgentLifecycle on every message update.
-  @spec cached_or_compute_line_index(PanelState.t(), [Message.t()]) ::
+  @spec cached_or_compute_line_index(UIState.t(), [Message.t()]) ::
           [{non_neg_integer(), AgentBufferSync.line_type()}]
   defp cached_or_compute_line_index(panel, messages) do
     case panel.cached_line_index do

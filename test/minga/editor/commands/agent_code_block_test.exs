@@ -1,7 +1,7 @@
 defmodule Minga.Editor.Commands.AgentCodeBlockTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -17,7 +17,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       vim: VimState.new(),
       buffers: %Buffers{},
       agent: %AgentState{},
-      agentic: %ViewState{}
+      agent_ui: %UIState{}
     }
   end
 

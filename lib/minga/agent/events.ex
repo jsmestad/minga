@@ -10,8 +10,8 @@ defmodule Minga.Agent.Events do
   """
 
   alias Minga.Agent.DiffReview
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -106,7 +106,7 @@ defmodule Minga.Agent.Events do
   end
 
   def handle(state, {:tool_ended, "read_file", result, _status}) do
-    case AgentAccess.agentic(state).preview.content do
+    case AgentAccess.agent_ui(state).preview.content do
       {:file, path, _} ->
         state = update_preview(state, &Preview.set_file(&1, path, result))
         {state, [{:render, 16}]}
@@ -125,7 +125,7 @@ defmodule Minga.Agent.Events do
   def handle(state, {:tool_ended, "list_directory", result, _status}) do
     entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
 
-    case AgentAccess.agentic(state).preview.content do
+    case AgentAccess.agent_ui(state).preview.content do
       {:directory, path, _} ->
         state = update_preview(state, &Preview.set_directory(&1, path, entries))
         {state, [{:render, 16}]}
@@ -145,9 +145,9 @@ defmodule Minga.Agent.Events do
 
   def handle(state, {:file_changed, path, before_content, after_content}) do
     state =
-      AgentAccess.update_agentic(state, &ViewState.record_baseline(&1, path, before_content))
+      AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
 
-    baseline = ViewState.get_baseline(AgentAccess.agentic(state), path)
+    baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
     existing_review = existing_diff_for_path(state, path)
 
     review =
@@ -162,7 +162,7 @@ defmodule Minga.Agent.Events do
 
       _ ->
         state = update_preview(state, &Preview.set_diff(&1, review))
-        state = AgentAccess.update_agentic(state, &ViewState.set_focus(&1, :file_viewer))
+        state = AgentAccess.update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
         {state, [:render]}
     end
   end
@@ -194,13 +194,13 @@ defmodule Minga.Agent.Events do
   end
 
   def handle(state, :dismiss_toast) do
-    state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.dismiss_toast/1)
     {state, [{:render, 16}]}
   end
 
   def handle(state, {:context_usage, estimated_tokens, _context_limit}) do
     state =
-      AgentAccess.update_agentic(state, fn a -> %{a | context_estimate: estimated_tokens} end)
+      AgentAccess.update_agent_ui(state, fn a -> %{a | context_estimate: estimated_tokens} end)
 
     {state, [{:render, 16}]}
   end
@@ -213,12 +213,12 @@ defmodule Minga.Agent.Events do
 
   @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
   defp update_preview(state, fun) do
-    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
+    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
   end
 
   @spec existing_diff_for_path(EditorState.t(), String.t()) :: DiffReview.t() | nil
   defp existing_diff_for_path(state, path) do
-    case Preview.diff_review(AgentAccess.agentic(state).preview) do
+    case Preview.diff_review(AgentAccess.agent_ui(state).preview) do
       %DiffReview{path: ^path} = review -> review
       _ -> nil
     end

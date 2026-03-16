@@ -4,7 +4,7 @@ defmodule Minga.Search.Match do
 
   Replaces the raw `{line, col, length}` tuple that previously crossed
   module boundaries between Search, Renderer, ContentHelpers, and
-  Agent.ViewState.
+  Agent.UIState.
   """
 
   @enforce_keys [:line, :col, :length]

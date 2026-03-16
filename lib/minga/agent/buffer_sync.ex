@@ -150,7 +150,7 @@ defmodule Minga.Agent.BufferSync do
   Returns a list where each element corresponds to a buffer line and contains
   `{message_index, line_type}`. The list is indexed by buffer line number.
 
-  Prefer reading the cached index from `PanelState.cached_line_index` when
+  Prefer reading the cached index from `UIState.cached_line_index` when
   available (populated by `sync/3`). This function is the fallback for when
   the cache is empty (e.g., before the first sync).
   """

@@ -2,7 +2,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.LayoutPreset
@@ -26,7 +26,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
 
     window = Window.new(1, buf, 24, 80)
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: false,
       input_focused: false,
       scroll: Minga.Scroll.new(),
@@ -81,7 +81,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       vim: VimState.new(),
       keymap_scope: :editor,
       agent: agent,
-      agentic: Minga.Agent.View.State.new(),
+      agent_ui: UIState.new(),
       tab_bar: tb,
       file_tree: %FileTreeState{}
     }

@@ -16,7 +16,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Search, as: SearchCommands
-
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState

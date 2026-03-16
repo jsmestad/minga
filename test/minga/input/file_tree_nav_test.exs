@@ -3,7 +3,7 @@ defmodule Minga.Input.FileTreeNavTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -34,7 +34,7 @@ defmodule Minga.Input.FileTreeNavTest do
     buf = BufferSync.start_buffer(tree)
 
     agent = %AgentState{}
-    agentic = %ViewState{}
+    agentic = %UIState{}
 
     %EditorState{
       port_manager: self(),
@@ -44,7 +44,7 @@ defmodule Minga.Input.FileTreeNavTest do
       vim: VimState.new(),
       status_msg: nil,
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       completion: nil,
       keymap_scope: :file_tree,
       focus_stack: [Scoped, Minga.Input.ModeFSM]

@@ -14,7 +14,7 @@ defmodule Minga.Editor do
   use GenServer
 
   alias Minga.Agent.Events
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Config.Options
@@ -39,11 +39,9 @@ defmodule Minga.Editor do
   alias Minga.Editor.WarningLog
   alias Minga.Editor.Window
   alias Minga.FileTree
-
   alias Minga.Input
   alias Minga.Mode
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
-
   alias Minga.Port.Manager, as: PortManager
 
   @typedoc "Options for starting the editor."
@@ -619,7 +617,7 @@ defmodule Minga.Editor do
   def handle_info(:dismiss_toast, state) do
     state = dispatch_agent_event(state, :dismiss_toast)
 
-    if ViewState.toast_visible?(AgentAccess.agentic(state)) do
+    if UIState.toast_visible?(AgentAccess.agent_ui(state)) do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
     end
 

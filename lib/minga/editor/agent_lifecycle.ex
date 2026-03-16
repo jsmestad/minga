@@ -12,8 +12,8 @@ defmodule Minga.Editor.AgentLifecycle do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session, as: AgentSession
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
@@ -56,7 +56,7 @@ defmodule Minga.Editor.AgentLifecycle do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
     agent_visible = LayoutPreset.has_agent_chat?(state)
-    preview_empty = AgentAccess.agentic(state).preview.content == :empty
+    preview_empty = AgentAccess.agent_ui(state).preview.content == :empty
 
     if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
       content = BufferServer.content(buffer_pid)
@@ -173,7 +173,7 @@ defmodule Minga.Editor.AgentLifecycle do
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agentic(state, &ViewState.update_preview(&1, fun))
+    AgentAccess.update_agent_ui(state, &UIState.update_preview(&1, fun))
   end
 
   @spec default_agent_label?(String.t()) :: boolean()
