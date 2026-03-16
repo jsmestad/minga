@@ -1,15 +1,16 @@
 (tag_name) @tag
 
 ; (erroneous_end_tag_name) @error ; we do not lint syntax errors
-(comment) @comment @spell
+(comment) @comment
 
 (attribute_name) @tag.attribute
 
-((attribute
-  (quoted_attribute_value) @string)
-  (#set! priority 99))
+(attribute_value)
 
-(text) @none @spell
+((attribute
+  (quoted_attribute_value) @string))
+
+(text)
 
 ((element
   (start_tag

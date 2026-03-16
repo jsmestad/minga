@@ -5,10 +5,7 @@
   "goto"
   "in"
   "local"
-  "global"
 ] @keyword
-
-(label_statement) @label
 
 (break_statement) @keyword
 
@@ -23,13 +20,13 @@
     "while"
     "do"
     "end"
-  ] @repeat)
+  ] @keyword.repeat)
 
 (repeat_statement
   [
     "repeat"
     "until"
-  ] @repeat)
+  ] @keyword.repeat)
 
 (if_statement
   [
@@ -38,27 +35,27 @@
     "else"
     "then"
     "end"
-  ] @conditional)
+  ] @keyword.conditional)
 
 (elseif_statement
   [
     "elseif"
     "then"
     "end"
-  ] @conditional)
+  ] @keyword.conditional)
 
 (else_statement
   [
     "else"
     "end"
-  ] @conditional)
+  ] @keyword.conditional)
 
 (for_statement
   [
     "for"
     "do"
     "end"
-  ] @repeat)
+  ] @keyword.repeat)
 
 (function_declaration
   [
@@ -91,6 +88,7 @@
 [
   ";"
   ":"
+  "::"
   ","
   "."
 ] @punctuation.delimiter
@@ -108,8 +106,17 @@
 ; Variables
 (identifier) @variable
 
+((identifier) @constant.builtin
+  (#eq? @constant.builtin "_VERSION"))
+
 ((identifier) @variable.builtin
   (#eq? @variable.builtin "self"))
+
+((identifier) @module.builtin
+  (#any-of? @module.builtin "_G" "debug" "io" "jit" "math" "os" "package" "string" "table" "utf8"))
+
+((identifier) @keyword.coroutine
+  (#eq? @keyword.coroutine "coroutine"))
 
 (variable_list
   (attribute
@@ -117,11 +124,16 @@
     (identifier) @attribute
     ">" @punctuation.bracket))
 
+; Labels
+(label_statement
+  (identifier) @label)
+
+(goto_statement
+  (identifier) @label)
+
 ; Constants
 ((identifier) @constant
   (#match? @constant "^[A-Z][A-Z_0-9]*$"))
-
-(vararg_expression) @constant
 
 (nil) @constant.builtin
 
@@ -132,10 +144,10 @@
 
 ; Tables
 (field
-  name: (identifier) @field)
+  name: (identifier) @property)
 
 (dot_index_expression
-  field: (identifier) @field)
+  field: (identifier) @variable.member)
 
 (table_constructor
   [
@@ -145,7 +157,9 @@
 
 ; Functions
 (parameters
-  (identifier) @parameter)
+  (identifier) @variable.parameter)
+
+(vararg_expression) @variable.parameter.builtin
 
 (function_declaration
   name: [
@@ -156,7 +170,7 @@
 
 (function_declaration
   name: (method_index_expression
-    method: (identifier) @method))
+    method: (identifier) @function.method))
 
 (assignment_statement
   (variable_list
@@ -181,7 +195,7 @@
     (dot_index_expression
       field: (identifier) @function.call)
     (method_index_expression
-      method: (identifier) @method.call)
+      method: (identifier) @function.method.call)
   ])
 
 (function_call
@@ -189,16 +203,47 @@
   (#any-of? @function.builtin
     ; built-in functions in Lua 5.1
     "assert" "collectgarbage" "dofile" "error" "getfenv" "getmetatable" "ipairs" "load" "loadfile"
-    "loadstring" "module" "next" "pairs" "pcall" "print" "rawequal" "rawget" "rawset" "require"
-    "select" "setfenv" "setmetatable" "tonumber" "tostring" "type" "unpack" "xpcall"))
+    "loadstring" "module" "next" "pairs" "pcall" "print" "rawequal" "rawget" "rawlen" "rawset"
+    "require" "select" "setfenv" "setmetatable" "tonumber" "tostring" "type" "unpack" "xpcall"
+    "__add" "__band" "__bnot" "__bor" "__bxor" "__call" "__concat" "__div" "__eq" "__gc" "__idiv"
+    "__index" "__le" "__len" "__lt" "__metatable" "__mod" "__mul" "__name" "__newindex" "__pairs"
+    "__pow" "__shl" "__shr" "__sub" "__tostring" "__unm"))
 
 ; Others
 (comment) @comment
 
-(hash_bang_line) @preproc
+((comment) @comment.documentation
+  (#match? @comment.documentation "^[-][-][-]"))
+
+((comment) @comment.documentation
+  (#match? @comment.documentation "^[-][-]([ \t]?)@"))
+
+(hash_bang_line) @keyword.directive
 
 (number) @number
 
 (string) @string
 
 (escape_sequence) @string.escape
+
+; string.match("123", "%d+")
+(function_call
+  (dot_index_expression
+    field: (identifier) @_method
+    (#any-of? @_method "find" "match" "gmatch" "gsub"))
+  arguments: (arguments
+    .
+    (_)
+    .
+    (string
+      content: (string_content) @string.regexp)))
+
+;("123"):match("%d+")
+(function_call
+  (method_index_expression
+    method: (identifier) @_method
+    (#any-of? @_method "find" "match" "gmatch" "gsub"))
+  arguments: (arguments
+    .
+    (string
+      content: (string_content) @string.regexp)))

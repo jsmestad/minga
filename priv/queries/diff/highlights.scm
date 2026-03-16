@@ -1,4 +1,4 @@
-(comment) @comment @spell
+(comment) @comment
 
 [
   (addition)
@@ -32,8 +32,7 @@
   "--"
   "---"
   "----"
-] @punctuation.special
-  (#set! priority 95))
+] @punctuation.special)
 
 [
   (binary_change)

@@ -263,13 +263,30 @@ defmodule Minga.Theme.Catppuccin do
       # ── Preprocessor ───────────────────────────────────────────────────
       "preproc" => [fg: p.pink, bold: true],
 
-      # ── Text / markup ──────────────────────────────────────────────────
-      "text.title" => [fg: p.red, bold: true],
-      "text.strong" => [fg: p.peach, bold: true],
-      "text.emphasis" => [fg: p.maroon, italic: true],
-      "text.literal" => [fg: p.green],
-      "text.uri" => [fg: p.rosewater, underline: true],
-      "text.reference" => [fg: p.blue],
+      # ── Markup (nvim-treesitter / tree-sitter standard) ────────────────
+      "markup.heading" => [fg: p.red, bold: true],
+      "markup.heading.1" => [fg: p.red, bold: true],
+      "markup.heading.2" => [fg: p.peach, bold: true],
+      "markup.heading.3" => [fg: p.yellow, bold: true],
+      "markup.heading.4" => [fg: p.green, bold: true],
+      "markup.heading.5" => [fg: p.blue, bold: true],
+      "markup.heading.6" => [fg: p.mauve, bold: true],
+      "markup.bold" => [fg: p.peach, bold: true],
+      "markup.strong" => [fg: p.peach, bold: true],
+      "markup.italic" => [fg: p.maroon, italic: true],
+      "markup.strikethrough" => [fg: p.overlay0, strikethrough: true],
+      "markup.raw" => [fg: p.green],
+      "markup.raw.block" => [fg: p.green],
+      "markup.raw.inline" => [fg: p.green],
+      "markup.link" => [fg: p.rosewater],
+      "markup.link.url" => [fg: p.rosewater, underline: true],
+      "markup.link.label" => [fg: p.blue],
+      "markup.list" => [fg: p.red],
+      "markup.list.numbered" => [fg: p.red],
+      "markup.list.unnumbered" => [fg: p.red],
+      "markup.list.checked" => [fg: p.green],
+      "markup.list.unchecked" => [fg: p.overlay0],
+      "markup.quote" => [fg: p.overlay1, italic: true],
 
       # ── CSS-specific ───────────────────────────────────────────────────
       "charset" => [fg: p.mauve, bold: true],

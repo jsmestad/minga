@@ -589,18 +589,18 @@ defmodule Minga.Theme do
       "punctuation.delimiter" => [fg: dim],
       # Heading markers (#), list markers (-, *, +, 1.)
       "punctuation.special" => [fg: dim],
-      # Link text gets link_fg
-      "text.reference" => [fg: agent.link_fg],
-      # URLs get dimmed
-      "text.uri" => [fg: dim],
-      # Per-level heading colors (from level-specific tree-sitter captures)
-      "text.title" => [fg: agent.heading1_fg, bold: true],
-      "text.title.h1" => [fg: agent.heading1_fg, bold: true],
-      "text.title.h2" => [fg: agent.heading2_fg, bold: true],
-      "text.title.h3" => [fg: agent.heading3_fg, bold: true],
-      "text.title.h4" => [fg: agent.heading3_fg],
-      "text.title.h5" => [fg: agent.heading3_fg],
-      "text.title.h6" => [fg: agent.heading3_fg]
+      # Link text and URLs (markup.* standard names)
+      "markup.link.label" => [fg: agent.link_fg],
+      "markup.link.url" => [fg: dim],
+      "markup.link" => [fg: dim],
+      # Per-level heading colors (markup.heading.* from nvim-treesitter)
+      "markup.heading" => [fg: agent.heading1_fg, bold: true],
+      "markup.heading.1" => [fg: agent.heading1_fg, bold: true],
+      "markup.heading.2" => [fg: agent.heading2_fg, bold: true],
+      "markup.heading.3" => [fg: agent.heading3_fg, bold: true],
+      "markup.heading.4" => [fg: agent.heading3_fg],
+      "markup.heading.5" => [fg: agent.heading3_fg],
+      "markup.heading.6" => [fg: agent.heading3_fg]
     })
   end
 

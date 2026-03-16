@@ -32,7 +32,7 @@
 
 (jsx_opening_element
   ((identifier) @tag
-    (#lua-match? @tag "^[A-Z]")))
+    (#match? @tag "^[A-Z]")))
 
 ; Handle the dot operator effectively - <My.Component>
 (jsx_opening_element
@@ -42,7 +42,7 @@
 
 (jsx_closing_element
   ((identifier) @tag
-    (#lua-match? @tag "^[A-Z]")))
+    (#match? @tag "^[A-Z]")))
 
 ; Handle the dot operator effectively - </My.Component>
 (jsx_closing_element
@@ -52,7 +52,7 @@
 
 (jsx_self_closing_element
   ((identifier) @tag
-    (#lua-match? @tag "^[A-Z]")))
+    (#match? @tag "^[A-Z]")))
 
 ; Handle the dot operator effectively - <My.Component />
 (jsx_self_closing_element
@@ -62,7 +62,7 @@
 
 (html_character_reference) @tag
 
-(jsx_text) @none @spell
+(jsx_text)
 
 (html_character_reference) @character.special
 

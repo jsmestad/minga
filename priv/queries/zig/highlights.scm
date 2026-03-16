@@ -1,19 +1,19 @@
 ; Variables
-
 (identifier) @variable
 
 ; Parameters
-
 (parameter
   name: (identifier) @variable.parameter)
 
-; Types
+(payload
+  (identifier) @variable.parameter)
 
+; Types
 (parameter
   type: (identifier) @type)
 
 ((identifier) @type
-  (#lua-match? @type "^[A-Z_][a-zA-Z0-9_]*"))
+  (#match? @type "^[A-Z_][a-zA-Z0-9_]*"))
 
 (variable_declaration
   (identifier) @type
@@ -31,9 +31,8 @@
 ] @type.builtin
 
 ; Constants
-
 ((identifier) @constant
-  (#lua-match? @constant "^[A-Z][A-Z_0-9]+$"))
+  (#match? @constant "^[A-Z][A-Z_0-9]+$"))
 
 [
   "null"
@@ -50,13 +49,13 @@
     type: (identifier) @constant))
 
 ; Labels
+(block_label
+  (identifier) @label)
 
-(block_label (identifier) @label)
-
-(break_label (identifier) @label)
+(break_label
+  (identifier) @label)
 
 ; Fields
-
 (field_initializer
   .
   (identifier) @variable.member)
@@ -70,12 +69,11 @@
 
 (initializer_list
   (assignment_expression
-      left: (field_expression
-              .
-              member: (identifier) @variable.member)))
+    left: (field_expression
+      .
+      member: (identifier) @variable.member)))
 
 ; Functions
-
 (builtin_identifier) @function.builtin
 
 (call_expression
@@ -89,7 +87,6 @@
   name: (identifier) @function)
 
 ; Modules
-
 (variable_declaration
   (identifier) @module
   (builtin_function
@@ -97,7 +94,6 @@
     (#any-of? @keyword.import "@import" "@cImport")))
 
 ; Builtins
-
 [
   "c"
   "..."
@@ -110,7 +106,6 @@
   (identifier) @variable.builtin)
 
 ; Keywords
-
 [
   "asm"
   "defer"
@@ -187,7 +182,6 @@
 ] @keyword.modifier
 
 ; Operator
-
 [
   "="
   "*="
@@ -218,7 +212,6 @@
   ">="
   "<="
   "<"
-  "&"
   "^"
   "|"
   "<<"
@@ -227,7 +220,6 @@
   "+"
   "++"
   "+%"
-  "-%"
   "+|"
   "-|"
   "*"
@@ -244,7 +236,6 @@
 ] @operator
 
 ; Literals
-
 (character) @character
 
 ([
@@ -262,7 +253,6 @@
 (escape_sequence) @string.escape
 
 ; Punctuation
-
 [
   "["
   "]"
@@ -281,11 +271,11 @@
   "->"
 ] @punctuation.delimiter
 
-(payload "|" @punctuation.bracket)
+(payload
+  "|" @punctuation.bracket)
 
 ; Comments
-
-(comment) @comment @spell
+(comment) @comment
 
 ((comment) @comment.documentation
-  (#lua-match? @comment.documentation "^//!"))
+  (#match? @comment.documentation "^//!"))
