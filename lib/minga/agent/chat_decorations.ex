@@ -106,13 +106,6 @@ defmodule Minga.Agent.ChatDecorations do
         priority: 10
       )
 
-    {_id, decs} =
-      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [bg: theme.header_bg],
-        priority: -20,
-        group: :chat_bg
-      )
-
     # Spinner as EOL virtual text when streaming (updates on each sync call)
     decs =
       if streaming do
@@ -414,13 +407,6 @@ defmodule Minga.Agent.ChatDecorations do
         placement: :above,
         render: fn _w -> [{"▎ You", [fg: theme.user_border, bold: true, bg: theme.header_bg]}] end,
         priority: 10
-      )
-
-    {_id, decs} =
-      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [bg: theme.header_bg],
-        priority: -20,
-        group: :chat_bg
       )
 
     # Colored border prefix on each content line

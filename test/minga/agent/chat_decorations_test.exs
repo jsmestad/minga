@@ -9,7 +9,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
   end
 
   describe "build_decorations/3" do
-    test "user message gets header block and background highlight" do
+    test "user message gets header block decoration" do
       decs = Decorations.new()
       messages = [{:user, "hello world"}]
       offsets = [{0, 0, 3}]
@@ -17,10 +17,9 @@ defmodule Minga.Agent.ChatDecorationsTest do
       result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())
 
       assert Decorations.has_block_decorations?(result)
-      assert Decorations.highlight_count(result) > 0
     end
 
-    test "assistant message gets header block and background highlight" do
+    test "assistant message gets header block decoration" do
       decs = Decorations.new()
       messages = [{:assistant, "I can help with that."}]
       offsets = [{0, 0, 3}]
@@ -28,7 +27,6 @@ defmodule Minga.Agent.ChatDecorationsTest do
       result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())
 
       assert Decorations.has_block_decorations?(result)
-      assert Decorations.highlight_count(result) > 0
     end
 
     test "collapsed thinking gets fold region" do
