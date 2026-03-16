@@ -387,7 +387,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
-    update_agent_ui(state, &UIState.scroll_up(&1, amount))
+    state = update_agent_ui(state, &UIState.scroll_up(&1, amount))
+    scroll_agent_chat_window(state, -amount)
   end
 
   @doc "Scrolls the chat panel down by half the panel height."
@@ -398,7 +399,8 @@ defmodule Minga.Editor.Commands.Agent do
 
   defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
-    update_agent_ui(state, &UIState.scroll_down(&1, amount))
+    state = update_agent_ui(state, &UIState.scroll_down(&1, amount))
+    scroll_agent_chat_window(state, amount)
   end
 
   @doc "Handles a character input in the agent prompt."
@@ -1044,6 +1046,10 @@ defmodule Minga.Editor.Commands.Agent do
       cached -> cached
     end
   end
+
+  # Delegates to EditorState shared helper.
+  defp scroll_agent_chat_window(state, delta),
+    do: EditorState.scroll_agent_chat_window(state, delta)
 
   # Maps command name atoms to their implementing function names.
   # All agent commands work without a buffer.

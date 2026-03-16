@@ -410,7 +410,7 @@ defmodule Minga.Mode.Normal do
     {:execute, :word_forward, state}
   end
 
-  def handle_key({?b, 0}, state) do
+  def handle_key({?b, 0}, %ModeState{pending_z: false} = state) do
     {:execute, :word_backward, state}
   end
 
@@ -586,6 +586,21 @@ defmodule Minga.Mode.Normal do
     {:execute, :fold_open_all, %{state | pending_z: false}}
   end
 
+  # zz — center viewport on cursor
+  def handle_key({?z, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :scroll_center, %{state | pending_z: false}}
+  end
+
+  # zt — scroll cursor to top
+  def handle_key({?t, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :scroll_cursor_top, %{state | pending_z: false}}
+  end
+
+  # zb — scroll cursor to bottom
+  def handle_key({?b, 0}, %ModeState{pending_z: true} = state) do
+    {:execute, :scroll_cursor_bottom, %{state | pending_z: false}}
+  end
+
   # Unknown z{key} — cancel
   def handle_key(_key, %ModeState{pending_z: true} = state) do
     {:continue, %{state | pending_z: false}}
@@ -700,6 +715,16 @@ defmodule Minga.Mode.Normal do
   # Ctrl+U → half-page up
   def handle_key({?u, mods}, state) when band(mods, @ctrl) != 0 do
     {:execute, :half_page_up, state}
+  end
+
+  # Ctrl+E → scroll viewport down one line
+  def handle_key({?e, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :scroll_down_line, state}
+  end
+
+  # Ctrl+Y → scroll viewport up one line
+  def handle_key({?y, mods}, state) when band(mods, @ctrl) != 0 do
+    {:execute, :scroll_up_line, state}
   end
 
   # Ctrl+F → full page down

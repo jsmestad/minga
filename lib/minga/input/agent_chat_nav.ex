@@ -179,8 +179,24 @@ defmodule Minga.Input.AgentChatNav do
 
   @spec sync_scroll_to_cursor(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp sync_scroll_to_cursor(state, cursor_line) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      %{ui | scroll: %{ui.scroll | offset: cursor_line, pinned: false}}
-    end)
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        %{ui | scroll: %{ui.scroll | offset: cursor_line, pinned: false}}
+      end)
+
+    # Also unpin the agent chat window so the render pipeline doesn't
+    # snap the viewport back to the bottom on the next frame.
+    unpin_agent_chat_window(state)
+  end
+
+  @spec unpin_agent_chat_window(EditorState.t()) :: EditorState.t()
+  defp unpin_agent_chat_window(state) do
+    case EditorState.find_agent_chat_window(state) do
+      nil ->
+        state
+
+      {win_id, _window} ->
+        EditorState.update_window(state, win_id, fn w -> %{w | pinned: false} end)
+    end
   end
 end

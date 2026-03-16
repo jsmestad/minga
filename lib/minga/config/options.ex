@@ -20,6 +20,7 @@ defmodule Minga.Config.Options do
   | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none`   | `:hybrid` |
   | `:autopair`     | boolean                                        | `true`    |
   | `:scroll_margin`| non-negative integer                           | `5`       |
+  | `:scroll_lines` | positive integer                               | `1`       |
   | `:theme`        | theme name atom (see `Minga.Theme.available/0`) | `:doom_one`|
   | `:indent_with`  | `:spaces` or `:tabs`                            | `:spaces`  |
   | `:trim_trailing_whitespace` | boolean                             | `false`    |
@@ -80,6 +81,7 @@ defmodule Minga.Config.Options do
           | :line_numbers
           | :autopair
           | :scroll_margin
+          | :scroll_lines
           | :theme
           | :indent_with
           | :trim_trailing_whitespace
@@ -164,6 +166,7 @@ defmodule Minga.Config.Options do
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
     {:autopair, :boolean, true},
     {:scroll_margin, :non_neg_integer, 5},
+    {:scroll_lines, :pos_integer, 1},
     {:theme, :theme_atom, :doom_one},
     {:indent_with, {:enum, [:spaces, :tabs]}, :spaces},
     {:trim_trailing_whitespace, :boolean, false},

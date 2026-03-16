@@ -36,6 +36,12 @@ defmodule Minga.Editor.MouseMultiClickTest do
 
   defp state(editor), do: :sys.get_state(editor)
 
+  defp active_window_viewport(editor) do
+    s = state(editor)
+    win = Map.get(s.windows.map, s.windows.active)
+    win.viewport
+  end
+
   describe "double-click word selection" do
     test "double-click selects word under cursor" do
       {editor, buffer} = start_editor("hello world foo")
@@ -152,8 +158,8 @@ defmodule Minga.Editor.MouseMultiClickTest do
 
       send_mouse(editor, 0, 0, :wheel_right, :press)
 
-      s = state(editor)
-      assert s.viewport.left == 6
+      vp = active_window_viewport(editor)
+      assert vp.left == 6
     end
 
     test "wheel_left shifts viewport left offset back" do
@@ -165,16 +171,16 @@ defmodule Minga.Editor.MouseMultiClickTest do
       send_mouse(editor, 0, 0, :wheel_right, :press)
       send_mouse(editor, 0, 0, :wheel_left, :press)
 
-      s = state(editor)
-      assert s.viewport.left == 0
+      vp = active_window_viewport(editor)
+      assert vp.left == 0
     end
 
     test "wheel_left doesn't go negative" do
       {editor, _buffer} = start_editor("hello")
       send_mouse(editor, 0, 0, :wheel_left, :press)
 
-      s = state(editor)
-      assert s.viewport.left == 0
+      vp = active_window_viewport(editor)
+      assert vp.left == 0
     end
   end
 

@@ -172,10 +172,14 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     # Cursor: active window reads live from buffer; inactive uses stored
     {cursor_line, cursor_byte_col} = window_cursor(window, is_active)
 
-    # Viewport from Layout content rect
+    # Use the window's persistent viewport, updating dimensions from Layout.
+    # This preserves the scroll position (viewport.top) across frames so that
+    # Ctrl-e/y, zz/zt/zb, and mouse wheel scroll actually persist.
+    # scroll_to_cursor only adjusts top when the cursor moves off-screen.
     wrap_on = wrap_enabled?(window.buffer)
     fold_map = window.fold_map
-    viewport = Viewport.new(content_height, content_width, 0)
+    %Viewport{} = win_vp = window.viewport
+    viewport = %{win_vp | rows: content_height, cols: content_width, reserved: 0}
 
     # When folds are active, scroll in visible-line coordinates.
     # The cursor's buffer line must be mapped to visible-line space
@@ -207,23 +211,18 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     line_count_approx = BufferServer.line_count(window.buffer)
     decorations = fetch_decorations(window.buffer)
 
-    visible_line_map =
-      case DisplayMap.compute(
-             fold_map,
-             decorations,
-             first_line,
-             visible_rows,
-             line_count_approx,
-             content_width
-           ) do
-        nil ->
-          # No decoration folds or virtual lines. Use the existing VisibleLines
-          # for per-window folds (or nil for the no-fold fast path).
-          VisibleLines.compute(fold_map, first_line, visible_rows, line_count_approx)
-
-        %DisplayMap{} = dm ->
-          DisplayMap.to_visible_line_map(dm)
-      end
+    # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
+    # If decorations push the cursor off-screen, adjust first_line and recompute.
+    {first_line, visible_line_map} =
+      compute_display_map_with_cursor_check(
+        fold_map,
+        decorations,
+        first_line,
+        visible_rows,
+        line_count_approx,
+        content_width,
+        cursor_line
+      )
 
     # Fetch buffer data: need to cover all visible buffer lines
     {fetch_first, fetch_count} =
@@ -374,6 +373,138 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
       Enum.at(lines, index)
     else
       ""
+    end
+  end
+
+  # Two-pass display map computation with cursor visibility check.
+  #
+  # Pass 1: compute the DisplayMap from the coarse first_line.
+  # Pass 2: if the cursor isn't visible in the DisplayMap (decorations
+  # pushed it off-screen), adjust first_line and recompute. Caps at 2
+  # adjustment iterations to avoid infinite loops.
+  @spec compute_display_map_with_cursor_check(
+          FoldMap.t(),
+          Decorations.t(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), [term()] | nil}
+  defp compute_display_map_with_cursor_check(
+         fold_map,
+         decorations,
+         first_line,
+         visible_rows,
+         total_lines,
+         content_width,
+         cursor_line
+       ) do
+    dm =
+      DisplayMap.compute(
+        fold_map,
+        decorations,
+        first_line,
+        visible_rows,
+        total_lines,
+        content_width
+      )
+
+    resolve_display_map(
+      dm,
+      fold_map,
+      decorations,
+      first_line,
+      visible_rows,
+      total_lines,
+      content_width,
+      cursor_line
+    )
+  end
+
+  # No decorations: fast path.
+  defp resolve_display_map(
+         nil,
+         fold_map,
+         _decs,
+         first_line,
+         visible_rows,
+         total_lines,
+         _cw,
+         _cursor
+       ) do
+    vlm = VisibleLines.compute(fold_map, first_line, visible_rows, total_lines)
+    {first_line, vlm}
+  end
+
+  # DisplayMap exists: check cursor visibility and adjust if needed.
+  defp resolve_display_map(
+         %DisplayMap{} = dm,
+         fold_map,
+         decorations,
+         first_line,
+         visible_rows,
+         total_lines,
+         content_width,
+         cursor_line
+       ) do
+    case DisplayMap.display_row_for_buf_line(dm, cursor_line) do
+      row when is_integer(row) and row >= 0 and row < visible_rows ->
+        {first_line, DisplayMap.to_visible_line_map(dm)}
+
+      _ ->
+        adjusted = adjust_first_line_for_cursor(first_line, cursor_line, visible_rows)
+
+        resolve_adjusted_display_map(
+          fold_map,
+          decorations,
+          adjusted,
+          visible_rows,
+          total_lines,
+          content_width
+        )
+    end
+  end
+
+  defp resolve_adjusted_display_map(
+         fold_map,
+         decorations,
+         adjusted,
+         visible_rows,
+         total_lines,
+         content_width
+       ) do
+    case DisplayMap.compute(
+           fold_map,
+           decorations,
+           adjusted,
+           visible_rows,
+           total_lines,
+           content_width
+         ) do
+      nil ->
+        vlm = VisibleLines.compute(fold_map, adjusted, visible_rows, total_lines)
+        {adjusted, vlm}
+
+      %DisplayMap{} = dm2 ->
+        {adjusted, DisplayMap.to_visible_line_map(dm2)}
+    end
+  end
+
+  # When the cursor is below the visible area, increase first_line.
+  # When above, decrease it. The adjustment is bounded to avoid overshooting.
+  @spec adjust_first_line_for_cursor(
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: non_neg_integer()
+  defp adjust_first_line_for_cursor(first_line, cursor_line, visible_rows) do
+    if cursor_line >= first_line + visible_rows do
+      # Cursor is below: move first_line down so cursor is near bottom
+      max(cursor_line - visible_rows + 1, 0)
+    else
+      # Cursor is above: move first_line up so cursor is near top
+      max(cursor_line, 0)
     end
   end
 end

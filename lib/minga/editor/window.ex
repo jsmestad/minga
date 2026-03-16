@@ -57,6 +57,7 @@ defmodule Minga.Editor.Window do
           buffer: pid(),
           viewport: Viewport.t(),
           cursor: Document.position(),
+          pinned: boolean(),
           fold_map: FoldMap.t(),
           fold_ranges: [FoldRange.t()],
           textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
@@ -79,6 +80,7 @@ defmodule Minga.Editor.Window do
     :buffer,
     :viewport,
     cursor: {0, 0},
+    pinned: false,
     fold_map: %FoldMap{folds: []},
     fold_ranges: [],
     textobject_positions: %{},
@@ -131,6 +133,7 @@ defmodule Minga.Editor.Window do
       content: Content.agent_chat(agent_buffer),
       buffer: agent_buffer,
       viewport: Viewport.new(rows, cols),
+      pinned: true,
       dirty_lines: :all
     }
   end
@@ -157,6 +160,28 @@ defmodule Minga.Editor.Window do
     window
     |> invalidate()
     |> Map.put(:viewport, Viewport.new(rows, cols))
+  end
+
+  # ── Scroll helpers ──────────────────────────────────────────────────────────
+
+  @doc """
+  Scrolls the window's viewport by `delta` lines and updates pinned state.
+
+  Scrolling up always unpins. Scrolling down re-pins only when the viewport
+  reaches the bottom. `total_lines` is the buffer's line count.
+
+  Returns the updated window.
+  """
+  @spec scroll_viewport(t(), integer(), non_neg_integer()) :: t()
+  def scroll_viewport(%__MODULE__{} = window, 0, _total_lines), do: window
+
+  def scroll_viewport(%__MODULE__{viewport: vp} = window, delta, total_lines) do
+    visible = Viewport.content_rows(vp)
+    max_top = max(total_lines - visible, 0)
+    new_top = (vp.top + delta) |> max(0) |> min(max_top)
+    pinned = delta > 0 and new_top >= max_top
+
+    %{window | viewport: %{vp | top: new_top}, pinned: pinned}
   end
 
   # ── Popup queries ──────────────────────────────────────────────────────────
