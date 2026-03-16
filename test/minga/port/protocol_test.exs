@@ -697,4 +697,40 @@ defmodule Minga.Port.ProtocolTest do
       assert length(Enum.uniq(values)) == length(roles)
     end
   end
+
+  # ── Scroll region command ──
+
+  describe "scroll_region" do
+    test "encode_scroll_region produces 7-byte binary with correct layout" do
+      result = Protocol.encode_scroll_region(2, 20, 1)
+      assert <<0x1B, 2::16, 20::16, 1::16-signed>> = result
+      assert byte_size(result) == 7
+    end
+
+    test "encode_scroll_region with negative delta (scroll down)" do
+      result = Protocol.encode_scroll_region(5, 30, -3)
+      assert <<0x1B, 5::16, 30::16, delta::16-signed>> = result
+      assert delta == -3
+    end
+
+    test "encode_scroll_region with zero delta" do
+      result = Protocol.encode_scroll_region(0, 10, 0)
+      assert <<0x1B, 0::16, 10::16, 0::16-signed>> = result
+    end
+
+    test "encode_scroll_region round-trips through decode_command" do
+      encoded = Protocol.encode_scroll_region(3, 22, 2)
+      assert {:ok, {:scroll_region, 3, 22, 2}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode_scroll_region round-trips with negative delta" do
+      encoded = Protocol.encode_scroll_region(1, 19, -1)
+      assert {:ok, {:scroll_region, 1, 19, -1}} = Protocol.decode_command(encoded)
+    end
+
+    test "encode_scroll_region with large row values" do
+      encoded = Protocol.encode_scroll_region(0, 65_535, 3)
+      assert {:ok, {:scroll_region, 0, 65_535, 3}} = Protocol.decode_command(encoded)
+    end
+  end
 end

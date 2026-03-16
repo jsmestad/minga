@@ -38,6 +38,7 @@ pub const OP_SET_WINDOW_BG: u8 = 0x17;
 pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
+pub const OP_SCROLL_REGION: u8 = 0x1B;
 
 // Config commands (BEAM → frontend, TUI ignores)
 pub const OP_SET_FONT: u8 = 0x50;
@@ -228,6 +229,8 @@ pub const RenderCommand = union(enum) {
     clear_region: u16,
     destroy_region: u16,
     set_active_region: u16,
+    // Scroll region (terminal scroll optimization)
+    scroll_region: ScrollRegion,
     // Incremental content sync
     edit_buffer: EditBuffer,
     // Text measurement
@@ -300,6 +303,17 @@ pub const RequestTextobject = struct {
 pub const LoadGrammar = struct {
     name: []const u8,
     path: []const u8,
+};
+
+/// A scroll region command: tells the renderer to use ANSI scroll
+/// region sequences to shift content within a screen row range.
+///
+/// `delta` > 0: scroll up (content moves up, new lines revealed at bottom).
+/// `delta` < 0: scroll down (content moves down, new lines revealed at top).
+pub const ScrollRegion = struct {
+    top_row: u16,
+    bottom_row: u16,
+    delta: i16,
 };
 
 pub const DrawText = struct {
@@ -697,6 +711,15 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 2) return error.Malformed;
             return .{ .set_active_region = std.mem.readInt(u16, rest[0..2], .big) };
         },
+        OP_SCROLL_REGION => {
+            // top_row:2, bottom_row:2, delta:2(signed) = 6 bytes
+            if (rest.len < 6) return error.Malformed;
+            return .{ .scroll_region = .{
+                .top_row = std.mem.readInt(u16, rest[0..2], .big),
+                .bottom_row = std.mem.readInt(u16, rest[2..4], .big),
+                .delta = std.mem.readInt(i16, rest[4..6], .big),
+            } };
+        },
         OP_SET_FONT => {
             // size:2, weight:1, ligatures:1, name_len:2 = 6 bytes after opcode
             if (rest.len < 6) return error.Malformed;
@@ -793,6 +816,7 @@ pub fn commandSize(payload: []const u8) usize {
         OP_CLEAR_REGION => 3, // opcode(1) + id(2)
         OP_DESTROY_REGION => 3, // opcode(1) + id(2)
         OP_SET_ACTIVE_REGION => 3, // opcode(1) + id(2)
+        OP_SCROLL_REGION => 7, // opcode(1) + top_row(2) + bottom_row(2) + delta(2)
         OP_SET_FONT => blk: {
             // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
             if (payload.len < 7) break :blk payload.len;
@@ -1851,4 +1875,93 @@ test "encodeLogMessage buffer too small returns error" {
     var buf: [3]u8 = undefined; // needs at least 4
     const result = encodeLogMessage(&buf, LOG_LEVEL_ERR, "");
     try std.testing.expectError(error.Malformed, result);
+}
+
+// ── Scroll region protocol tests ──────────────────────────────────────────────
+
+test "decode scroll_region with positive delta (scroll up)" {
+    var data: [7]u8 = undefined;
+    data[0] = OP_SCROLL_REGION;
+    std.mem.writeInt(u16, data[1..3], 2, .big); // top_row
+    std.mem.writeInt(u16, data[3..5], 20, .big); // bottom_row
+    std.mem.writeInt(i16, data[5..7], 1, .big); // delta
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .scroll_region => |sr| {
+            try std.testing.expectEqual(@as(u16, 2), sr.top_row);
+            try std.testing.expectEqual(@as(u16, 20), sr.bottom_row);
+            try std.testing.expectEqual(@as(i16, 1), sr.delta);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode scroll_region with negative delta (scroll down)" {
+    var data: [7]u8 = undefined;
+    data[0] = OP_SCROLL_REGION;
+    std.mem.writeInt(u16, data[1..3], 0, .big);
+    std.mem.writeInt(u16, data[3..5], 30, .big);
+    std.mem.writeInt(i16, data[5..7], -3, .big);
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .scroll_region => |sr| {
+            try std.testing.expectEqual(@as(u16, 0), sr.top_row);
+            try std.testing.expectEqual(@as(u16, 30), sr.bottom_row);
+            try std.testing.expectEqual(@as(i16, -3), sr.delta);
+        },
+        else => return error.WrongVariant,
+    }
+}
+
+test "decode scroll_region truncated returns malformed" {
+    const data = [_]u8{ OP_SCROLL_REGION, 0x00, 0x02, 0x00 }; // only 4 bytes, need 7
+    const result = decodeCommand(&data);
+    try std.testing.expectError(error.Malformed, result);
+}
+
+test "commandSize: scroll_region is 7 bytes" {
+    var data: [7]u8 = undefined;
+    data[0] = OP_SCROLL_REGION;
+    std.mem.writeInt(u16, data[1..3], 0, .big);
+    std.mem.writeInt(u16, data[3..5], 20, .big);
+    std.mem.writeInt(i16, data[5..7], 1, .big);
+    try std.testing.expectEqual(@as(usize, 7), commandSize(&data));
+}
+
+test "batch decode: scroll_region + draw_text + batch_end" {
+    var payload: [7 + 19 + 1]u8 = undefined;
+    // scroll_region: top=1, bottom=20, delta=1
+    payload[0] = OP_SCROLL_REGION;
+    std.mem.writeInt(u16, payload[1..3], 1, .big);
+    std.mem.writeInt(u16, payload[3..5], 20, .big);
+    std.mem.writeInt(i16, payload[5..7], 1, .big);
+    // draw_text: row=20, col=0, "hello"
+    payload[7] = OP_DRAW_TEXT;
+    std.mem.writeInt(u16, payload[8..10], 20, .big); // row
+    std.mem.writeInt(u16, payload[10..12], 0, .big); // col
+    payload[12] = 0xFF;
+    payload[13] = 0xFF;
+    payload[14] = 0xFF; // fg
+    payload[15] = 0x00;
+    payload[16] = 0x00;
+    payload[17] = 0x00; // bg
+    payload[18] = 0x00; // attrs
+    std.mem.writeInt(u16, payload[19..21], 5, .big); // text_len
+    @memcpy(payload[21..26], "hello");
+    // batch_end
+    payload[26] = OP_BATCH_END;
+
+    var offset: usize = 0;
+    var cmds: [3]RenderCommand = undefined;
+    var count: usize = 0;
+    while (offset < payload.len) {
+        const remaining = payload[offset..];
+        cmds[count] = try decodeCommand(remaining);
+        count += 1;
+        offset += commandSize(remaining);
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+    try std.testing.expect(cmds[0] == .scroll_region);
+    try std.testing.expect(cmds[1] == .draw_text);
+    try std.testing.expect(cmds[2] == .batch_end);
 }
