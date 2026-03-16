@@ -321,6 +321,12 @@ defmodule Minga.Editor.RenderPipeline.Content do
         %DisplayMap{} = dm -> DisplayMap.to_visible_line_map(dm)
       end
 
+    # Detect scroll/structural invalidation (viewport_top, gutter, line count,
+    # buffer version). The normal buffer path does this in the Scroll stage;
+    # agent chat skips that stage, so we must do it here.
+    buf_version = BufferServer.version(buf)
+    window = Window.detect_invalidation(window, viewport.top, gutter_w, line_count, buf_version)
+
     # Detect context changes to invalidate dirty-line cache
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
@@ -349,7 +355,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     # Snapshot render state so future frames can detect changes.
     # Without this, dirty_lines stays empty and content is never re-rendered.
-    buf_version = BufferServer.version(buf)
+    # buf_version was already fetched above for detect_invalidation.
     last_visible = first_line + length(snapshot.lines) - 1
 
     window =
