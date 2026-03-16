@@ -1,9 +1,8 @@
 defmodule Minga.Agent.SlashCommandTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.PanelState
   alias Minga.Agent.SlashCommand
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
 
@@ -74,12 +73,12 @@ defmodule Minga.Agent.SlashCommandTest do
         agent: %AgentState{
           session: session,
           status: :idle,
-          panel: PanelState.new(),
+          panel: UIState.new(),
           error: nil,
           spinner_timer: nil,
           buffer: nil
         },
-        agentic: ViewState.new(),
+        agent_ui: UIState.new(),
         status_msg: nil,
         buffers: %{active: nil, list: [], active_index: 0}
       }

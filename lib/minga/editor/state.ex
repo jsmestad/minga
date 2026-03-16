@@ -13,7 +13,7 @@ defmodule Minga.Editor.State do
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
   `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
-  `tab_bar_click_regions`, `agent`, `agentic`, `picker_ui`, `whichkey`.
+  `tab_bar_click_regions`, `agent`, `agent_ui`, `picker_ui`, `whichkey`.
 
   ## Composed sub-structs
 
@@ -28,7 +28,7 @@ defmodule Minga.Editor.State do
   """
 
   alias Minga.Agent.Session, as: AgentSession
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Editor.CompletionTrigger
@@ -55,7 +55,6 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
   alias Minga.Log
-
   alias Minga.Mode
   alias Minga.Port.Capabilities
   # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
@@ -117,7 +116,7 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             agent: %AgentState{},
-            agentic: ViewState.new(),
+            agent_ui: UIState.new(),
             dashboard: nil,
             nav_flash: nil,
             last_cursor_line: nil,
@@ -162,7 +161,7 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
-          agentic: ViewState.t(),
+          agent_ui: UIState.t(),
           dashboard: Dashboard.state() | nil,
           nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
@@ -448,7 +447,7 @@ defmodule Minga.Editor.State do
   tab's buffer in-place (like Vim `:e`). When the active tab is an
   agent tab, a new file tab is created and switched to. This matches
   the expected workflow: opening files from the tree or picker reuses
-  the current file tab; opening from the agentic view creates a
+  the current file tab; opening from the agent UI view creates a
   dedicated file tab.
   """
   @spec add_buffer(t(), pid()) :: t()
@@ -518,8 +517,8 @@ defmodule Minga.Editor.State do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # Leave agentic view: reset to editor scope.
-    state = AgentAccess.update_agentic(state, fn _ -> %ViewState{} end)
+    # Leave agent UI view: reset to editor scope.
+    state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
     state = %{state | keymap_scope: :editor, tab_bar: tb}
     state = sync_active_window_buffer(state)
 

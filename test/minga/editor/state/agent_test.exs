@@ -1,13 +1,13 @@
 defmodule Minga.Editor.State.AgentTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State.Agent, as: AgentState
 
   defp new_agent do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
-    %AgentState{panel: %{PanelState.new() | prompt_buffer: prompt_buf}}
+    %AgentState{panel: %{UIState.new() | prompt_buffer: prompt_buf}}
   end
 
   describe "status" do
@@ -107,7 +107,7 @@ defmodule Minga.Editor.State.AgentTest do
         |> AgentState.insert_char("i")
         |> AgentState.delete_char()
 
-      assert PanelState.input_text(agent.panel) == "h"
+      assert UIState.input_text(agent.panel) == "h"
     end
 
     test "clear_input_and_scroll empties input and pins to bottom" do
@@ -116,7 +116,7 @@ defmodule Minga.Editor.State.AgentTest do
         |> AgentState.insert_char("hello")
         |> AgentState.clear_input_and_scroll()
 
-      assert PanelState.input_text(agent.panel) == ""
+      assert UIState.input_text(agent.panel) == ""
       assert agent.panel.scroll.pinned
     end
 

@@ -71,6 +71,15 @@ defmodule Minga.GitTest do
     test "commit returns stub hash", %{root: dir} do
       assert {:ok, "stub000"} = Git.commit(dir, "msg")
     end
+
+    test "current_branch returns default 'main' when not configured", %{root: dir} do
+      assert {:ok, "main"} = Git.current_branch(dir)
+    end
+
+    test "current_branch returns configured branch name", %{root: dir} do
+      GitStub.set_branch(dir, "feat/modeline-git")
+      assert {:ok, "feat/modeline-git"} = Git.current_branch(dir)
+    end
   end
 
   describe "relative_path (pure calculation)" do

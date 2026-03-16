@@ -2,8 +2,7 @@ defmodule Minga.Input.AgentChatNavTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -30,7 +29,7 @@ defmodule Minga.Input.AgentChatNavTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
     {:ok, file_buf} = BufferServer.start_link(content: "file content")
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: true,
       input_focused: Keyword.get(opts, :input_focused, false),
       scroll: Minga.Scroll.new(),
@@ -50,7 +49,7 @@ defmodule Minga.Input.AgentChatNavTest do
       spinner_timer: nil
     }
 
-    agentic = %ViewState{
+    agentic = %UIState{
       active: true,
       focus: Keyword.get(opts, :focus, :chat)
     }
@@ -59,7 +58,7 @@ defmodule Minga.Input.AgentChatNavTest do
       port_manager: self(),
       viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       buffers: %Buffers{active: file_buf, list: [file_buf]},
       vim: VimState.new(),
       status_msg: nil,
@@ -131,7 +130,7 @@ defmodule Minga.Input.AgentChatNavTest do
       # Pin scroll first (simulating streaming auto-scroll)
       state =
         AgentAccess.update_agent(state, fn agent ->
-          %{agent | panel: PanelState.engage_auto_scroll(agent.panel)}
+          %{agent | panel: UIState.engage_auto_scroll(agent.panel)}
         end)
 
       assert AgentAccess.panel(state).scroll.pinned == true
@@ -239,7 +238,7 @@ defmodule Minga.Input.AgentChatNavTest do
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
 
-      preview = AgentAccess.agentic(new_state).preview
+      preview = AgentAccess.agent_ui(new_state).preview
       assert preview.scroll.offset == 1
     end
 
@@ -248,10 +247,10 @@ defmodule Minga.Input.AgentChatNavTest do
 
       # Scroll down first
       {:handled, state} = AgentChatNav.handle_key(state, ?j, 0)
-      assert AgentAccess.agentic(state).preview.scroll.offset == 1
+      assert AgentAccess.agent_ui(state).preview.scroll.offset == 1
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?k, 0)
-      assert AgentAccess.agentic(new_state).preview.scroll.offset == 0
+      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
     end
 
     test "k at offset 0 stays at 0" do
@@ -259,7 +258,7 @@ defmodule Minga.Input.AgentChatNavTest do
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?k, 0)
 
-      assert AgentAccess.agentic(new_state).preview.scroll.offset == 0
+      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
     end
 
     test "Ctrl-D scrolls preview down by 10" do
@@ -267,7 +266,7 @@ defmodule Minga.Input.AgentChatNavTest do
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?d, @ctrl)
 
-      assert AgentAccess.agentic(new_state).preview.scroll.offset == 10
+      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 10
     end
 
     test "Ctrl-U scrolls preview up by 10" do
@@ -275,10 +274,10 @@ defmodule Minga.Input.AgentChatNavTest do
 
       # Scroll down first
       {:handled, state} = AgentChatNav.handle_key(state, ?d, @ctrl)
-      assert AgentAccess.agentic(state).preview.scroll.offset == 10
+      assert AgentAccess.agent_ui(state).preview.scroll.offset == 10
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?u, @ctrl)
-      assert AgentAccess.agentic(new_state).preview.scroll.offset == 0
+      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
     end
 
     test "G pins preview to bottom" do
@@ -286,7 +285,7 @@ defmodule Minga.Input.AgentChatNavTest do
 
       {:handled, new_state} = AgentChatNav.handle_key(state, ?G, 0)
 
-      assert AgentAccess.agentic(new_state).preview.scroll.pinned == true
+      assert AgentAccess.agent_ui(new_state).preview.scroll.pinned == true
     end
 
     test "unbound key passes through" do

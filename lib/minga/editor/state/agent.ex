@@ -6,7 +6,7 @@ defmodule Minga.Editor.State.Agent do
   reach into the nested struct directly.
   """
 
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
 
   @typedoc "Agent status."
   @type status :: :idle | :thinking | :tool_executing | :error | nil
@@ -23,7 +23,7 @@ defmodule Minga.Editor.State.Agent do
           session: pid() | nil,
           session_monitor: reference() | nil,
           status: status(),
-          panel: PanelState.t(),
+          panel: UIState.t(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
@@ -34,7 +34,7 @@ defmodule Minga.Editor.State.Agent do
   defstruct session: nil,
             session_monitor: nil,
             status: nil,
-            panel: PanelState.new(),
+            panel: UIState.new(),
             error: nil,
             spinner_timer: nil,
             buffer: nil,
@@ -115,37 +115,37 @@ defmodule Minga.Editor.State.Agent do
   end
 
   # ── Panel delegation ────────────────────────────────────────────────────────
-  # Thin wrappers that update the nested PanelState so callers avoid
-  # `%{agent | panel: PanelState.foo(agent.panel, ...)}` boilerplate.
+  # Thin wrappers that update the nested UIState so callers avoid
+  # `%{agent | panel: UIState.foo(agent.panel, ...)}` boilerplate.
 
   @doc "Sets whether the agent input is focused."
   @spec focus_input(t(), boolean()) :: t()
   def focus_input(%__MODULE__{} = agent, focused) do
-    %{agent | panel: PanelState.set_input_focused(agent.panel, focused)}
+    %{agent | panel: UIState.set_input_focused(agent.panel, focused)}
   end
 
   @doc "Scrolls the chat to the bottom and re-engages auto-scroll."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.scroll_to_bottom(agent.panel)}
+    %{agent | panel: UIState.scroll_to_bottom(agent.panel)}
   end
 
   @doc "Scrolls the chat to the top. Disengages auto-scroll."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.scroll_to_top(agent.panel)}
+    %{agent | panel: UIState.scroll_to_top(agent.panel)}
   end
 
   @doc "Scrolls the chat up by `amount` lines. Disengages auto-scroll."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{} = agent, amount) do
-    %{agent | panel: PanelState.scroll_up(agent.panel, amount)}
+    %{agent | panel: UIState.scroll_up(agent.panel, amount)}
   end
 
   @doc "Scrolls the chat down by `amount` lines. Disengages auto-scroll."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{} = agent, amount) do
-    %{agent | panel: PanelState.scroll_down(agent.panel, amount)}
+    %{agent | panel: UIState.scroll_down(agent.panel, amount)}
   end
 
   @doc "Sets the scroll offset to an absolute value. Unpins from bottom."
@@ -157,55 +157,55 @@ defmodule Minga.Editor.State.Agent do
   @doc "Scrolls to bottom only if auto-scroll is engaged."
   @spec maybe_auto_scroll(t()) :: t()
   def maybe_auto_scroll(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.maybe_auto_scroll(agent.panel)}
+    %{agent | panel: UIState.maybe_auto_scroll(agent.panel)}
   end
 
   @doc "Re-engages auto-scroll and scrolls to bottom (e.g., new agent turn)."
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.engage_auto_scroll(agent.panel)}
+    %{agent | panel: UIState.engage_auto_scroll(agent.panel)}
   end
 
   @doc "Advances the spinner animation frame."
   @spec tick_spinner(t()) :: t()
   def tick_spinner(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.tick_spinner(agent.panel)}
+    %{agent | panel: UIState.tick_spinner(agent.panel)}
   end
 
   @doc "Inserts a character into the agent input."
   @spec insert_char(t(), String.t()) :: t()
   def insert_char(%__MODULE__{} = agent, char) do
-    %{agent | panel: PanelState.insert_char(agent.panel, char)}
+    %{agent | panel: UIState.insert_char(agent.panel, char)}
   end
 
   @doc "Inserts pasted text into the agent input. Collapses multi-line pastes."
   @spec insert_paste(t(), String.t()) :: t()
   def insert_paste(%__MODULE__{} = agent, text) do
-    %{agent | panel: PanelState.insert_paste(agent.panel, text)}
+    %{agent | panel: UIState.insert_paste(agent.panel, text)}
   end
 
   @doc "Toggles expand/collapse on the paste block at the current cursor line."
   @spec toggle_paste_expand(t()) :: t()
   def toggle_paste_expand(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.toggle_paste_expand(agent.panel)}
+    %{agent | panel: UIState.toggle_paste_expand(agent.panel)}
   end
 
   @doc "Deletes the last character from the agent input."
   @spec delete_char(t()) :: t()
   def delete_char(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.delete_char(agent.panel)}
+    %{agent | panel: UIState.delete_char(agent.panel)}
   end
 
   @doc "Inserts a newline at the cursor position."
   @spec insert_newline(t()) :: t()
   def insert_newline(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.insert_newline(agent.panel)}
+    %{agent | panel: UIState.insert_newline(agent.panel)}
   end
 
   @doc "Moves cursor up in the input. Returns `:at_top` if on the first line."
   @spec move_cursor_up(t()) :: t() | :at_top
   def move_cursor_up(%__MODULE__{} = agent) do
-    case PanelState.move_cursor_up(agent.panel) do
+    case UIState.move_cursor_up(agent.panel) do
       :at_top -> :at_top
       panel -> %{agent | panel: panel}
     end
@@ -214,7 +214,7 @@ defmodule Minga.Editor.State.Agent do
   @doc "Moves cursor down in the input. Returns `:at_bottom` if on the last line."
   @spec move_cursor_down(t()) :: t() | :at_bottom
   def move_cursor_down(%__MODULE__{} = agent) do
-    case PanelState.move_cursor_down(agent.panel) do
+    case UIState.move_cursor_down(agent.panel) do
       :at_bottom -> :at_bottom
       panel -> %{agent | panel: panel}
     end
@@ -223,13 +223,13 @@ defmodule Minga.Editor.State.Agent do
   @doc "Recalls the previous prompt from history."
   @spec history_prev(t()) :: t()
   def history_prev(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.history_prev(agent.panel)}
+    %{agent | panel: UIState.history_prev(agent.panel)}
   end
 
   @doc "Recalls the next prompt from history."
   @spec history_next(t()) :: t()
   def history_next(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.history_next(agent.panel)}
+    %{agent | panel: UIState.history_next(agent.panel)}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────
@@ -249,19 +249,19 @@ defmodule Minga.Editor.State.Agent do
   @doc "Clears the chat display (visual reset, history preserved)."
   @spec clear_display(t(), non_neg_integer()) :: t()
   def clear_display(%__MODULE__{} = agent, message_count) do
-    %{agent | panel: PanelState.clear_display(agent.panel, message_count)}
+    %{agent | panel: UIState.clear_display(agent.panel, message_count)}
   end
 
   @doc "Clears the input and scrolls to the bottom."
   @spec clear_input_and_scroll(t()) :: t()
   def clear_input_and_scroll(%__MODULE__{} = agent) do
-    %{agent | panel: agent.panel |> PanelState.clear_input() |> PanelState.scroll_to_bottom()}
+    %{agent | panel: agent.panel |> UIState.clear_input() |> UIState.scroll_to_bottom()}
   end
 
   @doc "Toggles the panel visibility."
   @spec toggle_panel(t()) :: t()
   def toggle_panel(%__MODULE__{} = agent) do
-    %{agent | panel: PanelState.toggle(agent.panel)}
+    %{agent | panel: UIState.toggle(agent.panel)}
   end
 
   # ── Panel config ────────────────────────────────────────────────────────────

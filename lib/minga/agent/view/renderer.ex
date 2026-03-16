@@ -15,8 +15,8 @@ defmodule Minga.Agent.View.Renderer do
   """
 
   alias Minga.Agent.ModelLimits
-  alias Minga.Agent.PanelState
   alias Minga.Agent.Session
+  alias Minga.Agent.UIState
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -48,12 +48,12 @@ defmodule Minga.Agent.View.Renderer do
 
     alias Minga.Theme
 
-    @enforce_keys [:theme, :agent_status, :panel, :agentic]
+    @enforce_keys [:theme, :agent_status, :panel, :agent_ui]
     defstruct [
       :theme,
       :agent_status,
       :panel,
-      :agentic,
+      :agent_ui,
       messages: [],
       usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
       pending_approval: nil,
@@ -65,7 +65,7 @@ defmodule Minga.Agent.View.Renderer do
             theme: Theme.t(),
             agent_status: atom() | nil,
             panel: panel_data(),
-            agentic: agentic_data(),
+            agent_ui: agent_ui_data(),
             messages: list(),
             usage: map(),
             pending_approval: map() | nil,
@@ -87,16 +87,16 @@ defmodule Minga.Agent.View.Renderer do
             thinking_level: String.t(),
             display_start_index: non_neg_integer(),
             mention_completion: Minga.Agent.FileMention.completion() | nil,
-            pasted_blocks: [PanelState.paste_block()]
+            pasted_blocks: [UIState.paste_block()]
           }
 
     @typedoc "Agentic view fields needed for rendering."
-    @type agentic_data :: %{
+    @type agent_ui_data :: %{
             chat_width_pct: non_neg_integer(),
             help_visible: boolean(),
             focus: atom(),
-            search: Minga.Agent.View.State.search_state() | nil,
-            toast: Minga.Agent.View.State.toast() | nil,
+            search: UIState.search_state() | nil,
+            toast: UIState.toast() | nil,
             context_estimate: non_neg_integer()
           }
   end
@@ -151,15 +151,15 @@ defmodule Minga.Agent.View.Renderer do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused do
-      agentic = AgentAccess.agentic(state)
-      chat_width_pct = agentic.chat_width_pct
+      agent_ui = AgentAccess.agent_ui(state)
+      chat_width_pct = agent_ui.chat_width_pct
       chat_width = max(div(width * chat_width_pct, 100), 20)
       box_width = max(chat_width - 2 * @input_h_margin, 10)
       box_col = col_off + @input_h_margin
       inner_width = input_inner_width(box_width)
 
-      lines = PanelState.input_lines(panel)
-      cursor = PanelState.input_cursor(panel)
+      lines = UIState.input_lines(panel)
+      cursor = UIState.input_cursor(panel)
 
       total_visual = InputWrap.visual_line_count(lines, inner_width)
       visible_lines = max(min(total_visual, @max_input_lines), 1)
@@ -188,7 +188,7 @@ defmodule Minga.Agent.View.Renderer do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
     session = AgentAccess.session(state)
-    agentic = AgentAccess.agentic(state)
+    agent_ui = AgentAccess.agent_ui(state)
 
     messages =
       if session do
@@ -217,8 +217,8 @@ defmodule Minga.Agent.View.Renderer do
       agent_status: agent.status,
       panel: %{
         input_focused: panel.input_focused,
-        input_lines: PanelState.input_lines(panel),
-        input_cursor: PanelState.input_cursor(panel),
+        input_lines: UIState.input_lines(panel),
+        input_cursor: UIState.input_cursor(panel),
         mode: state.vim.mode,
         mode_state: state.vim.mode_state,
         scroll: panel.scroll,
@@ -230,13 +230,13 @@ defmodule Minga.Agent.View.Renderer do
         mention_completion: panel.mention_completion,
         pasted_blocks: panel.pasted_blocks
       },
-      agentic: %{
-        chat_width_pct: agentic.chat_width_pct,
-        help_visible: agentic.help_visible,
-        focus: agentic.focus,
-        search: agentic.search,
-        toast: agentic.toast,
-        context_estimate: agentic.context_estimate
+      agent_ui: %{
+        chat_width_pct: agent_ui.chat_width_pct,
+        help_visible: agent_ui.help_visible,
+        focus: agent_ui.focus,
+        search: agent_ui.search,
+        toast: agent_ui.toast,
+        context_estimate: agent_ui.context_estimate
       },
       messages: messages,
       usage: usage,
@@ -333,7 +333,7 @@ defmodule Minga.Agent.View.Renderer do
 
     # ── Context section ──
     total_tokens = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
-    estimate = input.agentic.context_estimate
+    estimate = input.agent_ui.context_estimate
     display_tokens = max(total_tokens, estimate)
     limit = ModelLimits.context_limit(panel.model_name)
 
@@ -584,7 +584,7 @@ defmodule Minga.Agent.View.Renderer do
           Theme.Agent.t()
         ) :: {String.t(), Theme.color()}
   defp visual_row_display(vl, line_text, inner_width, panel, at) do
-    if PanelState.paste_placeholder?(line_text) and vl.col_offset == 0 do
+    if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
       input_line_display(line_text, inner_width, panel, at)
     else
       {vl.text, at.text_fg}
@@ -671,7 +671,7 @@ defmodule Minga.Agent.View.Renderer do
   @spec input_line_display(String.t(), pos_integer(), RenderInput.panel_data(), Theme.Agent.t()) ::
           {String.t(), Theme.color()}
   defp input_line_display(line_text, inner_width, panel, at) do
-    case PanelState.paste_block_index(line_text) do
+    case UIState.paste_block_index(line_text) do
       nil ->
         {String.slice(line_text, 0, inner_width), at.text_fg}
 
@@ -683,7 +683,7 @@ defmodule Minga.Agent.View.Renderer do
   end
 
   # Count lines in a paste block by index. Returns 0 if the index is invalid.
-  @spec paste_block_line_count([PanelState.paste_block()], non_neg_integer()) ::
+  @spec paste_block_line_count([UIState.paste_block()], non_neg_integer()) ::
           non_neg_integer()
   defp paste_block_line_count(blocks, index) do
     case Enum.at(blocks, index) do

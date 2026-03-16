@@ -119,6 +119,15 @@ defmodule Minga.Git do
   @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def commit(git_root, message), do: impl().commit(git_root, message)
 
+  @doc """
+  Returns the current branch name for a git repository.
+
+  Returns `{:ok, branch_name}` or `:error` if it can't be determined
+  (e.g., detached HEAD, not a git repo).
+  """
+  @spec current_branch(String.t()) :: {:ok, String.t()} | :error
+  def current_branch(git_root), do: impl().current_branch(git_root)
+
   # ── Pure calculations (no backend needed) ──────────────────────────────
 
   @doc """

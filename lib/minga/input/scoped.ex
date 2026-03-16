@@ -24,8 +24,7 @@ defmodule Minga.Input.Scoped do
 
   import Bitwise
 
-  alias Minga.Agent.PanelState
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -77,8 +76,8 @@ defmodule Minga.Input.Scoped do
 
   # Dismiss toast on any key (then re-process)
   defp handle_agent_key(state, cp, mods) do
-    if AgentAccess.agentic(state).toast != nil do
-      state = AgentAccess.update_agentic(state, &ViewState.dismiss_toast/1)
+    if AgentAccess.agent_ui(state).toast != nil do
+      state = AgentAccess.update_agent_ui(state, &UIState.dismiss_toast/1)
       handle_agent_key(state, cp, mods)
     else
       do_handle_agent_key(state, cp, mods)
@@ -111,10 +110,10 @@ defmodule Minga.Input.Scoped do
     # Normal dispatch: determine vim state and resolve through scope
     # Tab on a paste placeholder line: toggle expand/collapse
     if cp == @tab and mods == 0 and panel.input_focused do
-      {cursor_line, _} = PanelState.input_cursor(panel)
-      current_line = Enum.at(PanelState.input_lines(panel), cursor_line)
+      {cursor_line, _} = UIState.input_cursor(panel)
+      current_line = Enum.at(UIState.input_lines(panel), cursor_line)
 
-      if PanelState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
+      if UIState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
         {:handled, AgentCommands.toggle_paste_expand(state)}
       else
         resolve_agent_key(state, :insert, @tab, 0)
@@ -153,14 +152,14 @@ defmodule Minga.Input.Scoped do
     key = {cp, mods}
 
     # Check if we're continuing a prefix sequence
-    case AgentAccess.agentic(state).pending_prefix do
+    case AgentAccess.agent_ui(state).pending_prefix do
       nil ->
         # Fresh lookup
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
 
       prefix_node when is_map(prefix_node) ->
         # Continuing a prefix sequence stored as a trie node
-        state = AgentAccess.update_agentic(state, &ViewState.clear_prefix/1)
+        state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
 
         case Scope.resolve_key_in_node(prefix_node, key) do
           {:command, command} ->
@@ -168,7 +167,7 @@ defmodule Minga.Input.Scoped do
 
           {:prefix, sub_node} ->
             # Another prefix level (rare)
-            {:handled, AgentAccess.update_agentic(state, &ViewState.set_prefix(&1, sub_node))}
+            {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, sub_node))}
 
           :not_found ->
             # Invalid prefix continuation, re-process the key normally
@@ -177,7 +176,7 @@ defmodule Minga.Input.Scoped do
 
       _atom_prefix ->
         # Legacy atom prefix (shouldn't happen in new system, but handle gracefully)
-        state = AgentAccess.update_agentic(state, &ViewState.clear_prefix/1)
+        state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
     end
   end
@@ -198,7 +197,7 @@ defmodule Minga.Input.Scoped do
 
       {:prefix, prefix_node} ->
         # Store the prefix node for the next key
-        {:handled, AgentAccess.update_agentic(state, &ViewState.set_prefix(&1, prefix_node))}
+        {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, prefix_node))}
 
       :not_found ->
         # No scope binding. In insert mode, self-insert printable chars.
@@ -247,17 +246,17 @@ defmodule Minga.Input.Scoped do
 
   # Checks if the cursor is within the lines of an expanded paste block.
   # Used by handle_agent_key for Tab handling on paste placeholder lines.
-  @spec cursor_on_expanded_block?(PanelState.t()) :: boolean()
-  defp cursor_on_expanded_block?(%PanelState{pasted_blocks: blocks} = panel) do
-    {cursor_line, _} = PanelState.input_cursor(panel)
-    lines = PanelState.input_lines(panel)
+  @spec cursor_on_expanded_block?(UIState.t()) :: boolean()
+  defp cursor_on_expanded_block?(%UIState{pasted_blocks: blocks} = panel) do
+    {cursor_line, _} = UIState.input_cursor(panel)
+    lines = UIState.input_lines(panel)
 
     blocks
     |> Enum.filter(& &1.expanded)
     |> Enum.any?(&expanded_block_spans_cursor?(&1, lines, cursor_line))
   end
 
-  @spec expanded_block_spans_cursor?(PanelState.paste_block(), [String.t()], non_neg_integer()) ::
+  @spec expanded_block_spans_cursor?(UIState.paste_block(), [String.t()], non_neg_integer()) ::
           boolean()
   defp expanded_block_spans_cursor?(block, lines, cursor_line) do
     text_lines = String.split(block.text, "\n")

@@ -20,6 +20,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
+  alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Theme
   alias Minga.WhichKey
 
@@ -74,6 +76,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
     lsp_status = if is_active, do: state.lsp_status, else: :none
 
+    buf = scroll.window.buffer
+    {git_branch, git_diff_summary} = git_modeline_data(buf)
+
     Modeline.render(
       modeline_row,
       modeline_width,
@@ -96,7 +101,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
             do: Theme.agent_theme(state.theme),
             else: nil
           ),
-        lsp_status: lsp_status
+        lsp_status: lsp_status,
+        git_branch: git_branch,
+        git_diff_summary: git_diff_summary
       },
       state.theme,
       col_off
@@ -486,5 +493,27 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
     collect_separators(top, {row, col, width, top_height}) ++
       collect_separators(bottom, {row + top_height, col, width, bottom_height})
+  end
+
+  # ── Git modeline data ─────────────────────────────────────────────────────
+
+  # Returns {branch_name | nil, {added, modified, deleted} | nil} for the
+  # modeline. Single GenServer call to Git.Buffer, no file I/O: the branch
+  # is cached on Git.Buffer state and refreshed on init and save.
+  @spec git_modeline_data(pid() | nil) :: {String.t() | nil, GitBuffer.diff_summary() | nil}
+  defp git_modeline_data(nil), do: {nil, nil}
+
+  defp git_modeline_data(buf) when is_pid(buf) do
+    case GitTracker.lookup(buf) do
+      nil ->
+        {nil, nil}
+
+      git_pid ->
+        try do
+          GitBuffer.modeline_info(git_pid)
+        catch
+          :exit, _ -> {nil, nil}
+        end
+    end
   end
 end

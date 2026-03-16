@@ -28,7 +28,7 @@ defmodule Minga.Input.Interrupt do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Completion
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -138,12 +138,12 @@ defmodule Minga.Input.Interrupt do
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_agent_prefix(state, resets) do
-    case AgentAccess.agentic(state).pending_prefix do
+    case AgentAccess.agent_ui(state).pending_prefix do
       nil ->
         {state, resets}
 
       _prefix ->
-        new_state = AgentAccess.update_agentic(state, &ViewState.clear_prefix/1)
+        new_state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
         {new_state, ["agent prefix cleared" | resets]}
     end
   end

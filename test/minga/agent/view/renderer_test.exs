@@ -1,9 +1,8 @@
 defmodule Minga.Agent.View.RendererTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.PanelState
+  alias Minga.Agent.UIState
   alias Minga.Agent.View.Renderer
-  alias Minga.Agent.View.State, as: ViewState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -27,7 +26,7 @@ defmodule Minga.Agent.View.RendererTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: Enum.join(input_lines, "\n"))
     BufferServer.set_cursor(prompt_buf, input_cursor)
 
-    panel = %PanelState{
+    panel = %UIState{
       visible: true,
       input_focused: Keyword.get(opts, :input_focused, false),
       prompt_buffer: prompt_buf,
@@ -47,7 +46,7 @@ defmodule Minga.Agent.View.RendererTest do
       buffer: nil
     }
 
-    agentic = %ViewState{
+    agentic = %UIState{
       active: true,
       focus: Keyword.get(opts, :focus, :chat),
       saved_windows: nil,
@@ -62,7 +61,7 @@ defmodule Minga.Agent.View.RendererTest do
       buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       focus_stack: Input.default_stack(),
       agent: agent,
-      agentic: agentic,
+      agent_ui: agentic,
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
     }

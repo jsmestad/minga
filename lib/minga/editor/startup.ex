@@ -7,7 +7,7 @@ defmodule Minga.Editor.Startup do
   """
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
@@ -185,7 +185,7 @@ defmodule Minga.Editor.Startup do
   so the correct window type can be built in a single pass.
   """
   @spec startup_view_state(GenServer.server() | nil) ::
-          {atom(), ViewState.t()}
+          {atom(), UIState.t()}
   def startup_view_state(port_manager) do
     tui_mode? = port_manager == PortManager
     cli_flags = Minga.CLI.startup_flags()
@@ -196,10 +196,10 @@ defmodule Minga.Editor.Startup do
         ConfigOptions.get(:startup_view) == :agent
 
     if want_agent? do
-      av = %ViewState{ViewState.new() | active: true, focus: :chat}
+      av = %UIState{UIState.new() | active: true, focus: :chat}
       {:agent, av}
     else
-      {:editor, ViewState.new()}
+      {:editor, UIState.new()}
     end
   end
 

@@ -158,6 +158,69 @@ defmodule Minga.Editor.ModelineTest do
     end
   end
 
+  describe "git branch and diff summary" do
+    test "shows branch name with icon when git_branch is set" do
+      data = Map.put(@base_data, :git_branch, "main")
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "main")
+      assert String.contains?(combined, "\uE0A0")
+    end
+
+    test "shows diff stats with colors when git_diff_summary is set" do
+      data = Map.merge(@base_data, %{git_branch: "feat/x", git_diff_summary: {3, 2, 1}})
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "+3")
+      assert String.contains?(combined, "~2")
+      assert String.contains?(combined, "-1")
+    end
+
+    test "shows only non-zero diff stats" do
+      data = Map.merge(@base_data, %{git_branch: "main", git_diff_summary: {5, 0, 0}})
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "+5")
+      refute String.contains?(combined, "~0")
+      refute String.contains?(combined, "-0")
+    end
+
+    test "no diff stats when summary is {0, 0, 0}" do
+      data = Map.merge(@base_data, %{git_branch: "main", git_diff_summary: {0, 0, 0}})
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      assert String.contains?(combined, "main")
+      refute String.contains?(combined, "+")
+      refute String.contains?(combined, "~")
+    end
+
+    test "no git segment when git_branch is nil" do
+      {commands, _regions} = Modeline.render(0, 120, @base_data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      # The branch icon  (U+E0A0) should not appear in the modeline
+      refute String.contains?(combined, "\uE0A0")
+    end
+
+    test "no git segment when git_branch is empty string" do
+      data = Map.put(@base_data, :git_branch, "")
+      {commands, _regions} = Modeline.render(0, 120, data)
+
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      combined = Enum.join(texts)
+      refute String.contains?(combined, "\uE0A0")
+    end
+  end
+
   describe "cursor_shape/1" do
     test "insert mode returns beam" do
       assert Modeline.cursor_shape(:insert) == :beam

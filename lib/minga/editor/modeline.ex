@@ -31,6 +31,9 @@ defmodule Minga.Editor.Modeline do
   @typedoc "LSP connection status for the modeline indicator."
   @type lsp_status :: :ready | :initializing | :starting | :error | :none
 
+  @typedoc "Git diff summary: {added, modified, deleted} line counts."
+  @type git_diff_summary :: {non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+
   @typedoc "Data for rendering the modeline."
   @type modeline_data :: %{
           :mode => Mode.mode(),
@@ -47,7 +50,9 @@ defmodule Minga.Editor.Modeline do
           optional(:agent_status) => Minga.Editor.State.Agent.status(),
           optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
-          optional(:lsp_status) => lsp_status()
+          optional(:lsp_status) => lsp_status(),
+          optional(:git_branch) => String.t() | nil,
+          optional(:git_diff_summary) => git_diff_summary()
         }
 
   @doc """
@@ -100,6 +105,7 @@ defmodule Minga.Editor.Modeline do
 
     agent_segments = build_agent_segments(data, bar_bg)
     lsp_segments = build_lsp_segments(data, bar_bg, ml)
+    git_segments = build_git_segments(data, bar_bg, theme)
 
     # Segments are {text, fg, bg, opts, click_target}
     # click_target is an atom command or nil for non-clickable segments
@@ -109,7 +115,9 @@ defmodule Minga.Editor.Modeline do
         {@separator, mode_bg, info_bg, [], nil},
         {file_segment, info_fg, info_bg, [], :buffer_list},
         {@separator, info_bg, bar_bg, [], nil}
-      ] ++ Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
+      ] ++
+        git_segments ++
+        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
 
     right_segments =
       lsp_segments ++
@@ -173,6 +181,52 @@ defmodule Minga.Editor.Modeline do
   def cursor_shape(:search), do: :beam
   def cursor_shape(:replace), do: :underline
   def cursor_shape(_mode), do: :block
+
+  # Nerd Font branch icon (U+E0A0)
+  @branch_icon "\uE0A0"
+
+  @spec build_git_segments(modeline_data(), non_neg_integer(), Theme.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_git_segments(data, bar_bg, theme) do
+    branch = Map.get(data, :git_branch)
+    summary = Map.get(data, :git_diff_summary)
+
+    case branch do
+      nil ->
+        []
+
+      "" ->
+        []
+
+      name ->
+        # Branch name uses the modeline's info foreground (muted, theme-aware)
+        branch_fg = theme.modeline.info_fg
+        branch_segment = {" #{@branch_icon} #{name}", branch_fg, bar_bg, [], nil}
+
+        # Diff stats: +added ~modified -deleted, using theme git colors
+        diff_segments = build_diff_stat_segments(summary, bar_bg, theme.git)
+
+        [branch_segment | diff_segments]
+    end
+  end
+
+  @spec build_diff_stat_segments(
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
+          non_neg_integer(),
+          Theme.Git.t()
+        ) :: [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_diff_stat_segments(nil, _bar_bg, _git_theme), do: []
+  defp build_diff_stat_segments({0, 0, 0}, _bar_bg, _git_theme), do: []
+
+  defp build_diff_stat_segments({added, modified, deleted}, bar_bg, git_theme) do
+    [
+      {added, "+", git_theme.added_fg},
+      {modified, "~", git_theme.modified_fg},
+      {deleted, "-", git_theme.deleted_fg}
+    ]
+    |> Enum.filter(fn {count, _, _} -> count > 0 end)
+    |> Enum.map(fn {count, prefix, color} -> {" #{prefix}#{count}", color, bar_bg, [], nil} end)
+  end
 
   @spec build_agent_segments(modeline_data(), non_neg_integer()) ::
           [{String.t(), non_neg_integer(), non_neg_integer(), keyword()}]

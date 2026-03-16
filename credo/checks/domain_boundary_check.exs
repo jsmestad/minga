@@ -50,7 +50,7 @@ defmodule Minga.Credo.DomainBoundaryCheck do
   # cross-domain references are deliberate and unavoidable.
   @allowed_agent_buffer_modules [
     "Minga.Agent.View.Renderer",
-    "Minga.Agent.PanelState",
+    "Minga.Agent.UiState",
     "Minga.Agent.BufferSync",
     "Minga.Agent.ChatDecorations"
   ]

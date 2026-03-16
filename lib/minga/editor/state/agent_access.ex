@@ -2,14 +2,14 @@ defmodule Minga.Editor.State.AgentAccess do
   @moduledoc """
   Direct accessors for agent state on EditorState.
 
-  Agent state (`agent`, `agentic`) lives as top-level fields on
+  Agent state (`agent`, `agent_ui`) lives as top-level fields on
   EditorState. This module provides read/write functions so callers
   don't need to know the field layout.
 
   All agent state access in the codebase goes through this module.
   """
 
-  alias Minga.Agent.View.State, as: ViewState
+  alias Minga.Agent.UIState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
 
@@ -21,27 +21,27 @@ defmodule Minga.Editor.State.AgentAccess do
   def agent(%{agent: a}), do: a
   def agent(_), do: %AgentState{}
 
-  @doc "Returns the agentic view state."
-  @spec agentic(EditorState.t() | map()) :: ViewState.t()
-  def agentic(%EditorState{agentic: a}), do: a
-  def agentic(%{agentic: a}), do: a
-  def agentic(_), do: ViewState.new()
+  @doc "Returns the agent UI state."
+  @spec agent_ui(EditorState.t() | map()) :: UIState.t()
+  def agent_ui(%EditorState{agent_ui: a}), do: a
+  def agent_ui(%{agent_ui: a}), do: a
+  def agent_ui(_), do: UIState.new()
 
   @doc "Returns the agent session pid, or nil."
   @spec session(EditorState.t() | map()) :: pid() | nil
   def session(state), do: agent(state).session
 
   @doc "Returns the agent panel state."
-  @spec panel(EditorState.t() | map()) :: Minga.Agent.PanelState.t()
+  @spec panel(EditorState.t() | map()) :: UIState.t()
   def panel(state), do: agent(state).panel
 
   @doc "Returns true if the agent panel input is focused."
   @spec input_focused?(EditorState.t() | map()) :: boolean()
   def input_focused?(state), do: agent(state).panel.input_focused
 
-  @doc "Returns the agentic view focus."
+  @doc "Returns the agent UI focus."
   @spec focus(EditorState.t() | map()) :: atom()
-  def focus(state), do: agentic(state).focus
+  def focus(state), do: agent_ui(state).focus
 
   # ── Writers ────────────────────────────────────────────────────────────────
 
@@ -56,14 +56,14 @@ defmodule Minga.Editor.State.AgentAccess do
     %{state | agent: fun.(a)}
   end
 
-  @doc "Updates agentic view state via a transform function."
-  @spec update_agentic(EditorState.t() | map(), (ViewState.t() -> ViewState.t())) ::
+  @doc "Updates agent UI state via a transform function."
+  @spec update_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
-  def update_agentic(%EditorState{agentic: a} = state, fun) do
-    %{state | agentic: fun.(a)}
+  def update_agent_ui(%EditorState{agent_ui: a} = state, fun) do
+    %{state | agent_ui: fun.(a)}
   end
 
-  def update_agentic(%{agentic: a} = state, fun) do
-    %{state | agentic: fun.(a)}
+  def update_agent_ui(%{agent_ui: a} = state, fun) do
+    %{state | agent_ui: fun.(a)}
   end
 end

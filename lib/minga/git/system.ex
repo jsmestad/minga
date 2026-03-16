@@ -197,6 +197,34 @@ defmodule Minga.Git.System do
     e in [ErlangError, ArgumentError] -> {:error, "git commit error: #{Exception.message(e)}"}
   end
 
+  @impl true
+  @spec current_branch(String.t()) :: {:ok, String.t()} | :error
+  def current_branch(git_root) when is_binary(git_root) do
+    # Read .git/HEAD directly to avoid spawning a subprocess.
+    # Called at Git.Buffer init and on save (invalidate_base), not per-frame.
+    head_path = Path.join(git_root, ".git/HEAD")
+
+    case File.read(head_path) do
+      {:ok, "ref: refs/heads/" <> branch} ->
+        {:ok, String.trim(branch)}
+
+      {:ok, _detached} ->
+        # Detached HEAD: fall back to git CLI for the short SHA
+        case System.cmd("git", ["rev-parse", "--short", "HEAD"],
+               cd: git_root,
+               stderr_to_stdout: true
+             ) do
+          {output, 0} -> {:ok, String.trim(output)}
+          _ -> :error
+        end
+
+      {:error, _} ->
+        :error
+    end
+  rescue
+    _ -> :error
+  end
+
   # ── Private ────────────────────────────────────────────────────────────────
 
   alias Minga.Git.StatusEntry
