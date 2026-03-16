@@ -300,6 +300,17 @@ defmodule Minga.Mode.Normal do
     {:continue, %{state | pending_macro_replay: false}}
   end
 
+  # ── Complete find-char motion (must be before letter key handlers) ────────
+
+  # When pending_find is set (after f/F/t/T), any printable character
+  # completes the motion. This must appear before the letter key handlers
+  # (i, a, o, etc.) to prevent them from matching first.
+  def handle_key({codepoint, 0}, %ModeState{pending_find: dir} = state)
+      when dir in [:f, :F, :t, :T] and codepoint >= 32 do
+    char = <<codepoint::utf8>>
+    {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
+  end
+
   # ── Count prefix accumulation ─────────────────────────────────────────────
 
   # Digits 1-9 always start or extend the count.
@@ -596,13 +607,6 @@ defmodule Minga.Mode.Normal do
 
   def handle_key({?T, 0}, state) do
     {:continue, %{state | pending_find: :T}}
-  end
-
-  # Complete the find-char motion with the target character
-  def handle_key({codepoint, 0}, %ModeState{pending_find: dir} = state)
-      when dir in [:f, :F, :t, :T] and codepoint >= 32 do
-    char = <<codepoint::utf8>>
-    {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
   end
 
   # ── Repeat find-char (;  ,) ─────────────────────────────────────────────

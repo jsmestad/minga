@@ -242,6 +242,72 @@ defmodule Minga.Editor.Commands.MovementTest do
       assert Process.alive?(editor)
     end
 
+    test "fa moves to next 'a', ; repeats forward" do
+      {editor, buffer} = start_editor("banana split")
+      # Cursor starts at col 0 ('b'). fa should move to col 1 ('a')
+      send_key(editor, ?f)
+      send_key(editor, ?a)
+      assert BufferServer.cursor(buffer) == {0, 1}
+
+      # ; should repeat: move to next 'a' at col 3
+      send_key(editor, ?;)
+      assert BufferServer.cursor(buffer) == {0, 3}
+
+      # ; again: move to next 'a' at col 5
+      send_key(editor, ?;)
+      assert BufferServer.cursor(buffer) == {0, 5}
+    end
+
+    test ", reverses the last find char direction" do
+      {editor, buffer} = start_editor("banana split")
+      # fa moves to col 1, ; to col 3, , back to col 1
+      send_key(editor, ?f)
+      send_key(editor, ?a)
+      send_key(editor, ?;)
+      assert BufferServer.cursor(buffer) == {0, 3}
+
+      send_key(editor, ?,)
+      assert BufferServer.cursor(buffer) == {0, 1}
+    end
+
+    test "ta moves to one before next 'a', ; repeats till motion" do
+      {editor, buffer} = start_editor("x_abc_abc_end")
+      # Cursor at 0. ta finds 'a' at col 2, lands at col 1 (one before)
+      send_key(editor, ?t)
+      send_key(editor, ?a)
+      assert BufferServer.cursor(buffer) == {0, 1}
+
+      # Move past the first 'a' so ; has room to advance.
+      # fa lands on col 2, then ; (repeating t) finds next 'a' at col 6, lands at col 5.
+      send_key(editor, ?f)
+      send_key(editor, ?a)
+      assert BufferServer.cursor(buffer) == {0, 2}
+
+      # Now ta again from col 2 should find 'a' at col 6, land at col 5
+      send_key(editor, ?t)
+      send_key(editor, ?a)
+      assert BufferServer.cursor(buffer) == {0, 5}
+    end
+
+    test "Fa moves backward, ; repeats backward" do
+      # Place cursor at the end by moving right
+      {editor, buffer} = start_editor("banana split")
+      send_key(editor, ?$)
+      end_col = elem(BufferServer.cursor(buffer), 1)
+      assert end_col > 0
+
+      # Fa should find 'a' backward from end
+      send_key(editor, ?F)
+      send_key(editor, ?a)
+      first_pos = elem(BufferServer.cursor(buffer), 1)
+      assert first_pos == 5
+
+      # ; should repeat backward (same direction as F)
+      send_key(editor, ?;)
+      second_pos = elem(BufferServer.cursor(buffer), 1)
+      assert second_pos < first_pos
+    end
+
     test "buffer_list doesn't crash" do
       {editor, _buffer} = start_editor()
       send_key(editor, 32)

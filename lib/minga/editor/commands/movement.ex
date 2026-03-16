@@ -247,7 +247,7 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(
-        %{vim: %{last_find_char: {dir, char}}, buf: %{buffer: buf}} = state,
+        %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}} = state,
         :repeat_find_char
       ) do
     Helpers.apply_find_char(buf, dir, char)
@@ -257,7 +257,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :repeat_find_char), do: state
 
   def execute(
-        %{vim: %{last_find_char: {dir, char}}, buf: %{buffer: buf}} = state,
+        %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}} = state,
         :repeat_find_char_reverse
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)

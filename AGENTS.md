@@ -301,7 +301,12 @@ Current subsystems: `:render`, `:lsp`, `:agent`, `:editor`. If your code doesn't
 4. Add the subsystem to the `@type subsystem` union in `Minga.Log`
 5. Document the new subsystem in `docs/CONFIGURATION.md` under the Logging section
 
-For direct writes to `*Messages*` without Logger (e.g., inside the Editor GenServer), call `log_message(state, "your message")`. Outside the Editor, call `Minga.Editor.log_to_messages("your message")` (async cast to avoid deadlocks).
+**Two-tier logging model:** These are two distinct tiers of the same pipeline, not competing mechanisms.
+
+- **`log_message(state, text)` / `Minga.Editor.log_to_messages(text)`** is the unconditional tier. Use it for user-visible lifecycle events that should always appear in `*Messages*` regardless of log level settings: file open/save/close, config reload, format-on-save, editor startup. Inside the Editor GenServer, call `log_message(state, text)`. Outside, call `Minga.Editor.log_to_messages(text)` (async cast to avoid deadlocks).
+- **`Minga.Log.{level}(:subsystem, text)`** is the filterable tier. Use it for diagnostic output gated by per-subsystem log levels: LSP traces, render timing, debug context.
+
+Decision rule: if the user would be confused by its absence, use `log_to_messages`. If it's noise unless you're debugging, use `Minga.Log`.
 
 **Zig side:** Use `std.log` for debug output. The Port.Manager captures log messages from the Zig process's stderr and forwards them to `*Messages*` prefixed with `[ZIG/{level}]`.
 

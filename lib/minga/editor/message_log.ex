@@ -2,6 +2,15 @@ defmodule Minga.Editor.MessageLog do
   @moduledoc """
   Writes to the `*Messages*` buffer with timestamp prefix and line trimming.
 
+  This is the **unconditional tier** of the logging pipeline. Messages written
+  here always appear in `*Messages*` regardless of log level settings. Use it
+  for user-visible lifecycle events: file open, save, close, config reload, etc.
+
+  The **filterable tier** is `Minga.Log`, which routes through per-subsystem
+  log levels and is intended for diagnostic output (LSP traces, render timing,
+  debug context). `Minga.Log` eventually calls back into this module via the
+  `Minga.LoggerHandler`, but those messages are gated by subsystem log levels.
+
   Extracted from `Minga.Editor` to reduce GenServer module size.
   """
 
