@@ -56,6 +56,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       :ok
     end
 
+    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "uses scroll_region when viewport shifts by 1 line" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
@@ -79,6 +80,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
              end)
     end
 
+    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "uses scroll_region when viewport shifts by 3 lines" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
@@ -134,6 +136,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       assert [<<0x12>> | _] = commands
     end
 
+    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "scroll_region uses negative delta for scrolling up" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
@@ -158,6 +161,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       assert delta == -2
     end
 
+    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "always includes batch_end in scroll region commands" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
@@ -175,6 +179,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       assert <<0x13>> = List.last(commands)
     end
 
+    @tag skip: "scroll optimization disabled pending libvaxis buffer sync fix"
     test "always includes cursor commands in scroll region output" do
       state = base_state(rows: 24, cols: 80, content: long_content(100))
 
