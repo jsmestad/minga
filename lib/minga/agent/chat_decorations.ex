@@ -332,36 +332,52 @@ defmodule Minga.Agent.ChatDecorations do
     |> String.split("\n")
     |> Enum.with_index()
     |> Enum.reduce({decs, false}, fn {line_text, idx}, {d, in_code_block} ->
-      buf_line = base_line + idx
-      trimmed = String.trim_leading(line_text)
-
-      # Track fenced code block state to skip dimming inside code blocks
-      if String.starts_with?(trimmed, "```") do
-        # Dim the fence line itself
-        fence_start = String.length(line_text) - String.length(trimmed)
-
-        {_id, d} =
-          Decorations.add_highlight(
-            d,
-            {buf_line, fence_start},
-            {buf_line, fence_start + String.length(trimmed)},
-            style: [fg: theme.delimiter_dim],
-            priority: 15,
-            group: :chat_md_delimiters
-          )
-
-        {d, not in_code_block}
-      else
-        if in_code_block do
-          # Inside a code block, don't dim anything
-          {d, in_code_block}
-        else
-          d = dim_line_delimiters(d, line_text, buf_line, theme)
-          {d, in_code_block}
-        end
-      end
+      dim_markdown_line(d, line_text, base_line + idx, in_code_block, theme)
     end)
     |> elem(0)
+  end
+
+  # Processes a single line for delimiter dimming, tracking fenced code block state.
+  @spec dim_markdown_line(
+          Decorations.t(),
+          String.t(),
+          non_neg_integer(),
+          boolean(),
+          Minga.Theme.Agent.t()
+        ) ::
+          {Decorations.t(), boolean()}
+  defp dim_markdown_line(decs, line_text, buf_line, in_code_block, theme) do
+    trimmed = String.trim_leading(line_text)
+
+    if String.starts_with?(trimmed, "```") do
+      dim_fence_line(decs, line_text, buf_line, trimmed, in_code_block, theme)
+    else
+      dim_non_fence_line(decs, line_text, buf_line, in_code_block, theme)
+    end
+  end
+
+  defp dim_fence_line(decs, line_text, buf_line, trimmed, in_code_block, theme) do
+    fence_start = String.length(line_text) - String.length(trimmed)
+
+    {_id, decs} =
+      Decorations.add_highlight(
+        decs,
+        {buf_line, fence_start},
+        {buf_line, fence_start + String.length(trimmed)},
+        style: [fg: theme.delimiter_dim],
+        priority: 15,
+        group: :chat_md_delimiters
+      )
+
+    {decs, not in_code_block}
+  end
+
+  defp dim_non_fence_line(decs, _line_text, _buf_line, true = _in_code_block, _theme) do
+    {decs, true}
+  end
+
+  defp dim_non_fence_line(decs, line_text, buf_line, false = _in_code_block, theme) do
+    {dim_line_delimiters(decs, line_text, buf_line, theme), false}
   end
 
   # Dims markdown delimiters on a single line (outside code blocks).

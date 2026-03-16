@@ -133,7 +133,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
       # Find highlights in the :chat_md_delimiters group
       delimiter_highlights = Enum.filter(highlights, fn hl -> hl.group == :chat_md_delimiters end)
 
-      assert length(delimiter_highlights) >= 2,
+      assert [_, _ | _] = delimiter_highlights,
              "Expected at least 2 delimiter highlights for **bold**"
     end
 
@@ -146,7 +146,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
 
       highlights = Decorations.highlights_for_line(result, 0)
       delimiter_highlights = Enum.filter(highlights, fn hl -> hl.group == :chat_md_delimiters end)
-      assert length(delimiter_highlights) >= 1, "Expected heading marker to be dimmed"
+      assert [_ | _] = delimiter_highlights, "Expected heading marker to be dimmed"
     end
 
     test "inline code backticks are dimmed" do
@@ -158,7 +158,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
 
       highlights = Decorations.highlights_for_line(result, 0)
       delimiter_highlights = Enum.filter(highlights, fn hl -> hl.group == :chat_md_delimiters end)
-      assert length(delimiter_highlights) >= 2, "Expected backtick delimiters to be dimmed"
+      assert [_, _ | _] = delimiter_highlights, "Expected backtick delimiters to be dimmed"
     end
 
     test "fenced code block markers are dimmed" do
@@ -175,8 +175,8 @@ defmodule Minga.Agent.ChatDecorationsTest do
       open_delims = Enum.filter(fence_open, fn hl -> hl.group == :chat_md_delimiters end)
       close_delims = Enum.filter(fence_close, fn hl -> hl.group == :chat_md_delimiters end)
 
-      assert length(open_delims) >= 1, "Expected opening fence to be dimmed"
-      assert length(close_delims) >= 1, "Expected closing fence to be dimmed"
+      assert [_ | _] = open_delims, "Expected opening fence to be dimmed"
+      assert [_ | _] = close_delims, "Expected closing fence to be dimmed"
     end
 
     test "content inside code blocks is not dimmed" do
@@ -202,7 +202,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
       highlights = Decorations.highlights_for_line(result, 0)
       delimiter_highlights = Enum.filter(highlights, fn hl -> hl.group == :chat_md_delimiters end)
       # Should dim: [, ](, the URL, and )
-      assert length(delimiter_highlights) >= 3, "Expected link delimiters to be dimmed"
+      assert [_, _, _ | _] = delimiter_highlights, "Expected link delimiters to be dimmed"
     end
 
     test "list markers are dimmed" do
@@ -214,11 +214,11 @@ defmodule Minga.Agent.ChatDecorationsTest do
 
       line0_highlights = Decorations.highlights_for_line(result, 0)
       line0_delims = Enum.filter(line0_highlights, fn hl -> hl.group == :chat_md_delimiters end)
-      assert length(line0_delims) >= 1, "Expected unordered list marker to be dimmed"
+      assert [_ | _] = line0_delims, "Expected unordered list marker to be dimmed"
 
       line1_highlights = Decorations.highlights_for_line(result, 1)
       line1_delims = Enum.filter(line1_highlights, fn hl -> hl.group == :chat_md_delimiters end)
-      assert length(line1_delims) >= 1, "Expected ordered list marker to be dimmed"
+      assert [_ | _] = line1_delims, "Expected ordered list marker to be dimmed"
     end
 
     test "multibyte characters before delimiters use correct grapheme columns" do
