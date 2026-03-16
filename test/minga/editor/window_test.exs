@@ -413,7 +413,7 @@ defmodule Minga.Editor.WindowTest do
 
     test "returns true for a window with popup metadata" do
       rule = PopupRule.new("*test*")
-      active = PopupActive.new(rule, 2, nil, 1)
+      active = PopupActive.new(rule, 2, 1)
       window = %{make_window() | popup_meta: active}
       assert Window.popup?(window)
     end

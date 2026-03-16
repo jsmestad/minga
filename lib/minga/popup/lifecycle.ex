@@ -3,8 +3,9 @@ defmodule Minga.Popup.Lifecycle do
   Pure state transformations for opening and closing popup windows.
 
   Popup windows are managed splits (or floating overlays) governed by
-  `Popup.Rule` structs. Opening a popup snapshots the current window tree
-  so closing it restores the original layout.
+  `Popup.Rule` structs. Closing a popup surgically removes its window
+  from the current tree via `WindowTree.close/2`, so multiple popups
+  can coexist without interfering with each other.
 
   All functions are `state -> state` transformations with no side effects.
   The Editor GenServer calls these and handles rendering afterward.
@@ -20,9 +21,13 @@ defmodule Minga.Popup.Lifecycle do
 
   ## Close flow
 
-  1. `close_popup/2` reads the window's `popup_meta` to find the saved tree.
-  2. Restores the window tree to the snapshot, removes the popup window
-     from the map, and returns focus to the previously active window.
+  1. `close_popup/2` removes the popup window from the current tree via
+     `WindowTree.close/2` (like `delete-window` in Emacs).
+  2. Removes the popup window from the map and returns focus to the
+     previously active window.
+
+  This surgical approach lets multiple popups coexist: closing one only
+  removes its own window without affecting other open popups.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -65,8 +70,8 @@ defmodule Minga.Popup.Lifecycle do
   @doc """
   Closes the popup window with the given id.
 
-  Restores the window tree to the snapshot taken when the popup was opened,
-  removes the popup window from the map, and returns focus to the previously
+  Removes the popup's window from the current tree via `WindowTree.close/2`,
+  removes it from the window map, and returns focus to the previously
   active window. The underlying buffer is kept alive (not killed).
 
   Returns state unchanged if the window id doesn't exist or isn't a popup.
@@ -257,8 +262,6 @@ defmodule Minga.Popup.Lifecycle do
 
   @spec apply_rule(state(), Rule.t(), pid()) :: state()
   defp apply_rule(%{windows: ws} = state, %Rule{display: :split} = rule, buffer_pid) do
-    # Snapshot current layout for restore
-    previous_tree = ws.tree
     previous_active = ws.active
 
     # Create the popup window
@@ -284,7 +287,7 @@ defmodule Minga.Popup.Lifecycle do
         new_tree = apply_split_size(new_tree, next_id, rule, state)
 
         # Attach popup metadata to the new window
-        active = PopupActive.new(rule, next_id, previous_tree, previous_active)
+        active = PopupActive.new(rule, next_id, previous_active)
         popup_window = %{popup_window | popup_meta: active}
 
         # Update state
@@ -309,8 +312,6 @@ defmodule Minga.Popup.Lifecycle do
   end
 
   defp apply_rule(%{windows: ws} = state, %Rule{display: :float} = rule, buffer_pid) do
-    # Snapshot current layout for restore (tree stays unchanged for floats)
-    previous_tree = ws.tree
     previous_active = ws.active
 
     # Create the popup window (not added to the tree, only the map)
@@ -319,7 +320,7 @@ defmodule Minga.Popup.Lifecycle do
     popup_window = Window.new(next_id, buffer_pid, rows, cols)
 
     # Attach popup metadata
-    active = PopupActive.new(rule, next_id, previous_tree, previous_active)
+    active = PopupActive.new(rule, next_id, previous_active)
     popup_window = %{popup_window | popup_meta: active}
 
     # Add window to map but NOT to the tree (floats overlay the layout)
@@ -360,18 +361,13 @@ defmodule Minga.Popup.Lifecycle do
 
     ws = state.windows
 
-    # Restore the tree snapshot if available, otherwise just remove the split
+    # Remove just this popup's window from the current tree (like
+    # delete-window in Emacs). We used to restore a full tree snapshot,
+    # but that clobbers any other popups that were opened after this one.
     new_tree =
-      case meta.previous_tree do
-        nil ->
-          # No snapshot (edge case). Just remove the split.
-          case WindowTree.close(ws.tree, window_id) do
-            {:ok, tree} -> tree
-            :error -> ws.tree
-          end
-
-        tree ->
-          tree
+      case WindowTree.close(ws.tree, window_id) do
+        {:ok, tree} -> tree
+        :error -> ws.tree
       end
 
     # Remove the popup window from the map

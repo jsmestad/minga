@@ -72,7 +72,6 @@ defmodule Minga.Popup.LifecycleTest do
       assert Window.popup?(popup_window)
       assert popup_window.popup_meta.rule.side == :bottom
       assert popup_window.popup_meta.previous_active == 1
-      assert popup_window.popup_meta.previous_tree == WindowTree.new(1)
 
       # The tree should be a horizontal split
       assert {:split, :horizontal, _, _, _} = new_state.windows.tree
@@ -185,6 +184,63 @@ defmodule Minga.Popup.LifecycleTest do
     test "is a no-op when active window is not a popup", %{state: state} do
       result = Lifecycle.close_active_popup(state)
       assert result.windows.tree == state.windows.tree
+    end
+  end
+
+  describe "closing one popup preserves other popups" do
+    test "closing the first-opened popup does not clobber the second", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      popup_buf2 = fake_pid()
+      on_exit(fn -> if Process.alive?(popup_buf2), do: Process.exit(popup_buf2, :kill) end)
+
+      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
+
+      # Open both popups
+      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf)
+      {:ok, with_both} = Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2)
+
+      # Should have 3 windows: main + Messages + Warnings
+      assert map_size(with_both.windows.map) == 3
+
+      # Close Messages (the first-opened popup, window 2)
+      after_close = Lifecycle.close_popup(with_both, 2)
+
+      # Warnings popup (window 3) should still exist
+      assert map_size(after_close.windows.map) == 2
+      assert Map.has_key?(after_close.windows.map, 1), "main window missing"
+      assert Map.has_key?(after_close.windows.map, 3), "Warnings popup was clobbered"
+
+      # Window 3 should still be in the tree
+      leaves = WindowTree.leaves(after_close.windows.tree)
+      assert 3 in leaves, "Warnings popup window not in tree"
+    end
+
+    test "closing the second-opened popup does not affect the first", %{
+      state: state,
+      popup_buf: popup_buf
+    } do
+      popup_buf2 = fake_pid()
+      on_exit(fn -> if Process.alive?(popup_buf2), do: Process.exit(popup_buf2, :kill) end)
+
+      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
+
+      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf)
+      {:ok, with_both} = Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2)
+
+      # Close Warnings (the second-opened popup, window 3)
+      after_close = Lifecycle.close_popup(with_both, 3)
+
+      # Messages popup (window 2) should still exist
+      assert map_size(after_close.windows.map) == 2
+      assert Map.has_key?(after_close.windows.map, 1), "main window missing"
+      assert Map.has_key?(after_close.windows.map, 2), "Messages popup was clobbered"
+
+      leaves = WindowTree.leaves(after_close.windows.tree)
+      assert 2 in leaves, "Messages popup window not in tree"
     end
   end
 

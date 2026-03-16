@@ -27,7 +27,7 @@ defmodule Minga.Input.PopupTest do
     main_window = Window.new(1, main_buf, 24, 80)
 
     rule = Rule.new("*test*", quit_key: quit_key)
-    active = PopupActive.new(rule, 2, WindowTree.new(1), 1)
+    active = PopupActive.new(rule, 2, 1)
     popup_window = %{Window.new(2, popup_buf, 24, 80) | popup_meta: active}
 
     vim = %VimState{VimState.new() | mode: mode}
@@ -133,7 +133,7 @@ defmodule Minga.Input.PopupTest do
           height: {:percent, 70}
         )
 
-      active = PopupActive.new(rule, 2, WindowTree.new(1), 1)
+      active = PopupActive.new(rule, 2, 1)
       popup_window = %{Window.new(2, popup_buf, 24, 80) | popup_meta: active}
 
       %EditorState{
