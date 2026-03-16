@@ -66,7 +66,6 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 | Doc | What it covers |
 |-----|---------------|
 | [README.md](README.md) | Project overview and quick start |
-| [ROADMAP.md](ROADMAP.md) | Feature grid: what's done, what's planned |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Optimization roadmap with BEAM-specific techniques |
 | `AGENTS.md` | Coding standards, project structure, how to add features |
@@ -164,6 +163,5 @@ Examples:
 ## Updating Documentation
 
 When you finish a feature or change the architecture, update:
-- **`ROADMAP.md`**: flip status (📋 → 🚧 → ✅), add new rows as needed
 - **`docs/ARCHITECTURE.md`**: if you add process types, opcodes, or change supervision
 - **`docs/PERFORMANCE.md`**: mark optimizations as done

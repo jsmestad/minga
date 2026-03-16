@@ -92,54 +92,92 @@ Traditional editors in GC'd languages (VS Code/Electron, editors in Java or Go) 
 
 ### Supervision: graceful degradation
 
-BEAM processes are organized into supervision trees that encode dependency relationships. When a component fails, its supervisor can restart it without affecting unrelated components:
+BEAM processes are organized into supervision trees that encode dependency relationships. When a component fails, its supervisor can restart it without affecting unrelated components.
+
+### High-level overview
+
+The top-level supervisor splits the system into four tiers. Each tier is isolated so that a crash in one doesn't cascade into the others:
 
 ```
 Minga.Supervisor (rest_for_one)
-├── Foundation.Supervisor (rest_for_one)
-│    ├── Language.Registry    ← ETS, language definitions
-│    ├── Events               ← Registry(:duplicate), pub/sub bus
-│    ├── Config.Options       ← typed option registry (ETS, read_concurrency)
-│    ├── Keymap.Active        ← mutable keymap store (ETS, read_concurrency)
-│    ├── Config.Hooks         ← lifecycle hook registry (Agent)
-│    ├── Config.Advice        ← before/after command advice (ETS, read_concurrency)
-│    └── Filetype.Registry    ← static data, rarely fails
-├── Buffer.Supervisor (DynamicSupervisor, one_for_one)
-│    ├── Buffer processes     ← one per open file/scratch buffer
-│    ├── Git.Buffer processes ← one per buffer in a git repo (caches HEAD, computes diffs)
-│    └── Buffer.Fork processes ← (planned) per-agent forks for concurrent editing
-├── Services.Supervisor (rest_for_one)
-│    ├── Services.Independent (one_for_one)
-│    │    ├── Git.Tracker     ← subscribes to buffer events, ETS registry
-│    │    ├── CommandOutput.Registry ← Registry(:unique)
-│    │    ├── Eval.TaskSupervisor ← supervised tasks for user code
-│    │    ├── Command.Registry ← ETS-backed, aggregates commands from Provider modules
-│    │    ├── Fold.Registry   ← fold state
-│    │    └── Diagnostics     ← source-agnostic diagnostic aggregation (ETS reads, GenServer writes)
-│    ├── Extension.Registry   ← extension metadata store (Agent)
-│    ├── Extension.Supervisor ← DynamicSupervisor for extension processes
-│    ├── Config.Loader        ← config file discovery and evaluation
-│    ├── LSP.Supervisor       ← DynamicSupervisor for LSP client processes
-│    ├── LSP.SyncServer       ← subscribes to buffer events, manages LSP sync
-│    ├── Project              ← project root detection, known-projects persistence, file cache
-│    └── Agent.Supervisor     ← DynamicSupervisor for agent session process trees
-│         └── Agent.Session   ← one per active agent session (provider, conversation, tools)
-└── Runtime.Supervisor (one_for_one, conditional)
-     ├── Editor.Watchdog      ← SIGUSR1 recovery (independent leaf)
-     ├── FileWatcher          ← OS file notifications (independent leaf)
-     └── Editor.Supervisor (rest_for_one)
-          ├── Parser.Manager  ← owns the tree-sitter parser process
-          ├── Port.Manager    ← owns the Zig renderer process
-          └── Editor          ← orchestration, depends on Parser + Port
+├── Foundation.Supervisor    ← config, keymaps, events, registries
+├── Buffer.Supervisor        ← one process per open file + git tracking
+├── Services.Supervisor      ← LSP, extensions, diagnostics, agents
+└── Runtime.Supervisor       ← renderer, parser, editor orchestration
 ```
 
-The tree uses nested supervisors to constrain blast radius. A filesystem watcher flake restarts only FileWatcher, not the renderer. A git tracking crash restarts only Git.Tracker, not its sibling services. The `rest_for_one` chains within Foundation and Services preserve real dependency ordering (Events → Config subscribers, Extension.Registry → Config.Loader) while preventing unrelated siblings from cascading into each other.
+`rest_for_one` means tiers restart in order: if Foundation restarts, everything below it restarts too (they depend on config and events). But a crash in Runtime doesn't touch Services, Buffers, or Foundation.
 
-The tightly-coupled trio (Parser → Port → Editor) lives in its own `rest_for_one` supervisor: if the Port Manager fails, the Editor restarts too (since it depends on the renderer), but buffers are untouched. Your undo history, cursor positions, unsaved changes: all preserved. The renderer comes back up, re-renders the current viewport, and you're exactly where you were.
+### Foundation tier
 
-This is graceful degradation. Individual features can fail and recover independently. Losing your LSP connection doesn't affect your editing. A plugin that hits an error doesn't corrupt your buffers. The system degrades in pieces rather than failing all at once.
+Stateless registries and configuration that everything else depends on. These rarely fail.
 
-The BEAM was designed for telecom systems that run for years without downtime. The same supervision engineering applies here.
+```
+Foundation.Supervisor (rest_for_one)
+├── Language.Registry    ← ETS, language definitions
+├── Events               ← Registry(:duplicate), pub/sub bus
+├── Config.Options       ← typed option registry (ETS, read_concurrency)
+├── Keymap.Active        ← mutable keymap store (ETS, read_concurrency)
+├── Config.Hooks         ← lifecycle hook registry (Agent)
+├── Config.Advice        ← before/after command advice (ETS, read_concurrency)
+└── Filetype.Registry    ← static data
+```
+
+### Buffer tier
+
+One process per open file, plus per-buffer git tracking. `one_for_one` means each buffer is independent: one buffer crashing doesn't affect any other.
+
+```
+Buffer.Supervisor (DynamicSupervisor, one_for_one)
+├── Buffer "main.ex"
+├── Buffer "router.ex"
+├── Git.Buffer "main.ex"     ← caches HEAD content, computes line diffs
+├── Git.Buffer "router.ex"
+└── Buffer.Fork processes    ← (planned) per-agent forks for concurrent editing
+```
+
+### Services tier
+
+Higher-level features that depend on Foundation and Buffers but are independent of the renderer. A git tracking crash restarts only Git.Tracker. An LSP server crash restarts only that client.
+
+```
+Services.Supervisor (rest_for_one)
+├── Services.Independent (one_for_one)
+│    ├── Git.Tracker          ← subscribes to buffer events, ETS registry
+│    ├── CommandOutput.Registry ← Registry(:unique)
+│    ├── Eval.TaskSupervisor  ← supervised tasks for user code
+│    ├── Command.Registry     ← ETS-backed, aggregates commands from Providers
+│    ├── Fold.Registry        ← fold state
+│    └── Diagnostics          ← source-agnostic diagnostic aggregation (ETS)
+├── Extension.Registry        ← extension metadata store (Agent)
+├── Extension.Supervisor      ← DynamicSupervisor for extension processes
+├── Config.Loader             ← config file discovery and evaluation
+├── LSP.Supervisor            ← DynamicSupervisor for LSP client processes
+├── LSP.SyncServer            ← subscribes to buffer events, manages LSP sync
+├── Project                   ← project root detection, known-projects, file cache
+└── Agent.Supervisor          ← DynamicSupervisor for agent sessions
+     └── Agent.Session        ← one per active session (provider, conversation, tools)
+```
+
+### Runtime tier
+
+The tightly-coupled trio that handles rendering and user interaction. `rest_for_one` means if the Port Manager (renderer) fails, the Editor restarts too since it depends on the renderer. But buffers are untouched: your undo history, cursor positions, and unsaved changes are all preserved.
+
+```
+Runtime.Supervisor (one_for_one, conditional)
+├── Editor.Watchdog           ← SIGUSR1 recovery (independent leaf)
+├── FileWatcher               ← OS file notifications (independent leaf)
+└── Editor.Supervisor (rest_for_one)
+     ├── Parser.Manager       ← owns the minga-parser Zig process
+     ├── Port.Manager         ← owns the minga-renderer Zig process
+     └── Editor               ← orchestration, depends on Parser + Port
+```
+
+### Why this structure matters
+
+The nested supervisors constrain blast radius. Losing your LSP connection doesn't affect editing. A plugin error doesn't corrupt your buffers. A filesystem watcher flake restarts only FileWatcher, not the renderer. The `rest_for_one` chains within Foundation and Services preserve real dependency ordering (Events → Config subscribers, Extension.Registry → Config.Loader) while preventing unrelated siblings from cascading into each other.
+
+The system degrades in pieces rather than failing all at once. The BEAM was designed for telecom systems that run for years without downtime. The same supervision engineering applies here.
 
 ---
 
@@ -472,6 +510,20 @@ Most editors are trying to retrofit agent support onto architectures that assume
 ### Concurrent background work
 
 LSP communication, file indexing, git operations: these can run as separate BEAM processes without blocking the editor. The BEAM's preemptive scheduler ensures no single process can starve the UI, even under heavy load. This is qualitatively different from async/await in single-threaded runtimes. It's true preemptive concurrency with fairness guarantees.
+
+---
+
+## Design Principles
+
+These guide what we build and how:
+
+- **Fault tolerance over speed** — The BEAM's supervision model means crashes are recoverable events, not catastrophes.
+- **Two-process isolation** — Editor state and rendering never share memory; either can fail independently.
+- **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus.
+- **Elixir for logic, Zig for pixels** — Each language where it excels.
+- **Test everything** — Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
+- **Convention over configuration** — Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them.
+- **Core vs. extension** — If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
 
 ---
 

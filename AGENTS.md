@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Minga is a BEAM-powered modal text editor with a Zig terminal renderer. Read `PLAN.md` for full architecture and implementation roadmap. Read `ROADMAP.md` for the current feature grid and planned work. Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
+Minga is a BEAM-powered modal text editor with a Zig terminal renderer. Read `PLAN.md` for full architecture and implementation roadmap. Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
 
 ## Tech Stack
 
@@ -421,7 +421,6 @@ Use this as the minimum bar. If Doom does it, we should do it:
 
 When implementing features, completing planned work, or changing architecture:
 
-- **`ROADMAP.md`** — Update the feature grid status (📋→🚧→✅) when starting or finishing work. Add new rows for features not yet listed.
 - **`docs/ARCHITECTURE.md`** — Update when adding new process types, protocol opcodes, or changing supervision structure.
 - **`docs/PERFORMANCE.md`** — Mark optimizations as completed when done.
 
@@ -468,3 +467,4 @@ Adding syntax highlighting for a new language touches four places:
 After rebuilding (`zig build` or `mix compile`), the grammar is compiled into the binary and available immediately. No runtime loading needed.
 
 Users can override highlight queries without recompiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.
+mpiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.

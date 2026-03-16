@@ -26,7 +26,6 @@ defmodule Minga.MixProject do
           # Overview
           "README.md",
           "CHANGELOG.md",
-          "ROADMAP.md",
           # Getting Started
           "docs/GETTING-STARTED.md",
           # Using Minga

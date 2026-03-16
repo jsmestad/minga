@@ -4,13 +4,38 @@ Interactive diagrams of how Minga's processes, data, and communication are struc
 
 ## Supervision Tree
 
-The BEAM side of Minga uses nested supervisors to constrain blast radius. The top-level `rest_for_one` preserves the Foundation → Services → Editor cascade. Inner supervisors use strategies matched to their children's actual dependency profiles.
+The BEAM side of Minga uses nested supervisors to constrain blast radius. The top-level `rest_for_one` preserves the Foundation → Buffers → Services → Runtime cascade. Inner supervisors use strategies matched to their children's actual dependency profiles.
+
+### High-level overview
+
+Four tiers, each isolated. A crash in one tier doesn't cascade sideways.
 
 ```mermaid
 graph TD
     SUP["Minga.Supervisor<br/><i>rest_for_one</i>"]
 
-    SUP --> FOUND["Foundation.Supervisor<br/><i>rest_for_one</i>"]
+    SUP --> FOUND["Foundation.Supervisor<br/><i>config, keymaps, events, registries</i>"]
+    SUP --> BUFSUP["Buffer.Supervisor<br/><i>one process per open file + git tracking</i>"]
+    SUP --> SVC["Services.Supervisor<br/><i>LSP, extensions, diagnostics, agents</i>"]
+    SUP --> RT["Runtime.Supervisor<br/><i>renderer, parser, editor orchestration</i>"]
+
+    RT -. "stdin/stdout" .-> ZIG["Zig Processes<br/><i>renderer + parser</i>"]
+
+    style SUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
+    style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
+    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
+    style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
+```
+
+### Foundation tier
+
+Stateless registries and configuration that everything else depends on. These rarely fail.
+
+```mermaid
+graph TD
+    FOUND["Foundation.Supervisor<br/><i>rest_for_one</i>"]
     FOUND --> LANG["Language.Registry"]
     FOUND --> EVENTS["Events"]
     FOUND --> OPTS["Config.Options"]
@@ -19,13 +44,41 @@ graph TD
     FOUND --> ADVICE["Config.Advice"]
     FOUND --> FT["Filetype.Registry"]
 
-    SUP --> BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
+    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
+```
+
+### Buffer tier
+
+One process per open file, plus per-buffer git tracking. `one_for_one` means each buffer is independent: one crashing doesn't affect any other.
+
+```mermaid
+graph TD
+    BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
     BUFSUP --> B1["Buffer: main.ex"]
     BUFSUP --> B2["Buffer: router.ex"]
     BUFSUP --> B3["Buffer: schema.ex"]
+    BUFSUP --> GB1["Git.Buffer: main.ex"]
+    BUFSUP --> GB2["Git.Buffer: router.ex"]
     BUFSUP --> BF1["Buffer.Fork: main.ex<br/><i>(agent session A)</i>"]
 
-    SUP --> SVC["Services.Supervisor<br/><i>rest_for_one</i>"]
+    style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
+    style B1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style B2 fill:#2471a3,stroke:#1a5276,color:#fff
+    style B3 fill:#2471a3,stroke:#1a5276,color:#fff
+    style GB1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style GB2 fill:#2471a3,stroke:#1a5276,color:#fff
+    style BF1 fill:#2471a3,stroke:#1a5276,color:#fff,stroke-dasharray: 5 5
+```
+
+> **Note:** `Buffer.Fork` processes (dashed border) are planned. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge).
+
+### Services tier
+
+Higher-level features that depend on Foundation and Buffers. A git tracking crash restarts only Git.Tracker. An LSP server crash restarts only that client.
+
+```mermaid
+graph TD
+    SVC["Services.Supervisor<br/><i>rest_for_one</i>"]
     SVC --> INDEP["Services.Independent<br/><i>one_for_one</i>"]
     INDEP --> GIT["Git.Tracker"]
     INDEP --> TASKSUP["Eval.TaskSupervisor"]
@@ -35,15 +88,32 @@ graph TD
     SVC --> EXTSUP["Extension.Supervisor"]
     SVC --> LOADER["Config.Loader"]
     SVC --> LSPSUP["LSP.Supervisor<br/><i>DynamicSupervisor</i>"]
+    LSPSUP --> LSP1["LSP Client: elixir-ls"]
+    LSPSUP --> LSP2["LSP Client: lua-ls"]
     SVC --> SYNC["LSP.SyncServer"]
     SVC --> PROJ["Project"]
     SVC --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
     AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
     AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
-    LSPSUP --> LSP1["LSP Client: elixir-ls"]
-    LSPSUP --> LSP2["LSP Client: lua-ls"]
 
-    SUP --> RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
+    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
+    style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
+    style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
+    style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
+    style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
+    style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
+    style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
+    style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
+```
+
+### Runtime tier
+
+The tightly-coupled trio that handles rendering and user interaction. If the Port Manager (renderer) fails, the Editor restarts too since it depends on the renderer. Buffers stay untouched.
+
+```mermaid
+graph TD
+    RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
     RT --> WD["Editor.Watchdog"]
     RT --> FW["FileWatcher"]
     RT --> EDSUP["Editor.Supervisor<br/><i>rest_for_one</i>"]
@@ -51,36 +121,18 @@ graph TD
     EDSUP --> PM["Port.Manager"]
     EDSUP --> ED["Editor"]
 
-    PM -. "stdin/stdout<br/>Port protocol" .-> ZIG["Zig Process<br/><i>libvaxis + tree-sitter</i>"]
+    PM -. "stdin/stdout<br/>Port protocol" .-> ZIG_R["minga-renderer<br/><i>Zig + libvaxis</i>"]
+    PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
 
-    AS1 -. "apply_text_edits<br/>(message passing)" .-> BF1
-
-    style SUP fill:#6c3483,stroke:#4a235a,color:#fff
-    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
-    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
-    style RT fill:#6c3483,stroke:#4a235a,color:#fff
+    style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
     style EDSUP fill:#6c3483,stroke:#4a235a,color:#fff
-    style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
-    style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
-    style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
-    style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
-    style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
-    style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
     style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
     style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
     style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
     style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
-    style B1 fill:#2471a3,stroke:#1a5276,color:#fff
-    style B2 fill:#2471a3,stroke:#1a5276,color:#fff
-    style B3 fill:#2471a3,stroke:#1a5276,color:#fff
-    style BF1 fill:#2471a3,stroke:#1a5276,color:#fff,stroke-dasharray: 5 5
-    style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
-    style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
-    style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
-    style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
+    style ZIG_R fill:#1e8449,stroke:#196f3d,color:#fff
+    style ZIG_P fill:#1e8449,stroke:#196f3d,color:#fff
 ```
-
-> **Note:** `Buffer.Fork` processes (dashed border) are planned. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge). `Agent.Supervisor` and `Agent.Session` are shipped.
 
 ## Two-Process Architecture
 

@@ -31,7 +31,7 @@ Minga points that runtime at a text editor. The editor core runs on the BEAM. Re
 
 ### Current status
 
-Minga is pre-release. See the [Roadmap](ROADMAP.md) for what's shipped and what's planned. If you want to help shape what a BEAM-powered editor can be, now is a great time.
+Minga is pre-release. Check the [issue tracker](https://github.com/jsmestad/minga/issues) for planned work. If you want to help shape what a BEAM-powered editor can be, now is a great time.
 
 ## Quick start
 
