@@ -718,11 +718,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
-      if window.buffer == state.buffers.active do
-        state.highlight.current
-      else
-        Map.get(state.highlight.cache, window.buffer, Minga.Highlight.from_theme(state.theme))
-      end
+      Map.get(state.highlight.highlights, window.buffer, Minga.Highlight.from_theme(state.theme))
 
     if hl.capture_names != [], do: hl, else: nil
   end

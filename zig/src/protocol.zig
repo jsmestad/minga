@@ -61,6 +61,7 @@ pub const OP_SET_INDENT_QUERY: u8 = 0x29;
 pub const OP_REQUEST_INDENT: u8 = 0x2A;
 pub const OP_SET_TEXTOBJECT_QUERY: u8 = 0x2B;
 pub const OP_REQUEST_TEXTOBJECT: u8 = 0x2C;
+pub const OP_CLOSE_BUFFER: u8 = 0x2D;
 
 // Highlight responses (Zig → BEAM)
 pub const OP_HIGHLIGHT_SPANS: u8 = 0x30;
@@ -240,17 +241,18 @@ pub const RenderCommand = union(enum) {
     // No-op (command was decoded and skipped; GUI-only opcodes, etc.)
     noop: void,
     // Highlight commands
-    set_language: []const u8,
+    set_language: SetLanguage,
     parse_buffer: ParseBuffer,
-    set_highlight_query: []const u8,
-    set_injection_query: []const u8,
-    set_fold_query: []const u8,
-    set_indent_query: []const u8,
+    set_highlight_query: SetHighlightQuery,
+    set_injection_query: SetInjectionQuery,
+    set_fold_query: SetFoldQuery,
+    set_indent_query: SetIndentQuery,
     request_indent: RequestIndent,
-    set_textobject_query: []const u8,
+    set_textobject_query: SetTextobjectQuery,
     request_textobject: RequestTextobject,
     load_grammar: LoadGrammar,
     query_language_at: QueryLanguageAt,
+    close_buffer: u32, // buffer_id
 };
 
 /// A single edit delta for incremental content sync.
@@ -269,6 +271,7 @@ pub const EditDelta = struct {
 
 /// An edit_buffer command containing one or more edit deltas.
 pub const EditBuffer = struct {
+    buffer_id: u32 = 0,
     version: u32,
     edits: []const EditDelta,
 };
@@ -279,21 +282,55 @@ pub const MeasureText = struct {
 };
 
 pub const QueryLanguageAt = struct {
+    buffer_id: u32 = 0,
     request_id: u32,
     byte_offset: u32,
 };
 
 pub const ParseBuffer = struct {
+    buffer_id: u32 = 0,
     version: u32,
     source: []const u8,
 };
 
+pub const SetLanguage = struct {
+    buffer_id: u32 = 0,
+    name: []const u8,
+};
+
+pub const SetHighlightQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
+pub const SetInjectionQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
+pub const SetFoldQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
+pub const SetIndentQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
+pub const SetTextobjectQuery = struct {
+    buffer_id: u32 = 0,
+    source: []const u8,
+};
+
 pub const RequestIndent = struct {
+    buffer_id: u32 = 0,
     request_id: u32,
     line: u32,
 };
 
 pub const RequestTextobject = struct {
+    buffer_id: u32 = 0,
     request_id: u32,
     row: u32,
     col: u32,
@@ -450,15 +487,16 @@ pub fn writeMessage(writer: anytype, payload: []const u8) !void {
 
 /// Encodes highlight_spans: opcode(1) + version(4) + count(4) + spans(count * 10)
 /// Each span: start_byte:u32, end_byte:u32, capture_id:u16
-pub fn encodeHighlightSpans(allocator: std.mem.Allocator, version: u32, spans: []const Span) ![]u8 {
-    const header_size = 1 + 4 + 4; // opcode + version + count
+pub fn encodeHighlightSpans(allocator: std.mem.Allocator, buffer_id: u32, version: u32, spans: []const Span) ![]u8 {
+    const header_size = 1 + 4 + 4 + 4; // opcode + buffer_id + version + count
     const span_size = 10; // 4 + 4 + 2
     const total = header_size + spans.len * span_size;
     const buf = try allocator.alloc(u8, total);
 
     buf[0] = OP_HIGHLIGHT_SPANS;
-    std.mem.writeInt(u32, buf[1..5], version, .big);
-    std.mem.writeInt(u32, buf[5..9], @intCast(spans.len), .big);
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(spans.len), .big);
 
     for (spans, 0..) |span, i| {
         const off = header_size + i * span_size;
@@ -470,18 +508,19 @@ pub fn encodeHighlightSpans(allocator: std.mem.Allocator, version: u32, spans: [
     return buf;
 }
 
-/// Encodes highlight_names: opcode(1) + count(2) + (name_len:2 + name) for each
-pub fn encodeHighlightNames(allocator: std.mem.Allocator, names: []const []const u8) ![]u8 {
-    var total: usize = 1 + 2; // opcode + count
+/// Encodes highlight_names: opcode(1) + buffer_id(4) + count(2) + (name_len:2 + name) for each
+pub fn encodeHighlightNames(allocator: std.mem.Allocator, buffer_id: u32, names: []const []const u8) ![]u8 {
+    var total: usize = 1 + 4 + 2; // opcode + buffer_id + count
     for (names) |name| {
         total += 2 + name.len;
     }
 
     const buf = try allocator.alloc(u8, total);
     buf[0] = OP_HIGHLIGHT_NAMES;
-    std.mem.writeInt(u16, buf[1..3], @intCast(names.len), .big);
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u16, buf[5..7], @intCast(names.len), .big);
 
-    var off: usize = 3;
+    var off: usize = 7;
     for (names) |name| {
         std.mem.writeInt(u16, buf[off..][0..2], @intCast(name.len), .big);
         @memcpy(buf[off + 2 .. off + 2 + name.len], name);
@@ -571,74 +610,105 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             return .{ .set_default_bg = rgb };
         },
         OP_SET_LANGUAGE => {
-            // name_len:2, name
-            if (rest.len < 2) return error.Malformed;
-            const name_len = std.mem.readInt(u16, rest[0..2], .big);
-            if (rest.len < 2 + name_len) return error.Malformed;
-            return .{ .set_language = rest[2 .. 2 + name_len] };
+            // buffer_id:4, name_len:2, name
+            if (rest.len < 6) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const name_len = std.mem.readInt(u16, rest[4..6], .big);
+            if (rest.len < 6 + name_len) return error.Malformed;
+            return .{ .set_language = .{
+                .buffer_id = buffer_id,
+                .name = rest[6 .. 6 + name_len],
+            } };
         },
         OP_PARSE_BUFFER => {
-            // version:4, source_len:4, source
-            if (rest.len < 8) return error.Malformed;
-            const version = std.mem.readInt(u32, rest[0..4], .big);
-            const source_len = std.mem.readInt(u32, rest[4..8], .big);
-            if (rest.len < 8 + source_len) return error.Malformed;
+            // buffer_id:4, version:4, source_len:4, source
+            if (rest.len < 12) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const version = std.mem.readInt(u32, rest[4..8], .big);
+            const source_len = std.mem.readInt(u32, rest[8..12], .big);
+            if (rest.len < 12 + source_len) return error.Malformed;
             return .{ .parse_buffer = .{
+                .buffer_id = buffer_id,
                 .version = version,
-                .source = rest[8 .. 8 + source_len],
+                .source = rest[12 .. 12 + source_len],
             } };
         },
         OP_SET_HIGHLIGHT_QUERY => {
-            // query_len:4, query
-            if (rest.len < 4) return error.Malformed;
-            const query_len = std.mem.readInt(u32, rest[0..4], .big);
-            if (rest.len < 4 + query_len) return error.Malformed;
-            return .{ .set_highlight_query = rest[4 .. 4 + query_len] };
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_highlight_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
         },
         OP_SET_INJECTION_QUERY => {
-            // query_len:4, query (same wire format as set_highlight_query)
-            if (rest.len < 4) return error.Malformed;
-            const query_len = std.mem.readInt(u32, rest[0..4], .big);
-            if (rest.len < 4 + query_len) return error.Malformed;
-            return .{ .set_injection_query = rest[4 .. 4 + query_len] };
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_injection_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
         },
         OP_SET_FOLD_QUERY => {
-            // query_len:4, query (same wire format as set_highlight_query)
-            if (rest.len < 4) return error.Malformed;
-            const query_len = std.mem.readInt(u32, rest[0..4], .big);
-            if (rest.len < 4 + query_len) return error.Malformed;
-            return .{ .set_fold_query = rest[4 .. 4 + query_len] };
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_fold_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
         },
         OP_SET_INDENT_QUERY => {
-            if (rest.len < 4) return error.Malformed;
-            const query_len = std.mem.readInt(u32, rest[0..4], .big);
-            if (rest.len < 4 + query_len) return error.Malformed;
-            return .{ .set_indent_query = rest[4 .. 4 + query_len] };
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_indent_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
         },
         OP_REQUEST_INDENT => {
-            // request_id:4, line:4
-            if (rest.len < 8) return error.Malformed;
+            // buffer_id:4, request_id:4, line:4
+            if (rest.len < 12) return error.Malformed;
             return .{ .request_indent = .{
-                .request_id = std.mem.readInt(u32, rest[0..4], .big),
-                .line = std.mem.readInt(u32, rest[4..8], .big),
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .line = std.mem.readInt(u32, rest[8..12], .big),
             } };
         },
         OP_SET_TEXTOBJECT_QUERY => {
-            if (rest.len < 4) return error.Malformed;
-            const query_len = std.mem.readInt(u32, rest[0..4], .big);
-            if (rest.len < 4 + query_len) return error.Malformed;
-            return .{ .set_textobject_query = rest[4 .. 4 + query_len] };
+            // buffer_id:4, query_len:4, query
+            if (rest.len < 8) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const query_len = std.mem.readInt(u32, rest[4..8], .big);
+            if (rest.len < 8 + query_len) return error.Malformed;
+            return .{ .set_textobject_query = .{
+                .buffer_id = buffer_id,
+                .source = rest[8 .. 8 + query_len],
+            } };
         },
         OP_REQUEST_TEXTOBJECT => {
-            // request_id:4, row:4, col:4, name_len:2, name
-            if (rest.len < 14) return error.Malformed;
-            const name_len = std.mem.readInt(u16, rest[12..14], .big);
-            if (rest.len < 14 + name_len) return error.Malformed;
+            // buffer_id:4, request_id:4, row:4, col:4, name_len:2, name
+            if (rest.len < 18) return error.Malformed;
+            const buffer_id = std.mem.readInt(u32, rest[0..4], .big);
+            const name_len = std.mem.readInt(u16, rest[16..18], .big);
+            if (rest.len < 18 + name_len) return error.Malformed;
             return .{ .request_textobject = .{
-                .request_id = std.mem.readInt(u32, rest[0..4], .big),
-                .row = std.mem.readInt(u32, rest[4..8], .big),
-                .col = std.mem.readInt(u32, rest[8..12], .big),
-                .capture_name = rest[14 .. 14 + name_len],
+                .buffer_id = buffer_id,
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .row = std.mem.readInt(u32, rest[8..12], .big),
+                .col = std.mem.readInt(u32, rest[12..16], .big),
+                .capture_name = rest[18 .. 18 + name_len],
             } };
         },
         OP_LOAD_GRAMMAR => {
@@ -656,23 +726,28 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             } };
         },
         OP_QUERY_LANGUAGE_AT => {
-            // request_id:4, byte_offset:4
-            if (rest.len < 8) return error.Malformed;
-            const request_id = std.mem.readInt(u32, rest[0..4], .big);
-            const byte_offset = std.mem.readInt(u32, rest[4..8], .big);
+            // buffer_id:4, request_id:4, byte_offset:4
+            if (rest.len < 12) return error.Malformed;
             return .{ .query_language_at = .{
-                .request_id = request_id,
-                .byte_offset = byte_offset,
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .request_id = std.mem.readInt(u32, rest[4..8], .big),
+                .byte_offset = std.mem.readInt(u32, rest[8..12], .big),
             } };
         },
         OP_EDIT_BUFFER => {
             // Variable-length command. Decoded via decodeEditBuffer() with an allocator.
-            // Here we just validate the header and return the version + empty edits.
-            if (rest.len < 6) return error.Malformed;
+            // Here we just validate the header and return the buffer_id + version + empty edits.
+            if (rest.len < 10) return error.Malformed;
             return .{ .edit_buffer = .{
-                .version = std.mem.readInt(u32, rest[0..4], .big),
+                .buffer_id = std.mem.readInt(u32, rest[0..4], .big),
+                .version = std.mem.readInt(u32, rest[4..8], .big),
                 .edits = &.{},
             } };
+        },
+        OP_CLOSE_BUFFER => {
+            // buffer_id:4
+            if (rest.len < 4) return error.Malformed;
+            return .{ .close_buffer = std.mem.readInt(u32, rest[0..4], .big) };
         },
         OP_MEASURE_TEXT => {
             // request_id:4, text_len:2, text
@@ -758,19 +833,22 @@ pub fn commandSize(payload: []const u8) usize {
             break :blk 14 + text_len;
         },
         OP_SET_LANGUAGE => blk: {
-            if (payload.len < 3) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[1..3], .big);
-            break :blk 3 + name_len;
+            // opcode(1) + buffer_id(4) + name_len(2) + name
+            if (payload.len < 7) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[5..7], .big);
+            break :blk 7 + name_len;
         },
         OP_PARSE_BUFFER => blk: {
-            if (payload.len < 9) break :blk payload.len;
-            const source_len = std.mem.readInt(u32, payload[5..9], .big);
-            break :blk 9 + source_len;
+            // opcode(1) + buffer_id(4) + version(4) + source_len(4) + source
+            if (payload.len < 13) break :blk payload.len;
+            const source_len = std.mem.readInt(u32, payload[9..13], .big);
+            break :blk 13 + source_len;
         },
         OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY => blk: {
-            if (payload.len < 5) break :blk payload.len;
-            const query_len = std.mem.readInt(u32, payload[1..5], .big);
-            break :blk 5 + query_len;
+            // opcode(1) + buffer_id(4) + query_len(4) + query
+            if (payload.len < 9) break :blk payload.len;
+            const query_len = std.mem.readInt(u32, payload[5..9], .big);
+            break :blk 9 + query_len;
         },
         OP_LOAD_GRAMMAR => blk: {
             if (payload.len < 3) break :blk payload.len;
@@ -785,19 +863,20 @@ pub fn commandSize(payload: []const u8) usize {
             const title_len = std.mem.readInt(u16, payload[1..3], .big);
             break :blk 3 + title_len;
         },
-        OP_QUERY_LANGUAGE_AT => 9, // opcode(1) + request_id(4) + byte_offset(4)
-        OP_REQUEST_INDENT => 9, // opcode(1) + request_id(4) + line(4)
+        OP_QUERY_LANGUAGE_AT => 13, // opcode(1) + buffer_id(4) + request_id(4) + byte_offset(4)
+        OP_REQUEST_INDENT => 13, // opcode(1) + buffer_id(4) + request_id(4) + line(4)
         OP_REQUEST_TEXTOBJECT => blk: {
-            // opcode(1) + request_id(4) + row(4) + col(4) + name_len(2) + name
-            if (payload.len < 15) break :blk payload.len;
-            const nl = std.mem.readInt(u16, payload[13..15], .big);
-            break :blk 15 + nl;
+            // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4) + name_len(2) + name
+            if (payload.len < 19) break :blk payload.len;
+            const nl = std.mem.readInt(u16, payload[17..19], .big);
+            break :blk 19 + nl;
         },
+        OP_CLOSE_BUFFER => 5, // opcode(1) + buffer_id(4)
         OP_EDIT_BUFFER => blk: {
-            // opcode(1) + version(4) + edit_count(2) + variable per edit
-            if (payload.len < 7) break :blk payload.len;
-            const edit_count = std.mem.readInt(u16, payload[5..7], .big);
-            var off: usize = 7;
+            // opcode(1) + buffer_id(4) + version(4) + edit_count(2) + variable per edit
+            if (payload.len < 11) break :blk payload.len;
+            const edit_count = std.mem.readInt(u16, payload[9..11], .big);
+            var off: usize = 11;
             for (0..edit_count) |_| {
                 // 9 × u32 fields + text_len:u32 = 40 bytes header per edit
                 if (off + 40 > payload.len) break :blk payload.len;
@@ -829,17 +908,18 @@ pub fn commandSize(payload: []const u8) usize {
 }
 
 /// Fully decodes an edit_buffer command payload (after the opcode byte).
-/// Returns the version and an allocated slice of EditDelta structs.
+/// Returns the buffer_id, version, and an allocated slice of EditDelta structs.
 /// Caller owns the returned slice and must free it.
-pub fn decodeEditBuffer(data: []const u8, alloc: std.mem.Allocator) !struct { version: u32, edits: []EditDelta } {
-    if (data.len < 6) return error.Malformed;
-    const version = std.mem.readInt(u32, data[0..4], .big);
-    const edit_count = std.mem.readInt(u16, data[4..6], .big);
+pub fn decodeEditBuffer(data: []const u8, alloc: std.mem.Allocator) !struct { buffer_id: u32, version: u32, edits: []EditDelta } {
+    if (data.len < 10) return error.Malformed;
+    const buffer_id = std.mem.readInt(u32, data[0..4], .big);
+    const version = std.mem.readInt(u32, data[4..8], .big);
+    const edit_count = std.mem.readInt(u16, data[8..10], .big);
 
     const edits = try alloc.alloc(EditDelta, edit_count);
     errdefer alloc.free(edits);
 
-    var off: usize = 6;
+    var off: usize = 10;
     for (0..edit_count) |i| {
         if (off + 40 > data.len) return error.Malformed;
         edits[i] = .{
@@ -862,7 +942,7 @@ pub fn decodeEditBuffer(data: []const u8, alloc: std.mem.Allocator) !struct { ve
         off += 40 + text_len;
     }
 
-    return .{ .version = version, .edits = edits };
+    return .{ .buffer_id = buffer_id, .version = version, .edits = edits };
 }
 
 /// Encodes a text_width response: opcode(1) + request_id(4) + width(2) = 7 bytes.
@@ -889,16 +969,17 @@ pub fn encodeLanguageAtResponse(buf: []u8, request_id: u32, language: ?[]const u
 }
 
 /// Encodes injection_ranges: opcode(1) + count(2) + (start_byte:4, end_byte:4, name_len:2, name) for each
-pub fn encodeInjectionRanges(allocator: std.mem.Allocator, ranges: []const InjectionRange) ![]u8 {
-    var total: usize = 1 + 2; // opcode + count
+pub fn encodeInjectionRanges(allocator: std.mem.Allocator, buffer_id: u32, ranges: []const InjectionRange) ![]u8 {
+    var total: usize = 1 + 4 + 2; // opcode + buffer_id + count
     for (ranges) |r| {
         total += 4 + 4 + 2 + r.language.len;
     }
     const buf = try allocator.alloc(u8, total);
     buf[0] = OP_INJECTION_RANGES;
-    std.mem.writeInt(u16, buf[1..3], @intCast(ranges.len), .big);
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u16, buf[5..7], @intCast(ranges.len), .big);
 
-    var off: usize = 3;
+    var off: usize = 7;
     for (ranges) |r| {
         std.mem.writeInt(u32, buf[off..][0..4], r.start_byte, .big);
         std.mem.writeInt(u32, buf[off + 4 ..][0..4], r.end_byte, .big);
@@ -916,16 +997,17 @@ pub const FoldRange = struct {
     end_line: u32,
 };
 
-/// Encodes fold_ranges: opcode(1) + version(4) + count(4) + (start_line:4, end_line:4) for each
-pub fn encodeFoldRanges(allocator: std.mem.Allocator, version: u32, ranges: []const FoldRange) ![]u8 {
-    const header_size = 1 + 4 + 4; // opcode + version + count
+/// Encodes fold_ranges: opcode(1) + buffer_id(4) + version(4) + count(4) + (start_line:4, end_line:4) for each
+pub fn encodeFoldRanges(allocator: std.mem.Allocator, buffer_id: u32, version: u32, ranges: []const FoldRange) ![]u8 {
+    const header_size = 1 + 4 + 4 + 4; // opcode + buffer_id + version + count
     const range_size = 8; // start_line:4 + end_line:4
     const total = header_size + ranges.len * range_size;
     const buf = try allocator.alloc(u8, total);
 
     buf[0] = OP_FOLD_RANGES;
-    std.mem.writeInt(u32, buf[1..5], version, .big);
-    std.mem.writeInt(u32, buf[5..9], @intCast(ranges.len), .big);
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(ranges.len), .big);
 
     for (ranges, 0..) |r, i| {
         const off = header_size + i * range_size;
@@ -968,16 +1050,17 @@ pub const TextobjectEntry = struct {
     col: u32,
 };
 
-/// Encodes textobject_positions: opcode(1) + version(4) + count(4) + [type_id(1) + row(4) + col(4)] * count
-pub fn encodeTextobjectPositions(allocator: std.mem.Allocator, version: u32, entries: []const TextobjectEntry) ![]u8 {
+/// Encodes textobject_positions: opcode(1) + buffer_id(4) + version(4) + count(4) + [type_id(1) + row(4) + col(4)] * count
+pub fn encodeTextobjectPositions(allocator: std.mem.Allocator, buffer_id: u32, version: u32, entries: []const TextobjectEntry) ![]u8 {
     const entry_size: usize = 9; // type_id(1) + row(4) + col(4)
-    const header_size: usize = 9; // opcode(1) + version(4) + count(4)
+    const header_size: usize = 13; // opcode(1) + buffer_id(4) + version(4) + count(4)
     const total_size = header_size + entries.len * entry_size;
 
     const buf = try allocator.alloc(u8, total_size);
     buf[0] = OP_TEXTOBJECT_POSITIONS;
-    std.mem.writeInt(u32, buf[1..5], version, .big);
-    std.mem.writeInt(u32, buf[5..9], @intCast(entries.len), .big);
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(entries.len), .big);
 
     var pos: usize = header_size;
     for (entries) |e| {
@@ -1691,29 +1774,41 @@ test "encodeResize byte layout: self-consistent encoding" {
 // ── Highlight protocol tests ──────────────────────────────────────────────────
 
 test "decode set_language" {
-    // opcode(1) + name_len:2 + "elixir"(6) = 9 bytes
-    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06 } ++ "elixir".*;
+    // opcode(1) + buffer_id:4 + name_len:2 + "elixir"(6) = 13 bytes
+    var data: [13]u8 = undefined;
+    data[0] = OP_SET_LANGUAGE;
+    std.mem.writeInt(u32, data[1..5], 7, .big); // buffer_id = 7
+    std.mem.writeInt(u16, data[5..7], 6, .big); // name_len = 6
+    @memcpy(data[7..13], "elixir");
     const cmd = try decodeCommand(&data);
-    try std.testing.expect(cmd == .set_language);
-    try std.testing.expectEqualStrings("elixir", cmd.set_language);
+    switch (cmd) {
+        .set_language => |sl| {
+            try std.testing.expectEqual(@as(u32, 7), sl.buffer_id);
+            try std.testing.expectEqualStrings("elixir", sl.name);
+        },
+        else => return error.Malformed,
+    }
 }
 
 test "decode set_language truncated returns malformed" {
-    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06, 'e', 'l' }; // only 2 of 6 name bytes
+    // opcode(1) + buffer_id:4 + name_len:2 + only 2 of 6 name bytes
+    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x00, 0x00, 0x01, 0x00, 0x06, 'e', 'l' };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
 }
 
 test "decode parse_buffer" {
-    // opcode(1) + version:4 + source_len:4 + "hello"(5) = 14 bytes
-    const data = [_]u8{
-        OP_PARSE_BUFFER,
-        0x00, 0x00, 0x00, 0x01, // version = 1
-        0x00, 0x00, 0x00, 0x05, // source_len = 5
-    } ++ "hello".*;
+    // opcode(1) + buffer_id:4 + version:4 + source_len:4 + "hello"(5) = 18 bytes
+    var data: [18]u8 = undefined;
+    data[0] = OP_PARSE_BUFFER;
+    std.mem.writeInt(u32, data[1..5], 3, .big); // buffer_id = 3
+    std.mem.writeInt(u32, data[5..9], 1, .big); // version = 1
+    std.mem.writeInt(u32, data[9..13], 5, .big); // source_len = 5
+    @memcpy(data[13..18], "hello");
     const cmd = try decodeCommand(&data);
     switch (cmd) {
         .parse_buffer => |pb| {
+            try std.testing.expectEqual(@as(u32, 3), pb.buffer_id);
             try std.testing.expectEqual(@as(u32, 1), pb.version);
             try std.testing.expectEqualStrings("hello", pb.source);
         },
@@ -1723,13 +1818,19 @@ test "decode parse_buffer" {
 
 test "decode set_highlight_query" {
     const query = "(atom) @string";
-    var data: [1 + 4 + query.len]u8 = undefined;
+    // opcode(1) + buffer_id(4) + query_len(4) + query
+    var data: [1 + 4 + 4 + query.len]u8 = undefined;
     data[0] = OP_SET_HIGHLIGHT_QUERY;
-    std.mem.writeInt(u32, data[1..5], query.len, .big);
-    @memcpy(data[5..], query);
+    std.mem.writeInt(u32, data[1..5], 0, .big); // buffer_id = 0
+    std.mem.writeInt(u32, data[5..9], query.len, .big);
+    @memcpy(data[9..], query);
     const cmd = try decodeCommand(&data);
-    try std.testing.expect(cmd == .set_highlight_query);
-    try std.testing.expectEqualStrings(query, cmd.set_highlight_query);
+    switch (cmd) {
+        .set_highlight_query => |shq| {
+            try std.testing.expectEqualStrings(query, shq.source);
+        },
+        else => return error.Malformed,
+    }
 }
 
 test "decode load_grammar" {
@@ -1746,50 +1847,82 @@ test "decode load_grammar" {
 }
 
 test "commandSize: set_language" {
-    const data = [_]u8{ OP_SET_LANGUAGE, 0x00, 0x06 } ++ "elixir".*;
-    try std.testing.expectEqual(@as(usize, 9), commandSize(&data));
+    // opcode(1) + buffer_id(4) + name_len(2) + "elixir"(6) = 13 bytes
+    var data: [13]u8 = undefined;
+    data[0] = OP_SET_LANGUAGE;
+    std.mem.writeInt(u32, data[1..5], 0, .big);
+    std.mem.writeInt(u16, data[5..7], 6, .big);
+    @memcpy(data[7..13], "elixir");
+    try std.testing.expectEqual(@as(usize, 13), commandSize(&data));
 }
 
 test "commandSize: parse_buffer" {
-    const data = [_]u8{
-        OP_PARSE_BUFFER,
-        0x00,
-        0x00,
-        0x00,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x03,
-    } ++ "abc".*;
-    try std.testing.expectEqual(@as(usize, 12), commandSize(&data));
+    // opcode(1) + buffer_id(4) + version(4) + source_len(4) + "abc"(3) = 16 bytes
+    var data: [16]u8 = undefined;
+    data[0] = OP_PARSE_BUFFER;
+    std.mem.writeInt(u32, data[1..5], 0, .big); // buffer_id
+    std.mem.writeInt(u32, data[5..9], 1, .big); // version
+    std.mem.writeInt(u32, data[9..13], 3, .big); // source_len
+    @memcpy(data[13..16], "abc");
+    try std.testing.expectEqual(@as(usize, 16), commandSize(&data));
 }
 
 test "commandSize: set_highlight_query" {
-    var data: [1 + 4 + 5]u8 = undefined;
+    // opcode(1) + buffer_id(4) + query_len(4) + "query"(5) = 14 bytes
+    var data: [1 + 4 + 4 + 5]u8 = undefined;
     data[0] = OP_SET_HIGHLIGHT_QUERY;
-    std.mem.writeInt(u32, data[1..5], 5, .big);
-    @memcpy(data[5..10], "query");
-    try std.testing.expectEqual(@as(usize, 10), commandSize(&data));
+    std.mem.writeInt(u32, data[1..5], 0, .big); // buffer_id
+    std.mem.writeInt(u32, data[5..9], 5, .big); // query_len
+    @memcpy(data[9..14], "query");
+    try std.testing.expectEqual(@as(usize, 14), commandSize(&data));
 }
 
 test "decode set_injection_query" {
     const query = "(content) @injection.content";
-    var data: [1 + 4 + query.len]u8 = undefined;
+    // opcode(1) + buffer_id(4) + query_len(4) + query
+    var data: [1 + 4 + 4 + query.len]u8 = undefined;
     data[0] = OP_SET_INJECTION_QUERY;
-    std.mem.writeInt(u32, data[1..5], query.len, .big);
-    @memcpy(data[5..], query);
+    std.mem.writeInt(u32, data[1..5], 2, .big); // buffer_id = 2
+    std.mem.writeInt(u32, data[5..9], query.len, .big);
+    @memcpy(data[9..], query);
     const cmd = try decodeCommand(&data);
-    try std.testing.expect(cmd == .set_injection_query);
-    try std.testing.expectEqualStrings(query, cmd.set_injection_query);
+    switch (cmd) {
+        .set_injection_query => |siq| {
+            try std.testing.expectEqual(@as(u32, 2), siq.buffer_id);
+            try std.testing.expectEqualStrings(query, siq.source);
+        },
+        else => return error.Malformed,
+    }
 }
 
 test "commandSize: set_injection_query" {
-    var data: [1 + 4 + 5]u8 = undefined;
+    // opcode(1) + buffer_id(4) + query_len(4) + "query"(5) = 14 bytes
+    var data: [1 + 4 + 4 + 5]u8 = undefined;
     data[0] = OP_SET_INJECTION_QUERY;
-    std.mem.writeInt(u32, data[1..5], 5, .big);
-    @memcpy(data[5..10], "query");
-    try std.testing.expectEqual(@as(usize, 10), commandSize(&data));
+    std.mem.writeInt(u32, data[1..5], 0, .big);
+    std.mem.writeInt(u32, data[5..9], 5, .big);
+    @memcpy(data[9..14], "query");
+    try std.testing.expectEqual(@as(usize, 14), commandSize(&data));
+}
+
+test "decode close_buffer" {
+    var data: [5]u8 = undefined;
+    data[0] = OP_CLOSE_BUFFER;
+    std.mem.writeInt(u32, data[1..5], 42, .big);
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .close_buffer => |buffer_id| {
+            try std.testing.expectEqual(@as(u32, 42), buffer_id);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "commandSize: close_buffer" {
+    var data: [5]u8 = undefined;
+    data[0] = OP_CLOSE_BUFFER;
+    std.mem.writeInt(u32, data[1..5], 0, .big);
+    try std.testing.expectEqual(@as(usize, 5), commandSize(&data));
 }
 
 test "commandSize: load_grammar" {
@@ -1802,35 +1935,37 @@ test "encodeHighlightSpans round-trip" {
         .{ .start_byte = 0, .end_byte = 9, .capture_id = 0, .pattern_index = 0 },
         .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 1 },
     };
-    const buf = try encodeHighlightSpans(std.testing.allocator, 42, &spans);
+    const buf = try encodeHighlightSpans(std.testing.allocator, 5, 42, &spans);
     defer std.testing.allocator.free(buf);
 
     try std.testing.expectEqual(OP_HIGHLIGHT_SPANS, buf[0]);
-    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, buf[1..5], .big));
-    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, buf[5..9], .big));
+    try std.testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, buf[1..5], .big)); // buffer_id
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, buf[5..9], .big)); // version
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, buf[9..13], .big)); // count
     // First span
-    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[9..13], .big));
-    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, buf[13..17], .big));
-    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[17..19], .big));
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[13..17], .big));
+    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, buf[17..21], .big));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[21..23], .big));
     // Second span
-    try std.testing.expectEqual(@as(u32, 10), std.mem.readInt(u32, buf[19..23], .big));
-    try std.testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buf[23..27], .big));
-    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[27..29], .big));
+    try std.testing.expectEqual(@as(u32, 10), std.mem.readInt(u32, buf[23..27], .big));
+    try std.testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buf[27..31], .big));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[31..33], .big));
 }
 
 test "encodeHighlightNames round-trip" {
     const names = [_][]const u8{ "keyword", "string" };
-    const buf = try encodeHighlightNames(std.testing.allocator, &names);
+    const buf = try encodeHighlightNames(std.testing.allocator, 3, &names);
     defer std.testing.allocator.free(buf);
 
     try std.testing.expectEqual(OP_HIGHLIGHT_NAMES, buf[0]);
-    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, buf[1..3], .big));
+    try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, buf[1..5], .big)); // buffer_id
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, buf[5..7], .big)); // count
     // "keyword" (7)
-    try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, buf[3..5], .big));
-    try std.testing.expectEqualStrings("keyword", buf[5..12]);
+    try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, buf[7..9], .big));
+    try std.testing.expectEqualStrings("keyword", buf[9..16]);
     // "string" (6)
-    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, buf[12..14], .big));
-    try std.testing.expectEqualStrings("string", buf[14..20]);
+    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, buf[16..18], .big));
+    try std.testing.expectEqualStrings("string", buf[18..24]);
 }
 
 test "encodeGrammarLoaded" {

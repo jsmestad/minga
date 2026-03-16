@@ -27,18 +27,24 @@ defmodule Minga.Parser.IncrementalTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
+  # All tests use buffer_id 0 for simplicity.
+  @buffer_id 0
+
   defp setup_elixir(parser) do
-    ParserManager.send_commands(parser, [Protocol.encode_set_language("elixir")])
+    ParserManager.send_commands(parser, [Protocol.encode_set_language(@buffer_id, "elixir")])
     Process.sleep(20)
   end
 
   defp full_parse(parser, version, content) do
-    ParserManager.send_commands(parser, [Protocol.encode_parse_buffer(version, content)])
+    ParserManager.send_commands(parser, [
+      Protocol.encode_parse_buffer(@buffer_id, version, content)
+    ])
+
     receive_spans(version)
   end
 
   defp incremental_parse(parser, version, edits) do
-    ParserManager.send_commands(parser, [Protocol.encode_edit_buffer(version, edits)])
+    ParserManager.send_commands(parser, [Protocol.encode_edit_buffer(@buffer_id, version, edits)])
     receive_spans(version)
   end
 
@@ -48,13 +54,13 @@ defmodule Minga.Parser.IncrementalTest do
 
   defp receive_spans_loop(version, timeout) do
     receive do
-      {:minga_highlight, {:highlight_spans, ^version, spans}} ->
+      {:minga_highlight, {:highlight_spans, _buffer_id, ^version, spans}} ->
         spans
 
-      {:minga_highlight, {:highlight_names, _names}} ->
+      {:minga_highlight, {:highlight_names, _buffer_id, _names}} ->
         receive_spans_loop(version, timeout)
 
-      {:minga_highlight, {:highlight_spans, _other_version, _spans}} ->
+      {:minga_highlight, {:highlight_spans, _buffer_id, _other_version, _spans}} ->
         receive_spans_loop(version, timeout)
 
       {:minga_highlight, _other} ->

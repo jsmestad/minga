@@ -3,7 +3,10 @@ defmodule Minga.Editor.HighlightEvents do
   Handles highlight-related messages from the Parser.Manager.
 
   Extracted from `Minga.Editor` to keep the GenServer module focused on
-  orchestration. Each function takes state and returns `{:noreply, state}`.
+  orchestration. Each function takes state and returns updated state.
+
+  With per-buffer tree-sitter parsing, highlight data is stored per-buffer
+  in `highlight.highlights`. There is no separate "current" field.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -15,7 +18,7 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.LSP.SyncServer
 
   @doc """
-  Handles `:highlight_names` events from the parser.
+  Handles `:highlight_names` events from the parser (for the active buffer).
   """
   @spec handle_names(EditorState.t(), [String.t()]) :: EditorState.t()
   def handle_names(state, names) do
@@ -23,47 +26,24 @@ defmodule Minga.Editor.HighlightEvents do
   end
 
   @doc """
-  Handles `:injection_ranges` events from the parser.
-  """
-  @spec handle_injection_ranges(EditorState.t(), term()) :: EditorState.t()
-  def handle_injection_ranges(state, ranges) do
-    if state.buffers.active do
-      %{state | injection_ranges: Map.put(state.injection_ranges, state.buffers.active, ranges)}
-    else
-      state
-    end
-  end
+  Handles `:highlight_spans` events from the parser (for the active buffer).
 
-  @doc """
-  Handles `:highlight_spans` events from the parser.
-
-  Updates the highlight state, caches spans for the active buffer,
-  and triggers a render.
+  Updates the buffer's highlight data and triggers a render.
   """
   @spec handle_spans(EditorState.t(), non_neg_integer(), term()) :: EditorState.t()
   def handle_spans(state, version, spans) do
     new_state = HighlightSync.handle_spans(state, version, spans)
-
-    new_state =
-      if new_state.buffers.active do
-        hl = new_state.highlight
-
-        %{
-          new_state
-          | highlight: %{hl | cache: Map.put(hl.cache, new_state.buffers.active, hl.current)}
-        }
-      else
-        new_state
-      end
-
     Renderer.render(new_state)
   end
 
   @doc """
-  Detects buffer switch and restores/caches highlights accordingly.
+  Detects buffer switch and schedules highlight setup if the new buffer
+  has no cached highlights.
 
-  Saves current highlights for the old buffer, restores cached highlights
-  for the new buffer, or schedules highlight setup if no cache exists.
+  With per-buffer parsing, buffer switches don't need to swap data in
+  and out of a "current" field. Each buffer's highlights live in the
+  `highlights` map permanently. We just need to trigger setup if the
+  buffer has never been highlighted before.
   """
   @spec maybe_reset_highlight(EditorState.t(), pid() | nil) :: EditorState.t()
   def maybe_reset_highlight(state, old_buffer) do
@@ -72,24 +52,17 @@ defmodule Minga.Editor.HighlightEvents do
     if new_buffer != old_buffer and new_buffer != nil do
       hl = state.highlight
 
-      cache =
-        if old_buffer != nil and hl.current.capture_names != [] do
-          Map.put(hl.cache, old_buffer, hl.current)
-        else
-          hl.cache
-        end
-
-      case Map.get(cache, new_buffer) do
+      case Map.get(hl.highlights, new_buffer) do
         nil ->
+          # New buffer with no highlights: schedule setup.
           send(self(), :setup_highlight)
+          state
 
-          %{
-            state
-            | highlight: %{hl | current: Minga.Highlight.from_theme(state.theme), cache: cache}
-          }
-
-        cached ->
-          %{state | highlight: %{hl | current: cached, cache: cache}}
+        _cached ->
+          # Buffer has cached highlights: nothing to do, they're already
+          # in the highlights map and will be read by the render pipeline.
+          # Refresh the LRU timestamp so actively-viewed buffers aren't evicted.
+          HighlightSync.touch_active(state)
       end
     else
       state
@@ -121,8 +94,14 @@ defmodule Minga.Editor.HighlightEvents do
         state
       end
 
-    if content_changed and state.highlight.current.capture_names != [] do
-      HighlightSync.request_reparse(state)
+    if content_changed do
+      active_hl = HighlightSync.get_active_highlight(state)
+
+      if active_hl.capture_names != [] do
+        HighlightSync.request_reparse(state)
+      else
+        state
+      end
     else
       state
     end

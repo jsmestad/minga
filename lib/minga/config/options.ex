@@ -139,6 +139,7 @@ defmodule Minga.Config.Options do
           | :nav_flash_threshold
           | :log_level_config
           | :log_level_port
+          | :parser_tree_ttl
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -225,7 +226,8 @@ defmodule Minga.Config.Options do
     {:log_level_agent, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
     {:log_level_editor, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
     {:log_level_config, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default}
+    {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
+    {:parser_tree_ttl, :integer, 300}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

@@ -6,14 +6,20 @@ defmodule Minga.Editor.HighlightSyncTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
 
-  # Minimal state for testing — no real port or buffer needed for
-  # handle_names and handle_spans.
+  # Minimal state for testing with a fake active buffer PID.
   defp base_state do
+    pid = spawn(fn -> Process.sleep(:infinity) end)
+
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
       vim: VimState.new()
     }
+    |> then(fn s -> %{s | buffers: %{s.buffers | active: pid}} end)
+  end
+
+  defp get_hl(state) do
+    HighlightSync.get_active_highlight(state)
   end
 
   describe "handle_names/2" do
@@ -22,7 +28,7 @@ defmodule Minga.Editor.HighlightSyncTest do
       names = ["keyword", "string", "comment"]
       new_state = HighlightSync.handle_names(state, names)
 
-      assert new_state.highlight.current.capture_names == names
+      assert get_hl(new_state).capture_names == names
     end
 
     test "replaces previous capture names" do
@@ -31,7 +37,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_names(["old"])
         |> HighlightSync.handle_names(["new1", "new2"])
 
-      assert state.highlight.current.capture_names == ["new1", "new2"]
+      assert get_hl(state).capture_names == ["new1", "new2"]
     end
   end
 
@@ -46,8 +52,8 @@ defmodule Minga.Editor.HighlightSyncTest do
         base_state()
         |> HighlightSync.handle_spans(1, spans)
 
-      assert state.highlight.current.version == 1
-      assert state.highlight.current.spans == List.to_tuple(spans)
+      assert get_hl(state).version == 1
+      assert get_hl(state).spans == List.to_tuple(spans)
     end
 
     test "rejects stale spans with older version" do
@@ -59,8 +65,8 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(5, spans1)
         |> HighlightSync.handle_spans(3, spans2)
 
-      assert state.highlight.current.version == 5
-      assert state.highlight.current.spans == List.to_tuple(spans1)
+      assert get_hl(state).version == 5
+      assert get_hl(state).spans == List.to_tuple(spans1)
     end
 
     test "accepts spans with equal version" do
@@ -72,26 +78,36 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_spans(5, spans1)
         |> HighlightSync.handle_spans(5, spans2)
 
-      assert state.highlight.current.spans == List.to_tuple(spans2)
+      assert get_hl(state).spans == List.to_tuple(spans2)
     end
   end
 
   describe "setup_for_buffer/1" do
     test "returns state unchanged when no buffer" do
-      state = base_state()
+      state = %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new()
+      }
+
       assert HighlightSync.setup_for_buffer(state) == state
     end
   end
 
   describe "request_reparse/1" do
     test "returns state unchanged when no buffer" do
-      state = base_state()
+      state = %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new()
+      }
+
       assert HighlightSync.request_reparse(state) == state
     end
 
     test "returns state unchanged when no highlighting active" do
       state = base_state()
-      assert state.highlight.current.capture_names == []
+      assert get_hl(state).capture_names == []
       assert HighlightSync.request_reparse(state) == state
     end
   end

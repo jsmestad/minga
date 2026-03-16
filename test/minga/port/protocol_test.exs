@@ -480,30 +480,30 @@ defmodule Minga.Port.ProtocolTest do
 
   describe "highlight protocol" do
     test "encode_set_language produces correct binary" do
-      encoded = Protocol.encode_set_language("elixir")
-      assert <<0x20, 6::16, rest::binary>> = encoded
+      encoded = Protocol.encode_set_language(7, "elixir")
+      assert <<0x20, 7::32, 6::16, rest::binary>> = encoded
       assert rest == "elixir"
     end
 
     test "encode_parse_buffer produces correct binary" do
-      encoded = Protocol.encode_parse_buffer(42, "hello")
-      assert <<0x21, 42::32, 5::32, rest::binary>> = encoded
+      encoded = Protocol.encode_parse_buffer(3, 42, "hello")
+      assert <<0x21, 3::32, 42::32, 5::32, rest::binary>> = encoded
       assert rest == "hello"
     end
 
     test "encode_set_highlight_query produces correct binary" do
       query = "(atom) @string"
-      encoded = Protocol.encode_set_highlight_query(query)
+      encoded = Protocol.encode_set_highlight_query(1, query)
       qlen = byte_size(query)
-      assert <<0x22, ^qlen::32, rest::binary>> = encoded
+      assert <<0x22, 1::32, ^qlen::32, rest::binary>> = encoded
       assert rest == query
     end
 
     test "encode_set_injection_query produces correct binary" do
       query = "(content) @injection.content"
-      encoded = Protocol.encode_set_injection_query(query)
+      encoded = Protocol.encode_set_injection_query(2, query)
       qlen = byte_size(query)
-      assert <<0x24, ^qlen::32, rest::binary>> = encoded
+      assert <<0x24, 2::32, ^qlen::32, rest::binary>> = encoded
       assert rest == query
     end
 
@@ -513,23 +513,31 @@ defmodule Minga.Port.ProtocolTest do
       assert rest == "/tmp/lua.so"
     end
 
+    test "encode_close_buffer produces correct binary" do
+      encoded = Protocol.encode_close_buffer(42)
+      assert <<0x2D, 42::32>> = encoded
+    end
+
     test "decode_event highlight_spans" do
       spans_binary =
         <<0::32, 9::32, 0::16>> <>
           <<10::32, 15::32, 1::16>>
 
-      payload = <<0x30, 42::32, 2::32>> <> spans_binary
+      # buffer_id=5, version=42, count=2
+      payload = <<0x30, 5::32, 42::32, 2::32>> <> spans_binary
 
-      assert {:ok, {:highlight_spans, 42, spans}} = Protocol.decode_event(payload)
+      assert {:ok, {:highlight_spans, 5, 42, spans}} = Protocol.decode_event(payload)
       assert length(spans) == 2
       assert hd(spans) == %{start_byte: 0, end_byte: 9, capture_id: 0}
       assert List.last(spans) == %{start_byte: 10, end_byte: 15, capture_id: 1}
     end
 
     test "decode_event highlight_names" do
-      payload = <<0x31, 2::16, 7::16, "keyword", 6::16, "string">>
+      # buffer_id=3, count=2
+      payload = <<0x31, 3::32, 2::16, 7::16, "keyword", 6::16, "string">>
 
-      assert {:ok, {:highlight_names, ["keyword", "string"]}} = Protocol.decode_event(payload)
+      assert {:ok, {:highlight_names, 3, ["keyword", "string"]}} =
+               Protocol.decode_event(payload)
     end
 
     test "decode_event grammar_loaded success" do
@@ -543,18 +551,20 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     test "decode_event highlight_spans with zero spans" do
-      payload = <<0x30, 1::32, 0::32>>
-      assert {:ok, {:highlight_spans, 1, []}} = Protocol.decode_event(payload)
+      # buffer_id=0, version=1, count=0
+      payload = <<0x30, 0::32, 1::32, 0::32>>
+      assert {:ok, {:highlight_spans, 0, 1, []}} = Protocol.decode_event(payload)
     end
 
     test "decode_event highlight_names with zero names" do
-      payload = <<0x31, 0::16>>
-      assert {:ok, {:highlight_names, []}} = Protocol.decode_event(payload)
+      # buffer_id=0, count=0
+      payload = <<0x31, 0::32, 0::16>>
+      assert {:ok, {:highlight_names, 0, []}} = Protocol.decode_event(payload)
     end
 
     test "decode_event malformed highlight_spans" do
-      # Count says 2 spans but only 1 provided
-      payload = <<0x30, 1::32, 2::32, 0::32, 9::32, 0::16>>
+      # buffer_id=0, version=1, count says 2 spans but only 1 provided
+      payload = <<0x30, 0::32, 1::32, 2::32, 0::32, 9::32, 0::16>>
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end
   end
@@ -611,10 +621,10 @@ defmodule Minga.Port.ProtocolTest do
         }
       ]
 
-      result = Protocol.encode_edit_buffer(1, edits)
+      result = Protocol.encode_edit_buffer(5, 1, edits)
 
-      assert <<0x26, 1::32, 1::16, 10::32, 10::32, 11::32, 2::32, 5::32, 2::32, 5::32, 2::32,
-               6::32, 1::32, "x">> = result
+      assert <<0x26, 5::32, 1::32, 1::16, 10::32, 10::32, 11::32, 2::32, 5::32, 2::32, 5::32,
+               2::32, 6::32, 1::32, "x">> = result
     end
 
     test "encode_edit_buffer with multiple edits" do
@@ -639,13 +649,13 @@ defmodule Minga.Port.ProtocolTest do
         }
       ]
 
-      result = Protocol.encode_edit_buffer(42, edits)
-      assert <<0x26, 42::32, 2::16, _rest::binary>> = result
+      result = Protocol.encode_edit_buffer(0, 42, edits)
+      assert <<0x26, 0::32, 42::32, 2::16, _rest::binary>> = result
     end
 
     test "encode_edit_buffer with empty edits list" do
-      result = Protocol.encode_edit_buffer(1, [])
-      assert <<0x26, 1::32, 0::16>> = result
+      result = Protocol.encode_edit_buffer(0, 1, [])
+      assert <<0x26, 0::32, 1::32, 0::16>> = result
     end
   end
 

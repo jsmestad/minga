@@ -22,17 +22,18 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
 
   describe "decode_event/1 — textobject_positions (0x39)" do
     test "decodes empty positions" do
-      payload = <<@op_textobject_positions, 1::32, 0::32>>
+      # buffer_id=0, version=1, count=0
+      payload = <<@op_textobject_positions, 0::32, 1::32, 0::32>>
 
-      assert {:ok, {:textobject_positions, 1, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 0, 1, positions}} = Protocol.decode_event(payload)
       assert positions == %{}
     end
 
     test "decodes single function entry" do
       entry = encode_entry(@textobj_function, 5, 0)
-      payload = <<@op_textobject_positions, 42::32, 1::32, entry::binary>>
+      payload = <<@op_textobject_positions, 3::32, 42::32, 1::32, entry::binary>>
 
-      assert {:ok, {:textobject_positions, 42, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 3, 42, positions}} = Protocol.decode_event(payload)
       assert positions == %{function: [{5, 0}]}
     end
 
@@ -42,9 +43,9 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
           encode_entry(@textobj_function, 5, 0) <>
           encode_entry(@textobj_function, 10, 4)
 
-      payload = <<@op_textobject_positions, 1::32, 3::32, entries::binary>>
+      payload = <<@op_textobject_positions, 0::32, 1::32, 3::32, entries::binary>>
 
-      assert {:ok, {:textobject_positions, 1, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 0, 1, positions}} = Protocol.decode_event(payload)
       assert positions == %{function: [{0, 0}, {5, 0}, {10, 4}]}
     end
 
@@ -54,9 +55,9 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
           encode_entry(@textobj_class, 5, 2) <>
           encode_entry(@textobj_parameter, 3, 10)
 
-      payload = <<@op_textobject_positions, 7::32, 3::32, entries::binary>>
+      payload = <<@op_textobject_positions, 2::32, 7::32, 3::32, entries::binary>>
 
-      assert {:ok, {:textobject_positions, 7, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 2, 7, positions}} = Protocol.decode_event(payload)
       assert positions == %{function: [{1, 0}], class: [{5, 2}], parameter: [{3, 10}]}
     end
 
@@ -69,9 +70,9 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
           encode_entry(@textobj_comment, 4, 0) <>
           encode_entry(@textobj_test, 5, 0)
 
-      payload = <<@op_textobject_positions, 1::32, 6::32, entries::binary>>
+      payload = <<@op_textobject_positions, 0::32, 1::32, 6::32, entries::binary>>
 
-      assert {:ok, {:textobject_positions, 1, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 0, 1, positions}} = Protocol.decode_event(payload)
       assert Map.has_key?(positions, :function)
       assert Map.has_key?(positions, :class)
       assert Map.has_key?(positions, :parameter)
@@ -82,9 +83,9 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
 
     test "unknown type ID decodes as :unknown" do
       entry = encode_entry(255, 0, 0)
-      payload = <<@op_textobject_positions, 1::32, 1::32, entry::binary>>
+      payload = <<@op_textobject_positions, 0::32, 1::32, 1::32, entry::binary>>
 
-      assert {:ok, {:textobject_positions, 1, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 0, 1, positions}} = Protocol.decode_event(payload)
       assert Map.has_key?(positions, :unknown)
     end
 
@@ -95,16 +96,16 @@ defmodule Minga.Port.ProtocolTextobjectPositionsTest do
           encode_entry(@textobj_function, 3, 0) <>
           encode_entry(@textobj_function, 10, 2)
 
-      payload = <<@op_textobject_positions, 1::32, 4::32, entries::binary>>
+      payload = <<@op_textobject_positions, 0::32, 1::32, 4::32, entries::binary>>
 
-      assert {:ok, {:textobject_positions, 1, positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 0, 1, positions}} = Protocol.decode_event(payload)
       assert positions[:function] == [{0, 5}, {0, 15}, {3, 0}, {10, 2}]
     end
 
-    test "version counter is preserved" do
-      payload = <<@op_textobject_positions, 999::32, 0::32>>
+    test "buffer_id and version are preserved" do
+      payload = <<@op_textobject_positions, 7::32, 999::32, 0::32>>
 
-      assert {:ok, {:textobject_positions, 999, _positions}} = Protocol.decode_event(payload)
+      assert {:ok, {:textobject_positions, 7, 999, _positions}} = Protocol.decode_event(payload)
     end
   end
 end

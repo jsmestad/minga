@@ -284,11 +284,12 @@ defmodule Minga.TreeSitter do
 
   @spec send_queries(String.t(), keyword()) :: :ok
   defp send_queries(name, opts) do
-    # Set the language first so queries are associated with it
-    ParserManager.set_language(name)
+    # Set the language first so queries are associated with it.
+    # Dynamic grammar loading uses buffer_id 0 (global/default).
+    ParserManager.set_language(0, name)
 
-    send_query(name, opts, :highlights, &ParserManager.set_highlight_query/1)
-    send_query(name, opts, :injections, &ParserManager.set_injection_query/1)
+    send_query(name, opts, :highlights, &ParserManager.set_highlight_query(0, &1))
+    send_query(name, opts, :injections, &ParserManager.set_injection_query(0, &1))
 
     :ok
   end

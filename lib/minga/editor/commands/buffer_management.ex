@@ -724,6 +724,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
         end
       end
 
+      # Free the buffer's tree-sitter parse tree in the Zig parser process.
+      state = HighlightSync.close_buffer(state, buf)
+
       Minga.Editor.log_to_messages("Closed: #{buf_name}")
 
       new_buffers = List.delete_at(buffers, idx)

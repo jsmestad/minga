@@ -74,6 +74,7 @@ defmodule Minga.Port.Protocol do
   @op_request_indent 0x2A
   @op_set_textobject_query 0x2B
   @op_request_textobject 0x2C
+  @op_close_buffer 0x2D
 
   # Well-known textobject type IDs (match Zig constants)
   @textobj_function 0
@@ -161,14 +162,15 @@ defmodule Minga.Port.Protocol do
           | {:paste_event, text :: String.t()}
           | {:mouse_event, row :: integer(), col :: integer(), mouse_button(), modifiers(),
              mouse_event_type(), click_count :: pos_integer()}
-          | {:highlight_spans, version :: non_neg_integer(), [highlight_span()]}
-          | {:highlight_names, [String.t()]}
+          | {:highlight_spans, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
+             [highlight_span()]}
+          | {:highlight_names, buffer_id :: non_neg_integer(), [String.t()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
-          | {:injection_ranges,
+          | {:injection_ranges, buffer_id :: non_neg_integer(),
              [%{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}]}
           | {:language_at_response, request_id :: non_neg_integer(), language :: String.t()}
           | {:text_width, request_id :: non_neg_integer(), width :: non_neg_integer()}
-          | {:fold_ranges, version :: non_neg_integer(),
+          | {:fold_ranges, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              [{start_line :: non_neg_integer(), end_line :: non_neg_integer()}]}
           | {:indent_result, request_id :: non_neg_integer(), line :: non_neg_integer(),
              indent_level :: integer()}
@@ -176,7 +178,7 @@ defmodule Minga.Port.Protocol do
              result ::
                {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
                | nil}
-          | {:textobject_positions, version :: non_neg_integer(),
+          | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              %{atom() => [{non_neg_integer(), non_neg_integer()}]}}
           | {:log_message, level :: String.t(), text :: String.t()}
 
@@ -407,14 +409,16 @@ defmodule Minga.Port.Protocol do
         }
 
   @doc """
-  Encodes an edit_buffer command with a version and a list of edit deltas.
+  Encodes an edit_buffer command with buffer_id, version, and a list of edit deltas.
 
   Each delta describes a replacement: the range [start_byte, old_end_byte) is
   replaced with `inserted_text`, producing a range [start_byte, new_end_byte).
   """
-  @spec encode_edit_buffer(non_neg_integer(), [edit_delta()]) :: binary()
-  def encode_edit_buffer(version, edits) when is_integer(version) and is_list(edits) do
-    header = <<@op_edit_buffer, version::32, length(edits)::16>>
+  @spec encode_edit_buffer(non_neg_integer(), non_neg_integer(), [edit_delta()]) :: binary()
+  def encode_edit_buffer(buffer_id, version, edits)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(version) and is_list(edits) do
+    header = <<@op_edit_buffer, buffer_id::32, version::32, length(edits)::16>>
 
     edit_data =
       for edit <- edits, into: <<>> do
@@ -443,69 +447,79 @@ defmodule Minga.Port.Protocol do
 
   # ── Encoding: highlight commands (BEAM → Zig) ──
 
-  @doc "Encodes a set_language command."
-  @spec encode_set_language(String.t()) :: binary()
-  def encode_set_language(name) when is_binary(name) do
-    <<@op_set_language, byte_size(name)::16, name::binary>>
+  @doc "Encodes a set_language command with buffer_id."
+  @spec encode_set_language(non_neg_integer(), String.t()) :: binary()
+  def encode_set_language(buffer_id, name)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(name) do
+    <<@op_set_language, buffer_id::32, byte_size(name)::16, name::binary>>
   end
 
-  @doc "Encodes a parse_buffer command with a version counter."
-  @spec encode_parse_buffer(non_neg_integer(), String.t()) :: binary()
-  def encode_parse_buffer(version, source)
-      when is_integer(version) and version >= 0 and is_binary(source) do
-    <<@op_parse_buffer, version::32, byte_size(source)::32, source::binary>>
+  @doc "Encodes a parse_buffer command with buffer_id and version counter."
+  @spec encode_parse_buffer(non_neg_integer(), non_neg_integer(), String.t()) :: binary()
+  def encode_parse_buffer(buffer_id, version, source)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(version) and version >= 0 and is_binary(source) do
+    <<@op_parse_buffer, buffer_id::32, version::32, byte_size(source)::32, source::binary>>
   end
 
-  @doc "Encodes a set_highlight_query command."
-  @spec encode_set_highlight_query(String.t()) :: binary()
-  def encode_set_highlight_query(query) when is_binary(query) do
-    <<@op_set_highlight_query, byte_size(query)::32, query::binary>>
+  @doc "Encodes a set_highlight_query command with buffer_id."
+  @spec encode_set_highlight_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_highlight_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_highlight_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
-  @doc "Encodes a set_injection_query command."
-  @spec encode_set_injection_query(String.t()) :: binary()
-  def encode_set_injection_query(query) when is_binary(query) do
-    <<@op_set_injection_query, byte_size(query)::32, query::binary>>
+  @doc "Encodes a set_injection_query command with buffer_id."
+  @spec encode_set_injection_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_injection_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_injection_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
-  @doc "Encodes a set_fold_query command."
-  @spec encode_set_fold_query(String.t()) :: binary()
-  def encode_set_fold_query(query) when is_binary(query) do
-    <<@op_set_fold_query, byte_size(query)::32, query::binary>>
+  @doc "Encodes a set_fold_query command with buffer_id."
+  @spec encode_set_fold_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_fold_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_fold_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
-  @doc "Encodes a set_indent_query command."
-  @spec encode_set_indent_query(String.t()) :: binary()
-  def encode_set_indent_query(query) when is_binary(query) do
-    <<@op_set_indent_query, byte_size(query)::32, query::binary>>
+  @doc "Encodes a set_indent_query command with buffer_id."
+  @spec encode_set_indent_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_indent_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_indent_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
-  @doc "Encodes a request_indent command: request_id(4) + line(4)."
-  @spec encode_request_indent(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_request_indent(request_id, line)
-      when is_integer(request_id) and is_integer(line) do
-    <<@op_request_indent, request_id::32, line::32>>
+  @doc "Encodes a request_indent command: buffer_id(4) + request_id(4) + line(4)."
+  @spec encode_request_indent(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_request_indent(buffer_id, request_id, line)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(line) do
+    <<@op_request_indent, buffer_id::32, request_id::32, line::32>>
   end
 
-  @doc "Encodes a set_textobject_query command."
-  @spec encode_set_textobject_query(String.t()) :: binary()
-  def encode_set_textobject_query(query) when is_binary(query) do
-    <<@op_set_textobject_query, byte_size(query)::32, query::binary>>
+  @doc "Encodes a set_textobject_query command with buffer_id."
+  @spec encode_set_textobject_query(non_neg_integer(), String.t()) :: binary()
+  def encode_set_textobject_query(buffer_id, query)
+      when is_integer(buffer_id) and buffer_id >= 0 and is_binary(query) do
+    <<@op_set_textobject_query, buffer_id::32, byte_size(query)::32, query::binary>>
   end
 
-  @doc "Encodes a request_textobject command: request_id(4) + row(4) + col(4) + name_len(2) + name."
+  @doc "Encodes a request_textobject command: buffer_id(4) + request_id(4) + row(4) + col(4) + name_len(2) + name."
   @spec encode_request_textobject(
+          non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           String.t()
         ) ::
           binary()
-  def encode_request_textobject(request_id, row, col, capture_name)
-      when is_integer(request_id) and is_integer(row) and is_integer(col) and
+  def encode_request_textobject(buffer_id, request_id, row, col, capture_name)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(row) and is_integer(col) and
              is_binary(capture_name) do
-    <<@op_request_textobject, request_id::32, row::32, col::32, byte_size(capture_name)::16,
-      capture_name::binary>>
+    <<@op_request_textobject, buffer_id::32, request_id::32, row::32, col::32,
+      byte_size(capture_name)::16, capture_name::binary>>
   end
 
   @doc "Encodes a load_grammar command."
@@ -514,11 +528,20 @@ defmodule Minga.Port.Protocol do
     <<@op_load_grammar, byte_size(name)::16, name::binary, byte_size(path)::16, path::binary>>
   end
 
-  @doc "Encodes a query_language_at request: request_id(4) + byte_offset(4)."
-  @spec encode_query_language_at(non_neg_integer(), non_neg_integer()) :: binary()
-  def encode_query_language_at(request_id, byte_offset)
-      when is_integer(request_id) and is_integer(byte_offset) do
-    <<@op_query_language_at, request_id::32, byte_offset::32>>
+  @doc "Encodes a query_language_at request: buffer_id(4) + request_id(4) + byte_offset(4)."
+  @spec encode_query_language_at(non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          binary()
+  def encode_query_language_at(buffer_id, request_id, byte_offset)
+      when is_integer(buffer_id) and buffer_id >= 0 and
+             is_integer(request_id) and is_integer(byte_offset) do
+    <<@op_query_language_at, buffer_id::32, request_id::32, byte_offset::32>>
+  end
+
+  @doc "Encodes a close_buffer command: buffer_id(4)."
+  @spec encode_close_buffer(non_neg_integer()) :: binary()
+  def encode_close_buffer(buffer_id)
+      when is_integer(buffer_id) and buffer_id >= 0 do
+    <<@op_close_buffer, buffer_id::32>>
   end
 
   # ── Decoding (Zig → BEAM) ──
@@ -580,16 +603,16 @@ defmodule Minga.Port.Protocol do
     {:ok, {:paste_event, text}}
   end
 
-  def decode_event(<<@op_highlight_spans, version::32, count::32, rest::binary>>) do
+  def decode_event(<<@op_highlight_spans, buffer_id::32, version::32, count::32, rest::binary>>) do
     case decode_spans(rest, count, []) do
-      {:ok, spans} -> {:ok, {:highlight_spans, version, spans}}
+      {:ok, spans} -> {:ok, {:highlight_spans, buffer_id, version, spans}}
       :error -> {:error, :malformed}
     end
   end
 
-  def decode_event(<<@op_highlight_names, count::16, rest::binary>>) do
+  def decode_event(<<@op_highlight_names, buffer_id::32, count::16, rest::binary>>) do
     case decode_names(rest, count, []) do
-      {:ok, names} -> {:ok, {:highlight_names, names}}
+      {:ok, names} -> {:ok, {:highlight_names, buffer_id, names}}
       :error -> {:error, :malformed}
     end
   end
@@ -604,17 +627,17 @@ defmodule Minga.Port.Protocol do
     {:ok, {:language_at_response, request_id, name}}
   end
 
-  def decode_event(<<@op_injection_ranges, count::16, rest::binary>>) do
-    {:ok, {:injection_ranges, decode_injection_ranges(rest, count, [])}}
+  def decode_event(<<@op_injection_ranges, buffer_id::32, count::16, rest::binary>>) do
+    {:ok, {:injection_ranges, buffer_id, decode_injection_ranges(rest, count, [])}}
   end
 
   def decode_event(<<@op_text_width, request_id::32, width::16>>) do
     {:ok, {:text_width, request_id, width}}
   end
 
-  def decode_event(<<@op_fold_ranges, version::32, count::32, rest::binary>>) do
+  def decode_event(<<@op_fold_ranges, buffer_id::32, version::32, count::32, rest::binary>>) do
     case decode_fold_ranges(rest, count, []) do
-      {:ok, ranges} -> {:ok, {:fold_ranges, version, ranges}}
+      {:ok, ranges} -> {:ok, {:fold_ranges, buffer_id, version, ranges}}
       :error -> {:error, :malformed}
     end
   end
@@ -634,9 +657,11 @@ defmodule Minga.Port.Protocol do
     {:ok, {:textobject_result, request_id, nil}}
   end
 
-  def decode_event(<<@op_textobject_positions, version::32, count::32, entries::binary>>) do
+  def decode_event(
+        <<@op_textobject_positions, buffer_id::32, version::32, count::32, entries::binary>>
+      ) do
     positions = decode_textobject_entries(entries, count, %{})
-    {:ok, {:textobject_positions, version, positions}}
+    {:ok, {:textobject_positions, buffer_id, version, positions}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
