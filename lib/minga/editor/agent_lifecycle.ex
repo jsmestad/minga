@@ -116,7 +116,14 @@ defmodule Minga.Editor.AgentLifecycle do
   defp sync_buffer_content(state, _buffer, []), do: state
 
   defp sync_buffer_content(state, buffer, messages) do
-    line_index = AgentBufferSync.sync(buffer, messages)
+    # Pass pending_approval to the sync pipeline so ChatDecorations can
+    # render an approval prompt on the matching tool call.
+    agent = AgentAccess.agent(state)
+
+    sync_opts =
+      if agent.pending_approval, do: [pending_approval: agent.pending_approval], else: []
+
+    line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
 
     # Cache the line index in the panel state so callers (scroll_context,
     # code_block_index_for_scroll) can read it without recomputing.

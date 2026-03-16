@@ -45,6 +45,7 @@ defmodule Minga.Agent.ChatDecorations do
         ) :: Decorations.t()
   def build_decorations(decs, messages, line_offsets, theme, opts \\ []) do
     streaming = Keyword.get(opts, :streaming, false)
+    pending_approval = Keyword.get(opts, :pending_approval)
     offset_map = Map.new(line_offsets, fn {idx, start, count} -> {idx, {start, count}} end)
 
     last_idx = length(messages) - 1
@@ -56,7 +57,16 @@ defmodule Minga.Agent.ChatDecorations do
         {start_line, line_count} ->
           log_decoration(msg, idx, start_line, line_count)
           is_last = idx == last_idx
-          apply_message_decorations(d, msg, start_line, line_count, theme, streaming and is_last)
+
+          apply_message_decorations(
+            d,
+            msg,
+            start_line,
+            line_count,
+            theme,
+            streaming and is_last,
+            pending_approval
+          )
 
         nil ->
           Minga.Log.warning(:agent, "[chat_decs] no offset for msg idx=#{idx}")
@@ -87,16 +97,33 @@ defmodule Minga.Agent.ChatDecorations do
          line,
          line_count,
          theme,
-         _streaming
+         _streaming,
+         _pending_approval
        ) do
     apply_user_decorations(decs, line, line_count, theme)
   end
 
-  defp apply_message_decorations(decs, {:user, _text}, line, line_count, theme, _streaming) do
+  defp apply_message_decorations(
+         decs,
+         {:user, _text},
+         line,
+         line_count,
+         theme,
+         _streaming,
+         _pending_approval
+       ) do
     apply_user_decorations(decs, line, line_count, theme)
   end
 
-  defp apply_message_decorations(decs, {:assistant, text}, line, line_count, theme, streaming) do
+  defp apply_message_decorations(
+         decs,
+         {:assistant, text},
+         line,
+         line_count,
+         theme,
+         streaming,
+         _pending_approval
+       ) do
     {_id, decs} =
       Decorations.add_block_decoration(decs, line,
         placement: :above,
@@ -132,7 +159,8 @@ defmodule Minga.Agent.ChatDecorations do
          line,
          line_count,
          theme,
-         _streaming
+         _streaming,
+         _pending_approval
        ) do
     # Header
     {_id, decs} =
@@ -184,20 +212,100 @@ defmodule Minga.Agent.ChatDecorations do
     decs
   end
 
-  defp apply_message_decorations(decs, {:tool_call, tc}, line, line_count, theme, _streaming) do
-    status_icon =
-      case tc.status do
-        :running -> "⟳"
-        :complete -> "✓"
-        :error -> "✗"
-      end
+  defp apply_message_decorations(
+         decs,
+         {:tool_call, tc},
+         line,
+         line_count,
+         theme,
+         _streaming,
+         pending_approval
+       ) do
+    awaiting_approval = tool_awaiting_approval?(tc, pending_approval)
+    apply_tool_call_decorations(decs, tc, line, line_count, theme, awaiting_approval)
+  end
 
-    status_fg =
-      case tc.status do
-        :running -> theme.status_tool
-        :complete -> theme.tool_header
-        :error -> theme.status_error
-      end
+  defp apply_message_decorations(
+         decs,
+         {:usage, _usage},
+         line,
+         line_count,
+         theme,
+         _streaming,
+         _pending_approval
+       ) do
+    # Dim the usage stats line
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.usage_fg],
+        priority: 10,
+        group: :chat_usage
+      )
+
+    decs
+  end
+
+  defp apply_message_decorations(
+         decs,
+         {:system, _text, level},
+         line,
+         line_count,
+         theme,
+         _streaming,
+         _pending_approval
+       ) do
+    label_fg = if level == :error, do: theme.status_error, else: theme.system_fg
+
+    {_id, decs} =
+      Decorations.add_block_decoration(decs, line,
+        placement: :above,
+        render: fn _w ->
+          [{"System", [fg: label_fg, bold: true, bg: theme.header_bg]}]
+        end,
+        priority: 5
+      )
+
+    # Dim the system message text
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.system_fg],
+        priority: 5,
+        group: :chat_system
+      )
+
+    decs
+  end
+
+  defp apply_message_decorations(
+         decs,
+         _other,
+         _line,
+         _line_count,
+         _theme,
+         _streaming,
+         _pending_approval
+       ),
+       do: decs
+
+  # ── Tool call decorations ────────────────────────────────────────────────────
+
+  @spec tool_awaiting_approval?(map(), map() | nil) :: boolean()
+  defp tool_awaiting_approval?(_tc, nil), do: false
+
+  defp tool_awaiting_approval?(tc, approval) when is_map(approval) do
+    Map.get(approval, :tool_call_id) == tc.id
+  end
+
+  @spec apply_tool_call_decorations(
+          Decorations.t(),
+          map(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Theme.Agent.t(),
+          boolean()
+        ) :: Decorations.t()
+  defp apply_tool_call_decorations(decs, tc, line, line_count, theme, awaiting_approval) do
+    {status_icon, status_fg} = tool_status_display(tc, theme, awaiting_approval)
 
     has_result = tc.result != ""
 
@@ -206,13 +314,11 @@ defmodule Minga.Agent.ChatDecorations do
     command_text = format_tool_command(tc)
     header_text = "┌─ #{status_icon} #{tc.name}#{duration_text}#{command_text}"
 
-    # Block decoration: tool header
+    # Block decoration: tool header (with approval prompt when awaiting)
     {_id, decs} =
       Decorations.add_block_decoration(decs, line,
         placement: :above,
-        render: fn _w ->
-          [{header_text, [fg: status_fg, bold: true]}]
-        end,
+        render: tool_header_render(header_text, status_fg, theme, awaiting_approval),
         priority: 5
       )
 
@@ -251,58 +357,50 @@ defmodule Minga.Agent.ChatDecorations do
     {_id, decs} =
       Decorations.add_block_decoration(decs, last_line,
         placement: :below,
-        render: fn _w ->
-          [{"└─", [fg: status_fg]}]
-        end,
+        render: fn _w -> [{"└─", [fg: status_fg]}] end,
         priority: 5
       )
 
     decs
   end
 
-  defp apply_message_decorations(decs, {:usage, _usage}, line, line_count, theme, _streaming) do
-    # Dim the usage stats line
-    {_id, decs} =
-      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.usage_fg],
-        priority: 10,
-        group: :chat_usage
-      )
-
-    decs
+  @spec tool_status_display(map(), Minga.Theme.Agent.t(), boolean()) ::
+          {String.t(), non_neg_integer()}
+  defp tool_status_display(_tc, theme, true = _awaiting) do
+    {"?", theme.status_thinking}
   end
 
-  defp apply_message_decorations(
-         decs,
-         {:system, _text, level},
-         line,
-         line_count,
-         theme,
-         _streaming
-       ) do
-    label_fg = if level == :error, do: theme.status_error, else: theme.system_fg
-
-    {_id, decs} =
-      Decorations.add_block_decoration(decs, line,
-        placement: :above,
-        render: fn _w ->
-          [{"System", [fg: label_fg, bold: true, bg: theme.header_bg]}]
-        end,
-        priority: 5
-      )
-
-    # Dim the system message text
-    {_id, decs} =
-      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.system_fg],
-        priority: 5,
-        group: :chat_system
-      )
-
-    decs
+  defp tool_status_display(tc, theme, false) do
+    case tc.status do
+      :running -> {"⟳", theme.status_tool}
+      :complete -> {"✓", theme.tool_header}
+      :error -> {"✗", theme.status_error}
+    end
   end
 
-  defp apply_message_decorations(decs, _other, _line, _line_count, _theme, _streaming), do: decs
+  @spec tool_header_render(String.t(), non_neg_integer(), Minga.Theme.Agent.t(), boolean()) ::
+          (non_neg_integer() -> [{String.t(), keyword()}])
+  defp tool_header_render(header_text, status_fg, theme, true = _awaiting) do
+    fn _w ->
+      [
+        {header_text, [fg: status_fg, bold: true]},
+        {" ", []},
+        {"Approve? ", [fg: status_fg, bold: true]},
+        {"[y]", [fg: theme.tool_header, bold: true]},
+        {"es ", [fg: status_fg]},
+        {"[n]", [fg: theme.status_error, bold: true]},
+        {"o ", [fg: status_fg]},
+        {"[Y]", [fg: theme.tool_header, bold: true]},
+        {"es-all", [fg: status_fg]}
+      ]
+    end
+  end
+
+  defp tool_header_render(header_text, status_fg, _theme, false) do
+    fn _w ->
+      [{header_text, [fg: status_fg, bold: true]}]
+    end
+  end
 
   # Detects fenced code blocks (``` ... ```) in markdown text and adds
   # background highlight ranges for the block region.

@@ -82,6 +82,56 @@ defmodule Minga.Agent.ChatDecorationsTest do
       refute Decorations.has_fold_regions?(result)
     end
 
+    test "tool call awaiting approval shows approval prompt in header" do
+      tc = %{id: "tc_123", name: "write_file", status: :running, result: "", collapsed: false}
+      decs = Decorations.new()
+      messages = [{:tool_call, tc}]
+      offsets = [{0, 0, 1}]
+
+      pending_approval = %{tool_call_id: "tc_123", name: "write_file", args: %{}}
+
+      result =
+        ChatDecorations.build_decorations(decs, messages, offsets, test_theme(),
+          pending_approval: pending_approval
+        )
+
+      # Header block decoration should contain approval prompt text
+      {above, _below} = Decorations.blocks_for_line(result, 0)
+      assert length(above) == 1
+
+      [block_dec] = above
+      rendered = block_dec.render.(80)
+
+      # The rendered output should contain the approval prompt segments
+      rendered_text = Enum.map_join(rendered, "", fn {text, _style} -> text end)
+      assert rendered_text =~ "Approve?"
+      assert rendered_text =~ "[y]"
+      assert rendered_text =~ "[n]"
+    end
+
+    test "tool call without matching approval shows normal header" do
+      tc = %{id: "tc_456", name: "read_file", status: :running, result: "", collapsed: false}
+      decs = Decorations.new()
+      messages = [{:tool_call, tc}]
+      offsets = [{0, 0, 1}]
+
+      # Different tool_call_id, should not show approval
+      pending_approval = %{tool_call_id: "tc_999", name: "other_tool", args: %{}}
+
+      result =
+        ChatDecorations.build_decorations(decs, messages, offsets, test_theme(),
+          pending_approval: pending_approval
+        )
+
+      {above, _below} = Decorations.blocks_for_line(result, 0)
+      assert length(above) == 1
+
+      [block_dec] = above
+      rendered = block_dec.render.(80)
+      rendered_text = Enum.map_join(rendered, "", fn {text, _style} -> text end)
+      refute rendered_text =~ "Approve?"
+    end
+
     test "multiple messages get independent decorations" do
       decs = Decorations.new()
 
