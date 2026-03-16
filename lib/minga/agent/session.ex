@@ -1024,6 +1024,7 @@ defmodule Minga.Agent.Session do
       msg =
         "No API keys configured. Use `/auth` to get started.\n\n" <>
           "Example: `/auth anthropic sk-ant-your-key-here`\n" <>
+          "Get your Anthropic key at: https://console.anthropic.com/settings/keys\n\n" <>
           "Run `/auth` with no arguments to see status for all providers."
 
       messages = state.messages ++ [Message.system(msg)]

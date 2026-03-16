@@ -228,7 +228,8 @@ defmodule Minga.Agent.SlashCommand do
       Enum.map_join(statuses, "\n", fn s ->
         icon = if s.configured, do: "✓", else: "✗"
         source_hint = if s.source, do: " (#{s.source})", else: ""
-        "  #{icon} #{String.capitalize(s.provider)}#{source_hint}"
+        url_hint = dashboard_url_hint(s.provider)
+        "  #{icon} #{String.capitalize(s.provider)}#{source_hint}#{url_hint}"
       end)
 
     endpoint_info = format_endpoint_info()
@@ -256,9 +257,16 @@ defmodule Minga.Agent.SlashCommand do
         do_auth_store(state, String.downcase(provider), key)
 
       [provider] ->
+        url = Credentials.dashboard_url_for(provider)
+
+        hint =
+          if url,
+            do: "\nGet your API key at: #{url}",
+            else: ""
+
         emit_system_message(
           state,
-          "Usage: /auth #{provider} <api-key>\nPaste your API key after the provider name."
+          "Usage: /auth #{provider} <api-key>\nPaste your API key after the provider name.#{hint}"
         )
 
       _ ->
@@ -774,6 +782,16 @@ defmodule Minga.Agent.SlashCommand do
     case String.split(text, " ", parts: 2) do
       [cmd] -> {String.downcase(cmd), ""}
       [cmd, args] -> {String.downcase(cmd), args}
+    end
+  end
+
+  # Returns a short URL hint for unconfigured providers in the /auth status display.
+  # Configured providers don't need the hint (user already has a key).
+  @spec dashboard_url_hint(String.t()) :: String.t()
+  defp dashboard_url_hint(provider) do
+    case Credentials.dashboard_url_for(provider) do
+      nil -> ""
+      url -> " → #{url}"
     end
   end
 
