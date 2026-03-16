@@ -272,6 +272,36 @@ defmodule Minga.Agent.ChatDecorations do
     decs
   end
 
+  defp apply_message_decorations(
+         decs,
+         {:system, _text, level},
+         line,
+         line_count,
+         theme,
+         _streaming
+       ) do
+    label_fg = if level == :error, do: theme.status_error, else: theme.system_fg
+
+    {_id, decs} =
+      Decorations.add_block_decoration(decs, line,
+        placement: :above,
+        render: fn _w ->
+          [{"System", [fg: label_fg, bold: true, bg: theme.header_bg]}]
+        end,
+        priority: 5
+      )
+
+    # Dim the system message text
+    {_id, decs} =
+      Decorations.add_highlight(decs, {line, 0}, {line + line_count, 0},
+        style: [fg: theme.system_fg],
+        priority: 5,
+        group: :chat_system
+      )
+
+    decs
+  end
+
   defp apply_message_decorations(decs, _other, _line, _line_count, _theme, _streaming), do: decs
 
   # Detects fenced code blocks (``` ... ```) in markdown text and adds

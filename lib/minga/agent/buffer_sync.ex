@@ -137,12 +137,14 @@ defmodule Minga.Agent.BufferSync do
     end
   end
 
+  defp message_to_markdown({:system, text, _level}), do: text
+
   defp message_to_markdown(_other), do: ""
 
   # ── Line-to-message index ──────────────────────────────────────────────────
 
   @typedoc "Line type for buffer-line-to-message mapping."
-  @type line_type :: :text | :code | :tool | :thinking | :usage | :empty
+  @type line_type :: :text | :code | :tool | :thinking | :usage | :system | :empty
 
   @doc """
   Builds a per-buffer-line index mapping buffer lines to message indices and types.
@@ -251,6 +253,7 @@ defmodule Minga.Agent.BufferSync do
   defp classify_line({:thinking, _, _}, _line_num, _fence_map), do: :thinking
   defp classify_line({:tool_call, _}, _line_num, _fence_map), do: :tool
   defp classify_line({:usage, _}, _line_num, _fence_map), do: :usage
+  defp classify_line({:system, _, _}, _line_num, _fence_map), do: :system
   defp classify_line(_msg, _line_num, _fence_map), do: :text
 
   @doc """

@@ -46,6 +46,15 @@ defmodule Minga.Agent.Credentials do
     "groq" => "GROQ_API_KEY"
   }
 
+  # Maps provider names to their API key dashboard URLs.
+  @dashboard_urls %{
+    "anthropic" => "https://console.anthropic.com/settings/keys",
+    "openai" => "https://platform.openai.com/api-keys",
+    "google" => "https://aistudio.google.com/apikey",
+    "openrouter" => "https://openrouter.ai/keys",
+    "groq" => "https://console.groq.com/keys"
+  }
+
   # Ollama doesn't use an API key; it's auto-detected when the local server
   # is running. We store the host URL instead.
   @ollama_host_var "OLLAMA_HOST"
@@ -179,6 +188,14 @@ defmodule Minga.Agent.Credentials do
   @spec env_var_for(provider()) :: String.t() | nil
   def env_var_for(provider) when is_binary(provider) do
     Map.get(@env_vars, String.downcase(provider))
+  end
+
+  @doc """
+  Returns the API key dashboard URL for a provider, or nil if unknown.
+  """
+  @spec dashboard_url_for(provider()) :: String.t() | nil
+  def dashboard_url_for(provider) when is_binary(provider) do
+    Map.get(@dashboard_urls, String.downcase(provider))
   end
 
   @doc """
