@@ -53,6 +53,11 @@ defmodule Minga.Editor.Commands.Movement do
     {:half_page_up, "Scroll half page up", true},
     {:page_down, "Scroll page down", true},
     {:page_up, "Scroll page up", true},
+    {:scroll_down_line, "Scroll viewport down one line", true},
+    {:scroll_up_line, "Scroll viewport up one line", true},
+    {:scroll_center, "Center viewport on cursor (zz)", true},
+    {:scroll_cursor_top, "Scroll cursor to top of viewport (zt)", true},
+    {:scroll_cursor_bottom, "Scroll cursor to bottom of viewport (zb)", true},
     {:window_left, "Focus window left", true},
     {:window_right, "Focus window right", true},
     {:window_up, "Focus window up", true},
@@ -211,7 +216,7 @@ defmodule Minga.Editor.Commands.Movement do
     gb = BufferServer.snapshot(buf)
     new_pos = Minga.Motion.document_end(gb)
     BufferServer.move_to(buf, new_pos)
-    state
+    maybe_repin_agent_chat(state)
   end
 
   def execute(%{buffers: %{active: buf}} = state, {:goto_line, line_num}) do
@@ -307,24 +312,86 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Page scrolling ────────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}, viewport: vp} = state, :half_page_down) do
-    Helpers.page_move(buf, vp, div(Viewport.content_rows(vp), 2))
+  def execute(%{buffers: %{active: buf}} = state, :half_page_down) do
+    vp = active_viewport(state)
+    delta = decoration_aware_page_delta(buf, vp, div(Viewport.content_rows(vp), 2))
+    Helpers.page_move(buf, vp, delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}, viewport: vp} = state, :half_page_up) do
-    Helpers.page_move(buf, vp, -div(Viewport.content_rows(vp), 2))
+  def execute(%{buffers: %{active: buf}} = state, :half_page_up) do
+    vp = active_viewport(state)
+    delta = decoration_aware_page_delta(buf, vp, div(Viewport.content_rows(vp), 2))
+    Helpers.page_move(buf, vp, -delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}, viewport: vp} = state, :page_down) do
-    Helpers.page_move(buf, vp, Viewport.content_rows(vp))
+  def execute(%{buffers: %{active: buf}} = state, :page_down) do
+    vp = active_viewport(state)
+    delta = decoration_aware_page_delta(buf, vp, Viewport.content_rows(vp))
+    Helpers.page_move(buf, vp, delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}, viewport: vp} = state, :page_up) do
-    Helpers.page_move(buf, vp, -Viewport.content_rows(vp))
+  def execute(%{buffers: %{active: buf}} = state, :page_up) do
+    vp = active_viewport(state)
+    delta = decoration_aware_page_delta(buf, vp, Viewport.content_rows(vp))
+    Helpers.page_move(buf, vp, -delta)
     state
+  end
+
+  # ── Scroll-without-cursor commands ─────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, :scroll_down_line) do
+    vp = active_viewport(state)
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    {new_vp, clamped_cursor} = Viewport.scroll_line_down(vp, cursor_line, total_lines)
+
+    if clamped_cursor != cursor_line do
+      BufferServer.move_to(buf, {clamped_cursor, cursor_col})
+    end
+
+    put_active_viewport(state, new_vp)
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :scroll_up_line) do
+    vp = active_viewport(state)
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    {new_vp, clamped_cursor} = Viewport.scroll_line_up(vp, cursor_line, total_lines)
+
+    if clamped_cursor != cursor_line do
+      BufferServer.move_to(buf, {clamped_cursor, cursor_col})
+    end
+
+    put_active_viewport(state, new_vp)
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :scroll_center) do
+    vp = active_viewport(state)
+    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    new_vp = Viewport.center_on(vp, cursor_line, total_lines)
+    put_active_viewport(state, new_vp)
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :scroll_cursor_top) do
+    vp = active_viewport(state)
+    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    margin = scroll_margin(buf)
+    new_vp = Viewport.top_on(vp, cursor_line, total_lines, margin)
+    put_active_viewport(state, new_vp)
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, :scroll_cursor_bottom) do
+    vp = active_viewport(state)
+    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
+    total_lines = BufferServer.line_count(buf)
+    margin = scroll_margin(buf)
+    new_vp = Viewport.bottom_on(vp, cursor_line, total_lines, margin)
+    put_active_viewport(state, new_vp)
   end
 
   # ── Window commands ────────────────────────────────────────────────────────
@@ -561,6 +628,47 @@ defmodule Minga.Editor.Commands.Movement do
   @spec fold_skip_target(FoldMap.t(), non_neg_integer(), :up | :down) :: non_neg_integer()
   defp fold_skip_target(fm, cursor_line, :down), do: FoldMap.next_visible(fm, cursor_line - 1)
   defp fold_skip_target(fm, cursor_line, :up), do: FoldMap.prev_visible(fm, cursor_line + 1)
+
+  # ── Viewport helpers for scroll commands ──────────────────────────────────
+
+  # Delegates to EditorState shared helpers.
+  defp active_viewport(state), do: EditorState.active_window_viewport(state)
+
+  defp put_active_viewport(state, new_vp),
+    do: EditorState.put_active_window_viewport(state, new_vp)
+
+  @spec scroll_margin(pid()) :: non_neg_integer()
+  defp scroll_margin(buf) do
+    BufferServer.get_option(buf, :scroll_margin)
+  catch
+    :exit, _ -> 5
+  end
+
+  # Computes the effective page delta in buffer lines, accounting for
+  # decorations that consume display rows. Falls back to raw display_rows
+  # when no decorations exist (fast path).
+  @spec decoration_aware_page_delta(pid(), Viewport.t(), pos_integer()) :: pos_integer()
+  defp decoration_aware_page_delta(buf, _vp, display_rows) do
+    decorations = BufferServer.decorations(buf)
+    {cursor_line, _} = BufferServer.cursor(buf)
+    total = BufferServer.line_count(buf)
+    Viewport.effective_page_lines(cursor_line, display_rows, decorations, total)
+  catch
+    :exit, _ -> display_rows
+  end
+
+  # When G is pressed in an agent chat window, re-pin so streaming
+  # auto-follows again. For normal buffer windows this is a no-op.
+  @spec maybe_repin_agent_chat(state()) :: state()
+  defp maybe_repin_agent_chat(state) do
+    case EditorState.active_window_struct(state) do
+      %Window{id: win_id, content: {:agent_chat, _}} ->
+        EditorState.update_window(state, win_id, fn w -> %{w | pinned: true} end)
+
+      _ ->
+        state
+    end
+  end
 
   @impl Minga.Command.Provider
   def __commands__ do

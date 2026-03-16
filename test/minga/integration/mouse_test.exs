@@ -285,9 +285,13 @@ defmodule Minga.Integration.MouseTest do
       assert state_after.agent_ui.scroll.offset == agent_scroll_before,
              "scrolling in editor area should not affect agent chat scroll"
 
-      # But editor viewport should have scrolled
-      assert state_after.viewport.top > state_before.viewport.top,
-             "scrolling in editor area should scroll editor viewport"
+      # But editor window's viewport should have scrolled
+      active_win_id = state_after.windows.active
+      win_after = Map.get(state_after.windows.map, active_win_id)
+      win_before = Map.get(state_before.windows.map, active_win_id)
+
+      assert win_after.viewport.top > win_before.viewport.top,
+             "scrolling in editor area should scroll the active window's viewport"
     end
   end
 

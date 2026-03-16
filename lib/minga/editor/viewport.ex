@@ -161,5 +161,155 @@ defmodule Minga.Editor.Viewport do
     max(cols - gutter_width(line_count), 1)
   end
 
+  # ── Scroll-without-cursor commands ───────────────────────────────────────
+
+  @doc """
+  Scrolls the viewport down by one line without moving the cursor.
+
+  The cursor line is clamped to remain visible. Returns
+  `{updated_viewport, clamped_cursor_line}`.
+  """
+  @spec scroll_line_down(t(), non_neg_integer(), non_neg_integer()) ::
+          {t(), non_neg_integer()}
+  def scroll_line_down(%__MODULE__{} = vp, cursor_line, total_lines) do
+    visible = content_rows(vp)
+    max_top = max(total_lines - visible, 0)
+    new_top = min(vp.top + 1, max_top)
+    clamped_cursor = max(cursor_line, new_top)
+    {%__MODULE__{vp | top: new_top}, clamped_cursor}
+  end
+
+  @doc """
+  Scrolls the viewport up by one line without moving the cursor.
+
+  The cursor line is clamped to remain visible. Returns
+  `{updated_viewport, clamped_cursor_line}`.
+  """
+  @spec scroll_line_up(t(), non_neg_integer(), non_neg_integer()) ::
+          {t(), non_neg_integer()}
+  def scroll_line_up(%__MODULE__{} = vp, cursor_line, _total_lines) do
+    new_top = max(vp.top - 1, 0)
+    visible = content_rows(vp)
+    max_cursor = new_top + visible - 1
+    clamped_cursor = min(cursor_line, max_cursor)
+    {%__MODULE__{vp | top: new_top}, clamped_cursor}
+  end
+
+  @doc """
+  Centers the viewport on the given cursor line (`zz` in vim).
+
+  Returns the updated viewport.
+  """
+  @spec center_on(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def center_on(%__MODULE__{} = vp, cursor_line, total_lines) do
+    visible = content_rows(vp)
+    target_top = cursor_line - div(visible, 2)
+    max_top = max(total_lines - visible, 0)
+    new_top = min(max(target_top, 0), max_top)
+    %__MODULE__{vp | top: new_top}
+  end
+
+  @doc """
+  Scrolls so the cursor line is at the top of the viewport (`zt` in vim).
+
+  Respects scroll_margin by placing the cursor `margin` lines from the top.
+  """
+  @spec top_on(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  def top_on(%__MODULE__{} = vp, cursor_line, total_lines, margin \\ 0) do
+    visible = content_rows(vp)
+    effective_margin = min(margin, div(visible - 1, 2))
+    target_top = max(cursor_line - effective_margin, 0)
+    max_top = max(total_lines - visible, 0)
+    new_top = min(target_top, max_top)
+    %__MODULE__{vp | top: new_top}
+  end
+
+  @doc """
+  Scrolls so the cursor line is at the bottom of the viewport (`zb` in vim).
+
+  Respects scroll_margin by placing the cursor `margin` lines from the bottom.
+  """
+  @spec bottom_on(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: t()
+  def bottom_on(%__MODULE__{} = vp, cursor_line, total_lines, margin \\ 0) do
+    visible = content_rows(vp)
+    effective_margin = min(margin, div(visible - 1, 2))
+    target_top = cursor_line - visible + 1 + effective_margin
+    max_top = max(total_lines - visible, 0)
+    new_top = min(max(target_top, 0), max_top)
+    %__MODULE__{vp | top: new_top}
+  end
+
+  # ── Decoration-aware helpers ─────────────────────────────────────────────
+
+  @doc """
+  Computes how many buffer lines fit in `display_rows` screen rows,
+  accounting for decorations that consume extra display rows.
+
+  Walks forward from `cursor_line`, counting each buffer line as 1 display
+  row plus any virtual lines and block decorations attached to it. Stops
+  when the display row budget is exhausted. Returns the number of buffer
+  lines traversed.
+
+  When there are no decorations, this returns `display_rows` (the fast path).
+  """
+  @spec effective_page_lines(
+          non_neg_integer(),
+          pos_integer(),
+          Minga.Buffer.Decorations.t(),
+          non_neg_integer()
+        ) :: pos_integer()
+  def effective_page_lines(cursor_line, display_rows, decorations, total_lines) do
+    alias Minga.Buffer.Decorations
+
+    if not Decorations.has_block_decorations?(decorations) and
+         Decorations.virtual_line_count(decorations, cursor_line, cursor_line + display_rows) == 0 do
+      # Fast path: no decorations in this range, but clamp to remaining lines
+      min(display_rows, max(total_lines - cursor_line, 1))
+    else
+      do_effective_page_lines(cursor_line, display_rows, decorations, total_lines, 0, 0)
+    end
+  end
+
+  defp do_effective_page_lines(_line, display_budget, _decs, _total, buf_count, _display_used)
+       when display_budget <= 0 do
+    max(buf_count, 1)
+  end
+
+  defp do_effective_page_lines(line, _display_budget, _decs, total, buf_count, _display_used)
+       when line >= total do
+    max(buf_count, 1)
+  end
+
+  defp do_effective_page_lines(line, display_budget, decorations, total, buf_count, display_used) do
+    alias Minga.Buffer.Decorations
+    alias Minga.Buffer.Decorations.BlockDecoration
+
+    # Count display rows consumed by this buffer line:
+    # 1 for the line itself + virtual lines + block decorations
+    virt = Decorations.virtual_line_count(decorations, line, line + 1)
+
+    block_rows =
+      decorations.block_decorations
+      |> Enum.filter(fn b -> b.anchor_line == line end)
+      |> Enum.reduce(0, fn b, acc -> acc + BlockDecoration.resolve_height(b, 80) end)
+
+    rows_for_line = 1 + virt + block_rows
+    new_used = display_used + rows_for_line
+
+    if new_used > display_budget and buf_count > 0 do
+      # This line would exceed the budget and we already have some lines
+      max(buf_count, 1)
+    else
+      do_effective_page_lines(
+        line + 1,
+        display_budget,
+        decorations,
+        total,
+        buf_count + 1,
+        new_used
+      )
+    end
+  end
+
   # ── Private helpers ────────────────────────────────────────────────────────
 end

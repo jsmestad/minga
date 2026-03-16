@@ -373,6 +373,67 @@ defmodule Minga.Editor.State do
     %{state | windows: %{ws | map: new_map}}
   end
 
+  @doc """
+  Returns the active window's viewport, falling back to `state.viewport`
+  when no window is active. Use this for scroll commands that need to
+  read/write the viewport of the focused window (not the terminal-level
+  viewport).
+  """
+  @spec active_window_viewport(t()) :: Viewport.t()
+  def active_window_viewport(%__MODULE__{} = state) do
+    case active_window_struct(state) do
+      nil -> state.viewport
+      %Window{viewport: vp} -> vp
+    end
+  end
+
+  @doc """
+  Updates the active window's viewport. Falls back to updating
+  `state.viewport` when no window is active.
+  """
+  @spec put_active_window_viewport(t(), Viewport.t()) :: t()
+  def put_active_window_viewport(%__MODULE__{} = state, new_vp) do
+    case active_window_struct(state) do
+      nil ->
+        %{state | viewport: new_vp}
+
+      %Window{id: win_id} ->
+        update_window(state, win_id, fn w -> %{w | viewport: new_vp} end)
+    end
+  end
+
+  @doc """
+  Finds the agent chat window in the windows map.
+
+  Returns `{win_id, window}` or `nil` if no agent chat window exists.
+  """
+  @spec find_agent_chat_window(t()) :: {Window.id(), Window.t()} | nil
+  def find_agent_chat_window(%__MODULE__{windows: ws}) do
+    Enum.find_value(ws.map, fn
+      {win_id, %Window{content: {:agent_chat, _}} = window} -> {win_id, window}
+      _ -> nil
+    end)
+  end
+
+  @doc """
+  Scrolls the agent chat window's viewport by `delta` lines and updates
+  pinned state. Delegates to `Window.scroll_viewport/3`.
+
+  Returns the state unchanged if no agent chat window exists.
+  """
+  @spec scroll_agent_chat_window(t(), integer()) :: t()
+  def scroll_agent_chat_window(%__MODULE__{} = state, delta) do
+    case find_agent_chat_window(state) do
+      nil ->
+        state
+
+      {win_id, window} ->
+        total_lines = BufferServer.line_count(window.buffer)
+        updated = Window.scroll_viewport(window, delta, total_lines)
+        update_window(state, win_id, fn _ -> updated end)
+    end
+  end
+
   # ── Other accessors ───────────────────────────────────────────────────────
 
   @doc """

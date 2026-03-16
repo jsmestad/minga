@@ -31,6 +31,7 @@ defmodule Minga.Config.OptionsTest do
                line_numbers: :hybrid,
                autopair: true,
                scroll_margin: 5,
+               scroll_lines: 1,
                theme: :doom_one,
                indent_with: :spaces,
                trim_trailing_whitespace: false,

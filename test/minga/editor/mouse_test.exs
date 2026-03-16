@@ -66,9 +66,10 @@ defmodule Minga.Editor.MouseTest do
 
     test "scroll down moves viewport without moving cursor when cursor stays visible" do
       {editor, buffer} = start_mouse_editor()
+      # Default scroll_lines is 1. Cursor at 0 gets clamped to viewport top.
       send_mouse(editor, 0, 0, :wheel_down, :press)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 3
+      assert line == 1
     end
 
     test "scroll down keeps cursor in place when it remains visible" do
@@ -82,21 +83,22 @@ defmodule Minga.Editor.MouseTest do
 
     test "scroll up moves viewport without moving cursor when cursor stays visible" do
       {editor, buffer} = start_mouse_editor()
+      # Scroll down twice (2 lines), move cursor down, then scroll up
       send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, 0, 0, :wheel_down, :press)
-      BufferServer.move_to(buffer, {9, 0})
+      BufferServer.move_to(buffer, {5, 0})
       _ = :sys.get_state(editor)
       send_mouse(editor, 0, 0, :wheel_up, :press)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 9
+      assert line == 5
     end
 
     test "scroll clamps cursor when it falls outside viewport" do
       {editor, buffer} = start_mouse_editor()
-      send_mouse(editor, 0, 0, :wheel_down, :press)
-      send_mouse(editor, 0, 0, :wheel_down, :press)
+      # Scroll down enough that cursor at line 0 is off-screen
+      for _i <- 1..3, do: send_mouse(editor, 0, 0, :wheel_down, :press)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line >= 3
+      assert line >= 1
     end
 
     test "scroll at top of file doesn't go negative" do
@@ -150,13 +152,13 @@ defmodule Minga.Editor.MouseTest do
           height: 10
         )
 
-      # Scroll down, then click content row 2 to position cursor
+      # Scroll down then click. Default scroll_lines=1, so 4 scrolls = viewport top at 4.
       for _i <- 1..4, do: send_mouse(editor, 0, 0, :wheel_down, :press)
       send_mouse(editor, @content_row + 2, 0, :left, :press)
       send_mouse(editor, @content_row + 2, 0, :left, :release)
       {line, _col} = BufferServer.cursor(buffer)
-      # The exact target line depends on scroll offset. Just verify it moved past the scroll.
-      assert line >= 10
+      # Verify cursor moved past the initial view (scrolled at least 4 lines).
+      assert line >= 4
     end
 
     test "left click on modeline row is ignored" do

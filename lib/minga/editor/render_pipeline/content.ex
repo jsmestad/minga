@@ -272,8 +272,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
     {cursor_line, cursor_byte_col} = agent_window_cursor(window, buf, is_active)
 
     line_count = BufferServer.line_count(buf)
-    viewport = Viewport.new(chat_height, chat_width, 0)
-    viewport = Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buf)
+    viewport = agent_chat_viewport(window, chat_height, chat_width, cursor_line, line_count, buf)
+
     visible_rows = Viewport.content_rows(viewport)
     {first_line, _} = Viewport.visible_range(viewport)
 
@@ -404,6 +404,29 @@ defmodule Minga.Editor.RenderPipeline.Content do
     }
 
     {frame, final_cursor, state}
+  end
+
+  # Computes the viewport for the agent chat window.
+  # When pinned (streaming), snaps to bottom. When unpinned (user scrolled up),
+  # preserves scroll position and uses scroll_to_cursor for cursor tracking.
+  @spec agent_chat_viewport(
+          Window.t(),
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pid()
+        ) :: Viewport.t()
+  defp agent_chat_viewport(window, chat_height, chat_width, cursor_line, line_count, buf) do
+    %Viewport{} = win_vp = window.viewport
+    viewport = %{win_vp | rows: chat_height, cols: chat_width, reserved: 0}
+
+    if window.pinned do
+      visible = Viewport.content_rows(viewport)
+      %Viewport{viewport | top: max(line_count - visible, 0)}
+    else
+      Viewport.scroll_to_cursor(viewport, {cursor_line, 0}, buf)
+    end
   end
 
   defp agent_window_active?(state, window) do

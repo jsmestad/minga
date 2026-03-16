@@ -28,6 +28,7 @@ defmodule Minga.Input.AgentMouse do
 
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Renderer, as: ViewRenderer
+  alias Minga.Config.Options
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -36,7 +37,7 @@ defmodule Minga.Input.AgentMouse do
   alias Minga.Mode
 
   # Scroll 3 lines per wheel tick (matches Editor.Mouse TUI behavior).
-  @scroll_lines 3
+  @default_scroll_lines 1
 
   # Mouse event fields grouped for dispatch without exceeding max arity.
   # Modifiers and click_count are threaded through for future use
@@ -142,11 +143,11 @@ defmodule Minga.Input.AgentMouse do
          button: :wheel_down,
          event_type: :press
        }) do
-    {:handled, scroll_in_window(state, layout, win_id, col, @scroll_lines)}
+    {:handled, scroll_in_window(state, layout, win_id, col, scroll_lines())}
   end
 
   defp dispatch_window(state, layout, win_id, _row, col, %{button: :wheel_up, event_type: :press}) do
-    {:handled, scroll_in_window(state, layout, win_id, col, -@scroll_lines)}
+    {:handled, scroll_in_window(state, layout, win_id, col, -scroll_lines())}
   end
 
   defp dispatch_window(state, layout, win_id, row, col, %{button: :left, event_type: :press}) do
@@ -218,11 +219,11 @@ defmodule Minga.Input.AgentMouse do
           EditorState.t()
 
   defp dispatch_panel(state, _rect, _row, _col, %{button: :wheel_down, event_type: :press}) do
-    scroll_chat(state, @scroll_lines)
+    scroll_chat(state, scroll_lines())
   end
 
   defp dispatch_panel(state, _rect, _row, _col, %{button: :wheel_up, event_type: :press}) do
-    scroll_chat(state, -@scroll_lines)
+    scroll_chat(state, -scroll_lines())
   end
 
   defp dispatch_panel(state, rect, row, col, %{button: :left, event_type: :press}) do
@@ -256,13 +257,22 @@ defmodule Minga.Input.AgentMouse do
   # ── Shared scroll helpers ──────────────────────────────────────────────────
 
   @spec scroll_chat(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()
-  defp scroll_chat(state, delta) when delta > 0 do
-    AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
+  defp scroll_chat(state, delta) do
+    # Update UIState.scroll for backward compat
+    state =
+      if delta > 0 do
+        AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
+      else
+        AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
+      end
+
+    # Also update the agent chat Window's viewport and pinned state
+    scroll_agent_window(state, delta)
   end
 
-  defp scroll_chat(state, delta) when delta < 0 do
-    AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
-  end
+  # Delegates to EditorState shared helper.
+  defp scroll_agent_window(state, delta),
+    do: EditorState.scroll_agent_chat_window(state, delta)
 
   @spec scroll_preview(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()
   defp scroll_preview(state, delta) when delta > 0 do
@@ -271,5 +281,12 @@ defmodule Minga.Input.AgentMouse do
 
   defp scroll_preview(state, delta) when delta < 0 do
     AgentAccess.update_agent_ui(state, &UIState.scroll_viewer_up(&1, abs(delta)))
+  end
+
+  @spec scroll_lines() :: pos_integer()
+  defp scroll_lines do
+    Options.get(:scroll_lines)
+  catch
+    :exit, _ -> @default_scroll_lines
   end
 end

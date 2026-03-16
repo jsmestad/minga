@@ -49,7 +49,6 @@ defmodule Minga.Editor.Mouse do
   # TUI scrolls 3 lines per wheel tick (standard terminal behavior).
   # GUI scrolls 1 line per event because the frontend accumulates pixel
   # deltas and emits one event per cellHeight crossed.
-  @tui_scroll_lines 3
   @gui_scroll_lines 1
   @scroll_cols 6
 
@@ -83,7 +82,7 @@ defmodule Minga.Editor.Mouse do
   # ── Scroll wheel (vertical) ──
 
   def handle(
-        %{buffers: %{active: buf}, viewport: vp} = state,
+        %{buffers: %{active: buf}} = state,
         _r,
         _c,
         :wheel_down,
@@ -93,27 +92,31 @@ defmodule Minga.Editor.Mouse do
       ) do
     total_lines = BufferServer.line_count(buf)
     lines = scroll_lines(state)
+    vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, lines, total_lines)
-    %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
+    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport()
   end
 
-  def handle(%{buffers: %{active: buf}, viewport: vp} = state, _r, _c, :wheel_up, _m, :press, _cc) do
+  def handle(%{buffers: %{active: buf}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
     total_lines = BufferServer.line_count(buf)
     lines = scroll_lines(state)
+    vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, -lines, total_lines)
-    %{state | viewport: new_vp} |> clamp_cursor_to_viewport()
+    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport()
   end
 
   # ── Scroll wheel (horizontal) ──
 
-  def handle(%{viewport: vp} = state, _r, _c, :wheel_right, _m, :press, _cc) do
+  def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
+    vp = active_window_viewport(state)
     new_left = vp.left + @scroll_cols
-    %{state | viewport: %{vp | left: new_left}}
+    put_active_window_viewport(state, %{vp | left: new_left})
   end
 
-  def handle(%{viewport: vp} = state, _r, _c, :wheel_left, _m, :press, _cc) do
+  def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
+    vp = active_window_viewport(state)
     new_left = max(vp.left - @scroll_cols, 0)
-    %{state | viewport: %{vp | left: new_left}}
+    put_active_window_viewport(state, %{vp | left: new_left})
   end
 
   # ── Middle-click paste ──
@@ -676,9 +679,10 @@ defmodule Minga.Editor.Mouse do
 
     case Layout.active_window_layout(layout, state) do
       %{content: {win_row, _win_col, content_w, win_h}} ->
+        window = EditorState.active_window_struct(state)
         total_lines = BufferServer.line_count(buf)
         {cursor_line, _} = BufferServer.cursor(buf)
-        scroll_top = render_scroll_top(win_h, content_w, cursor_line, buf)
+        scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         target_line = local_row + scroll_top
 
@@ -704,7 +708,7 @@ defmodule Minga.Editor.Mouse do
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = BufferServer.cursor(buf)
-        scroll_top = render_scroll_top(win_h, content_w, cursor_line, buf)
+        scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
 
@@ -738,7 +742,7 @@ defmodule Minga.Editor.Mouse do
         total_lines = BufferServer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = window.cursor
-        scroll_top = render_scroll_top(content_h, content_w, cursor_line, buf)
+        scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0)
 
@@ -911,24 +915,27 @@ defmodule Minga.Editor.Mouse do
   end
 
   # Computes the scroll top the same way the render pipeline does:
-  # create a fresh viewport sized to the window content rect, then scroll
-  # to keep the cursor visible. This is the single source of truth for
-  # which buffer line maps to screen row 0. We must replicate it here
-  # because state.viewport.top is the *terminal* viewport (stale for
-  # per-window scroll), not the per-frame viewport used for rendering.
-  @spec render_scroll_top(pos_integer(), pos_integer(), non_neg_integer(), pid()) ::
+  # Returns the viewport's scroll top. Now reads from the window's
+  # persistent viewport instead of computing a throwaway one each time.
+  @spec window_scroll_top(
+          Window.t() | nil,
+          pos_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          pid()
+        ) ::
           non_neg_integer()
-  defp render_scroll_top(content_height, content_width, cursor_line, buf) do
+  defp window_scroll_top(%Window{viewport: vp}, _h, _w, _cursor, _buf), do: vp.top
+
+  defp window_scroll_top(nil, content_height, content_width, cursor_line, buf) do
+    # Fallback when no window struct is available
     vp = Viewport.new(content_height, content_width, 0)
     vp = Viewport.scroll_to_cursor(vp, {cursor_line, 0}, buf)
     vp.top
   end
 
-  # Computes horizontal scroll offset the same way the render pipeline
-  # does. For now this just reads state.viewport.left since horizontal
-  # scroll is updated by the scroll wheel handler directly on state.
   @spec scroll_left(state(), pid()) :: non_neg_integer()
-  defp scroll_left(%{viewport: vp}, _buf), do: vp.left
+  defp scroll_left(state, _buf), do: active_window_viewport(state).left
 
   # ── Viewport helpers ───────────────────────────────────────────────────────
 
@@ -941,7 +948,8 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec clamp_cursor_to_viewport(state()) :: state()
-  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}, viewport: vp} = state) do
+  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}} = state) do
+    vp = active_window_viewport(state)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     {first_line, last_line} = Viewport.visible_range(vp)
     do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, last_line)
@@ -963,12 +971,14 @@ defmodule Minga.Editor.Mouse do
     do: state
 
   @spec maybe_auto_scroll(state(), integer()) :: state()
-  defp maybe_auto_scroll(%{buffers: %{active: buf}, viewport: vp} = state, row) when row <= 0 do
+  defp maybe_auto_scroll(%{buffers: %{active: buf}} = state, row) when row <= 0 do
+    vp = active_window_viewport(state)
     page_move(buf, vp, -1)
     state
   end
 
-  defp maybe_auto_scroll(%{buffers: %{active: buf}, viewport: vp} = state, row) do
+  defp maybe_auto_scroll(%{buffers: %{active: buf}} = state, row) do
+    vp = active_window_viewport(state)
     scroll_threshold = Viewport.content_rows(vp) - 1
     maybe_scroll_down(state, buf, vp, row, scroll_threshold)
   end
@@ -1138,7 +1148,17 @@ defmodule Minga.Editor.Mouse do
   defp scroll_lines(%{capabilities: %Capabilities{frontend_type: :native_gui}}),
     do: @gui_scroll_lines
 
-  defp scroll_lines(_state), do: @tui_scroll_lines
+  defp scroll_lines(_state) do
+    Options.get(:scroll_lines)
+  catch
+    :exit, _ -> 1
+  end
+
+  # Delegates to EditorState shared helpers.
+  defp active_window_viewport(state), do: EditorState.active_window_viewport(state)
+
+  defp put_active_window_viewport(state, new_vp),
+    do: EditorState.put_active_window_viewport(state, new_vp)
 
   @spec find_click_region([Minga.Editor.Modeline.click_region()], non_neg_integer()) ::
           {:command, atom()} | :not_modeline
