@@ -43,6 +43,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.ModelCatalog
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Retry
+  alias Minga.Agent.Session
   alias Minga.Agent.Skills
   alias Minga.Agent.TokenEstimator
   alias Minga.Agent.Tools
@@ -90,6 +91,7 @@ defmodule Minga.Agent.Providers.Native do
       :llm_client,
       :max_turns,
       :max_cost,
+      :session_pid,
       turn_count: 0,
       session_cost: 0.0
     ]
@@ -105,6 +107,7 @@ defmodule Minga.Agent.Providers.Native do
             llm_client: term(),
             max_turns: pos_integer(),
             max_cost: float() | nil,
+            session_pid: pid() | nil,
             turn_count: non_neg_integer(),
             session_cost: float()
           }
@@ -303,6 +306,7 @@ defmodule Minga.Agent.Providers.Native do
       # Spawn the agent turn loop in a linked task
       lctx = %LoopCtx{
         provider_pid: self(),
+        session_pid: state.subscriber,
         model: state.model,
         config: state.config,
         tools: state.tools,
@@ -357,6 +361,7 @@ defmodule Minga.Agent.Providers.Native do
 
     lctx = %LoopCtx{
       provider_pid: self(),
+      session_pid: state.subscriber,
       model: state.model,
       config: state.config,
       tools: state.tools,
@@ -852,6 +857,10 @@ defmodule Minga.Agent.Providers.Native do
     context = Context.append(context, assistant_msg)
 
     context = execute_tools(lctx.provider_pid, context, tool_calls, lctx.tools, lctx.config)
+
+    # Inject any steering messages queued by the user while tools were executing.
+    context = inject_steering_messages(lctx, context)
+
     send(lctx.provider_pid, {:agent_context_update, context})
 
     # Track cost from this turn and increment turn count for safety checks
@@ -867,6 +876,31 @@ defmodule Minga.Agent.Providers.Native do
 
     # Continue the loop with updated context and incremented turn count
     run_agent_loop(lctx, context)
+  end
+
+  # Dequeues any steering messages from the Session and appends them to the
+  # LLM context so the model sees them on its next turn. Returns the context
+  # unchanged when there are no pending steering messages or no session_pid.
+  @spec inject_steering_messages(loop_ctx(), Context.t()) :: Context.t()
+  defp inject_steering_messages(%{session_pid: nil}, context), do: context
+
+  defp inject_steering_messages(lctx, context) do
+    # Use a short timeout: Session.dequeue_steering is a simple queue pop and
+    # should respond in microseconds. 200ms guards against a slow/dead session
+    # without blocking the agent loop meaningfully.
+    steering =
+      try do
+        GenServer.call(lctx.session_pid, :dequeue_steering, 200)
+      catch
+        :exit, _ -> []
+      end
+
+    if steering == [] do
+      context
+    else
+      combined = Session.combine_queue_entries_to_text(steering)
+      Context.append(context, Context.user(combined))
+    end
   end
 
   @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()], AgentConfig.t()) ::

@@ -127,8 +127,8 @@ defmodule Minga.Keymap.ScopeTest do
       assert {:command, :agent_input_backspace} = Scope.resolve_key(:agent, :insert, {127, 0})
     end
 
-    test "Ctrl+C resolves to agent_submit_or_abort in insert mode" do
-      assert {:command, :agent_submit_or_abort} = Scope.resolve_key(:agent, :insert, {?c, 0x02})
+    test "Ctrl+C resolves to agent_ctrl_c in insert mode" do
+      assert {:command, :agent_ctrl_c} = Scope.resolve_key(:agent, :insert, {?c, 0x02})
     end
 
     test "unknown key returns :not_found in normal mode" do

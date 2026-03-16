@@ -172,8 +172,17 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
     |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
     |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
+    # Ctrl+Enter queues as follow-up during streaming; submits normally when idle.
+    # Uses the same multi-encoding strategy as Shift+Enter:
+    # 1. Kitty protocol (CSI 13;5 u)
+    # 2. Some terminals send plain Enter for Ctrl+Enter — no reliable legacy fallback.
+    |> Bindings.bind([{@enter, @ctrl}], :agent_queue_follow_up, "Queue as follow-up")
+    # Alt+Up dequeues pending messages back into the prompt buffer.
+    |> Bindings.bind([{0xF700, @alt}], :agent_dequeue, "Dequeue to editor")
+    |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
     # Ctrl modifiers
-    |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
+    # Ctrl-C: abort+restore queues if streaming, else return to normal mode.
+    |> Bindings.bind([{?c, @ctrl}], :agent_ctrl_c, "Abort (streaming) or normal mode (idle)")
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
     |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
     |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
@@ -192,7 +201,7 @@ defmodule Minga.Keymap.Scope.Agent do
     # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
     # Use `q` or Ctrl+Q to leave the input field.
     |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
-    |> Bindings.bind([{?c, @ctrl}], :agent_submit_or_abort, "Submit or abort")
+    |> Bindings.bind([{?c, @ctrl}], :agent_ctrl_c, "Abort (streaming) or normal mode (idle)")
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down")
     |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up")
     |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat")
@@ -247,11 +256,15 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"Session",
        [
-         {"Ctrl-c", "Abort agent"},
+         {"Ctrl-c", "Abort + restore queued (streaming) / normal mode (idle)"},
+         {"Ctrl+Enter", "Queue as follow-up (or submit if idle)"},
+         {"Alt+Up", "Dequeue messages back to editor"},
          {"Ctrl-l", "Clear display"},
          {"s", "Session switcher"},
          {"SPC a n", "New session"},
          {"SPC a s", "Stop agent"},
+         {"SPC a q", "Dequeue to editor"},
+         {"SPC a f", "Queue follow-up from input"},
          {"SPC a m", "Pick model"},
          {"SPC a T", "Cycle thinking level"}
        ]},

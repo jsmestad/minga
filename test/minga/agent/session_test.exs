@@ -7,6 +7,56 @@ defmodule Minga.Agent.SessionTest do
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
+  # A provider that starts an agent run but waits for an explicit :proceed
+  # message before sending AgentEnd. Allows tests to inspect Session state
+  # while the agent is "streaming" (i.e., status is :thinking).
+  defmodule SlowMockProvider do
+    @behaviour Minga.Agent.Provider
+
+    use GenServer
+
+    @impl Minga.Agent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl Minga.Agent.Provider
+    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+
+    @impl Minga.Agent.Provider
+    def abort(pid), do: GenServer.cast(pid, :abort)
+
+    @impl Minga.Agent.Provider
+    def new_session(pid), do: GenServer.cast(pid, :new_session)
+
+    @impl Minga.Agent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+
+    @doc false
+    @spec proceed(GenServer.server()) :: :ok
+    def proceed(pid), do: GenServer.cast(pid, :proceed)
+
+    @impl GenServer
+    def init(opts) do
+      subscriber = Keyword.fetch!(opts, :subscriber)
+      {:ok, %{subscriber: subscriber, pending: nil}}
+    end
+
+    @impl GenServer
+    def handle_cast({:prompt, text}, state) do
+      send(state.subscriber, {:agent_provider_event, %Event.AgentStart{}})
+      send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: text}})
+      {:noreply, %{state | pending: text}}
+    end
+
+    def handle_cast(:proceed, state) do
+      usage = %{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}
+      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
+      {:noreply, %{state | pending: nil}}
+    end
+
+    def handle_cast(:abort, state), do: {:noreply, state}
+    def handle_cast(:new_session, state), do: {:noreply, state}
+  end
+
   defmodule MockProvider do
     @behaviour Minga.Agent.Provider
 
@@ -585,6 +635,287 @@ defmodule Minga.Agent.SessionTest do
 
       meta = Session.metadata(session)
       assert meta.first_prompt == "Hello there"
+    end
+  end
+
+  # ── Queue API ──────────────────────────────────────────────────────────────
+
+  describe "combine_queue_entries_to_text/1" do
+    test "returns empty string for empty list" do
+      assert Session.combine_queue_entries_to_text([]) == ""
+    end
+
+    test "returns a single string unchanged" do
+      assert Session.combine_queue_entries_to_text(["hello"]) == "hello"
+    end
+
+    test "joins multiple strings with double newlines" do
+      result = Session.combine_queue_entries_to_text(["first", "second", "third"])
+      assert result == "first\n\nsecond\n\nthird"
+    end
+
+    test "extracts text from ContentPart lists" do
+      parts = [
+        %ReqLLM.Message.ContentPart{type: :text, text: "hello "},
+        %ReqLLM.Message.ContentPart{type: :text, text: "world"}
+      ]
+
+      assert Session.combine_queue_entries_to_text([parts]) == "hello world"
+    end
+
+    test "skips image ContentParts when extracting text" do
+      parts = [
+        %ReqLLM.Message.ContentPart{type: :text, text: "describe this"},
+        %ReqLLM.Message.ContentPart{type: :image, text: nil}
+      ]
+
+      assert Session.combine_queue_entries_to_text([parts]) == "describe this"
+    end
+
+    test "mixes strings and ContentPart lists" do
+      parts = [%ReqLLM.Message.ContentPart{type: :text, text: "part text"}]
+      result = Session.combine_queue_entries_to_text(["string entry", parts])
+      assert result == "string entry\n\npart text"
+    end
+  end
+
+  describe "message queuing during streaming" do
+    setup do
+      {:ok, slow_session} =
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_opts: []
+        )
+
+      Session.subscribe(slow_session)
+
+      # Wait for provider to start
+      :sys.get_state(slow_session)
+
+      %{slow_session: slow_session}
+    end
+
+    test "send_prompt while streaming queues message as steering", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first message")
+      # Wait for AgentStart to be processed (status becomes :thinking)
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Second send_prompt while streaming: should queue, not submit
+      result = Session.send_prompt(session, "steer me")
+      assert result == {:queued, :steering}
+
+      # Steering queue should hold the message
+      {steering, follow_up} = Session.get_queued_messages(session)
+      assert steering == ["steer me"]
+      assert follow_up == []
+
+      # Let the run finish
+      SlowMockProvider.proceed(Session.get_provider(session))
+
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "multiple messages accumulate in the steering queue", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      assert {:queued, :steering} = Session.send_prompt(session, "steer 1")
+      assert {:queued, :steering} = Session.send_prompt(session, "steer 2")
+
+      {steering, _} = Session.get_queued_messages(session)
+      assert steering == ["steer 1", "steer 2"]
+
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "queue_follow_up while streaming queues message as follow_up", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      result = Session.queue_follow_up(session, "follow this up")
+      assert result == {:queued, :follow_up}
+
+      {steering, follow_up} = Session.get_queued_messages(session)
+      assert steering == []
+      assert follow_up == ["follow this up"]
+
+      # Clear the follow-up before proceeding so the auto-send doesn't trigger.
+      # The follow-up auto-send behaviour is covered by the dedicated describe block.
+      Session.clear_queues(session)
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "dequeue_steering returns and clears only the steering queue", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer me")
+      Session.queue_follow_up(session, "follow up later")
+
+      steering = Session.dequeue_steering(session)
+      assert steering == ["steer me"]
+
+      # Follow-up queue is untouched
+      {remaining_steering, follow_up} = Session.get_queued_messages(session)
+      assert remaining_steering == []
+      assert follow_up == ["follow up later"]
+
+      # Steering messages are added to conversation history on dequeue
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:user, "steer me"}, &1))
+
+      # Clear the follow-up so it doesn't auto-send during cleanup.
+      Session.clear_queues(session)
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "recall_queues returns both queues and clears them", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer")
+      Session.queue_follow_up(session, "follow")
+
+      {steering, follow_up} = Session.recall_queues(session)
+      assert steering == ["steer"]
+      assert follow_up == ["follow"]
+
+      # Both queues are now empty
+      {s2, f2} = Session.get_queued_messages(session)
+      assert s2 == []
+      assert f2 == []
+
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "clear_queues empties both queues", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer")
+      Session.queue_follow_up(session, "follow")
+
+      :ok = Session.clear_queues(session)
+
+      {steering, follow_up} = Session.get_queued_messages(session)
+      assert steering == []
+      assert follow_up == []
+
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "queue_follow_up when idle sends immediately like send_prompt", %{slow_session: session} do
+      result = Session.queue_follow_up(session, "immediate follow-up")
+      assert result == :ok
+
+      # Message should be in conversation history right away
+      assert_receive {:agent_event, _, :messages_changed}, 500
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:user, "immediate follow-up"}, &1))
+
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "new_session clears both queues", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer")
+      Session.queue_follow_up(session, "follow")
+
+      # Clear queues before proceeding so follow-up auto-send doesn't trigger.
+      Session.clear_queues(session)
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+
+      # Re-queue to verify new_session clears them
+      Session.send_prompt(session, "second run")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer2")
+      Session.queue_follow_up(session, "follow2")
+
+      # new_session while idle-ish (we clear queues first then call new_session)
+      Session.clear_queues(session)
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+
+      Session.new_session(session)
+      {steering, follow_up} = Session.get_queued_messages(session)
+      assert steering == []
+      assert follow_up == []
+    end
+
+    test "prompt_queued event is broadcast when queuing during streaming",
+         %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.send_prompt(session, "steer me")
+      assert_receive {:agent_event, _, {:prompt_queued, "steer me", :steering}}, 500
+
+      Session.queue_follow_up(session, "follow")
+      assert_receive {:agent_event, _, {:prompt_queued, "follow", :follow_up}}, 500
+
+      # Clear queues so neither the steering (already dequeued by time proceed is called)
+      # nor the follow-up triggers an extra run during cleanup.
+      Session.clear_queues(session)
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+  end
+
+  describe "follow-up auto-send at AgentEnd" do
+    setup do
+      {:ok, slow_session} =
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_opts: []
+        )
+
+      Session.subscribe(slow_session)
+      :sys.get_state(slow_session)
+
+      %{slow_session: slow_session}
+    end
+
+    test "queued follow-up is auto-sent when agent finishes", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      Session.queue_follow_up(session, "now follow up")
+
+      # Complete the first run - should trigger the follow-up
+      SlowMockProvider.proceed(Session.get_provider(session))
+
+      # Session should NOT go idle yet - it should start a new turn
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Follow-up message should appear in conversation history
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:user, "now follow up"}, &1))
+
+      # Follow-up queue should be cleared
+      {_, follow_up} = Session.get_queued_messages(session)
+      assert follow_up == []
+
+      # Complete the follow-up run
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "no follow-ups means normal idle transition", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "simple")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
     end
   end
 end

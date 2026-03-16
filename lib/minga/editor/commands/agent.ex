@@ -239,14 +239,45 @@ defmodule Minga.Editor.Commands.Agent do
     # Returns either a string (text only) or a list of ContentPart (when images are present).
     model = AgentAccess.panel(state).model_name
 
-    with {:ok, resolved} <- resolve_mentions(text, model: model),
-         :ok <- Session.send_prompt(AgentAccess.session(state), resolved) do
-      state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+    case resolve_mentions(text, model: model) do
+      {:ok, resolved} ->
+        state
+        |> clear_input_after_submit()
+        |> deliver_prompt(resolved)
 
-      AgentAccess.update_agent_ui(state, fn _ ->
-        UIState.clear_baselines(AgentAccess.agent_ui(state))
-      end)
-    else
+      {:error, msg} ->
+        %{state | status_msg: msg}
+    end
+  catch
+    # The :DOWN monitor clears stale session PIDs, but there's a race window:
+    # the session can die while we're mid-call (before :DOWN is processed).
+    # This is the user-facing hot path (Enter to send), so catch it here.
+    :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
+  end
+
+  # Clears the input and resets diff baselines after a prompt is submitted.
+  @spec clear_input_after_submit(state()) :: state()
+  defp clear_input_after_submit(state) do
+    state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+
+    AgentAccess.update_agent_ui(state, fn _ ->
+      UIState.clear_baselines(AgentAccess.agent_ui(state))
+    end)
+  end
+
+  # Sends the resolved content to the LLM and handles steering queue feedback.
+  @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
+  defp deliver_prompt(state, resolved) do
+    case Session.send_prompt(AgentAccess.session(state), resolved) do
+      :ok ->
+        state
+
+      {:queued, :steering} ->
+        update_agent_ui(
+          state,
+          &UIState.push_toast(&1, "⏳ Queued (steer). Ctrl-C to cancel.", :info)
+        )
+
       {:error, :provider_not_ready} ->
         %{state | status_msg: "Agent provider still starting, try again in a moment"}
 
@@ -256,11 +287,46 @@ defmodule Minga.Editor.Commands.Agent do
       {:error, reason} ->
         %{state | status_msg: "Agent error: #{inspect(reason)}"}
     end
+  end
+
+  @spec send_follow_up_to_llm(state(), String.t()) :: state()
+  defp send_follow_up_to_llm(state, text) do
+    model = AgentAccess.panel(state).model_name
+
+    case resolve_mentions(text, model: model) do
+      {:ok, resolved} ->
+        state
+        |> update_agent_ui(&UIState.clear_input_and_scroll/1)
+        |> deliver_follow_up(resolved)
+
+      {:error, msg} ->
+        %{state | status_msg: msg}
+    end
   catch
-    # The :DOWN monitor clears stale session PIDs, but there's a race window:
-    # the session can die while we're mid-call (before :DOWN is processed).
-    # This is the user-facing hot path (Enter to send), so catch it here.
     :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
+  end
+
+  @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
+  defp deliver_follow_up(state, resolved) do
+    case Session.queue_follow_up(AgentAccess.session(state), resolved) do
+      :ok ->
+        state
+
+      {:queued, :follow_up} ->
+        update_agent_ui(
+          state,
+          &UIState.push_toast(&1, "⏳ Queued (follow-up). Ctrl-C to cancel.", :info)
+        )
+
+      {:error, :provider_not_ready} ->
+        %{state | status_msg: "Agent provider still starting, try again in a moment"}
+
+      {:error, msg} when is_binary(msg) ->
+        %{state | status_msg: msg}
+
+      {:error, reason} ->
+        %{state | status_msg: "Agent error: #{inspect(reason)}"}
+    end
   end
 
   @spec resolve_mentions(String.t(), keyword()) ::
@@ -303,17 +369,94 @@ defmodule Minga.Editor.Commands.Agent do
     state
   end
 
-  @doc "Aborts the current agent operation."
+  @doc """
+  Aborts the current agent operation and restores any queued messages to the prompt input.
+
+  Queued steering and follow-up messages are recalled from the Session and placed
+  back in the prompt buffer so nothing is lost.
+  """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
-    if AgentAccess.session(state) == nil do
-      state
-    else
-      Session.abort(AgentAccess.session(state))
-      state
+    case AgentAccess.session(state) do
+      nil ->
+        state
+
+      session ->
+        {steering, follow_up} = safe_recall_queues(session)
+
+        try do
+          Session.abort(session)
+        catch
+          :exit, _ -> :ok
+        end
+
+        restore_queued_to_prompt(state, steering ++ follow_up)
     end
-  catch
-    :exit, _ -> state
+  end
+
+  @doc """
+  Pulls all queued messages back into the prompt input without aborting the agent.
+
+  Useful when you want to re-read or edit your queued messages. Does not stop streaming.
+  """
+  @spec dequeue_to_editor(state()) :: state()
+  def dequeue_to_editor(state) do
+    case AgentAccess.session(state) do
+      nil ->
+        state
+
+      session ->
+        {steering, follow_up} = safe_recall_queues(session)
+        do_dequeue_to_editor(state, steering ++ follow_up)
+    end
+  end
+
+  @doc "Queues the current input as a follow-up; submits normally when agent is idle."
+  @spec scope_queue_follow_up(state()) :: state()
+  def scope_queue_follow_up(state) do
+    panel = AgentAccess.panel(state)
+
+    cond do
+      UIState.input_empty?(panel) ->
+        state
+
+      AgentAccess.session(state) == nil ->
+        %{state | status_msg: "No agent session, try closing and reopening the panel"}
+
+      AgentAccess.agent(state).status in [:thinking, :tool_executing] ->
+        text = UIState.prompt_text(panel)
+
+        if SlashCommand.slash_command?(text) do
+          state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
+          execute_slash_command(state, text)
+        else
+          send_follow_up_to_llm(state, text)
+        end
+
+      true ->
+        # Agent is idle: Ctrl+Enter behaves like regular Enter.
+        submit_prompt(state)
+    end
+  end
+
+  @doc "Dequeues all pending messages back into the prompt input without aborting."
+  @spec scope_dequeue(state()) :: state()
+  def scope_dequeue(state), do: dequeue_to_editor(state)
+
+  @doc """
+  Context-sensitive Ctrl-C handler.
+
+  During streaming: aborts the agent and restores queued messages to the prompt.
+  When idle in insert mode: returns to normal mode (vim convention).
+  When idle in normal mode: no-op.
+  """
+  @spec scope_ctrl_c(state()) :: state()
+  def scope_ctrl_c(state) do
+    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
+      abort_agent(state)
+    else
+      input_to_normal(state)
+    end
   end
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
@@ -874,6 +1017,42 @@ defmodule Minga.Editor.Commands.Agent do
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
+  @spec safe_recall_queues(pid()) ::
+          {[String.t() | [ReqLLM.Message.ContentPart.t()]],
+           [String.t() | [ReqLLM.Message.ContentPart.t()]]}
+  defp safe_recall_queues(session) do
+    Session.recall_queues(session)
+  catch
+    :exit, _ -> {[], []}
+  end
+
+  @spec restore_queued_to_prompt(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
+          state()
+  defp restore_queued_to_prompt(state, []), do: state
+
+  defp restore_queued_to_prompt(state, all_queued) do
+    current_text = UIState.prompt_text(AgentAccess.panel(state))
+    combined = Session.combine_queue_entries_to_text(all_queued)
+
+    restored =
+      if current_text != "",
+        do: combined <> "\n\n" <> current_text,
+        else: combined
+
+    update_agent_ui(state, &UIState.set_prompt_text(&1, restored))
+  end
+
+  @spec do_dequeue_to_editor(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
+          state()
+  defp do_dequeue_to_editor(state, []), do: %{state | status_msg: "No queued messages"}
+
+  defp do_dequeue_to_editor(state, all_queued) do
+    count = length(all_queued)
+    label = if count == 1, do: "message", else: "messages"
+    state = restore_queued_to_prompt(state, all_queued)
+    %{state | status_msg: "Restored #{count} queued #{label} to editor"}
+  end
+
   # Returns true when no agent UI is visible (panel or split pane),
   # meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()
@@ -1097,6 +1276,9 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
     {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
     {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
+    {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
+    {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
+    {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
     {:agent_input_backspace, "Agent input backspace", :input_backspace},
     {:agent_input_up, "Agent input up", :scope_input_up},
     {:agent_input_down, "Agent input down", :scope_input_down},
