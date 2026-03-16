@@ -38,6 +38,7 @@ defmodule Minga.Buffer.Decorations do
   """
 
   alias Minga.Buffer.Decorations.BlockDecoration
+  alias Minga.Buffer.Decorations.ConcealRange
   alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Decorations.HighlightRange
   alias Minga.Buffer.Decorations.VirtualText
@@ -74,6 +75,7 @@ defmodule Minga.Buffer.Decorations do
   - `virtual_texts`: list of virtual text decorations (queried by line, not range)
   - `fold_regions`: list of buffer-level fold regions (per-buffer, not per-window)
   - `block_decorations`: list of block decorations (custom-rendered lines between buffer lines)
+  - `conceal_ranges`: list of conceal ranges (hidden buffer text with optional replacement)
   - `pending`: list of pending operations during a batch (nil when not batching)
   - `version`: monotonically increasing version for change detection by the render pipeline
   """
@@ -82,6 +84,7 @@ defmodule Minga.Buffer.Decorations do
           virtual_texts: [VirtualText.t()],
           fold_regions: [FoldRegion.t()],
           block_decorations: [BlockDecoration.t()],
+          conceal_ranges: [ConcealRange.t()],
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()}] | nil,
           version: non_neg_integer()
@@ -92,6 +95,7 @@ defmodule Minga.Buffer.Decorations do
             virtual_texts: [],
             fold_regions: [],
             block_decorations: [],
+            conceal_ranges: [],
             pending: nil,
             version: 0
 
@@ -468,21 +472,124 @@ defmodule Minga.Buffer.Decorations do
     Enum.find(blocks, fn b -> b.id == id end)
   end
 
-  # ── Column mapping (inline virtual text) ─────────────────────────────────
+  # ── Conceal range API ─────────────────────────────────────────────────────
+
+  @doc """
+  Adds a conceal range. Returns `{id, updated_decorations}`.
+
+  Concealed text is hidden from the display without modifying the buffer.
+  When a replacement string is provided, the entire concealed range is
+  shown as that single replacement character.
+
+  ## Options
+
+  - `:replacement` (optional) - string to show in place of concealed text (nil = invisible)
+  - `:replacement_style` (optional) - style keyword list for the replacement character
+  - `:priority` (optional, default 0) - higher values take precedence on overlap
+  - `:group` (optional) - atom for bulk removal (e.g., `:markdown`, `:agent`)
+
+  ## Examples
+
+      {id, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2})
+      {id, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 2},
+        replacement: "·",
+        group: :markdown
+      )
+  """
+  @spec add_conceal(t(), IntervalTree.position(), IntervalTree.position(), keyword()) ::
+          {reference(), t()}
+  def add_conceal(%__MODULE__{} = decs, start_pos, end_pos, opts \\ []) do
+    id = make_ref()
+
+    range = %ConcealRange{
+      id: id,
+      start_pos: start_pos,
+      end_pos: end_pos,
+      replacement: Keyword.get(opts, :replacement),
+      replacement_style: Keyword.get(opts, :replacement_style, []),
+      priority: Keyword.get(opts, :priority, 0),
+      group: Keyword.get(opts, :group)
+    }
+
+    {id, %{decs | conceal_ranges: [range | decs.conceal_ranges], version: decs.version + 1}}
+  end
+
+  @doc "Removes a conceal range by ID."
+  @spec remove_conceal(t(), reference()) :: t()
+  def remove_conceal(%__MODULE__{} = decs, id) do
+    new_conceals = Enum.reject(decs.conceal_ranges, fn c -> c.id == id end)
+
+    if length(new_conceals) == length(decs.conceal_ranges) do
+      decs
+    else
+      %{decs | conceal_ranges: new_conceals, version: decs.version + 1}
+    end
+  end
+
+  @doc "Removes all conceal ranges belonging to a group."
+  @spec remove_conceal_group(t(), atom()) :: t()
+  def remove_conceal_group(%__MODULE__{} = decs, group) when is_atom(group) do
+    new_conceals = Enum.reject(decs.conceal_ranges, fn c -> c.group == group end)
+
+    if length(new_conceals) == length(decs.conceal_ranges) do
+      decs
+    else
+      %{decs | conceal_ranges: new_conceals, version: decs.version + 1}
+    end
+  end
+
+  @doc "Returns true if there are any conceal ranges."
+  @spec has_conceal_ranges?(t()) :: boolean()
+  def has_conceal_ranges?(%__MODULE__{conceal_ranges: []}), do: false
+  def has_conceal_ranges?(%__MODULE__{}), do: true
+
+  @doc """
+  Returns conceal ranges that intersect the given line, sorted by start column.
+
+  Used by the rendering pipeline to know which graphemes to skip during
+  the line rendering walk.
+  """
+  @spec conceals_for_line(t(), non_neg_integer()) :: [ConcealRange.t()]
+  def conceals_for_line(%__MODULE__{conceal_ranges: []}, _line), do: []
+
+  def conceals_for_line(%__MODULE__{conceal_ranges: ranges}, line) do
+    ranges
+    |> Enum.filter(fn c -> ConcealRange.spans_line?(c, line) end)
+    |> Enum.sort_by(fn %ConcealRange{start_pos: {sl, sc}} ->
+      if sl < line, do: 0, else: sc
+    end)
+  end
+
+  # ── Column mapping (inline virtual text + conceals) ──────────────────────
 
   @doc """
   Converts a buffer column to a display column on the given line,
-  accounting for inline virtual text that shifts content rightward.
+  accounting for inline virtual text that shifts content rightward
+  and conceal ranges that reduce display width.
 
   Virtual texts anchored at or before `buf_col` add their display width
-  to the result. Virtual texts after `buf_col` don't affect it.
+  to the result. Conceal ranges before `buf_col` subtract their concealed
+  width and add replacement width (0 or 1). Virtual texts after `buf_col`
+  don't affect it.
   """
   @spec buf_col_to_display_col(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  def buf_col_to_display_col(%__MODULE__{virtual_texts: []}, _line, buf_col), do: buf_col
+  def buf_col_to_display_col(
+        %__MODULE__{virtual_texts: [], conceal_ranges: []} = _decs,
+        _line,
+        buf_col
+      ),
+      do: buf_col
 
   def buf_col_to_display_col(%__MODULE__{} = decs, line, buf_col) do
+    display_col = buf_col
+
+    # Add virtual text widths
     inline_vts = inline_virtual_texts_for_line(decs, line)
-    add_virtual_widths(inline_vts, buf_col)
+    display_col = add_virtual_widths(inline_vts, display_col)
+
+    # Subtract conceal widths
+    conceals = conceals_for_line(decs, line)
+    apply_conceal_offset_to_display(conceals, line, buf_col, display_col)
   end
 
   @doc """
@@ -494,11 +601,21 @@ defmodule Minga.Buffer.Decorations do
   display column that may be offset by virtual text.
   """
   @spec display_col_to_buf_col(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  def display_col_to_buf_col(%__MODULE__{virtual_texts: []}, _line, display_col), do: display_col
+  def display_col_to_buf_col(
+        %__MODULE__{virtual_texts: [], conceal_ranges: []},
+        _line,
+        display_col
+      ),
+      do: display_col
 
   def display_col_to_buf_col(%__MODULE__{} = decs, line, display_col) do
     inline_vts = inline_virtual_texts_for_line(decs, line)
-    subtract_virtual_widths(inline_vts, display_col)
+    buf_col = subtract_virtual_widths(inline_vts, display_col)
+
+    # Reverse the conceal offset: a display col maps to a higher buf col
+    # because concealed characters don't appear on screen.
+    conceals = conceals_for_line(decs, line)
+    apply_conceal_offset_to_buf(conceals, line, buf_col)
   end
 
   @spec add_virtual_widths([VirtualText.t()], non_neg_integer()) :: non_neg_integer()
@@ -558,6 +675,67 @@ defmodule Minga.Buffer.Decorations do
       # Click is past this virtual text: accumulate its width
       {:cont, {vt_width_sum + vt_w, nil}}
     end
+  end
+
+  # ── Conceal column offset helpers ──────────────────────────────────────────
+
+  # Adjusts a display column by subtracting the width of concealed ranges
+  # that fall before the given buffer column. Each conceal range reduces
+  # display width by (concealed_width - replacement_width).
+  @spec apply_conceal_offset_to_display(
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp apply_conceal_offset_to_display([], _line, _buf_col, display_col), do: display_col
+
+  defp apply_conceal_offset_to_display(conceals, line, buf_col, display_col) do
+    Enum.reduce(conceals, display_col, fn conceal, acc ->
+      {_sl, sc} = conceal.start_pos
+      {el, ec} = conceal.end_pos
+      conceal_start = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
+      conceal_end = if el > line, do: buf_col, else: ec
+
+      if conceal_start < buf_col do
+        # How much of this conceal is before our buf_col?
+        effective_end = min(conceal_end, buf_col)
+        concealed_width = max(effective_end - conceal_start, 0)
+        replacement_width = ConcealRange.display_width(conceal)
+        acc - concealed_width + replacement_width
+      else
+        acc
+      end
+    end)
+  end
+
+  # Inverse of apply_conceal_offset_to_display: given a buf_col that was
+  # derived from a display_col (after removing VT offsets), add back the
+  # concealed widths to find the true buffer column.
+  @spec apply_conceal_offset_to_buf([ConcealRange.t()], non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp apply_conceal_offset_to_buf([], _line, buf_col), do: buf_col
+
+  defp apply_conceal_offset_to_buf(conceals, line, buf_col) do
+    # Walk through conceals in order. Each conceal at or before the current
+    # position shifts the buffer column forward by the concealed width
+    # minus the replacement width. We use <= because a display_col that
+    # lands where a conceal starts means the first visible character after
+    # the conceal.
+    Enum.reduce(conceals, buf_col, fn conceal, acc ->
+      {_sl, sc} = conceal.start_pos
+      {el, ec} = conceal.end_pos
+      conceal_start = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
+      conceal_end = if el > line, do: acc, else: ec
+
+      if conceal_start <= acc do
+        concealed_width = max(conceal_end - conceal_start, 0)
+        replacement_width = ConcealRange.display_width(conceal)
+        acc + concealed_width - replacement_width
+      else
+        acc
+      end
+    end)
   end
 
   # ── Batch operations ─────────────────────────────────────────────────────
@@ -663,7 +841,8 @@ defmodule Minga.Buffer.Decorations do
         highlights: nil,
         virtual_texts: [],
         fold_regions: [],
-        block_decorations: []
+        block_decorations: [],
+        conceal_ranges: []
       }),
       do: true
 
@@ -671,9 +850,11 @@ defmodule Minga.Buffer.Decorations do
         highlights: hl,
         virtual_texts: vts,
         fold_regions: folds,
-        block_decorations: blocks
+        block_decorations: blocks,
+        conceal_ranges: conceals
       }) do
-    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == [] and blocks == []
+    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == [] and blocks == [] and
+      conceals == []
   end
 
   # ── Anchor adjustment ───────────────────────────────────────────────────
@@ -702,7 +883,7 @@ defmodule Minga.Buffer.Decorations do
         ) :: t()
   def adjust_for_edit(%__MODULE__{} = decs, _edit_start, _edit_end, _new_end)
       when decs.highlights == nil and decs.virtual_texts == [] and decs.fold_regions == [] and
-             decs.block_decorations == [],
+             decs.block_decorations == [] and decs.conceal_ranges == [],
       do: decs
 
   def adjust_for_edit(%__MODULE__{} = decs, edit_start, edit_end, new_end) do
@@ -726,6 +907,7 @@ defmodule Minga.Buffer.Decorations do
     new_folds = adjust_fold_regions(decs.fold_regions, ctx)
 
     new_blocks = adjust_block_decorations(decs.block_decorations, ctx)
+    new_conceals = adjust_conceal_ranges(decs.conceal_ranges, ctx)
 
     %{
       decs
@@ -733,6 +915,7 @@ defmodule Minga.Buffer.Decorations do
         virtual_texts: new_vts,
         fold_regions: new_folds,
         block_decorations: new_blocks,
+        conceal_ranges: new_conceals,
         version: decs.version + 1
     }
   end
@@ -759,6 +942,67 @@ defmodule Minga.Buffer.Decorations do
   end
 
   defp adjust_anchor_position(_anchor, ctx), do: ctx.new_end
+
+  @spec adjust_conceal_ranges([ConcealRange.t()], edit_ctx()) :: [ConcealRange.t()]
+  defp adjust_conceal_ranges([], _ctx), do: []
+
+  defp adjust_conceal_ranges(conceals, ctx) do
+    Enum.reduce(conceals, [], fn conceal, acc ->
+      case adjust_conceal_range(conceal, ctx) do
+        nil -> acc
+        adjusted -> [adjusted | acc]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  @spec adjust_conceal_range(ConcealRange.t(), edit_ctx()) :: ConcealRange.t() | nil
+  defp adjust_conceal_range(%ConcealRange{start_pos: start_pos, end_pos: end_pos} = conceal, ctx) do
+    # Entirely before the edit: no change
+    if end_pos <= ctx.edit_start do
+      conceal
+    else
+      if start_pos >= ctx.edit_end do
+        # Entirely after the edit: shift both endpoints
+        new_start = shift_position(start_pos, ctx.edit_end, ctx.line_delta, ctx.col_delta)
+        new_end = shift_position(end_pos, ctx.edit_end, ctx.line_delta, ctx.col_delta)
+        %{conceal | start_pos: new_start, end_pos: new_end}
+      else
+        adjust_conceal_overlap(conceal, ctx)
+      end
+    end
+  end
+
+  # Edit overlaps the conceal range: dispatch to multi-clause handler
+  @spec adjust_conceal_overlap(ConcealRange.t(), edit_ctx()) :: ConcealRange.t() | nil
+
+  # Edit spans entire range: remove
+  defp adjust_conceal_overlap(%ConcealRange{start_pos: sp, end_pos: ep}, ctx)
+       when ctx.edit_start <= sp and ctx.edit_end >= ep do
+    nil
+  end
+
+  # Edit overlaps start: shrink from left
+  defp adjust_conceal_overlap(%ConcealRange{start_pos: sp, end_pos: ep} = conceal, ctx)
+       when ctx.edit_start <= sp do
+    new_end = shift_position(ep, ctx.edit_end, ctx.line_delta, ctx.col_delta)
+
+    if ctx.edit_start >= new_end,
+      do: nil,
+      else: %{conceal | start_pos: ctx.edit_start, end_pos: new_end}
+  end
+
+  # Edit overlaps end: shrink from right
+  defp adjust_conceal_overlap(%ConcealRange{start_pos: sp, end_pos: ep} = conceal, ctx)
+       when ctx.edit_end >= ep do
+    if sp >= ctx.edit_start, do: nil, else: %{conceal | end_pos: ctx.edit_start}
+  end
+
+  # Edit entirely within range: adjust end
+  defp adjust_conceal_overlap(%ConcealRange{end_pos: ep} = conceal, ctx) do
+    new_end = shift_position(ep, ctx.edit_end, ctx.line_delta, ctx.col_delta)
+    %{conceal | end_pos: new_end}
+  end
 
   @spec adjust_fold_regions([FoldRegion.t()], edit_ctx()) :: [FoldRegion.t()]
   @spec adjust_block_decorations([BlockDecoration.t()], edit_ctx()) :: [BlockDecoration.t()]

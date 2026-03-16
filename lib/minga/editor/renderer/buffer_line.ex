@@ -89,8 +89,12 @@ defmodule Minga.Editor.Renderer.BufferLine do
     sign_cmd = render_sign(p, sr)
     gutter_cmd = render_number(p, sr)
 
+    # On the cursor line, reveal concealed text (Neovim concealcursor behavior).
+    # This lets the user see raw delimiters when the cursor is on the line.
+    ctx = maybe_reveal_conceals(p.ctx, p.buf_line, p.cursor_line)
+
     content_cmds =
-      LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
+      LineRenderer.render(p.line_text, sr, p.buf_line, ctx, p.byte_offset)
 
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
@@ -383,6 +387,21 @@ defmodule Minga.Editor.Renderer.BufferLine do
   @spec prepend_if([DisplayList.draw()], DisplayList.draw() | []) :: [DisplayList.draw()]
   defp prepend_if(list, []), do: list
   defp prepend_if(list, cmd) when is_tuple(cmd), do: [cmd | list]
+
+  # Strips conceal ranges for the cursor line so that raw text is revealed.
+  # This implements Neovim's concealcursor behavior: concealed text is
+  # visible when the cursor is on the line, hidden on all other lines.
+  @spec maybe_reveal_conceals(Context.t(), non_neg_integer(), non_neg_integer()) :: Context.t()
+  defp maybe_reveal_conceals(ctx, buf_line, cursor_line) when buf_line == cursor_line do
+    if Decorations.has_conceal_ranges?(ctx.decorations) do
+      revealed = %{ctx.decorations | conceal_ranges: []}
+      %{ctx | decorations: revealed}
+    else
+      ctx
+    end
+  end
+
+  defp maybe_reveal_conceals(ctx, _buf_line, _cursor_line), do: ctx
 
   @spec prepend_all([DisplayList.draw()], [DisplayList.draw()]) :: [DisplayList.draw()]
   defp prepend_all(acc, []), do: acc
