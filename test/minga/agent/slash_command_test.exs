@@ -73,7 +73,6 @@ defmodule Minga.Agent.SlashCommandTest do
         agent: %AgentState{
           session: session,
           status: :idle,
-          panel: UIState.new(),
           error: nil,
           spinner_timer: nil,
           buffer: nil

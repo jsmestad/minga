@@ -17,11 +17,11 @@ defmodule Minga.Input.AgentPanel do
 
   @behaviour Minga.Input.Handler
 
+  alias Minga.Agent.UIState
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input
   alias Minga.Input.AgentChatNav
@@ -133,14 +133,14 @@ defmodule Minga.Input.AgentPanel do
       if LayoutPreset.has_agent_chat?(state) do
         AgentCommands.toggle_agent_split(state)
       else
-        AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+        AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
       end
 
     {:panel, state}
   end
 
   defp panel_nav_key(state, ?i, _mods) do
-    state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
+    state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
     {:panel, %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}}
   end
 

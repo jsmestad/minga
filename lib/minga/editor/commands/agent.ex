@@ -161,7 +161,7 @@ defmodule Minga.Editor.Commands.Agent do
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
         |> maybe_start_session()
-        |> then(&update_agent(&1, fn a -> AgentState.focus_input(a, true) end))
+        |> then(&update_agent_ui(&1, fn ui -> UIState.set_input_focused(ui, true) end))
       catch
         :exit, _ -> state
       end
@@ -217,7 +217,7 @@ defmodule Minga.Editor.Commands.Agent do
         text = UIState.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
-          state = update_agent(state, &AgentState.clear_input_and_scroll/1)
+          state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
           execute_slash_command(state, text)
         else
           send_prompt_to_llm(state, text)
@@ -241,7 +241,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     with {:ok, resolved} <- resolve_mentions(text, model: model),
          :ok <- Session.send_prompt(AgentAccess.session(state), resolved) do
-      state = update_agent(state, &AgentState.clear_input_and_scroll/1)
+      state = update_agent_ui(state, &UIState.clear_input_and_scroll/1)
 
       AgentAccess.update_agent_ui(state, fn _ ->
         UIState.clear_baselines(AgentAccess.agent_ui(state))
@@ -294,7 +294,7 @@ defmodule Minga.Editor.Commands.Agent do
         0
       end
 
-    state = update_agent(state, &AgentState.clear_display(&1, msg_count))
+    state = update_agent_ui(state, &UIState.clear_display(&1, msg_count))
 
     if AgentAccess.session(state) do
       Session.add_system_message(AgentAccess.session(state), "Display cleared")
@@ -375,10 +375,7 @@ defmodule Minga.Editor.Commands.Agent do
         end
 
       # Reset panel scroll and auto-scroll to reflect new session's content
-      update_agent(state, fn agent ->
-        panel = %{agent.panel | scroll: Minga.Scroll.new()}
-        %{agent | panel: panel}
-      end)
+      update_agent_ui(state, fn ui -> %{ui | scroll: Minga.Scroll.new()} end)
     end
   end
 
@@ -390,7 +387,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
-    update_agent(state, &AgentState.scroll_up(&1, amount))
+    update_agent_ui(state, &UIState.scroll_up(&1, amount))
   end
 
   @doc "Scrolls the chat panel down by half the panel height."
@@ -401,7 +398,7 @@ defmodule Minga.Editor.Commands.Agent do
 
   defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
-    update_agent(state, &AgentState.scroll_down(&1, amount))
+    update_agent_ui(state, &UIState.scroll_down(&1, amount))
   end
 
   @doc "Handles a character input in the agent prompt."
@@ -409,7 +406,7 @@ defmodule Minga.Editor.Commands.Agent do
   def input_char(state, char) do
     if no_agent_ui?(state),
       do: state,
-      else: update_agent(state, &AgentState.insert_char(&1, char))
+      else: update_agent_ui(state, &UIState.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
@@ -417,19 +414,19 @@ defmodule Minga.Editor.Commands.Agent do
   def input_paste(state, text) do
     if no_agent_ui?(state),
       do: state,
-      else: update_agent(state, &AgentState.insert_paste(&1, text))
+      else: update_agent_ui(state, &UIState.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
   @spec toggle_paste_expand(state()) :: state()
   def toggle_paste_expand(state) do
-    update_agent(state, &AgentState.toggle_paste_expand/1)
+    update_agent_ui(state, &UIState.toggle_paste_expand/1)
   end
 
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
   def input_backspace(state) do
-    if no_agent_ui?(state), do: state, else: update_agent(state, &AgentState.delete_char/1)
+    if no_agent_ui?(state), do: state, else: update_agent_ui(state, &UIState.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
@@ -440,7 +437,7 @@ defmodule Minga.Editor.Commands.Agent do
     else
       case Session.cycle_thinking_level(AgentAccess.session(state)) do
         {:ok, %{"level" => level}} when is_binary(level) ->
-          state = update_agent(state, &AgentState.set_thinking_level(&1, level))
+          state = update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
           %{state | status_msg: "Thinking: #{level}"}
 
@@ -484,7 +481,7 @@ defmodule Minga.Editor.Commands.Agent do
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total}} ->
-          state = update_agent(state, &AgentState.set_model_name(&1, model))
+          state = update_agent_ui(state, &UIState.set_model_name(&1, model))
 
           Session.add_system_message(
             AgentAccess.session(state),
@@ -505,14 +502,14 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Sets the agent provider and restarts the session."
   @spec set_provider(state(), String.t()) :: state()
   def set_provider(state, provider) do
-    state = update_agent(state, &AgentState.set_provider_name(&1, provider))
+    state = update_agent_ui(state, &UIState.set_provider_name(&1, provider))
     AgentSession.restart_session(state, "Provider: #{provider}")
   end
 
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do
-    state = update_agent(state, &AgentState.set_model_name(&1, model))
+    state = update_agent_ui(state, &UIState.set_model_name(&1, model))
 
     if AgentAccess.session(state) do
       Session.set_model(AgentAccess.session(state), model)
@@ -655,21 +652,21 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Focuses the input field and transitions to insert mode."
   @spec scope_focus_input(state()) :: state()
   def scope_focus_input(state) do
-    state = update_agent(state, &AgentState.focus_input(&1, true))
+    state = update_agent_ui(state, &UIState.set_input_focused(&1, true))
     %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}
   end
 
   @doc "Unfocuses the input field and transitions to normal mode."
   @spec scope_unfocus_input(state()) :: state()
   def scope_unfocus_input(state) do
-    state = update_agent(state, &AgentState.focus_input(&1, false))
+    state = update_agent_ui(state, &UIState.set_input_focused(&1, false))
     %{state | vim: %{state.vim | mode: :normal, mode_state: Minga.Mode.initial_state()}}
   end
 
   @doc "Unfocuses the input field and closes the agent split pane."
   @spec scope_unfocus_and_quit(state()) :: state()
   def scope_unfocus_and_quit(state) do
-    state = update_agent(state, &AgentState.focus_input(&1, false))
+    state = update_agent_ui(state, &UIState.set_input_focused(&1, false))
     toggle_agent_split(state)
   end
 
@@ -769,7 +766,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Inserts a newline in the input field."
   @spec scope_insert_newline(state()) :: state()
   def scope_insert_newline(state) do
-    update_agent(state, &AgentState.insert_newline/1)
+    update_agent_ui(state, &UIState.insert_newline/1)
   end
 
   @doc "Submits if input has text, aborts if agent is active."
@@ -789,9 +786,9 @@ defmodule Minga.Editor.Commands.Agent do
     {line, _col} = UIState.input_cursor(panel)
 
     if line == 0 do
-      update_agent(state, &AgentState.history_prev/1)
+      update_agent_ui(state, &UIState.history_prev/1)
     else
-      update_agent(state, &AgentState.move_cursor_up/1)
+      update_agent_ui(state, &UIState.move_cursor_up/1)
     end
   end
 
@@ -803,9 +800,9 @@ defmodule Minga.Editor.Commands.Agent do
     max_line = UIState.input_line_count(panel) - 1
 
     if line >= max_line do
-      update_agent(state, &AgentState.history_next/1)
+      update_agent_ui(state, &UIState.history_next/1)
     else
-      update_agent(state, &AgentState.move_cursor_down/1)
+      update_agent_ui(state, &UIState.move_cursor_down/1)
     end
   end
 

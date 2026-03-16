@@ -29,27 +29,18 @@ defmodule Minga.Input.ScopedTest do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    panel = %UIState{
-      visible: Keyword.get(opts, :panel_visible, false),
-      input_focused: Keyword.get(opts, :input_focused, false),
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
-
     agent = %AgentState{
       session: nil,
       status: :idle,
-      panel: panel,
       error: nil,
       spinner_timer: nil,
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
     agentic = %UIState{
+      visible: Keyword.get(opts, :panel_visible, false),
+      input_focused: Keyword.get(opts, :input_focused, false),
+      prompt_buffer: prompt_buf,
       active: Keyword.get(opts, :agentic_active, false),
       focus: Keyword.get(opts, :focus, :chat)
     }
@@ -605,8 +596,8 @@ defmodule Minga.Input.ScopedTest do
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          %{agent | panel: %{agent.panel | input_focused: true, visible: true}}
+        AgentAccess.update_agent_ui(state, fn ui ->
+          %{ui | input_focused: true, visible: true}
         end)
 
       state = %{state | vim: %{state.vim | mode: :insert}}
@@ -680,8 +671,8 @@ defmodule Minga.Input.ScopedTest do
       }
 
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          put_in(agent.panel.mention_completion, completion)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          put_in(ui.mention_completion, completion)
         end)
 
       {:ok, state: state}
@@ -714,7 +705,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "mention only intercepts in insert mode", %{state: state} do
       state =
-        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, false) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, false) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
     end
@@ -742,8 +733,8 @@ defmodule Minga.Input.ScopedTest do
       }
 
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          put_in(agent.panel.mention_completion, completion)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          put_in(ui.mention_completion, completion)
         end)
 
       {:ok, state: state}

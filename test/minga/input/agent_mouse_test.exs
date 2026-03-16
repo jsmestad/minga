@@ -23,23 +23,11 @@ defmodule Minga.Input.AgentMouseTest do
 
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld\nfoo\nbar\nbaz")
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
-
-    panel = %UIState{
-      visible: Keyword.get(opts, :panel_visible, false),
-      input_focused: Keyword.get(opts, :input_focused, false),
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
+    {:ok, _prompt_buf} = BufferServer.start_link(content: "")
 
     agent = %AgentState{
       session: nil,
       status: :idle,
-      panel: panel,
       error: nil,
       spinner_timer: nil,
       buffer: Keyword.get(opts, :agent_buffer, nil)
@@ -83,9 +71,8 @@ defmodule Minga.Input.AgentMouseTest do
 
   defp with_agent_panel(state) do
     state
-    |> AgentAccess.update_agent(fn agent ->
-      panel = %{agent.panel | visible: true, input_focused: true}
-      %{agent | panel: panel}
+    |> AgentAccess.update_agent_ui(fn ui ->
+      %{ui | visible: true, input_focused: true}
     end)
     |> Layout.invalidate()
   end
@@ -198,7 +185,7 @@ defmodule Minga.Input.AgentMouseTest do
       {_row, col, _w, h} = rect
 
       # Make sure input is not focused
-      state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
       refute AgentAccess.input_focused?(state)
 
       # Click near the bottom of the agent window (where input lives)
@@ -296,7 +283,7 @@ defmodule Minga.Input.AgentMouseTest do
       {_row, col, _w, h} = panel_rect
 
       # Unfocus first
-      state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
       refute AgentAccess.input_focused?(state)
 
       # Click near the bottom of the panel (input area)

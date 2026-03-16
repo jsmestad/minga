@@ -33,11 +33,11 @@ defmodule Minga.Editor.State.AgentAccess do
 
   @doc "Returns the agent panel state."
   @spec panel(EditorState.t() | map()) :: UIState.t()
-  def panel(state), do: agent(state).panel
+  def panel(state), do: agent_ui(state)
 
   @doc "Returns true if the agent panel input is focused."
   @spec input_focused?(EditorState.t() | map()) :: boolean()
-  def input_focused?(state), do: agent(state).panel.input_focused
+  def input_focused?(state), do: agent_ui(state).input_focused
 
   @doc "Returns the agent UI focus."
   @spec focus(EditorState.t() | map()) :: atom()

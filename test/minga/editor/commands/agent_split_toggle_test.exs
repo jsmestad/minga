@@ -34,21 +34,9 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     # Create agent buffer (needed for split pane behavior)
     agent_buf = BufferSync.start_buffer()
 
-    panel = %UIState{
-      visible: false,
-      input_focused: false,
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
-
     agent = %AgentState{
       session: Keyword.get(opts, :session, fake_session()),
       status: :idle,
-      panel: panel,
       error: nil,
       spinner_timer: nil,
       buffer: agent_buf
@@ -57,11 +45,13 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     active = Keyword.get(opts, :active, false)
 
     agentic = %UIState{
+      visible: false,
+      input_focused: false,
+      prompt_buffer: prompt_buf,
       active: active,
       focus: :chat,
       preview: Preview.new(),
       saved_windows: Keyword.get(opts, :saved_windows, nil),
-      pending_prefix: nil,
       saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
     }
 

@@ -20,25 +20,13 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
 
   defp make_state do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
-    {:ok, prompt_buf} = BufferServer.start_link(content: "")
+    {:ok, _prompt_buf} = BufferServer.start_link(content: "")
     agent_buf = AgentBufferSync.start_buffer()
     {:ok, fake_session} = StubServer.start_link()
 
     window = Window.new(1, buf, 24, 80)
 
-    panel = %UIState{
-      visible: false,
-      input_focused: false,
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
-
     agent = %AgentState{
-      panel: panel,
       buffer: agent_buf,
       session: fake_session,
       status: :idle,

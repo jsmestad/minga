@@ -99,8 +99,8 @@ defmodule Minga.Editor.AgentLifecycle do
 
     # Cache the line index in the panel state so callers (scroll_context,
     # code_block_index_for_scroll) can read it without recomputing.
-    AgentAccess.update_agent(state, fn a ->
-      %{a | panel: %{a.panel | cached_line_index: line_index}}
+    AgentAccess.update_agent_ui(state, fn ui ->
+      %{ui | cached_line_index: line_index}
     end)
   end
 

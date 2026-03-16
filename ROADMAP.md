@@ -27,7 +27,7 @@ Current status and planned features. Updated as development progresses.
 | Input router + focus stack | ✅ | Centralized key dispatch via `Input.Handler` behaviour; single `handle_info` clause |
 | Keymap scopes (#223) | ✅ | Buffer-type-specific keybindings (agent, file_tree, editor) via `Keymap.Scope` behaviour; replaces per-view focus stack handlers |
 | Panel buffer backing | ✅ | File tree and agent chat backed by BufferServer; vim navigation via mode FSM delegation |
-| Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots |
+| Diff-based undo (memory efficient) | 📋 | Currently stores full snapshots #638 |
 | Line index cache (O(1) line access) | ✅ | Lazy line offset tuple; `line_at`/`lines`/`position_to_offset` use `binary_part` |
 
 ## Modes
@@ -43,7 +43,7 @@ Current status and planned features. Updated as development progresses.
 | Search (`/`, `?`) | ✅ | Forward and backward |
 | Replace (`r`) | ✅ | Single-character replace |
 | Substitute confirm | ✅ | `:%s/old/new/gc` interactive |
-| Visual Block | 📋 | Column selection |
+| Visual Block | 📋 | Column selection #56 |
 
 ## Motions
 
@@ -58,8 +58,8 @@ Current status and planned features. Updated as development progresses.
 | `f`/`F`/`t`/`T` + char | ✅ | Find character on line |
 | `{` `}` | ✅ | Paragraph forward / backward |
 | `%` | ✅ | Matching bracket |
-| `;` `,` (repeat find) | 📋 | Stubbed, not yet wired |
-| `H` `M` `L` | 📋 | Screen top / middle / bottom |
+| `;` `,` (repeat find) | ✅ | Repeat / reverse last `f`/`F`/`t`/`T` |
+| `H` `M` `L` | ✅ | Screen top / middle / bottom |
 | `]f` / `[f` | ✅ | Goto next/prev function (tree-sitter textobject cache, #442) |
 | `]t` / `[t` | ✅ | Goto next/prev type/class (tree-sitter textobject cache, #442) |
 | `]a` / `[a` | ✅ | Goto next/prev argument/parameter (tree-sitter textobject cache, #442) |
@@ -124,7 +124,7 @@ Current status and planned features. Updated as development progresses.
 | `SPC w v` / `SPC w s` | Vertical / horizontal split | ✅ | Nested splits supported |
 | `SPC w d` | Close window | ✅ | Last window protected |
 | `SPC f p` | Open config file | ✅ | Creates starter template if missing |
-| `SPC h k` | Describe key | 📋 | Stubbed |
+| `SPC h k` | Describe key | ✅ | Shows key, command, description in help buffer |
 | `SPC h r` | Reload config | ✅ | Hot-reloads modules, config, extensions |
 | `SPC q q` | Quit | ✅ |
 
@@ -160,8 +160,8 @@ Current status and planned features. Updated as development progresses.
 | Background query pre-compilation | ✅ | All query sets (highlights, injections, folds, indents, textobjects) compiled on startup |
 | Per-buffer highlight cache | ✅ | Instant switching between files |
 | Additional themes | ✅ | 7 built-in: Doom One, Catppuccin ×4, One Dark/Light |
-| Theme switching at runtime | 📋 | Static via config; runtime picker planned |
-| Incremental parsing | 💭 | Full reparse is <5ms for 10K lines; not needed yet |
+| Theme switching at runtime | ✅ | `SPC h t` live preview picker |
+| Incremental parsing | ✅ | Edit deltas from BEAM → Zig `parseIncremental` with `TSInputEdit` |
 
 ## File Management
 
@@ -213,7 +213,7 @@ Current status and planned features. Updated as development progresses.
 | Jump to mark line (`'{a-z}`) | ✅ | |
 | Jump to mark exact (`` `{a-z} ``) | ✅ | |
 | Special marks (`''`, ` `` `) | ✅ | Jump to last position |
-| Global marks (`A-Z`) | 📋 | Cross-buffer marks |
+| Global marks (`A-Z`) | 📋 | Cross-buffer marks (related: #102) |
 
 ## UI
 
@@ -241,12 +241,12 @@ Current status and planned features. Updated as development progresses.
 | Mouse: picker candidate clicking | ✅ | #217 — click to select+confirm, scroll wheel |
 | Mouse: completion menu clicking | ✅ | #217 — click to accept, scroll wheel, outside click dismisses |
 | Mouse: modeline segment clicking | ✅ | #217 — file name opens buffer list, render-time click regions |
-| Mouse: right-click context menu | 📋 | #217 |
-| Mouse: hover tooltips (GUI) | 📋 | #217 |
+| Mouse: right-click context menu | 📋 | #234 |
+| Mouse: hover tooltips (GUI) | 📋 | #235 |
 | Mouse: smooth trackpad scrolling (GUI) | ✅ | #217 — sub-pixel Metal offset, ScrollAccumulator, 1-line BEAM events |
-| Mouse: cursor shape changes (GUI) | 📋 | #217 |
+| Mouse: cursor shape changes (GUI) | 📋 | #236 |
 | Split windows | ✅ | Vertical, horizontal, nested; `SPC w` navigation |
-| Floating windows | 📋 | Zig renderer supports panels |
+| Floating windows | ✅ | `FloatingWindow` module with bordered, titled panels |
 | Tab bar | ✅ | Row 0, Powerline separators, per-filetype Nerd Font devicons, overflow scrolling, click/middle-click, `SPC 1-9`/`gt`/`gT` #249 |
 | Tab data model | ✅ | Tab/TabBar structs, snapshot/restore, 9 per-tab fields #251 |
 | Tab commands | ✅ | `SPC TAB n/p/d/a`, tab picker (`SPC b b`), `cycle_agent_tabs` #252 |
@@ -273,7 +273,7 @@ Current status and planned features. Updated as development progresses.
 | Completion | ✅ | Inline popup with trigger chars, identifier debounce, C-n/C-p/Tab/Enter |
 | Go-to-definition | ✅ | `gd` or `SPC c g`; cross-file navigation |
 | Hover | ✅ | `K` or `SPC c k`; displays in minibuffer |
-| Rename | 📋 | |
+| Rename | 📋 | No ticket yet |
 | Incremental document sync | 📋 | Full sync for now; incremental when perf requires it |
 
 ## Infrastructure
@@ -293,7 +293,7 @@ Current status and planned features. Updated as development progresses.
 | Incremental content sync | ✅ | edit_buffer opcode + edit delta tracking in Buffer.Server (#154) |
 | Headless test harness | ✅ | Full editor testing without terminal |
 | Custom Mix compiler for Zig | ✅ | `mix compile` builds everything |
-| 2,714 Elixir tests | ✅ | Including 10 property-based tests |
+| 5,255 Elixir tests | ✅ | Including 59 property-based tests, 48 doctests |
 | 105 Zig tests | ✅ | Protocol + renderer + highlighter |
 | Burrito packaging | ✅ | Single-binary distribution |
 | Unified render paths | ✅ | Single pipeline for all content types (#162) |
@@ -301,8 +301,8 @@ Current status and planned features. Updated as development progresses.
 | Explicit render pipeline | ✅ | 7 named stages: invalidation, layout, scroll, content, chrome, compose, emit (#166) |
 | Per-window render state | ✅ | Cached draws, dirty-line tracking, context fingerprinting (#163) |
 | Dirty-line rendering | ✅ | Skip unchanged lines, reuse cached draws, context-aware invalidation (#164) |
-| Component model | 📋 | Composable render components with lifecycle (#167) |
-| Layout constraints | 📋 | Constraint-based layout system (#168) |
+| Component model | ✅ | Composable render components with lifecycle (#167) |
+| Layout constraints | ✅ | Constraint-based layout system (#168) |
 
 ---
 
@@ -342,7 +342,7 @@ Current status and planned features. Updated as development progresses.
 | Inline completions (ghost text) | 📋 | #74 |
 | Agent-aware undo | 📋 | #76. Depends on #393 (buffer-routed agent tools) |
 | Edit boundaries | 📋 | #78. Depends on #393 (buffer-routed agent tools) |
-| Inline diff review | 📋 | #79 |
+| Inline diff review | ✅ | #79 |
 
 ## What's Next
 
@@ -369,6 +369,18 @@ These guide what we build and how:
 - **Two-process isolation** — Editor state and rendering never share memory; either can fail independently
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus
 - **Elixir for logic, Zig for pixels** — Each language where it excels
-- **Test everything** — 2,284 tests and counting; property-based tests for data structures
+- **Test everything** — 5,255 tests and counting; property-based tests for data structures
 - **Convention over configuration** — Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them. Minga's `Keymap.Defaults` and `Config.Options` modules are explicit, readable Elixir. The defaults live in one place, they're real code, and you can read them.
 - **Core vs. extension** — If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
+ll philosophy.
+ilosophy.
+osophy.
+sophy.
+
+osophy.
+sophy.
+sophy.
+osophy.
+sophy.
+y.
+sophy.
