@@ -300,6 +300,62 @@ defmodule Minga.ThemeTest do
     end
   end
 
+  describe "agent_syntax/1" do
+    test "overrides delimiter captures with delimiter_dim color" do
+      theme = Theme.get!(:doom_one)
+      syntax = Theme.agent_syntax(theme)
+      agent = Theme.agent_theme(theme)
+
+      assert syntax["punctuation.delimiter"] == [fg: agent.delimiter_dim]
+      assert syntax["punctuation.special"] == [fg: agent.delimiter_dim]
+    end
+
+    test "overrides link captures with agent colors" do
+      theme = Theme.get!(:doom_one)
+      syntax = Theme.agent_syntax(theme)
+      agent = Theme.agent_theme(theme)
+
+      assert syntax["text.reference"] == [fg: agent.link_fg]
+      assert syntax["text.uri"] == [fg: agent.delimiter_dim]
+    end
+
+    test "maps per-level heading captures to heading colors" do
+      theme = Theme.get!(:doom_one)
+      syntax = Theme.agent_syntax(theme)
+      agent = Theme.agent_theme(theme)
+
+      assert syntax["text.title.h1"] == [fg: agent.heading1_fg, bold: true]
+      assert syntax["text.title.h2"] == [fg: agent.heading2_fg, bold: true]
+      assert syntax["text.title.h3"] == [fg: agent.heading3_fg, bold: true]
+      # h4-h6 fall back to heading3 color without bold
+      assert syntax["text.title.h4"] == [fg: agent.heading3_fg]
+    end
+
+    test "preserves non-overridden captures from base syntax" do
+      theme = Theme.get!(:doom_one)
+      syntax = Theme.agent_syntax(theme)
+
+      # keyword, string, etc. should come from the base theme
+      assert syntax["keyword"] == theme.syntax["keyword"]
+      assert syntax["string"] == theme.syntax["string"]
+      assert syntax["comment"] == theme.syntax["comment"]
+    end
+
+    test "works for all themes" do
+      for name <- Theme.available() do
+        theme = Theme.get!(name)
+        syntax = Theme.agent_syntax(theme)
+        agent = Theme.agent_theme(theme)
+
+        assert syntax["punctuation.delimiter"] == [fg: agent.delimiter_dim],
+               "#{name}: punctuation.delimiter should use delimiter_dim"
+
+        assert syntax["text.reference"] == [fg: agent.link_fg],
+               "#{name}: text.reference should use link_fg"
+      end
+    end
+  end
+
   describe "agent theme consistency" do
     test "light themes have light agent panel backgrounds" do
       for name <- [:catppuccin_latte, :one_light] do

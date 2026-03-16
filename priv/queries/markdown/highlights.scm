@@ -1,6 +1,29 @@
-;From nvim-treesitter/nvim-treesitter
+;From nvim-treesitter/nvim-treesitter, extended with per-level heading captures
+
+; Level-specific heading captures (matched before the generic fallback)
 (atx_heading
-  (inline) @text.title)
+  (atx_h1_marker)
+  (inline) @text.title.h1)
+
+(atx_heading
+  (atx_h2_marker)
+  (inline) @text.title.h2)
+
+(atx_heading
+  (atx_h3_marker)
+  (inline) @text.title.h3)
+
+(atx_heading
+  (atx_h4_marker)
+  (inline) @text.title.h4)
+
+(atx_heading
+  (atx_h5_marker)
+  (inline) @text.title.h5)
+
+(atx_heading
+  (atx_h6_marker)
+  (inline) @text.title.h6)
 
 (setext_heading
   (paragraph) @text.title)

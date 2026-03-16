@@ -36,6 +36,9 @@ defmodule Minga.Editor.HighlightSync do
     end
   end
 
+  @typedoc "Options for `setup_for_buffer_pid/3`."
+  @type setup_opt :: {:syntax, Minga.Theme.syntax()}
+
   @doc """
   Sets up highlighting for a specific buffer PID that may not be the active buffer.
 
@@ -43,14 +46,22 @@ defmodule Minga.Editor.HighlightSync do
   tree-sitter parsing even when they're not the focused buffer. Assigns a
   buffer_id, sends set_language + parse_buffer to the parser, and initializes
   the highlight entry.
+
+  ## Options
+
+    * `:syntax` — custom syntax theme map to use instead of the global theme's
+      syntax. Used by the agent buffer to override delimiter captures with
+      dimmed colors.
   """
-  @spec setup_for_buffer_pid(EditorState.t(), pid()) :: EditorState.t()
-  def setup_for_buffer_pid(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
+  @spec setup_for_buffer_pid(EditorState.t(), pid(), [setup_opt()]) :: EditorState.t()
+  def setup_for_buffer_pid(state, buf_pid, opts \\ [])
+
+  def setup_for_buffer_pid(%EditorState{} = state, buf_pid, opts) when is_pid(buf_pid) do
     filetype = BufferServer.filetype(buf_pid)
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
-        send_parse_for_pid(state, buf_pid, language)
+        send_parse_for_pid(state, buf_pid, language, opts)
 
       :unsupported ->
         state
@@ -79,13 +90,20 @@ defmodule Minga.Editor.HighlightSync do
         touch_buffer(state, buf_pid)
 
       :error ->
-        # Buffer not registered with parser yet; set up from scratch
-        setup_for_buffer_pid(state, buf_pid)
+        # Buffer not registered with parser yet; set up from scratch.
+        # Recover any stored syntax override (e.g., agent buffer's dimmed delimiters).
+        opts =
+          case Map.get(hl.syntax_overrides, buf_pid) do
+            nil -> []
+            syntax -> [syntax: syntax]
+          end
+
+        setup_for_buffer_pid(state, buf_pid, opts)
     end
   end
 
-  @spec send_parse_for_pid(EditorState.t(), pid(), String.t()) :: EditorState.t()
-  defp send_parse_for_pid(state, buf_pid, language) do
+  @spec send_parse_for_pid(EditorState.t(), pid(), String.t(), [setup_opt()]) :: EditorState.t()
+  defp send_parse_for_pid(state, buf_pid, language, opts) do
     {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
     hl = state.highlight
     version = hl.version + 1
@@ -110,8 +128,29 @@ defmodule Minga.Editor.HighlightSync do
 
     ParserManager.send_commands(commands)
 
-    state = put_highlight(state, buf_pid, Highlight.from_theme(state.theme))
-    state = %{state | highlight: %{state.highlight | version: version}}
+    # Use custom syntax theme if provided (e.g., agent buffer with dimmed delimiters),
+    # otherwise use the global editor theme. Store the override so
+    # request_reparse_buffer can recover it if the buffer_id is lost.
+    custom_syntax = Keyword.get(opts, :syntax)
+
+    hl_data =
+      case custom_syntax do
+        nil -> Highlight.from_theme(state.theme)
+        syntax -> Highlight.new(syntax)
+      end
+
+    state = put_highlight(state, buf_pid, hl_data)
+
+    hl2 = state.highlight
+
+    syntax_overrides =
+      if custom_syntax do
+        Map.put(hl2.syntax_overrides, buf_pid, custom_syntax)
+      else
+        hl2.syntax_overrides
+      end
+
+    state = %{state | highlight: %{hl2 | version: version, syntax_overrides: syntax_overrides}}
     touch_buffer(state, buf_pid)
   end
 
@@ -226,7 +265,8 @@ defmodule Minga.Editor.HighlightSync do
               | buffer_ids: remaining_ids,
                 reverse_buffer_ids: Map.delete(hl.reverse_buffer_ids, buffer_id),
                 highlights: Map.delete(hl.highlights, buffer_pid),
-                last_active_at: Map.delete(hl.last_active_at, buffer_pid)
+                last_active_at: Map.delete(hl.last_active_at, buffer_pid),
+                syntax_overrides: Map.delete(hl.syntax_overrides, buffer_pid)
             }
         }
     end

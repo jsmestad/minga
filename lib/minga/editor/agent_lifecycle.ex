@@ -78,7 +78,10 @@ defmodule Minga.Editor.AgentLifecycle do
     agent = AgentAccess.agent(state)
 
     if is_pid(agent.buffer) do
-      HighlightSync.setup_for_buffer_pid(state, agent.buffer)
+      # Use a custom syntax theme that dims markdown delimiters via
+      # tree-sitter captures instead of regex-based ChatDecorations.
+      agent_syntax = Minga.Theme.agent_syntax(state.theme)
+      HighlightSync.setup_for_buffer_pid(state, agent.buffer, syntax: agent_syntax)
     else
       state
     end
