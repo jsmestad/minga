@@ -41,4 +41,7 @@ defmodule Minga.Git.Backend do
 
   @callback stage_patch(git_root :: String.t(), patch :: String.t()) ::
               :ok | {:error, String.t()}
+
+  @callback current_branch(git_root :: String.t()) ::
+              {:ok, String.t()} | :error
 end

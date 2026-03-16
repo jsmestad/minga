@@ -22,7 +22,8 @@ defmodule Minga.Git.Buffer do
           relative_path: String.t(),
           base_lines: [String.t()],
           hunks: [Diff.hunk()],
-          signs: %{non_neg_integer() => Diff.hunk_type()}
+          signs: %{non_neg_integer() => Diff.hunk_type()},
+          branch: String.t() | nil
         }
 
   # ── Client API ─────────────────────────────────────────────────────────────
@@ -81,6 +82,34 @@ defmodule Minga.Git.Buffer do
     GenServer.call(server, :relative_path)
   end
 
+  @typedoc "Diff summary counts: {added, modified, deleted}."
+  @type diff_summary :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+
+  @typedoc "Pre-computed data for the modeline: branch name and diff summary."
+  @type modeline_info :: {branch :: String.t() | nil, diff_summary()}
+
+  @doc """
+  Returns a summary of diff sign counts: `{added, modified, deleted}`.
+
+  Counts are derived from the per-line sign map, which is already computed
+  on every buffer change. This is a cheap GenServer.call (no recomputation).
+  """
+  @spec summary(GenServer.server()) :: diff_summary()
+  def summary(server) do
+    GenServer.call(server, :summary)
+  end
+
+  @doc """
+  Returns `{branch, {added, modified, deleted}}` in a single GenServer call.
+
+  The branch name is cached on state and refreshed on init and save
+  (`:invalidate_base`), so this call does zero I/O.
+  """
+  @spec modeline_info(GenServer.server()) :: modeline_info()
+  def modeline_info(server) do
+    GenServer.call(server, :modeline_info)
+  end
+
   # ── Server Callbacks ───────────────────────────────────────────────────────
 
   @impl true
@@ -97,12 +126,15 @@ defmodule Minga.Git.Buffer do
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
 
+    branch = read_branch(git_root)
+
     state = %{
       git_root: git_root,
       relative_path: rel_path,
       base_lines: base_lines,
       hunks: hunks,
-      signs: signs
+      signs: signs,
+      branch: branch
     }
 
     {:ok, state}
@@ -119,6 +151,15 @@ defmodule Minga.Git.Buffer do
 
   def handle_call({:hunk_at, line}, _from, state) do
     {:reply, Diff.hunk_at_line(state.hunks, line), state}
+  end
+
+  def handle_call(:summary, _from, state) do
+    summary = count_signs(state.signs)
+    {:reply, summary, state}
+  end
+
+  def handle_call(:modeline_info, _from, state) do
+    {:reply, {state.branch, count_signs(state.signs)}, state}
   end
 
   def handle_call(:git_root, _from, state) do
@@ -142,10 +183,30 @@ defmodule Minga.Git.Buffer do
     current_lines = split_lines(content)
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
-    {:noreply, %{state | base_lines: base_lines, hunks: hunks, signs: signs}}
+    branch = read_branch(state.git_root)
+    {:noreply, %{state | base_lines: base_lines, hunks: hunks, signs: signs, branch: branch}}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec count_signs(%{non_neg_integer() => Diff.hunk_type()}) :: diff_summary()
+  defp count_signs(signs) do
+    Enum.reduce(signs, {0, 0, 0}, fn {_line, type}, {a, m, d} ->
+      case type do
+        :added -> {a + 1, m, d}
+        :modified -> {a, m + 1, d}
+        :deleted -> {a, m, d + 1}
+      end
+    end)
+  end
+
+  @spec read_branch(String.t()) :: String.t() | nil
+  defp read_branch(git_root) do
+    case Git.current_branch(git_root) do
+      {:ok, branch} -> branch
+      :error -> nil
+    end
+  end
 
   @spec load_base_lines(String.t(), String.t()) :: [String.t()]
   defp load_base_lines(git_root, relative_path) do

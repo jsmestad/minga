@@ -74,6 +74,13 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
+  @doc "Sets the branch name returned for `git_root`."
+  @spec set_branch(String.t(), String.t()) :: :ok
+  def set_branch(git_root, branch) when is_binary(branch) do
+    :ets.insert(@table, {{:branch, Path.expand(git_root)}, branch})
+    :ok
+  end
+
   @doc "Removes all stub entries for a given root path."
   @spec clear(String.t()) :: :ok
   def clear(git_root) do
@@ -83,6 +90,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:head, expanded, :_}, :_})
     :ets.match_delete(@table, {{:log, expanded}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
+    :ets.match_delete(@table, {{:branch, expanded}, :_})
     :ok
   end
 
@@ -145,6 +153,15 @@ defmodule Minga.Git.Stub do
   @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok
   def stage_patch(_git_root, _patch), do: :ok
+
+  @impl true
+  @spec current_branch(String.t()) :: {:ok, String.t()} | :error
+  def current_branch(git_root) do
+    case :ets.lookup(@table, {:branch, Path.expand(git_root)}) do
+      [{_, branch}] -> {:ok, branch}
+      [] -> {:ok, "main"}
+    end
+  end
 
   # ── Private ────────────────────────────────────────────────────────────
 
