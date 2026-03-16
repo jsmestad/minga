@@ -382,6 +382,10 @@ defmodule Minga.Test.HeadlessPort do
 
         %{state | waiters: [], frame_count: state.frame_count + 1}
 
+      {:ok, {:scroll_region, top_row, bottom_row, delta}} ->
+        # Simulate terminal scroll region: shift grid rows within the range.
+        scroll_grid_region(state, top_row, bottom_row, delta)
+
       {:ok, {:set_font, _family, _size, _weight, _ligatures}} ->
         # Font config is GUI-only; headless port ignores it.
         state
@@ -420,6 +424,35 @@ defmodule Minga.Test.HeadlessPort do
 
       %{state | grid: List.replace_at(state.grid, row, new_row)}
     end
+  end
+
+  # Simulates ANSI scroll region behavior: shift rows within [top, bottom]
+  # by `delta` positions. Positive delta scrolls up (content moves up, blank
+  # rows appear at the bottom). Negative scrolls down.
+  @spec scroll_grid_region(State.t(), non_neg_integer(), non_neg_integer(), integer()) ::
+          State.t()
+  defp scroll_grid_region(state, top_row, bottom_row, delta) do
+    top = min(top_row, state.height - 1)
+    bottom = min(bottom_row, state.height - 1)
+    blank_row = for _c <- 1..state.width, do: %{char: " ", fg: 0xFFFFFF, bg: 0x000000, attrs: []}
+
+    region = Enum.slice(state.grid, top..bottom)
+    abs_delta = abs(delta)
+
+    shifted =
+      if delta > 0 do
+        # Scroll up: drop first `delta` rows, add blanks at bottom
+        Enum.drop(region, abs_delta) ++ List.duplicate(blank_row, min(abs_delta, length(region)))
+      else
+        # Scroll down: add blanks at top, drop last `delta` rows
+        List.duplicate(blank_row, min(abs_delta, length(region))) ++
+          Enum.take(region, length(region) - abs_delta)
+      end
+
+    # Splice the shifted region back into the grid
+    before = Enum.take(state.grid, top)
+    after_region = Enum.drop(state.grid, bottom + 1)
+    %{state | grid: before ++ Enum.take(shifted, bottom - top + 1) ++ after_region}
   end
 
   @spec blank_grid(pos_integer(), pos_integer()) :: grid()

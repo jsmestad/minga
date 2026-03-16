@@ -24,6 +24,7 @@ defmodule Minga.Port.Protocol do
   | 0x12   | clear            | (empty)                                                              |
   | 0x13   | batch_end        | (empty)                                                              |
   | 0x15   | set_cursor_shape | `shape::8` (BLOCK=0, BEAM=1, UNDERLINE=2)                           |
+  | 0x1B   | scroll_region    | `top_row::16, bottom_row::16, delta::16-signed`                      |
 
   ## Modifier Flags
 
@@ -59,6 +60,7 @@ defmodule Minga.Port.Protocol do
   @op_clear_region 0x18
   @op_destroy_region 0x19
   @op_set_active_region 0x1A
+  @op_scroll_region 0x1B
 
   # Highlight commands (BEAM → Zig)
   @op_set_language 0x20
@@ -358,6 +360,27 @@ defmodule Minga.Port.Protocol do
   @doc "Encodes a set_active_region command. Pass 0 to reset to root."
   @spec encode_set_active_region(non_neg_integer()) :: binary()
   def encode_set_active_region(id), do: <<@op_set_active_region, id::16>>
+
+  @doc """
+  Encodes a scroll_region command for terminal scroll optimization.
+
+  Tells the Zig renderer to use ANSI scroll region sequences to shift
+  content within the given screen row range by `delta` lines, avoiding
+  a full redraw.
+
+  * `top_row` / `bottom_row` — screen row range (inclusive) for the scroll region.
+  * `delta` — positive = scroll up (content moves up, new lines at bottom),
+              negative = scroll down (content moves down, new lines at top).
+
+  Wire format: `opcode(1) + top_row(2) + bottom_row(2) + delta(2, signed)` = 7 bytes.
+  """
+  @spec encode_scroll_region(non_neg_integer(), non_neg_integer(), integer()) :: binary()
+  def encode_scroll_region(top_row, bottom_row, delta)
+      when is_integer(top_row) and top_row >= 0 and
+             is_integer(bottom_row) and bottom_row >= 0 and
+             is_integer(delta) do
+    <<@op_scroll_region, top_row::16, bottom_row::16, delta::16-signed>>
+  end
 
   @spec encode_region_role(region_role()) :: non_neg_integer()
   defp encode_region_role(:editor), do: @region_editor
@@ -685,6 +708,10 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(<<@op_set_title, len::16, title::binary-size(len)>>) do
     {:ok, {:set_title, title}}
+  end
+
+  def decode_command(<<@op_scroll_region, top_row::16, bottom_row::16, delta::16-signed>>) do
+    {:ok, {:scroll_region, top_row, bottom_row, delta}}
   end
 
   def decode_command(

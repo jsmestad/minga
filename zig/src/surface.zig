@@ -50,6 +50,7 @@ pub fn assertSurface(comptime T: type) void {
     if (!@hasDecl(T, "writeCell")) @compileError("Surface missing method: writeCell");
     if (!@hasDecl(T, "showCursor")) @compileError("Surface missing method: showCursor");
     if (!@hasDecl(T, "setCursorShape")) @compileError("Surface missing method: setCursorShape");
+    if (!@hasDecl(T, "scrollRegion")) @compileError("Surface missing method: scrollRegion");
     if (!@hasDecl(T, "render")) @compileError("Surface missing method: render");
     if (!@hasDecl(T, "width")) @compileError("Surface missing method: width");
     if (!@hasDecl(T, "height")) @compileError("Surface missing method: height");

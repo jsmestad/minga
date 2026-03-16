@@ -75,6 +75,169 @@ pub const VaxisSurface = struct {
         });
     }
 
+    /// Uses ANSI scroll region sequences to shift content within a row range.
+    ///
+    /// This avoids rewriting every cell when the viewport shifts by a few lines.
+    /// The terminal emulator shifts its internal buffer, then the renderer only
+    /// draws the newly revealed lines.
+    ///
+    /// `delta` > 0: scroll up (content moves up, new lines at bottom).
+    /// `delta` < 0: scroll down (content moves down, new lines at top).
+    ///
+    /// After issuing the ANSI sequences, this method syncs libvaxis's
+    /// internal screen buffers (`screen` and `screen_last`) so that the
+    /// subsequent `render()` diff only repaints the newly revealed rows
+    /// instead of the entire screen.
+    pub fn scrollRegion(self: *VaxisSurface, top: u16, bottom: u16, delta: i16) void {
+        const writer = self.tty_writer;
+        if (delta == 0) return;
+        if (top >= bottom) return;
+
+        // Set the scroll region: CSI top;bottom r (1-based rows)
+        writer.print("\x1b[{d};{d}r", .{ @as(u32, top) + 1, @as(u32, bottom) + 1 }) catch return;
+
+        if (delta > 0) {
+            // Scroll up: CSI n S
+            writer.print("\x1b[{d}S", .{@as(u32, @intCast(delta))}) catch return;
+        } else {
+            // Scroll down: CSI n T
+            writer.print("\x1b[{d}T", .{@as(u32, @intCast(-delta))}) catch return;
+        }
+
+        // Reset scroll region to full screen: CSI r
+        writer.writeAll("\x1b[r") catch return;
+
+        // Sync libvaxis screen buffers to match the terminal's post-scroll state.
+        // Without this, render() would diff against stale buffers and repaint
+        // every shifted row (negating the scroll region optimization).
+        syncScreenAfterScroll(self.vx, top, bottom, delta);
+    }
+
+    /// Shifts cells in both `screen` (desired state) and `screen_last`
+    /// (terminal tracking) to match what the terminal did with the scroll
+    /// region sequences. Newly revealed rows are blanked so that
+    /// libvaxis's diff repaints only those rows.
+    fn syncScreenAfterScroll(vx: *vaxis.Vaxis, top: u16, bottom: u16, delta: i16) void {
+        const w: usize = @intCast(vx.screen.width);
+        if (w == 0) return;
+
+        const abs_delta: usize = @intCast(if (delta < 0) -delta else delta);
+        const region_height: usize = @as(usize, bottom) - @as(usize, top) + 1;
+        if (abs_delta >= region_height) return;
+
+        // Shift screen.buf (Cell structs, no owned data, safe to memcpy).
+        shiftScreenBuf(vx.screen.buf, w, top, bottom, delta, abs_delta);
+
+        // Shift screen_last.buf (InternalCell with owned char data).
+        shiftScreenLastBuf(&vx.screen_last, w, top, bottom, delta, abs_delta);
+    }
+
+    /// Shifts Cell structs in the Screen buffer (desired state).
+    /// Cell.grapheme is a slice pointer (not owned); struct copy is safe.
+    fn shiftScreenBuf(buf: []vaxis.Cell, w: usize, top: u16, bottom: u16, delta: i16, abs_delta: usize) void {
+        const t: usize = @intCast(top);
+        const b: usize = @intCast(bottom);
+
+        if (delta > 0) {
+            // Scroll up: shift rows [top+delta..bottom] to [top..bottom-delta]
+            var r: usize = t;
+            while (r <= b - abs_delta) : (r += 1) {
+                const dst_start = r * w;
+                const src_start = (r + abs_delta) * w;
+                @memcpy(buf[dst_start .. dst_start + w], buf[src_start .. src_start + w]);
+            }
+            // Blank newly revealed rows at bottom
+            while (r <= b) : (r += 1) {
+                const start = r * w;
+                for (buf[start .. start + w]) |*cell| {
+                    cell.* = .{};
+                }
+            }
+        } else {
+            // Scroll down: shift rows [top..bottom-delta] to [top+delta..bottom]
+            var r: usize = b;
+            while (r >= t + abs_delta) : (r -= 1) {
+                const dst_start = r * w;
+                const src_start = (r - abs_delta) * w;
+                @memcpy(buf[dst_start .. dst_start + w], buf[src_start .. src_start + w]);
+                if (r == t + abs_delta) break;
+            }
+            // Blank newly revealed rows at top
+            r = t;
+            while (r < t + abs_delta) : (r += 1) {
+                const start = r * w;
+                for (buf[start .. start + w]) |*cell| {
+                    cell.* = .{};
+                }
+            }
+        }
+    }
+
+    /// Shifts InternalCell data in screen_last (terminal tracking buffer).
+    /// InternalCell.char is an ArrayListUnmanaged that owns its bytes via
+    /// the screen_last arena, so we copy character bytes rather than
+    /// struct-copying.
+    fn shiftScreenLastBuf(screen_last: *vaxis.AllocatingScreen, w: usize, top: u16, bottom: u16, delta: i16, abs_delta: usize) void {
+        const t: usize = @intCast(top);
+        const b: usize = @intCast(bottom);
+        const alloc = screen_last.arena.allocator();
+
+        if (delta > 0) {
+            // Scroll up: copy from [top+delta..] to [top..]
+            var r: usize = t;
+            while (r <= b - abs_delta) : (r += 1) {
+                copyInternalRow(screen_last.buf, r, r + abs_delta, w, alloc);
+            }
+            // Blank newly revealed rows at bottom
+            while (r <= b) : (r += 1) {
+                blankInternalRow(screen_last.buf, r, w, alloc);
+            }
+        } else {
+            // Scroll down: copy from [..bottom-delta] to [..+delta]
+            var r: usize = b;
+            while (r >= t + abs_delta) : (r -= 1) {
+                copyInternalRow(screen_last.buf, r, r - abs_delta, w, alloc);
+                if (r == t + abs_delta) break;
+            }
+            // Blank newly revealed rows at top
+            r = t;
+            while (r < t + abs_delta) : (r += 1) {
+                blankInternalRow(screen_last.buf, r, w, alloc);
+            }
+        }
+    }
+
+    /// Copies character data from src_row to dst_row in the InternalCell buffer.
+    fn copyInternalRow(buf: []vaxis.AllocatingScreen.InternalCell, dst_row: usize, src_row: usize, w: usize, alloc: std.mem.Allocator) void {
+        const dst_start = dst_row * w;
+        const src_start = src_row * w;
+
+        for (0..w) |c| {
+            const dst = &buf[dst_start + c];
+            const src = &buf[src_start + c];
+
+            dst.char.clearRetainingCapacity();
+            dst.char.appendSlice(alloc, src.char.items) catch {};
+            dst.style = src.style;
+            dst.skipped = src.skipped;
+            dst.default = src.default;
+        }
+    }
+
+    /// Blanks a row in the InternalCell buffer (space character, default style).
+    fn blankInternalRow(buf: []vaxis.AllocatingScreen.InternalCell, row: usize, w: usize, alloc: std.mem.Allocator) void {
+        const start = row * w;
+
+        for (0..w) |c| {
+            const cell = &buf[start + c];
+            cell.char.clearRetainingCapacity();
+            cell.char.appendSlice(alloc, " ") catch {};
+            cell.style = .{};
+            cell.skipped = false;
+            cell.default = true;
+        }
+    }
+
     pub fn render(self: *VaxisSurface) !void {
         try self.vx.render(self.tty_writer);
     }

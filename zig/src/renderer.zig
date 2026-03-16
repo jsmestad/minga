@@ -164,6 +164,10 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     }
                 },
 
+                .scroll_region => |sr| {
+                    self.surface.scrollRegion(sr.top_row, sr.bottom_row, sr.delta);
+                },
+
                 .set_default_bg => |bg| {
                     self.default_bg = bg;
                     // Fill immediately so the theme background takes effect
@@ -214,6 +218,10 @@ const MockSurface = struct {
     last_cell: ?Cell = null,
     mock_width: u16 = 80,
     mock_height: u16 = 24,
+    scroll_region_count: usize = 0,
+    last_scroll_top: u16 = 0,
+    last_scroll_bottom: u16 = 0,
+    last_scroll_delta: i16 = 0,
     /// No-op writer that discards all output (satisfies set_title).
     tty_writer: NullWriter = .{},
 
@@ -246,6 +254,13 @@ const MockSurface = struct {
 
     pub fn setCursorShape(self: *MockSurface, shape: surface_mod.CursorShape) void {
         self.last_cursor_shape = shape;
+    }
+
+    pub fn scrollRegion(self: *MockSurface, top: u16, bottom: u16, delta: i16) void {
+        self.scroll_region_count += 1;
+        self.last_scroll_top = top;
+        self.last_scroll_bottom = bottom;
+        self.last_scroll_delta = delta;
     }
 
     pub fn render(self: *MockSurface) !void {
@@ -462,6 +477,62 @@ test "draw_text with explicit bg ignores default_bg" {
     const cell = mock.last_cell.?;
     // Cell should use the explicit bg, not default
     try std.testing.expectEqual(@as(u24, 0x123456), cell.bg);
+}
+
+test "handleCommand scroll_region calls surface.scrollRegion" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .scroll_region = .{
+        .top_row = 2,
+        .bottom_row = 20,
+        .delta = 1,
+    } });
+    try std.testing.expectEqual(@as(usize, 1), mock.scroll_region_count);
+    try std.testing.expectEqual(@as(u16, 2), mock.last_scroll_top);
+    try std.testing.expectEqual(@as(u16, 20), mock.last_scroll_bottom);
+    try std.testing.expectEqual(@as(i16, 1), mock.last_scroll_delta);
+}
+
+test "handleCommand scroll_region with negative delta" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    try rend.handleCommand(.{ .scroll_region = .{
+        .top_row = 0,
+        .bottom_row = 30,
+        .delta = -3,
+    } });
+    try std.testing.expectEqual(@as(i16, -3), mock.last_scroll_delta);
+}
+
+test "scroll_region then draw_text then batch_end sequence" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    // Scroll region (shift existing content)
+    try rend.handleCommand(.{ .scroll_region = .{
+        .top_row = 0,
+        .bottom_row = 20,
+        .delta = 1,
+    } });
+    // Draw the newly revealed line
+    try rend.handleCommand(.{ .draw_text = .{
+        .row = 20,
+        .col = 0,
+        .fg = 0xFFFFFF,
+        .bg = 0x000000,
+        .attrs = 0,
+        .text = "new line",
+    } });
+    try rend.handleCommand(.batch_end);
+
+    try std.testing.expectEqual(@as(usize, 1), mock.scroll_region_count);
+    try std.testing.expectEqual(@as(usize, 8), mock.cells_written);
+    try std.testing.expectEqual(@as(usize, 1), mock.render_count);
 }
 
 test "clear then draw_text then batch_end full sequence" {
