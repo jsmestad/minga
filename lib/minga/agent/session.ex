@@ -946,18 +946,24 @@ defmodule Minga.Agent.Session do
         state
       end
 
-    case state.follow_up_queue do
+    # Collect pending messages from both queues. Steering messages that arrived
+    # after the last tool call (or just before AgentEnd) would otherwise be
+    # orphaned because dequeue_steering is only called between tool calls during
+    # an active agent loop. Merge them with follow-ups so nothing gets lost.
+    all_pending = state.steering_queue ++ state.follow_up_queue
+
+    case all_pending do
       [] ->
         set_status(state, :idle)
 
-      follow_ups ->
-        # Auto-send queued follow-up messages as a new turn. Combine all pending
-        # follow-ups into a single prompt so they arrive as one user message.
-        combined = combine_queue_entries_to_text(follow_ups)
+      pending ->
+        # Auto-send queued messages as a new turn. Combine all pending
+        # messages into a single prompt so they arrive as one user message.
+        combined = combine_queue_entries_to_text(pending)
         {user_msg, send_content} = build_user_message(combined)
 
         messages = state.messages ++ [user_msg]
-        state = %{state | messages: messages, follow_up_queue: []}
+        state = %{state | messages: messages, steering_queue: [], follow_up_queue: []}
         state = notify_messages_changed(state)
 
         case state.provider_module.send_prompt(state.provider, send_content) do

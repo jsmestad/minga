@@ -709,6 +709,10 @@ defmodule Minga.Agent.SessionTest do
       assert steering == ["steer me"]
       assert follow_up == []
 
+      # Clear queues before proceeding so the auto-send doesn't trigger.
+      # The auto-send behaviour is covered by the "follow-up auto-send" tests.
+      Session.clear_queues(session)
+
       # Let the run finish
       SlowMockProvider.proceed(Session.get_provider(session))
 
@@ -724,6 +728,9 @@ defmodule Minga.Agent.SessionTest do
 
       {steering, _} = Session.get_queued_messages(session)
       assert steering == ["steer 1", "steer 2"]
+
+      # Clear queues before proceeding so the auto-send doesn't trigger.
+      Session.clear_queues(session)
 
       SlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
@@ -914,6 +921,75 @@ defmodule Minga.Agent.SessionTest do
       assert :ok = Session.send_prompt(session, "simple")
       assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
 
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "queued steering messages are auto-sent when agent finishes", %{slow_session: session} do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Queue a steering message (this is what happens when a user sends a prompt
+      # while the agent is busy)
+      assert {:queued, :steering} = Session.send_prompt(session, "steering msg")
+
+      # Complete the first run. The steering message should be auto-sent as a new
+      # turn instead of being orphaned.
+      SlowMockProvider.proceed(Session.get_provider(session))
+
+      # Session should start a new turn (not go idle) because the steering queue
+      # had a pending message.
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Steering message should appear in conversation history
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:user, "steering msg"}, &1))
+
+      # Steering queue should be cleared
+      {steering, _} = Session.get_queued_messages(session)
+      assert steering == []
+
+      # Complete the follow-up run
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
+    end
+
+    test "mixed steering and follow-up messages are combined at AgentEnd", %{
+      slow_session: session
+    } do
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Queue both types
+      assert {:queued, :steering} = Session.send_prompt(session, "steer this")
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "and follow up")
+
+      # Complete the first run. Both messages should be combined into one prompt.
+      SlowMockProvider.proceed(Session.get_provider(session))
+
+      # Should start a new turn
+      assert_receive {:agent_event, _, {:status_changed, :thinking}}, 500
+
+      # Both queues should be cleared
+      {steering, follow_up} = Session.get_queued_messages(session)
+      assert steering == []
+      assert follow_up == []
+
+      # Both messages should appear in the combined user message
+      messages = Session.messages(session)
+
+      combined_msg =
+        Enum.find(messages, fn
+          {:user, text} ->
+            String.contains?(text, "steer this") and String.contains?(text, "and follow up")
+
+          _ ->
+            false
+        end)
+
+      assert combined_msg != nil
+
+      # Complete the second run
       SlowMockProvider.proceed(Session.get_provider(session))
       assert_receive {:agent_event, _, {:status_changed, :idle}}, 500
     end
