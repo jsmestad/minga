@@ -94,49 +94,74 @@ defmodule Minga.Editor.HighlightSyncTest do
     end
   end
 
-  describe "ensure_buffer_id_for/2" do
-    test "assigns a new buffer_id for an unknown buffer pid" do
+  describe "setup_for_buffer_pid/2" do
+    test "assigns a buffer_id for the given buffer" do
       state = base_state()
-      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, md_buf} = Minga.Buffer.Server.start_link(content: "# Hello", filetype: :markdown)
 
-      {id, new_state} = HighlightSync.ensure_buffer_id_for(state, other_pid)
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
 
+      # Should have a buffer_id mapping
+      assert Map.has_key?(new_state.highlight.buffer_ids, md_buf)
+      id = Map.get(new_state.highlight.buffer_ids, md_buf)
       assert is_integer(id)
       assert id > 0
-      assert Map.get(new_state.highlight.buffer_ids, other_pid) == id
-      assert Map.get(new_state.highlight.reverse_buffer_ids, id) == other_pid
+      # Reverse mapping should exist
+      assert Map.get(new_state.highlight.reverse_buffer_ids, id) == md_buf
     end
 
-    test "returns existing buffer_id for already-registered buffer" do
+    test "sets last_active_at timestamp" do
       state = base_state()
-      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, md_buf} = Minga.Buffer.Server.start_link(content: "# Hello", filetype: :markdown)
 
-      {id1, state2} = HighlightSync.ensure_buffer_id_for(state, other_pid)
-      {id2, _state3} = HighlightSync.ensure_buffer_id_for(state2, other_pid)
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+
+      assert Map.has_key?(new_state.highlight.last_active_at, md_buf)
+    end
+
+    test "initializes highlight entry for the buffer" do
+      state = base_state()
+      {:ok, md_buf} = Minga.Buffer.Server.start_link(content: "# Hello", filetype: :markdown)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+
+      hl = HighlightSync.get_highlight(new_state, md_buf)
+      assert hl != nil
+    end
+
+    test "is idempotent: second call reuses same buffer_id" do
+      state = base_state()
+      {:ok, md_buf} = Minga.Buffer.Server.start_link(content: "# Hello", filetype: :markdown)
+
+      state2 = HighlightSync.setup_for_buffer_pid(state, md_buf)
+      id1 = Map.get(state2.highlight.buffer_ids, md_buf)
+
+      state3 = HighlightSync.setup_for_buffer_pid(state2, md_buf)
+      id2 = Map.get(state3.highlight.buffer_ids, md_buf)
 
       assert id1 == id2
     end
 
     test "assigns different ids for different buffers" do
       state = base_state()
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, buf1} = Minga.Buffer.Server.start_link(content: "# A", filetype: :markdown)
+      {:ok, buf2} = Minga.Buffer.Server.start_link(content: "# B", filetype: :markdown)
 
-      {id1, state2} = HighlightSync.ensure_buffer_id_for(state, pid1)
-      {id2, _state3} = HighlightSync.ensure_buffer_id_for(state2, pid2)
+      state2 = HighlightSync.setup_for_buffer_pid(state, buf1)
+      state3 = HighlightSync.setup_for_buffer_pid(state2, buf2)
 
+      id1 = Map.get(state3.highlight.buffer_ids, buf1)
+      id2 = Map.get(state3.highlight.buffer_ids, buf2)
       assert id1 != id2
     end
-  end
 
-  describe "touch_buffer/2" do
-    test "updates last_active_at timestamp for given buffer pid" do
+    test "returns state unchanged for unsupported filetype" do
       state = base_state()
-      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, txt_buf} = Minga.Buffer.Server.start_link(content: "hello", filetype: :text)
 
-      new_state = HighlightSync.touch_buffer(state, other_pid)
+      new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
 
-      assert Map.has_key?(new_state.highlight.last_active_at, other_pid)
+      refute Map.has_key?(new_state.highlight.buffer_ids, txt_buf)
     end
   end
 

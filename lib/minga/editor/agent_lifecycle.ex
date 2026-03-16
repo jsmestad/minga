@@ -84,10 +84,6 @@ defmodule Minga.Editor.AgentLifecycle do
     end
   end
 
-  # Non-EditorState structs (e.g., mock state maps in slash command tests)
-  # lack the highlight infrastructure. Skip parser setup gracefully.
-  def setup_agent_highlight(%{} = state) when not is_struct(state, EditorState), do: state
-
   @doc """
   Syncs the agent buffer content with the current session messages.
 

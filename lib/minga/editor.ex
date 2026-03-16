@@ -165,7 +165,11 @@ defmodule Minga.Editor do
     Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
 
     # Set up tree-sitter markdown highlighting for the agent buffer
-    # so it's ready before the first sync.
+    # so it's ready before the first sync. Idempotent: also called from
+    # create_agent_buffer and ensure_agent_session, so whichever path
+    # creates the buffer first wins and subsequent calls are no-ops
+    # (ensure_buffer_id_for returns the existing ID, and set_language +
+    # parse_buffer are idempotent on the Zig side).
     state = AgentLifecycle.setup_agent_highlight(state)
 
     {:ok, state}

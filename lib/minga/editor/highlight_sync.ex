@@ -115,14 +115,11 @@ defmodule Minga.Editor.HighlightSync do
     touch_buffer(state, buf_pid)
   end
 
-  @doc """
-  Returns the parser buffer_id for a given buffer PID, assigning one if needed.
-
-  Unlike `ensure_buffer_id/1` which works on the active buffer, this works
-  on any buffer PID.
-  """
+  # Returns the parser buffer_id for a given buffer PID, assigning one if needed.
+  # Private: callers should use setup_for_buffer_pid/2 or request_reparse_buffer/2
+  # which handle the full language + parse protocol.
   @spec ensure_buffer_id_for(EditorState.t(), pid()) :: {non_neg_integer(), EditorState.t()}
-  def ensure_buffer_id_for(%EditorState{highlight: hl} = state, buf_pid) do
+  defp ensure_buffer_id_for(%EditorState{highlight: hl} = state, buf_pid) do
     case Map.fetch(hl.buffer_ids, buf_pid) do
       {:ok, id} ->
         {id, state}
@@ -132,11 +129,9 @@ defmodule Minga.Editor.HighlightSync do
     end
   end
 
-  @doc """
-  Touches the last_active_at timestamp for a specific buffer PID.
-  """
+  # Touches the last_active_at timestamp for a specific buffer PID.
   @spec touch_buffer(EditorState.t(), pid()) :: EditorState.t()
-  def touch_buffer(%EditorState{} = state, buf_pid) do
+  defp touch_buffer(%EditorState{} = state, buf_pid) do
     hl = state.highlight
     now = System.monotonic_time(:millisecond)
     timestamps = Map.put(hl.last_active_at, buf_pid, now)
