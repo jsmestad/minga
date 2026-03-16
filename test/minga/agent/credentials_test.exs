@@ -5,7 +5,17 @@ defmodule Minga.Agent.CredentialsTest do
 
   @test_dir "test/tmp/credentials_test"
 
+  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY)
+
   setup do
+    # Clear all provider env vars so host machine state never leaks into tests
+    saved_env =
+      for var <- @provider_env_vars, into: %{} do
+        {var, System.get_env(var)}
+      end
+
+    for var <- @provider_env_vars, do: System.delete_env(var)
+
     # Use a unique temp dir per test to avoid interference
     dir = Path.join(@test_dir, "#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -16,6 +26,11 @@ defmodule Minga.Agent.CredentialsTest do
     System.put_env("XDG_CONFIG_HOME", parent_dir)
 
     on_exit(fn ->
+      # Restore original env vars
+      for {var, val} <- saved_env do
+        if val, do: System.put_env(var, val), else: System.delete_env(var)
+      end
+
       System.delete_env("XDG_CONFIG_HOME")
       File.rm_rf!(dir)
     end)
@@ -47,8 +62,6 @@ defmodule Minga.Agent.CredentialsTest do
     end
 
     test "returns :error when no key is configured" do
-      # Make sure env var is not set
-      System.delete_env("ANTHROPIC_API_KEY")
       assert :error = Credentials.resolve("anthropic")
     end
 
@@ -70,7 +83,6 @@ defmodule Minga.Agent.CredentialsTest do
 
   describe "revoke/1" do
     test "removes a stored key" do
-      System.delete_env("ANTHROPIC_API_KEY")
       :ok = Credentials.store("anthropic", "sk-ant-test")
       assert {:ok, _, :file} = Credentials.resolve("anthropic")
 
@@ -83,7 +95,6 @@ defmodule Minga.Agent.CredentialsTest do
     end
 
     test "revoke preserves other providers" do
-      System.delete_env("OPENAI_API_KEY")
       :ok = Credentials.store("anthropic", "ant-key")
       :ok = Credentials.store("openai", "oai-key")
 
@@ -95,22 +106,12 @@ defmodule Minga.Agent.CredentialsTest do
 
   describe "status/0" do
     test "reports unconfigured when nothing is set" do
-      System.delete_env("ANTHROPIC_API_KEY")
-      System.delete_env("OPENAI_API_KEY")
-      System.delete_env("GOOGLE_API_KEY")
-      System.delete_env("OPENROUTER_API_KEY")
-      System.delete_env("GROQ_API_KEY")
-
       statuses = Credentials.status()
       # 5 key-based providers + 1 Ollama (auto-detected)
       assert length(statuses) == 6
     end
 
     test "reports configured with correct source" do
-      System.delete_env("ANTHROPIC_API_KEY")
-      System.delete_env("OPENAI_API_KEY")
-      System.delete_env("GOOGLE_API_KEY")
-
       :ok = Credentials.store("anthropic", "ant-key")
       System.put_env("OPENAI_API_KEY", "oai-env-key")
 
@@ -131,10 +132,6 @@ defmodule Minga.Agent.CredentialsTest do
 
   describe "any_configured?/0" do
     test "returns false when nothing is configured" do
-      System.delete_env("ANTHROPIC_API_KEY")
-      System.delete_env("OPENAI_API_KEY")
-      System.delete_env("GOOGLE_API_KEY")
-
       refute Credentials.any_configured?()
     end
 
