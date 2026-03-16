@@ -142,17 +142,33 @@ defmodule Minga.Editor.State.EventRoutingTest do
              }
 
       assert :render in effects
+      assert :sync_agent_buffer in effects
     end
 
-    test "approval_resolved clears pending approval" do
+    test "approval_pending unfocuses the prompt input" do
+      %{state: state} = make_state()
+
+      # Simulate the user typing in the prompt (input focused)
+      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
+      assert AgentAccess.input_focused?(state)
+
+      approval = %{tool_call_id: "456", name: "write_file", args: %{}}
+      {new_state, _effects} = AgentEvents.handle(state, {:approval_pending, approval})
+
+      # Input must be unfocused so the ToolApproval handler can intercept y/n
+      refute AgentAccess.input_focused?(new_state)
+    end
+
+    test "approval_resolved clears pending approval and syncs buffer" do
       %{state: state} = make_state()
 
       state =
         AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, %{name: "shell"}))
 
-      {new_state, _effects} = AgentEvents.handle(state, {:approval_resolved, :approved})
+      {new_state, effects} = AgentEvents.handle(state, {:approval_resolved, :approved})
 
       assert AgentAccess.agent(new_state).pending_approval == nil
+      assert :sync_agent_buffer in effects
     end
   end
 

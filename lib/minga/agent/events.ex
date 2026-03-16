@@ -170,12 +170,18 @@ defmodule Minga.Agent.Events do
   def handle(state, {:approval_pending, approval}) do
     cached = Map.take(approval, [:tool_call_id, :name, :args])
     state = AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, cached))
-    {state, [:render]}
+
+    # Unfocus the prompt input so the ToolApproval input handler can
+    # intercept y/n keys. The user needs to see and respond to the
+    # approval prompt, not keep typing in the input field.
+    state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
+
+    {state, [:render, :sync_agent_buffer]}
   end
 
   def handle(state, {:approval_resolved, _decision}) do
     state = AgentAccess.update_agent(state, &AgentState.clear_pending_approval/1)
-    {state, [{:render, 16}]}
+    {state, [{:render, 16}, :sync_agent_buffer]}
   end
 
   def handle(state, {:error, message}) do
