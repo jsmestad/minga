@@ -15,6 +15,7 @@ defmodule Minga.Editor.Renderer.Line do
   """
 
   alias Minga.Buffer.Decorations
+  alias Minga.Buffer.Decorations.ConcealRange
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
@@ -46,7 +47,32 @@ defmodule Minga.Editor.Renderer.Line do
         Decorations.highlights_for_line(ctx.decorations, buf_line)
       end
 
-    case selection_cols_for_line(buf_line, line_display_len, ctx.visual_selection) do
+    has_conceals = Decorations.has_conceal_ranges?(ctx.decorations)
+
+    # When conceals are active, apply them to visible_pairs for selection paths.
+    # Without this, selection rendering would show raw text (including concealed
+    # characters) while selection coordinates are conceal-adjusted.
+    concealed_pairs =
+      if has_conceals do
+        apply_conceals_to_pairs(pairs, ctx.decorations, buf_line)
+      else
+        nil
+      end
+
+    # Recompute display len and visible pairs from concealed pairs when active
+    {effective_pairs, effective_display_len} =
+      if concealed_pairs do
+        {concealed_pairs, display_width_of_pairs(concealed_pairs)}
+      else
+        {pairs, line_display_len}
+      end
+
+    effective_visible =
+      effective_pairs
+      |> display_drop(ctx.viewport.left)
+      |> display_take(ctx.content_w)
+
+    case selection_cols_for_line(buf_line, effective_display_len, ctx.visual_selection) do
       nil when ctx.highlight != nil ->
         render_highlighted_line(
           line_text,
@@ -57,23 +83,23 @@ defmodule Minga.Editor.Renderer.Line do
           line_highlights
         )
 
-      nil when line_highlights != [] ->
-        # No syntax highlighting but has decorations (including search):
+      nil when line_highlights != [] or has_conceals ->
+        # No syntax highlighting but has decorations or conceals:
         # render through the styled-segment path
         render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights)
 
       nil ->
-        # Plain text, no decorations, no syntax highlighting
+        # Plain text, no decorations, no syntax highlighting, no conceals
         visible_text = join_pairs(visible_pairs)
         [DisplayList.draw(screen_row, ctx.gutter_w, visible_text)]
 
       :full ->
-        visible_text = join_pairs(visible_pairs)
+        visible_text = join_pairs(effective_visible)
         [DisplayList.draw(screen_row, ctx.gutter_w, visible_text, reverse: true)]
 
       {sel_start, sel_end} ->
         render_partial_selection(
-          visible_pairs,
+          effective_visible,
           screen_row,
           ctx.gutter_w,
           ctx.viewport.left,
@@ -292,6 +318,7 @@ defmodule Minga.Editor.Renderer.Line do
   defp render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights) do
     segments = [{line_text, []}]
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
+    segments = apply_conceals_to_segments(segments, ctx.decorations, buf_line)
     segments = inject_inline_virtual_text(segments, ctx.decorations, buf_line)
     render_segments_with_scroll(segments, screen_row, ctx)
   end
@@ -442,6 +469,316 @@ defmodule Minga.Editor.Renderer.Line do
     {before_acc |> Enum.reverse() |> Enum.join(), after_acc |> Enum.reverse() |> Enum.join()}
   end
 
+  # ── Conceal application to grapheme pairs (for selection paths) ──────────────
+
+  # Applies conceals to a list of grapheme pairs, removing concealed graphemes
+  # and optionally inserting replacement characters. Used by the selection
+  # rendering paths which work with pairs instead of styled segments.
+  @spec apply_conceals_to_pairs([grapheme_pair()], Decorations.t(), non_neg_integer()) ::
+          [grapheme_pair()]
+  defp apply_conceals_to_pairs(pairs, decorations, buf_line) do
+    conceals = Decorations.conceals_for_line(decorations, buf_line)
+    if conceals == [], do: pairs, else: do_apply_conceals_to_pairs(pairs, conceals, buf_line, 0)
+  end
+
+  @spec do_apply_conceals_to_pairs(
+          [grapheme_pair()],
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [grapheme_pair()]
+  defp do_apply_conceals_to_pairs([], _conceals, _line, _col), do: []
+  defp do_apply_conceals_to_pairs(pairs, [], _line, _col), do: pairs
+
+  defp do_apply_conceals_to_pairs(
+         [{_g, w} = pair | rest],
+         [%ConcealRange{} = conceal | rest_conceals] = conceals,
+         line,
+         col
+       ) do
+    {_sl, sc} = conceal.start_pos
+    {el, ec} = conceal.end_pos
+    cs = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
+    ce = if el > line, do: col + w + 1, else: ec
+
+    pair_conceal_action(col, w, cs, ce)
+    |> apply_pair_action(pair, rest, conceal, rest_conceals, conceals, line, col)
+  end
+
+  @spec pair_conceal_action(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :past | :inside | :before
+  defp pair_conceal_action(col, w, cs, _ce) when cs >= col + w, do: :past
+  defp pair_conceal_action(col, _w, cs, ce) when col >= cs and col < ce, do: :inside
+  defp pair_conceal_action(_col, _w, _cs, _ce), do: :before
+
+  # Dispatches on the pair's position relative to the conceal.
+  # `w` is extracted from `pair` instead of passed separately (it's redundant).
+  # :past and :before have identical behavior (emit pair, continue), so
+  # they share the catch-all clause.
+  @spec apply_pair_action(
+          :past | :inside | :before,
+          grapheme_pair(),
+          [grapheme_pair()],
+          ConcealRange.t(),
+          [ConcealRange.t()],
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [grapheme_pair()]
+  defp apply_pair_action(:inside, {_g, w}, rest, conceal, rest_conceals, conceals, line, col) do
+    {_sl, sc} = conceal.start_pos
+    cs = if elem(conceal.start_pos, 0) < line, do: 0, else: sc
+    {el, ec} = conceal.end_pos
+    ce = if el > line, do: col + w + 1, else: ec
+
+    replacement =
+      if col == cs and conceal.replacement != nil,
+        do: [{conceal.replacement, 1}],
+        else: []
+
+    if col + w >= ce do
+      replacement ++ do_apply_conceals_to_pairs(rest, rest_conceals, line, col + w)
+    else
+      replacement ++ do_apply_conceals_to_pairs(rest, conceals, line, col + w)
+    end
+  end
+
+  # :past and :before both pass through the pair unchanged
+  defp apply_pair_action(
+         _action,
+         {_g, w} = pair,
+         rest,
+         _conceal,
+         _rest_conceals,
+         conceals,
+         line,
+         col
+       ) do
+    [pair | do_apply_conceals_to_pairs(rest, conceals, line, col + w)]
+  end
+
+  # ── Conceal range application ─────────────────────────────────────────────────
+
+  # Applies conceal ranges to a styled segment list. Concealed graphemes are
+  # removed from the output; if a conceal has a replacement character, that
+  # replacement is emitted once in place of the entire concealed range.
+  #
+  # Operates in buffer column space (before inline virtual text shifts).
+  # Walks the segment list tracking the current buffer column, and for each
+  # conceal range on this line, excises the concealed graphemes and optionally
+  # inserts the replacement.
+  @spec apply_conceals_to_segments(
+          [{String.t(), keyword()}],
+          Decorations.t(),
+          non_neg_integer()
+        ) :: [{String.t(), keyword()}]
+  defp apply_conceals_to_segments(segments, decorations, buf_line) do
+    conceals = Decorations.conceals_for_line(decorations, buf_line)
+
+    if conceals == [] do
+      segments
+    else
+      do_apply_conceals(segments, conceals, %{line: buf_line, col: 0, acc: []})
+    end
+  end
+
+  # Walk segments and conceals together. Both are sorted by column position.
+  # Uses a conceal_ctx map to bundle line/col/acc and avoid high arity helpers.
+  @typep conceal_ctx :: %{
+           line: non_neg_integer(),
+           col: non_neg_integer(),
+           acc: [{String.t(), keyword()}]
+         }
+
+  @spec do_apply_conceals(
+          [{String.t(), keyword()}],
+          [ConcealRange.t()],
+          conceal_ctx()
+        ) :: [{String.t(), keyword()}]
+  defp do_apply_conceals([], _conceals, ctx), do: Enum.reverse(ctx.acc)
+  defp do_apply_conceals(segments, [], ctx), do: Enum.reverse(ctx.acc, segments)
+
+  defp do_apply_conceals(
+         [{seg_text, seg_style} | rest_segs],
+         [%ConcealRange{} = conceal | rest_conceals] = conceals,
+         ctx
+       ) do
+    seg_width = Unicode.display_width(seg_text)
+    seg_end = ctx.col + seg_width
+
+    # Determine conceal start/end on this line
+    {_sl, sc} = conceal.start_pos
+    {el, ec} = conceal.end_pos
+    conceal_start = if elem(conceal.start_pos, 0) < ctx.line, do: 0, else: sc
+    conceal_end = if el > ctx.line, do: seg_end + 1, else: ec
+
+    # Dispatch based on the relationship between segment and conceal.
+    # Uses if/else instead of separate function to avoid high arity.
+    if conceal_start >= seg_end do
+      # Conceal is entirely past this segment: emit segment, keep going
+      do_apply_conceals(
+        rest_segs,
+        conceals,
+        %{ctx | col: seg_end, acc: [{seg_text, seg_style} | ctx.acc]}
+      )
+    else
+      if conceal_start <= ctx.col do
+        apply_conceal_from_start(
+          {seg_text, seg_style},
+          rest_segs,
+          conceal,
+          rest_conceals,
+          seg_end,
+          conceal_end,
+          ctx
+        )
+      else
+        apply_conceal_mid_segment(
+          {seg_text, seg_style},
+          rest_segs,
+          conceal,
+          rest_conceals,
+          seg_end,
+          conceal_start,
+          ctx
+        )
+      end
+    end
+  end
+
+  # Conceal starts at or before segment start: skip concealed portion
+  @spec apply_conceal_from_start(
+          {String.t(), keyword()},
+          [{String.t(), keyword()}],
+          ConcealRange.t(),
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          conceal_ctx()
+        ) :: [{String.t(), keyword()}]
+  defp apply_conceal_from_start(
+         {seg_text, seg_style},
+         rest_segs,
+         conceal,
+         rest_conceals,
+         seg_end,
+         conceal_end,
+         ctx
+       ) do
+    if conceal_end >= seg_end do
+      # Entire segment is concealed. Emit replacement on first concealed segment
+      # only (when col == conceal_start or conceal started on a previous segment).
+      replacement_acc = maybe_emit_replacement(ctx.acc, conceal, ctx.col, ctx.line, seg_style)
+
+      if conceal_end == seg_end do
+        # Conceal ends exactly at segment end: move to next conceal
+        do_apply_conceals(rest_segs, rest_conceals, %{ctx | col: seg_end, acc: replacement_acc})
+      else
+        # Conceal extends past this segment: continue with same conceal
+        do_apply_conceals(
+          rest_segs,
+          [conceal | rest_conceals],
+          %{ctx | col: seg_end, acc: replacement_acc}
+        )
+      end
+    else
+      # Conceal ends within this segment: split and emit the non-concealed tail
+      replacement_acc = maybe_emit_replacement(ctx.acc, conceal, ctx.col, ctx.line, seg_style)
+      drop_cols = conceal_end - ctx.col
+      {_before, after_text} = split_text_at_display_col(seg_text, drop_cols)
+
+      if after_text != "" do
+        do_apply_conceals(
+          [{after_text, seg_style} | rest_segs],
+          rest_conceals,
+          %{ctx | col: conceal_end, acc: replacement_acc}
+        )
+      else
+        do_apply_conceals(
+          rest_segs,
+          rest_conceals,
+          %{ctx | col: seg_end, acc: replacement_acc}
+        )
+      end
+    end
+  end
+
+  # Conceal starts within this segment: emit the before portion, then handle concealed part
+  @spec apply_conceal_mid_segment(
+          {String.t(), keyword()},
+          [{String.t(), keyword()}],
+          ConcealRange.t(),
+          [ConcealRange.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          conceal_ctx()
+        ) :: [{String.t(), keyword()}]
+  defp apply_conceal_mid_segment(
+         {seg_text, seg_style},
+         rest_segs,
+         conceal,
+         rest_conceals,
+         seg_end,
+         conceal_start,
+         ctx
+       ) do
+    split_at = conceal_start - ctx.col
+    {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
+
+    before_acc = if before_text != "", do: [{before_text, seg_style} | ctx.acc], else: ctx.acc
+
+    if after_text != "" do
+      # Re-process the remainder (which now starts at the conceal)
+      do_apply_conceals(
+        [{after_text, seg_style} | rest_segs],
+        [conceal | rest_conceals],
+        %{ctx | col: conceal_start, acc: before_acc}
+      )
+    else
+      # Before text consumed everything (edge case with wide chars)
+      do_apply_conceals(
+        rest_segs,
+        [conceal | rest_conceals],
+        %{ctx | col: seg_end, acc: before_acc}
+      )
+    end
+  end
+
+  # Emits the replacement character for a conceal range, but only once
+  # (at the start of the conceal). We detect "first concealed segment"
+  # by checking if we're at the conceal's start column on this line.
+  #
+  # The seg_style from the concealed text is merged onto the replacement
+  # style so that overlapping decorations (e.g., search highlight bg)
+  # carry through to the replacement character.
+  @spec maybe_emit_replacement(
+          [{String.t(), keyword()}],
+          ConcealRange.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          keyword()
+        ) :: [{String.t(), keyword()}]
+  defp maybe_emit_replacement(acc, %ConcealRange{replacement: nil}, _col, _line, _seg_style),
+    do: acc
+
+  defp maybe_emit_replacement(acc, conceal, col, line, seg_style) do
+    {sl, sc} = conceal.start_pos
+    conceal_start_on_line = if sl < line, do: 0, else: sc
+
+    if col <= conceal_start_on_line do
+      # Merge: conceal replacement_style wins over the segment's style,
+      # but the segment's style provides bg/fg from overlapping decorations.
+      merged_style = Keyword.merge(seg_style, conceal.replacement_style)
+      [{conceal.replacement, merged_style} | acc]
+    else
+      acc
+    end
+  end
+
   # ── Syntax highlighting ──────────────────────────────────────────────────────
 
   @spec render_highlighted_line(
@@ -465,6 +802,7 @@ defmodule Minga.Editor.Renderer.Line do
 
     # Merge decoration highlight ranges with syntax segments (pre-queried, no double lookup)
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
+    segments = apply_conceals_to_segments(segments, ctx.decorations, buf_line)
     segments = inject_inline_virtual_text(segments, ctx.decorations, buf_line)
 
     render_segments_with_scroll(segments, screen_row, ctx)

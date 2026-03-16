@@ -10,6 +10,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   """
 
   alias Minga.Buffer.Decorations
+  alias Minga.Buffer.Decorations.ConcealRange
   alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
@@ -361,13 +362,15 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         {buf_line, display_text}
       end)
 
-    # Compute wrap entries per-line, adjusting width for inline virtual text.
-    # Inline VTs (e.g., "▎ " border) displace content rightward, so the
-    # available text width is content_w minus the VT display width.
+    # Compute wrap entries per-line, adjusting width for inline virtual text
+    # and conceal ranges. Inline VTs displace content rightward; conceals
+    # reduce visible width. Both affect where line breaks should occur.
     wrap_entries =
       Enum.map(buffer_entries, fn {buf_line, text} ->
         vt_width = inline_vt_width(decorations, buf_line)
-        wrap_w = max(width - vt_width, 10)
+        line_len = Unicode.display_width(text)
+        conceal_width = conceal_hidden_width(decorations, buf_line, line_len)
+        wrap_w = max(width - vt_width + conceal_width, 10)
 
         [entry] = WrapMap.compute([text], wrap_w)
         entry
@@ -388,6 +391,22 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     |> Enum.reduce(0, fn vt, acc ->
       seg_width = Enum.reduce(vt.segments, 0, fn {text, _style}, w -> w + String.length(text) end)
       acc + seg_width
+    end)
+  end
+
+  # Returns the total number of buffer columns hidden by conceals on a line.
+  # This is the concealed width minus replacement width (0 or 1 per range).
+  # Used by the wrap map to compensate: concealed text doesn't consume
+  # display width, so the effective wrap width is larger than content_w.
+  @spec conceal_hidden_width(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp conceal_hidden_width(decorations, buf_line, line_len) do
+    conceals = Decorations.conceals_for_line(decorations, buf_line)
+
+    Enum.reduce(conceals, 0, fn conceal, acc ->
+      concealed = ConcealRange.concealed_width_on_line(conceal, buf_line, line_len)
+      replacement = ConcealRange.display_width(conceal)
+      acc + max(concealed - replacement, 0)
     end)
   end
 
