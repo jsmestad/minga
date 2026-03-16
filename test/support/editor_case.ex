@@ -128,8 +128,9 @@ defmodule Minga.Test.EditorCase do
   def inject_highlights(ctx, capture_names, version \\ 1, spans) do
     # Flush pending messages (e.g. :setup_highlight from :ready)
     _ = :sys.get_state(ctx.editor)
-    send(ctx.editor, {:minga_input, {:highlight_names, capture_names}})
-    send(ctx.editor, {:minga_input, {:highlight_spans, version, spans}})
+    # buffer_id 0 is used in test injection since no real parser is involved
+    send(ctx.editor, {:minga_input, {:highlight_names, 0, capture_names}})
+    send(ctx.editor, {:minga_input, {:highlight_spans, 0, version, spans}})
     # Sync: ensure both messages have been processed before returning
     _ = :sys.get_state(ctx.editor)
     ctx

@@ -19,7 +19,7 @@ defmodule Minga.Parser.BandwidthTest do
       assert byte_size(large_content) > 50_000
 
       # Full sync: encode the entire content
-      full_sync = Protocol.encode_parse_buffer(1, large_content)
+      full_sync = Protocol.encode_parse_buffer(0, 1, large_content)
       full_size = byte_size(full_sync)
 
       # Incremental sync: single character insertion
@@ -33,7 +33,7 @@ defmodule Minga.Parser.BandwidthTest do
         inserted_text: "x"
       }
 
-      incremental_sync = Protocol.encode_edit_buffer(1, [edit])
+      incremental_sync = Protocol.encode_edit_buffer(0, 1, [edit])
       incremental_size = byte_size(incremental_sync)
 
       # Full sync should be ~50KB, incremental should be ~50 bytes
@@ -51,7 +51,7 @@ defmodule Minga.Parser.BandwidthTest do
     test "edit_buffer is small for multi-character paste" do
       large_content = String.duplicate("line of code\n", 5000)
 
-      full_sync = Protocol.encode_parse_buffer(1, large_content)
+      full_sync = Protocol.encode_parse_buffer(0, 1, large_content)
       full_size = byte_size(full_sync)
 
       # Paste 100 characters
@@ -67,7 +67,7 @@ defmodule Minga.Parser.BandwidthTest do
         inserted_text: pasted
       }
 
-      incremental_sync = Protocol.encode_edit_buffer(1, [edit])
+      incremental_sync = Protocol.encode_edit_buffer(0, 1, [edit])
       incremental_size = byte_size(incremental_sync)
 
       # Even a 100-char paste should be << full file
@@ -86,7 +86,7 @@ defmodule Minga.Parser.BandwidthTest do
         inserted_text: ""
       }
 
-      deletion_sync = Protocol.encode_edit_buffer(1, [edit])
+      deletion_sync = Protocol.encode_edit_buffer(0, 1, [edit])
       # Deletion: no inserted text, just metadata
       assert byte_size(deletion_sync) < 60
     end

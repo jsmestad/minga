@@ -2,19 +2,31 @@ defmodule Minga.Editor.State.Highlighting do
   @moduledoc """
   Groups syntax-highlighting fields from EditorState.
 
-  Tracks the current highlight state, a monotonic version counter for
-  invalidation, and a per-buffer cache of highlight data.
+  Tracks per-buffer highlight data, a monotonic version counter for
+  invalidation, the mapping from buffer PIDs to parser buffer IDs
+  (monotonically incrementing u32s), and LRU timestamps for inactive
+  tree eviction.
+
+  Highlight spans are stored per-buffer in `highlights`. There is no
+  separate "current" field; the active buffer's highlight is just
+  `Map.get(highlights, active_pid)`.
   """
 
   alias Minga.Highlight
 
   @type t :: %__MODULE__{
-          current: Highlight.t(),
+          highlights: %{pid() => Highlight.t()},
           version: non_neg_integer(),
-          cache: %{pid() => Highlight.t()}
+          buffer_ids: %{pid() => non_neg_integer()},
+          reverse_buffer_ids: %{non_neg_integer() => pid()},
+          next_buffer_id: non_neg_integer(),
+          last_active_at: %{pid() => integer()}
         }
 
-  defstruct current: Highlight.new(),
+  defstruct highlights: %{},
             version: 0,
-            cache: %{}
+            buffer_ids: %{},
+            reverse_buffer_ids: %{},
+            next_buffer_id: 1,
+            last_active_at: %{}
 end

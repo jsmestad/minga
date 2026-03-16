@@ -8,6 +8,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Editor.HighlightSync
   alias Minga.Highlight.Grammar
 
   alias Minga.Command.Parser
@@ -38,7 +39,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       )
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans != []
+      assert HighlightSync.get_active_highlight(state).spans != []
 
       version_before = state.highlight.version
 
@@ -49,7 +50,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
       # Highlight state should be reset (new Highlight struct with empty spans)
       # and a new parse should be in-flight (version incremented)
-      assert state.highlight.current.spans == {}
+      assert HighlightSync.get_active_highlight(state).spans == {}
       assert state.highlight.version > version_before
     end
 
@@ -71,7 +72,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       send_keys(ctx, ":rh<CR>")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans == {}
+      assert HighlightSync.get_active_highlight(state).spans == {}
       assert state.highlight.version > version_before
     end
   end

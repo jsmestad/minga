@@ -95,39 +95,53 @@ defmodule Minga.Parser.Manager do
   @spec request_textobject(
           non_neg_integer(),
           non_neg_integer(),
+          non_neg_integer(),
           String.t(),
           GenServer.server()
         ) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
-  def request_textobject(row, col, capture_name, server \\ __MODULE__)
-      when is_integer(row) and is_integer(col) and is_binary(capture_name) do
-    GenServer.call(server, {:request_textobject, row, col, capture_name}, 2_000)
+  def request_textobject(buffer_id, row, col, capture_name, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_integer(row) and is_integer(col) and
+             is_binary(capture_name) do
+    GenServer.call(server, {:request_textobject, buffer_id, row, col, capture_name}, 2_000)
   catch
     :exit, _ -> nil
   end
 
   @doc """
-  Sets the active tree-sitter language for subsequent parse/query commands.
+  Sets the active tree-sitter language for a buffer.
   """
-  @spec set_language(String.t(), GenServer.server()) :: :ok
-  def set_language(name, server \\ __MODULE__) when is_binary(name) do
-    send_commands(server, [Protocol.encode_set_language(name)])
+  @spec set_language(non_neg_integer(), String.t(), GenServer.server()) :: :ok
+  def set_language(buffer_id, name, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_binary(name) do
+    send_commands(server, [Protocol.encode_set_language(buffer_id, name)])
   end
 
   @doc """
-  Sets a custom highlight query for the currently active language.
+  Sets a custom highlight query for a buffer.
   """
-  @spec set_highlight_query(String.t(), GenServer.server()) :: :ok
-  def set_highlight_query(query, server \\ __MODULE__) when is_binary(query) do
-    send_commands(server, [Protocol.encode_set_highlight_query(query)])
+  @spec set_highlight_query(non_neg_integer(), String.t(), GenServer.server()) :: :ok
+  def set_highlight_query(buffer_id, query, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_binary(query) do
+    send_commands(server, [Protocol.encode_set_highlight_query(buffer_id, query)])
   end
 
   @doc """
-  Sets a custom injection query for the currently active language.
+  Sets a custom injection query for a buffer.
   """
-  @spec set_injection_query(String.t(), GenServer.server()) :: :ok
-  def set_injection_query(query, server \\ __MODULE__) when is_binary(query) do
-    send_commands(server, [Protocol.encode_set_injection_query(query)])
+  @spec set_injection_query(non_neg_integer(), String.t(), GenServer.server()) :: :ok
+  def set_injection_query(buffer_id, query, server \\ __MODULE__)
+      when is_integer(buffer_id) and is_binary(query) do
+    send_commands(server, [Protocol.encode_set_injection_query(buffer_id, query)])
+  end
+
+  @doc """
+  Closes a buffer in the parser, freeing its tree and source.
+  """
+  @spec close_buffer(non_neg_integer(), GenServer.server()) :: :ok
+  def close_buffer(buffer_id, server \\ __MODULE__)
+      when is_integer(buffer_id) do
+    send_commands(server, [Protocol.encode_close_buffer(buffer_id)])
   end
 
   # ── Server Callbacks ──
@@ -148,13 +162,17 @@ defmodule Minga.Parser.Manager do
     {:reply, :ok, %{state | subscribers: subscribers}}
   end
 
-  def handle_call({:request_textobject, _row, _col, _capture}, _from, %{port: nil} = state) do
+  def handle_call(
+        {:request_textobject, _buffer_id, _row, _col, _capture},
+        _from,
+        %{port: nil} = state
+      ) do
     {:reply, nil, state}
   end
 
-  def handle_call({:request_textobject, row, col, capture_name}, from, state) do
+  def handle_call({:request_textobject, buffer_id, row, col, capture_name}, from, state) do
     request_id = state.next_request_id
-    cmd = Protocol.encode_request_textobject(request_id, row, col, capture_name)
+    cmd = Protocol.encode_request_textobject(buffer_id, request_id, row, col, capture_name)
     Port.command(state.port, cmd)
 
     pending = Map.put(state.pending_requests, request_id, from)

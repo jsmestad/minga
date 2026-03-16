@@ -241,10 +241,10 @@ defmodule Minga.TextObject do
   Uses tree-sitter textobjects.scm queries. Returns `nil` if no text object
   of the requested type contains the cursor, or if tree-sitter is unavailable.
   """
-  @spec structural_inner(structural_type(), position()) :: range()
-  def structural_inner(type, {line, col}) when is_atom(type) do
+  @spec structural_inner(structural_type(), position(), non_neg_integer()) :: range()
+  def structural_inner(type, {line, col}, buffer_id) when is_atom(type) do
     capture = Atom.to_string(type) <> ".inside"
-    query_structural(line, col, capture)
+    query_structural(line, col, capture, buffer_id)
   end
 
   @doc """
@@ -252,15 +252,16 @@ defmodule Minga.TextObject do
 
   Includes the structural delimiters (e.g., `def...end`, braces, etc.).
   """
-  @spec structural_around(structural_type(), position()) :: range()
-  def structural_around(type, {line, col}) when is_atom(type) do
+  @spec structural_around(structural_type(), position(), non_neg_integer()) :: range()
+  def structural_around(type, {line, col}, buffer_id) when is_atom(type) do
     capture = Atom.to_string(type) <> ".around"
-    query_structural(line, col, capture)
+    query_structural(line, col, capture, buffer_id)
   end
 
-  @spec query_structural(non_neg_integer(), non_neg_integer(), String.t()) :: range()
-  defp query_structural(row, col, capture_name) do
-    case ParserManager.request_textobject(row, col, capture_name) do
+  @spec query_structural(non_neg_integer(), non_neg_integer(), String.t(), non_neg_integer()) ::
+          range()
+  defp query_structural(row, col, capture_name, buffer_id) do
+    case ParserManager.request_textobject(buffer_id, row, col, capture_name) do
       {start_row, start_col, end_row, end_col} ->
         # Zig returns byte columns. The end position from tree-sitter is
         # exclusive, so we subtract 1 to make it inclusive for Vim semantics.

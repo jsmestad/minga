@@ -31,14 +31,16 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, spans)
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans != {}, "Pre-condition: file1 should have spans"
+
+      assert HighlightSync.get_active_highlight(state).spans != {},
+             "Pre-condition: file1 should have spans"
 
       # Open second file via :e — triggers buffer switch
       send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.current.spans == {},
+      assert HighlightSync.get_active_highlight(state).spans == {},
              "Stale spans from file1 persisted after :e to file2"
     end
 
@@ -59,14 +61,16 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, spans)
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans != {}, "Pre-condition: file2 should have spans"
+
+      assert HighlightSync.get_active_highlight(state).spans != {},
+             "Pre-condition: file2 should have spans"
 
       # Switch to previous buffer via SPC b n
       send_keys(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.current.spans == {},
+      assert HighlightSync.get_active_highlight(state).spans == {},
              "Stale spans from file2 persisted after SPC b n"
     end
   end
@@ -86,14 +90,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans == List.to_tuple(spans_a)
+      assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a)
 
       # Open file2 via :e command (deterministic, no CWD dependency)
       send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.current.spans == {},
+      assert HighlightSync.get_active_highlight(state).spans == {},
              "Stale spans from file1 persisted after :e to file2"
     end
 
@@ -118,10 +122,10 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       state = :sys.get_state(ctx.editor)
 
       # Verify cache was populated for file1
-      assert Map.has_key?(state.highlight.cache, buf1_pid),
+      assert Map.has_key?(state.highlight.highlights, buf1_pid),
              "Expected file1 highlights to be cached after buffer switch"
 
-      cached = state.highlight.cache[buf1_pid]
+      cached = state.highlight.highlights[buf1_pid]
       assert cached.spans == List.to_tuple(spans_a)
     end
   end
@@ -202,15 +206,16 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Switch to file2
       send_keys(ctx, ":e #{path2}<CR>")
 
-      assert :sys.get_state(ctx.editor).highlight.current.spans == {}
+      state2 = :sys.get_state(ctx.editor)
+      assert HighlightSync.get_active_highlight(state2).spans == {}
 
       # Switch back to file1 via :e (should already be in buffer list)
       send_keys(ctx, ":e #{path1}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.current.spans == List.to_tuple(spans_a),
-             "Expected cached spans restored via :e, got: #{inspect(state.highlight.current.spans)}"
+      assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a),
+             "Expected cached spans restored via :e, got: #{inspect(HighlightSync.get_active_highlight(state).spans)}"
     end
   end
 
@@ -230,21 +235,23 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans == List.to_tuple(spans_a)
+      assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a)
 
       # Open file2 and switch to it
       send_keys(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans == {}, "File2 should start with empty spans"
+
+      assert HighlightSync.get_active_highlight(state).spans == {},
+             "File2 should start with empty spans"
 
       # Switch back to file1 — should restore cached highlights instantly
       send_keys(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.highlight.current.spans == List.to_tuple(spans_a),
-             "Expected cached spans from file1 to be restored, got: #{inspect(state.highlight.current.spans)}"
+      assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a),
+             "Expected cached spans from file1 to be restored, got: #{inspect(HighlightSync.get_active_highlight(state).spans)}"
     end
   end
 
@@ -264,8 +271,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         )
 
       state = :sys.get_state(editor)
-      assert state.highlight.current.spans == {}
-      assert state.highlight.current.capture_names == []
+      assert HighlightSync.get_active_highlight(state).spans == {}
+      assert HighlightSync.get_active_highlight(state).capture_names == []
     end
   end
 
@@ -279,9 +286,14 @@ defmodule Minga.Editor.HighlightIntegrationTest do
           %{start_byte: 10, end_byte: 15, capture_id: 1}
         ])
 
-      assert state.highlight.current.capture_names == ["keyword", "string", "comment"]
-      assert tuple_size(state.highlight.current.spans) == 2
-      assert state.highlight.current.version == 1
+      assert HighlightSync.get_active_highlight(state).capture_names == [
+               "keyword",
+               "string",
+               "comment"
+             ]
+
+      assert tuple_size(HighlightSync.get_active_highlight(state).spans) == 2
+      assert HighlightSync.get_active_highlight(state).version == 1
     end
 
     test "receiving new names clears old names without affecting spans" do
@@ -291,8 +303,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
         |> HighlightSync.handle_names(["new_keyword", "new_string"])
 
-      assert state.highlight.current.capture_names == ["new_keyword", "new_string"]
-      assert tuple_size(state.highlight.current.spans) == 1
+      assert HighlightSync.get_active_highlight(state).capture_names == [
+               "new_keyword",
+               "new_string"
+             ]
+
+      assert tuple_size(HighlightSync.get_active_highlight(state).spans) == 1
     end
   end
 
@@ -394,8 +410,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert_row_contains(ctx, 1, "just plain text")
 
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.capture_names == []
-      assert state.highlight.current.spans == {}
+      assert HighlightSync.get_active_highlight(state).capture_names == []
+      assert HighlightSync.get_active_highlight(state).spans == {}
     end
 
     test "empty file renders without crash" do
@@ -403,7 +419,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       # Should show empty first line and tildes
       state = :sys.get_state(ctx.editor)
-      assert state.highlight.current.spans == {}
+      assert HighlightSync.get_active_highlight(state).spans == {}
     end
 
     test "file with syntax errors still renders partial highlights" do
@@ -465,10 +481,13 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   # ── Helpers ──
 
   defp base_state do
+    pid = spawn(fn -> Process.sleep(:infinity) end)
+
     %EditorState{
       port_manager: nil,
       viewport: Viewport.new(24, 80),
       vim: VimState.new()
     }
+    |> then(fn s -> %{s | buffers: %{s.buffers | active: pid}} end)
   end
 end

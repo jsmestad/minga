@@ -88,7 +88,8 @@ defmodule Minga.Config.OptionsTest do
                nav_flash: true,
                nav_flash_threshold: 5,
                log_level_config: :default,
-               log_level_port: :default
+               log_level_port: :default,
+               parser_tree_ttl: 300
              }
     end
   end

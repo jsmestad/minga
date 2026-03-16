@@ -161,6 +161,9 @@ defmodule Minga.Editor do
 
     state = EditorState.monitor_buffers(state, all_initial_pids)
 
+    # Schedule periodic eviction of inactive tree-sitter parse trees.
+    Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+
     {:ok, state}
   end
 
@@ -387,14 +390,36 @@ defmodule Minga.Editor do
   # Legacy {:minga_input, event} forms are also accepted for backward
   # compatibility during the transition (headless tests, etc.).
 
-  def handle_info({tag, {:highlight_names, names}}, state)
+  def handle_info({tag, {:highlight_names, buffer_id, names}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    {:noreply, HighlightEvents.handle_names(state, names)}
+    # Resolve buffer_id to PID; fall back to active buffer for unregistered IDs
+    # (e.g., buffer_id 0 from test injection or legacy code paths).
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+
+    new_state =
+      if pid == state.buffers.active do
+        HighlightEvents.handle_names(state, names)
+      else
+        existing = HighlightSync.get_highlight(state, pid)
+        updated = Minga.Highlight.put_names(existing, names)
+        HighlightSync.put_highlight(state, pid, updated)
+      end
+
+    {:noreply, new_state}
   end
 
-  def handle_info({tag, {:injection_ranges, ranges}}, state)
+  def handle_info({tag, {:injection_ranges, buffer_id, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    {:noreply, HighlightEvents.handle_injection_ranges(state, ranges)}
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+
+    new_state =
+      if pid do
+        %{state | injection_ranges: Map.put(state.injection_ranges, pid, ranges)}
+      else
+        state
+      end
+
+    {:noreply, new_state}
   end
 
   def handle_info({tag, {:language_at_response, _request_id, _language}}, state)
@@ -402,42 +427,59 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  def handle_info({tag, {:highlight_spans, version, spans}}, state)
+  def handle_info({tag, {:highlight_spans, buffer_id, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state = HighlightEvents.handle_spans(state, version, spans)
-    {:noreply, new_state}
-  end
-
-  def handle_info({tag, {:fold_ranges, _version, ranges}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    fold_ranges =
-      Enum.map(ranges, fn {start_line, end_line} ->
-        FoldRange.new!(start_line, end_line)
-      end)
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
 
     new_state =
-      case EditorState.active_window_struct(state) do
-        nil ->
-          state
-
-        %Window{id: id} ->
-          EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+      if pid == state.buffers.active do
+        HighlightEvents.handle_spans(state, version, spans)
+      else
+        # Non-active buffer: store spans in highlights map, no render.
+        existing = HighlightSync.get_highlight(state, pid)
+        updated = Minga.Highlight.put_spans(existing, version, spans)
+        HighlightSync.put_highlight(state, pid, updated)
       end
 
     {:noreply, new_state}
   end
 
-  def handle_info({tag, {:textobject_positions, _version, positions}}, state)
+  def handle_info({tag, {:fold_ranges, buffer_id, _version, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    new_state =
-      case EditorState.active_window_struct(state) do
-        nil ->
-          state
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
 
-        %Window{id: id} ->
-          EditorState.update_window(state, id, fn w ->
-            %{w | textobject_positions: positions}
+    new_state =
+      if pid == state.buffers.active do
+        fold_ranges =
+          Enum.map(ranges, fn {start_line, end_line} ->
+            FoldRange.new!(start_line, end_line)
           end)
+
+        case EditorState.active_window_struct(state) do
+          nil ->
+            state
+
+          %Window{id: id} ->
+            EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+        end
+      else
+        # Stale response for a non-active buffer; discard.
+        state
+      end
+
+    {:noreply, new_state}
+  end
+
+  def handle_info({tag, {:textobject_positions, buffer_id, _version, positions}}, state)
+      when tag in [:minga_highlight, :minga_input] do
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+
+    new_state =
+      if pid == state.buffers.active do
+        apply_textobject_positions(state, positions)
+      else
+        # Stale response for a non-active buffer; discard.
+        state
       end
 
     {:noreply, new_state}
@@ -459,6 +501,15 @@ defmodule Minga.Editor do
     prefix = MessageLog.frontend_prefix(state)
     new_state = log_message(state, "[#{prefix}/#{level}] #{text}")
     {:noreply, new_state}
+  end
+
+  # ── LRU eviction of inactive parser trees ─────────────────────────────────────
+
+  def handle_info(:evict_parser_trees, state) do
+    ttl_seconds = Options.get(:parser_tree_ttl)
+    state = HighlightSync.evict_inactive(state, ttl_ms: ttl_seconds * 1_000)
+    Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    {:noreply, state}
   end
 
   # Completion debounce timer fired — send the actual completion request
@@ -790,6 +841,17 @@ defmodule Minga.Editor do
   # 2. Deltas arriving mid-window are picked up by the pending timer.
   # 3. The timer fires, renders the latest state, and clears the guard
   #    so the next delta can schedule again.
+  @spec apply_textobject_positions(state(), map()) :: state()
+  defp apply_textobject_positions(state, positions) do
+    case EditorState.active_window_struct(state) do
+      nil ->
+        state
+
+      %Window{id: id} ->
+        EditorState.update_window(state, id, &%{&1 | textobject_positions: positions})
+    end
+  end
+
   @spec schedule_render(state(), non_neg_integer()) :: state()
   defp schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
 

@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Clipboard
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
@@ -391,7 +392,8 @@ defmodule Minga.Editor.Commands.Helpers do
   def apply_text_object(%{buffers: %{active: buf}} = state, modifier, spec, action) do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
-    range = compute_text_object_range(gb, cursor, modifier, spec)
+    buffer_id = HighlightSync.buffer_id_for(state, buf)
+    range = compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
 
     case {action, range} do
       {_, nil} ->
@@ -409,30 +411,39 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   @doc "Computes the range for a text object modifier + spec pair."
-  @spec compute_text_object_range(Document.t(), TextObject.position(), atom(), term()) ::
+  @spec compute_text_object_range(
+          Document.t(),
+          TextObject.position(),
+          atom(),
+          term(),
+          non_neg_integer()
+        ) ::
           TextObject.range()
-  def compute_text_object_range(buf, pos, :inner, :word), do: TextObject.inner_word(buf, pos)
-  def compute_text_object_range(buf, pos, :around, :word), do: TextObject.a_word(buf, pos)
+  def compute_text_object_range(buf, pos, :inner, :word, _bid),
+    do: TextObject.inner_word(buf, pos)
 
-  def compute_text_object_range(buf, pos, :inner, {:quote, q}),
+  def compute_text_object_range(buf, pos, :around, :word, _bid),
+    do: TextObject.a_word(buf, pos)
+
+  def compute_text_object_range(buf, pos, :inner, {:quote, q}, _bid),
     do: TextObject.inner_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :around, {:quote, q}),
+  def compute_text_object_range(buf, pos, :around, {:quote, q}, _bid),
     do: TextObject.a_quotes(buf, pos, q)
 
-  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}),
+  def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _bid),
     do: TextObject.inner_parens(buf, pos, open, close)
 
-  def compute_text_object_range(buf, pos, :around, {:paren, open, close}),
+  def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
     do: TextObject.a_parens(buf, pos, open, close)
 
-  def compute_text_object_range(_buf, pos, :inner, {:structural, type}),
-    do: TextObject.structural_inner(type, pos)
+  def compute_text_object_range(_buf, pos, :inner, {:structural, type}, bid),
+    do: TextObject.structural_inner(type, pos, bid)
 
-  def compute_text_object_range(_buf, pos, :around, {:structural, type}),
-    do: TextObject.structural_around(type, pos)
+  def compute_text_object_range(_buf, pos, :around, {:structural, type}, bid),
+    do: TextObject.structural_around(type, pos, bid)
 
-  def compute_text_object_range(_buf, _pos, _modifier, _spec), do: nil
+  def compute_text_object_range(_buf, _pos, _modifier, _spec, _bid), do: nil
 
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
