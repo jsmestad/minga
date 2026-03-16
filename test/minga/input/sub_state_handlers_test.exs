@@ -32,7 +32,12 @@ defmodule Minga.Input.SubStateHandlersTest do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    panel = %UIState{
+    agent = %AgentState{
+      session: nil,
+      pending_approval: Keyword.get(opts, :pending_approval, nil)
+    }
+
+    agentic = %UIState{
       visible: Keyword.get(opts, :panel_visible, false),
       input_focused: Keyword.get(opts, :input_focused, false),
       scroll: Scroll.new(),
@@ -40,16 +45,7 @@ defmodule Minga.Input.SubStateHandlersTest do
       provider_name: "anthropic",
       model_name: "claude-sonnet-4",
       thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
-
-    agent = %AgentState{
-      session: nil,
-      panel: panel,
-      pending_approval: Keyword.get(opts, :pending_approval, nil)
-    }
-
-    agentic = %UIState{
+      prompt_buffer: prompt_buf,
       active: Keyword.get(opts, :agentic_active, false),
       focus: Keyword.get(opts, :focus, :chat)
     }
@@ -116,8 +112,8 @@ defmodule Minga.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :agent, agentic_active: true, input_focused: true)
 
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          put_in(agent.panel.mention_completion, comp)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          put_in(ui.mention_completion, comp)
         end)
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
@@ -127,8 +123,8 @@ defmodule Minga.Input.SubStateHandlersTest do
       state = base_state(keymap_scope: :editor, panel_visible: true, input_focused: true)
 
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          put_in(agent.panel.mention_completion, comp)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          put_in(ui.mention_completion, comp)
         end)
 
       {:handled, _new_state} = MentionCompletion.handle_key(state, 27, 0)
@@ -236,7 +232,7 @@ defmodule Minga.Input.SubStateHandlersTest do
 
     test "passes through when input is focused", %{state: state} do
       state =
-        AgentAccess.update_agent(state, fn agent -> put_in(agent.panel.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
 
       {:passthrough, _} = DiffReview.handle_key(state, ?y, 0)
     end

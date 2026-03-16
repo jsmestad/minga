@@ -179,10 +179,8 @@ defmodule Minga.Input.AgentChatNav do
 
   @spec sync_scroll_to_cursor(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp sync_scroll_to_cursor(state, cursor_line) do
-    AgentAccess.update_agent(state, fn agent ->
-      panel = agent.panel
-      scroll = %{panel.scroll | offset: cursor_line, pinned: false}
-      %{agent | panel: %{panel | scroll: scroll}}
+    AgentAccess.update_agent_ui(state, fn ui ->
+      %{ui | scroll: %{ui.scroll | offset: cursor_line, pinned: false}}
     end)
   end
 end

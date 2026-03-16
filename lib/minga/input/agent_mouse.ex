@@ -30,7 +30,6 @@ defmodule Minga.Input.AgentMouse do
   alias Minga.Agent.View.Renderer, as: ViewRenderer
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
@@ -173,7 +172,7 @@ defmodule Minga.Input.AgentMouse do
 
   @spec unfocus_input(EditorState.t()) :: EditorState.t()
   defp unfocus_input(state) do
-    AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+    AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
   end
 
   @spec click_in_prompt?(Layout.rect(), non_neg_integer(), EditorState.t()) :: boolean()
@@ -247,10 +246,10 @@ defmodule Minga.Input.AgentMouse do
     input_start_row = cr + ch - input_height - ViewRenderer.input_v_gap()
 
     if row >= input_start_row do
-      state = AgentAccess.update_agent(state, &AgentState.focus_input(&1, true))
+      state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
       put_in(state.vim, %{state.vim | mode: :insert, mode_state: Mode.initial_state()})
     else
-      AgentAccess.update_agent(state, &AgentState.focus_input(&1, false))
+      AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
     end
   end
 
@@ -258,11 +257,11 @@ defmodule Minga.Input.AgentMouse do
 
   @spec scroll_chat(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()
   defp scroll_chat(state, delta) when delta > 0 do
-    AgentAccess.update_agent(state, &AgentState.scroll_down(&1, delta))
+    AgentAccess.update_agent_ui(state, &UIState.scroll_down(&1, delta))
   end
 
   defp scroll_chat(state, delta) when delta < 0 do
-    AgentAccess.update_agent(state, &AgentState.scroll_up(&1, abs(delta)))
+    AgentAccess.update_agent_ui(state, &UIState.scroll_up(&1, abs(delta)))
   end
 
   @spec scroll_preview(EditorState.t(), pos_integer() | neg_integer()) :: EditorState.t()

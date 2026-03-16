@@ -26,7 +26,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Input
-  alias Minga.Scroll
   alias Minga.Test.StubServer
 
   # ── Helpers ──────────────────────────────────────────────────────────────
@@ -35,17 +34,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     {:ok, buf} = BufferServer.start_link(content: Keyword.get(opts, :content, "hello\nworld"))
 
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
-
-    panel = %UIState{
-      visible: Keyword.get(opts, :panel_visible, false),
-      input_focused: Keyword.get(opts, :input_focused, false),
-      prompt_buffer: prompt_buf,
-      scroll: Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium"
-    }
 
     default_session =
       if Keyword.has_key?(opts, :session) do
@@ -56,12 +44,15 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       end
 
     agent = %AgentState{
-      panel: panel,
       session: default_session,
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
-    agentic = %UIState{}
+    agentic = %UIState{
+      visible: Keyword.get(opts, :panel_visible, true),
+      input_focused: Keyword.get(opts, :input_focused, false),
+      prompt_buffer: prompt_buf
+    }
 
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
@@ -96,10 +87,10 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
 
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          panel = UIState.ensure_prompt_buffer(agent.panel)
-          BufferServer.replace_content(panel.prompt_buffer, "hello agent")
-          %{agent | panel: panel}
+        AgentAccess.update_agent_ui(state, fn ui ->
+          ui = UIState.ensure_prompt_buffer(ui)
+          BufferServer.replace_content(ui.prompt_buffer, "hello agent")
+          ui
         end)
 
       new_state = AgentCommands.submit_prompt(state)

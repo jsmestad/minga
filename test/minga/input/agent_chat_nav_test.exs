@@ -29,19 +29,7 @@ defmodule Minga.Input.AgentChatNavTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
     {:ok, file_buf} = BufferServer.start_link(content: "file content")
 
-    panel = %UIState{
-      visible: true,
-      input_focused: Keyword.get(opts, :input_focused, false),
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf
-    }
-
     agent = %AgentState{
-      panel: panel,
       buffer: buf,
       session: nil,
       status: :idle,
@@ -50,6 +38,14 @@ defmodule Minga.Input.AgentChatNavTest do
     }
 
     agentic = %UIState{
+      visible: true,
+      input_focused: Keyword.get(opts, :input_focused, false),
+      scroll: Minga.Scroll.new(),
+      spinner_frame: 0,
+      provider_name: "anthropic",
+      model_name: "claude-sonnet-4",
+      thinking_level: "medium",
+      prompt_buffer: prompt_buf,
       active: true,
       focus: Keyword.get(opts, :focus, :chat)
     }
@@ -129,8 +125,8 @@ defmodule Minga.Input.AgentChatNavTest do
 
       # Pin scroll first (simulating streaming auto-scroll)
       state =
-        AgentAccess.update_agent(state, fn agent ->
-          %{agent | panel: UIState.engage_auto_scroll(agent.panel)}
+        AgentAccess.update_agent_ui(state, fn ui ->
+          UIState.engage_auto_scroll(ui)
         end)
 
       assert AgentAccess.panel(state).scroll.pinned == true

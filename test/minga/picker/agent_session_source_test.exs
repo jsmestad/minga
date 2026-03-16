@@ -160,7 +160,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
-    agent = %AgentState{session: session_pid, status: :idle, panel: UIState.new()}
+    agent = %AgentState{session: session_pid, status: :idle}
     agentic = %UIState{active: true, focus: :chat}
 
     %EditorState{
@@ -186,7 +186,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # First agent tab is active
     tb = TabBar.switch_to(tb, tab1.id)
 
-    agent = %AgentState{session: session1, status: :idle, panel: UIState.new()}
+    agent = %AgentState{session: session1, status: :idle}
     agentic = %UIState{active: true, focus: :chat}
 
     %EditorState{
@@ -223,7 +223,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     # File tab (1) is active
     tb = TabBar.switch_to(tb, 1)
 
-    agent = %AgentState{panel: UIState.new()}
+    agent = %AgentState{}
     agentic = %UIState{}
 
     %EditorState{

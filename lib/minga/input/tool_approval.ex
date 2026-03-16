@@ -19,7 +19,7 @@ defmodule Minga.Input.ToolApproval do
   def handle_key(state, cp, _mods) do
     agent = AgentAccess.agent(state)
 
-    if is_map(agent.pending_approval) and not agent.panel.input_focused do
+    if is_map(agent.pending_approval) and not AgentAccess.input_focused?(state) do
       {:handled, dispatch_approval(state, cp)}
     else
       {:passthrough, state}

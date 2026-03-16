@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   def handle_search_key(state, 27) do
     saved = UIState.search_saved_scroll(AgentAccess.agent_ui(state))
     state = update_agent_ui(state, &UIState.cancel_search/1)
-    if saved, do: update_agent(state, &AgentState.set_scroll(&1, saved)), else: state
+    if saved, do: update_agent_ui(state, &UIState.set_scroll(&1, saved)), else: state
   end
 
   def handle_search_key(state, 127) do
@@ -374,7 +374,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
     case AgentBufferSync.message_start_line(messages, msg_idx) do
       nil -> state
-      line_idx -> update_agent(state, &AgentState.set_scroll(&1, line_idx))
+      line_idx -> update_agent_ui(state, &UIState.set_scroll(&1, line_idx))
     end
   end
 
@@ -455,10 +455,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     state
   end
 
-  @spec update_panel(state(), (term() -> term())) :: state()
+  @spec update_panel(state(), (UIState.t() -> UIState.t())) :: state()
   defp update_panel(state, fun) do
-    AgentAccess.update_agent(state, fn agent ->
-      %{agent | panel: fun.(agent.panel)}
-    end)
+    AgentAccess.update_agent_ui(state, fun)
   end
 end

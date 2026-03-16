@@ -26,32 +26,20 @@ defmodule Minga.Agent.View.RendererTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: Enum.join(input_lines, "\n"))
     BufferServer.set_cursor(prompt_buf, input_cursor)
 
-    panel = %UIState{
-      visible: true,
-      input_focused: Keyword.get(opts, :input_focused, false),
-      prompt_buffer: prompt_buf,
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium"
-    }
-
     agent = %AgentState{
       session: nil,
       status: :idle,
-      panel: panel,
       error: nil,
       spinner_timer: nil,
       buffer: nil
     }
 
     agentic = %UIState{
+      visible: true,
+      input_focused: Keyword.get(opts, :input_focused, false),
+      prompt_buffer: prompt_buf,
       active: true,
-      focus: Keyword.get(opts, :focus, :chat),
-      saved_windows: nil,
-      pending_prefix: nil,
-      saved_file_tree: nil
+      focus: Keyword.get(opts, :focus, :chat)
     }
 
     %EditorState{

@@ -37,7 +37,7 @@ defmodule Minga.Agent.Events do
           {state, [{:log_message, "Agent: error"}]}
 
         :thinking ->
-          {AgentAccess.update_agent(state, &AgentState.engage_auto_scroll/1), []}
+          {AgentAccess.update_agent_ui(state, &UIState.engage_auto_scroll/1), []}
 
         _ ->
           {state, []}
@@ -62,17 +62,17 @@ defmodule Minga.Agent.Events do
   # minimal latency. The throttle guard in schedule_render coalesces
   # multiple deltas arriving in the same millisecond into one render.
   def handle(state, {:text_delta, _delta}) do
-    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     {state, [{:render, 1}, :sync_agent_buffer]}
   end
 
   def handle(state, {:thinking_delta, _delta}) do
-    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     {state, [{:render, 50}, :sync_agent_buffer]}
   end
 
   def handle(state, :messages_changed) do
-    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
   end
 
@@ -83,13 +83,13 @@ defmodule Minga.Agent.Events do
   end
 
   def handle(state, {:tool_update, _id, "shell", partial}) do
-    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     state = update_preview(state, &Preview.update_shell_output(&1, partial))
     {state, [{:render, 50}]}
   end
 
   def handle(state, {:tool_update, _id, _name, _partial}) do
-    state = AgentAccess.update_agent(state, &AgentState.maybe_auto_scroll/1)
+    state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
     {state, [{:render, 50}]}
   end
 
@@ -185,7 +185,7 @@ defmodule Minga.Agent.Events do
 
   def handle(state, :spinner_tick) do
     if AgentState.busy?(AgentAccess.agent(state)) do
-      state = AgentAccess.update_agent(state, &AgentState.tick_spinner/1)
+      state = AgentAccess.update_agent_ui(state, &UIState.tick_spinner/1)
       {state, [{:render, 16}]}
     else
       state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)

@@ -47,7 +47,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
-      assert AgentAccess.agent(new_state).panel.scroll.pinned == true
+      assert AgentAccess.agent_ui(new_state).scroll.pinned == true
     end
 
     test "status_changed to :error logs a message" do
@@ -114,7 +114,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle(state, :spinner_tick)
 
-      assert AgentAccess.agent(new_state).panel.spinner_frame == 1
+      assert AgentAccess.agent_ui(new_state).spinner_frame == 1
       assert {:render, 16} in effects
     end
 

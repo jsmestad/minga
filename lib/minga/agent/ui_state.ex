@@ -522,6 +522,32 @@ defmodule Minga.Agent.UIState do
     %{state | display_start_index: message_count, scroll: Scroll.new()}
   end
 
+  @doc "Clears the input and scrolls to the bottom."
+  @spec clear_input_and_scroll(t()) :: t()
+  def clear_input_and_scroll(%__MODULE__{} = state) do
+    state |> clear_input() |> scroll_to_bottom()
+  end
+
+  # ── Model/provider config ──────────────────────────────────────────────────
+
+  @doc "Sets the thinking level."
+  @spec set_thinking_level(t(), String.t()) :: t()
+  def set_thinking_level(%__MODULE__{} = state, level), do: %{state | thinking_level: level}
+
+  @doc "Sets the provider name."
+  @spec set_provider_name(t(), String.t()) :: t()
+  def set_provider_name(%__MODULE__{} = state, provider), do: %{state | provider_name: provider}
+
+  @doc "Sets the model name."
+  @spec set_model_name(t(), String.t()) :: t()
+  def set_model_name(%__MODULE__{} = state, model), do: %{state | model_name: model}
+
+  @doc "Sets the scroll offset to an absolute value. Unpins from bottom."
+  @spec set_scroll(t(), non_neg_integer()) :: t()
+  def set_scroll(%__MODULE__{} = state, offset) when is_integer(offset) and offset >= 0 do
+    %{state | scroll: Scroll.set_offset(state.scroll, offset)}
+  end
+
   # ── Private: paste helpers ───────────────────────────────────────────────
 
   # Creates a collapsed paste block and inserts a placeholder token at the

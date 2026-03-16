@@ -18,7 +18,6 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
 
   @typedoc "Editor state (same as EditorState.t())."
@@ -179,7 +178,7 @@ defmodule Minga.Agent.SlashCommand do
     if AgentAccess.session(state) do
       case Session.set_thinking_level(AgentAccess.session(state), level) do
         :ok ->
-          state = AgentAccess.update_agent(state, &AgentState.set_thinking_level(&1, level))
+          state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
           %{state | status_msg: "Thinking: #{level}"}
 

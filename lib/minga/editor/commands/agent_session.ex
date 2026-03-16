@@ -31,7 +31,7 @@ defmodule Minga.Editor.Commands.AgentSession do
 
     state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
     state = %{state | status_msg: message}
-    if AgentState.visible?(AgentAccess.agent(state)), do: start_agent_session(state), else: state
+    if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
   end
 
   @doc "Starts a new agent session and subscribes to its events."
