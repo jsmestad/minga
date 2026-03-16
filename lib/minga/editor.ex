@@ -164,6 +164,10 @@ defmodule Minga.Editor do
     # Schedule periodic eviction of inactive tree-sitter parse trees.
     Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
 
+    # Set up tree-sitter markdown highlighting for the agent buffer
+    # so it's ready before the first sync.
+    state = AgentLifecycle.setup_agent_highlight(state)
+
     {:ok, state}
   end
 
@@ -435,10 +439,18 @@ defmodule Minga.Editor do
       if pid == state.buffers.active do
         HighlightEvents.handle_spans(state, version, spans)
       else
-        # Non-active buffer: store spans in highlights map, no render.
+        # Non-active buffer: store spans in highlights map.
         existing = HighlightSync.get_highlight(state, pid)
         updated = Minga.Highlight.put_spans(existing, version, spans)
-        HighlightSync.put_highlight(state, pid, updated)
+        state_with_hl = HighlightSync.put_highlight(state, pid, updated)
+
+        # If this buffer is visible in any window (e.g., agent panel),
+        # trigger a render so the highlights appear immediately.
+        if buffer_visible_in_window?(state_with_hl, pid) do
+          Renderer.render(state_with_hl)
+        else
+          state_with_hl
+        end
       end
 
     {:noreply, new_state}
@@ -507,7 +519,16 @@ defmodule Minga.Editor do
 
   def handle_info(:evict_parser_trees, state) do
     ttl_seconds = Options.get(:parser_tree_ttl)
-    state = HighlightSync.evict_inactive(state, ttl_ms: ttl_seconds * 1_000)
+    # Protect the agent buffer from eviction: it's persistent and always-visible.
+    agent_buf = state |> EditorState.AgentAccess.agent() |> Map.get(:buffer)
+    protected = if is_pid(agent_buf), do: [agent_buf], else: []
+
+    state =
+      HighlightSync.evict_inactive(state,
+        ttl_ms: ttl_seconds * 1_000,
+        protected_pids: protected
+      )
+
     Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
     {:noreply, state}
   end
@@ -1078,6 +1099,12 @@ defmodule Minga.Editor do
       nil ->
         state
     end
+  end
+
+  # Returns true if the given buffer PID is visible in any window.
+  @spec buffer_visible_in_window?(state(), pid()) :: boolean()
+  defp buffer_visible_in_window?(state, buf_pid) do
+    Enum.any?(state.windows.map, fn {_id, win} -> win.buffer == buf_pid end)
   end
 
   # ── Window resize ────────────────────────────────────────────────────────

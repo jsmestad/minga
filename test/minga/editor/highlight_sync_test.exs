@@ -94,6 +94,52 @@ defmodule Minga.Editor.HighlightSyncTest do
     end
   end
 
+  describe "ensure_buffer_id_for/2" do
+    test "assigns a new buffer_id for an unknown buffer pid" do
+      state = base_state()
+      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      {id, new_state} = HighlightSync.ensure_buffer_id_for(state, other_pid)
+
+      assert is_integer(id)
+      assert id > 0
+      assert Map.get(new_state.highlight.buffer_ids, other_pid) == id
+      assert Map.get(new_state.highlight.reverse_buffer_ids, id) == other_pid
+    end
+
+    test "returns existing buffer_id for already-registered buffer" do
+      state = base_state()
+      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      {id1, state2} = HighlightSync.ensure_buffer_id_for(state, other_pid)
+      {id2, _state3} = HighlightSync.ensure_buffer_id_for(state2, other_pid)
+
+      assert id1 == id2
+    end
+
+    test "assigns different ids for different buffers" do
+      state = base_state()
+      pid1 = spawn(fn -> Process.sleep(:infinity) end)
+      pid2 = spawn(fn -> Process.sleep(:infinity) end)
+
+      {id1, state2} = HighlightSync.ensure_buffer_id_for(state, pid1)
+      {id2, _state3} = HighlightSync.ensure_buffer_id_for(state2, pid2)
+
+      assert id1 != id2
+    end
+  end
+
+  describe "touch_buffer/2" do
+    test "updates last_active_at timestamp for given buffer pid" do
+      state = base_state()
+      other_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      new_state = HighlightSync.touch_buffer(state, other_pid)
+
+      assert Map.has_key?(new_state.highlight.last_active_at, other_pid)
+    end
+  end
+
   describe "request_reparse/1" do
     test "returns state unchanged when no buffer" do
       state = %EditorState{

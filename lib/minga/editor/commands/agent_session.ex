@@ -9,6 +9,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -52,7 +53,9 @@ defmodule Minga.Editor.Commands.AgentSession do
         state =
           if AgentAccess.agent(state).buffer == nil do
             buf = AgentBufferSync.start_buffer()
-            AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
+            state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
+            # Register with tree-sitter parser for markdown highlighting
+            AgentLifecycle.setup_agent_highlight(state)
           else
             state
           end

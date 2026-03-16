@@ -36,6 +36,113 @@ defmodule Minga.Editor.HighlightSync do
     end
   end
 
+  @doc """
+  Sets up highlighting for a specific buffer PID that may not be the active buffer.
+
+  Used for persistent buffers like `*Agent*` that live in side panels and need
+  tree-sitter parsing even when they're not the focused buffer. Assigns a
+  buffer_id, sends set_language + parse_buffer to the parser, and initializes
+  the highlight entry.
+  """
+  @spec setup_for_buffer_pid(EditorState.t(), pid()) :: EditorState.t()
+  def setup_for_buffer_pid(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
+    filetype = BufferServer.filetype(buf_pid)
+
+    case Grammar.language_for_filetype(filetype) do
+      {:ok, language} ->
+        send_parse_for_pid(state, buf_pid, language)
+
+      :unsupported ->
+        state
+    end
+  end
+
+  @doc """
+  Requests a full reparse of a specific buffer PID.
+
+  Used after content changes to non-active buffers (e.g., agent buffer sync).
+  Sends a parse_buffer command with the full content since replace_content_force
+  clears pending edit deltas.
+  """
+  @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
+  def request_reparse_buffer(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
+    hl = state.highlight
+
+    case Map.fetch(hl.buffer_ids, buf_pid) do
+      {:ok, buffer_id} ->
+        version = hl.version + 1
+        content = BufferServer.content(buf_pid)
+        parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
+        ParserManager.send_commands([parse_cmd])
+
+        state = %{state | highlight: %{hl | version: version}}
+        touch_buffer(state, buf_pid)
+
+      :error ->
+        # Buffer not registered with parser yet; set up from scratch
+        setup_for_buffer_pid(state, buf_pid)
+    end
+  end
+
+  @spec send_parse_for_pid(EditorState.t(), pid(), String.t()) :: EditorState.t()
+  defp send_parse_for_pid(state, buf_pid, language) do
+    {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
+    hl = state.highlight
+    version = hl.version + 1
+    content = BufferServer.content(buf_pid)
+
+    query_override = user_query_override(buffer_id, language)
+    injection_override = user_injection_query_override(buffer_id, language)
+    fold_override = user_fold_query_override(buffer_id, language)
+    textobject_override = user_textobject_query_override(buffer_id, language)
+
+    parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
+
+    commands =
+      Enum.concat([
+        [Protocol.encode_set_language(buffer_id, language)],
+        query_override,
+        injection_override,
+        fold_override,
+        textobject_override,
+        [parse_cmd]
+      ])
+
+    ParserManager.send_commands(commands)
+
+    state = put_highlight(state, buf_pid, Highlight.from_theme(state.theme))
+    state = %{state | highlight: %{state.highlight | version: version}}
+    touch_buffer(state, buf_pid)
+  end
+
+  @doc """
+  Returns the parser buffer_id for a given buffer PID, assigning one if needed.
+
+  Unlike `ensure_buffer_id/1` which works on the active buffer, this works
+  on any buffer PID.
+  """
+  @spec ensure_buffer_id_for(EditorState.t(), pid()) :: {non_neg_integer(), EditorState.t()}
+  def ensure_buffer_id_for(%EditorState{highlight: hl} = state, buf_pid) do
+    case Map.fetch(hl.buffer_ids, buf_pid) do
+      {:ok, id} ->
+        {id, state}
+
+      :error ->
+        assign_new_buffer_id(state, hl, buf_pid)
+    end
+  end
+
+  @doc """
+  Touches the last_active_at timestamp for a specific buffer PID.
+  """
+  @spec touch_buffer(EditorState.t(), pid()) :: EditorState.t()
+  def touch_buffer(%EditorState{} = state, buf_pid) do
+    hl = state.highlight
+    now = System.monotonic_time(:millisecond)
+    timestamps = Map.put(hl.last_active_at, buf_pid, now)
+    %{state | highlight: %{hl | last_active_at: timestamps}}
+  end
+
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
   defp send_parse_only(state, language) do
     {buffer_id, state} = ensure_buffer_id(state)

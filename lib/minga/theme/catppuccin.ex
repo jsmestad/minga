@@ -141,7 +141,9 @@ defmodule Minga.Theme.Catppuccin do
         heading1_fg: p.mauve,
         heading2_fg: p.blue,
         heading3_fg: p.green,
-        dashboard_label: p.blue
+        dashboard_label: p.blue,
+        delimiter_dim: p.surface0,
+        link_fg: p.blue
       },
       dashboard: %Minga.Theme.Dashboard{
         bg: p.base,

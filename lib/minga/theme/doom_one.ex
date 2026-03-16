@@ -159,7 +159,9 @@ defmodule Minga.Theme.DoomOne do
         heading1_fg: @magenta,
         heading2_fg: @blue,
         heading3_fg: @green,
-        dashboard_label: 0x61AFEF
+        dashboard_label: 0x61AFEF,
+        delimiter_dim: 0x3E4452,
+        link_fg: 0x61AFEF
       },
       dashboard: %Minga.Theme.Dashboard{
         bg: @bg,

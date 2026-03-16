@@ -156,7 +156,9 @@ defmodule Minga.Theme.OneLight do
         heading1_fg: @hue_3,
         heading2_fg: @hue_2,
         heading3_fg: @hue_4,
-        dashboard_label: 0x4078F2
+        dashboard_label: 0x4078F2,
+        delimiter_dim: 0xC8CCD4,
+        link_fg: 0x4078F2
       },
       dashboard: %Minga.Theme.Dashboard{
         bg: @syntax_bg,
