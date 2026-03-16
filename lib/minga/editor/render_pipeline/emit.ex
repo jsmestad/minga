@@ -67,6 +67,24 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   @spec detect_scroll_regions(state()) :: [scroll_delta()] | nil
   defp detect_scroll_regions(state) do
+    # Scroll region optimization disabled: the interaction between ANSI
+    # scroll regions, libvaxis internal buffer sync, and partial content
+    # redraws causes content corruption on shifted rows. Full redraw on
+    # every frame until this is properly debugged.
+    if scroll_optimization_enabled?() do
+      detect_scroll_regions_impl(state)
+    else
+      nil
+    end
+  end
+
+  # Kill switch for the scroll region optimization. Set to true to re-enable
+  # once the libvaxis buffer sync issue is resolved.
+  @spec scroll_optimization_enabled?() :: boolean()
+  defp scroll_optimization_enabled?, do: false
+
+  @spec detect_scroll_regions_impl(state()) :: [scroll_delta()] | nil
+  defp detect_scroll_regions_impl(state) do
     prev_tops = Process.get(:emit_prev_viewport_tops)
     prev_rects = Process.get(:emit_prev_content_rects)
     prev_gutter_ws = Process.get(:emit_prev_gutter_ws)
