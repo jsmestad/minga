@@ -201,4 +201,33 @@ defmodule Minga.Agent.View.RendererTest do
       end
     end
   end
+
+  describe "model name display with provider prefix" do
+    test "prompt bar strips provider prefix from model name" do
+      state = base_state()
+      commands = Renderer.render_prompt_only(state, {30, 0, 80, 5})
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      # model_name defaults to "anthropic:claude-sonnet-4" but the display
+      # should strip the prefix and titleize to "Claude Sonnet 4"
+      bottom_border =
+        Enum.find(texts, fn text ->
+          String.starts_with?(text, "╰─")
+        end)
+
+      assert bottom_border != nil
+      assert String.contains?(bottom_border, "Claude Sonnet 4")
+      refute String.contains?(bottom_border, "Anthropic:claude")
+    end
+
+    test "dashboard model section strips provider prefix" do
+      state = base_state()
+      commands = Renderer.render_dashboard_only(state, {0, 80, 40, 30})
+      texts = Enum.map(commands, fn d -> elem(d, 2) end)
+
+      # The model section should show bare model name, not the prefixed spec
+      assert Enum.any?(texts, &String.contains?(&1, "claude-sonnet-4"))
+      refute Enum.any?(texts, &String.contains?(&1, "anthropic:claude-sonnet-4"))
+    end
+  end
 end

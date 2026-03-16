@@ -178,13 +178,7 @@ defmodule Minga.Agent.Compaction do
     end
   end
 
-  @spec strip_provider_prefix(String.t()) :: String.t()
-  defp strip_provider_prefix(model) do
-    case String.split(model, ":", parts: 2) do
-      [_provider, name] -> name
-      _ -> model
-    end
-  end
+  defdelegate strip_provider_prefix(model), to: Minga.Agent.Config
 
   @spec format_tokens(non_neg_integer()) :: String.t()
   defp format_tokens(tokens) when tokens >= 1000 do

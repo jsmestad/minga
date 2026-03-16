@@ -41,6 +41,7 @@ defmodule Minga.Agent.FileMention do
           anchor_col: non_neg_integer()
         }
 
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.ModelLimits
   alias ReqLLM.Message.ContentPart
 
@@ -134,7 +135,9 @@ defmodule Minga.Agent.FileMention do
     has_images = Enum.any?(mentions, fn %{path: path} -> image_path?(path) end)
     model = Keyword.get(opts, :model)
 
-    if has_images and model != nil and not ModelLimits.vision_capable?(model) do
+    bare_model = if model, do: AgentConfig.strip_provider_prefix(model), else: nil
+
+    if has_images and bare_model != nil and not ModelLimits.vision_capable?(bare_model) do
       {:error,
        "Model #{model} does not support image input. Use a vision-capable model (Claude, GPT-4o, Gemini)."}
     else

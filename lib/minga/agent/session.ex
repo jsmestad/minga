@@ -22,6 +22,7 @@ defmodule Minga.Agent.Session do
   use GenServer
 
   alias Minga.Agent.Branch
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.Credentials
   alias Minga.Agent.Event
   alias Minga.Agent.Message
@@ -1128,7 +1129,7 @@ defmodule Minga.Agent.Session do
     cost = Map.get(usage, :cost, 0.0)
 
     provider = titleize(state.provider_name)
-    model = titleize(state.model_name)
+    model = state.model_name |> AgentConfig.strip_provider_prefix() |> titleize()
 
     cache_part =
       if cr > 0 or cw > 0 do

@@ -17,6 +17,7 @@ defmodule Minga.Agent.UIState do
   """
 
   alias Minga.Agent.BufferSync
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
@@ -104,7 +105,7 @@ defmodule Minga.Agent.UIState do
             history_index: -1,
             spinner_frame: 0,
             provider_name: "anthropic",
-            model_name: "claude-sonnet-4",
+            model_name: AgentConfig.default_model(),
             thinking_level: "medium",
             input_focused: false,
             display_start_index: 0,
