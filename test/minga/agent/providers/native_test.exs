@@ -951,4 +951,31 @@ defmodule Minga.Agent.Providers.NativeTest do
       Options.set(:agent_api_endpoints, nil)
     end
   end
+
+  # ── Model format validation ──────────────────────────────────────────────────
+
+  describe "model format validation" do
+    test "bare model name without provider prefix returns :invalid_format error", %{
+      tmp_dir: tmp_dir
+    } do
+      # A model name like "claude-sonnet-4" (no provider prefix) should
+      # fail with a clear error, not a cryptic :invalid_format atom.
+      {:ok, pid} =
+        start_provider(
+          model: "claude-sonnet-4",
+          llm_client: fake_llm_client([]),
+          tmp_dir: tmp_dir
+        )
+
+      Native.send_prompt(pid, "hello")
+      events = collect_events(2_000)
+
+      error_events = Enum.filter(events, &match?(%Event.Error{}, &1))
+      assert error_events != []
+
+      error = hd(error_events)
+      assert error.message =~ "missing a provider prefix"
+      assert error.message =~ "provider:model"
+    end
+  end
 end

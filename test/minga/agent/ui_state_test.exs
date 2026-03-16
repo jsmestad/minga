@@ -1,6 +1,7 @@
 defmodule Minga.Agent.UIStateTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
 
@@ -41,6 +42,12 @@ defmodule Minga.Agent.UIStateTest do
       panel = UIState.new()
       assert panel.prompt_history == []
       assert panel.history_index == -1
+    end
+
+    test "default model_name includes provider prefix" do
+      panel = UIState.new()
+      assert String.contains?(panel.model_name, ":")
+      assert panel.model_name == AgentConfig.default_model()
     end
   end
 

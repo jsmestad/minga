@@ -14,6 +14,7 @@ defmodule Minga.Agent.View.Renderer do
   Called by `Minga.Editor.RenderPipeline.Content` when rendering agent chat windows.
   """
 
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.Session
   alias Minga.Agent.UIState
@@ -320,6 +321,7 @@ defmodule Minga.Agent.View.Renderer do
   defp dashboard_sections(input, width, at) do
     panel = input.panel
     usage = input.usage
+    bare_model = AgentConfig.strip_provider_prefix(panel.model_name)
 
     # ── Session title section ──
     title_lines = [
@@ -335,7 +337,7 @@ defmodule Minga.Agent.View.Renderer do
     total_tokens = Map.get(usage, :input, 0) + Map.get(usage, :output, 0)
     estimate = input.agent_ui.context_estimate
     display_tokens = max(total_tokens, estimate)
-    limit = ModelLimits.context_limit(panel.model_name)
+    limit = ModelLimits.context_limit(bare_model)
 
     context_lines = [
       dashboard_text(" Context", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
@@ -345,7 +347,7 @@ defmodule Minga.Agent.View.Renderer do
       if display_tokens > 0 do
         pct_text =
           if limit,
-            do: " (#{context_fill_pct(usage, panel.model_name, estimate) || 0}% used)",
+            do: " (#{context_fill_pct(usage, bare_model, estimate) || 0}% used)",
             else: ""
 
         cost_text = if usage.cost > 0, do: "$#{Float.round(usage.cost, 4)}", else: "$0.00"
@@ -391,7 +393,7 @@ defmodule Minga.Agent.View.Renderer do
 
     model_lines = [
       dashboard_text(" Model", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
-      dashboard_text("  #{panel.model_name}#{thinking}", width,
+      dashboard_text("  #{bare_model}#{thinking}", width,
         fg: at.text_fg,
         bg: at.panel_bg
       ),
@@ -557,7 +559,7 @@ defmodule Minga.Agent.View.Renderer do
   @spec model_info_text(RenderInput.t()) :: String.t()
   defp model_info_text(input) do
     panel = input.panel
-    model = titleize(panel.model_name)
+    model = panel.model_name |> AgentConfig.strip_provider_prefix() |> titleize()
     provider = if panel.provider_name != "", do: " · #{titleize(panel.provider_name)}", else: ""
     thinking = if panel.thinking_level != "", do: " · #{panel.thinking_level}", else: ""
     "󰚩 #{model}#{provider}#{thinking}"

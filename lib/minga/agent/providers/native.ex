@@ -611,8 +611,9 @@ defmodule Minga.Agent.Providers.Native do
   def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
     # Task completed with an error
     Process.demonitor(ref, [:flush])
-    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{inspect(reason)}")
-    notify(state.subscriber, %Event.Error{message: format_error(reason)})
+    formatted = format_error(reason)
+    Minga.Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
+    notify(state.subscriber, %Event.Error{message: formatted})
     notify(state.subscriber, %Event.AgentEnd{usage: nil})
     {:noreply, %{state | task: nil, streaming: false}}
   end
@@ -675,6 +676,25 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec do_agent_loop(loop_ctx(), Context.t()) :: :ok | {:error, term()}
   defp do_agent_loop(lctx, context) do
+    # Validate model format before making the API call. A bare model name
+    # like "claude-sonnet-4" will fail with :invalid_format deep in LLMDB.
+    # Return early with a clear error instead of letting it fail cryptically.
+    if not String.contains?(lctx.model, ":") and not String.contains?(lctx.model, "@") do
+      message =
+        ~s|Model "#{lctx.model}" is missing a provider prefix. | <>
+          ~s|Expected "provider:model" (e.g., "anthropic:#{lctx.model}"). | <>
+          "Check :agent_model in your config."
+
+      Minga.Log.error(:agent, "[Agent.Native] #{message}")
+      emit_error_and_end(lctx.provider_pid, message)
+      {:error, :invalid_format}
+    else
+      do_agent_loop_validated(lctx, context)
+    end
+  end
+
+  @spec do_agent_loop_validated(loop_ctx(), Context.t()) :: :ok | {:error, term()}
+  defp do_agent_loop_validated(lctx, context) do
     # Check if context needs compaction before the API call
     context = maybe_compact_context(lctx, context)
 
@@ -1577,13 +1597,7 @@ defmodule Minga.Agent.Providers.Native do
     :ok
   end
 
-  @spec strip_provider_prefix(String.t()) :: String.t()
-  defp strip_provider_prefix(model) do
-    case String.split(model, ":", parts: 2) do
-      [_provider, name] -> name
-      [name] -> name
-    end
-  end
+  defdelegate strip_provider_prefix(model), to: Minga.Agent.Config
 
   @spec emit_error_and_end(pid(), String.t()) :: :ok
   defp emit_error_and_end(provider_pid, message) do
@@ -1652,6 +1666,12 @@ defmodule Minga.Agent.Providers.Native do
   @spec format_error(term()) :: String.t()
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(%{message: msg}) when is_binary(msg), do: msg
+
+  defp format_error(:invalid_format) do
+    ~s|Invalid model format. Expected "provider:model" (e.g., "anthropic:claude-sonnet-4"), | <>
+      "got a bare model name without a provider prefix."
+  end
+
   defp format_error(reason), do: inspect(reason)
 
   @spec notify(pid(), Event.t()) :: Event.t()

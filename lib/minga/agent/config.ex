@@ -165,6 +165,27 @@ defmodule Minga.Agent.Config do
   @spec default_model() :: String.t()
   def default_model, do: @default_model
 
+  @doc """
+  Strips the "provider:" prefix from a model spec string.
+
+  Returns the bare model name. If there's no prefix, returns the string unchanged.
+
+  ## Examples
+
+      iex> Minga.Agent.Config.strip_provider_prefix("anthropic:claude-sonnet-4")
+      "claude-sonnet-4"
+
+      iex> Minga.Agent.Config.strip_provider_prefix("claude-sonnet-4")
+      "claude-sonnet-4"
+  """
+  @spec strip_provider_prefix(String.t()) :: String.t()
+  def strip_provider_prefix(model) when is_binary(model) do
+    case String.split(model, ":", parts: 2) do
+      [_provider, name] -> name
+      [name] -> name
+    end
+  end
+
   # Reads a single option from the Options ETS table, falling back to the
   # given default when the table doesn't exist yet (tests, standalone).
   @spec get(atom(), term()) :: term()
