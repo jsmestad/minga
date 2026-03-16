@@ -3,8 +3,11 @@ defmodule Minga.Agent.SlashCommandTest do
 
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.UIState
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
 
   describe "slash_command?/1" do
     test "returns true for slash-prefixed text" do
@@ -69,7 +72,10 @@ defmodule Minga.Agent.SlashCommandTest do
     defp mock_state(opts \\ []) do
       session = Keyword.get(opts, :session)
 
-      %{
+      %EditorState{
+        port_manager: nil,
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
         agent: %AgentState{
           session: session,
           status: :idle,
@@ -78,8 +84,7 @@ defmodule Minga.Agent.SlashCommandTest do
           buffer: nil
         },
         agent_ui: UIState.new(),
-        status_msg: nil,
-        buffers: %{active: nil, list: [], active_index: 0}
+        status_msg: nil
       }
     end
 

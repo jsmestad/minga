@@ -328,7 +328,9 @@ defmodule Minga.Theme do
       :heading2_fg,
       :heading3_fg,
       :hint_fg,
-      :dashboard_label
+      :dashboard_label,
+      :delimiter_dim,
+      :link_fg
     ]
 
     defstruct [
@@ -367,7 +369,9 @@ defmodule Minga.Theme do
       :heading2_fg,
       :heading3_fg,
       :hint_fg,
-      :dashboard_label
+      :dashboard_label,
+      :delimiter_dim,
+      :link_fg
     ]
 
     @type t :: %__MODULE__{
@@ -406,7 +410,9 @@ defmodule Minga.Theme do
             heading2_fg: Minga.Theme.color(),
             heading3_fg: Minga.Theme.color(),
             hint_fg: Minga.Theme.color(),
-            dashboard_label: Minga.Theme.color()
+            dashboard_label: Minga.Theme.color(),
+            delimiter_dim: Minga.Theme.color(),
+            link_fg: Minga.Theme.color()
           }
   end
 
@@ -554,7 +560,9 @@ defmodule Minga.Theme do
       heading2_fg: 0x51AFEF,
       heading3_fg: 0x98BE65,
       hint_fg: 0x5C6370,
-      dashboard_label: 0x61AFEF
+      dashboard_label: 0x61AFEF,
+      delimiter_dim: 0x3E4452,
+      link_fg: 0x61AFEF
     }
   end
 

@@ -1,6 +1,7 @@
 defmodule Minga.Editor.HighlightSyncTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
@@ -91,6 +92,77 @@ defmodule Minga.Editor.HighlightSyncTest do
       }
 
       assert HighlightSync.setup_for_buffer(state) == state
+    end
+  end
+
+  describe "setup_for_buffer_pid/2" do
+    test "assigns a buffer_id for the given buffer" do
+      state = base_state()
+      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+
+      # Should have a buffer_id mapping
+      assert Map.has_key?(new_state.highlight.buffer_ids, md_buf)
+      id = Map.get(new_state.highlight.buffer_ids, md_buf)
+      assert is_integer(id)
+      assert id > 0
+      # Reverse mapping should exist
+      assert Map.get(new_state.highlight.reverse_buffer_ids, id) == md_buf
+    end
+
+    test "sets last_active_at timestamp" do
+      state = base_state()
+      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+
+      assert Map.has_key?(new_state.highlight.last_active_at, md_buf)
+    end
+
+    test "initializes highlight entry for the buffer" do
+      state = base_state()
+      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+
+      hl = HighlightSync.get_highlight(new_state, md_buf)
+      assert hl != nil
+    end
+
+    test "is idempotent: second call reuses same buffer_id" do
+      state = base_state()
+      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+
+      state2 = HighlightSync.setup_for_buffer_pid(state, md_buf)
+      id1 = Map.get(state2.highlight.buffer_ids, md_buf)
+
+      state3 = HighlightSync.setup_for_buffer_pid(state2, md_buf)
+      id2 = Map.get(state3.highlight.buffer_ids, md_buf)
+
+      assert id1 == id2
+    end
+
+    test "assigns different ids for different buffers" do
+      state = base_state()
+      {:ok, buf1} = BufferServer.start_link(content: "# A", filetype: :markdown)
+      {:ok, buf2} = BufferServer.start_link(content: "# B", filetype: :markdown)
+
+      state2 = HighlightSync.setup_for_buffer_pid(state, buf1)
+      state3 = HighlightSync.setup_for_buffer_pid(state2, buf2)
+
+      id1 = Map.get(state3.highlight.buffer_ids, buf1)
+      id2 = Map.get(state3.highlight.buffer_ids, buf2)
+      assert id1 != id2
+    end
+
+    test "returns state unchanged for unsupported filetype" do
+      state = base_state()
+      {:ok, txt_buf} = BufferServer.start_link(content: "hello", filetype: :text)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, txt_buf)
+
+      refute Map.has_key?(new_state.highlight.buffer_ids, txt_buf)
     end
   end
 

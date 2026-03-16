@@ -20,6 +20,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
+  alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.AgentSession
   alias Minga.Editor.Commands.AgentSubStates
@@ -141,7 +142,9 @@ defmodule Minga.Editor.Commands.Agent do
   defp create_agent_buffer(state) do
     case AgentBufferSync.start_buffer() do
       buf when is_pid(buf) ->
-        AgentAccess.update_agent(state, fn a -> %{a | buffer: buf} end)
+        state = AgentAccess.update_agent(state, fn a -> %{a | buffer: buf} end)
+        # Register with tree-sitter parser for markdown highlighting
+        AgentLifecycle.setup_agent_highlight(state)
 
       _ ->
         state

@@ -17,6 +17,7 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
+  alias Minga.Editor.HighlightSync
   alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -67,6 +68,23 @@ defmodule Minga.Editor.AgentLifecycle do
   end
 
   @doc """
+  Registers the agent buffer with the tree-sitter parser for markdown highlighting.
+
+  Call once after the agent buffer is created. Sets up the language and
+  triggers an initial parse so highlights are ready when the buffer is viewed.
+  """
+  @spec setup_agent_highlight(state()) :: state()
+  def setup_agent_highlight(%EditorState{} = state) do
+    agent = AgentAccess.agent(state)
+
+    if is_pid(agent.buffer) do
+      HighlightSync.setup_for_buffer_pid(state, agent.buffer)
+    else
+      state
+    end
+  end
+
+  @doc """
   Syncs the agent buffer content with the current session messages.
 
   Called as a surface effect when the agent view receives new messages.
@@ -99,9 +117,14 @@ defmodule Minga.Editor.AgentLifecycle do
 
     # Cache the line index in the panel state so callers (scroll_context,
     # code_block_index_for_scroll) can read it without recomputing.
-    AgentAccess.update_agent_ui(state, fn ui ->
-      %{ui | cached_line_index: line_index}
-    end)
+    state =
+      AgentAccess.update_agent_ui(state, fn ui ->
+        %{ui | cached_line_index: line_index}
+      end)
+
+    # Trigger tree-sitter reparse for markdown highlighting.
+    # replace_content_force clears edit deltas, so we do a full reparse.
+    HighlightSync.request_reparse_buffer(state, buffer)
   end
 
   @doc """
