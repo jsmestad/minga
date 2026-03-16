@@ -122,6 +122,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     parser_exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    parser_exe.root_module.link_libc = true;
     parser_exe.linkLibrary(ts_lib);
     for (grammar_libs) |gl| parser_exe.linkLibrary(gl);
     b.installArtifact(parser_exe);
@@ -145,6 +146,7 @@ pub fn build(b: *std.Build) void {
     });
     tests.root_module.addImport("vaxis", vaxis.module("vaxis"));
     tests.root_module.addImport("build_options", build_options.createModule());
+    tests.root_module.link_libc = true;
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");

@@ -1,97 +1,137 @@
-; highlights.scm
-
 ; Literals
-
 (integer) @number
-(float) @number
+
+(float) @number.float
+
 (complex) @number
 
 (string) @string
-(string (string_content (escape_sequence) @string.escape))
+
+(string
+  (string_content
+    (escape_sequence) @string.escape))
 
 ; Comments
-
 (comment) @comment
 
-; Operators
+((program
+  .
+  (comment) @keyword.directive)
+  (#match? @keyword.directive "^#!/"))
 
+; Operators
 [
-  "?" ":=" "=" "<-" "<<-" "->" "->>"
-  "~" "|>" "||" "|" "&&" "&"
-  "<" "<=" ">" ">=" "==" "!="
-  "+" "-" "*" "/" "::" ":::"
-  "**" "^" "$" "@" ":"
+  "?"
+  ":="
+  "="
+  "<-"
+  "<<-"
+  "->"
+  "->>"
+  "~"
+  "|>"
+  "||"
+  "|"
+  "&&"
+  "&"
+  "<"
+  "<="
+  ">"
+  ">="
+  "=="
+  "!="
+  "+"
+  "-"
+  "*"
+  "/"
+  "::"
+  ":::"
+  "**"
+  "^"
+  "$"
+  "@"
+  ":"
+  "!"
   "special"
 ] @operator
 
 ; Punctuation
-
 [
-  "("  ")"
-  "{"  "}"
-  "["  "]"
-  "[[" "]]"
+  "("
+  ")"
+  "{"
+  "}"
+  "["
+  "]"
+  "[["
+  "]]"
 ] @punctuation.bracket
 
 (comma) @punctuation.delimiter
 
 ; Variables
-
 (identifier) @variable
 
 ; Functions
+(binary_operator
+  lhs: (identifier) @function
+  operator: "<-"
+  rhs: (function_definition))
 
 (binary_operator
-    lhs: (identifier) @function
-    operator: "<-"
-    rhs: (function_definition)
-)
-
-(binary_operator
-    lhs: (identifier) @function
-    operator: "="
-    rhs: (function_definition)
-)
+  lhs: (identifier) @function
+  operator: "="
+  rhs: (function_definition))
 
 ; Calls
+(call
+  function: (identifier) @function.call)
 
-(call function: (identifier) @function)
+(extract_operator
+  rhs: (identifier) @variable.member)
+
+function: (extract_operator
+  rhs: (identifier) @function.method.call)
 
 ; Parameters
+(parameters
+  (parameter
+    name: (identifier) @variable.parameter))
 
-(parameters (parameter name: (identifier) @variable.parameter))
-(arguments (argument name: (identifier) @variable.parameter))
+(arguments
+  (argument
+    name: (identifier) @variable.parameter))
 
 ; Namespace
-
-(namespace_operator lhs: (identifier) @namespace)
+(namespace_operator
+  lhs: (identifier) @module)
 
 (call
-    function: (namespace_operator rhs: (identifier) @function)
-)
+  function: (namespace_operator
+    rhs: (identifier) @function))
 
 ; Keywords
+(function_definition
+  name: "function" @keyword.function)
 
-(function_definition name: "function" @keyword.function)
-(function_definition name: "\\" @operator)
+(function_definition
+  name: "\\" @operator)
 
-[
-  "in"
-  (return)
-  (next)
-  (break)
-] @keyword
+(return) @keyword.return
 
 [
   "if"
   "else"
-] @conditional
+] @keyword.conditional
 
 [
   "while"
   "repeat"
   "for"
-] @repeat
+  "in"
+  (break)
+  (next)
+] @keyword.repeat
 
 [
   (true)
@@ -106,7 +146,3 @@
   (dots)
   (dot_dot_i)
 ] @constant.builtin
-
-; Error
-
-(ERROR) @error

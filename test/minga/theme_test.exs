@@ -165,6 +165,56 @@ defmodule Minga.ThemeTest do
         end
       end
 
+      test "#{theme_name} has markup entries for markdown highlighting" do
+        theme = Theme.get!(unquote(theme_name))
+
+        markup_captures = [
+          "markup.heading",
+          "markup.heading.1",
+          "markup.heading.2",
+          "markup.heading.3",
+          "markup.heading.4",
+          "markup.heading.5",
+          "markup.heading.6",
+          "markup.bold",
+          "markup.strong",
+          "markup.italic",
+          "markup.strikethrough",
+          "markup.raw",
+          "markup.raw.block",
+          "markup.link",
+          "markup.link.url",
+          "markup.link.label",
+          "markup.list",
+          "markup.list.checked",
+          "markup.list.unchecked",
+          "markup.quote"
+        ]
+
+        for capture <- markup_captures do
+          style = Theme.style_for_capture(theme, capture)
+          assert is_list(style), "expected style list for #{capture} in #{unquote(theme_name)}"
+
+          assert Keyword.has_key?(style, :fg),
+                 "expected :fg in style for #{capture} in #{unquote(theme_name)}"
+        end
+      end
+
+      test "#{theme_name} heading levels have distinct colors" do
+        theme = Theme.get!(unquote(theme_name))
+
+        heading_colors =
+          for level <- 1..6 do
+            style = Theme.style_for_capture(theme, "markup.heading.#{level}")
+            Keyword.get(style, :fg)
+          end
+
+        unique_colors = Enum.uniq(heading_colors)
+        # At least 4 distinct colors across 6 heading levels
+        assert length(unique_colors) >= 4,
+               "expected at least 4 distinct heading colors in #{unquote(theme_name)}, got #{length(unique_colors)}: #{inspect(heading_colors)}"
+      end
+
       test "#{theme_name} color groups are proper structs" do
         theme = Theme.get!(unquote(theme_name))
         assert %Theme.Editor{} = theme.editor
@@ -315,8 +365,8 @@ defmodule Minga.ThemeTest do
       syntax = Theme.agent_syntax(theme)
       agent = Theme.agent_theme(theme)
 
-      assert syntax["text.reference"] == [fg: agent.link_fg]
-      assert syntax["text.uri"] == [fg: agent.delimiter_dim]
+      assert syntax["markup.link.label"] == [fg: agent.link_fg]
+      assert syntax["markup.link.url"] == [fg: agent.delimiter_dim]
     end
 
     test "maps per-level heading captures to heading colors" do
@@ -324,11 +374,11 @@ defmodule Minga.ThemeTest do
       syntax = Theme.agent_syntax(theme)
       agent = Theme.agent_theme(theme)
 
-      assert syntax["text.title.h1"] == [fg: agent.heading1_fg, bold: true]
-      assert syntax["text.title.h2"] == [fg: agent.heading2_fg, bold: true]
-      assert syntax["text.title.h3"] == [fg: agent.heading3_fg, bold: true]
+      assert syntax["markup.heading.1"] == [fg: agent.heading1_fg, bold: true]
+      assert syntax["markup.heading.2"] == [fg: agent.heading2_fg, bold: true]
+      assert syntax["markup.heading.3"] == [fg: agent.heading3_fg, bold: true]
       # h4-h6 fall back to heading3 color without bold
-      assert syntax["text.title.h4"] == [fg: agent.heading3_fg]
+      assert syntax["markup.heading.4"] == [fg: agent.heading3_fg]
     end
 
     test "preserves non-overridden captures from base syntax" do
@@ -350,8 +400,8 @@ defmodule Minga.ThemeTest do
         assert syntax["punctuation.delimiter"] == [fg: agent.delimiter_dim],
                "#{name}: punctuation.delimiter should use delimiter_dim"
 
-        assert syntax["text.reference"] == [fg: agent.link_fg],
-               "#{name}: text.reference should use link_fg"
+        assert syntax["markup.link.label"] == [fg: agent.link_fg],
+               "#{name}: markup.link.label should use link_fg"
       end
     end
   end

@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 pub const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
+const predicates_mod = @import("predicates.zig");
 const query_loader = @import("query_loader.zig");
 
 /// A highlight span: byte range + capture index.
@@ -55,10 +56,13 @@ pub const Highlighter = struct {
     current_source: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    predicate_cache: std.StringHashMapUnmanaged(predicates_mod.PredicateTable),
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    /// Currently active predicate table (set during setLanguage)
+    current_predicates: ?*const predicates_mod.PredicateTable = null,
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -80,6 +84,7 @@ pub const Highlighter = struct {
             .parser = parser,
             .languages = .empty,
             .query_cache = .empty,
+            .predicate_cache = .empty,
             .injection_query_cache = .empty,
             .fold_query_cache = .empty,
             .indent_query_cache = .empty,
@@ -110,6 +115,8 @@ pub const Highlighter = struct {
         inline for (builtin_grammars) |entry| {
             if (entry.query) |query_source| {
                 self.prewarmOne(entry.name, query_source, &self.query_cache);
+                // Build predicate table for highlight queries
+                self.prewarmPredicates(entry.name);
             }
             if (entry.injection_query) |inj_source| {
                 self.prewarmOne(entry.name, inj_source, &self.injection_query_cache);
@@ -168,6 +175,16 @@ pub const Highlighter = struct {
         }
     }
 
+    /// Build predicate table for a language's highlight query (background thread).
+    fn prewarmPredicates(self: *Highlighter, name: []const u8) void {
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+        if (self.predicate_cache.get(name) != null) return;
+        const query = self.query_cache.get(name) orelse return;
+        const table = predicates_mod.PredicateTable.init(query, self.allocator);
+        self.predicate_cache.put(self.allocator, name, table) catch {};
+    }
+
     /// Free all resources.
     pub fn deinit(self: *Highlighter) void {
         // Wait for background pre-compilation to finish
@@ -179,6 +196,13 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.query_cache.deinit(self.allocator);
+
+        // Free all cached predicate tables
+        var pit = self.predicate_cache.iterator();
+        while (pit.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.predicate_cache.deinit(self.allocator);
 
         // Free all cached injection queries
         var iqit = self.injection_query_cache.iterator();
@@ -248,10 +272,21 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
                                 self.query = compiled;
                                 self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+                                // Build predicate table alongside the query
+                                if (self.predicate_cache.get(entry.name) == null) {
+                                    const table = predicates_mod.PredicateTable.init(compiled, self.allocator);
+                                    self.predicate_cache.put(self.allocator, entry.name, table) catch {};
+                                }
                             }
                         }
                     }
                 }
+            }
+            // Restore predicate table for current language
+            if (self.predicate_cache.getPtr(name)) |cached_ptr| {
+                self.current_predicates = cached_ptr;
+            } else {
+                self.current_predicates = null;
             }
 
             // Injection query
@@ -866,8 +901,14 @@ pub const Highlighter = struct {
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
 
+        const source = self.current_source orelse &.{};
+
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
+            // Evaluate predicates (#any-of?, #match?, #eq?, etc.)
+            if (self.current_predicates) |preds| {
+                if (!preds.evaluate(match, source)) continue;
+            }
             const captures = match.captures[0..match.capture_count];
             for (captures) |cap| {
                 const node = cap.node;
@@ -928,6 +969,10 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
+            // Evaluate predicates (#any-of?, #match?, #eq?, etc.)
+            if (self.current_predicates) |preds| {
+                if (!preds.evaluate(match, source)) continue;
+            }
             const captures = match.captures[0..match.capture_count];
             for (captures) |cap| {
                 try spans.append(alloc, .{
@@ -1094,6 +1139,11 @@ pub const Highlighter = struct {
                             var err_type: c.TSQueryError = c.TSQueryErrorNone;
                             if (c.ts_query_new(lang, qs.ptr, @intCast(qs.len), &err_off, &err_type)) |compiled| {
                                 self.query_cache.put(alloc, bg.name, compiled) catch {};
+                                // Build predicate table alongside query
+                                if (self.predicate_cache.get(bg.name) == null) {
+                                    const pt = predicates_mod.PredicateTable.init(compiled, alloc);
+                                    self.predicate_cache.put(alloc, bg.name, pt) catch {};
+                                }
                                 break :blk compiled;
                             }
                         }
@@ -1164,9 +1214,20 @@ pub const Highlighter = struct {
                 }
             }
 
+            // Lookup predicate table for this injection language
+            const inj_preds: ?*const predicates_mod.PredicateTable = blk: {
+                self.cache_mutex.lock();
+                defer self.cache_mutex.unlock();
+                break :blk self.predicate_cache.getPtr(lang_name);
+            };
+
             // Collect injection spans with remapped capture IDs
             var hl_match: c.TSQueryMatch = undefined;
             while (c.ts_query_cursor_next_match(hl_cursor, &hl_match)) {
+                // Evaluate predicates for injection language
+                if (inj_preds) |preds| {
+                    if (!preds.evaluate(hl_match, source)) continue;
+                }
                 const caps = hl_match.captures[0..hl_match.capture_count];
                 for (caps) |cap| {
                     const start = c.ts_node_start_byte(cap.node);
@@ -1796,4 +1857,54 @@ test "highlighter: getInjectionLanguagePredicate reads #set! predicates" {
         }
     }
     try std.testing.expect(found_set_predicate);
+}
+
+test "highlighter: predicates filter #any-of? correctly in Elixir" {
+    // Acid test: `defmodule` and `def` should be @keyword.function,
+    // but `IO` and `puts` should NOT be @keyword.function.
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+
+    const source = "defmodule Foo do\n  def bar do\n    IO.puts(\"hello\")\n  end\nend\n";
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections() catch try hl.highlight();
+    defer result.deinit();
+
+    // Find the capture index for "keyword.function" and "function.call"
+    var keyword_fn_id: ?u16 = null;
+    var function_call_id: ?u16 = null;
+    for (result.capture_names, 0..) |name, i| {
+        if (std.mem.eql(u8, name, "keyword.function")) keyword_fn_id = @intCast(i);
+        if (std.mem.eql(u8, name, "function.call")) function_call_id = @intCast(i);
+    }
+
+    // keyword.function should exist (from defmodule/def patterns)
+    try std.testing.expect(keyword_fn_id != null);
+
+    // Check that "puts" (byte offset in source) is NOT tagged as keyword.function
+    const puts_start = std.mem.indexOf(u8, source, "puts") orelse unreachable;
+    const puts_end = puts_start + 4;
+
+    for (result.spans) |span| {
+        if (span.start_byte == puts_start and span.end_byte == puts_end) {
+            // "puts" should NOT be keyword.function
+            try std.testing.expect(span.capture_id != keyword_fn_id.?);
+        }
+    }
+
+    // Check that "defmodule" IS tagged as keyword.function
+    const defmod_start: u32 = 0;
+    const defmod_end: u32 = 9; // "defmodule"
+    var found_defmodule_keyword = false;
+    for (result.spans) |span| {
+        if (span.start_byte == defmod_start and span.end_byte == defmod_end) {
+            if (keyword_fn_id) |kid| {
+                if (span.capture_id == kid) found_defmodule_keyword = true;
+            }
+        }
+    }
+    try std.testing.expect(found_defmodule_keyword);
 }

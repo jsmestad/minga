@@ -281,13 +281,30 @@ defmodule Minga.Theme.DoomOne do
       # ── Preprocessor ───────────────────────────────────────────────────
       "preproc" => [fg: @magenta, bold: true],
 
-      # ── Text / markup ──────────────────────────────────────────────────
-      "text.title" => [fg: @red, bold: true],
-      "text.strong" => [fg: @orange, bold: true],
-      "text.emphasis" => [fg: @magenta, italic: true],
-      "text.literal" => [fg: @green],
-      "text.uri" => [fg: @cyan, underline: true],
-      "text.reference" => [fg: @blue],
+      # ── Markup (nvim-treesitter / tree-sitter standard) ────────────────
+      "markup.heading" => [fg: @red, bold: true],
+      "markup.heading.1" => [fg: @magenta, bold: true],
+      "markup.heading.2" => [fg: @blue, bold: true],
+      "markup.heading.3" => [fg: @green, bold: true],
+      "markup.heading.4" => [fg: @yellow, bold: true],
+      "markup.heading.5" => [fg: @cyan, bold: true],
+      "markup.heading.6" => [fg: @orange, bold: true],
+      "markup.bold" => [fg: @orange, bold: true],
+      "markup.strong" => [fg: @orange, bold: true],
+      "markup.italic" => [fg: @magenta, italic: true],
+      "markup.strikethrough" => [fg: @grey, strikethrough: true],
+      "markup.raw" => [fg: @green],
+      "markup.raw.block" => [fg: @green],
+      "markup.raw.inline" => [fg: @green],
+      "markup.link" => [fg: @cyan],
+      "markup.link.url" => [fg: @cyan, underline: true],
+      "markup.link.label" => [fg: @blue],
+      "markup.list" => [fg: @red],
+      "markup.list.numbered" => [fg: @red],
+      "markup.list.unnumbered" => [fg: @red],
+      "markup.list.checked" => [fg: @green],
+      "markup.list.unchecked" => [fg: @grey],
+      "markup.quote" => [fg: @grey, italic: true],
 
       # ── CSS-specific ───────────────────────────────────────────────────
       "charset" => [fg: @magenta, bold: true],
