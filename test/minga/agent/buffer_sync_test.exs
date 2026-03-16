@@ -66,6 +66,13 @@ defmodule Minga.Agent.BufferSyncTest do
       assert [{0, :usage}] = index
     end
 
+    test "classifies system message lines as :system" do
+      messages = [{:system, "API key status:\n  ✗ Anthropic\n  ✗ Google", :info}]
+      index = BufferSync.line_message_index(messages)
+
+      assert [{0, :system}, {0, :system}, {0, :system}] = index
+    end
+
     test "handles mixed message types" do
       messages = [
         {:user, "question"},
@@ -90,6 +97,23 @@ defmodule Minga.Agent.BufferSyncTest do
       index = BufferSync.line_message_index(messages)
 
       assert [{0, :tool}] = index
+    end
+  end
+
+  describe "messages_to_markdown_with_offsets/1" do
+    test "system messages produce their text content" do
+      messages = [{:system, "API key status:\n  ✗ Anthropic", :info}]
+      {text, offsets} = BufferSync.messages_to_markdown_with_offsets(messages)
+
+      assert text == "API key status:\n  ✗ Anthropic"
+      assert [{0, 0, 2}] = offsets
+    end
+
+    test "system error messages produce their text content" do
+      messages = [{:system, "Something went wrong", :error}]
+      {text, _offsets} = BufferSync.messages_to_markdown_with_offsets(messages)
+
+      assert text == "Something went wrong"
     end
   end
 
