@@ -2,7 +2,7 @@
 
 **Vim motions. Emacs extensibility. Built for the age of AI agents.**
 
-[Getting Started](https://jsmestad.github.io/minga/getting-started.html) | [Documentation](https://jsmestad.github.io/minga/) | [Architecture](https://jsmestad.github.io/minga/architecture.html) | [Roadmap](https://jsmestad.github.io/minga/roadmap.html)
+[Getting Started](https://jsmestad.github.io/minga/getting-started.html) | [Documentation](https://jsmestad.github.io/minga/) | [Architecture](https://jsmestad.github.io/minga/architecture.html)
 
 <!-- TODO: add a screenshot or terminal recording here -->
 

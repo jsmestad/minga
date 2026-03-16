@@ -35,7 +35,6 @@ defmodule Minga.MixProject do
           "docs/PROJECTS.md",
           # Architecture
           "docs/ARCHITECTURE.md",
-          "docs/DIAGRAMS.md",
           "docs/PROTOCOL.md",
           "docs/RENDERING_GAPS.md",
           "docs/PERFORMANCE.md",
@@ -64,7 +63,6 @@ defmodule Minga.MixProject do
           ],
           Architecture: [
             "docs/ARCHITECTURE.md",
-            "docs/DIAGRAMS.md",
             "docs/PROTOCOL.md",
             "docs/RENDERING_GAPS.md",
             "docs/PERFORMANCE.md"

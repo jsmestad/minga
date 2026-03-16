@@ -10,29 +10,39 @@ Most text editors are single-threaded programs with shared state. Buffers, rende
 
 Minga splits the editor into **two OS processes** with completely isolated memory:
 
-```
-┌─────────────────────────────────┐     ┌───────────────────────────┐
-│         BEAM (Elixir)           │     │  minga-renderer (Zig)     │
-│                                 │     │                           │
-│  ┌───────────────────────────┐  │     │  Terminal rendering       │
-│  │ Supervisor ("Stamm")      │  │     │  Keyboard input capture   │
-│  │  ├── Buffer.Supervisor    │  │     │  Screen drawing           │
-│  │  │    ├── Buffer A        │  │ ◄──►│  Layout regions           │
-│  │  │    ├── Buffer B        │  │     │                           │
-│  │  │    ├── Buffer C        │  │     └───────────────────────────┘
-│  │  │    ├── Git.Buffer A    │  │
-│  │  │    └── Git.Buffer B    │  │     ┌───────────────────────────┐
-│  │  ├── Parser.Manager ──────│──│─────│  minga-parser (Zig)       │
-│  │  ├── Port.Manager ────────│──│─────│  Tree-sitter (39 grammars)│
-│  │  └── Editor               │  │     │  Incremental parsing      │
-│  └───────────────────────────┘  │     │  Highlight queries        │
-│                                 │     └───────────────────────────┘
-│                                 │
-│  Command.Registry               │
-│  Filetype.Registry              │
-│  Grammar.Registry (ETS)         │
-│  FileWatcher                    │
-└─────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph BEAM["BEAM (Elixir)"]
+        ED2["Editor<br/>orchestration"]
+        BUF["Buffer<br/>GenServers"]
+        CMD["Commands &<br/>Keymaps"]
+        MODE["Mode FSM<br/>normal/insert/visual"]
+        PORT["Port.Manager"]
+
+        ED2 <--> BUF
+        ED2 <--> CMD
+        ED2 <--> MODE
+        ED2 --> PORT
+    end
+
+    subgraph ZIG["Zig + libvaxis"]
+        EVLOOP["Event Loop"]
+        PROTO["Protocol<br/>decoder/encoder"]
+        RENDER["Renderer<br/>cell grid"]
+        TS["Tree-sitter<br/>parser"]
+        TTY["/dev/tty<br/>terminal I/O"]
+
+        EVLOOP <--> PROTO
+        EVLOOP <--> RENDER
+        EVLOOP <--> TS
+        RENDER <--> TTY
+    end
+
+    PORT -- "render commands<br/>(draw_text, set_cursor, clear)" --> PROTO
+    PROTO -- "input events<br/>(key_press, resize, highlights)" --> PORT
+
+    style BEAM fill:#1a1a2e,stroke:#6c3483,color:#fff
+    style ZIG fill:#1a2e1a,stroke:#1e8449,color:#fff
 ```
 
 The two processes communicate over a binary protocol on stdin/stdout. They share no memory. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
@@ -51,7 +61,7 @@ Every buffer in Minga is its own BEAM process (a GenServer). Processes don't sha
 
 ```
 Buffer.Supervisor (DynamicSupervisor, one_for_one)
-├── Buffer "main.ex"     ← this process owns its own state
+├── Buffer "main.ex"     ← owns its own state
 ├── Buffer "router.ex"   ← completely independent memory
 └── Buffer "schema.ex"   ← completely independent memory
 ```
@@ -96,81 +106,130 @@ BEAM processes are organized into supervision trees that encode dependency relat
 
 ### High-level overview
 
-The top-level supervisor splits the system into four tiers. Each tier is isolated so that a crash in one doesn't cascade into the others:
+The top-level supervisor splits the system into four tiers. Each tier is isolated so that a crash in one doesn't cascade into the others. `rest_for_one` means tiers restart in order: if Foundation restarts, everything below it restarts too (they depend on config and events). But a crash in Runtime doesn't touch Services, Buffers, or Foundation.
 
-```
-Minga.Supervisor (rest_for_one)
-├── Foundation.Supervisor    ← config, keymaps, events, registries
-├── Buffer.Supervisor        ← one process per open file + git tracking
-├── Services.Supervisor      ← LSP, extensions, diagnostics, agents
-└── Runtime.Supervisor       ← renderer, parser, editor orchestration
-```
+```mermaid
+graph TD
+    SUP["Minga.Supervisor<br/><i>rest_for_one</i>"]
 
-`rest_for_one` means tiers restart in order: if Foundation restarts, everything below it restarts too (they depend on config and events). But a crash in Runtime doesn't touch Services, Buffers, or Foundation.
+    SUP --> FOUND["Foundation.Supervisor<br/><i>config, keymaps, events, registries</i>"]
+    SUP --> BUFSUP["Buffer.Supervisor<br/><i>one process per open file + git tracking</i>"]
+    SUP --> SVC["Services.Supervisor<br/><i>LSP, extensions, diagnostics, agents</i>"]
+    SUP --> RT["Runtime.Supervisor<br/><i>renderer, parser, editor orchestration</i>"]
+
+    RT -. "stdin/stdout" .-> ZIG["Zig Processes<br/><i>renderer + parser</i>"]
+
+    style SUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
+    style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
+    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
+    style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
+```
 
 ### Foundation tier
 
 Stateless registries and configuration that everything else depends on. These rarely fail.
 
-```
-Foundation.Supervisor (rest_for_one)
-├── Language.Registry    ← ETS, language definitions
-├── Events               ← Registry(:duplicate), pub/sub bus
-├── Config.Options       ← typed option registry (ETS, read_concurrency)
-├── Keymap.Active        ← mutable keymap store (ETS, read_concurrency)
-├── Config.Hooks         ← lifecycle hook registry (Agent)
-├── Config.Advice        ← before/after command advice (ETS, read_concurrency)
-└── Filetype.Registry    ← static data
+```mermaid
+graph TD
+    FOUND["Foundation.Supervisor<br/><i>rest_for_one</i>"]
+    FOUND --> LANG["Language.Registry"]
+    FOUND --> EVENTS["Events"]
+    FOUND --> OPTS["Config.Options"]
+    FOUND --> KEYMAP["Keymap.Active"]
+    FOUND --> HOOKS["Config.Hooks"]
+    FOUND --> ADVICE["Config.Advice"]
+    FOUND --> FT["Filetype.Registry"]
+
+    style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
 ```
 
 ### Buffer tier
 
 One process per open file, plus per-buffer git tracking. `one_for_one` means each buffer is independent: one buffer crashing doesn't affect any other.
 
+```mermaid
+graph TD
+    BUFSUP["Buffer.Supervisor<br/><i>DynamicSupervisor, one_for_one</i>"]
+    BUFSUP --> B1["Buffer: main.ex"]
+    BUFSUP --> B2["Buffer: router.ex"]
+    BUFSUP --> B3["Buffer: schema.ex"]
+    BUFSUP --> GB1["Git.Buffer: main.ex"]
+    BUFSUP --> GB2["Git.Buffer: router.ex"]
+    BUFSUP --> BF1["Buffer.Fork: main.ex<br/><i>(agent session A)</i>"]
+
+    style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
+    style B1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style B2 fill:#2471a3,stroke:#1a5276,color:#fff
+    style B3 fill:#2471a3,stroke:#1a5276,color:#fff
+    style GB1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style GB2 fill:#2471a3,stroke:#1a5276,color:#fff
+    style BF1 fill:#2471a3,stroke:#1a5276,color:#fff,stroke-dasharray: 5 5
 ```
-Buffer.Supervisor (DynamicSupervisor, one_for_one)
-├── Buffer "main.ex"
-├── Buffer "router.ex"
-├── Git.Buffer "main.ex"     ← caches HEAD content, computes line diffs
-├── Git.Buffer "router.ex"
-└── Buffer.Fork processes    ← (planned) per-agent forks for concurrent editing
-```
+
+> **Note:** `Buffer.Fork` processes (dashed border) are planned. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge).
 
 ### Services tier
 
 Higher-level features that depend on Foundation and Buffers but are independent of the renderer. A git tracking crash restarts only Git.Tracker. An LSP server crash restarts only that client.
 
-```
-Services.Supervisor (rest_for_one)
-├── Services.Independent (one_for_one)
-│    ├── Git.Tracker          ← subscribes to buffer events, ETS registry
-│    ├── CommandOutput.Registry ← Registry(:unique)
-│    ├── Eval.TaskSupervisor  ← supervised tasks for user code
-│    ├── Command.Registry     ← ETS-backed, aggregates commands from Providers
-│    ├── Fold.Registry        ← fold state
-│    └── Diagnostics          ← source-agnostic diagnostic aggregation (ETS)
-├── Extension.Registry        ← extension metadata store (Agent)
-├── Extension.Supervisor      ← DynamicSupervisor for extension processes
-├── Config.Loader             ← config file discovery and evaluation
-├── LSP.Supervisor            ← DynamicSupervisor for LSP client processes
-├── LSP.SyncServer            ← subscribes to buffer events, manages LSP sync
-├── Project                   ← project root detection, known-projects, file cache
-└── Agent.Supervisor          ← DynamicSupervisor for agent sessions
-     └── Agent.Session        ← one per active session (provider, conversation, tools)
+```mermaid
+graph TD
+    SVC["Services.Supervisor<br/><i>rest_for_one</i>"]
+    SVC --> INDEP["Services.Independent<br/><i>one_for_one</i>"]
+    INDEP --> GIT["Git.Tracker"]
+    INDEP --> TASKSUP["Eval.TaskSupervisor"]
+    INDEP --> CMDREG["Command.Registry"]
+    INDEP --> DIAG["Diagnostics"]
+    SVC --> EXTREG["Extension.Registry"]
+    SVC --> EXTSUP["Extension.Supervisor"]
+    SVC --> LOADER["Config.Loader"]
+    SVC --> LSPSUP["LSP.Supervisor<br/><i>DynamicSupervisor</i>"]
+    LSPSUP --> LSP1["LSP Client: elixir-ls"]
+    LSPSUP --> LSP2["LSP Client: lua-ls"]
+    SVC --> SYNC["LSP.SyncServer"]
+    SVC --> PROJ["Project"]
+    SVC --> AGENTSUP["Agent.Supervisor<br/><i>DynamicSupervisor</i>"]
+    AGENTSUP --> AS1["Agent.Session<br/><i>Claude (refactoring)</i>"]
+    AGENTSUP --> AS2["Agent.Session<br/><i>Claude (tests)</i>"]
+
+    style SVC fill:#6c3483,stroke:#4a235a,color:#fff
+    style INDEP fill:#6c3483,stroke:#4a235a,color:#fff
+    style LSPSUP fill:#1a5276,stroke:#154360,color:#fff
+    style AGENTSUP fill:#1a5276,stroke:#154360,color:#fff
+    style TASKSUP fill:#1a5276,stroke:#154360,color:#fff
+    style AS1 fill:#884ea0,stroke:#6c3483,color:#fff
+    style AS2 fill:#884ea0,stroke:#6c3483,color:#fff
+    style LSP1 fill:#2471a3,stroke:#1a5276,color:#fff
+    style LSP2 fill:#2471a3,stroke:#1a5276,color:#fff
 ```
 
 ### Runtime tier
 
 The tightly-coupled trio that handles rendering and user interaction. `rest_for_one` means if the Port Manager (renderer) fails, the Editor restarts too since it depends on the renderer. But buffers are untouched: your undo history, cursor positions, and unsaved changes are all preserved.
 
-```
-Runtime.Supervisor (one_for_one, conditional)
-├── Editor.Watchdog           ← SIGUSR1 recovery (independent leaf)
-├── FileWatcher               ← OS file notifications (independent leaf)
-└── Editor.Supervisor (rest_for_one)
-     ├── Parser.Manager       ← owns the minga-parser Zig process
-     ├── Port.Manager         ← owns the minga-renderer Zig process
-     └── Editor               ← orchestration, depends on Parser + Port
+```mermaid
+graph TD
+    RT["Runtime.Supervisor<br/><i>one_for_one</i>"]
+    RT --> WD["Editor.Watchdog"]
+    RT --> FW["FileWatcher"]
+    RT --> EDSUP["Editor.Supervisor<br/><i>rest_for_one</i>"]
+    EDSUP --> PARSER["Parser.Manager"]
+    EDSUP --> PM["Port.Manager"]
+    EDSUP --> ED["Editor"]
+
+    PM -. "stdin/stdout<br/>Port protocol" .-> ZIG_R["minga-renderer<br/><i>Zig + libvaxis</i>"]
+    PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
+
+    style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style EDSUP fill:#6c3483,stroke:#4a235a,color:#fff
+    style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style ZIG_R fill:#1e8449,stroke:#196f3d,color:#fff
+    style ZIG_P fill:#1e8449,stroke:#196f3d,color:#fff
 ```
 
 ### Why this structure matters
@@ -208,7 +267,37 @@ BEAM and the frontend communicate via `{:packet, 4}`: each message is prefixed w
 
 Every render frame follows the pattern: `clear` → N × `draw_text` → `set_cursor` → `set_cursor_shape` → `batch_end`. The frontend double-buffers and only writes changed cells to the terminal (TUI) or triggers a display refresh (GUI).
 
-The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and diagnostics. For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. That document is the authoritative reference for anyone implementing a Minga frontend.
+The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and diagnostics:
+
+```mermaid
+graph LR
+    subgraph ZigToBEAM["Zig → BEAM"]
+        K["0x01 Key Press<br/>codepoint::32, mods::8"]
+        R["0x02 Resize<br/>width::16, height::16"]
+        RDY["0x03 Ready<br/>width::16, height::16"]
+        M["0x04 Mouse<br/>row, col, button, mods, type"]
+        HS["0x30 Highlight Spans<br/>version, count, [start, end, id]"]
+        HN["0x31 Highlight Names<br/>count, [len, name]"]
+        GL["0x32 Grammar Loaded<br/>success, name"]
+    end
+
+    subgraph BEAMToZig["BEAM → Zig"]
+        DT["0x10 Draw Text<br/>row, col, fg, bg, attrs, text"]
+        SC["0x11 Set Cursor<br/>row::16, col::16"]
+        CL["0x12 Clear"]
+        BE["0x13 Batch End<br/>(flush frame)"]
+        CS["0x15 Cursor Shape<br/>block/beam/underline"]
+        SL["0x20 Set Language"]
+        PB["0x21 Parse Buffer"]
+        SH["0x22 Set Highlight Query"]
+        LG["0x23 Load Grammar"]
+    end
+
+    style ZigToBEAM fill:#1a2e1a,stroke:#1e8449,color:#fff
+    style BEAMToZig fill:#1a1a2e,stroke:#6c3483,color:#fff
+```
+
+For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. That document is the authoritative reference for anyone implementing a Minga frontend.
 
 Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend.
 
@@ -244,29 +333,41 @@ See **[docs/RENDERING_GAPS.md](RENDERING_GAPS.md)** for the full rendering pipel
 
 ## Life of a Keystroke
 
-Here's what happens when you press `dd` (delete a line) in normal mode:
+Here's what happens when you press `dd` (delete a line) in normal mode. The entire round-trip takes under 1ms on the BEAM side.
 
-```
-1. Terminal delivers raw bytes to the Zig process
-2. libvaxis decodes the key event (codepoint + modifiers)
-3. Zig encodes a key_press message (0x01) and writes to stdout
-4. BEAM Port reads the length-prefixed message
-5. Port.Manager decodes the event and sends it to the Editor process
-6. Editor passes the key to the Normal mode FSM
-7. First `d`: Mode returns {:pending, :operator_pending}, waiting for motion
-8. Editor transitions to operator-pending mode
-9. Second `d`: Mode recognizes `dd`, returns {:execute, :delete_line}
-10. Editor calls Operator.delete_line on the buffer's GenServer
-11. Buffer.Server updates its gap buffer, pushes undo entry
-12. Editor takes a render snapshot from the buffer
-13. Renderer converts buffer state into draw_text commands
-14. Port.Manager batches commands and writes to Port stdin
-15. Zig process reads commands, updates its cell grid
-16. batch_end triggers a flush; changed cells written to terminal
-17. You see the line disappear
-```
+```mermaid
+sequenceDiagram
+    participant Term as Terminal
+    participant Zig as Zig Process
+    participant PM as Port.Manager
+    participant Ed as Editor
+    participant Mode as Mode.Normal
+    participant Buf as Buffer.Server
 
-Total time: under 1ms for the BEAM side. The Zig render is practically instant for typical terminal sizes.
+    Term->>Zig: raw key bytes
+    Zig->>Zig: libvaxis decodes key
+    Zig->>PM: key_press(0x01) via stdout
+
+    Note over Ed,Mode: First 'd'
+    PM->>Ed: {:key_event, :d}
+    Ed->>Mode: handle_key(:d)
+    Mode-->>Ed: {:pending, :operator_pending}
+    Ed->>Ed: transition to OperatorPending
+
+    Note over Ed,Buf: Second 'd'
+    PM->>Ed: {:key_event, :d}
+    Ed->>Mode: handle_key(:d)
+    Mode-->>Ed: {:execute, :delete_line}
+    Ed->>Buf: Operator.delete_line()
+    Buf->>Buf: update gap buffer + push undo
+
+    Note over Ed,Term: Render cycle
+    Ed->>Ed: build render snapshot
+    Ed->>PM: [clear, draw_text x N, set_cursor, batch_end]
+    PM->>Zig: render commands via stdin
+    Zig->>Zig: update cell grid (double-buffered)
+    Zig->>Term: write changed cells
+```
 
 ### Keymap Scopes
 
@@ -344,38 +445,32 @@ The `handle_mouse/7` callback is optional on `Input.Handler`. Handlers that don'
 
 Tree-sitter parsing runs in the Zig process to avoid sending parse trees across the protocol boundary. The BEAM controls *what* to parse and *how* to color it; Zig does the actual parsing.
 
-```
-File opened
-    │
-    ▼
-BEAM detects filetype (:elixir)
-    │
-    ▼
-BEAM sends set_language("elixir") to Zig
-    │
-    ▼
-Zig selects pre-compiled grammar + embedded highlight query
-    │
-    ▼
-BEAM sends parse_buffer(version, content) to Zig
-    │
-    ▼
-Zig parses with tree-sitter, runs highlight query
-    │
-    ▼
-Zig sends highlight_names (capture names) + highlight_spans back
-    │
-    ▼
-BEAM maps capture names → Doom One theme colors
-    │
-    ▼
-BEAM slices visible lines at span boundaries using binary_part (O(1))
-    │
-    ▼
-BEAM emits draw_text commands with per-segment fg/bg/attrs
-    │
-    ▼
-Zig renders colored text to terminal
+```mermaid
+sequenceDiagram
+    participant Ed as Editor
+    participant PM as Port.Manager
+    participant Zig as Zig Process
+    participant TS as Tree-sitter
+
+    Note over Ed: File opened, filetype detected
+    Ed->>PM: set_language("elixir")
+    PM->>Zig: 0x20 Set Language
+
+    Ed->>PM: parse_buffer(version, content)
+    PM->>Zig: 0x21 Parse Buffer
+    Zig->>TS: parse with grammar
+    TS-->>Zig: syntax tree
+    Zig->>Zig: run highlight query
+
+    Zig->>PM: 0x31 highlight_names
+    Zig->>PM: 0x30 highlight_spans
+    PM->>Ed: spans + capture names
+
+    Note over Ed: Map captures → theme colors
+    Ed->>Ed: slice visible lines at span boundaries
+    Ed->>PM: draw_text with per-segment colors
+    PM->>Zig: 0x10 Draw Text commands
+    Zig->>Zig: render colored text to terminal
 ```
 
 All 39 grammars are compiled into the Zig binary. Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.
@@ -386,19 +481,28 @@ Users can override queries by placing `.scm` files in `~/.config/minga/queries/{
 
 ## Buffer Architecture
 
-Each buffer is a GenServer wrapping a gap buffer, the classic data structure used by Emacs since the 1980s. Text is stored as two binaries with a "gap" at the cursor position:
+Each buffer is a GenServer wrapping a gap buffer, the classic data structure used by Emacs since the 1980s. Text is stored as two binaries with a "gap" at the cursor position. Insertions and deletions at the cursor are O(1). Only the text on one side of the gap changes. Moving the cursor is O(k) where k is the distance moved, but since most movements are small (next word, next line), this is fast in practice.
 
+```mermaid
+graph TD
+    subgraph Document["Gap Buffer Internals"]
+        direction LR
+        BEFORE["before: &quot;Hello&quot;"]
+        GAP["◄ cursor ►"]
+        AFTER["after: &quot;, world!&quot;"]
+        BEFORE --- GAP --- AFTER
+    end
+
+    subgraph Operations["O(1) Operations"]
+        INS["Insert 'X' at cursor<br/>before → &quot;HelloX&quot;<br/>after unchanged"]
+        DEL["Delete before cursor<br/>before → &quot;Hell&quot;<br/>after unchanged"]
+    end
+
+    Document --> Operations
+
+    style Document fill:#1a1a2e,stroke:#6c3483,color:#fff
+    style Operations fill:#1a2e1a,stroke:#1e8449,color:#fff
 ```
-Content: "Hello, world!"
-Cursor after "Hello"
-
-before: "Hello"
-after:  ", world!"
-
-Insert 'X': before becomes "HelloX", no copying of ", world!"
-```
-
-Insertions and deletions at the cursor are O(1). Only the text on one side of the gap changes. Moving the cursor is O(k) where k is the distance moved, but since most movements are small (next word, next line), this is fast in practice.
 
 ### Byte-indexed positions
 
