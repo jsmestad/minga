@@ -568,6 +568,42 @@ defmodule Minga.Theme do
 
   def agent_theme(%__MODULE__{agent: agent}), do: agent
 
+  @doc """
+  Returns a syntax theme map customized for the agent chat buffer.
+
+  Overrides delimiter and punctuation captures to use the agent theme's
+  `delimiter_dim` color, so tree-sitter naturally dims markdown syntax
+  characters (`**`, `*`, `` ` ``, `#`, ` ``` `, brackets, list markers).
+  Link text uses `link_fg` and URLs use `delimiter_dim`.
+
+  The base syntax map comes from the editor's global theme; only the
+  agent-specific overrides are merged on top.
+  """
+  @spec agent_syntax(t()) :: syntax()
+  def agent_syntax(%__MODULE__{syntax: base_syntax} = theme) do
+    agent = agent_theme(theme)
+    dim = agent.delimiter_dim
+
+    Map.merge(base_syntax, %{
+      # Markdown delimiters: **, *, `, ```, brackets in links
+      "punctuation.delimiter" => [fg: dim],
+      # Heading markers (#), list markers (-, *, +, 1.)
+      "punctuation.special" => [fg: dim],
+      # Link text gets link_fg
+      "text.reference" => [fg: agent.link_fg],
+      # URLs get dimmed
+      "text.uri" => [fg: dim],
+      # Per-level heading colors (from level-specific tree-sitter captures)
+      "text.title" => [fg: agent.heading1_fg, bold: true],
+      "text.title.h1" => [fg: agent.heading1_fg, bold: true],
+      "text.title.h2" => [fg: agent.heading2_fg, bold: true],
+      "text.title.h3" => [fg: agent.heading3_fg, bold: true],
+      "text.title.h4" => [fg: agent.heading3_fg],
+      "text.title.h5" => [fg: agent.heading3_fg],
+      "text.title.h6" => [fg: agent.heading3_fg]
+    })
+  end
+
   @doc "Returns the dashboard theme section, falling back to a basic default."
   @spec dashboard_theme(t()) :: Dashboard.t()
   def dashboard_theme(%__MODULE__{dashboard: nil}) do

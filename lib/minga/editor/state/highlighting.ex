@@ -20,7 +20,8 @@ defmodule Minga.Editor.State.Highlighting do
           buffer_ids: %{pid() => non_neg_integer()},
           reverse_buffer_ids: %{non_neg_integer() => pid()},
           next_buffer_id: non_neg_integer(),
-          last_active_at: %{pid() => integer()}
+          last_active_at: %{pid() => integer()},
+          syntax_overrides: %{pid() => Minga.Theme.syntax()}
         }
 
   defstruct highlights: %{},
@@ -28,5 +29,6 @@ defmodule Minga.Editor.State.Highlighting do
             buffer_ids: %{},
             reverse_buffer_ids: %{},
             next_buffer_id: 1,
-            last_active_at: %{}
+            last_active_at: %{},
+            syntax_overrides: %{}
 end
