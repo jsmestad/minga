@@ -205,6 +205,19 @@ defmodule Minga.Agent.Events do
     {state, [{:render, 16}]}
   end
 
+  # A message was queued (steer or follow-up): trigger render so the pending
+  # display can update. The queue contents live in Session, not EditorState,
+  # so no state mutation is needed here.
+  def handle(state, {:prompt_queued, _content, _type}) do
+    {state, [{:render, 16}]}
+  end
+
+  # Both queues were recalled (dequeue or abort+restore). Trigger a render to
+  # clear the pending display.
+  def handle(state, :queues_recalled) do
+    {state, [{:render, 16}]}
+  end
+
   def handle(state, _unknown) do
     {state, []}
   end

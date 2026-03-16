@@ -59,7 +59,9 @@ defmodule Minga.Agent.Session do
           model_name: String.t(),
           provider_name: String.t(),
           save_timer: reference() | nil,
-          branches: [Branch.t()]
+          branches: [Branch.t()],
+          steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
+          follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]]
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -77,7 +79,7 @@ defmodule Minga.Agent.Session do
   (for multi-modal messages with images).
   """
   @spec send_prompt(GenServer.server(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
-          :ok | {:error, term()}
+          :ok | {:queued, :steering} | {:error, term()}
   def send_prompt(session, content) when is_binary(content) or is_list(content) do
     GenServer.call(session, {:send_prompt, content})
   end
@@ -293,6 +295,83 @@ defmodule Minga.Agent.Session do
     GenServer.cast(session, {:add_system_message, text, level})
   end
 
+  @doc """
+  Queues a message as a steering prompt (injected between tool calls on the next turn).
+
+  When the agent is idle, behaves identically to `send_prompt/2`.
+  Returns `{:queued, :steering}` when the message was queued.
+  """
+  @spec queue_steering(GenServer.server(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          :ok | {:queued, :steering} | {:error, term()}
+  def queue_steering(session, content) when is_binary(content) or is_list(content) do
+    GenServer.call(session, {:send_prompt, content})
+  end
+
+  @doc """
+  Queues a message as a follow-up (sent automatically once the current agent run finishes).
+
+  When the agent is idle, behaves identically to `send_prompt/2`.
+  Returns `{:queued, :follow_up}` when the message was queued.
+  """
+  @spec queue_follow_up(GenServer.server(), String.t() | [ReqLLM.Message.ContentPart.t()]) ::
+          :ok | {:queued, :follow_up} | {:error, term()}
+  def queue_follow_up(session, content) when is_binary(content) or is_list(content) do
+    GenServer.call(session, {:send_follow_up, content})
+  end
+
+  @doc "Pops and returns all pending steering messages, clearing the steering queue."
+  @spec dequeue_steering(GenServer.server()) ::
+          [String.t() | [ReqLLM.Message.ContentPart.t()]]
+  def dequeue_steering(session) do
+    GenServer.call(session, :dequeue_steering)
+  end
+
+  @doc """
+  Returns both queues and clears them. Used by abort (Ctrl-C) and dequeue (Alt+Up)
+  so pending messages can be restored to the prompt input.
+  """
+  @spec recall_queues(GenServer.server()) ::
+          {[String.t() | [ReqLLM.Message.ContentPart.t()]],
+           [String.t() | [ReqLLM.Message.ContentPart.t()]]}
+  def recall_queues(session) do
+    GenServer.call(session, :recall_queues)
+  end
+
+  @doc "Clears both queues without returning their contents."
+  @spec clear_queues(GenServer.server()) :: :ok
+  def clear_queues(session) do
+    GenServer.call(session, :clear_queues)
+  end
+
+  @doc "Returns both queues without modifying them (for pending message display)."
+  @spec get_queued_messages(GenServer.server()) ::
+          {[String.t() | [ReqLLM.Message.ContentPart.t()]],
+           [String.t() | [ReqLLM.Message.ContentPart.t()]]}
+  def get_queued_messages(session) do
+    GenServer.call(session, :get_queued_messages)
+  end
+
+  @doc """
+  Converts a list of queue entries (strings or ContentPart lists) into a single
+  string suitable for display or restoring to the prompt input.
+  """
+  @spec combine_queue_entries_to_text([String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
+          String.t()
+  def combine_queue_entries_to_text(entries) do
+    entries
+    |> Enum.map(fn
+      text when is_binary(text) ->
+        text
+
+      parts when is_list(parts) ->
+        parts
+        |> Enum.filter(&(&1.type == :text))
+        |> Enum.map_join("", & &1.text)
+    end)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
   @doc "Returns the provider pid for direct provider-specific calls."
   @spec get_provider(GenServer.server()) :: pid() | nil
   def get_provider(session) do
@@ -340,7 +419,9 @@ defmodule Minga.Agent.Session do
       provider_name: provider_name,
       save_timer: nil,
       created_at: DateTime.utc_now(),
-      branches: []
+      branches: [],
+      steering_queue: [],
+      follow_up_queue: []
     }
 
     # Start provider asynchronously so init doesn't block
@@ -352,6 +433,15 @@ defmodule Minga.Agent.Session do
   @impl GenServer
   def handle_call({:send_prompt, _text}, _from, %{provider: nil} = state) do
     {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call({:send_prompt, content}, _from, %{status: status} = state)
+      when status in [:thinking, :tool_executing] do
+    # Agent is busy: queue the message as a steering prompt. It will be injected
+    # into the agent's context between tool calls.
+    state = %{state | steering_queue: state.steering_queue ++ [content]}
+    broadcast(state, {:prompt_queued, content, :steering})
+    {:reply, {:queued, :steering}, state}
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
@@ -369,6 +459,66 @@ defmodule Minga.Agent.Session do
       {:error, _} = err ->
         {:reply, err, state}
     end
+  end
+
+  def handle_call({:send_follow_up, _content}, _from, %{provider: nil} = state) do
+    {:reply, {:error, :provider_not_ready}, state}
+  end
+
+  def handle_call({:send_follow_up, content}, _from, %{status: status} = state)
+      when status in [:thinking, :tool_executing] do
+    # Agent is busy: queue as a follow-up that sends automatically once the current run finishes.
+    state = %{state | follow_up_queue: state.follow_up_queue ++ [content]}
+    broadcast(state, {:prompt_queued, content, :follow_up})
+    {:reply, {:queued, :follow_up}, state}
+  end
+
+  def handle_call({:send_follow_up, content}, _from, state) do
+    # Agent is idle: treat follow-up as a regular prompt.
+    {user_msg, send_content} = build_user_message(content)
+    state = %{state | messages: state.messages ++ [user_msg]}
+    state = notify_messages_changed(state)
+
+    case state.provider_module.send_prompt(state.provider, send_content) do
+      :ok -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call(:dequeue_steering, _from, state) do
+    steering = state.steering_queue
+
+    if steering == [] do
+      {:reply, [], state}
+    else
+      # Add each steering message to conversation history so it appears in chat.
+      messages =
+        Enum.reduce(steering, state.messages, fn content, msgs ->
+          {user_msg, _} = build_user_message(content)
+          msgs ++ [user_msg]
+        end)
+
+      state = %{state | steering_queue: [], messages: messages}
+      state = notify_messages_changed(state)
+      {:reply, steering, state}
+    end
+  end
+
+  def handle_call(:recall_queues, _from, state) do
+    result = {state.steering_queue, state.follow_up_queue}
+    state = %{state | steering_queue: [], follow_up_queue: []}
+    broadcast(state, :queues_recalled)
+    {:reply, result, state}
+  end
+
+  def handle_call(:clear_queues, _from, state) do
+    state = %{state | steering_queue: [], follow_up_queue: []}
+    broadcast(state, :queues_recalled)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:get_queued_messages, _from, state) do
+    {:reply, {state.steering_queue, state.follow_up_queue}, state}
   end
 
   def handle_call(:abort, _from, %{provider: nil} = state) do
@@ -412,7 +562,9 @@ defmodule Minga.Agent.Session do
         status: :idle,
         total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
         error_message: nil,
-        pending_approval: nil
+        pending_approval: nil,
+        steering_queue: [],
+        follow_up_queue: []
     }
 
     broadcast(state, {:status_changed, :idle})
@@ -437,7 +589,9 @@ defmodule Minga.Agent.Session do
             model_name: data.model_name,
             status: :idle,
             error_message: nil,
-            pending_approval: nil
+            pending_approval: nil,
+            steering_queue: [],
+            follow_up_queue: []
         }
 
         broadcast(state, {:status_changed, :idle})
@@ -792,7 +946,29 @@ defmodule Minga.Agent.Session do
         state
       end
 
-    set_status(state, :idle)
+    case state.follow_up_queue do
+      [] ->
+        set_status(state, :idle)
+
+      follow_ups ->
+        # Auto-send queued follow-up messages as a new turn. Combine all pending
+        # follow-ups into a single prompt so they arrive as one user message.
+        combined = combine_queue_entries_to_text(follow_ups)
+        {user_msg, send_content} = build_user_message(combined)
+
+        messages = state.messages ++ [user_msg]
+        state = %{state | messages: messages, follow_up_queue: []}
+        state = notify_messages_changed(state)
+
+        case state.provider_module.send_prompt(state.provider, send_content) do
+          :ok ->
+            # AgentStart event from the provider will transition us to :thinking.
+            state
+
+          {:error, _reason} ->
+            set_status(state, :idle)
+        end
+    end
   end
 
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do

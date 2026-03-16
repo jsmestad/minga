@@ -276,6 +276,15 @@ defmodule Minga.Agent.UIState do
     delete_char(state)
   end
 
+  @doc "Replaces the input content with the given text. Does not save to history."
+  @spec set_prompt_text(t(), String.t()) :: t()
+  def set_prompt_text(%__MODULE__{prompt_buffer: pid} = state, text) when is_pid(pid) do
+    BufferServer.replace_content(pid, text)
+    %{state | pasted_blocks: []}
+  end
+
+  def set_prompt_text(%__MODULE__{} = state, _text), do: state
+
   @doc "Clears the input (after submission). Saves current text to history first."
   @spec clear_input(t()) :: t()
   def clear_input(%__MODULE__{} = state) do
