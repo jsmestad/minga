@@ -17,19 +17,47 @@ struct FileTreeView: View {
     private let sidebarMinWidth: CGFloat = 180
     private let sidebarMaxWidth: CGFloat = 360
 
+    @State private var sidebarWidth: CGFloat = 240
+    @State private var isDraggingResize: Bool = false
+
     var body: some View {
-        VStack(spacing: 0) {
-            projectHeader
-            entryList
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                projectHeader
+                entryList
+            }
+            .frame(width: sidebarWidth)
+            .background(theme.treeBg)
+            .focusable(false)
+            .focusEffectDisabled()
+            .onAppear {
+                sidebarWidth = CGFloat(fileTreeState.treeWidth) * 7.5
+            }
+
+            // Resize handle (drag to resize sidebar)
+            Rectangle()
+                .fill(isDraggingResize ? theme.treeActiveFg.opacity(0.5) : Color.clear)
+                .frame(width: 4)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            isDraggingResize = true
+                            let newWidth = sidebarWidth + value.translation.width
+                            sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
+                        }
+                        .onEnded { _ in
+                            isDraggingResize = false
+                        }
+                )
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
         }
-        .frame(
-            minWidth: sidebarMinWidth,
-            idealWidth: CGFloat(fileTreeState.treeWidth) * 7.5,
-            maxWidth: sidebarMaxWidth
-        )
-        .background(theme.treeBg)
-        .focusable(false)
-        .focusEffectDisabled()
     }
 
     // MARK: - Project header
