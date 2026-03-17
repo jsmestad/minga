@@ -128,25 +128,36 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
     render_overlays_flag = Caps.render_overlays?(state.capabilities)
     {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
 
+    gui_mode? = Capabilities.gui?(state.capabilities)
+
+    # Skip which-key and completion draws in GUI mode (SwiftUI renders them)
     whichkey_draws =
-      if render_overlays_flag, do: ChromeHelpers.render_whichkey(state, full_viewport), else: []
+      if gui_mode? or not render_overlays_flag do
+        []
+      else
+        ChromeHelpers.render_whichkey(state, full_viewport)
+      end
 
     completion_draws =
-      case cursor_info do
-        %Cursor{row: cur_row, col: cur_col} ->
-          CompletionUI.render(
-            state.completion,
-            %{
-              cursor_row: cur_row,
-              cursor_col: cur_col,
-              viewport_rows: full_viewport.rows,
-              viewport_cols: full_viewport.cols
-            },
-            state.theme
-          )
+      if gui_mode? do
+        []
+      else
+        case cursor_info do
+          %Cursor{row: cur_row, col: cur_col} ->
+            CompletionUI.render(
+              state.completion,
+              %{
+                cursor_row: cur_row,
+                cursor_col: cur_col,
+                viewport_rows: full_viewport.rows,
+                viewport_cols: full_viewport.cols
+              },
+              state.theme
+            )
 
-        nil ->
-          []
+          nil ->
+            []
+        end
       end
 
     # Hover popup overlay

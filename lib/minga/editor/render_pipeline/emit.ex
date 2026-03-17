@@ -54,7 +54,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec emit(Frame.t(), state()) :: :ok
   def emit(frame, state) do
     scroll_deltas = detect_scroll_regions(state)
-    commands = build_commands(frame, scroll_deltas)
+
+    commands =
+      if Capabilities.gui?(state.capabilities) do
+        build_gui_commands(frame)
+      else
+        build_commands(frame, scroll_deltas)
+      end
+
     update_tracking(state)
 
     byte_count = IO.iodata_length(commands)
@@ -225,6 +232,36 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   end
 
   # ── Command building ─────────────────────────────────────────────────────
+
+  # GUI mode: only emit editor content (windows + minibuffer).
+  # All chrome (tab bar, file tree, overlays, modeline) is handled by SwiftUI.
+  # Window modeline stays in Metal (it's inside the editor area for vim splits).
+  @spec build_gui_commands(Frame.t()) :: [binary()]
+  defp build_gui_commands(frame) do
+    window_draws =
+      Enum.flat_map(frame.windows, fn wf ->
+        {row_off, col_off, _w, _h} = wf.rect
+
+        gutter = DisplayList.layer_to_draws(wf.gutter)
+        lines = DisplayList.layer_to_draws(wf.lines)
+        tildes = DisplayList.layer_to_draws(wf.tilde_lines)
+        modeline = DisplayList.layer_to_draws(wf.modeline)
+
+        DisplayList.offset_draws(gutter ++ lines ++ tildes ++ modeline, row_off, col_off)
+      end)
+
+    # Minibuffer stays in Metal (command-line input)
+    all_draws = window_draws ++ frame.separators ++ frame.minibuffer
+
+    [Protocol.encode_clear()] ++
+      frame.regions ++
+      DisplayList.draws_to_commands(all_draws) ++
+      [
+        Protocol.encode_cursor_shape(frame.cursor.shape),
+        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
+        Protocol.encode_batch_end()
+      ]
+  end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
   defp build_commands(frame, nil) do
