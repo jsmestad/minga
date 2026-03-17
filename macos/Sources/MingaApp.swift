@@ -92,15 +92,6 @@ struct ContentView: View {
                         }
                     }
 
-                    // Which-key overlay (anchored to bottom)
-                    VStack {
-                        Spacer()
-                        WhichKeyOverlay(
-                            state: appState.whichKeyState,
-                            theme: appState.themeColors
-                        )
-                    }
-
                     // Completion overlay (positioned at cursor)
                     if appState.completionState.visible {
                         let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
@@ -129,7 +120,20 @@ struct ContentView: View {
 
         }
 
-        // Picker overlay (floats over entire window, outside HStack)
+        // Which-key overlay (center bottom of full window)
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                WhichKeyOverlay(
+                    state: appState.whichKeyState,
+                    theme: appState.themeColors
+                )
+                Spacer()
+            }
+        }
+
+        // Picker overlay (floats over entire window)
         PickerOverlay(
             state: appState.pickerState,
             theme: appState.themeColors
