@@ -64,7 +64,7 @@ defmodule Minga.Port.Protocol do
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
 
-  # GUI chrome commands live in Protocol.GUI (0x1C-0x1F, 0x70-0x74)
+  # GUI chrome commands live in Protocol.GUI (contiguous range 0x70-0x78)
 
   # Highlight commands (BEAM → Zig)
   @op_set_language 0x20

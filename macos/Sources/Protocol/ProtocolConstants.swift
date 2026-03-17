@@ -25,17 +25,17 @@ let OP_CLEAR_REGION: UInt8 = 0x18
 let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 
-// MARK: - GUI chrome opcodes (BEAM → frontend)
+// MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x78)
 
 let OP_GUI_FILE_TREE: UInt8 = 0x70
-let OP_GUI_TAB_BAR: UInt8 = 0x1C
-let OP_GUI_WHICH_KEY: UInt8 = 0x1D
-let OP_GUI_COMPLETION: UInt8 = 0x1E
-let OP_GUI_BREADCRUMB: UInt8 = 0x71
-let OP_GUI_STATUS_BAR: UInt8 = 0x72
-let OP_GUI_PICKER: UInt8 = 0x73
-let OP_GUI_AGENT_CHAT: UInt8 = 0x74
-let OP_GUI_THEME: UInt8 = 0x1F
+let OP_GUI_TAB_BAR: UInt8 = 0x71
+let OP_GUI_WHICH_KEY: UInt8 = 0x72
+let OP_GUI_COMPLETION: UInt8 = 0x73
+let OP_GUI_THEME: UInt8 = 0x74
+let OP_GUI_BREADCRUMB: UInt8 = 0x75
+let OP_GUI_STATUS_BAR: UInt8 = 0x76
+let OP_GUI_PICKER: UInt8 = 0x77
+let OP_GUI_AGENT_CHAT: UInt8 = 0x78
 
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01

@@ -43,35 +43,13 @@ final class CommandDispatcher {
     /// Parameters: family, size, ligatures, weight byte.
     var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
 
-    /// Theme colors for SwiftUI chrome views. Updated on gui_theme commands.
-    var themeColors: ThemeColors?
+    /// All GUI chrome sub-states. Injected at init from AppDelegate.
+    /// Non-optional: forgetting to wire this is a compile-time error.
+    let guiState: GUIState
 
-    /// Tab bar state for SwiftUI chrome. Updated on gui_tab_bar commands.
-    var tabBarState: TabBarState?
-
-    /// File tree state for SwiftUI sidebar. Updated on gui_file_tree commands.
-    var fileTreeState: FileTreeState?
-
-    /// Completion state for floating popup. Updated on gui_completion commands.
-    var completionState: CompletionState?
-
-    /// Which-key state for floating popup. Updated on gui_which_key commands.
-    var whichKeyState: WhichKeyState?
-
-    /// Breadcrumb state for path bar. Updated on gui_breadcrumb commands.
-    var breadcrumbState: BreadcrumbState?
-
-    /// Status bar state. Updated on gui_status_bar commands.
-    var statusBarState: StatusBarState?
-
-    /// Picker state for command palette. Updated on gui_picker commands.
-    var pickerState: PickerState?
-
-    /// Agent chat state. Updated on gui_agent_chat commands.
-    var agentChatState: AgentChatState?
-
-    init(grid: CellGrid) {
+    init(grid: CellGrid, guiState: GUIState) {
         self.grid = grid
+        self.guiState = guiState
     }
 
     /// Process a single render command.
@@ -144,50 +122,50 @@ final class CommandDispatcher {
             onFontChanged?(family, size, ligatures, weight)
 
         case .guiTheme(let slots):
-            themeColors?.applySlots(slots)
+            guiState.themeColors.applySlots(slots)
 
         case .guiTabBar(let activeIndex, let tabs):
-            tabBarState?.update(activeIndex: activeIndex, entries: tabs)
+            guiState.tabBarState.update(activeIndex: activeIndex, entries: tabs)
 
         case .guiFileTree(let selectedIndex, let treeWidth, let entries):
             if entries.isEmpty {
-                fileTreeState?.hide()
+                guiState.fileTreeState.hide()
             } else {
-                fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
+                guiState.fileTreeState.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
             }
 
         case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
             if visible {
-                completionState?.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)
+                guiState.completionState.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)
             } else {
-                completionState?.hide()
+                guiState.completionState.hide()
             }
 
         case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
             if visible {
-                whichKeyState?.update(visible: true, prefix: prefix, page: page, pageCount: pageCount, rawBindings: bindings)
+                guiState.whichKeyState.update(visible: true, prefix: prefix, page: page, pageCount: pageCount, rawBindings: bindings)
             } else {
-                whichKeyState?.hide()
+                guiState.whichKeyState.hide()
             }
 
         case .guiBreadcrumb(let segments):
-            breadcrumbState?.update(segments: segments)
+            guiState.breadcrumbState.update(segments: segments)
 
         case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype):
-            statusBarState?.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
+            guiState.statusBarState.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
 
         case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
             if visible {
-                pickerState?.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
             } else {
-                pickerState?.hide()
+                guiState.pickerState.hide()
             }
 
         case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
             if visible {
-                agentChatState?.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, rawMessages: messages)
+                guiState.agentChatState.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, rawMessages: messages)
             } else {
-                agentChatState?.hide()
+                guiState.agentChatState.hide()
             }
         }
     }

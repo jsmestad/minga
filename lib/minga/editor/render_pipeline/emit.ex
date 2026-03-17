@@ -55,7 +55,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     commands =
       if Capabilities.gui?(state.capabilities) do
-        build_gui_commands(frame)
+        frame
+        |> filter_frame_for_gui()
+        |> DisplayList.to_commands()
       else
         build_commands(frame, scroll_deltas)
       end
@@ -232,31 +234,18 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   # GUI mode: only emit editor content (windows + minibuffer).
   # All chrome (tab bar, file tree, overlays, modeline) is handled by SwiftUI.
   # Window modeline stays in Metal (it's inside the editor area for vim splits).
-  @spec build_gui_commands(Frame.t()) :: [binary()]
-  defp build_gui_commands(frame) do
-    window_draws =
-      Enum.flat_map(frame.windows, fn wf ->
-        {row_off, col_off, _w, _h} = wf.rect
-
-        gutter = DisplayList.layer_to_draws(wf.gutter)
-        lines = DisplayList.layer_to_draws(wf.lines)
-        tildes = DisplayList.layer_to_draws(wf.tilde_lines)
-        modeline = DisplayList.layer_to_draws(wf.modeline)
-
-        DisplayList.offset_draws(gutter ++ lines ++ tildes ++ modeline, row_off, col_off)
-      end)
-
-    # Minibuffer stays in Metal (command-line input)
-    all_draws = window_draws ++ frame.separators ++ frame.minibuffer
-
-    [Protocol.encode_clear()] ++
-      frame.regions ++
-      DisplayList.draws_to_commands(all_draws) ++
-      [
-        Protocol.encode_cursor_shape(frame.cursor.shape),
-        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
-        Protocol.encode_batch_end()
-      ]
+  # Filters a Frame for the GUI path by zeroing out fields that SwiftUI
+  # handles natively (tab bar, file tree, agent panel, splash). Window
+  # content, minibuffer, separators, and regions pass through to
+  # DisplayList.to_commands/1.
+  #
+  # Overlays pass through intentionally: the Chrome stage already filters
+  # them in build_gui_chrome (picker, which-key, completion are empty).
+  # The remaining overlays (hover popup, signature help, float popups)
+  # are Metal-rendered and belong in the cell-grid output.
+  @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
+  defp filter_frame_for_gui(frame) do
+    %{frame | tab_bar: [], file_tree: [], agent_panel: [], agentic_view: [], splash: nil}
   end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
