@@ -123,6 +123,7 @@ pub fn build(b: *std.Build) void {
     });
     parser_exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     parser_exe.root_module.link_libc = true;
+    parser_exe.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
     parser_exe.linkLibrary(ts_lib);
     for (grammar_libs) |gl| parser_exe.linkLibrary(gl);
     b.installArtifact(parser_exe);
@@ -151,6 +152,24 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    // Parser tests (highlighter, predicates, posix_regex)
+    const parser_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/parser_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    parser_tests.root_module.addImport("build_options", build_options.createModule());
+    parser_tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    parser_tests.root_module.link_libc = true;
+    parser_tests.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
+    parser_tests.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| parser_tests.linkLibrary(gl);
+
+    const run_parser_tests = b.addRunArtifact(parser_tests);
+    test_step.dependOn(&run_parser_tests.step);
 }
 
 /// Build a static library for a tree-sitter grammar.

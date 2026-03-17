@@ -128,7 +128,6 @@ defmodule Minga.HighlightTest do
     end
 
     test "span crossing line boundary is clamped" do
-      # Span covers bytes 0-20, but line is only bytes 5-10
       hl = %Highlight{
         version: 1,
         spans: [%{start_byte: 0, end_byte: 20, capture_id: 0}],
@@ -164,15 +163,13 @@ defmodule Minga.HighlightTest do
       assert [{"def", []}, {" foo", []}] = result
     end
 
-    test "overlapping spans use first (pre-sorted by Zig with highest priority first)" do
-      # Spans arrive from Zig sorted by (start_byte ASC, pattern_index DESC).
-      # The most specific pattern comes first. First-wins picks it.
-      # In tests, we simulate this by putting the specific span first.
+    test "same-width spans: higher pattern_index wins" do
+      # Two captures on the same node. Higher pattern_index = later in query = more specific.
       hl = %Highlight{
         version: 1,
         spans: [
-          %{start_byte: 0, end_byte: 9, capture_id: 1},
-          %{start_byte: 0, end_byte: 9, capture_id: 0}
+          %{start_byte: 0, end_byte: 9, capture_id: 0, pattern_index: 3},
+          %{start_byte: 0, end_byte: 9, capture_id: 1, pattern_index: 10}
         ],
         capture_names: ["keyword", "keyword.function"],
         theme: %{
@@ -182,12 +179,10 @@ defmodule Minga.HighlightTest do
       }
 
       result = Highlight.styles_for_line(hl, "defmodule Foo do", 0)
-
-      # Should NOT produce "defmodule" twice
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "defmodule Foo do"
 
-      # First span (highest priority) wins for the overlapping region
+      # Higher pattern_index wins
       assert [{"defmodule", [fg: 0x00FF00]}, {" Foo do", []}] = result
     end
 
@@ -207,17 +202,15 @@ defmodule Minga.HighlightTest do
       assert all_text == "hello world"
     end
 
-    test "contained spans: inner overrides outer when sorted first" do
-      # Spans pre-sorted by Zig: narrower (inner) before broader (outer)
-      # at the same start_byte. Inner span at 0-2 comes first, wins for
-      # its range, then outer covers the remainder.
-      # String: #{content} = bytes: #(0) {(1) c(2) o(3) n(4) t(5) e(6) n(7) t(8) }(9)
+    test "innermost-wins: child spans override parent spans" do
+      # String interpolation: #{content}
+      # Outer "embedded" span covers everything, inner "punctuation.special" covers #{ and }
       hl = %Highlight{
         version: 1,
         spans: [
-          %{start_byte: 0, end_byte: 2, capture_id: 1},
-          %{start_byte: 0, end_byte: 10, capture_id: 0},
-          %{start_byte: 9, end_byte: 10, capture_id: 1}
+          %{start_byte: 0, end_byte: 2, capture_id: 1, pattern_index: 10},
+          %{start_byte: 0, end_byte: 10, capture_id: 0, pattern_index: 5},
+          %{start_byte: 9, end_byte: 10, capture_id: 1, pattern_index: 10}
         ],
         capture_names: ["embedded", "punctuation.special"],
         theme: %{
@@ -230,37 +223,101 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "\#{content}"
 
-      # Inner span wins for its range, outer covers the rest
       assert [
                {"\#{", [fg: 0xFF0000]},
-               {"content}", [fg: 0xAAAAAA]}
+               {"content", [fg: 0xAAAAAA]},
+               {"}", [fg: 0xFF0000]}
              ] = result
     end
 
-    test "three overlapping spans at same position: first (highest priority) wins" do
-      # Spans arrive from Zig sorted by pattern_index DESC.
-      # In this test, keyword has the highest priority so comes first.
+    test "innermost-wins: module attribute with atoms" do
+      # @reference_forms [:alias, :import, :require]
+      # Parent @constant covers entire expression, child atoms get their own style
       hl = %Highlight{
         version: 1,
-        spans: [
-          %{start_byte: 0, end_byte: 3, capture_id: 2},
-          %{start_byte: 0, end_byte: 3, capture_id: 1},
-          %{start_byte: 0, end_byte: 3, capture_id: 0}
-        ],
-        capture_names: ["variable", "function", "keyword"],
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 44, capture_id: 1, pattern_index: 38},
+            %{start_byte: 18, end_byte: 24, capture_id: 0, pattern_index: 5},
+            %{start_byte: 26, end_byte: 33, capture_id: 0, pattern_index: 5},
+            %{start_byte: 35, end_byte: 43, capture_id: 0, pattern_index: 5}
+          ]),
+        capture_names: ["string.special.symbol", "constant"],
         theme: %{
-          "variable" => [fg: 0x111111],
-          "function" => [fg: 0x222222],
-          "keyword" => [fg: 0x333333]
+          "string.special.symbol" => [fg: 0xAA00FF],
+          "constant" => [fg: 0xDA8548]
         }
       }
 
-      result = Highlight.styles_for_line(hl, "def bar", 0)
-      assert [{"def", [fg: 0x333333]}, {" bar", []}] = result
+      line = "@reference_forms [:alias, :import, :require]"
+      result = Highlight.styles_for_line(hl, line, 0)
+      all_text = Enum.map_join(result, fn {text, _} -> text end)
+      assert all_text == line
+
+      assert [
+               {"@reference_forms [", [fg: 0xDA8548]},
+               {":alias", [fg: 0xAA00FF]},
+               {", ", [fg: 0xDA8548]},
+               {":import", [fg: 0xAA00FF]},
+               {", ", [fg: 0xDA8548]},
+               {":require", [fg: 0xAA00FF]},
+               {"]", [fg: 0xDA8548]}
+             ] = result
+    end
+
+    test "innermost-wins: three nesting levels" do
+      hl = %Highlight{
+        version: 1,
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 20, capture_id: 0, pattern_index: 1},
+            %{start_byte: 5, end_byte: 15, capture_id: 1, pattern_index: 2},
+            %{start_byte: 8, end_byte: 12, capture_id: 2, pattern_index: 3}
+          ]),
+        capture_names: ["outer", "middle", "inner"],
+        theme: %{
+          "outer" => [fg: 0x111111],
+          "middle" => [fg: 0x222222],
+          "inner" => [fg: 0x333333]
+        }
+      }
+
+      result = Highlight.styles_for_line(hl, "01234567890123456789", 0)
+      all_text = Enum.map_join(result, fn {text, _} -> text end)
+      assert all_text == "01234567890123456789"
+
+      assert [
+               {"01234", [fg: 0x111111]},
+               {"567", [fg: 0x222222]},
+               {"8901", [fg: 0x333333]},
+               {"234", [fg: 0x222222]},
+               {"56789", [fg: 0x111111]}
+             ] = result
+    end
+
+    test "injection layer always wins over outer layer" do
+      # layer=1 (injection) beats layer=0 (outer) even when outer is narrower
+      hl = %Highlight{
+        version: 1,
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 5, capture_id: 0, pattern_index: 10, layer: 0},
+            %{start_byte: 0, end_byte: 10, capture_id: 1, pattern_index: 1, layer: 1}
+          ]),
+        capture_names: ["outer.keyword", "injection.string"],
+        theme: %{
+          "outer.keyword" => [fg: 0xFF0000],
+          "injection.string" => [fg: 0x00FF00]
+        }
+      }
+
+      result = Highlight.styles_for_line(hl, "hello world", 0)
+
+      # Injection wins everywhere it covers, even though outer is narrower
+      assert [{"hello", [fg: 0x00FF00]}, {" worl", [fg: 0x00FF00]}, {"d", []}] = result
     end
 
     test "with line_start_byte offset" do
-      # "def foo\nbar baz" — line 2 starts at byte 8
       hl = %Highlight{
         version: 1,
         spans: [%{start_byte: 8, end_byte: 11, capture_id: 0}],
@@ -270,6 +327,87 @@ defmodule Minga.HighlightTest do
 
       result = Highlight.styles_for_line(hl, "bar baz", 8)
       assert [{"bar", [fg: 0xFF0000]}, {" baz", []}] = result
+    end
+  end
+
+  describe "styles_for_visible_lines/2" do
+    test "empty highlights returns unstyled segments" do
+      hl = Highlight.new()
+
+      result =
+        Highlight.styles_for_visible_lines(hl, [
+          {"hello", 0},
+          {"world", 6}
+        ])
+
+      assert result == [[{"hello", []}], [{"world", []}]]
+    end
+
+    test "results match per-line styles_for_line" do
+      hl = %Highlight{
+        version: 1,
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 3, capture_id: 0, pattern_index: 1},
+            %{start_byte: 8, end_byte: 13, capture_id: 1, pattern_index: 2}
+          ]),
+        capture_names: ["keyword", "string"],
+        theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
+      }
+
+      lines = [{"def foo", 0}, {"world", 8}]
+
+      batch_result = Highlight.styles_for_visible_lines(hl, lines)
+
+      per_line_result =
+        Enum.map(lines, fn {text, offset} ->
+          Highlight.styles_for_line(hl, text, offset)
+        end)
+
+      assert batch_result == per_line_result
+    end
+
+    test "multi-line span handled correctly across lines" do
+      hl = %Highlight{
+        version: 1,
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 30, capture_id: 0, pattern_index: 1}
+          ]),
+        capture_names: ["comment"],
+        theme: %{"comment" => [fg: 0x888888]}
+      }
+
+      lines = [{"first", 0}, {"second", 6}, {"third", 13}]
+      result = Highlight.styles_for_visible_lines(hl, lines)
+
+      assert result == [
+               [{"first", [fg: 0x888888]}],
+               [{"second", [fg: 0x888888]}],
+               [{"third", [fg: 0x888888]}]
+             ]
+    end
+
+    test "watermark advances past consumed spans" do
+      hl = %Highlight{
+        version: 1,
+        spans:
+          List.to_tuple([
+            %{start_byte: 0, end_byte: 3, capture_id: 0, pattern_index: 1},
+            %{start_byte: 10, end_byte: 15, capture_id: 1, pattern_index: 2}
+          ]),
+        capture_names: ["keyword", "string"],
+        theme: %{"keyword" => [fg: 0xFF0000], "string" => [fg: 0x00FF00]}
+      }
+
+      lines = [{"def foo", 0}, {"hello", 8}, {"world", 14}]
+      result = Highlight.styles_for_visible_lines(hl, lines)
+
+      assert result == [
+               [{"def", [fg: 0xFF0000]}, {" foo", []}],
+               [{"he", []}, {"llo", [fg: 0x00FF00]}],
+               [{"w", [fg: 0x00FF00]}, {"orld", []}]
+             ]
     end
   end
 end

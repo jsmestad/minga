@@ -111,26 +111,22 @@ defmodule Minga.Highlight do
     [{line_text, []}]
   end
 
-  # Fast path: tuple spans with binary search (production path from Zig)
+  # Fast path: tuple spans (production path from Zig)
   def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
       when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
              line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
     span_count = tuple_size(spans)
 
-    # Spans are stored in a tuple sorted by start_byte. Binary search for
-    # the first span that could overlap this line, then collect forward.
-    start_idx = bsearch_first_overlap(spans, span_count, line_start_byte)
-
-    overlapping =
-      collect_overlapping(spans, span_count, start_idx, line_start_byte, line_end_byte, [])
+    # Linear scan from index 0: end_byte is non-monotonic in the start_byte-
+    # sorted span array (a large parent can start before a line but extend
+    # past it), so binary search on end_byte is unsound. The batch path
+    # (styles_for_visible_lines/2) avoids this cost via an advancing watermark.
+    overlapping = collect_overlapping(spans, span_count, 0, line_start_byte, line_end_byte, [])
 
     case overlapping do
-      [] ->
-        [{line_text, []}]
-
-      _ ->
-        build_segments(line_text, line_start_byte, line_end_byte, overlapping, hl)
+      [] -> [{line_text, []}]
+      _ -> build_segments(line_text, line_start_byte, overlapping, hl)
     end
   end
 
@@ -141,33 +137,75 @@ defmodule Minga.Highlight do
     styles_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte)
   end
 
-  # ── Private ──
+  @doc """
+  Batch-compute styled segments for multiple consecutive lines in a single
+  pass over the span tuple. Returns a list of `[styled_segment()]` in the
+  same order as the input lines.
 
-  # Binary search for the first span index whose end_byte > line_start_byte.
-  # This is the earliest span that could overlap the line. Spans are sorted
-  # by start_byte, but a span starting before the line could extend into it,
-  # so we search on end_byte to catch those.
-  @spec bsearch_first_overlap(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp bsearch_first_overlap(_spans, 0, _line_start), do: 0
+  This is O(total_spans + total_overlapping_pairs) regardless of file size,
+  compared to O(spans × visible_lines) for repeated `styles_for_line/3` calls.
+  Use this for rendering visible lines.
 
-  defp bsearch_first_overlap(spans, count, line_start) do
-    do_bsearch(spans, 0, count - 1, line_start)
+  Each element in `lines` is `{line_text, line_start_byte}`.
+  """
+  @spec styles_for_visible_lines(t(), [{String.t(), non_neg_integer()}]) ::
+          [[styled_segment()]]
+  def styles_for_visible_lines(%__MODULE__{spans: spans}, lines)
+      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+    Enum.map(lines, fn {text, _} -> [{text, []}] end)
   end
 
-  @spec do_bsearch(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp do_bsearch(_spans, low, high, _line_start) when low > high, do: low
+  def styles_for_visible_lines(%__MODULE__{spans: spans} = hl, lines)
+      when is_tuple(spans) and is_list(lines) do
+    span_count = tuple_size(spans)
+    {results_rev, _watermark} = batch_lines(lines, spans, span_count, hl, 0, [])
+    Enum.reverse(results_rev)
+  end
 
-  defp do_bsearch(spans, low, high, line_start) do
-    mid = div(low + high, 2)
-    span = elem(spans, mid)
+  # ── Private: batch rendering ─────────────────────────────────────────
+
+  @spec batch_lines(
+          [{String.t(), non_neg_integer()}],
+          tuple(),
+          non_neg_integer(),
+          t(),
+          non_neg_integer(),
+          [[styled_segment()]]
+        ) :: {[[styled_segment()]], non_neg_integer()}
+  defp batch_lines([], _spans, _count, _hl, watermark, acc), do: {acc, watermark}
+
+  defp batch_lines([{line_text, line_start} | rest], spans, count, hl, watermark, acc) do
+    line_end = line_start + byte_size(line_text)
+
+    # Advance watermark past spans that can't overlap this or any later line.
+    watermark = advance_watermark(spans, count, watermark, line_start)
+
+    overlapping = collect_overlapping(spans, count, watermark, line_start, line_end, [])
+
+    segments =
+      case overlapping do
+        [] -> [{line_text, []}]
+        _ -> build_segments(line_text, line_start, overlapping, hl)
+      end
+
+    batch_lines(rest, spans, count, hl, watermark, [segments | acc])
+  end
+
+  @spec advance_watermark(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp advance_watermark(_spans, count, idx, _line_start) when idx >= count, do: idx
+
+  defp advance_watermark(spans, count, idx, line_start) do
+    span = elem(spans, idx)
 
     if span.end_byte <= line_start do
-      do_bsearch(spans, mid + 1, high, line_start)
+      advance_watermark(spans, count, idx + 1, line_start)
     else
-      do_bsearch(spans, low, mid - 1, line_start)
+      idx
     end
   end
+
+  # ── Private: overlap collection ──────────────────────────────────────
 
   # Collect spans that overlap [line_start, line_end) starting from start_idx.
   # Stops once spans start past the line.
@@ -188,94 +226,161 @@ defmodule Minga.Highlight do
 
     cond do
       span.start_byte >= line_end ->
-        # Past the line — done
         Enum.reverse(acc)
 
       span.end_byte > line_start ->
-        # Overlaps the line
         collect_overlapping(spans, count, idx + 1, line_start, line_end, [span | acc])
 
       true ->
-        # Ends before line starts — skip
         collect_overlapping(spans, count, idx + 1, line_start, line_end, acc)
     end
   end
 
-  # Spans arrive from Zig pre-sorted by (start_byte ASC, pattern_index DESC,
-  # end_byte ASC). This means the most specific tree-sitter pattern comes first
-  # at each byte position. The left-to-right walk below uses first-wins: the
-  # first span covering a position determines its style, and later spans that
-  # overlap already-rendered text are skipped.
+  # ── Private: innermost-wins span resolution ──────────────────────────
+  #
+  # Tree-sitter queries emit captures on both parent and child nodes. The
+  # correct rendering is *innermost-wins*: a child node's capture overrides
+  # its parent's capture for the child's byte range. The parent's style
+  # resumes after the child ends. Injection spans (layer > 0) always beat
+  # outer spans (layer 0) at the same position.
+  #
+  # Algorithm:
+  #   1. Convert overlapping spans to boundary events (:open / :close)
+  #   2. Sort events by position (close before open at same byte)
+  #   3. Walk events maintaining a sorted active set
+  #   4. Priority: layer DESC, width ASC, pattern_index DESC
+  #   5. Emit segments at each style-change boundary
 
-  @spec build_segments(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          [Minga.Port.Protocol.highlight_span()],
-          t()
-        ) :: [styled_segment()]
-  defp build_segments(line_text, line_start, line_end, spans, hl) do
-    do_build(line_text, line_start, line_end, spans, hl, 0, [])
+  @spec build_segments(String.t(), non_neg_integer(), [map()], t()) :: [styled_segment()]
+  defp build_segments(line_text, line_start, spans, hl) do
+    # Filter out internal captures (names starting with _) before the sweep.
+    # These are used by tree-sitter queries for predicate matching only,
+    # not for highlighting. Neovim and Helix both skip these.
+    spans = Enum.reject(spans, fn s -> internal_capture?(hl, s.capture_id) end)
+
+    case spans do
+      [] ->
+        [{line_text, []}]
+
+      _ ->
+        line_len = byte_size(line_text)
+        events = spans_to_events(spans, line_start, line_len)
+        sweep_events(events, line_text, hl, 0, [], [])
+    end
   end
 
-  @spec do_build(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          [Minga.Port.Protocol.highlight_span()],
-          t(),
-          non_neg_integer(),
+  @spec internal_capture?(t(), non_neg_integer()) :: boolean()
+  defp internal_capture?(hl, capture_id) do
+    case Enum.at(hl.capture_names, capture_id) do
+      "_" <> _ -> true
+      _ -> false
+    end
+  end
+
+  @typep span_event :: {non_neg_integer(), :open | :close, map()}
+
+  @spec spans_to_events([map()], non_neg_integer(), non_neg_integer()) :: [span_event()]
+  defp spans_to_events(spans, line_start, line_len) do
+    spans
+    |> Enum.flat_map(fn span ->
+      s = max(span.start_byte - line_start, 0)
+      e = min(span.end_byte - line_start, line_len)
+
+      if e > s do
+        [{s, :open, span}, {e, :close, span}]
+      else
+        []
+      end
+    end)
+    |> Enum.sort_by(fn
+      # Close before open at same position. Among closes, narrower first.
+      # Among opens, broader first (parent opens before child).
+      {pos, :close, span} ->
+        width = span.end_byte - span.start_byte
+        {pos, 0, width}
+
+      {pos, :open, span} ->
+        width = span.end_byte - span.start_byte
+        {pos, 1, -width}
+    end)
+  end
+
+  # Walk events left-to-right, emitting segments at each style change.
+  # `active` is a sorted list of {layer, width, pattern_index, capture_id}
+  # where hd(active) is always the winning span.
+  @typep active_entry ::
+           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+
+  @spec sweep_events([span_event()], String.t(), t(), non_neg_integer(), [active_entry()], [
+          styled_segment()
+        ]) ::
           [styled_segment()]
-        ) :: [styled_segment()]
-  defp do_build(line_text, _line_start, _line_end, [], _hl, pos, acc) do
+  defp sweep_events([], line_text, _hl, pos, _active, acc) do
     line_len = byte_size(line_text)
 
     if pos < line_len do
-      segment = safe_binary_slice(line_text, pos, line_len - pos)
-      Enum.reverse([{segment, []} | acc])
+      seg = safe_binary_slice(line_text, pos, line_len - pos)
+      Enum.reverse([{seg, []} | acc])
     else
       Enum.reverse(acc)
     end
   end
 
-  defp do_build(line_text, line_start, line_end, [span | rest], hl, pos, acc) do
-    line_len = byte_size(line_text)
+  defp sweep_events([{event_pos, type, span} | rest], line_text, hl, pos, active, acc) do
+    # Emit text from pos to event_pos with current winning style
+    acc =
+      if event_pos > pos do
+        style = winning_style(active, hl)
+        seg = safe_binary_slice(line_text, pos, event_pos - pos)
+        [{seg, style} | acc]
+      else
+        acc
+      end
 
-    # Clamp span to line boundaries (relative to line_start)
-    span_start_in_line = max(span.start_byte - line_start, 0)
-    span_end_in_line = min(span.end_byte - line_start, line_len)
+    new_pos = max(pos, event_pos)
 
-    # Skip spans that are entirely behind our current position
-    if span_end_in_line <= pos or span_start_in_line >= line_len do
-      do_build(line_text, line_start, line_end, rest, hl, pos, acc)
-    else
-      # Adjust start to not overlap with already-rendered text
-      effective_start = max(span_start_in_line, pos)
+    layer = Map.get(span, :layer, 0)
+    width = span.end_byte - span.start_byte
+    pidx = Map.get(span, :pattern_index, 0)
+    cid = span.capture_id
+    entry = {layer, width, pidx, cid}
 
-      # Gap before this span
-      acc =
-        if effective_start > pos do
-          gap = safe_binary_slice(line_text, pos, effective_start - pos)
-          [{gap, []} | acc]
-        else
-          acc
-        end
+    active =
+      case type do
+        :open -> insert_active(active, entry)
+        :close -> remove_active(active, entry)
+      end
 
-      # The highlighted segment
-      style = resolve_style(hl, span.capture_id)
-      seg_len = span_end_in_line - effective_start
+    sweep_events(rest, line_text, hl, new_pos, active, acc)
+  end
 
-      acc =
-        if seg_len > 0 do
-          segment = safe_binary_slice(line_text, effective_start, seg_len)
-          [{segment, style} | acc]
-        else
-          acc
-        end
+  @spec winning_style([active_entry()], t()) :: Minga.Port.Protocol.style()
+  defp winning_style([], _hl), do: []
 
-      do_build(line_text, line_start, line_end, rest, hl, span_end_in_line, acc)
+  defp winning_style([{_layer, _width, _pidx, capture_id} | _], hl),
+    do: resolve_style(hl, capture_id)
+
+  # Insert into active set maintaining priority order:
+  # (layer DESC, width ASC, pattern_index DESC)
+  # The head is always the winner.
+  @spec insert_active([active_entry()], active_entry()) :: [active_entry()]
+  defp insert_active([], entry), do: [entry]
+
+  defp insert_active([{hl, hw, hp, _} = head | tail], {el, ew, ep, _} = entry) do
+    cond do
+      el > hl -> [entry, head | tail]
+      el < hl -> [head | insert_active(tail, entry)]
+      ew < hw -> [entry, head | tail]
+      ew > hw -> [head | insert_active(tail, entry)]
+      ep > hp -> [entry, head | tail]
+      true -> [head | insert_active(tail, entry)]
     end
   end
+
+  @spec remove_active([active_entry()], active_entry()) :: [active_entry()]
+  defp remove_active([], _entry), do: []
+  defp remove_active([entry | tail], entry), do: tail
+  defp remove_active([head | tail], entry), do: [head | remove_active(tail, entry)]
 
   @spec resolve_style(t(), non_neg_integer()) :: Minga.Port.Protocol.style()
   defp resolve_style(hl, capture_id) do

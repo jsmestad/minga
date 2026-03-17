@@ -27,10 +27,29 @@ defmodule Minga.Editor.Renderer.Line do
   @typedoc "A grapheme paired with its display width."
   @type grapheme_pair :: {String.t(), non_neg_integer()}
 
-  @doc "Renders a single buffer line into draw tuples, including virtual text decorations."
-  @spec render(String.t(), non_neg_integer(), non_neg_integer(), Context.t(), non_neg_integer()) ::
+  @doc """
+  Renders a single buffer line into draw tuples, including virtual text decorations.
+
+  When `precomputed_segments` is provided (from `Highlight.styles_for_visible_lines/2`),
+  it's used directly instead of calling `styles_for_line/3` per line.
+  """
+  @spec render(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t(),
+          non_neg_integer(),
+          [Highlight.styled_segment()] | nil
+        ) ::
           [DisplayList.draw()]
-  def render(line_text, screen_row, buf_line, %Context{} = ctx, line_byte_offset \\ 0) do
+  def render(
+        line_text,
+        screen_row,
+        buf_line,
+        %Context{} = ctx,
+        line_byte_offset \\ 0,
+        precomputed_segments \\ nil
+      ) do
     pairs = grapheme_pairs(line_text)
     line_display_len = display_width_of_pairs(pairs)
 
@@ -80,7 +99,8 @@ defmodule Minga.Editor.Renderer.Line do
           buf_line,
           ctx,
           line_byte_offset,
-          line_highlights
+          line_highlights,
+          precomputed_segments
         )
 
       nil when line_highlights != [] or has_conceals ->
@@ -787,7 +807,8 @@ defmodule Minga.Editor.Renderer.Line do
           non_neg_integer(),
           Context.t(),
           non_neg_integer(),
-          [Decorations.highlight_range()]
+          [Decorations.highlight_range()],
+          [Highlight.styled_segment()] | nil
         ) ::
           [DisplayList.draw()]
   defp render_highlighted_line(
@@ -796,9 +817,12 @@ defmodule Minga.Editor.Renderer.Line do
          buf_line,
          ctx,
          line_byte_offset,
-         line_highlights
+         line_highlights,
+         precomputed_segments
        ) do
-    segments = Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
+    segments =
+      precomputed_segments ||
+        Highlight.styles_for_line(ctx.highlight, line_text, line_byte_offset)
 
     # Merge decoration highlight ranges with syntax segments (pre-queried, no double lookup)
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)

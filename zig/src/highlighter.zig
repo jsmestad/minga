@@ -492,7 +492,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 const node = cap.node;
                 const start_line: u32 = @intCast(c.ts_node_start_point(node).row);
@@ -597,7 +597,7 @@ pub const Highlighter = struct {
         var match: c.TSQueryMatch = undefined;
 
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 const node = cap.node;
                 const node_start = c.ts_node_start_point(node).row;
@@ -699,7 +699,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 if (cap.index != tid) continue;
 
@@ -796,7 +796,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 if (cap.index >= 64) continue;
                 const type_id = cap_to_type[cap.index] orelse continue;
@@ -909,7 +909,7 @@ pub const Highlighter = struct {
             if (self.current_predicates) |preds| {
                 if (!preds.evaluate(match, source)) continue;
             }
-            const captures = match.captures[0..match.capture_count];
+            const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
                 const node = cap.node;
                 const start = c.ts_node_start_byte(node);
@@ -973,7 +973,7 @@ pub const Highlighter = struct {
             if (self.current_predicates) |preds| {
                 if (!preds.evaluate(match, source)) continue;
             }
-            const captures = match.captures[0..match.capture_count];
+            const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
                 try spans.append(alloc, .{
                     .start_byte = c.ts_node_start_byte(cap.node),
@@ -1046,7 +1046,7 @@ pub const Highlighter = struct {
             var content_node: ?c.TSNode = null;
             var lang_from_capture: ?[]const u8 = null;
 
-            const caps = inj_match.captures[0..inj_match.capture_count];
+            const caps = if (inj_match.captures == null) continue else inj_match.captures[0..inj_match.capture_count];
             for (caps) |cap| {
                 if (cap.index == content_capture_id.?) {
                     content_node = cap.node;
@@ -1228,7 +1228,7 @@ pub const Highlighter = struct {
                 if (inj_preds) |preds| {
                     if (!preds.evaluate(hl_match, source)) continue;
                 }
-                const caps = hl_match.captures[0..hl_match.capture_count];
+                const caps = if (hl_match.captures == null) continue else hl_match.captures[0..hl_match.capture_count];
                 for (caps) |cap| {
                     const start = c.ts_node_start_byte(cap.node);
                     const end = c.ts_node_end_byte(cap.node);
@@ -1253,43 +1253,10 @@ pub const Highlighter = struct {
             }
         }
 
-        // ── Phase 4: Punch holes in outer spans ──────────────────────────
-        // The BEAM's renderer sorts spans by start_byte and uses first-wins.
-        // Outer spans that cover injection regions would "eat" the injection
-        // spans because they start at a lower byte offset. Fix: trim or
-        // remove outer spans that overlap with any injection region.
-        if (regions.items.len > 0) {
-            // Build sorted injection range list
-            var inj_ranges = try alloc.alloc(TrimRange, regions.items.len);
-            defer alloc.free(inj_ranges);
-            for (regions.items, 0..) |reg, i| {
-                inj_ranges[i] = .{ .start_byte = reg.start_byte, .end_byte = reg.end_byte };
-            }
-            std.mem.sortUnstable(TrimRange, inj_ranges, {}, struct {
-                fn cmp(_: void, a: TrimRange, b: TrimRange) bool {
-                    return a.start_byte < b.start_byte;
-                }
-            }.cmp);
-
-            var trimmed: std.ArrayListUnmanaged(Span) = .empty;
-            errdefer trimmed.deinit(alloc);
-            try trimmed.ensureTotalCapacity(alloc, spans.items.len);
-
-            for (spans.items) |span| {
-                if (span.layer != 0) {
-                    // Injection span — keep as-is
-                    try trimmed.append(alloc, span);
-                    continue;
-                }
-                // Outer span — trim around injection regions
-                try trimOuterSpan(alloc, span, inj_ranges, &trimmed);
-            }
-
-            spans.deinit(alloc);
-            spans = trimmed;
-        }
-
-        // ── Phase 5: Sort and return ─────────────────────────────────────
+        // ── Phase 4: Sort and return ─────────────────────────────────────
+        // All spans (outer layer=0 + injection layer=1) are sent to the BEAM
+        // with full metadata. The BEAM-side innermost-wins sweep resolves
+        // overlaps using (layer DESC, width ASC, pattern_index DESC).
         std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
 
         const names = try alloc.alloc([]const u8, name_list.items.len);
@@ -1398,65 +1365,6 @@ fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const
 }
 
 /// A byte range representing an injection region (for internal trimming).
-const TrimRange = struct {
-    start_byte: u32,
-    end_byte: u32,
-};
-
-/// Trims an outer span around injection ranges. If the span doesn't
-/// overlap any range, it's kept as-is. If it partially overlaps, the
-/// non-overlapping fragments are emitted. If fully covered, it's dropped.
-fn trimOuterSpan(
-    alloc: std.mem.Allocator,
-    span: Span,
-    ranges: []const TrimRange,
-    out: *std.ArrayListUnmanaged(Span),
-) !void {
-    // Check if this span overlaps any injection range
-    var overlaps_any = false;
-    for (ranges) |r| {
-        if (span.start_byte < r.end_byte and span.end_byte > r.start_byte) {
-            overlaps_any = true;
-            break;
-        }
-    }
-    if (!overlaps_any) {
-        try out.append(alloc, span);
-        return;
-    }
-
-    // Walk through injection ranges and emit fragments of the outer span
-    // that don't overlap with any range.
-    var pos = span.start_byte;
-    for (ranges) |r| {
-        if (r.start_byte >= span.end_byte) break;
-        if (r.end_byte <= pos) continue;
-
-        // Emit fragment before this range
-        const range_start = @max(r.start_byte, span.start_byte);
-        if (range_start > pos) {
-            try out.append(alloc, .{
-                .start_byte = pos,
-                .end_byte = range_start,
-                .capture_id = span.capture_id,
-                .pattern_index = span.pattern_index,
-                .layer = 0,
-            });
-        }
-        pos = @max(pos, @min(r.end_byte, span.end_byte));
-    }
-
-    // Emit trailing fragment after the last overlapping range
-    if (pos < span.end_byte) {
-        try out.append(alloc, .{
-            .start_byte = pos,
-            .end_byte = span.end_byte,
-            .capture_id = span.capture_id,
-            .pattern_index = span.pattern_index,
-            .layer = 0,
-        });
-    }
-}
 
 // ── Span ordering ─────────────────────────────────────────────────────────
 
@@ -1870,7 +1778,7 @@ test "highlighter: predicates filter #any-of? correctly in Elixir" {
     const source = "defmodule Foo do\n  def bar do\n    IO.puts(\"hello\")\n  end\nend\n";
     try hl.parse(source);
 
-    var result = try hl.highlightWithInjections() catch try hl.highlight();
+    var result = try hl.highlightWithInjections();
     defer result.deinit();
 
     // Find the capture index for "keyword.function" and "function.call"

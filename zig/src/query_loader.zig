@@ -450,7 +450,8 @@ test "resolve: nonexistent language returns null" {
 }
 
 test "resolve: missing query type returns null" {
-    const result = comptime resolve("bash", .folds);
+    // dockerfile has highlights but no folds query
+    const result = comptime resolve("dockerfile", .folds);
     try std.testing.expect(result == null);
 }
 

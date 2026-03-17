@@ -70,7 +70,7 @@ pub const PredicateTable = struct {
     pub fn deinit(self: *PredicateTable) void {
         // Free compiled regexes
         for (self.regexes.items) |re| {
-            posix_regex.free(re);
+            posix_regex.freeRegex(re);
         }
         self.regexes.deinit(self.allocator);
 
