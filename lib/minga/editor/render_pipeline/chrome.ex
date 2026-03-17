@@ -27,6 +27,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
+  alias Minga.Port.Capabilities
 
   # ── Result struct ──────────────────────────────────────────────────────────
 
@@ -108,8 +109,13 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
         []
       end
 
-    # File tree
-    tree_draws = TreeRenderer.render(state)
+    # File tree: skip cell-grid rendering in GUI mode (SwiftUI renders it natively)
+    tree_draws =
+      if Capabilities.gui?(state.capabilities) do
+        []
+      else
+        TreeRenderer.render(state)
+      end
 
     # Agent panel: rendered through buffer pipeline via {:agent_chat, _} windows.
     agent_draws = []
