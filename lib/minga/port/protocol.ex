@@ -1097,6 +1097,7 @@ defmodule Minga.Port.Protocol do
   defp summarize_tool_args("edit_file", %{path: path}), do: path
   defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
   defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
+
   defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
     do: Enum.join(paths, ", ")
 
