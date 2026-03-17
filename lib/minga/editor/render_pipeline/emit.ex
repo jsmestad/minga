@@ -30,6 +30,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Port.Capabilities
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
   alias Minga.Telemetry
 
   @typedoc "Internal editor state."
@@ -461,7 +462,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   defp send_gui_tab_bar(%{capabilities: caps, tab_bar: %TabBar{} = tb} = state) do
     if Capabilities.gui?(caps) do
       active_buf = active_window_buffer(state)
-      cmd = Protocol.encode_gui_tab_bar(tb, active_buf)
+      cmd = ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
       PortManager.send_commands(state.port_manager, [cmd])
     end
 
@@ -485,7 +486,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
          port_manager: pm
        }) do
     if Capabilities.gui?(caps) do
-      cmd = Protocol.encode_gui_file_tree(tree)
+      cmd = ProtocolGUI.encode_gui_file_tree(tree)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -494,7 +495,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   defp send_gui_file_tree(%{capabilities: caps, port_manager: pm}) do
     if Capabilities.gui?(caps) do
-      cmd = Protocol.encode_gui_file_tree(nil)
+      cmd = ProtocolGUI.encode_gui_file_tree(nil)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -504,7 +505,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec send_gui_which_key(state()) :: :ok
   defp send_gui_which_key(%{capabilities: caps, whichkey: wk, port_manager: pm}) do
     if Capabilities.gui?(caps) do
-      cmd = Protocol.encode_gui_which_key(wk)
+      cmd = ProtocolGUI.encode_gui_which_key(wk)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -515,7 +516,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   defp send_gui_completion(%{capabilities: caps, completion: comp, port_manager: pm} = state) do
     if Capabilities.gui?(caps) do
       {cursor_row, cursor_col} = current_cursor_screen_pos(state)
-      cmd = Protocol.encode_gui_completion(comp, cursor_row, cursor_col)
+      cmd = ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -533,7 +534,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
           _ -> ""
         end
 
-      cmd = Protocol.encode_gui_breadcrumb(file_path, root)
+      cmd = ProtocolGUI.encode_gui_breadcrumb(file_path, root)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -544,7 +545,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   defp send_gui_status_bar(%{capabilities: caps, port_manager: pm} = state) do
     if Capabilities.gui?(caps) do
       data = build_status_bar_data(state)
-      cmd = Protocol.encode_gui_status_bar(data)
+      cmd = ProtocolGUI.encode_gui_status_bar(data)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -603,7 +604,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec send_gui_picker(state()) :: :ok
   defp send_gui_picker(%{capabilities: caps, picker_ui: %{picker: picker}, port_manager: pm}) do
     if Capabilities.gui?(caps) do
-      cmd = Protocol.encode_gui_picker(picker)
+      cmd = ProtocolGUI.encode_gui_picker(picker)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -619,7 +620,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
         Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
       end
 
-      cmd = Protocol.encode_gui_agent_chat(data)
+      cmd = ProtocolGUI.encode_gui_agent_chat(data)
       PortManager.send_commands(pm, [cmd])
     end
 
@@ -680,7 +681,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
       if theme_name != Process.get(:last_gui_theme) do
         Process.put(:last_gui_theme, theme_name)
-        PortManager.send_commands(state.port_manager, [Protocol.encode_gui_theme(state.theme)])
+        PortManager.send_commands(state.port_manager, [ProtocolGUI.encode_gui_theme(state.theme)])
       end
     end
 

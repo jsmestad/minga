@@ -1063,7 +1063,7 @@ defmodule Minga.Editor do
   # editor operations. These are wired up as SwiftUI views are built;
   # unimplemented actions log a message and return state unchanged.
 
-  @spec handle_gui_action(state(), Protocol.gui_action()) :: state()
+  @spec handle_gui_action(state(), Protocol.GUI.gui_action()) :: state()
   defp handle_gui_action(state, {:select_tab, id}) do
     EditorState.switch_tab(state, id)
   end
