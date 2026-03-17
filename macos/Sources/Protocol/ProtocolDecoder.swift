@@ -23,6 +23,18 @@ enum RenderCommand: Sendable {
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
+    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
+}
+
+/// A single file tree entry decoded from the gui_file_tree protocol message.
+struct GUIFileTreeEntry: Sendable {
+    let isDir: Bool
+    let isExpanded: Bool
+    let isSelected: Bool
+    let depth: UInt8
+    let gitStatus: UInt8
+    let icon: String
+    let name: String
 }
 
 /// A single tab entry decoded from the gui_tab_bar protocol message.
@@ -206,6 +218,42 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (nil, 1 + 6 + textLen)
 
     // GUI chrome commands.
+    case OP_GUI_FILE_TREE:
+        // selected_index:2, tree_width:2, entry_count:2, then per entry:
+        // flags:1, depth:1, git_status:1, icon_len:1, icon, name_len:2, name
+        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
+        let selectedIndex = readU16(data, rest)
+        let treeWidth = readU16(data, rest + 2)
+        let entryCount = Int(readU16(data, rest + 4))
+        var entries: [GUIFileTreeEntry] = []
+        entries.reserveCapacity(entryCount)
+        var pos = rest + 6
+        for _ in 0..<entryCount {
+            guard data.count >= pos + 4 else { throw ProtocolDecodeError.malformed }
+            let flags = data[pos]
+            let depth = data[pos + 1]
+            let gitStatus = data[pos + 2]
+            let iconLen = Int(data[pos + 3])
+            guard data.count >= pos + 4 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
+            let iconData = data[(pos + 4)..<(pos + 4 + iconLen)]
+            let icon = String(data: iconData, encoding: .utf8) ?? ""
+            let nameLen = Int(readU16(data, pos + 4 + iconLen))
+            guard data.count >= pos + 6 + iconLen + nameLen else { throw ProtocolDecodeError.malformed }
+            let nameData = data[(pos + 6 + iconLen)..<(pos + 6 + iconLen + nameLen)]
+            let name = String(data: nameData, encoding: .utf8) ?? ""
+            entries.append(GUIFileTreeEntry(
+                isDir: flags & 0x01 != 0,
+                isExpanded: flags & 0x02 != 0,
+                isSelected: flags & 0x04 != 0,
+                depth: depth,
+                gitStatus: gitStatus,
+                icon: icon,
+                name: name
+            ))
+            pos += 6 + iconLen + nameLen
+        }
+        return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, entries: entries), pos - offset)
+
     case OP_GUI_TAB_BAR:
         // active_index:1, tab_count:1, then per tab: flags:1, id:4, icon_len:1, icon, label_len:2, label
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }

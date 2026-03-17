@@ -49,8 +49,19 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // File tree sidebar (will be added in step 6)
-            // Placeholder: sidebar goes here, conditional on visibility
+            // File tree sidebar
+            if appState.fileTreeState.visible {
+                FileTreeView(
+                    fileTreeState: appState.fileTreeState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+
+                // 1px separator between sidebar and editor
+                Rectangle()
+                    .fill(appState.themeColors.treeSeparatorFg)
+                    .frame(width: 1)
+            }
 
             // Right pane: tab bar + editor + status bar
             VStack(spacing: 0) {
@@ -96,6 +107,8 @@ final class AppState: ObservableObject {
     let themeColors = ThemeColors()
     /// Tab bar state for SwiftUI chrome.
     let tabBarState = TabBarState()
+    /// File tree state for SwiftUI sidebar.
+    let fileTreeState = FileTreeState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: InputEncoder?
 }
@@ -183,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.fontFace = face
         disp.themeColors = appState.themeColors
         disp.tabBarState = appState.tabBarState
+        disp.fileTreeState = appState.fileTreeState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }

@@ -49,6 +49,9 @@ final class CommandDispatcher {
     /// Tab bar state for SwiftUI chrome. Updated on gui_tab_bar commands.
     var tabBarState: TabBarState?
 
+    /// File tree state for SwiftUI sidebar. Updated on gui_file_tree commands.
+    var fileTreeState: FileTreeState?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -127,6 +130,9 @@ final class CommandDispatcher {
 
         case .guiTabBar(let activeIndex, let tabs):
             tabBarState?.update(activeIndex: activeIndex, entries: tabs)
+
+        case .guiFileTree(let selectedIndex, let treeWidth, let entries):
+            fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
         }
     }
 

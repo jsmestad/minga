@@ -79,6 +79,7 @@ defmodule Minga.Port.Protocol do
   @op_scroll_region 0x1B
 
   # GUI chrome commands (BEAM → Swift)
+  @op_gui_file_tree 0x70
   @op_gui_tab_bar 0x1C
   @op_gui_theme 0x1F
 
@@ -797,6 +798,69 @@ defmodule Minga.Port.Protocol do
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
   defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
+
+  @doc """
+  Encodes a gui_file_tree command with the visible file tree entries.
+
+  Sends: selected_index, tree_width, entry_count, then per entry:
+  flags (is_dir, is_expanded), depth, git_status, icon, name.
+  """
+  @spec encode_gui_file_tree(Minga.FileTree.t()) :: binary()
+  def encode_gui_file_tree(%Minga.FileTree{} = tree) do
+    entries = Minga.FileTree.visible_entries(tree)
+    count = length(entries)
+
+    entry_binaries =
+      entries
+      |> Enum.with_index()
+      |> Enum.map(fn {entry, index} ->
+        encode_file_tree_entry(entry, tree, index == tree.cursor)
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_file_tree,
+      <<tree.cursor::16, tree.width::16, count::16>>
+      | entry_binaries
+    ])
+  end
+
+  @spec encode_file_tree_entry(Minga.FileTree.entry(), Minga.FileTree.t(), boolean()) :: binary()
+  defp encode_file_tree_entry(entry, tree, is_selected?) do
+    is_dir = if entry[:dir?], do: 1, else: 0
+    is_expanded = if entry[:dir?] && MapSet.member?(tree.expanded, entry.path), do: 1, else: 0
+    selected_bit = if is_selected?, do: 1, else: 0
+
+    flags =
+      Bitwise.bor(
+        is_dir,
+        Bitwise.bor(Bitwise.bsl(is_expanded, 1), Bitwise.bsl(selected_bit, 2))
+      )
+
+    git_status = encode_git_status(Map.get(tree.git_status, entry.path))
+
+    icon = file_tree_icon(entry)
+    icon_bytes = :erlang.iolist_to_binary([icon])
+    name_bytes = :erlang.iolist_to_binary([entry.name])
+
+    <<flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8, icon_bytes::binary,
+      byte_size(name_bytes)::16, name_bytes::binary>>
+  end
+
+  # Nerd Font folder icon (nf-md-folder)
+  @folder_icon "\u{F024B}"
+
+  @spec file_tree_icon(Minga.FileTree.entry()) :: String.t()
+  defp file_tree_icon(%{dir?: true}), do: @folder_icon
+  defp file_tree_icon(%{name: name}), do: Devicon.icon(Filetype.detect(name))
+
+  @spec encode_git_status(atom() | nil) :: non_neg_integer()
+  defp encode_git_status(nil), do: 0
+  defp encode_git_status(:modified), do: 1
+  defp encode_git_status(:staged), do: 2
+  defp encode_git_status(:untracked), do: 3
+  defp encode_git_status(:conflict), do: 4
+  defp encode_git_status(:ignored), do: 5
+  defp encode_git_status(_), do: 0
 
   # ── Decoding (Zig → BEAM) ──
 

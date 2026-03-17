@@ -62,6 +62,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_window_bg(state)
       send_gui_theme(state)
       send_gui_tab_bar(state)
+      send_gui_file_tree(state)
       :ok
     end)
   end
@@ -429,6 +430,22 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       _ -> nil
     end
   end
+
+  @spec send_gui_file_tree(state()) :: :ok
+  defp send_gui_file_tree(%{
+         capabilities: caps,
+         file_tree: %{tree: %Minga.FileTree{} = tree},
+         port_manager: pm
+       }) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_file_tree(tree)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  defp send_gui_file_tree(_state), do: :ok
 
   @spec send_gui_theme(state()) :: :ok
   defp send_gui_theme(state) do

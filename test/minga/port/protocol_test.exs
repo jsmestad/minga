@@ -811,6 +811,22 @@ defmodule Minga.Port.ProtocolTest do
       assert byte_size(rest) == count * 4
     end
 
+    test "encodes gui_file_tree with entries" do
+      tree = %Minga.FileTree{
+        root: "/tmp/project",
+        expanded: MapSet.new(["/tmp/project"]),
+        cursor: 0,
+        width: 30
+      }
+
+      # This will try to read the filesystem, but the encoder should handle it
+      # Just verify it produces a valid binary with the right opcode
+      encoded = Protocol.encode_gui_file_tree(tree)
+      assert <<0x70, cursor::16, width::16, _count::16, _rest::binary>> = encoded
+      assert width == 30
+      assert cursor == 0
+    end
+
     test "encodes gui_tab_bar with tabs" do
       tab1 = %Minga.Editor.State.Tab{id: 1, kind: :file, label: "editor.ex"}
       tab2 = %Minga.Editor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
