@@ -616,16 +616,23 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   @spec build_agent_chat_data(state()) :: map()
   defp build_agent_chat_data(state) do
-    agent = state.agent
-    agent_ui = state.agent_ui
+    alias Minga.Editor.Window.Content
 
-    if agent_ui.visible && agent.session do
+    # Check if the active window is showing an agent chat
+    active_window = Map.get(state.windows.map, state.windows.active)
+    is_agent_chat = active_window && Content.agent_chat?(active_window.content)
+
+    if is_agent_chat do
+      session_pid = Content.pid(active_window.content)
+
       messages =
         try do
-          AgentSession.messages(agent.session)
+          AgentSession.messages(session_pid)
         catch
           :exit, _ -> []
         end
+
+      agent_ui = state.agent_ui
 
       prompt_text =
         case agent_ui.prompt_buffer do
@@ -636,7 +643,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       %{
         visible: true,
         messages: messages,
-        status: agent.status || :idle,
+        status: state.agent.status || :idle,
         model: agent_ui.model_name,
         prompt: prompt_text
       }

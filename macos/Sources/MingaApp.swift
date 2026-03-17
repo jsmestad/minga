@@ -82,23 +82,26 @@ struct ContentView: View {
                     encoder: appState.encoder
                 )
 
-                // Editor surface (Metal) or Agent chat (SwiftUI)
+                // Editor surface (Metal) with optional agent chat overlay
                 ZStack(alignment: .topLeading) {
+                    // Metal editor surface (always present for input handling)
+                    Group {
+                        if let nsView = appState.editorNSView {
+                            EditorView(editorNSView: nsView)
+                        } else {
+                            Color(red: 0.12, green: 0.12, blue: 0.14)
+                        }
+                    }
+                    // Show the agent view on top when visible. Keeping the
+                    // metal view underneath means EditorNSView stays in the
+                    // responder chain for keyboard input.
+                    .opacity(appState.agentChatState.visible ? 0 : 1)
+
                     if appState.agentChatState.visible {
-                        // Native agent chat view
                         AgentChatView(
                             state: appState.agentChatState,
                             theme: appState.themeColors
                         )
-                    } else {
-                        // Metal editor surface
-                        Group {
-                            if let nsView = appState.editorNSView {
-                                EditorView(editorNSView: nsView)
-                            } else {
-                                Color(red: 0.12, green: 0.12, blue: 0.14)
-                            }
-                        }
                     }
 
                     // Completion overlay (positioned at cursor)
