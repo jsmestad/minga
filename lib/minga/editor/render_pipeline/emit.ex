@@ -492,7 +492,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     :ok
   end
 
-  defp send_gui_file_tree(_state), do: :ok
+  defp send_gui_file_tree(%{capabilities: caps, port_manager: pm}) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_file_tree(nil)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
 
   @spec send_gui_which_key(state()) :: :ok
   defp send_gui_which_key(%{capabilities: caps, whichkey: wk, port_manager: pm}) do

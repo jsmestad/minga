@@ -811,7 +811,9 @@ defmodule Minga.Port.Protocol do
   Sends: selected_index, tree_width, entry_count, then per entry:
   flags (is_dir, is_expanded), depth, git_status, icon, name.
   """
-  @spec encode_gui_file_tree(Minga.FileTree.t()) :: binary()
+  @spec encode_gui_file_tree(Minga.FileTree.t() | nil) :: binary()
+  def encode_gui_file_tree(nil), do: <<@op_gui_file_tree, 0::16, 0::16, 0::16>>
+
   def encode_gui_file_tree(%Minga.FileTree{} = tree) do
     entries = Minga.FileTree.visible_entries(tree)
     count = length(entries)

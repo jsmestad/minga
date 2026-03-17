@@ -150,7 +150,11 @@ final class CommandDispatcher {
             tabBarState?.update(activeIndex: activeIndex, entries: tabs)
 
         case .guiFileTree(let selectedIndex, let treeWidth, let entries):
-            fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
+            if entries.isEmpty {
+                fileTreeState?.hide()
+            } else {
+                fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
+            }
 
         case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
             if visible {
