@@ -513,7 +513,7 @@ defmodule Minga.Editor.LayoutTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp collect_all_rects(layout) do
-    base = [layout.tab_bar, layout.minibuffer]
+    base = [layout.tab_bar, layout.minibuffer] |> Enum.reject(&is_nil/1)
     base = if layout.file_tree, do: [layout.file_tree | base], else: base
     base = if layout.agent_panel, do: [layout.agent_panel | base], else: base
 
@@ -619,6 +619,130 @@ defmodule Minga.Editor.LayoutTest do
 
       assert sr == cr
       assert sh == ch
+    end
+  end
+
+  # ── GUI layout ──────────────────────────────────────────────────────────────
+
+  describe "GUI layout (compute_gui)" do
+    defp with_gui_caps(state) do
+      %{state | capabilities: %Minga.Port.Capabilities{frontend_type: :native_gui}}
+    end
+
+    test "editor area starts at row 0 (no tab bar row)" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      {row, _col, _w, _h} = layout.editor_area
+      assert row == 0
+    end
+
+    test "no file tree columns even when file tree is open" do
+      state = new_state(40, 120) |> with_window() |> with_file_tree(30) |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      assert layout.file_tree == nil
+      {_row, col, width, _h} = layout.editor_area
+      assert col == 0
+      assert width == 120
+    end
+
+    test "editor area uses full viewport width" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      {_row, col, width, _h} = layout.editor_area
+      assert col == 0
+      assert width == 120
+    end
+
+    test "minibuffer stays as the last row" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      {row, col, width, height} = layout.minibuffer
+      assert row == 39
+      assert col == 0
+      assert width == 120
+      assert height == 1
+    end
+
+    test "editor area height is viewport minus minibuffer" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      {_row, _col, _w, height} = layout.editor_area
+      assert height == 39
+    end
+
+    test "tab bar rect is nil" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      assert layout.tab_bar == nil
+    end
+
+    test "agent panel is nil in GUI mode" do
+      state = new_state(40, 120) |> with_window() |> with_agent_panel() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      assert layout.agent_panel == nil
+    end
+
+    test "single-window GUI mode hides modeline (status bar handles it)" do
+      state = new_state(40, 120) |> with_window() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      win_layout = layout.window_layouts[1]
+      {_ml_row, _col, _w, ml_h} = win_layout.modeline
+      assert ml_h == 0
+      # Content fills the entire editor area (no modeline row reserved)
+      {_content_row, _c, _cw, content_h} = win_layout.content
+      {_ea_row, _ea_c, _ea_w, ea_h} = layout.editor_area
+      assert content_h == ea_h
+    end
+
+    test "split-window GUI mode preserves per-window modeline" do
+      state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      # Both windows should have modelines in split mode
+      Enum.each(layout.window_layouts, fn {_id, wl} ->
+        {_r, _c, _w, h} = wl.modeline
+        assert h == 1
+      end)
+    end
+
+    test "GUI layout differs from TUI layout for same viewport" do
+      base = new_state(40, 120) |> with_window() |> with_file_tree(30)
+
+      tui_layout = Layout.compute(base)
+      gui_layout = Layout.compute(with_gui_caps(base))
+
+      # TUI reserves row 0 for tab bar, GUI doesn't
+      {tui_row, _, _, _} = tui_layout.editor_area
+      {gui_row, _, _, _} = gui_layout.editor_area
+      assert tui_row == 1
+      assert gui_row == 0
+
+      # TUI reserves columns for file tree, GUI doesn't
+      {_, tui_col, _, _} = tui_layout.editor_area
+      {_, gui_col, _, _} = gui_layout.editor_area
+      assert tui_col > 0
+      assert gui_col == 0
+    end
+
+    test "window splits work correctly in GUI mode" do
+      state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      # Both windows should exist
+      assert map_size(layout.window_layouts) == 2
+      # Each window should have a modeline
+      Enum.each(layout.window_layouts, fn {_id, wl} ->
+        {_r, _c, _w, h} = wl.modeline
+        assert h == 1
+      end)
     end
   end
 end

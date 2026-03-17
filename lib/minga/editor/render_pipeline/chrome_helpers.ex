@@ -35,6 +35,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec render_tab_bar(state(), Layout.t()) ::
           {[DisplayList.draw()], [TabBarRenderer.click_region()]}
   def render_tab_bar(%{tab_bar: nil}, _layout), do: {[], []}
+  def render_tab_bar(_state, %{tab_bar: nil}), do: {[], []}
 
   def render_tab_bar(state, layout) do
     {tab_row, _col, tab_width, _h} = layout.tab_bar

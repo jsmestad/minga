@@ -23,16 +23,19 @@ defmodule Minga.Editor.Commands.FileTree do
   def toggle(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
 
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
 
   def toggle(state) do
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
+
+  @spec restore_scope(state()) :: atom()
+  defp restore_scope(state), do: EditorState.scope_for_active_window(state)
 
   @spec open_or_toggle(state()) :: state()
   def open_or_toggle(%{file_tree: %{tree: nil}} = state), do: state
@@ -45,6 +48,8 @@ defmodule Minga.Editor.Commands.FileTree do
 
       %{dir?: false, path: path} ->
         state = put_in(state.file_tree.focused, false)
+        # Opening a file buffer always uses :editor scope (not restore_scope)
+        # because the new buffer becomes the active window content.
         state = %{state | keymap_scope: :editor}
 
         case Commands.start_buffer(path) do
@@ -93,11 +98,15 @@ defmodule Minga.Editor.Commands.FileTree do
   @spec close(state()) :: state()
   def close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
   end
 
   def close(state),
-    do: %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: :editor}
+    do: %{
+      state
+      | file_tree: FileTreeState.close(state.file_tree),
+        keymap_scope: restore_scope(state)
+    }
 
   # ── Private helpers ───────────────────────────────────────────────────────
 

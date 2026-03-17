@@ -206,6 +206,7 @@ struct CellGridLigatureTests {
 }
 
 @Suite("CommandDispatcher ligature integration")
+@MainActor
 struct DispatcherLigatureTests {
     @Test("drawText without fontFace writes individual cells")
     func noFontFaceIndividualCells() {

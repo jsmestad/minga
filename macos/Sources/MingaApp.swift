@@ -48,12 +48,109 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
-        Group {
-            if let nsView = appState.editorNSView {
-                EditorView(editorNSView: nsView)
-            } else {
-                Color(red: 0.12, green: 0.12, blue: 0.14)
+        ZStack {
+        HStack(spacing: 0) {
+            // File tree sidebar
+            if appState.fileTreeState.visible {
+                FileTreeView(
+                    fileTreeState: appState.fileTreeState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+
+                // 1px separator between sidebar and editor
+                Rectangle()
+                    .fill(appState.themeColors.treeSeparatorFg)
+                    .frame(width: 1)
             }
+
+            // Right pane: tab bar + breadcrumb + editor + status bar
+            VStack(spacing: 0) {
+                // Native tab bar
+                if !appState.tabBarState.tabs.isEmpty {
+                    TabBarView(
+                        tabBarState: appState.tabBarState,
+                        theme: appState.themeColors,
+                        encoder: appState.encoder
+                    )
+                }
+
+                // Breadcrumb path bar
+                BreadcrumbBar(
+                    state: appState.breadcrumbState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+
+                // Editor surface (Metal) with optional agent chat overlay
+                ZStack(alignment: .topLeading) {
+                    // Metal editor surface (always present for input handling)
+                    Group {
+                        if let nsView = appState.editorNSView {
+                            EditorView(editorNSView: nsView)
+                        } else {
+                            Color(red: 0.12, green: 0.12, blue: 0.14)
+                        }
+                    }
+                    // Show the agent view on top when visible. Keeping the
+                    // metal view underneath means EditorNSView stays in the
+                    // responder chain for keyboard input.
+                    .opacity(appState.agentChatState.visible ? 0 : 1)
+
+                    if appState.agentChatState.visible {
+                        AgentChatView(
+                            state: appState.agentChatState,
+                            theme: appState.themeColors,
+                            isInsertMode: appState.statusBarState.isInsertMode
+                        )
+                    }
+
+                    // Completion overlay (positioned at cursor)
+                    if appState.completionState.visible {
+                        let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+                        let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                        let x = CGFloat(appState.completionState.anchorCol) * cw
+                        let y = (CGFloat(appState.completionState.anchorRow) + 1) * ch
+
+                        CompletionOverlay(
+                            state: appState.completionState,
+                            theme: appState.themeColors,
+                            encoder: appState.encoder,
+                            cellWidth: cw,
+                            cellHeight: ch
+                        )
+                        .offset(x: x, y: y)
+                    }
+                }
+
+                // Status bar
+                StatusBarView(
+                    state: appState.statusBarState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+            }
+
+        }
+
+        // Which-key overlay (center bottom of full window)
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                WhichKeyOverlay(
+                    state: appState.whichKeyState,
+                    theme: appState.themeColors
+                )
+                Spacer()
+            }
+        }
+
+        // Picker overlay (floats over entire window)
+        PickerOverlay(
+            state: appState.pickerState,
+            theme: appState.themeColors
+        )
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
@@ -72,6 +169,26 @@ final class AppState: ObservableObject {
     @Published var windowBgColor: Color?
     /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
     @Published var windowBgIsDark: Bool = true
+    /// Theme colors for SwiftUI chrome views.
+    let themeColors = ThemeColors()
+    /// Tab bar state for SwiftUI chrome.
+    let tabBarState = TabBarState()
+    /// File tree state for SwiftUI sidebar.
+    let fileTreeState = FileTreeState()
+    /// Completion state for floating popup.
+    let completionState = CompletionState()
+    /// Which-key state for floating popup.
+    let whichKeyState = WhichKeyState()
+    /// Breadcrumb state for path bar.
+    let breadcrumbState = BreadcrumbState()
+    /// Status bar state.
+    let statusBarState = StatusBarState()
+    /// Picker state for command palette.
+    let pickerState = PickerState()
+    /// Agent chat state.
+    let agentChatState = AgentChatState()
+    /// Protocol encoder for sending gui_action events from SwiftUI chrome.
+    var encoder: InputEncoder?
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -86,6 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register the bundled Nerd Font for devicon rendering.
+        registerBundledFonts()
+
         // Register as a regular GUI app so macOS routes keyboard events to us.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -114,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
         self.encoder = enc
+        appState.encoder = enc
 
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
@@ -154,6 +275,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         disp.fontFace = face
+        disp.themeColors = appState.themeColors
+        disp.tabBarState = appState.tabBarState
+        disp.fileTreeState = appState.fileTreeState
+        disp.completionState = appState.completionState
+        disp.whichKeyState = appState.whichKeyState
+        disp.breadcrumbState = appState.breadcrumbState
+        disp.statusBarState = appState.statusBarState
+        disp.pickerState = appState.pickerState
+        disp.agentChatState = appState.agentChatState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
@@ -204,6 +334,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.fontFace = newFace
         dispatcher.fontFace = newFace
         nsView.updateFont(newFace)
+    }
+
+    // MARK: - Font registration
+
+    /// Registers bundled Nerd Font so SwiftUI views can use it for devicons.
+    private func registerBundledFonts() {
+        let fontName = "SymbolsNerdFontMono-Regular"
+        let ext = "ttf"
+
+        // Look for the font in the app bundle's Resources directory.
+        // For a tool target, resources are next to the binary.
+        let searchPaths = [
+            Bundle.main.bundleURL.appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(fontName).\(ext)")
+        ]
+
+        for url in searchPaths {
+            if FileManager.default.fileExists(atPath: url.path) {
+                var errorRef: Unmanaged<CFError>?
+                if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &errorRef) {
+                    NSLog("Registered bundled font: \(fontName)")
+                    return
+                } else if let error = errorRef?.takeRetainedValue() {
+                    // Font might already be registered (e.g., user has it installed)
+                    let desc = CFErrorCopyDescription(error) as String
+                    if desc.contains("already registered") {
+                        return
+                    }
+                    NSLog("Failed to register font \(fontName): \(desc)")
+                }
+            }
+        }
+
+        // Font not found in bundle; check if it's already available system-wide
+        let testFont = NSFont(name: "Symbols Nerd Font Mono", size: 12)
+        if testFont != nil {
+            return
+        }
+
+        NSLog("Warning: Nerd Font not found. Devicons will show as missing glyphs.")
     }
 
     // MARK: - Protocol handling

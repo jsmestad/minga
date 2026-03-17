@@ -685,6 +685,20 @@ defmodule Minga.Editor.State do
   def scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
   def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
 
+  @doc """
+  Returns the appropriate keymap scope for the active window's content type.
+
+  Used when leaving the file tree (toggle, close, navigate right) to restore
+  the correct scope. Returns :agent for agent chat windows, :editor otherwise.
+  """
+  @spec scope_for_active_window(t()) :: atom()
+  def scope_for_active_window(%{windows: %{map: map, active: active_id}}) do
+    case Map.get(map, active_id) do
+      %{content: content} -> scope_for_content(content, :editor)
+      nil -> :editor
+    end
+  end
+
   @spec buffer_label(pid()) :: String.t()
   defp buffer_label(pid) when is_pid(pid) do
     live_buffer_label(pid)

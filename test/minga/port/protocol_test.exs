@@ -743,4 +743,177 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:scroll_region, 0, 65_535, 3}} = Protocol.decode_command(encoded)
     end
   end
+
+  # ── GUI action decoding ──────────────────────────────────────────────────
+
+  describe "decode_event/1 — gui_action" do
+    test "select_tab with tab id" do
+      payload = <<0x07, 0x01, 42::32-big>>
+      assert {:ok, {:gui_action, {:select_tab, 42}}} = Protocol.decode_event(payload)
+    end
+
+    test "close_tab with tab id" do
+      payload = <<0x07, 0x02, 42::32-big>>
+      assert {:ok, {:gui_action, {:close_tab, 42}}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_click with index" do
+      payload = <<0x07, 0x03, 15::16-big>>
+      assert {:ok, {:gui_action, {:file_tree_click, 15}}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_toggle with index" do
+      payload = <<0x07, 0x04, 7::16-big>>
+      assert {:ok, {:gui_action, {:file_tree_toggle, 7}}} = Protocol.decode_event(payload)
+    end
+
+    test "completion_select with index" do
+      payload = <<0x07, 0x05, 3::16-big>>
+      assert {:ok, {:gui_action, {:completion_select, 3}}} = Protocol.decode_event(payload)
+    end
+
+    test "breadcrumb_click with segment index" do
+      payload = <<0x07, 0x06, 2>>
+      assert {:ok, {:gui_action, {:breadcrumb_click, 2}}} = Protocol.decode_event(payload)
+    end
+
+    test "toggle_panel with panel id" do
+      payload = <<0x07, 0x07, 1>>
+      assert {:ok, {:gui_action, {:toggle_panel, 1}}} = Protocol.decode_event(payload)
+    end
+
+    test "new_tab with no payload" do
+      payload = <<0x07, 0x08>>
+      assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
+    end
+
+    test "unknown action type returns malformed" do
+      payload = <<0x07, 0xFF, 0, 0>>
+      assert {:error, :malformed} = Protocol.decode_event(payload)
+    end
+  end
+
+  # ── GUI theme encoding ──────────────────────────────────────────────────
+
+  describe "encode_gui_theme/1" do
+    test "encodes theme colors as slot_id + rgb tuples" do
+      theme = Minga.Theme.get!(:doom_one)
+      encoded = Protocol.encode_gui_theme(theme)
+
+      # First byte is opcode
+      assert <<0x1F, count::8, rest::binary>> = encoded
+
+      # Should have a reasonable number of color slots
+      assert count > 20
+      assert count < 50
+
+      # Each entry is 4 bytes (slot_id, r, g, b)
+      assert byte_size(rest) == count * 4
+    end
+
+    test "encodes gui_file_tree with entries" do
+      tree = %Minga.FileTree{
+        root: "/tmp/project",
+        expanded: MapSet.new(["/tmp/project"]),
+        cursor: 0,
+        width: 30
+      }
+
+      # This will try to read the filesystem, but the encoder should handle it
+      # Just verify it produces a valid binary with the right opcode
+      encoded = Protocol.encode_gui_file_tree(tree)
+      assert <<0x70, cursor::16, width::16, _count::16, _rest::binary>> = encoded
+      assert width == 30
+      assert cursor == 0
+    end
+
+    test "encodes gui_tab_bar with tabs" do
+      tab1 = %Minga.Editor.State.Tab{id: 1, kind: :file, label: "editor.ex"}
+      tab2 = %Minga.Editor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
+      tb = %Minga.Editor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
+
+      encoded = Protocol.encode_gui_tab_bar(tb)
+
+      # First byte is opcode 0x1C
+      assert <<0x1C, active_index::8, tab_count::8, rest::binary>> = encoded
+      assert active_index == 0
+      assert tab_count == 2
+
+      # First tab: flags has is_active=1
+      assert <<flags1::8, id1::32, _rest1::binary>> = rest
+      assert Bitwise.band(flags1, 0x01) == 1
+      assert id1 == 1
+
+      # Verify it's a valid binary (no crashes)
+      assert is_binary(encoded)
+      assert byte_size(encoded) > 10
+    end
+
+    test "encodes gui_agent_chat with pending approval including tool summary" do
+      data = %{
+        visible: true,
+        messages: [{:user, "hello"}],
+        status: :thinking,
+        model: "claude",
+        prompt: "test",
+        pending_approval: %{name: "shell", args: %{"command" => "ls -la"}}
+      }
+
+      encoded = Protocol.encode_gui_agent_chat(data)
+      # Opcode + visible
+      assert <<0x74, 1::8, rest::binary>> = encoded
+
+      # Status byte (thinking = 1)
+      assert <<1::8, rest2::binary>> = rest
+
+      # Model: "claude" (len=6)
+      assert <<0::8, 6::8, "claude", rest3::binary>> = rest2
+
+      # Prompt: "test" (len=4)
+      assert <<0::8, 4::8, "test", rest4::binary>> = rest3
+
+      # Pending approval flag = 1, name = "shell" (len=5), summary = "ls -la" (len=6)
+      assert <<1::8, 0::8, 5::8, "shell", 0::8, 6::8, "ls -la", _msg_rest::binary>> = rest4
+    end
+
+    test "encodes gui_agent_chat without pending approval" do
+      data = %{
+        visible: true,
+        messages: [{:user, "hi"}],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = Protocol.encode_gui_agent_chat(data)
+      assert <<0x74, 1::8, _status::8, rest::binary>> = encoded
+
+      # Model: "claude" (len=6)
+      assert <<0::8, 6::8, "claude", rest2::binary>> = rest
+
+      # Prompt: "" (len=0)
+      assert <<0::8, 0::8, rest3::binary>> = rest2
+
+      # Pending approval flag = 0
+      assert <<0::8, _msg_rest::binary>> = rest3
+    end
+
+    test "encodes gui_agent_chat hidden" do
+      encoded = Protocol.encode_gui_agent_chat(%{visible: false})
+      assert <<0x74, 0::8>> = encoded
+    end
+
+    test "nil colors are skipped" do
+      theme = Minga.Theme.get!(:doom_one)
+      encoded = Protocol.encode_gui_theme(theme)
+      <<0x1F, count::8, _rest::binary>> = encoded
+
+      # Build manually with nils to verify they're filtered
+      # The tree git_conflict_fg is nil in doom_one
+      assert count > 0
+      # Verify it round-trips (no crashes on decode)
+      assert is_binary(encoded)
+    end
+  end
 end

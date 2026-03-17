@@ -303,6 +303,16 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendLog(level: UInt8, message: String) {
         state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
     }
+
+    // GUI action stubs (no recording needed for current tests)
+    func sendSelectTab(id: UInt32) {}
+    func sendCloseTab(id: UInt32) {}
+    func sendFileTreeClick(index: UInt16) {}
+    func sendFileTreeToggle(index: UInt16) {}
+    func sendCompletionSelect(index: UInt16) {}
+    func sendBreadcrumbClick(index: UInt8) {}
+    func sendTogglePanel(panel: UInt8) {}
+    func sendNewTab() {}
 }
 
 @Suite("CellGrid Resize")

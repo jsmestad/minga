@@ -473,9 +473,11 @@ defmodule Minga.Editor.Commands.Movement do
   defp navigate_window(%{windows: %{tree: nil}} = state, _direction), do: state
 
   # When file tree is focused, navigating right unfocuses the tree
+  # and restores the scope based on the active window's content type.
   defp navigate_window(%{file_tree: %{focused: true}} = state, :right) do
     state = put_in(state.file_tree.focused, false)
-    %{state | keymap_scope: :editor}
+    scope = EditorState.scope_for_active_window(state)
+    %{state | keymap_scope: scope}
   end
 
   defp navigate_window(state, direction) do

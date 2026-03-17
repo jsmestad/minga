@@ -77,6 +77,16 @@ defmodule Minga.Input.AgentChatNav do
 
   @spec handle_chat_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
+
+  # i/a/A in chat nav mode focuses the prompt input and enters insert mode,
+  # rather than trying to enter insert mode on the read-only chat buffer.
+  defp handle_chat_nav(state, cp, _mods) when cp in [?i, ?a, ?A] and state.vim.mode == :normal do
+    state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
+
+    {:handled,
+     %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}}
+  end
+
   defp handle_chat_nav(state, cp, mods) do
     agent = AgentAccess.agent(state)
 

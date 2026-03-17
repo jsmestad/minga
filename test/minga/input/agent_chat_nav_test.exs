@@ -136,21 +136,44 @@ defmodule Minga.Input.AgentChatNavTest do
       assert AgentAccess.panel(new_state).scroll.pinned == false
     end
 
-    test "blocks mode transitions (chat is read-only)" do
+    test "blocks mode transitions on read-only buffer for keys that fall through to FSM" do
       state = make_state()
 
-      # 'i' in agent scope focuses input (handled by scope trie), but if
-      # somehow a mode-changing key reaches AgentChatNav, mode stays normal.
-      # Use 'o' which in vim opens a new line (enters insert mode).
-      # But 'o' is bound to :agent_toggle_collapse in the trie.
-      # Instead, test directly with delegate_to_mode_fsm:
+      # Keys like 's' (substitute) would enter insert mode in normal vim,
+      # but the chat buffer is read-only so the mode stays normal.
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {0, 0})
 
-      # 'A' (append at end of line) would enter insert mode in normal vim
-      new_state = AgentChatNav.delegate_to_mode_fsm(state, buf, ?A, 0)
+      new_state = AgentChatNav.delegate_to_mode_fsm(state, buf, ?s, 0)
 
       assert new_state.vim.mode == :normal
+    end
+
+    test "i in chat nav mode focuses prompt and enters insert mode" do
+      state = make_state()
+
+      {:handled, new_state} = AgentChatNav.handle_key(state, ?i, 0)
+
+      assert new_state.vim.mode == :insert
+      assert AgentAccess.panel(new_state).input_focused == true
+    end
+
+    test "a in chat nav mode focuses prompt and enters insert mode" do
+      state = make_state()
+
+      {:handled, new_state} = AgentChatNav.handle_key(state, ?a, 0)
+
+      assert new_state.vim.mode == :insert
+      assert AgentAccess.panel(new_state).input_focused == true
+    end
+
+    test "A in chat nav mode focuses prompt and enters insert mode" do
+      state = make_state()
+
+      {:handled, new_state} = AgentChatNav.handle_key(state, ?A, 0)
+
+      assert new_state.vim.mode == :insert
+      assert AgentAccess.panel(new_state).input_focused == true
     end
 
     test "restores original active buffer after dispatch" do
@@ -314,6 +337,25 @@ defmodule Minga.Input.AgentChatNavTest do
       state = AgentAccess.update_agent(state, fn agent -> %{agent | buffer: nil} end)
 
       assert {:passthrough, _} = AgentChatNav.handle_key(state, ?j, 0)
+    end
+  end
+
+  describe "read-only buffer guard (KeyDispatch integration)" do
+    alias Minga.Editor.KeyDispatch
+
+    test "insert mode allowed when agent input is focused despite read-only active buffer" do
+      state = make_state(input_focused: true)
+      # Put the read-only agent buffer as buffers.active so the read-only
+      # guard would fire WITHOUT the input_focused bypass.
+      agent_buf = AgentAccess.agent(state).buffer
+      assert BufferServer.read_only?(agent_buf)
+      state = put_in(state.buffers.active, agent_buf)
+
+      new_state = KeyDispatch.handle_key(state, ?A, 0)
+
+      # input_focused bypasses the read-only check, so insert succeeds
+      assert new_state.vim.mode == :insert
+      refute new_state.status_msg == "Buffer is read-only"
     end
   end
 end

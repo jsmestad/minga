@@ -19,6 +19,7 @@ struct Region {
 }
 
 /// Dispatches render commands to a CellGrid and notifies when a frame is complete.
+@MainActor
 final class CommandDispatcher {
     let grid: CellGrid
     private var regions: [UInt16: Region] = [:]
@@ -41,6 +42,33 @@ final class CommandDispatcher {
     /// Called when the BEAM sends a font configuration change.
     /// Parameters: family, size, ligatures, weight byte.
     var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
+
+    /// Theme colors for SwiftUI chrome views. Updated on gui_theme commands.
+    var themeColors: ThemeColors?
+
+    /// Tab bar state for SwiftUI chrome. Updated on gui_tab_bar commands.
+    var tabBarState: TabBarState?
+
+    /// File tree state for SwiftUI sidebar. Updated on gui_file_tree commands.
+    var fileTreeState: FileTreeState?
+
+    /// Completion state for floating popup. Updated on gui_completion commands.
+    var completionState: CompletionState?
+
+    /// Which-key state for floating popup. Updated on gui_which_key commands.
+    var whichKeyState: WhichKeyState?
+
+    /// Breadcrumb state for path bar. Updated on gui_breadcrumb commands.
+    var breadcrumbState: BreadcrumbState?
+
+    /// Status bar state. Updated on gui_status_bar commands.
+    var statusBarState: StatusBarState?
+
+    /// Picker state for command palette. Updated on gui_picker commands.
+    var pickerState: PickerState?
+
+    /// Agent chat state. Updated on gui_agent_chat commands.
+    var agentChatState: AgentChatState?
 
     init(grid: CellGrid) {
         self.grid = grid
@@ -114,6 +142,53 @@ final class CommandDispatcher {
 
         case .setFont(let family, let size, let ligatures, let weight):
             onFontChanged?(family, size, ligatures, weight)
+
+        case .guiTheme(let slots):
+            themeColors?.applySlots(slots)
+
+        case .guiTabBar(let activeIndex, let tabs):
+            tabBarState?.update(activeIndex: activeIndex, entries: tabs)
+
+        case .guiFileTree(let selectedIndex, let treeWidth, let entries):
+            if entries.isEmpty {
+                fileTreeState?.hide()
+            } else {
+                fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
+            }
+
+        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
+            if visible {
+                completionState?.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)
+            } else {
+                completionState?.hide()
+            }
+
+        case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
+            if visible {
+                whichKeyState?.update(visible: true, prefix: prefix, page: page, pageCount: pageCount, rawBindings: bindings)
+            } else {
+                whichKeyState?.hide()
+            }
+
+        case .guiBreadcrumb(let segments):
+            breadcrumbState?.update(segments: segments)
+
+        case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype):
+            statusBarState?.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
+
+        case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
+            if visible {
+                pickerState?.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
+            } else {
+                pickerState?.hide()
+            }
+
+        case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
+            if visible {
+                agentChatState?.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, rawMessages: messages)
+            } else {
+                agentChatState?.hide()
+            }
         }
     }
 

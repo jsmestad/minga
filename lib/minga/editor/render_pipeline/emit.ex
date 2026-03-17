@@ -16,6 +16,8 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   for the most common scroll case (Ctrl-e/y, mouse wheel, cursor near edges).
   """
 
+  alias Minga.Agent.Session, as: AgentSession
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
@@ -23,6 +25,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
+  alias Minga.Filetype
+  alias Minga.Git
+  alias Minga.Port.Capabilities
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.Telemetry
@@ -50,7 +55,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec emit(Frame.t(), state()) :: :ok
   def emit(frame, state) do
     scroll_deltas = detect_scroll_regions(state)
-    commands = build_commands(frame, scroll_deltas)
+
+    commands =
+      if Capabilities.gui?(state.capabilities) do
+        build_gui_commands(frame)
+      else
+        build_commands(frame, scroll_deltas)
+      end
+
     update_tracking(state)
 
     byte_count = IO.iodata_length(commands)
@@ -59,6 +71,15 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       PortManager.send_commands(state.port_manager, commands)
       send_title(state)
       send_window_bg(state)
+      send_gui_theme(state)
+      send_gui_tab_bar(state)
+      send_gui_file_tree(state)
+      send_gui_which_key(state)
+      send_gui_completion(state)
+      send_gui_breadcrumb(state)
+      send_gui_status_bar(state)
+      send_gui_picker(state)
+      send_gui_agent_chat(state)
       :ok
     end)
   end
@@ -214,6 +235,36 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   end
 
   # ── Command building ─────────────────────────────────────────────────────
+
+  # GUI mode: only emit editor content (windows + minibuffer).
+  # All chrome (tab bar, file tree, overlays, modeline) is handled by SwiftUI.
+  # Window modeline stays in Metal (it's inside the editor area for vim splits).
+  @spec build_gui_commands(Frame.t()) :: [binary()]
+  defp build_gui_commands(frame) do
+    window_draws =
+      Enum.flat_map(frame.windows, fn wf ->
+        {row_off, col_off, _w, _h} = wf.rect
+
+        gutter = DisplayList.layer_to_draws(wf.gutter)
+        lines = DisplayList.layer_to_draws(wf.lines)
+        tildes = DisplayList.layer_to_draws(wf.tilde_lines)
+        modeline = DisplayList.layer_to_draws(wf.modeline)
+
+        DisplayList.offset_draws(gutter ++ lines ++ tildes ++ modeline, row_off, col_off)
+      end)
+
+    # Minibuffer stays in Metal (command-line input)
+    all_draws = window_draws ++ frame.separators ++ frame.minibuffer
+
+    [Protocol.encode_clear()] ++
+      frame.regions ++
+      DisplayList.draws_to_commands(all_draws) ++
+      [
+        Protocol.encode_cursor_shape(frame.cursor.shape),
+        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
+        Protocol.encode_batch_end()
+      ]
+  end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
   defp build_commands(frame, nil) do
@@ -401,6 +452,236 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     if bg != Process.get(:last_window_bg) do
       Process.put(:last_window_bg, bg)
       PortManager.send_commands([Protocol.encode_set_window_bg(bg)])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_tab_bar(state()) :: :ok
+  defp send_gui_tab_bar(%{capabilities: caps, tab_bar: %TabBar{} = tb} = state) do
+    if Capabilities.gui?(caps) do
+      active_buf = active_window_buffer(state)
+      cmd = Protocol.encode_gui_tab_bar(tb, active_buf)
+      PortManager.send_commands(state.port_manager, [cmd])
+    end
+
+    :ok
+  end
+
+  defp send_gui_tab_bar(%{tab_bar: nil}), do: :ok
+
+  @spec active_window_buffer(state()) :: pid() | nil
+  defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
+    case Map.get(map, win_id) do
+      %{buffer: buf} when is_pid(buf) -> buf
+      _ -> nil
+    end
+  end
+
+  @spec send_gui_file_tree(state()) :: :ok
+  defp send_gui_file_tree(%{
+         capabilities: caps,
+         file_tree: %{tree: %Minga.FileTree{} = tree},
+         port_manager: pm
+       }) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_file_tree(tree)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  defp send_gui_file_tree(%{capabilities: caps, port_manager: pm}) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_file_tree(nil)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_which_key(state()) :: :ok
+  defp send_gui_which_key(%{capabilities: caps, whichkey: wk, port_manager: pm}) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_which_key(wk)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_completion(state()) :: :ok
+  defp send_gui_completion(%{capabilities: caps, completion: comp, port_manager: pm} = state) do
+    if Capabilities.gui?(caps) do
+      {cursor_row, cursor_col} = current_cursor_screen_pos(state)
+      cmd = Protocol.encode_gui_completion(comp, cursor_row, cursor_col)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_breadcrumb(state()) :: :ok
+  defp send_gui_breadcrumb(%{capabilities: caps, port_manager: pm} = state) do
+    if Capabilities.gui?(caps) do
+      file_path = active_buffer_path(state)
+
+      root =
+        case state.file_tree do
+          %{tree: %{root: r}} -> r
+          _ -> ""
+        end
+
+      cmd = Protocol.encode_gui_breadcrumb(file_path, root)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_status_bar(state()) :: :ok
+  defp send_gui_status_bar(%{capabilities: caps, port_manager: pm} = state) do
+    if Capabilities.gui?(caps) do
+      data = build_status_bar_data(state)
+      cmd = Protocol.encode_gui_status_bar(data)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec current_cursor_screen_pos(state()) :: {non_neg_integer(), non_neg_integer()}
+  defp current_cursor_screen_pos(state) do
+    layout = Layout.get(state)
+
+    case Layout.active_window_layout(layout, state) do
+      %{content: {row, col, _w, _h}} ->
+        buf = state.buffers.active
+
+        if buf do
+          {line, column} = BufferServer.cursor(buf)
+          vp = state.viewport
+          {row + line - vp.top, col + column}
+        else
+          {row, col}
+        end
+
+      nil ->
+        {0, 0}
+    end
+  end
+
+  @spec active_buffer_path(state()) :: String.t() | nil
+  defp active_buffer_path(state) do
+    case state.buffers.active do
+      nil -> nil
+      buf -> BufferServer.file_path(buf)
+    end
+  end
+
+  @spec build_status_bar_data(state()) :: map()
+  defp build_status_bar_data(state) do
+    buf = state.buffers.active
+    {line, col} = if buf, do: BufferServer.cursor(buf), else: {1, 0}
+    line_count = if buf, do: BufferServer.line_count(buf), else: 1
+    file_name = if buf, do: BufferServer.file_path(buf) || "", else: ""
+
+    %{
+      mode: state.vim.mode,
+      cursor_line: line + 1,
+      cursor_col: col + 1,
+      line_count: line_count,
+      filetype: Filetype.detect(file_name),
+      dirty_marker: if(buf && BufferServer.dirty?(buf), do: "●", else: ""),
+      lsp_status: state.lsp_status,
+      git_branch: resolve_git_branch(state),
+      status_msg: state.status_msg
+    }
+  end
+
+  @spec send_gui_picker(state()) :: :ok
+  defp send_gui_picker(%{capabilities: caps, picker_ui: %{picker: picker}, port_manager: pm}) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_picker(picker)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_agent_chat(state()) :: :ok
+  defp send_gui_agent_chat(%{capabilities: caps, port_manager: pm} = state) do
+    if Capabilities.gui?(caps) do
+      data = build_agent_chat_data(state)
+
+      if data.visible do
+        Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
+      end
+
+      cmd = Protocol.encode_gui_agent_chat(data)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec build_agent_chat_data(state()) :: map()
+  defp build_agent_chat_data(state) do
+    alias Minga.Editor.Window.Content
+
+    active_window = Map.get(state.windows.map, state.windows.active)
+    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    session = state.agent.session
+
+    if is_agent_chat && session do
+      messages =
+        try do
+          AgentSession.messages(session)
+        catch
+          :exit, _ -> []
+        end
+
+      prompt_text =
+        case state.agent_ui.prompt_buffer do
+          nil -> ""
+          buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
+        end
+
+      pending = state.agent.pending_approval
+
+      %{
+        visible: true,
+        messages: messages,
+        status: state.agent.status || :idle,
+        model: state.agent_ui.model_name,
+        prompt: prompt_text,
+        pending_approval: pending
+      }
+    else
+      %{visible: false}
+    end
+  end
+
+  @spec resolve_git_branch(state()) :: String.t() | nil
+  defp resolve_git_branch(%{file_tree: %{tree: %{root: root}}}) do
+    case Git.current_branch(root) do
+      {:ok, branch} -> branch
+      _ -> nil
+    end
+  end
+
+  defp resolve_git_branch(_state), do: nil
+
+  @spec send_gui_theme(state()) :: :ok
+  defp send_gui_theme(state) do
+    if Capabilities.gui?(state.capabilities) do
+      theme_name = state.theme.name
+
+      if theme_name != Process.get(:last_gui_theme) do
+        Process.put(:last_gui_theme, theme_name)
+        PortManager.send_commands(state.port_manager, [Protocol.encode_gui_theme(state.theme)])
+      end
     end
 
     :ok
