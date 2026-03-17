@@ -86,6 +86,7 @@ defmodule Minga.Port.Protocol do
   @op_gui_theme 0x1F
   @op_gui_breadcrumb 0x71
   @op_gui_status_bar 0x72
+  @op_gui_picker 0x73
 
   # GUI theme color slot IDs
   @gui_color_editor_bg 0x01
@@ -1004,6 +1005,35 @@ defmodule Minga.Port.Protocol do
     has_git = if data[:git_branch], do: 1, else: 0
     is_dirty = if data[:dirty_marker] && data[:dirty_marker] != "", do: 1, else: 0
     Bitwise.bor(has_lsp, Bitwise.bor(Bitwise.bsl(has_git, 1), Bitwise.bsl(is_dirty, 2)))
+  end
+
+  # ── Picker ──
+
+  @doc "Encodes a gui_picker command."
+  @spec encode_gui_picker(Minga.Picker.t() | nil) :: binary()
+  def encode_gui_picker(nil), do: <<@op_gui_picker, 0::8>>
+
+  def encode_gui_picker(%Minga.Picker{} = picker) do
+    items = Enum.take(picker.filtered, picker.max_visible)
+    title_bytes = :erlang.iolist_to_binary([picker.title])
+    query_bytes = :erlang.iolist_to_binary([picker.query])
+
+    entries =
+      Enum.map(items, fn item ->
+        label_bytes = :erlang.iolist_to_binary([item.label])
+        desc_bytes = :erlang.iolist_to_binary([item.description || ""])
+        icon_color = item.icon_color || 0
+
+        <<icon_color::24, byte_size(label_bytes)::16, label_bytes::binary,
+          byte_size(desc_bytes)::16, desc_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_picker,
+      <<1::8, picker.selected::16, byte_size(title_bytes)::16, title_bytes::binary,
+        byte_size(query_bytes)::16, query_bytes::binary, length(items)::16>>
+      | entries
+    ])
   end
 
   # ── Decoding (Zig → BEAM) ──

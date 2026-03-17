@@ -33,6 +33,7 @@ let OP_GUI_WHICH_KEY: UInt8 = 0x1D
 let OP_GUI_COMPLETION: UInt8 = 0x1E
 let OP_GUI_BREADCRUMB: UInt8 = 0x71
 let OP_GUI_STATUS_BAR: UInt8 = 0x72
+let OP_GUI_PICKER: UInt8 = 0x73
 let OP_GUI_THEME: UInt8 = 0x1F
 
 // GUI theme color slot IDs

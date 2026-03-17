@@ -77,6 +77,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_gui_completion(state)
       send_gui_breadcrumb(state)
       send_gui_status_bar(state)
+      send_gui_picker(state)
       :ok
     end)
   end
@@ -593,6 +594,16 @@ defmodule Minga.Editor.RenderPipeline.Emit do
           end,
       status_msg: state.status_msg
     }
+  end
+
+  @spec send_gui_picker(state()) :: :ok
+  defp send_gui_picker(%{capabilities: caps, picker_ui: %{picker: picker}, port_manager: pm}) do
+    if Capabilities.gui?(caps) do
+      cmd = Protocol.encode_gui_picker(picker)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
   end
 
   @spec send_gui_theme(state()) :: :ok

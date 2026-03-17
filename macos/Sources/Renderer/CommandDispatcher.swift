@@ -64,6 +64,9 @@ final class CommandDispatcher {
     /// Status bar state. Updated on gui_status_bar commands.
     var statusBarState: StatusBarState?
 
+    /// Picker state for command palette. Updated on gui_picker commands.
+    var pickerState: PickerState?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -165,6 +168,13 @@ final class CommandDispatcher {
 
         case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype):
             statusBarState?.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
+
+        case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
+            if visible {
+                pickerState?.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
+            } else {
+                pickerState?.hide()
+            }
         }
     }
 

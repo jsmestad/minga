@@ -132,61 +132,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
-    # Overlays
-    render_overlays_flag = Caps.render_overlays?(state.capabilities)
-    {picker_draws, picker_cursor} = PickerUI.render(state, full_viewport)
-
-    gui_mode? = Capabilities.gui?(state.capabilities)
-
-    # Skip which-key and completion draws in GUI mode (SwiftUI renders them)
-    whichkey_draws =
-      if gui_mode? or not render_overlays_flag do
-        []
-      else
-        ChromeHelpers.render_whichkey(state, full_viewport)
-      end
-
-    completion_draws =
-      if gui_mode? do
-        []
-      else
-        case cursor_info do
-          %Cursor{row: cur_row, col: cur_col} ->
-            CompletionUI.render(
-              state.completion,
-              %{
-                cursor_row: cur_row,
-                cursor_col: cur_col,
-                viewport_rows: full_viewport.rows,
-                viewport_cols: full_viewport.cols
-              },
-              state.theme
-            )
-
-          nil ->
-            []
-        end
-      end
-
-    # Hover popup overlay
-    hover_draws = render_hover_popup(state)
-
-    # Signature help overlay
-    sig_help_draws = render_signature_help(state)
-
-    # Float popup overlays (from the popup system)
-    float_overlays = PopupLifecycle.render_float_overlays(state)
-
-    overlays =
-      (float_overlays ++
-         [
-           %Overlay{draws: hover_draws},
-           %Overlay{draws: sig_help_draws},
-           %Overlay{draws: whichkey_draws},
-           %Overlay{draws: completion_draws},
-           %Overlay{draws: picker_draws, cursor: picker_cursor}
-         ])
-      |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
+    # Overlays (extracted to reduce complexity)
+    overlays = build_overlays(state, full_viewport, cursor_info)
 
     # Tab bar
     {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
@@ -207,6 +154,57 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
       regions: regions
     }
   end
+
+  # ── Overlay building ──────────────────────────────────────────────────────
+
+  @spec build_overlays(state(), Minga.Editor.Viewport.t(), Cursor.t() | nil) :: [Overlay.t()]
+  defp build_overlays(state, viewport, cursor_info) do
+    gui_mode? = Capabilities.gui?(state.capabilities)
+    render_overlays_flag = Caps.render_overlays?(state.capabilities)
+
+    {picker_draws, picker_cursor} =
+      if gui_mode?, do: {[], nil}, else: PickerUI.render(state, viewport)
+
+    whichkey_draws =
+      if gui_mode? or not render_overlays_flag,
+        do: [],
+        else: ChromeHelpers.render_whichkey(state, viewport)
+
+    completion_draws =
+      if gui_mode?,
+        do: [],
+        else: build_completion_draws(state, cursor_info)
+
+    hover_draws = render_hover_popup(state)
+    sig_help_draws = render_signature_help(state)
+    float_overlays = PopupLifecycle.render_float_overlays(state)
+
+    (float_overlays ++
+       [
+         %Overlay{draws: hover_draws},
+         %Overlay{draws: sig_help_draws},
+         %Overlay{draws: whichkey_draws},
+         %Overlay{draws: completion_draws},
+         %Overlay{draws: picker_draws, cursor: picker_cursor}
+       ])
+    |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
+  end
+
+  @spec build_completion_draws(state(), Cursor.t() | nil) :: [DisplayList.draw()]
+  defp build_completion_draws(state, %Cursor{row: cur_row, col: cur_col}) do
+    CompletionUI.render(
+      state.completion,
+      %{
+        cursor_row: cur_row,
+        cursor_col: cur_col,
+        viewport_rows: state.viewport.rows,
+        viewport_cols: state.viewport.cols
+      },
+      state.theme
+    )
+  end
+
+  defp build_completion_draws(_state, nil), do: []
 
   # ── Hover popup ──────────────────────────────────────────────────────────
 

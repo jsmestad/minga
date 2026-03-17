@@ -125,6 +125,12 @@ struct ContentView: View {
                     encoder: appState.encoder
                 )
             }
+
+            // Picker overlay (floats over entire window)
+            PickerOverlay(
+                state: appState.pickerState,
+                theme: appState.themeColors
+            )
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
@@ -157,6 +163,8 @@ final class AppState: ObservableObject {
     let breadcrumbState = BreadcrumbState()
     /// Status bar state.
     let statusBarState = StatusBarState()
+    /// Picker state for command palette.
+    let pickerState = PickerState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: InputEncoder?
 }
@@ -252,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.whichKeyState = appState.whichKeyState
         disp.breadcrumbState = appState.breadcrumbState
         disp.statusBarState = appState.statusBarState
+        disp.pickerState = appState.pickerState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }

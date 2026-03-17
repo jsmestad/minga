@@ -21,6 +21,7 @@
 		2A14A36D7CB3580A73355970 /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
 		2E40B27FA890123D325C4346 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */; };
 		31E0D1C2347322703DA6CC71 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458552EC58E44C7CD15A98A /* FileTreeView.swift */; };
+		32171233224FC90E1E956631 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0836F0D4150126F181C05 /* PickerState.swift */; };
 		3DF3937E460A624254F647BC /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
 		48842D6AE71AA7EB08B9ED03 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
 		50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
@@ -36,6 +37,7 @@
 		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		793247C2AB95598A1AC4C6EC /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
 		7A21099CFC922D178A3079DF /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
+		7B1E95EDA0612049FB400108 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0836F0D4150126F181C05 /* PickerState.swift */; };
 		7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		7FD39613E25BB0588ADBECCC /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */; };
 		8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */; };
@@ -49,6 +51,7 @@
 		B3CE9FF4E42438A1A72BD156 /* CompletionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */; };
 		B6295F0247ADE2D1D0133DCB /* ThemeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6B3C68CFF37BC4303933A /* ThemeColors.swift */; };
 		B6F7BAB1912B12C5D59B6290 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458552EC58E44C7CD15A98A /* FileTreeView.swift */; };
+		B768FE0E1E64E6C754EAD109 /* PickerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F606681DE9AA9D502A42AA /* PickerOverlay.swift */; };
 		C00E62ED31BA198B0EC92EAF /* CompletionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */; };
 		C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
 		C607CC562920162A87010EA9 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */; };
@@ -62,6 +65,7 @@
 		EDF83D0ACFCCB4ED91C1813C /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		F0E42B12D7F886477CE7FC81 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
 		F16FDEC1BFC1776B1109622E /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
+		F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F606681DE9AA9D502A42AA /* PickerOverlay.swift */; };
 		F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
 		FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
 /* End PBXBuildFile section */
@@ -80,6 +84,7 @@
 		4BC98120D82BD7548347875E /* FontFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontFace.swift; sourceTree = "<group>"; };
 		4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaWindow.swift; sourceTree = "<group>"; };
 		4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		52F606681DE9AA9D502A42AA /* PickerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerOverlay.swift; sourceTree = "<group>"; };
 		5458552EC58E44C7CD15A98A /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeView.swift; sourceTree = "<group>"; };
 		56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolDecoder.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -87,6 +92,7 @@
 		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
 		83165B89231936674C54B513 /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
 		89DAA6AEFA6A62A1172EABF2 /* minga-mac */ = {isa = PBXFileReference; includeInIndex = 0; path = "minga-mac"; sourceTree = BUILT_PRODUCTS_DIR; };
+		92C0836F0D4150126F181C05 /* PickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerState.swift; sourceTree = "<group>"; };
 		BD2DE335B00721CBB29329F9 /* FontTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontTests.swift; sourceTree = "<group>"; };
 		BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionState.swift; sourceTree = "<group>"; };
 		BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulator.swift; sourceTree = "<group>"; };
@@ -150,6 +156,8 @@
 				CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */,
 				5458552EC58E44C7CD15A98A /* FileTreeView.swift */,
 				4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */,
+				52F606681DE9AA9D502A42AA /* PickerOverlay.swift */,
+				92C0836F0D4150126F181C05 /* PickerState.swift */,
 				BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */,
 				E892F827AFBE959F9DF25C05 /* StatusBarView.swift */,
 				0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */,
@@ -344,6 +352,8 @@
 				50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */,
 				16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */,
 				27236A210603A4548A56F072 /* MingaWindow.swift in Sources */,
+				B768FE0E1E64E6C754EAD109 /* PickerOverlay.swift in Sources */,
+				7B1E95EDA0612049FB400108 /* PickerState.swift in Sources */,
 				158393FF12EC30CAB1653526 /* PortLogger.swift in Sources */,
 				0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */,
 				CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */,
@@ -378,6 +388,8 @@
 				F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */,
 				1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */,
 				8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */,
+				F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */,
+				32171233224FC90E1E956631 /* PickerState.swift in Sources */,
 				5CADBD593C49EE44EBBD854E /* PortLogger.swift in Sources */,
 				A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */,
 				93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */,
