@@ -211,7 +211,7 @@ struct DispatcherLigatureTests {
     @Test("drawText without fontFace writes individual cells")
     func noFontFaceIndividualCells() {
         let grid = CellGrid(cols: 20, rows: 1)
-        let disp = CommandDispatcher(grid: grid)
+        let disp = CommandDispatcher(grid: grid, guiState: GUIState())
         // No fontFace set, so no ligature shaping.
         disp.dispatch(.drawText(row: 0, col: 0, fg: 0xFFFFFF, bg: 0, attrs: 0, text: "->"))
         let cell0 = grid.cells[0]
@@ -225,7 +225,7 @@ struct DispatcherLigatureTests {
     @Test("drawText with ligatures disabled writes individual cells")
     func ligaturesDisabledIndividualCells() {
         let grid = CellGrid(cols: 20, rows: 1)
-        let disp = CommandDispatcher(grid: grid)
+        let disp = CommandDispatcher(grid: grid, guiState: GUIState())
         disp.fontFace = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: false)
         disp.dispatch(.drawText(row: 0, col: 0, fg: 0xFFFFFF, bg: 0, attrs: 0, text: "->"))
         let cell0 = grid.cells[0]
