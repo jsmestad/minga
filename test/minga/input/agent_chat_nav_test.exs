@@ -339,4 +339,23 @@ defmodule Minga.Input.AgentChatNavTest do
       assert {:passthrough, _} = AgentChatNav.handle_key(state, ?j, 0)
     end
   end
+
+  describe "read-only buffer guard (KeyDispatch integration)" do
+    alias Minga.Editor.KeyDispatch
+
+    test "insert mode allowed when agent input is focused despite read-only active buffer" do
+      state = make_state(input_focused: true)
+      # Put the read-only agent buffer as buffers.active so the read-only
+      # guard would fire WITHOUT the input_focused bypass.
+      agent_buf = AgentAccess.agent(state).buffer
+      assert BufferServer.read_only?(agent_buf)
+      state = put_in(state.buffers.active, agent_buf)
+
+      new_state = KeyDispatch.handle_key(state, ?A, 0)
+
+      # input_focused bypasses the read-only check, so insert succeeds
+      assert new_state.vim.mode == :insert
+      refute new_state.status_msg == "Buffer is read-only"
+    end
+  end
 end

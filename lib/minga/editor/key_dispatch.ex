@@ -19,6 +19,7 @@ defmodule Minga.Editor.KeyDispatch do
   alias Minga.Editor.MacroReplay
   alias Minga.Editor.ModeTransitions
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Mode
 
   @doc """
@@ -122,7 +123,18 @@ defmodule Minga.Editor.KeyDispatch do
   # windows may display a different buffer than the one tracked in the
   # buffers struct.
   @spec active_buffer_read_only?(EditorState.t()) :: boolean()
-  defp active_buffer_read_only?(%{windows: %{map: map, active: active_id}} = state) do
+  defp active_buffer_read_only?(state) do
+    # When the agent input is focused, the target buffer is the prompt
+    # buffer (which is writable), not the read-only chat buffer.
+    if AgentAccess.input_focused?(state) do
+      false
+    else
+      check_window_buffer_read_only(state)
+    end
+  end
+
+  @spec check_window_buffer_read_only(EditorState.t()) :: boolean()
+  defp check_window_buffer_read_only(%{windows: %{map: map, active: active_id}} = state) do
     buf =
       case Map.fetch(map, active_id) do
         {:ok, window} -> window.buffer
