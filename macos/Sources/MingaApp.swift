@@ -172,6 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register the bundled Nerd Font for devicon rendering.
+        registerBundledFonts()
+
         // Register as a regular GUI app so macOS routes keyboard events to us.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -298,6 +301,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.fontFace = newFace
         dispatcher.fontFace = newFace
         nsView.updateFont(newFace)
+    }
+
+    // MARK: - Font registration
+
+    /// Registers bundled Nerd Font so SwiftUI views can use it for devicons.
+    private func registerBundledFonts() {
+        let fontName = "SymbolsNerdFontMono-Regular"
+        let ext = "ttf"
+
+        // Look for the font in the app bundle's Resources directory.
+        // For a tool target, resources are next to the binary.
+        let searchPaths = [
+            Bundle.main.bundleURL.appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(fontName).\(ext)")
+        ]
+
+        for url in searchPaths {
+            if FileManager.default.fileExists(atPath: url.path) {
+                var errorRef: Unmanaged<CFError>?
+                if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &errorRef) {
+                    NSLog("Registered bundled font: \(fontName)")
+                    return
+                } else if let error = errorRef?.takeRetainedValue() {
+                    // Font might already be registered (e.g., user has it installed)
+                    let desc = CFErrorCopyDescription(error) as String
+                    if desc.contains("already registered") {
+                        return
+                    }
+                    NSLog("Failed to register font \(fontName): \(desc)")
+                }
+            }
+        }
+
+        // Font not found in bundle; check if it's already available system-wide
+        let testFont = NSFont(name: "Symbols Nerd Font Mono", size: 12)
+        if testFont != nil {
+            return
+        }
+
+        NSLog("Warning: Nerd Font not found. Devicons will show as missing glyphs.")
     }
 
     // MARK: - Protocol handling

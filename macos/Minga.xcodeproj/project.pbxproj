@@ -16,6 +16,7 @@
 		158393FF12EC30CAB1653526 /* PortLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23DC6E0ACB156F21293E87 /* PortLogger.swift */; };
 		16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A647814918768E62822D4A1 /* MingaApp.swift */; };
 		1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
+		2534C98EBC14F9F08600AE7A /* SymbolsNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */; };
 		27236A210603A4548A56F072 /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */; };
 		2A14A36D7CB3580A73355970 /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
 		2E40B27FA890123D325C4346 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */; };
@@ -98,6 +99,7 @@
 		E892F827AFBE959F9DF25C05 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
+		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -110,6 +112,14 @@
 				4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */,
 			);
 			path = Renderer;
+			sourceTree = "<group>";
+		};
+		13651B343AC3A6E146620074 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 		4AACF7C989E8FDB12B3EC840 /* Font */ = {
@@ -175,9 +185,18 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		D088D90543E0691383A8FA23 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				13651B343AC3A6E146620074 /* Fonts */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		E8F5FA5379F05A4CFD1B29AA = {
 			isa = PBXGroup;
 			children = (
+				D088D90543E0691383A8FA23 /* Resources */,
 				C6B8D946BE6392AA3F4AE5E9 /* Sources */,
 				616EA584E8B34ECF2CD77B29 /* Tests */,
 				EAC6A96BCF212D9B7E7CEF60 /* Products */,
@@ -228,6 +247,7 @@
 			buildConfigurationList = BEC4852E67E77008BC01B1D6 /* Build configuration list for PBXNativeTarget "minga-mac" */;
 			buildPhases = (
 				57A5E7D23FC6D5271E0D927A /* Sources */,
+				CE1A6BE2950D968425CF18A1 /* Resources */,
 				9461805708F48669CDAFF6D6 /* Codesign */,
 			);
 			buildRules = (
@@ -271,6 +291,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CE1A6BE2950D968425CF18A1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2534C98EBC14F9F08600AE7A /* SymbolsNerdFontMono-Regular.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		9461805708F48669CDAFF6D6 /* Codesign */ = {

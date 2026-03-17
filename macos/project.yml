@@ -21,6 +21,8 @@ targets:
     sources:
       - path: Sources
         type: group
+      - path: Resources
+        type: group
     settings:
       base:
         PRODUCT_NAME: minga-mac
