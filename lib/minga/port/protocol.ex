@@ -73,6 +73,56 @@ defmodule Minga.Port.Protocol do
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
 
+  # GUI chrome commands (BEAM → Swift)
+  @op_gui_theme 0x1F
+
+  # GUI theme color slot IDs
+  @gui_color_editor_bg 0x01
+  @gui_color_editor_fg 0x02
+  @gui_color_tree_bg 0x03
+  @gui_color_tree_fg 0x04
+  @gui_color_tree_selection_bg 0x05
+  @gui_color_tree_dir_fg 0x06
+  @gui_color_tree_active_fg 0x07
+  @gui_color_tree_header_bg 0x08
+  @gui_color_tree_header_fg 0x09
+  @gui_color_tree_separator_fg 0x0A
+  @gui_color_tree_git_modified 0x0B
+  @gui_color_tree_git_staged 0x0C
+  @gui_color_tree_git_untracked 0x0D
+  @gui_color_tree_selection_fg 0x0E
+  @gui_color_tree_guide_fg 0x0F
+  @gui_color_tab_bg 0x10
+  @gui_color_tab_active_bg 0x11
+  @gui_color_tab_active_fg 0x12
+  @gui_color_tab_inactive_fg 0x13
+  @gui_color_tab_modified_fg 0x14
+  @gui_color_tab_separator_fg 0x15
+  @gui_color_tab_close_hover_fg 0x16
+  @gui_color_tab_attention_fg 0x17
+  @gui_color_popup_bg 0x20
+  @gui_color_popup_fg 0x21
+  @gui_color_popup_border 0x22
+  @gui_color_popup_sel_bg 0x23
+  @gui_color_popup_key_fg 0x24
+  @gui_color_popup_group_fg 0x25
+  @gui_color_popup_desc_fg 0x26
+  @gui_color_breadcrumb_bg 0x27
+  @gui_color_breadcrumb_fg 0x28
+  @gui_color_breadcrumb_separator_fg 0x29
+  @gui_color_modeline_bar_bg 0x30
+  @gui_color_modeline_bar_fg 0x31
+  @gui_color_modeline_info_bg 0x32
+  @gui_color_modeline_info_fg 0x33
+  @gui_color_mode_normal_bg 0x34
+  @gui_color_mode_normal_fg 0x35
+  @gui_color_mode_insert_bg 0x36
+  @gui_color_mode_insert_fg 0x37
+  @gui_color_mode_visual_bg 0x38
+  @gui_color_mode_visual_fg 0x39
+  @gui_color_statusbar_accent_fg 0x3A
+  @gui_color_accent 0x40
+
   # Highlight commands (BEAM → Zig)
   @op_set_language 0x20
   @op_parse_buffer 0x21
@@ -565,6 +615,102 @@ defmodule Minga.Port.Protocol do
   def encode_close_buffer(buffer_id)
       when is_integer(buffer_id) and buffer_id >= 0 do
     <<@op_close_buffer, buffer_id::32>>
+  end
+
+  # ── GUI chrome encoding ──
+
+  @doc """
+  Encodes a gui_theme command with all theme colors for SwiftUI chrome.
+
+  Takes a `Theme.t()` and produces a binary with `{slot_id:u8, r:u8, g:u8, b:u8}`
+  entries for every color slot the GUI needs. Colors that are nil are skipped.
+  """
+  @spec encode_gui_theme(Minga.Theme.t()) :: binary()
+  def encode_gui_theme(%Minga.Theme{} = theme) do
+    colors =
+      build_gui_theme_colors(theme)
+      |> Enum.reject(fn {_slot, color} -> is_nil(color) end)
+
+    count = length(colors)
+
+    entries =
+      Enum.map(colors, fn {slot, rgb} ->
+        r = Bitwise.bsr(Bitwise.band(rgb, 0xFF0000), 16)
+        g = Bitwise.bsr(Bitwise.band(rgb, 0x00FF00), 8)
+        b = Bitwise.band(rgb, 0x0000FF)
+        <<slot::8, r::8, g::8, b::8>>
+      end)
+
+    IO.iodata_to_binary([@op_gui_theme, <<count::8>> | entries])
+  end
+
+  @spec build_gui_theme_colors(Minga.Theme.t()) ::
+          [{non_neg_integer(), non_neg_integer() | nil}]
+  defp build_gui_theme_colors(theme) do
+    e = theme.editor
+    t = theme.tree
+    tb = theme.tab_bar
+    p = theme.popup
+    ml = theme.modeline
+
+    mode_color = fn mode ->
+      case Map.get(ml.mode_colors || %{}, mode) do
+        {fg, bg} -> {fg, bg}
+        _ -> {ml.bar_fg, ml.bar_bg}
+      end
+    end
+
+    {normal_fg, normal_bg} = mode_color.(:normal)
+    {insert_fg, insert_bg} = mode_color.(:insert)
+    {visual_fg, visual_bg} = mode_color.(:visual)
+
+    [
+      {@gui_color_editor_bg, e.bg},
+      {@gui_color_editor_fg, e.fg},
+      {@gui_color_tree_bg, t.bg},
+      {@gui_color_tree_fg, t.fg},
+      {@gui_color_tree_selection_bg, t.cursor_bg},
+      {@gui_color_tree_dir_fg, t.dir_fg},
+      {@gui_color_tree_active_fg, t.active_fg},
+      {@gui_color_tree_header_bg, t.header_bg},
+      {@gui_color_tree_header_fg, t.header_fg},
+      {@gui_color_tree_separator_fg, t.separator_fg},
+      {@gui_color_tree_git_modified, t.git_modified_fg},
+      {@gui_color_tree_git_staged, t.git_staged_fg},
+      {@gui_color_tree_git_untracked, t.git_untracked_fg},
+      {@gui_color_tree_selection_fg, e.fg},
+      {@gui_color_tree_guide_fg, t.separator_fg},
+      {@gui_color_tab_bg, tb && tb.bg},
+      {@gui_color_tab_active_bg, tb && tb.active_bg},
+      {@gui_color_tab_active_fg, tb && tb.active_fg},
+      {@gui_color_tab_inactive_fg, tb && tb.inactive_fg},
+      {@gui_color_tab_modified_fg, tb && tb.modified_fg},
+      {@gui_color_tab_separator_fg, tb && tb.separator_fg},
+      {@gui_color_tab_close_hover_fg, tb && tb.close_hover_fg},
+      {@gui_color_tab_attention_fg, tb && tb.attention_fg},
+      {@gui_color_popup_bg, p.bg},
+      {@gui_color_popup_fg, p.fg},
+      {@gui_color_popup_border, p.border_fg},
+      {@gui_color_popup_sel_bg, p.sel_bg},
+      {@gui_color_popup_key_fg, p.key_fg},
+      {@gui_color_popup_group_fg, p.group_fg},
+      {@gui_color_popup_desc_fg, p.fg},
+      {@gui_color_breadcrumb_bg, ml.bar_bg},
+      {@gui_color_breadcrumb_fg, ml.info_fg},
+      {@gui_color_breadcrumb_separator_fg, t.separator_fg},
+      {@gui_color_modeline_bar_bg, ml.bar_bg},
+      {@gui_color_modeline_bar_fg, ml.bar_fg},
+      {@gui_color_modeline_info_bg, ml.info_bg},
+      {@gui_color_modeline_info_fg, ml.info_fg},
+      {@gui_color_mode_normal_bg, normal_bg},
+      {@gui_color_mode_normal_fg, normal_fg},
+      {@gui_color_mode_insert_bg, insert_bg},
+      {@gui_color_mode_insert_fg, insert_fg},
+      {@gui_color_mode_visual_bg, visual_bg},
+      {@gui_color_mode_visual_fg, visual_fg},
+      {@gui_color_statusbar_accent_fg, t.active_fg},
+      {@gui_color_accent, t.active_fg}
+    ]
   end
 
   # ── Decoding (Zig → BEAM) ──

@@ -23,6 +23,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
+  alias Minga.Port.Capabilities
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
   alias Minga.Telemetry
@@ -59,6 +60,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       PortManager.send_commands(state.port_manager, commands)
       send_title(state)
       send_window_bg(state)
+      send_gui_theme(state)
       :ok
     end)
   end
@@ -401,6 +403,20 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     if bg != Process.get(:last_window_bg) do
       Process.put(:last_window_bg, bg)
       PortManager.send_commands([Protocol.encode_set_window_bg(bg)])
+    end
+
+    :ok
+  end
+
+  @spec send_gui_theme(state()) :: :ok
+  defp send_gui_theme(state) do
+    if Capabilities.gui?(state.capabilities) do
+      theme_name = state.theme.name
+
+      if theme_name != Process.get(:last_gui_theme) do
+        Process.put(:last_gui_theme, theme_name)
+        PortManager.send_commands(state.port_manager, [Protocol.encode_gui_theme(state.theme)])
+      end
     end
 
     :ok

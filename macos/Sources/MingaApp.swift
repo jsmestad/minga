@@ -72,6 +72,8 @@ final class AppState: ObservableObject {
     @Published var windowBgColor: Color?
     /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
     @Published var windowBgIsDark: Bool = true
+    /// Theme colors for SwiftUI chrome views.
+    let themeColors = ThemeColors()
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -154,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         disp.fontFace = face
+        disp.themeColors = appState.themeColors
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }

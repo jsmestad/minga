@@ -21,6 +21,7 @@ enum RenderCommand: Sendable {
     case destroyRegion(id: UInt16)
     case setActiveRegion(id: UInt16)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
+    case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
 }
 
 /// Cursor shape matching the protocol constants.
@@ -190,6 +191,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
         let textLen = Int(readU16(data, rest + 4))
         return (nil, 1 + 6 + textLen)
+
+    // GUI chrome commands.
+    case OP_GUI_THEME:
+        // count:1, then count × (slot_id:1, r:1, g:1, b:1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let count = Int(data[rest])
+        guard data.count >= rest + 1 + count * 4 else { throw ProtocolDecodeError.malformed }
+        var slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)] = []
+        slots.reserveCapacity(count)
+        for i in 0..<count {
+            let base = rest + 1 + i * 4
+            slots.append((data[base], data[base + 1], data[base + 2], data[base + 3]))
+        }
+        return (.guiTheme(slots: slots), 1 + 1 + count * 4)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

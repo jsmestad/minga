@@ -42,6 +42,9 @@ final class CommandDispatcher {
     /// Parameters: family, size, ligatures, weight byte.
     var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
 
+    /// Theme colors for SwiftUI chrome views. Updated on gui_theme commands.
+    var themeColors: ThemeColors?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -114,6 +117,9 @@ final class CommandDispatcher {
 
         case .setFont(let family, let size, let ligatures, let weight):
             onFontChanged?(family, size, ligatures, weight)
+
+        case .guiTheme(let slots):
+            themeColors?.applySlots(slots)
         }
     }
 
