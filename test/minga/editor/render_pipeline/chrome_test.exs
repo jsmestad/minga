@@ -24,7 +24,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
     {scrolls, cursor_info, state, layout}
   end
 
-  describe "build_chrome/4" do
+  alias Minga.Port.Capabilities
+
+  describe "build_chrome/4 TUI path" do
     test "returns a Chrome struct" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
@@ -57,6 +59,62 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
 
     test "chrome regions is a list of binaries" do
       state = base_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert is_list(chrome.regions)
+      assert Enum.all?(chrome.regions, &is_binary/1)
+    end
+  end
+
+  describe "build_chrome/4 GUI path" do
+    defp gui_state(opts \\ []) do
+      state = base_state(opts)
+      %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+    end
+
+    test "returns a Chrome struct with GUI capabilities" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert %Chrome{} = chrome
+    end
+
+    test "tab bar and file tree are empty (SwiftUI handles them)" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert chrome.tab_bar == []
+      assert chrome.tab_bar_click_regions == []
+      assert chrome.file_tree == []
+    end
+
+    test "modeline is empty for single window" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert chrome.modeline_draws == %{}
+      assert chrome.modeline_click_regions == []
+    end
+
+    test "minibuffer is still rendered" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert [_ | _] = chrome.minibuffer
+    end
+
+    test "regions are still produced" do
+      state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
