@@ -243,14 +243,17 @@ struct AgentChatView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(theme.popupFg.opacity(isInsertMode ? 0.4 : 0.25))
             } else {
-                Text(state.prompt)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg)
-                if isInsertMode {
-                    // Cursor indicator
-                    Rectangle()
-                        .fill(theme.accent)
-                        .frame(width: 1.5, height: 16)
+                // Text + cursor with zero spacing so cursor sits right at the insertion point
+                HStack(spacing: 0) {
+                    Text(state.prompt)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.popupFg)
+                    if isInsertMode {
+                        // Cursor indicator
+                        Rectangle()
+                            .fill(theme.accent)
+                            .frame(width: 1.5, height: 16)
+                    }
                 }
             }
 
