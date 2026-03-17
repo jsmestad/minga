@@ -743,4 +743,53 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:scroll_region, 0, 65_535, 3}} = Protocol.decode_command(encoded)
     end
   end
+
+  # ── GUI action decoding ──────────────────────────────────────────────────
+
+  describe "decode_event/1 — gui_action" do
+    test "select_tab with tab id" do
+      payload = <<0x07, 0x01, 42::32-big>>
+      assert {:ok, {:gui_action, {:select_tab, 42}}} = Protocol.decode_event(payload)
+    end
+
+    test "close_tab with tab id" do
+      payload = <<0x07, 0x02, 42::32-big>>
+      assert {:ok, {:gui_action, {:close_tab, 42}}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_click with index" do
+      payload = <<0x07, 0x03, 15::16-big>>
+      assert {:ok, {:gui_action, {:file_tree_click, 15}}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_toggle with index" do
+      payload = <<0x07, 0x04, 7::16-big>>
+      assert {:ok, {:gui_action, {:file_tree_toggle, 7}}} = Protocol.decode_event(payload)
+    end
+
+    test "completion_select with index" do
+      payload = <<0x07, 0x05, 3::16-big>>
+      assert {:ok, {:gui_action, {:completion_select, 3}}} = Protocol.decode_event(payload)
+    end
+
+    test "breadcrumb_click with segment index" do
+      payload = <<0x07, 0x06, 2>>
+      assert {:ok, {:gui_action, {:breadcrumb_click, 2}}} = Protocol.decode_event(payload)
+    end
+
+    test "toggle_panel with panel id" do
+      payload = <<0x07, 0x07, 1>>
+      assert {:ok, {:gui_action, {:toggle_panel, 1}}} = Protocol.decode_event(payload)
+    end
+
+    test "new_tab with no payload" do
+      payload = <<0x07, 0x08>>
+      assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
+    end
+
+    test "unknown action type returns malformed" do
+      payload = <<0x07, 0xFF, 0, 0>>
+      assert {:error, :malformed} = Protocol.decode_event(payload)
+    end
+  end
 end

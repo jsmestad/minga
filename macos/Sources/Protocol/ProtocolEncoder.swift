@@ -15,6 +15,16 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8)
     func sendPasteEvent(text: String)
     func sendLog(level: UInt8, message: String)
+
+    // GUI actions (semantic commands from SwiftUI chrome)
+    func sendSelectTab(id: UInt32)
+    func sendCloseTab(id: UInt32)
+    func sendFileTreeClick(index: UInt16)
+    func sendFileTreeToggle(index: UInt16)
+    func sendCompletionSelect(index: UInt16)
+    func sendBreadcrumbClick(index: UInt8)
+    func sendTogglePanel(panel: UInt8)
+    func sendNewTab()
 }
 
 extension InputEncoder {
@@ -106,6 +116,79 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if msgLen > 0 {
             buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
         }
+        writeFrame(buf)
+    }
+
+    // MARK: - GUI Actions
+
+    /// Send a gui_action: select_tab. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendSelectTab(id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SELECT_TAB
+        writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: close_tab. Layout: opcode(1) + action_type(1) + tab_id(4).
+    func sendCloseTab(id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CLOSE_TAB
+        writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_click. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeClick(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_CLICK
+        writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_toggle. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeToggle(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_TOGGLE
+        writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: completion_select. Layout: opcode(1) + action_type(1) + index(2).
+    func sendCompletionSelect(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_COMPLETION_SELECT
+        writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: breadcrumb_click. Layout: opcode(1) + action_type(1) + index(1).
+    func sendBreadcrumbClick(index: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_BREADCRUMB_CLICK
+        buf[2] = index
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: toggle_panel. Layout: opcode(1) + action_type(1) + panel(1).
+    func sendTogglePanel(panel: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_TOGGLE_PANEL
+        buf[2] = panel
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: new_tab. Layout: opcode(1) + action_type(1).
+    func sendNewTab() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_NEW_TAB
         writeFrame(buf)
     }
 

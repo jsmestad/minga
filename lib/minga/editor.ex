@@ -43,6 +43,7 @@ defmodule Minga.Editor do
   alias Minga.Mode
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
   alias Minga.Port.Manager, as: PortManager
+  alias Minga.Port.Protocol
 
   @typedoc "Options for starting the editor."
   @type start_opt ::
@@ -371,6 +372,14 @@ defmodule Minga.Editor do
         state
       ) do
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
+    new_state = Renderer.render(new_state)
+    {:noreply, new_state}
+  end
+
+  # ── GUI action events (semantic commands from SwiftUI chrome) ────────────
+
+  def handle_info({:minga_input, {:gui_action, action}}, state) do
+    new_state = handle_gui_action(state, action)
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -1048,6 +1057,73 @@ defmodule Minga.Editor do
 
   @spec log_message(state(), String.t()) :: state()
   defp log_message(state, text), do: MessageLog.log(state, text)
+
+  # ── GUI action dispatch ────────────────────────────────────────────────
+  # Semantic commands from SwiftUI chrome. Each action maps to existing
+  # editor operations. These are wired up as SwiftUI views are built;
+  # unimplemented actions log a message and return state unchanged.
+
+  @spec handle_gui_action(state(), Protocol.gui_action()) :: state()
+  defp handle_gui_action(state, {:select_tab, id}) do
+    EditorState.switch_tab(state, id)
+  end
+
+  defp handle_gui_action(state, {:close_tab, _id}) do
+    # Close specific tab by id. For now, use force_quit which closes
+    # the active tab. Full implementation in a later step.
+    Commands.BufferManagement.execute(state, :force_quit)
+  end
+
+  defp handle_gui_action(state, {:file_tree_click, index}) do
+    gui_tree_action(state, index, :click)
+  end
+
+  defp handle_gui_action(state, {:file_tree_toggle, index}) do
+    gui_tree_action(state, index, :toggle)
+  end
+
+  defp handle_gui_action(state, {:completion_select, index}) do
+    case state.completion do
+      %Completion{} = comp ->
+        updated = %{comp | selected: index}
+        do_accept_completion(%{state | completion: updated}, updated)
+
+      nil ->
+        state
+    end
+  end
+
+  defp handle_gui_action(state, {:breadcrumb_click, _segment_index}) do
+    # Breadcrumb navigation is a follow-up feature.
+    state
+  end
+
+  defp handle_gui_action(state, {:toggle_panel, 0}) do
+    Commands.FileTree.toggle(state)
+  end
+
+  defp handle_gui_action(state, {:toggle_panel, _panel}) do
+    # Other panel toggles (diagnostics, etc.) are follow-up features.
+    state
+  end
+
+  defp handle_gui_action(state, :new_tab) do
+    Commands.BufferManagement.execute(state, :new_buffer)
+  end
+
+  # Moves the file tree cursor to the given index and performs the action.
+  @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
+  defp gui_tree_action(%{file_tree: %{tree: nil}} = state, _index, _action), do: state
+
+  defp gui_tree_action(state, index, action) do
+    tree = %{state.file_tree.tree | cursor: index}
+    state = put_in(state.file_tree.tree, tree)
+
+    case action do
+      :click -> Commands.FileTree.open_or_toggle(state)
+      :toggle -> Commands.FileTree.open_or_toggle(state)
+    end
+  end
 
   # ── Warning popup debounce ───────────────────────────────────────────────
 

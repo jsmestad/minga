@@ -77,6 +77,20 @@ let MOUSE_SCROLL_DOWN: UInt8 = 0x41
 let MOUSE_SCROLL_RIGHT: UInt8 = 0x42
 let MOUSE_SCROLL_LEFT: UInt8 = 0x43
 
+// MARK: - GUI action opcode (frontend → BEAM)
+
+let OP_GUI_ACTION: UInt8 = 0x07
+
+// GUI action types (sub-opcodes within gui_action)
+let GUI_ACTION_SELECT_TAB: UInt8 = 0x01
+let GUI_ACTION_CLOSE_TAB: UInt8 = 0x02
+let GUI_ACTION_FILE_TREE_CLICK: UInt8 = 0x03
+let GUI_ACTION_FILE_TREE_TOGGLE: UInt8 = 0x04
+let GUI_ACTION_COMPLETION_SELECT: UInt8 = 0x05
+let GUI_ACTION_BREADCRUMB_CLICK: UInt8 = 0x06
+let GUI_ACTION_TOGGLE_PANEL: UInt8 = 0x07
+let GUI_ACTION_NEW_TAB: UInt8 = 0x08
+
 // MARK: - Log message opcode (frontend → BEAM)
 
 let OP_LOG_MESSAGE: UInt8 = 0x60

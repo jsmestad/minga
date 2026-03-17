@@ -45,6 +45,17 @@ defmodule Minga.Port.Protocol do
   @op_mouse_event 0x04
   @op_capabilities_updated 0x05
   @op_paste_event 0x06
+  @op_gui_action 0x07
+
+  # GUI action types (sub-opcodes within gui_action)
+  @gui_action_select_tab 0x01
+  @gui_action_close_tab 0x02
+  @gui_action_file_tree_click 0x03
+  @gui_action_file_tree_toggle 0x04
+  @gui_action_completion_select 0x05
+  @gui_action_breadcrumb_click 0x06
+  @gui_action_toggle_panel 0x07
+  @gui_action_new_tab 0x08
 
   alias Minga.Port.Capabilities
 
@@ -181,6 +192,18 @@ defmodule Minga.Port.Protocol do
           | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              %{atom() => [{non_neg_integer(), non_neg_integer()}]}}
           | {:log_message, level :: String.t(), text :: String.t()}
+          | {:gui_action, gui_action()}
+
+  @typedoc "A semantic GUI action from the Swift frontend."
+  @type gui_action ::
+          {:select_tab, id :: pos_integer()}
+          | {:close_tab, id :: pos_integer()}
+          | {:file_tree_click, index :: non_neg_integer()}
+          | {:file_tree_toggle, index :: non_neg_integer()}
+          | {:completion_select, index :: non_neg_integer()}
+          | {:breadcrumb_click, segment_index :: non_neg_integer()}
+          | {:toggle_panel, panel :: non_neg_integer()}
+          | :new_tab
 
   @typedoc "Cursor shape."
   @type cursor_shape :: :block | :beam | :underline
@@ -603,6 +626,14 @@ defmodule Minga.Port.Protocol do
     {:ok, {:paste_event, text}}
   end
 
+  # GUI action: opcode(1) + action_type(1) + payload
+  def decode_event(<<@op_gui_action, action_type::8, rest::binary>>) do
+    case decode_gui_action(action_type, rest) do
+      {:ok, action} -> {:ok, {:gui_action, action}}
+      :error -> {:error, :malformed}
+    end
+  end
+
   def decode_event(<<@op_highlight_spans, buffer_id::32, version::32, count::32, rest::binary>>) do
     case decode_spans(rest, count, []) do
       {:ok, spans} -> {:ok, {:highlight_spans, buffer_id, version, spans}}
@@ -861,6 +892,30 @@ defmodule Minga.Port.Protocol do
   # ── Mouse helpers ──
 
   @spec decode_mouse_button(non_neg_integer()) :: mouse_button()
+  # ── GUI action decoding ──
+
+  @spec decode_gui_action(non_neg_integer(), binary()) :: {:ok, gui_action()} | :error
+  defp decode_gui_action(@gui_action_select_tab, <<id::32>>), do: {:ok, {:select_tab, id}}
+  defp decode_gui_action(@gui_action_close_tab, <<id::32>>), do: {:ok, {:close_tab, id}}
+
+  defp decode_gui_action(@gui_action_file_tree_click, <<index::16>>),
+    do: {:ok, {:file_tree_click, index}}
+
+  defp decode_gui_action(@gui_action_file_tree_toggle, <<index::16>>),
+    do: {:ok, {:file_tree_toggle, index}}
+
+  defp decode_gui_action(@gui_action_completion_select, <<index::16>>),
+    do: {:ok, {:completion_select, index}}
+
+  defp decode_gui_action(@gui_action_breadcrumb_click, <<index::8>>),
+    do: {:ok, {:breadcrumb_click, index}}
+
+  defp decode_gui_action(@gui_action_toggle_panel, <<panel::8>>),
+    do: {:ok, {:toggle_panel, panel}}
+
+  defp decode_gui_action(@gui_action_new_tab, <<>>), do: {:ok, :new_tab}
+  defp decode_gui_action(_, _), do: :error
+
   defp decode_mouse_button(@mouse_left), do: :left
   defp decode_mouse_button(@mouse_middle), do: :middle
   defp decode_mouse_button(@mouse_right), do: :right
