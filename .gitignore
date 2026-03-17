@@ -21,6 +21,7 @@ macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 erl_crash.dump
 /priv/minga-renderer
 /priv/minga-parser
+/priv/minga-test-harness
 /burrito_out/
 
 # Editor / OS

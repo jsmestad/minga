@@ -64,6 +64,9 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   @doc """
   Builds all non-content UI draws: modeline, minibuffer, separators,
   file tree, agent panel sidebar, overlays, and region definitions.
+
+  Dispatches to `build_gui_chrome` or `build_tui_chrome` based on
+  frontend capabilities. Both return the same `Chrome.t()` struct.
   """
   @spec build_chrome(
           state(),
@@ -72,37 +75,34 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
           Cursor.t() | nil
         ) :: t()
   def build_chrome(state, layout, scrolls, cursor_info) do
+    if Capabilities.gui?(state.capabilities) do
+      build_gui_chrome(state, layout, scrolls, cursor_info)
+    else
+      build_tui_chrome(state, layout, scrolls, cursor_info)
+    end
+  end
+
+  # ── TUI path ───────────────────────────────────────────────────────────────
+
+  @spec build_tui_chrome(
+          state(),
+          Layout.t(),
+          %{Window.id() => WindowScroll.t()},
+          Cursor.t() | nil
+        ) :: t()
+  defp build_tui_chrome(state, layout, scrolls, cursor_info) do
     full_viewport = state.viewport
 
-    # Modeline per buffer window.
-    # In GUI mode with a single window, skip modeline draws (SwiftUI status bar
-    # handles it). Keep modeline for splits so each window shows its own status.
-    gui_single_window? = Capabilities.gui?(state.capabilities) && !EditorState.split?(state)
-
+    # Modeline per buffer window
     {modeline_draws, modeline_click_regions} =
-      if gui_single_window? do
-        {%{}, []}
-      else
-        Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
-          {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
-          {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
-        end)
-      end
+      Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
+        {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
+        {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+      end)
 
     # Modeline per agent chat window (skipped in scrolls, rendered here)
     {modeline_draws, modeline_click_regions} =
-      layout.window_layouts
-      |> Enum.reduce({modeline_draws, modeline_click_regions}, fn {win_id, win_layout},
-                                                                  {draws_acc, regions_acc} ->
-        window = Map.get(state.windows.map, win_id)
-
-        if window != nil and Content.agent_chat?(window.content) do
-          {draws, regions} = ChromeHelpers.render_agent_modeline(state, win_layout)
-          {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
-        else
-          {draws_acc, regions_acc}
-        end
-      end)
+      render_agent_modelines(state, layout, modeline_draws, modeline_click_regions)
 
     # Separators (vertical split borders)
     separator_draws =
@@ -117,23 +117,15 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
         []
       end
 
-    # File tree: skip cell-grid rendering in GUI mode (SwiftUI renders it natively)
-    tree_draws =
-      if Capabilities.gui?(state.capabilities) do
-        []
-      else
-        TreeRenderer.render(state)
-      end
-
-    # Agent panel: rendered through buffer pipeline via {:agent_chat, _} windows.
-    agent_draws = []
+    # File tree
+    tree_draws = TreeRenderer.render(state)
 
     # Minibuffer
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
-    # Overlays (extracted to reduce complexity)
-    overlays = build_overlays(state, full_viewport, cursor_info)
+    # Overlays
+    overlays = build_overlays(state, full_viewport, cursor_info, _gui_mode? = false)
 
     # Tab bar
     {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
@@ -149,17 +141,99 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
       minibuffer: [minibuffer_draw],
       separators: separator_draws,
       file_tree: tree_draws,
-      agent_panel: agent_draws,
+      agent_panel: [],
       overlays: overlays,
       regions: regions
     }
   end
 
+  # ── GUI path ───────────────────────────────────────────────────────────────
+
+  @spec build_gui_chrome(
+          state(),
+          Layout.t(),
+          %{Window.id() => WindowScroll.t()},
+          Cursor.t() | nil
+        ) :: t()
+  defp build_gui_chrome(state, layout, scrolls, cursor_info) do
+    full_viewport = state.viewport
+
+    # Modeline only for splits (SwiftUI status bar handles single window)
+    {modeline_draws, modeline_click_regions} =
+      if EditorState.split?(state) do
+        Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
+          {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
+          {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+        end)
+      else
+        {%{}, []}
+      end
+
+    # Modeline per agent chat window
+    {modeline_draws, modeline_click_regions} =
+      render_agent_modelines(state, layout, modeline_draws, modeline_click_regions)
+
+    # Separators (still needed for splits in the Metal editor surface)
+    separator_draws =
+      if EditorState.split?(state) do
+        ChromeHelpers.render_separators(
+          state.windows.tree,
+          layout.editor_area,
+          elem(layout.editor_area, 3),
+          state.theme
+        )
+      else
+        []
+      end
+
+    # Minibuffer (rendered in Metal, not SwiftUI)
+    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
+    minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+
+    # Overlays: only hover popup, signature help, and float popups
+    # (picker, which-key, completion are handled by SwiftUI)
+    overlays = build_overlays(state, full_viewport, cursor_info, _gui_mode? = true)
+
+    # Region definitions
+    regions = Regions.define_regions(layout)
+
+    %__MODULE__{
+      modeline_draws: modeline_draws,
+      modeline_click_regions: modeline_click_regions,
+      tab_bar: [],
+      tab_bar_click_regions: [],
+      minibuffer: [minibuffer_draw],
+      separators: separator_draws,
+      file_tree: [],
+      agent_panel: [],
+      overlays: overlays,
+      regions: regions
+    }
+  end
+
+  # ── Shared helpers ─────────────────────────────────────────────────────────
+
+  @spec render_agent_modelines(state(), Layout.t(), map(), list()) :: {map(), list()}
+  defp render_agent_modelines(state, layout, modeline_draws, modeline_click_regions) do
+    layout.window_layouts
+    |> Enum.reduce({modeline_draws, modeline_click_regions}, fn {win_id, win_layout},
+                                                                {draws_acc, regions_acc} ->
+      window = Map.get(state.windows.map, win_id)
+
+      if window != nil and Content.agent_chat?(window.content) do
+        {draws, regions} = ChromeHelpers.render_agent_modeline(state, win_layout)
+        {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+      else
+        {draws_acc, regions_acc}
+      end
+    end)
+  end
+
   # ── Overlay building ──────────────────────────────────────────────────────
 
-  @spec build_overlays(state(), Minga.Editor.Viewport.t(), Cursor.t() | nil) :: [Overlay.t()]
-  defp build_overlays(state, viewport, cursor_info) do
-    gui_mode? = Capabilities.gui?(state.capabilities)
+  @spec build_overlays(state(), Minga.Editor.Viewport.t(), Cursor.t() | nil, boolean()) ::
+          [Overlay.t()]
+  defp build_overlays(state, viewport, cursor_info, gui_mode?) do
     render_overlays_flag = Caps.render_overlays?(state.capabilities)
 
     {picker_draws, picker_cursor} =

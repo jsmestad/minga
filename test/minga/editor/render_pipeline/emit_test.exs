@@ -12,6 +12,8 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
   import Minga.Editor.RenderPipeline.TestHelpers
 
+  alias Minga.Port.Capabilities
+
   describe "emit/2" do
     test "converts frame to commands and sends to port_manager" do
       frame = %Frame{
@@ -196,6 +198,114 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       # Should contain set_cursor (0x11) and set_cursor_shape (0x15)
       assert Enum.any?(commands, fn cmd -> match?(<<0x11, _::binary>>, cmd) end)
       assert Enum.any?(commands, fn cmd -> match?(<<0x15, _::binary>>, cmd) end)
+    end
+  end
+
+  describe "GUI frame filtering" do
+    test "TUI and GUI paths produce identical editor content window draws" do
+      state = base_state(rows: 24, cols: 80, content: long_content(20))
+
+      # Build a frame with window content, file tree, and tab bar draws
+      frame = build_frame_with_window(state, viewport_top: 0)
+
+      file_tree_draws = [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)]
+      tab_bar_draws = [DisplayList.draw(0, 0, " main.ex ", fg: 0xBBC2CF, bg: 0x21242B)]
+
+      frame_with_chrome = %{
+        frame
+        | file_tree: file_tree_draws,
+          tab_bar: tab_bar_draws,
+          agent_panel: [DisplayList.draw(0, 0, "agent", fg: 0xBBC2CF, bg: 0x21242B)]
+      }
+
+      # TUI path: gets everything
+      tui_commands = DisplayList.to_commands(frame_with_chrome)
+
+      # GUI path: filters out SwiftUI-handled fields, then same to_commands
+      gui_frame = %{
+        frame_with_chrome
+        | tab_bar: [],
+          file_tree: [],
+          agent_panel: [],
+          agentic_view: [],
+          splash: nil
+      }
+
+      gui_commands = DisplayList.to_commands(gui_frame)
+
+      # Both should have clear, cursor, and batch_end
+      assert [<<0x12>> | _] = tui_commands
+      assert [<<0x12>> | _] = gui_commands
+
+      # GUI should have fewer commands (no file tree, tab bar, agent panel draws)
+      assert length(gui_commands) < length(tui_commands)
+
+      # Extract just the draw commands (opcode 0x10) from both
+      tui_draws = Enum.filter(tui_commands, &match?(<<0x10, _::binary>>, &1))
+      gui_draws = Enum.filter(gui_commands, &match?(<<0x10, _::binary>>, &1))
+
+      # GUI should have exactly 3 fewer draws (file_tree + tab_bar + agent_panel)
+      assert length(tui_draws) - length(gui_draws) == 3
+
+      # All GUI draws should be present in TUI draws (same window content)
+      for draw <- gui_draws do
+        assert draw in tui_draws, "GUI draw command not found in TUI commands"
+      end
+    end
+
+    test "GUI emit path uses filtered frame via to_commands" do
+      state = base_state()
+      gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+
+      frame = build_frame_with_window(gui_state, viewport_top: 0)
+
+      frame_with_chrome = %{
+        frame
+        | file_tree: [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)],
+          tab_bar: [DisplayList.draw(0, 0, " tab ", fg: 0xBBC2CF, bg: 0x21242B)]
+      }
+
+      assert :ok = Emit.emit(frame_with_chrome, gui_state)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      assert is_list(commands)
+
+      # Should have clear at the start
+      assert [<<0x12>> | _] = commands
+
+      # Should NOT contain file tree or tab bar draw commands.
+      # The file tree draw is at row=0, col=0 with "src/" text.
+      # The tab bar draw is at row=0, col=0 with " tab " text.
+      draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
+
+      refute Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24, _attrs::8,
+                                           len::16, text::binary-size(len)>> ->
+               text == "src/" or text == " tab "
+             end)
+    end
+
+    test "GUI path preserves Metal-rendered overlays (hover, signature help)" do
+      state = base_state()
+      gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+
+      frame = build_frame_with_window(gui_state, viewport_top: 0)
+      hover_draw = DisplayList.draw(5, 10, "hover info", fg: 0xBBC2CF, bg: 0x3E4451)
+
+      frame_with_overlay = %{
+        frame
+        | overlays: [%DisplayList.Overlay{draws: [hover_draw]}]
+      }
+
+      assert :ok = Emit.emit(frame_with_overlay, gui_state)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
+
+      # The hover overlay draw should be present in the output
+      assert Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24, _attrs::8,
+                                           len::16, text::binary-size(len)>> ->
+               text == "hover info"
+             end)
     end
   end
 

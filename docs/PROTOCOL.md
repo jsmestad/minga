@@ -853,6 +853,14 @@ Total size: 7 + (40 + text_len) per edit.
 
 ---
 
+## GUI Chrome Protocol
+
+Native GUI frontends (SwiftUI, GTK4) receive additional structured data opcodes for chrome elements like tab bars, file trees, status bars, and popups. These opcodes live in the 0x70-0x78 range and are sent only when the frontend reports `frontend_type = native_gui` in its capabilities.
+
+See [GUI_PROTOCOL.md](GUI_PROTOCOL.md) for the complete specification of GUI chrome opcodes, gui_action input events, theme color slots, and the behavioral contract for GUI frontends.
+
+---
+
 ## Future: Buffer Fork UI
 
 When [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) lands, the protocol may need new opcodes for fork-related UI elements: fork status indicators in the modeline, merge conflict region rendering, or a fork branch picker. These will be additive (new opcodes, no changes to existing ones). Frontend implementors can safely ignore unknown opcodes by reading and discarding the payload based on the length prefix.
