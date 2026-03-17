@@ -27,6 +27,7 @@ let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 
 // MARK: - GUI chrome opcodes (BEAM → frontend)
 
+let OP_GUI_TAB_BAR: UInt8 = 0x1C
 let OP_GUI_THEME: UInt8 = 0x1F
 
 // GUI theme color slot IDs

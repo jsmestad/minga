@@ -57,6 +57,11 @@ defmodule Minga.Port.Protocol do
   @gui_action_toggle_panel 0x07
   @gui_action_new_tab 0x08
 
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Devicon
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
+  alias Minga.Filetype
   alias Minga.Port.Capabilities
 
   # Render commands (BEAM → Zig)
@@ -74,6 +79,7 @@ defmodule Minga.Port.Protocol do
   @op_scroll_region 0x1B
 
   # GUI chrome commands (BEAM → Swift)
+  @op_gui_tab_bar 0x1C
   @op_gui_theme 0x1F
 
   # GUI theme color slot IDs
@@ -712,6 +718,85 @@ defmodule Minga.Port.Protocol do
       {@gui_color_accent, t.active_fg}
     ]
   end
+
+  @doc """
+  Encodes a gui_tab_bar command with the current tab bar state.
+
+  Each tab entry includes: flags byte (is_active, is_dirty, is_agent,
+  has_attention, agent_status in upper bits), tab id, Nerd Font icon,
+  and display label.
+  """
+  @spec encode_gui_tab_bar(TabBar.t(), pid() | nil) :: binary()
+  def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer \\ nil) do
+    active_index = TabBar.active_index(tb)
+
+    entries =
+      Enum.map(tb.tabs, fn tab ->
+        encode_gui_tab_entry(tab, tb.active_id, active_win_buffer)
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_tab_bar,
+      <<active_index::8, length(tb.tabs)::8>>
+      | entries
+    ])
+  end
+
+  @spec encode_gui_tab_entry(Tab.t(), pos_integer(), pid() | nil) :: binary()
+  defp encode_gui_tab_entry(tab, active_id, active_win_buffer) do
+    is_active = if tab.id == active_id, do: 1, else: 0
+    flags = build_tab_flags(tab, is_active, active_win_buffer)
+
+    icon = tab_icon(tab)
+    icon_bytes = :erlang.iolist_to_binary([icon])
+    label_bytes = :erlang.iolist_to_binary([tab.label])
+
+    <<flags::8, tab.id::32, byte_size(icon_bytes)::8, icon_bytes::binary,
+      byte_size(label_bytes)::16, label_bytes::binary>>
+  end
+
+  @spec build_tab_flags(Tab.t(), 0 | 1, pid() | nil) :: non_neg_integer()
+  defp build_tab_flags(tab, is_active, active_win_buffer) do
+    is_dirty = tab_dirty_bit(tab, is_active, active_win_buffer)
+    is_agent = if tab.kind == :agent, do: 1, else: 0
+    has_attention = if tab.attention, do: 1, else: 0
+    agent_status = encode_agent_status(tab.agent_status)
+
+    Bitwise.bor(
+      Bitwise.bor(is_active, Bitwise.bsl(is_dirty, 1)),
+      Bitwise.bor(
+        Bitwise.bor(Bitwise.bsl(is_agent, 2), Bitwise.bsl(has_attention, 3)),
+        Bitwise.bsl(agent_status, 4)
+      )
+    )
+  end
+
+  @spec tab_dirty_bit(Tab.t(), 0 | 1, pid() | nil) :: 0 | 1
+  defp tab_dirty_bit(%{kind: :agent}, _is_active, _buf), do: 0
+
+  defp tab_dirty_bit(tab, is_active, active_win_buffer) do
+    pid = resolve_tab_buffer(tab, is_active, active_win_buffer)
+    if pid && BufferServer.dirty?(pid), do: 1, else: 0
+  end
+
+  @spec resolve_tab_buffer(Tab.t(), 0 | 1, pid() | nil) :: pid() | nil
+  defp resolve_tab_buffer(%{context: %{buffers: %{active: pid}}}, _is_active, _buf)
+       when is_pid(pid),
+       do: pid
+
+  defp resolve_tab_buffer(_tab, 1, buf) when is_pid(buf), do: buf
+  defp resolve_tab_buffer(_tab, _is_active, _buf), do: nil
+
+  @spec encode_agent_status(atom() | nil) :: non_neg_integer()
+  defp encode_agent_status(:idle), do: 0
+  defp encode_agent_status(:thinking), do: 1
+  defp encode_agent_status(:tool_executing), do: 2
+  defp encode_agent_status(:error), do: 3
+  defp encode_agent_status(_), do: 0
+
+  @spec tab_icon(Tab.t()) :: String.t()
+  defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
+  defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
 
   # ── Decoding (Zig → BEAM) ──
 

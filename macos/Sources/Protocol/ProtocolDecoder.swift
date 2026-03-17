@@ -22,6 +22,19 @@ enum RenderCommand: Sendable {
     case setActiveRegion(id: UInt16)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
+    case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
+}
+
+/// A single tab entry decoded from the gui_tab_bar protocol message.
+struct GUITabEntry: Sendable {
+    let id: UInt32
+    let isActive: Bool
+    let isDirty: Bool
+    let isAgent: Bool
+    let hasAttention: Bool
+    let agentStatus: UInt8
+    let icon: String
+    let label: String
 }
 
 /// Cursor shape matching the protocol constants.
@@ -193,6 +206,40 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (nil, 1 + 6 + textLen)
 
     // GUI chrome commands.
+    case OP_GUI_TAB_BAR:
+        // active_index:1, tab_count:1, then per tab: flags:1, id:4, icon_len:1, icon, label_len:2, label
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let activeIndex = data[rest]
+        let tabCount = Int(data[rest + 1])
+        var tabs: [GUITabEntry] = []
+        tabs.reserveCapacity(tabCount)
+        var pos = rest + 2
+        for _ in 0..<tabCount {
+            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
+            let flags = data[pos]
+            let tabId = readU32(data, pos + 1)
+            let iconLen = Int(data[pos + 5])
+            guard data.count >= pos + 6 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
+            let iconData = data[(pos + 6)..<(pos + 6 + iconLen)]
+            let icon = String(data: iconData, encoding: .utf8) ?? ""
+            let labelLen = Int(readU16(data, pos + 6 + iconLen))
+            guard data.count >= pos + 6 + iconLen + 2 + labelLen else { throw ProtocolDecodeError.malformed }
+            let labelData = data[(pos + 8 + iconLen)..<(pos + 8 + iconLen + labelLen)]
+            let label = String(data: labelData, encoding: .utf8) ?? ""
+            tabs.append(GUITabEntry(
+                id: tabId,
+                isActive: flags & 0x01 != 0,
+                isDirty: flags & 0x02 != 0,
+                isAgent: flags & 0x04 != 0,
+                hasAttention: flags & 0x08 != 0,
+                agentStatus: (flags >> 4) & 0x0F,
+                icon: icon,
+                label: label
+            ))
+            pos += 8 + iconLen + labelLen
+        }
+        return (.guiTabBar(activeIndex: activeIndex, tabs: tabs), pos - offset)
+
     case OP_GUI_THEME:
         // count:1, then count × (slot_id:1, r:1, g:1, b:1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

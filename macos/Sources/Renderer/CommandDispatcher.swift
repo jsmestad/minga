@@ -45,6 +45,9 @@ final class CommandDispatcher {
     /// Theme colors for SwiftUI chrome views. Updated on gui_theme commands.
     var themeColors: ThemeColors?
 
+    /// Tab bar state for SwiftUI chrome. Updated on gui_tab_bar commands.
+    var tabBarState: TabBarState?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -120,6 +123,9 @@ final class CommandDispatcher {
 
         case .guiTheme(let slots):
             themeColors?.applySlots(slots)
+
+        case .guiTabBar(let activeIndex, let tabs):
+            tabBarState?.update(activeIndex: activeIndex, entries: tabs)
         }
     }
 

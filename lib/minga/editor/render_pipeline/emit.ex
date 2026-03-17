@@ -61,6 +61,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_title(state)
       send_window_bg(state)
       send_gui_theme(state)
+      send_gui_tab_bar(state)
       :ok
     end)
   end
@@ -406,6 +407,27 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     end
 
     :ok
+  end
+
+  @spec send_gui_tab_bar(state()) :: :ok
+  defp send_gui_tab_bar(%{capabilities: caps, tab_bar: %TabBar{} = tb} = state) do
+    if Capabilities.gui?(caps) do
+      active_buf = active_window_buffer(state)
+      cmd = Protocol.encode_gui_tab_bar(tb, active_buf)
+      PortManager.send_commands(state.port_manager, [cmd])
+    end
+
+    :ok
+  end
+
+  defp send_gui_tab_bar(%{tab_bar: nil}), do: :ok
+
+  @spec active_window_buffer(state()) :: pid() | nil
+  defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
+    case Map.get(map, win_id) do
+      %{buffer: buf} when is_pid(buf) -> buf
+      _ -> nil
+    end
   end
 
   @spec send_gui_theme(state()) :: :ok

@@ -48,11 +48,23 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
-        Group {
-            if let nsView = appState.editorNSView {
-                EditorView(editorNSView: nsView)
-            } else {
-                Color(red: 0.12, green: 0.12, blue: 0.14)
+        VStack(spacing: 0) {
+            // Native tab bar (driven by BEAM gui_tab_bar messages)
+            if !appState.tabBarState.tabs.isEmpty {
+                TabBarView(
+                    tabBarState: appState.tabBarState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+            }
+
+            // Editor surface (Metal)
+            Group {
+                if let nsView = appState.editorNSView {
+                    EditorView(editorNSView: nsView)
+                } else {
+                    Color(red: 0.12, green: 0.12, blue: 0.14)
+                }
             }
         }
         .navigationTitle(appState.windowTitle)
@@ -74,6 +86,10 @@ final class AppState: ObservableObject {
     @Published var windowBgIsDark: Bool = true
     /// Theme colors for SwiftUI chrome views.
     let themeColors = ThemeColors()
+    /// Tab bar state for SwiftUI chrome.
+    let tabBarState = TabBarState()
+    /// Protocol encoder for sending gui_action events from SwiftUI chrome.
+    var encoder: InputEncoder?
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
@@ -116,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
         self.encoder = enc
+        appState.encoder = enc
 
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
@@ -157,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         disp.fontFace = face
         disp.themeColors = appState.themeColors
+        disp.tabBarState = appState.tabBarState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
