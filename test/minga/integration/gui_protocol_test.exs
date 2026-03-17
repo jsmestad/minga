@@ -13,11 +13,11 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
+  @moduletag :swift_harness
+
   setup do
-    if not File.exists?(@harness_path) do
-      flunk(
-        "Test harness not found at #{@harness_path}. Build with: swiftc -o priv/minga-test-harness macos/Sources/Protocol/ProtocolConstants.swift macos/Sources/Protocol/ProtocolDecoder.swift macos/Sources/TestHarness/main.swift"
-      )
+    unless File.exists?(@harness_path) do
+      flunk("Test harness not found at #{@harness_path}. Run: mix swift.harness")
     end
 
     port = Port.open({:spawn_executable, @harness_path}, [:binary, {:packet, 4}])

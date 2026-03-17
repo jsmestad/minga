@@ -8,7 +8,11 @@ Minga.Git.Stub.ensure_table()
 # git init calls in tests. An empty string tells git to skip templates.
 System.put_env("GIT_TEMPLATE_DIR", "")
 
-ExUnit.start(capture_log: true, exclude: [:pi])
+# Exclude Swift harness tests when the binary isn't built (CI Linux, or dev without `mix swift.harness`).
+harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
+swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]
+
+ExUnit.start(capture_log: true, exclude: [:pi | swift_exclude])
 
 # Disable clipboard sync during tests to avoid race conditions from
 # parallel tests sharing the system clipboard. Tests that specifically

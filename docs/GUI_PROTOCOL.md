@@ -340,5 +340,5 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 | Theme slot mapping | `lib/minga/theme/slots.ex` | Elixir |
 | Decoder | `macos/Sources/Protocol/ProtocolDecoder.swift` | Swift |
 | Constants | `macos/Sources/Protocol/ProtocolConstants.swift` | Swift |
-| Test harness | `macos/Sources/TestHarness/main.swift` | Swift |
+| Test harness | `macos/TestHarness/main.swift` | Swift |
 | Integration tests | `test/minga/integration/gui_protocol_test.exs` | Elixir |

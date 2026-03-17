@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Swift.Harness do
     sources = [
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",
-      "macos/Sources/TestHarness/main.swift"
+      "macos/TestHarness/main.swift"
     ]
 
     priv_dir = Path.join(Mix.Project.app_path(), "priv")
