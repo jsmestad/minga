@@ -1,7 +1,7 @@
 ; inherits: c
 
 ((identifier) @variable.member
-  (#lua-match? @variable.member "^m_.*$"))
+  (#match? @variable.member "^m_.*$"))
 
 (parameter_declaration
   declarator: (reference_declarator) @variable.parameter)
@@ -40,7 +40,7 @@
 (namespace_identifier) @module
 
 ((namespace_identifier) @type
-  (#lua-match? @type "^[%u]"))
+  (#match? @type "^[[A-Z]]"))
 
 (case_statement
   value: (qualified_identifier
@@ -154,31 +154,36 @@
   (field_expression
     (field_identifier) @function.method.call))
 
+(call_expression
+  (field_expression
+    (template_method
+      (field_identifier) @function.method.call)))
+
 ; constructors
 ((function_declarator
   (qualified_identifier
     (identifier) @constructor))
-  (#lua-match? @constructor "^%u"))
+  (#match? @constructor "^[A-Z]"))
 
 ((call_expression
   function: (identifier) @constructor)
-  (#lua-match? @constructor "^%u"))
+  (#match? @constructor "^[A-Z]"))
 
 ((call_expression
   function: (qualified_identifier
     name: (identifier) @constructor))
-  (#lua-match? @constructor "^%u"))
+  (#match? @constructor "^[A-Z]"))
 
 ((call_expression
   function: (field_expression
     field: (field_identifier) @constructor))
-  (#lua-match? @constructor "^%u"))
+  (#match? @constructor "^[A-Z]"))
 
 ; constructing a type in an initializer list: Constructor ():  **SuperType (1)**
 ((field_initializer
   (field_identifier) @constructor
   (argument_list))
-  (#lua-match? @constructor "^%u"))
+  (#match? @constructor "^[A-Z]"))
 
 ; Constants
 (this) @variable.builtin

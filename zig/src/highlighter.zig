@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 pub const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
+const predicates_mod = @import("predicates.zig");
 const query_loader = @import("query_loader.zig");
 
 /// A highlight span: byte range + capture index.
@@ -55,10 +56,13 @@ pub const Highlighter = struct {
     current_source: ?[]const u8 = null,
     languages: std.StringHashMapUnmanaged(*const c.TSLanguage),
     query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    predicate_cache: std.StringHashMapUnmanaged(predicates_mod.PredicateTable),
     injection_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     fold_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     indent_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
+    /// Currently active predicate table (set during setLanguage)
+    current_predicates: ?*const predicates_mod.PredicateTable = null,
     cache_mutex: std.Thread.Mutex = .{},
     allocator: std.mem.Allocator,
 
@@ -80,6 +84,7 @@ pub const Highlighter = struct {
             .parser = parser,
             .languages = .empty,
             .query_cache = .empty,
+            .predicate_cache = .empty,
             .injection_query_cache = .empty,
             .fold_query_cache = .empty,
             .indent_query_cache = .empty,
@@ -110,6 +115,8 @@ pub const Highlighter = struct {
         inline for (builtin_grammars) |entry| {
             if (entry.query) |query_source| {
                 self.prewarmOne(entry.name, query_source, &self.query_cache);
+                // Build predicate table for highlight queries
+                self.prewarmPredicates(entry.name);
             }
             if (entry.injection_query) |inj_source| {
                 self.prewarmOne(entry.name, inj_source, &self.injection_query_cache);
@@ -168,6 +175,16 @@ pub const Highlighter = struct {
         }
     }
 
+    /// Build predicate table for a language's highlight query (background thread).
+    fn prewarmPredicates(self: *Highlighter, name: []const u8) void {
+        self.cache_mutex.lock();
+        defer self.cache_mutex.unlock();
+        if (self.predicate_cache.get(name) != null) return;
+        const query = self.query_cache.get(name) orelse return;
+        const table = predicates_mod.PredicateTable.init(query, self.allocator);
+        self.predicate_cache.put(self.allocator, name, table) catch {};
+    }
+
     /// Free all resources.
     pub fn deinit(self: *Highlighter) void {
         // Wait for background pre-compilation to finish
@@ -179,6 +196,13 @@ pub const Highlighter = struct {
             c.ts_query_delete(entry.value_ptr.*);
         }
         self.query_cache.deinit(self.allocator);
+
+        // Free all cached predicate tables
+        var pit = self.predicate_cache.iterator();
+        while (pit.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.predicate_cache.deinit(self.allocator);
 
         // Free all cached injection queries
         var iqit = self.injection_query_cache.iterator();
@@ -248,10 +272,21 @@ pub const Highlighter = struct {
                             if (c.ts_query_new(lang, query_source.ptr, @intCast(query_source.len), &err_off, &err_type)) |compiled| {
                                 self.query = compiled;
                                 self.query_cache.put(self.allocator, entry.name, compiled) catch {};
+                                // Build predicate table alongside the query
+                                if (self.predicate_cache.get(entry.name) == null) {
+                                    const table = predicates_mod.PredicateTable.init(compiled, self.allocator);
+                                    self.predicate_cache.put(self.allocator, entry.name, table) catch {};
+                                }
                             }
                         }
                     }
                 }
+            }
+            // Restore predicate table for current language
+            if (self.predicate_cache.getPtr(name)) |cached_ptr| {
+                self.current_predicates = cached_ptr;
+            } else {
+                self.current_predicates = null;
             }
 
             // Injection query
@@ -457,7 +492,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 const node = cap.node;
                 const start_line: u32 = @intCast(c.ts_node_start_point(node).row);
@@ -562,7 +597,7 @@ pub const Highlighter = struct {
         var match: c.TSQueryMatch = undefined;
 
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 const node = cap.node;
                 const node_start = c.ts_node_start_point(node).row;
@@ -664,7 +699,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 if (cap.index != tid) continue;
 
@@ -761,7 +796,7 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..@intCast(match.capture_count)];
+            const captures = if (match.captures == null) continue else match.captures[0..@intCast(match.capture_count)];
             for (captures) |cap| {
                 if (cap.index >= 64) continue;
                 const type_id = cap_to_type[cap.index] orelse continue;
@@ -866,9 +901,15 @@ pub const Highlighter = struct {
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
 
+        const source = self.current_source orelse &.{};
+
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..match.capture_count];
+            // Evaluate predicates (#any-of?, #match?, #eq?, etc.)
+            if (self.current_predicates) |preds| {
+                if (!preds.evaluate(match, source)) continue;
+            }
+            const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
                 const node = cap.node;
                 const start = c.ts_node_start_byte(node);
@@ -928,7 +969,11 @@ pub const Highlighter = struct {
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
-            const captures = match.captures[0..match.capture_count];
+            // Evaluate predicates (#any-of?, #match?, #eq?, etc.)
+            if (self.current_predicates) |preds| {
+                if (!preds.evaluate(match, source)) continue;
+            }
+            const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
                 try spans.append(alloc, .{
                     .start_byte = c.ts_node_start_byte(cap.node),
@@ -1001,7 +1046,7 @@ pub const Highlighter = struct {
             var content_node: ?c.TSNode = null;
             var lang_from_capture: ?[]const u8 = null;
 
-            const caps = inj_match.captures[0..inj_match.capture_count];
+            const caps = if (inj_match.captures == null) continue else inj_match.captures[0..inj_match.capture_count];
             for (caps) |cap| {
                 if (cap.index == content_capture_id.?) {
                     content_node = cap.node;
@@ -1094,6 +1139,11 @@ pub const Highlighter = struct {
                             var err_type: c.TSQueryError = c.TSQueryErrorNone;
                             if (c.ts_query_new(lang, qs.ptr, @intCast(qs.len), &err_off, &err_type)) |compiled| {
                                 self.query_cache.put(alloc, bg.name, compiled) catch {};
+                                // Build predicate table alongside query
+                                if (self.predicate_cache.get(bg.name) == null) {
+                                    const pt = predicates_mod.PredicateTable.init(compiled, alloc);
+                                    self.predicate_cache.put(alloc, bg.name, pt) catch {};
+                                }
                                 break :blk compiled;
                             }
                         }
@@ -1164,10 +1214,21 @@ pub const Highlighter = struct {
                 }
             }
 
+            // Lookup predicate table for this injection language
+            const inj_preds: ?*const predicates_mod.PredicateTable = blk: {
+                self.cache_mutex.lock();
+                defer self.cache_mutex.unlock();
+                break :blk self.predicate_cache.getPtr(lang_name);
+            };
+
             // Collect injection spans with remapped capture IDs
             var hl_match: c.TSQueryMatch = undefined;
             while (c.ts_query_cursor_next_match(hl_cursor, &hl_match)) {
-                const caps = hl_match.captures[0..hl_match.capture_count];
+                // Evaluate predicates for injection language
+                if (inj_preds) |preds| {
+                    if (!preds.evaluate(hl_match, source)) continue;
+                }
+                const caps = if (hl_match.captures == null) continue else hl_match.captures[0..hl_match.capture_count];
                 for (caps) |cap| {
                     const start = c.ts_node_start_byte(cap.node);
                     const end = c.ts_node_end_byte(cap.node);
@@ -1192,43 +1253,10 @@ pub const Highlighter = struct {
             }
         }
 
-        // ── Phase 4: Punch holes in outer spans ──────────────────────────
-        // The BEAM's renderer sorts spans by start_byte and uses first-wins.
-        // Outer spans that cover injection regions would "eat" the injection
-        // spans because they start at a lower byte offset. Fix: trim or
-        // remove outer spans that overlap with any injection region.
-        if (regions.items.len > 0) {
-            // Build sorted injection range list
-            var inj_ranges = try alloc.alloc(TrimRange, regions.items.len);
-            defer alloc.free(inj_ranges);
-            for (regions.items, 0..) |reg, i| {
-                inj_ranges[i] = .{ .start_byte = reg.start_byte, .end_byte = reg.end_byte };
-            }
-            std.mem.sortUnstable(TrimRange, inj_ranges, {}, struct {
-                fn cmp(_: void, a: TrimRange, b: TrimRange) bool {
-                    return a.start_byte < b.start_byte;
-                }
-            }.cmp);
-
-            var trimmed: std.ArrayListUnmanaged(Span) = .empty;
-            errdefer trimmed.deinit(alloc);
-            try trimmed.ensureTotalCapacity(alloc, spans.items.len);
-
-            for (spans.items) |span| {
-                if (span.layer != 0) {
-                    // Injection span — keep as-is
-                    try trimmed.append(alloc, span);
-                    continue;
-                }
-                // Outer span — trim around injection regions
-                try trimOuterSpan(alloc, span, inj_ranges, &trimmed);
-            }
-
-            spans.deinit(alloc);
-            spans = trimmed;
-        }
-
-        // ── Phase 5: Sort and return ─────────────────────────────────────
+        // ── Phase 4: Sort and return ─────────────────────────────────────
+        // All spans (outer layer=0 + injection layer=1) are sent to the BEAM
+        // with full metadata. The BEAM-side innermost-wins sweep resolves
+        // overlaps using (layer DESC, width ASC, pattern_index DESC).
         std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
 
         const names = try alloc.alloc([]const u8, name_list.items.len);
@@ -1337,65 +1365,6 @@ fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const
 }
 
 /// A byte range representing an injection region (for internal trimming).
-const TrimRange = struct {
-    start_byte: u32,
-    end_byte: u32,
-};
-
-/// Trims an outer span around injection ranges. If the span doesn't
-/// overlap any range, it's kept as-is. If it partially overlaps, the
-/// non-overlapping fragments are emitted. If fully covered, it's dropped.
-fn trimOuterSpan(
-    alloc: std.mem.Allocator,
-    span: Span,
-    ranges: []const TrimRange,
-    out: *std.ArrayListUnmanaged(Span),
-) !void {
-    // Check if this span overlaps any injection range
-    var overlaps_any = false;
-    for (ranges) |r| {
-        if (span.start_byte < r.end_byte and span.end_byte > r.start_byte) {
-            overlaps_any = true;
-            break;
-        }
-    }
-    if (!overlaps_any) {
-        try out.append(alloc, span);
-        return;
-    }
-
-    // Walk through injection ranges and emit fragments of the outer span
-    // that don't overlap with any range.
-    var pos = span.start_byte;
-    for (ranges) |r| {
-        if (r.start_byte >= span.end_byte) break;
-        if (r.end_byte <= pos) continue;
-
-        // Emit fragment before this range
-        const range_start = @max(r.start_byte, span.start_byte);
-        if (range_start > pos) {
-            try out.append(alloc, .{
-                .start_byte = pos,
-                .end_byte = range_start,
-                .capture_id = span.capture_id,
-                .pattern_index = span.pattern_index,
-                .layer = 0,
-            });
-        }
-        pos = @max(pos, @min(r.end_byte, span.end_byte));
-    }
-
-    // Emit trailing fragment after the last overlapping range
-    if (pos < span.end_byte) {
-        try out.append(alloc, .{
-            .start_byte = pos,
-            .end_byte = span.end_byte,
-            .capture_id = span.capture_id,
-            .pattern_index = span.pattern_index,
-            .layer = 0,
-        });
-    }
-}
 
 // ── Span ordering ─────────────────────────────────────────────────────────
 
@@ -1796,4 +1765,54 @@ test "highlighter: getInjectionLanguagePredicate reads #set! predicates" {
         }
     }
     try std.testing.expect(found_set_predicate);
+}
+
+test "highlighter: predicates filter #any-of? correctly in Elixir" {
+    // Acid test: `defmodule` and `def` should be @keyword.function,
+    // but `IO` and `puts` should NOT be @keyword.function.
+    var hl = try Highlighter.init(std.testing.allocator);
+    defer hl.deinit();
+
+    try std.testing.expect(hl.setLanguage("elixir"));
+
+    const source = "defmodule Foo do\n  def bar do\n    IO.puts(\"hello\")\n  end\nend\n";
+    try hl.parse(source);
+
+    var result = try hl.highlightWithInjections();
+    defer result.deinit();
+
+    // Find the capture index for "keyword.function" and "function.call"
+    var keyword_fn_id: ?u16 = null;
+    var function_call_id: ?u16 = null;
+    for (result.capture_names, 0..) |name, i| {
+        if (std.mem.eql(u8, name, "keyword.function")) keyword_fn_id = @intCast(i);
+        if (std.mem.eql(u8, name, "function.call")) function_call_id = @intCast(i);
+    }
+
+    // keyword.function should exist (from defmodule/def patterns)
+    try std.testing.expect(keyword_fn_id != null);
+
+    // Check that "puts" (byte offset in source) is NOT tagged as keyword.function
+    const puts_start = std.mem.indexOf(u8, source, "puts") orelse unreachable;
+    const puts_end = puts_start + 4;
+
+    for (result.spans) |span| {
+        if (span.start_byte == puts_start and span.end_byte == puts_end) {
+            // "puts" should NOT be keyword.function
+            try std.testing.expect(span.capture_id != keyword_fn_id.?);
+        }
+    }
+
+    // Check that "defmodule" IS tagged as keyword.function
+    const defmod_start: u32 = 0;
+    const defmod_end: u32 = 9; // "defmodule"
+    var found_defmodule_keyword = false;
+    for (result.spans) |span| {
+        if (span.start_byte == defmod_start and span.end_byte == defmod_end) {
+            if (keyword_fn_id) |kid| {
+                if (span.capture_id == kid) found_defmodule_keyword = true;
+            }
+        }
+    }
+    try std.testing.expect(found_defmodule_keyword);
 }

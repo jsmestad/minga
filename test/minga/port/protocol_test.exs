@@ -519,17 +519,32 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     test "decode_event highlight_spans" do
+      # Each span: start_byte:u32, end_byte:u32, capture_id:u16, pattern_index:u16, layer:u16
       spans_binary =
-        <<0::32, 9::32, 0::16>> <>
-          <<10::32, 15::32, 1::16>>
+        <<0::32, 9::32, 0::16, 5::16, 0::16>> <>
+          <<10::32, 15::32, 1::16, 3::16, 1::16>>
 
       # buffer_id=5, version=42, count=2
       payload = <<0x30, 5::32, 42::32, 2::32>> <> spans_binary
 
       assert {:ok, {:highlight_spans, 5, 42, spans}} = Protocol.decode_event(payload)
       assert length(spans) == 2
-      assert hd(spans) == %{start_byte: 0, end_byte: 9, capture_id: 0}
-      assert List.last(spans) == %{start_byte: 10, end_byte: 15, capture_id: 1}
+
+      assert hd(spans) == %{
+               start_byte: 0,
+               end_byte: 9,
+               capture_id: 0,
+               pattern_index: 5,
+               layer: 0
+             }
+
+      assert List.last(spans) == %{
+               start_byte: 10,
+               end_byte: 15,
+               capture_id: 1,
+               pattern_index: 3,
+               layer: 1
+             }
     end
 
     test "decode_event highlight_names" do
@@ -563,8 +578,8 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     test "decode_event malformed highlight_spans" do
-      # buffer_id=0, version=1, count says 2 spans but only 1 provided
-      payload = <<0x30, 0::32, 1::32, 2::32, 0::32, 9::32, 0::16>>
+      # buffer_id=0, version=1, count says 2 spans but only 1 complete span (14 bytes)
+      payload = <<0x30, 0::32, 1::32, 2::32, 0::32, 9::32, 0::16, 0::16, 0::16>>
       assert {:error, :malformed} = Protocol.decode_event(payload)
     end
   end

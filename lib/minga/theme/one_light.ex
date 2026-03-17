@@ -278,13 +278,30 @@ defmodule Minga.Theme.OneLight do
       # ── Preprocessor ───────────────────────────────────────────────────
       "preproc" => [fg: @hue_3, bold: true],
 
-      # ── Text / markup ──────────────────────────────────────────────────
-      "text.title" => [fg: @hue_5, bold: true],
-      "text.strong" => [fg: @hue_6, bold: true],
-      "text.emphasis" => [fg: @hue_3, italic: true],
-      "text.literal" => [fg: @hue_4],
-      "text.uri" => [fg: @hue_1, underline: true],
-      "text.reference" => [fg: @hue_2],
+      # ── Markup (nvim-treesitter / tree-sitter standard) ────────────────
+      "markup.heading" => [fg: @hue_5, bold: true],
+      "markup.heading.1" => [fg: @hue_5, bold: true],
+      "markup.heading.2" => [fg: @hue_6, bold: true],
+      "markup.heading.3" => [fg: @hue_4, bold: true],
+      "markup.heading.4" => [fg: @hue_6_2, bold: true],
+      "markup.heading.5" => [fg: @hue_1, bold: true],
+      "markup.heading.6" => [fg: @hue_3, bold: true],
+      "markup.bold" => [fg: @hue_6, bold: true],
+      "markup.strong" => [fg: @hue_6, bold: true],
+      "markup.italic" => [fg: @hue_3, italic: true],
+      "markup.strikethrough" => [fg: @mono_3, strikethrough: true],
+      "markup.raw" => [fg: @hue_4],
+      "markup.raw.block" => [fg: @hue_4],
+      "markup.raw.inline" => [fg: @hue_4],
+      "markup.link" => [fg: @hue_1],
+      "markup.link.url" => [fg: @hue_1, underline: true],
+      "markup.link.label" => [fg: @hue_2],
+      "markup.list" => [fg: @hue_5],
+      "markup.list.numbered" => [fg: @hue_5],
+      "markup.list.unnumbered" => [fg: @hue_5],
+      "markup.list.checked" => [fg: @hue_4],
+      "markup.list.unchecked" => [fg: @mono_3],
+      "markup.quote" => [fg: @mono_3, italic: true],
 
       # ── CSS-specific ───────────────────────────────────────────────────
       "charset" => [fg: @hue_3, bold: true],

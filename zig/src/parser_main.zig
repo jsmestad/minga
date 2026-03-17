@@ -455,3 +455,10 @@ fn readExact(fd: std.posix.fd_t, buf: []u8) !bool {
     }
     return true;
 }
+
+// Pull in tests from imported modules for the parser test step.
+comptime {
+    _ = @import("highlighter.zig");
+    _ = @import("predicates.zig");
+    _ = @import("posix_regex.zig");
+}

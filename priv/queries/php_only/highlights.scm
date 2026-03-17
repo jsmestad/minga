@@ -44,20 +44,15 @@
   "protected"
   "public"
   "readonly"
-  (static_modifier)
+  "static"
 ] @keyword.modifier
-
-(function_static_declaration
-  "static" @keyword.modifier)
 
 [
   "return"
   "exit"
   "yield"
+  "yield from"
 ] @keyword.return
-
-(yield_expression
-  "from" @keyword.return)
 
 [
   "case"
@@ -107,7 +102,7 @@
 
 [
   (php_tag)
-  "?>"
+  (php_end_tag)
   "("
   ")"
   "["
@@ -173,10 +168,10 @@
 
 ; Constants
 ((name) @constant
-  (#lua-match? @constant "^_?[A-Z][A-Z%d_]*$"))
+  (#match? @constant "^_?[A-Z][A-Z[0-9]_]*$"))
 
 ((name) @constant.builtin
-  (#lua-match? @constant.builtin "^__[A-Z][A-Z%d_]+__$"))
+  (#match? @constant.builtin "^__[A-Z][A-Z[0-9]_]+__$"))
 
 (const_declaration
   (const_element
@@ -474,6 +469,12 @@
 
 (float) @number.float
 
-(comment) @comment @spell
+(comment) @comment
 
 (named_label_statement) @label
+
+(property_hook
+  (name) @label)
+
+(visibility_modifier
+  (operation) @label)

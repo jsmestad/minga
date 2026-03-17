@@ -1,71 +1,39 @@
 ; Punctuation
-
 [
- "%"
-] @punctuation
-
-[
- ","
- ";"
+  ","
+  ";"
 ] @punctuation.delimiter
 
 [
   "("
   ")"
+  "<<"
+  ">>"
   "["
   "]"
   "{"
   "}"
-  "<<"
-  ">>"
 ] @punctuation.bracket
 
-; Literals
-
-[
-  (boolean)
-  (nil)
-] @constant
-
-[
-  (integer)
-  (float)
-] @number
-
-(char) @constant
+"%" @punctuation.special
 
 ; Identifiers
-
-; * regular
 (identifier) @variable
 
-; * unused
-(
-  (identifier) @comment.unused
-  (#match? @comment.unused "^_")
-)
+; Unused Identifiers
+((identifier) @comment
+  (#match? @comment "^_"))
 
-; * special
-(
-  (identifier) @constant.builtin
-  (#any-of? @constant.builtin "__MODULE__" "__DIR__" "__ENV__" "__CALLER__" "__STACKTRACE__")
-)
-
-; Comment
-
+; Comments
 (comment) @comment
 
-; Quoted content
+; Strings
+(string) @string
 
-(interpolation "#{" @punctuation.special "}" @punctuation.special) @embedded
+; Modules
+(alias) @module
 
-(escape_sequence) @string.escape
-
-[
-  (string)
-  (charlist)
-] @string
-
+; Atoms & Keywords
 [
   (atom)
   (quoted_atom)
@@ -73,102 +41,35 @@
   (quoted_keyword)
 ] @string.special.symbol
 
-; Note that we explicitly target sigil quoted start/end, so they are not overridden by delimiters
+; Interpolation
+(interpolation
+  [
+    "#{"
+    "}"
+  ] @string.special)
 
-(sigil
-  (sigil_name) @__name__
-  quoted_start: _ @string.special
-  quoted_end: _ @string.special) @string.special
+; Escape sequences
+(escape_sequence) @string.escape
 
-(sigil
-  (sigil_name) @__name__
-  quoted_start: _ @string
-  quoted_end: _ @string
-  (#match? @__name__ "^[sS]$")) @string
+; Integers
+(integer) @number
 
-(sigil
-  (sigil_name) @__name__
-  quoted_start: _ @string.regex
-  quoted_end: _ @string.regex
-  (#match? @__name__ "^[rR]$")) @string.regex
+; Floats
+(float) @number.float
 
-; Calls
+; Characters
+[
+  (char)
+  (charlist)
+] @character
 
-; * local function call
-(call
-  target: (identifier) @function)
+; Booleans
+(boolean) @boolean
 
-; * remote function call
-(call
-  target: (dot
-    right: (identifier) @function))
-
-; * field without parentheses or block
-(call
-  target: (dot
-    right: (identifier) @property)
-  .)
-
-; * remote call without parentheses or block (overrides above)
-(call
-  target: (dot
-    left: [
-      (alias)
-      (atom)
-    ]
-    right: (identifier) @function)
-  .)
-
-; * definition keyword
-(call
-  target: (identifier) @keyword
-  (#any-of? @keyword "def" "defdelegate" "defexception" "defguard" "defguardp" "defimpl" "defmacro" "defmacrop" "defmodule" "defn" "defnp" "defoverridable" "defp" "defprotocol" "defstruct"))
-
-; * kernel or special forms keyword
-(call
-  target: (identifier) @keyword
-  (#any-of? @keyword "alias" "case" "cond" "for" "if" "import" "quote" "raise" "receive" "require" "reraise" "super" "throw" "try" "unless" "unquote" "unquote_splicing" "use" "with"))
-
-; * just identifier in function definition
-(call
-  target: (identifier) @keyword
-  (arguments
-    [
-      (identifier) @function
-      (binary_operator
-        left: (identifier) @function
-        operator: "when")
-    ])
-  (#any-of? @keyword "def" "defdelegate" "defguard" "defguardp" "defmacro" "defmacrop" "defn" "defnp" "defp"))
-
-; * pipe into identifier (function call)
-(binary_operator
-  operator: "|>"
-  right: (identifier) @function)
-
-; * pipe into identifier (definition)
-(call
-  target: (identifier) @keyword
-  (arguments
-    (binary_operator
-      operator: "|>"
-      right: (identifier) @variable))
-  (#any-of? @keyword "def" "defdelegate" "defguard" "defguardp" "defmacro" "defmacrop" "defn" "defnp" "defp"))
-
-; * pipe into field without parentheses (function call)
-(binary_operator
-  operator: "|>"
-  right: (call
-    target: (dot
-      right: (identifier) @function)))
+; Nil
+(nil) @constant.builtin
 
 ; Operators
-
-; * capture operand
-(unary_operator
-  operator: "&"
-  operand: (integer) @operator)
-
 (operator_identifier) @operator
 
 (unary_operator
@@ -177,47 +78,140 @@
 (binary_operator
   operator: _ @operator)
 
+; Pipe Operator
+(binary_operator
+  operator: "|>"
+  right: (identifier) @function)
+
 (dot
   operator: _ @operator)
 
 (stab_clause
   operator: _ @operator)
 
-; * module attribute
-(unary_operator
-  operator: "@" @attribute
-  operand: [
-    (identifier) @attribute
-    (call
-      target: (identifier) @attribute)
-    (boolean) @attribute
-    (nil) @attribute
-  ])
+; Local Function Calls
+(call
+  target: (identifier) @function.call)
 
-; * doc string
-(unary_operator
-  operator: "@" @comment.doc
-  operand: (call
-    target: (identifier) @comment.doc.__attribute__
-    (arguments
-      [
-        (string) @comment.doc
-        (charlist) @comment.doc
-        (sigil
-          quoted_start: _ @comment.doc
-          quoted_end: _ @comment.doc) @comment.doc
-        (boolean) @comment.doc
-      ]))
-  (#any-of? @comment.doc.__attribute__ "moduledoc" "typedoc" "doc"))
-
-; Module
-
-(alias) @module
-
+; Remote Function Calls
 (call
   target: (dot
-    left: (atom) @module))
+    left: [
+      (atom) @type
+      (_)
+    ]
+    right: (identifier) @function.call)
+  (arguments))
 
-; Reserved keywords
+; Definition Function Calls
+(call
+  target: ((identifier) @keyword.function
+    (#any-of? @keyword.function
+      "def" "defdelegate" "defexception" "defguard" "defguardp" "defimpl" "defmacro" "defmacrop"
+      "defmodule" "defn" "defnp" "defoverridable" "defp" "defprotocol" "defstruct"))
+  (arguments
+    [
+      (call
+        (identifier) @function)
+      (identifier) @function
+      (binary_operator
+        left: (call
+          target: (identifier) @function)
+        operator: "when")
+    ])?)
 
-["when" "and" "or" "not" "in" "not in" "fn" "do" "end" "catch" "rescue" "after" "else"] @keyword
+; Kernel Keywords & Special Forms
+(call
+  target: ((identifier) @keyword
+    (#any-of? @keyword
+      "alias" "case" "catch" "cond" "else" "for" "if" "import" "quote" "raise" "receive" "require"
+      "reraise" "super" "throw" "try" "unless" "unquote" "unquote_splicing" "use" "with")))
+
+; Special Constants
+((identifier) @constant.builtin
+  (#any-of? @constant.builtin "__CALLER__" "__DIR__" "__ENV__" "__MODULE__" "__STACKTRACE__"))
+
+; Reserved Keywords
+[
+  "after"
+  "catch"
+  "do"
+  "end"
+  "fn"
+  "rescue"
+  "when"
+  "else"
+] @keyword
+
+; Operator Keywords
+[
+  "and"
+  "in"
+  "not in"
+  "not"
+  "or"
+] @keyword.operator
+
+; Capture Operator
+(unary_operator
+  operator: "&"
+  operand: [
+    (integer) @operator
+    (binary_operator
+      left: [
+        (call
+          target: (dot
+            left: (_)
+            right: (identifier) @function))
+        (identifier) @function
+      ]
+      operator: "/"
+      right: (integer) @operator)
+  ])
+
+; Non-String Sigils
+(sigil
+  "~" @string.special
+  (sigil_name) @string.special @_sigil_name
+  quoted_start: _ @string.special
+  quoted_end: _ @string.special
+  ((sigil_modifiers) @string.special)?
+  (#not-any-of? @_sigil_name "s" "S"))
+
+; String Sigils
+(sigil
+  "~" @string
+  (sigil_name) @string @_sigil_name
+  quoted_start: _ @string
+  (quoted_content) @string
+  quoted_end: _ @string
+  ((sigil_modifiers) @string)?
+  (#any-of? @_sigil_name "s" "S"))
+
+; Module attributes
+(unary_operator
+  operator: "@"
+  operand: [
+    (identifier)
+    (call
+      target: (identifier))
+  ] @constant) @constant
+
+; Documentation
+(unary_operator
+  operator: "@"
+  operand: (call
+    target: ((identifier) @_identifier
+      (#any-of? @_identifier "moduledoc" "typedoc" "shortdoc" "doc")) @comment.documentation
+    (arguments
+      [
+        (string)
+        (boolean)
+        (charlist)
+        (sigil
+          "~" @comment.documentation
+          (sigil_name) @comment.documentation
+          quoted_start: _ @comment.documentation
+          (quoted_content) @comment.documentation
+          quoted_end: _ @comment.documentation)
+      ] @comment.documentation))) @comment.documentation

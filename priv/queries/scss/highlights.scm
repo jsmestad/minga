@@ -26,7 +26,7 @@
   "in"
 ] @keyword.repeat
 
-(single_line_comment) @comment @spell
+(single_line_comment) @comment
 
 (function_name) @function
 

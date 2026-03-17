@@ -20,7 +20,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 # ── Versions ────────────────────────────────────────────────────────────────
 
-TREE_SITTER_VERSION="v0.24.7"
+TREE_SITTER_VERSION="v0.26.7"
 
 # ── Grammar definitions ────────────────────────────────────────────────────
 # Format: name|repo|tag|scanner_ext|src_subdir
