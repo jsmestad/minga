@@ -82,7 +82,7 @@ struct ContentView: View {
                 )
 
                 // Editor surface (Metal) with overlays
-                ZStack(alignment: .bottom) {
+                ZStack(alignment: .topLeading) {
                     Group {
                         if let nsView = appState.editorNSView {
                             EditorView(editorNSView: nsView)
@@ -92,28 +92,29 @@ struct ContentView: View {
                     }
 
                     // Which-key overlay (anchored to bottom)
-                    WhichKeyOverlay(
-                        state: appState.whichKeyState,
-                        theme: appState.themeColors
-                    )
+                    VStack {
+                        Spacer()
+                        WhichKeyOverlay(
+                            state: appState.whichKeyState,
+                            theme: appState.themeColors
+                        )
+                    }
 
-                    // Completion overlay (positioned near cursor)
-                    // Positioning by offset will be refined when connected to BEAM
+                    // Completion overlay (positioned at cursor)
                     if appState.completionState.visible {
-                        VStack {
-                            Spacer()
-                            HStack {
-                                CompletionOverlay(
-                                    state: appState.completionState,
-                                    theme: appState.themeColors,
-                                    encoder: appState.encoder,
-                                    cellWidth: CGFloat(appState.editorNSView?.cellWidth ?? 8),
-                                    cellHeight: CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                                )
-                                Spacer()
-                            }
-                            Spacer()
-                        }
+                        let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+                        let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                        let x = CGFloat(appState.completionState.anchorCol) * cw
+                        let y = (CGFloat(appState.completionState.anchorRow) + 1) * ch
+
+                        CompletionOverlay(
+                            state: appState.completionState,
+                            theme: appState.themeColors,
+                            encoder: appState.encoder,
+                            cellWidth: cw,
+                            cellHeight: ch
+                        )
+                        .offset(x: x, y: y)
                     }
                 }
 
