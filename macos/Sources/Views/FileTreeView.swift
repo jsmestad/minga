@@ -1,9 +1,8 @@
-/// Custom-drawn file tree sidebar for the hybrid GUI.
+/// Custom-drawn file tree sidebar matching Zed's visual style.
 ///
-/// Renders file tree entries as a vertical list with Nerd Font icons,
-/// theme colors, git status indicators, and whitespace indentation.
-/// No stock SwiftUI List widget. No box-drawing characters.
-/// Styled to match Zed's sidebar aesthetic.
+/// Dense, clean rows with Nerd Font icons, whitespace indentation,
+/// and git status color tints. No box-drawing characters, no stock
+/// List widget. Styled for tight vertical rhythm.
 
 import SwiftUI
 
@@ -14,37 +13,20 @@ struct FileTreeView: View {
     let encoder: InputEncoder?
 
     private let rowHeight: CGFloat = 22
-    private let indentWidth: CGFloat = 16
-    private let iconFontSize: CGFloat = 13
-    private let nameFontSize: CGFloat = 12.5
+    private let indentWidth: CGFloat = 14
+    private let sidebarMinWidth: CGFloat = 180
+    private let sidebarMaxWidth: CGFloat = 360
 
     var body: some View {
         VStack(spacing: 0) {
-            // Project name header
             projectHeader
-
-            // 1px separator under header
-            Rectangle()
-                .fill(theme.treeSeparatorFg)
-                .frame(height: 1)
-
-            // Scrollable entry list
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(fileTreeState.entries) { entry in
-                            fileTreeRow(entry)
-                        }
-                    }
-                }
-                .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
-                    withAnimation(nil) {
-                        proxy.scrollTo(newIndex, anchor: .center)
-                    }
-                }
-            }
+            entryList
         }
-        .frame(width: CGFloat(fileTreeState.treeWidth) * 8)
+        .frame(
+            minWidth: sidebarMinWidth,
+            idealWidth: CGFloat(fileTreeState.treeWidth) * 7.5,
+            maxWidth: sidebarMaxWidth
+        )
         .background(theme.treeBg)
         .focusable(false)
         .focusEffectDisabled()
@@ -55,12 +37,13 @@ struct FileTreeView: View {
     @ViewBuilder
     private var projectHeader: some View {
         HStack(spacing: 6) {
+            // Folder icon
             Text("\u{F024B}")
-                .font(.custom("Symbols Nerd Font Mono", size: iconFontSize))
-                .foregroundStyle(theme.treeHeaderFg)
+                .font(.custom("Symbols Nerd Font Mono", size: 12))
+                .foregroundStyle(theme.treeDirFg)
 
             Text(projectName)
-                .font(.system(size: nameFontSize, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.treeHeaderFg)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -68,62 +51,89 @@ struct FileTreeView: View {
             Spacer()
         }
         .padding(.horizontal, 10)
-        .frame(height: 28)
-        .background(theme.treeHeaderBg)
+        .padding(.vertical, 6)
+        .background(theme.treeBg)
     }
 
     private var projectName: String {
-        // Extract project name from the first entry's path or use "Project"
-        if let first = fileTreeState.entries.first {
-            // The root is depth 0; its name is the project folder
-            if first.depth == 0 && first.isDir {
-                return first.name
-            }
+        if let first = fileTreeState.entries.first, first.depth == 0, first.isDir {
+            return first.name
         }
         return "Project"
+    }
+
+    // MARK: - Entry list
+
+    @ViewBuilder
+    private var entryList: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 0) {
+                    ForEach(fileTreeState.entries) { entry in
+                        entryRow(entry)
+                    }
+                }
+                .padding(.top, 2)
+            }
+            .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
+                withAnimation(nil) {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
+            }
+        }
     }
 
     // MARK: - Entry row
 
     @ViewBuilder
-    private func fileTreeRow(_ entry: FileTreeEntry) -> some View {
-        HStack(spacing: 5) {
+    private func entryRow(_ entry: FileTreeEntry) -> some View {
+        HStack(spacing: 4) {
             // Nerd Font icon
             Text(entry.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: iconFontSize))
+                .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(iconColor(entry))
-                .frame(width: 18, alignment: .center)
+                .frame(width: 16, alignment: .center)
 
-            // File/directory name
+            // Name
             Text(entry.name)
-                .font(.system(size: nameFontSize))
+                .font(.system(size: 12))
                 .foregroundStyle(nameColor(entry))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            Spacer()
-
-            // Git status dot
-            if entry.gitStatus > 0 {
-                Circle()
-                    .fill(gitStatusColor(entry.gitStatus))
-                    .frame(width: 5, height: 5)
-                    .padding(.trailing, 6)
-            }
+            Spacer(minLength: 0)
         }
-        .padding(.leading, CGFloat(entry.depth) * indentWidth + 8)
-        .padding(.trailing, 4)
+        .padding(.leading, leadingPadding(entry))
+        .padding(.trailing, 8)
         .frame(height: rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(entry.isSelected ? theme.treeSelectionBg : Color.clear)
+        .background(selectionBackground(entry))
         .id(entry.id)
+        .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            // Double-click: open file or toggle directory
             (encoder as? ProtocolEncoder)?.sendFileTreeClick(index: UInt16(entry.id))
         }
         .onTapGesture {
-            // Single click: select entry
             (encoder as? ProtocolEncoder)?.sendFileTreeClick(index: UInt16(entry.id))
+        }
+    }
+
+    // MARK: - Layout helpers
+
+    private func leadingPadding(_ entry: FileTreeEntry) -> CGFloat {
+        // Base padding + depth indentation
+        8 + CGFloat(entry.depth) * indentWidth
+    }
+
+    @ViewBuilder
+    private func selectionBackground(_ entry: FileTreeEntry) -> some View {
+        if entry.isSelected {
+            // Subtle rounded selection background, like Zed
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.treeSelectionBg.opacity(0.6))
+                .padding(.horizontal, 4)
+        } else {
+            Color.clear
         }
     }
 
@@ -133,27 +143,26 @@ struct FileTreeView: View {
         if entry.isDir {
             return theme.treeDirFg
         }
-        return theme.treeFg
-    }
-
-    private func nameColor(_ entry: FileTreeEntry) -> Color {
-        if entry.isSelected {
-            return theme.treeSelectionFg
-        }
+        // Git status tints the icon too
         switch entry.gitStatus {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
         case 3: return theme.treeGitUntracked
-        default: return entry.isDir ? theme.treeDirFg : theme.treeFg
+        default: return theme.treeFg.opacity(0.7)
         }
     }
 
-    private func gitStatusColor(_ status: UInt8) -> Color {
-        switch status {
+    private func nameColor(_ entry: FileTreeEntry) -> Color {
+        if entry.isSelected {
+            return theme.treeActiveFg
+        }
+        // Git status colors on the name
+        switch entry.gitStatus {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
         case 3: return theme.treeGitUntracked
-        default: return theme.treeFg
+        default:
+            return entry.isDir ? theme.treeDirFg : theme.treeFg
         }
     }
 }
