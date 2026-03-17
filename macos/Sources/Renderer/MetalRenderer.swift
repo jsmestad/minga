@@ -33,7 +33,9 @@ struct Uniforms {
 }
 
 /// Background clear color (dark gray matching the default bg).
-private let bgClearColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
+// Linear equivalents of sRGB (0.12, 0.12, 0.14). MTLClearColor bypasses
+// shaders, so it must be specified in linear space for the sRGB framebuffer.
+private let bgClearColor = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
 
 /// Renders the cell grid to a CAMetalLayer using instanced drawing.
 final class MetalRenderer {
@@ -72,13 +74,13 @@ final class MetalRenderer {
         let bgDesc = MTLRenderPipelineDescriptor()
         bgDesc.vertexFunction = library.makeFunction(name: "bg_vertex")
         bgDesc.fragmentFunction = library.makeFunction(name: "bg_fragment")
-        bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
 
         // Glyph pipeline (premultiplied alpha blending).
         let glyphDesc = MTLRenderPipelineDescriptor()
         glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
         glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
-        glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
         glyphDesc.colorAttachments[0].isBlendingEnabled = true
         glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .one
         glyphDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
@@ -273,7 +275,7 @@ final class MetalRenderer {
 
     private func uploadAtlas(_ atlas: GlyphAtlas) {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm,
+            pixelFormat: .bgra8Unorm_srgb,
             width: Int(atlas.size),
             height: Int(atlas.size),
             mipmapped: false
