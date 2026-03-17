@@ -808,12 +808,14 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
-  # ── GUI theme encoding ──────────────────────────────────────────────────
+  # ── GUI encoding (Protocol.GUI) ──────────────────────────────────────────
+
+  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
   describe "encode_gui_theme/1" do
     test "encodes theme colors as slot_id + rgb tuples" do
       theme = Minga.Theme.get!(:doom_one)
-      encoded = Protocol.encode_gui_theme(theme)
+      encoded = ProtocolGUI.encode_gui_theme(theme)
 
       # First byte is opcode
       assert <<0x1F, count::8, rest::binary>> = encoded
@@ -836,7 +838,7 @@ defmodule Minga.Port.ProtocolTest do
 
       # This will try to read the filesystem, but the encoder should handle it
       # Just verify it produces a valid binary with the right opcode
-      encoded = Protocol.encode_gui_file_tree(tree)
+      encoded = ProtocolGUI.encode_gui_file_tree(tree)
       assert <<0x70, cursor::16, width::16, _count::16, _rest::binary>> = encoded
       assert width == 30
       assert cursor == 0
@@ -847,7 +849,7 @@ defmodule Minga.Port.ProtocolTest do
       tab2 = %Minga.Editor.State.Tab{id: 2, kind: :agent, label: "Agent", agent_status: :thinking}
       tb = %Minga.Editor.State.TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
 
-      encoded = Protocol.encode_gui_tab_bar(tb)
+      encoded = ProtocolGUI.encode_gui_tab_bar(tb)
 
       # First byte is opcode 0x1C
       assert <<0x1C, active_index::8, tab_count::8, rest::binary>> = encoded
@@ -874,7 +876,7 @@ defmodule Minga.Port.ProtocolTest do
         pending_approval: %{name: "shell", args: %{"command" => "ls -la"}}
       }
 
-      encoded = Protocol.encode_gui_agent_chat(data)
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
       # Opcode + visible
       assert <<0x74, 1::8, rest::binary>> = encoded
 
@@ -901,7 +903,7 @@ defmodule Minga.Port.ProtocolTest do
         pending_approval: nil
       }
 
-      encoded = Protocol.encode_gui_agent_chat(data)
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
       assert <<0x74, 1::8, _status::8, rest::binary>> = encoded
 
       # Model: "claude" (len=6)
@@ -915,13 +917,13 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     test "encodes gui_agent_chat hidden" do
-      encoded = Protocol.encode_gui_agent_chat(%{visible: false})
+      encoded = ProtocolGUI.encode_gui_agent_chat(%{visible: false})
       assert <<0x74, 0::8>> = encoded
     end
 
     test "nil colors are skipped" do
       theme = Minga.Theme.get!(:doom_one)
-      encoded = Protocol.encode_gui_theme(theme)
+      encoded = ProtocolGUI.encode_gui_theme(theme)
       <<0x1F, count::8, _rest::binary>> = encoded
 
       # Build manually with nils to verify they're filtered
