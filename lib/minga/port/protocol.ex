@@ -1045,16 +1045,20 @@ defmodule Minga.Port.Protocol do
     <<@op_gui_agent_chat, 0::8>>
   end
 
-  def encode_gui_agent_chat(%{
-        visible: true,
-        messages: messages,
-        status: status,
-        model: model,
-        prompt: prompt
-      }) do
+  def encode_gui_agent_chat(
+        %{
+          visible: true,
+          messages: messages,
+          status: status,
+          model: model,
+          prompt: prompt
+        } = data
+      ) do
     status_byte = encode_agent_chat_status(status)
     model_bytes = :erlang.iolist_to_binary([model || ""])
     prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
+
+    pending_bytes = encode_pending_approval(data[:pending_approval])
 
     msg_binaries =
       messages
@@ -1064,10 +1068,45 @@ defmodule Minga.Port.Protocol do
     IO.iodata_to_binary([
       @op_gui_agent_chat,
       <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
-        byte_size(prompt_bytes)::16, prompt_bytes::binary, length(msg_binaries)::16>>
+        byte_size(prompt_bytes)::16, prompt_bytes::binary>>,
+      pending_bytes,
+      <<length(msg_binaries)::16>>
       | msg_binaries
     ])
   end
+
+  # Encodes the pending tool approval. Includes the tool name and a
+  # human-readable summary of args so the user can see what the tool
+  # wants to do before approving.
+  @spec encode_pending_approval(map() | nil) :: binary()
+  defp encode_pending_approval(nil), do: <<0::8>>
+
+  defp encode_pending_approval(%{name: name, args: args}) do
+    name_b = :erlang.iolist_to_binary([name])
+    summary = summarize_tool_args(name, args)
+    summary_b = :erlang.iolist_to_binary([summary])
+    <<1::8, byte_size(name_b)::16, name_b::binary, byte_size(summary_b)::16, summary_b::binary>>
+  end
+
+  @spec summarize_tool_args(String.t(), map()) :: String.t()
+  defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
+  defp summarize_tool_args("shell", %{command: cmd}), do: cmd
+  defp summarize_tool_args("write_file", %{"path" => path}), do: path
+  defp summarize_tool_args("write_file", %{path: path}), do: path
+  defp summarize_tool_args("edit_file", %{"path" => path}), do: path
+  defp summarize_tool_args("edit_file", %{path: path}), do: path
+  defp summarize_tool_args("multi_edit_file", %{"path" => path}), do: path
+  defp summarize_tool_args("multi_edit_file", %{path: path}), do: path
+  defp summarize_tool_args("git_stage", %{"paths" => paths}) when is_list(paths),
+    do: Enum.join(paths, ", ")
+
+  defp summarize_tool_args("git_stage", %{paths: paths}) when is_list(paths),
+    do: Enum.join(paths, ", ")
+
+  defp summarize_tool_args("git_commit", %{"message" => msg}), do: msg
+  defp summarize_tool_args("git_commit", %{message: msg}), do: msg
+  defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
+  defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 
   @spec encode_chat_message(Minga.Agent.Message.t()) :: binary()
   defp encode_chat_message({:user, text}) do

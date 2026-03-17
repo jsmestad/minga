@@ -179,9 +179,9 @@ final class CommandDispatcher {
                 pickerState?.hide()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let prompt, let messages):
+        case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
             if visible {
-                agentChatState?.update(visible: true, status: status, model: model, prompt: prompt, rawMessages: messages)
+                agentChatState?.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, rawMessages: messages)
             } else {
                 agentChatState?.hide()
             }

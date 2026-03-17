@@ -29,6 +29,12 @@ final class AgentChatState {
     var model: String = ""
     var prompt: String = ""
     var messages: [ChatMessageEntry] = []
+    var pendingApproval: PendingApproval?
+
+    struct PendingApproval {
+        let toolName: String
+        let summary: String
+    }
 
     var statusLabel: String {
         switch status {
@@ -42,11 +48,12 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, rawMessages: [GUIChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
         self.prompt = prompt
+        self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
         self.messages = rawMessages.enumerated().map { i, msg in
             switch msg {
             case .user(let text):

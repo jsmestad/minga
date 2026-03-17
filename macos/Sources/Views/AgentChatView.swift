@@ -37,6 +37,11 @@ struct AgentChatView: View {
                 }
             }
 
+            // Approval banner (when tool needs user confirmation)
+            if let approval = state.pendingApproval {
+                approvalBanner(approval)
+            }
+
             // Prompt area
             promptArea
         }
@@ -226,6 +231,70 @@ struct AgentChatView: View {
     }
 
     // MARK: - Prompt
+
+    // MARK: - Approval banner
+
+    @ViewBuilder
+    private func approvalBanner(_ approval: AgentChatState.PendingApproval) -> some View {
+        VStack(spacing: 6) {
+            Rectangle()
+                .fill(theme.popupBorder.opacity(0.3))
+                .frame(height: 1)
+
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.shield")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tool needs approval")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.popupFg)
+
+                    HStack(spacing: 4) {
+                        Text(approval.toolName)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.accent)
+
+                        if !approval.summary.isEmpty {
+                            Text(approval.summary)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.popupFg.opacity(0.6))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Text("y")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.green)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.green.opacity(0.1)))
+                Text("approve")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.popupFg.opacity(0.5))
+
+                Text("n")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.red)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.red.opacity(0.1)))
+                Text("reject")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.popupFg.opacity(0.5))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.orange.opacity(0.05))
+        }
+    }
+
+    // MARK: - Prompt area
 
     @ViewBuilder
     private var promptArea: some View {

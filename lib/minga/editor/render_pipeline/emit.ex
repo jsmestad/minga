@@ -641,12 +641,15 @@ defmodule Minga.Editor.RenderPipeline.Emit do
           buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
         end
 
+      pending = state.agent.pending_approval
+
       %{
         visible: true,
         messages: messages,
         status: state.agent.status || :idle,
         model: state.agent_ui.model_name,
-        prompt: prompt_text
+        prompt: prompt_text,
+        pending_approval: pending
       }
     else
       %{visible: false}

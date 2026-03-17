@@ -29,7 +29,7 @@ enum RenderCommand: Sendable {
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, messages: [GUIChatMessage])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
 }
 
 /// A chat message from gui_agent_chat.
@@ -472,7 +472,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
-            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", messages: []), 2)
+            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", pendingToolName: nil, pendingToolSummary: "", messages: []), 2)
         }
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let status = data[rest + 1]
@@ -482,10 +482,28 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let promptLen = Int(readU16(data, rest + 4 + modelLen))
         guard data.count >= rest + 6 + modelLen + promptLen + 2 else { throw ProtocolDecodeError.malformed }
         let prompt = String(data: data[(rest + 6 + modelLen)..<(rest + 6 + modelLen + promptLen)], encoding: .utf8) ?? ""
-        let msgCount = Int(readU16(data, rest + 6 + modelLen + promptLen))
+        // Parse pending_approval: 0 = none, 1 = has approval
+        var pendingPos = rest + 6 + modelLen + promptLen
+        guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
+        let hasPending = data[pendingPos] != 0
+        pendingPos += 1
+        var pendingToolName: String? = nil
+        var pendingToolSummary: String = ""
+        if hasPending {
+            guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
+            let pNameLen = Int(readU16(data, pendingPos))
+            guard data.count >= pendingPos + 2 + pNameLen + 2 else { throw ProtocolDecodeError.malformed }
+            pendingToolName = String(data: data[(pendingPos + 2)..<(pendingPos + 2 + pNameLen)], encoding: .utf8) ?? ""
+            let pSummaryLen = Int(readU16(data, pendingPos + 2 + pNameLen))
+            guard data.count >= pendingPos + 4 + pNameLen + pSummaryLen else { throw ProtocolDecodeError.malformed }
+            pendingToolSummary = String(data: data[(pendingPos + 4 + pNameLen)..<(pendingPos + 4 + pNameLen + pSummaryLen)], encoding: .utf8) ?? ""
+            pendingPos += 4 + pNameLen + pSummaryLen
+        }
+        guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
+        let msgCount = Int(readU16(data, pendingPos))
         var messages: [GUIChatMessage] = []
         messages.reserveCapacity(msgCount)
-        var pos = rest + 8 + modelLen + promptLen
+        var pos = pendingPos + 2
         for _ in 0..<msgCount {
             guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
             let msgType = data[pos]
@@ -547,7 +565,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 break
             }
         }
-        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, messages: messages), pos - offset)
+        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, messages: messages), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

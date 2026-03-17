@@ -849,6 +849,61 @@ defmodule Minga.Port.ProtocolTest do
       assert byte_size(encoded) > 10
     end
 
+    test "encodes gui_agent_chat with pending approval including tool summary" do
+      data = %{
+        visible: true,
+        messages: [{:user, "hello"}],
+        status: :thinking,
+        model: "claude",
+        prompt: "test",
+        pending_approval: %{name: "shell", args: %{"command" => "ls -la"}}
+      }
+
+      encoded = Protocol.encode_gui_agent_chat(data)
+      # Opcode + visible
+      assert <<0x74, 1::8, rest::binary>> = encoded
+
+      # Status byte (thinking = 1)
+      assert <<1::8, rest2::binary>> = rest
+
+      # Model: "claude" (len=6)
+      assert <<0::8, 6::8, "claude", rest3::binary>> = rest2
+
+      # Prompt: "test" (len=4)
+      assert <<0::8, 4::8, "test", rest4::binary>> = rest3
+
+      # Pending approval flag = 1, name = "shell" (len=5), summary = "ls -la" (len=6)
+      assert <<1::8, 0::8, 5::8, "shell", 0::8, 6::8, "ls -la", _msg_rest::binary>> = rest4
+    end
+
+    test "encodes gui_agent_chat without pending approval" do
+      data = %{
+        visible: true,
+        messages: [{:user, "hi"}],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = Protocol.encode_gui_agent_chat(data)
+      assert <<0x74, 1::8, _status::8, rest::binary>> = encoded
+
+      # Model: "claude" (len=6)
+      assert <<0::8, 6::8, "claude", rest2::binary>> = rest
+
+      # Prompt: "" (len=0)
+      assert <<0::8, 0::8, rest3::binary>> = rest2
+
+      # Pending approval flag = 0
+      assert <<0::8, _msg_rest::binary>> = rest3
+    end
+
+    test "encodes gui_agent_chat hidden" do
+      encoded = Protocol.encode_gui_agent_chat(%{visible: false})
+      assert <<0x74, 0::8>> = encoded
+    end
+
     test "nil colors are skipped" do
       theme = Minga.Theme.get!(:doom_one)
       encoded = Protocol.encode_gui_theme(theme)
