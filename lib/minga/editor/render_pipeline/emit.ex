@@ -607,6 +607,11 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   defp send_gui_agent_chat(%{capabilities: caps, port_manager: pm} = state) do
     if Capabilities.gui?(caps) do
       data = build_agent_chat_data(state)
+
+      if data.visible do
+        Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
+      end
+
       cmd = Protocol.encode_gui_agent_chat(data)
       PortManager.send_commands(pm, [cmd])
     end
@@ -618,24 +623,20 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   defp build_agent_chat_data(state) do
     alias Minga.Editor.Window.Content
 
-    # Check if the active window is showing an agent chat
     active_window = Map.get(state.windows.map, state.windows.active)
-    is_agent_chat = active_window && Content.agent_chat?(active_window.content)
+    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    session = state.agent.session
 
-    if is_agent_chat do
-      session_pid = Content.pid(active_window.content)
-
+    if is_agent_chat && session do
       messages =
         try do
-          AgentSession.messages(session_pid)
+          AgentSession.messages(session)
         catch
           :exit, _ -> []
         end
 
-      agent_ui = state.agent_ui
-
       prompt_text =
-        case agent_ui.prompt_buffer do
+        case state.agent_ui.prompt_buffer do
           nil -> ""
           buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
         end
@@ -644,7 +645,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
         visible: true,
         messages: messages,
         status: state.agent.status || :idle,
-        model: agent_ui.model_name,
+        model: state.agent_ui.model_name,
         prompt: prompt_text
       }
     else
