@@ -48,6 +48,7 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
+        ZStack {
         HStack(spacing: 0) {
             // File tree sidebar
             if appState.fileTreeState.visible {
@@ -126,11 +127,13 @@ struct ContentView: View {
                 )
             }
 
-            // Picker overlay (floats over entire window)
-            PickerOverlay(
-                state: appState.pickerState,
-                theme: appState.themeColors
-            )
+        }
+
+        // Picker overlay (floats over entire window, outside HStack)
+        PickerOverlay(
+            state: appState.pickerState,
+            theme: appState.themeColors
+        )
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)

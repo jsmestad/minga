@@ -586,12 +586,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       filetype: Filetype.detect(file_name),
       dirty_marker: if(buf && BufferServer.dirty?(buf), do: "●", else: ""),
       lsp_status: state.lsp_status,
-      git_branch:
-        get_in(state, [Access.key(:file_tree), Access.key(:tree)]) &&
-          case state.file_tree.tree do
-            %{root: _} -> Git.current_branch(state.file_tree.tree.root)
-            _ -> nil
-          end,
+      git_branch: resolve_git_branch(state),
       status_msg: state.status_msg
     }
   end
@@ -605,6 +600,16 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     :ok
   end
+
+  @spec resolve_git_branch(state()) :: String.t() | nil
+  defp resolve_git_branch(%{file_tree: %{tree: %{root: root}}}) do
+    case Git.current_branch(root) do
+      {:ok, branch} -> branch
+      _ -> nil
+    end
+  end
+
+  defp resolve_git_branch(_state), do: nil
 
   @spec send_gui_theme(state()) :: :ok
   defp send_gui_theme(state) do
