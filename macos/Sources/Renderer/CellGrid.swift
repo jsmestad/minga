@@ -45,6 +45,11 @@ final class CellGrid {
     /// Set by the set_window_bg protocol command. 0 = terminal default.
     var defaultBg: UInt32 = 0
 
+    /// Gutter separator: column position (0 = no separator) and 24-bit RGB color.
+    /// Set by the gui_gutter_separator protocol command.
+    var gutterCol: UInt16 = 0
+    var gutterSeparatorColor: UInt32 = 0
+
     /// Track whether the grid was modified since last render.
     var dirty: Bool = true
 

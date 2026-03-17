@@ -79,6 +79,7 @@ defmodule Minga.Config.Options do
   @type option_name ::
           :tab_width
           | :line_numbers
+          | :show_gutter_separator
           | :autopair
           | :scroll_margin
           | :scroll_lines
@@ -165,6 +166,7 @@ defmodule Minga.Config.Options do
   @option_specs [
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
+    {:show_gutter_separator, :boolean, true},
     {:autopair, :boolean, true},
     {:scroll_margin, :non_neg_integer, 5},
     {:scroll_lines, :pos_integer, 1},

@@ -22,6 +22,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x76   | gui_status_bar| Status bar data                |
   | 0x77   | gui_picker    | Fuzzy picker items             |
   | 0x78   | gui_agent_chat| Agent conversation view        |
+  | 0x79   | gui_gutter_sep| Gutter separator col + color   |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -47,7 +48,7 @@ defmodule Minga.Port.Protocol.GUI do
   alias Minga.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──
-  # Contiguous range 0x70-0x78 for easy range-check classification.
+  # Contiguous range 0x70-0x79 for easy range-check classification.
 
   @op_gui_file_tree 0x70
   @op_gui_tab_bar 0x71
@@ -58,6 +59,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_status_bar 0x76
   @op_gui_picker 0x77
   @op_gui_agent_chat 0x78
+  @op_gui_gutter_separator 0x79
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -86,6 +88,24 @@ defmodule Minga.Port.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
+
+  # ── Gutter separator ──
+
+  @doc """
+  Encodes a gui_gutter_separator command.
+
+  Sends the gutter column position and separator color to the GUI frontend.
+  `col` is the cell column at the right edge of the gutter (0 = no separator).
+  `color_rgb` is a 24-bit RGB color value.
+  """
+  @spec encode_gui_gutter_separator(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_gui_gutter_separator(col, color_rgb)
+      when is_integer(col) and is_integer(color_rgb) do
+    r = color_rgb >>> 16 &&& 0xFF
+    g = color_rgb >>> 8 &&& 0xFF
+    b = color_rgb &&& 0xFF
+    <<@op_gui_gutter_separator, col::16, r::8, g::8, b::8>>
+  end
 
   # ── Theme ──
 

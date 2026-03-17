@@ -229,6 +229,31 @@ final class MetalRenderer {
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
             }
 
+            // Gutter separator: 1px vertical line at the right edge of the gutter.
+            if grid.gutterCol > 0 {
+                let sepColor = colorFromU24(grid.gutterSeparatorColor,
+                                            default: SIMD3<Float>(0.25, 0.25, 0.29))
+                var sepCell = CellGPU()
+                sepCell.bgColor = sepColor
+                sepCell.hasGlyph = 0
+
+                // 1px wide line positioned at the right edge of the gutter column.
+                var sepUniforms = uniforms
+                let lineWidth: Float = 1.0 * contentScale
+                sepUniforms.cellSize.x = lineWidth
+                sepUniforms.cellSize.y = Float(viewportSize.height)
+                // Position at the right edge of the gutter: gutterCol * cellWidth.
+                sepCell.gridPos.x = Float(grid.gutterCol) * cellW * contentScale / lineWidth
+                sepCell.gridPos.y = 0
+                // No scroll offset for the separator (it's fixed).
+                sepUniforms.scrollOffset = .zero
+
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&sepCell, length: MemoryLayout<CellGPU>.stride, index: 0)
+                encoder.setVertexBytes(&sepUniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+            }
+
             // Cursor overlay. Shape varies by mode: block (normal), beam (insert), underline.
             if grid.cursorVisible {
                 let cursorIdx = Int(grid.cursorRow) * Int(grid.cols) + Int(grid.cursorCol)
