@@ -74,12 +74,20 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   def build_chrome(state, layout, scrolls, cursor_info) do
     full_viewport = state.viewport
 
-    # Modeline per buffer window
+    # Modeline per buffer window.
+    # In GUI mode with a single window, skip modeline draws (SwiftUI status bar
+    # handles it). Keep modeline for splits so each window shows its own status.
+    gui_single_window? = Capabilities.gui?(state.capabilities) && !EditorState.split?(state)
+
     {modeline_draws, modeline_click_regions} =
-      Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
-        {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
-        {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
-      end)
+      if gui_single_window? do
+        {%{}, []}
+      else
+        Enum.reduce(scrolls, {%{}, []}, fn {win_id, scroll}, {draws_acc, regions_acc} ->
+          {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
+          {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
+        end)
+      end
 
     # Modeline per agent chat window (skipped in scrolls, rendered here)
     {modeline_draws, modeline_click_regions} =

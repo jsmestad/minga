@@ -151,11 +151,13 @@ defmodule Minga.Editor.Layout do
     editor_area = {0, 0, vp.cols, editor_height}
 
     # Window layouts within the editor area.
+    # In single-window GUI mode, skip the modeline row (SwiftUI status bar
+    # handles it). In splits, keep modeline per window.
     window_layouts =
       if EditorState.split?(state) do
         compute_window_layouts(state.windows.tree, editor_area)
       else
-        %{state.windows.active => single_window_layout(editor_area)}
+        %{state.windows.active => single_window_layout_no_modeline(editor_area)}
       end
 
     %__MODULE__{
@@ -347,6 +349,17 @@ defmodule Minga.Editor.Layout do
 
   @spec single_window_layout(rect()) :: window_layout()
   defp single_window_layout(rect), do: subdivide_window(rect)
+
+  # GUI single-window: content fills the entire rect, no modeline row.
+  # Uses subdivide_window's height<2 path to produce a zero-height modeline,
+  # then patches the content to fill the full rect.
+  # No @spec: modeline height is 0, which doesn't fit rect() type.
+  defp single_window_layout_no_modeline({row, col, width, height}) do
+    # Start with a normal subdivision that includes modeline
+    base = subdivide_window({row, col, width, height})
+    # Expand content to fill the modeline row too
+    %{base | content: {row, col, width, height}, modeline: {row + height, col, width, 0}}
+  end
 
   @spec compute_window_layouts(WindowTree.t(), rect()) :: %{Window.id() => window_layout()}
   defp compute_window_layouts(tree, editor_area) do

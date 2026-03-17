@@ -689,16 +689,28 @@ defmodule Minga.Editor.LayoutTest do
       assert layout.agent_panel == nil
     end
 
-    test "per-window modeline is preserved in GUI mode" do
+    test "single-window GUI mode hides modeline (status bar handles it)" do
       state = new_state(40, 120) |> with_window() |> with_gui_caps()
       layout = Layout.compute(state)
 
       win_layout = layout.window_layouts[1]
-      {ml_row, _col, _w, ml_h} = win_layout.modeline
-      assert ml_h == 1
-      # Modeline should be at the bottom of the content area
-      {content_row, _c, _cw, content_h} = win_layout.content
-      assert ml_row == content_row + content_h
+      {_ml_row, _col, _w, ml_h} = win_layout.modeline
+      assert ml_h == 0
+      # Content fills the entire editor area (no modeline row reserved)
+      {_content_row, _c, _cw, content_h} = win_layout.content
+      {_ea_row, _ea_c, _ea_w, ea_h} = layout.editor_area
+      assert content_h == ea_h
+    end
+
+    test "split-window GUI mode preserves per-window modeline" do
+      state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
+      layout = Layout.compute(state)
+
+      # Both windows should have modelines in split mode
+      Enum.each(layout.window_layouts, fn {_id, wl} ->
+        {_r, _c, _w, h} = wl.modeline
+        assert h == 1
+      end)
     end
 
     test "GUI layout differs from TUI layout for same viewport" do
