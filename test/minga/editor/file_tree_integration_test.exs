@@ -32,6 +32,41 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       assert state.file_tree.focused == false
     end
 
+    test "closing tree restores :agent scope when active window is agent chat", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Open tree
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.file_tree.tree != nil
+
+      # Get the editor state and inject an agent chat as the active window
+      # content to simulate the real scenario.
+      state = :sys.get_state(ctx.editor)
+      active_id = state.windows.active
+      active_window = Map.get(state.windows.map, active_id)
+      agent_window = %{active_window | content: {:agent_chat, self()}}
+      state = put_in(state.windows.map[active_id], agent_window)
+
+      # Toggle the tree closed and verify scope restores to :agent
+      closed_state = Minga.Editor.Commands.FileTree.toggle(state)
+      assert closed_state.keymap_scope == :agent
+    end
+
+    test "closing tree restores :editor scope for regular buffer window", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.file_tree.tree != nil
+
+      state = :sys.get_state(ctx.editor)
+      closed_state = Minga.Editor.Commands.FileTree.toggle(state)
+      assert closed_state.keymap_scope == :editor
+    end
+
     test "tree panel reduces editor viewport width", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
