@@ -67,6 +67,9 @@ final class CommandDispatcher {
     /// Picker state for command palette. Updated on gui_picker commands.
     var pickerState: PickerState?
 
+    /// Agent chat state. Updated on gui_agent_chat commands.
+    var agentChatState: AgentChatState?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -174,6 +177,13 @@ final class CommandDispatcher {
                 pickerState?.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
             } else {
                 pickerState?.hide()
+            }
+
+        case .guiAgentChat(let visible, let status, let model, let prompt, let messages):
+            if visible {
+                agentChatState?.update(visible: true, status: status, model: model, prompt: prompt, rawMessages: messages)
+            } else {
+                agentChatState?.hide()
             }
         }
     }

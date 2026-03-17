@@ -16,6 +16,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   for the most common scroll case (Ctrl-e/y, mouse wheel, cursor near edges).
   """
 
+  alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
   alias Minga.Editor.DisplayList
@@ -78,6 +79,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_gui_breadcrumb(state)
       send_gui_status_bar(state)
       send_gui_picker(state)
+      send_gui_agent_chat(state)
       :ok
     end)
   end
@@ -599,6 +601,48 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     end
 
     :ok
+  end
+
+  @spec send_gui_agent_chat(state()) :: :ok
+  defp send_gui_agent_chat(%{capabilities: caps, port_manager: pm} = state) do
+    if Capabilities.gui?(caps) do
+      data = build_agent_chat_data(state)
+      cmd = Protocol.encode_gui_agent_chat(data)
+      PortManager.send_commands(pm, [cmd])
+    end
+
+    :ok
+  end
+
+  @spec build_agent_chat_data(state()) :: map()
+  defp build_agent_chat_data(state) do
+    agent = state.agent
+    agent_ui = state.agent_ui
+
+    if agent_ui.visible && agent.session do
+      messages =
+        try do
+          AgentSession.messages(agent.session)
+        catch
+          :exit, _ -> []
+        end
+
+      prompt_text =
+        case agent_ui.prompt_buffer do
+          nil -> ""
+          buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
+        end
+
+      %{
+        visible: true,
+        messages: messages,
+        status: agent.status || :idle,
+        model: agent_ui.model_name,
+        prompt: prompt_text
+      }
+    else
+      %{visible: false}
+    end
   end
 
   @spec resolve_git_branch(state()) :: String.t() | nil

@@ -29,6 +29,17 @@ enum RenderCommand: Sendable {
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, messages: [GUIChatMessage])
+}
+
+/// A chat message from gui_agent_chat.
+enum GUIChatMessage: Sendable {
+    case user(text: String)
+    case assistant(text: String)
+    case thinking(text: String, collapsed: Bool)
+    case toolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+    case system(text: String, isError: Bool)
+    case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 }
 
 /// A picker item from gui_picker.
@@ -456,6 +467,87 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pos += 7 + labelLen + descLen
         }
         return (.guiPicker(visible: true, selectedIndex: selectedIndex, title: title, query: query, items: items), pos - offset)
+
+    case OP_GUI_AGENT_CHAT:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        if !visible {
+            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", messages: []), 2)
+        }
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let status = data[rest + 1]
+        let modelLen = Int(readU16(data, rest + 2))
+        guard data.count >= rest + 4 + modelLen + 2 else { throw ProtocolDecodeError.malformed }
+        let model = String(data: data[(rest + 4)..<(rest + 4 + modelLen)], encoding: .utf8) ?? ""
+        let promptLen = Int(readU16(data, rest + 4 + modelLen))
+        guard data.count >= rest + 6 + modelLen + promptLen + 2 else { throw ProtocolDecodeError.malformed }
+        let prompt = String(data: data[(rest + 6 + modelLen)..<(rest + 6 + modelLen + promptLen)], encoding: .utf8) ?? ""
+        let msgCount = Int(readU16(data, rest + 6 + modelLen + promptLen))
+        var messages: [GUIChatMessage] = []
+        messages.reserveCapacity(msgCount)
+        var pos = rest + 8 + modelLen + promptLen
+        for _ in 0..<msgCount {
+            guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
+            let msgType = data[pos]
+            switch msgType {
+            case 0x01: // user
+                guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
+                let tLen = Int(readU32(data, pos + 1))
+                guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
+                let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
+                messages.append(.user(text: t))
+                pos += 5 + tLen
+            case 0x02: // assistant
+                guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
+                let tLen = Int(readU32(data, pos + 1))
+                guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
+                let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
+                messages.append(.assistant(text: t))
+                pos += 5 + tLen
+            case 0x03: // thinking
+                guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
+                let collapsed = data[pos + 1] != 0
+                let tLen = Int(readU32(data, pos + 2))
+                guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
+                let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
+                messages.append(.thinking(text: t, collapsed: collapsed))
+                pos += 6 + tLen
+            case 0x04: // tool_call
+                guard data.count >= pos + 10 else { throw ProtocolDecodeError.malformed }
+                let tcStatus = data[pos + 1]
+                let isError = data[pos + 2] != 0
+                let tcCollapsed = data[pos + 3] != 0
+                let duration = readU32(data, pos + 4)
+                let nameLen = Int(readU16(data, pos + 8))
+                guard data.count >= pos + 10 + nameLen + 4 else { throw ProtocolDecodeError.malformed }
+                let name = String(data: data[(pos + 10)..<(pos + 10 + nameLen)], encoding: .utf8) ?? ""
+                let resultLen = Int(readU32(data, pos + 10 + nameLen))
+                guard data.count >= pos + 14 + nameLen + resultLen else { throw ProtocolDecodeError.malformed }
+                let result = String(data: data[(pos + 14 + nameLen)..<(pos + 14 + nameLen + resultLen)], encoding: .utf8) ?? ""
+                messages.append(.toolCall(name: name, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result))
+                pos += 14 + nameLen + resultLen
+            case 0x05: // system
+                guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
+                let isError = data[pos + 1] != 0
+                let tLen = Int(readU32(data, pos + 2))
+                guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
+                let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
+                messages.append(.system(text: t, isError: isError))
+                pos += 6 + tLen
+            case 0x06: // usage
+                guard data.count >= pos + 21 else { throw ProtocolDecodeError.malformed }
+                let inp = readU32(data, pos + 1)
+                let outp = readU32(data, pos + 5)
+                let cacheR = readU32(data, pos + 9)
+                let cacheW = readU32(data, pos + 13)
+                let costM = readU32(data, pos + 17)
+                messages.append(.usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM))
+                pos += 21
+            default:
+                break
+            }
+        }
+        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, messages: messages), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

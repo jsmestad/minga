@@ -87,6 +87,7 @@ defmodule Minga.Port.Protocol do
   @op_gui_breadcrumb 0x71
   @op_gui_status_bar 0x72
   @op_gui_picker 0x73
+  @op_gui_agent_chat 0x74
 
   # GUI theme color slot IDs
   @gui_color_editor_bg 0x01
@@ -1035,6 +1036,98 @@ defmodule Minga.Port.Protocol do
       | entries
     ])
   end
+
+  # ── Agent chat ──
+
+  @doc "Encodes a gui_agent_chat command with conversation messages."
+  @spec encode_gui_agent_chat(map()) :: binary()
+  def encode_gui_agent_chat(%{visible: false}) do
+    <<@op_gui_agent_chat, 0::8>>
+  end
+
+  def encode_gui_agent_chat(%{
+        visible: true,
+        messages: messages,
+        status: status,
+        model: model,
+        prompt: prompt
+      }) do
+    status_byte = encode_agent_chat_status(status)
+    model_bytes = :erlang.iolist_to_binary([model || ""])
+    prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
+
+    msg_binaries =
+      messages
+      |> Enum.take(100)
+      |> Enum.map(&encode_chat_message/1)
+
+    IO.iodata_to_binary([
+      @op_gui_agent_chat,
+      <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
+        byte_size(prompt_bytes)::16, prompt_bytes::binary, length(msg_binaries)::16>>
+      | msg_binaries
+    ])
+  end
+
+  @spec encode_chat_message(Minga.Agent.Message.t()) :: binary()
+  defp encode_chat_message({:user, text}) do
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  defp encode_chat_message({:user, text, _attachments}) do
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  defp encode_chat_message({:assistant, text}) do
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<0x02::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  defp encode_chat_message({:thinking, text, collapsed}) do
+    collapsed_byte = if collapsed, do: 1, else: 0
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<0x03::8, collapsed_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  defp encode_chat_message({:tool_call, tc}) do
+    name_bytes = :erlang.iolist_to_binary([tc.name])
+    result_bytes = :erlang.iolist_to_binary([tc.result || ""])
+
+    status_byte =
+      case tc.status do
+        :running -> 0
+        :complete -> 1
+        :error -> 2
+      end
+
+    duration = tc.duration_ms || 0
+    error_byte = if tc.is_error, do: 1, else: 0
+    collapsed_byte = if tc.collapsed, do: 1, else: 0
+
+    <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
+      byte_size(name_bytes)::16, name_bytes::binary, byte_size(result_bytes)::32,
+      result_bytes::binary>>
+  end
+
+  defp encode_chat_message({:system, text, level}) do
+    level_byte = if level == :error, do: 1, else: 0
+    text_bytes = :erlang.iolist_to_binary([text])
+    <<0x05::8, level_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  defp encode_chat_message({:usage, u}) do
+    cost_int = round((u.cost || 0.0) * 1_000_000)
+    <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
+  end
+
+  @spec encode_agent_chat_status(atom()) :: non_neg_integer()
+  defp encode_agent_chat_status(:idle), do: 0
+  defp encode_agent_chat_status(:thinking), do: 1
+  defp encode_agent_chat_status(:tool_executing), do: 2
+  defp encode_agent_chat_status(:error), do: 3
+  defp encode_agent_chat_status(_), do: 0
 
   # ── Decoding (Zig → BEAM) ──
 

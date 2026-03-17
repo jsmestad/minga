@@ -82,13 +82,22 @@ struct ContentView: View {
                     encoder: appState.encoder
                 )
 
-                // Editor surface (Metal) with overlays
+                // Editor surface (Metal) or Agent chat (SwiftUI)
                 ZStack(alignment: .topLeading) {
-                    Group {
-                        if let nsView = appState.editorNSView {
-                            EditorView(editorNSView: nsView)
-                        } else {
-                            Color(red: 0.12, green: 0.12, blue: 0.14)
+                    if appState.agentChatState.visible {
+                        // Native agent chat view
+                        AgentChatView(
+                            state: appState.agentChatState,
+                            theme: appState.themeColors
+                        )
+                    } else {
+                        // Metal editor surface
+                        Group {
+                            if let nsView = appState.editorNSView {
+                                EditorView(editorNSView: nsView)
+                            } else {
+                                Color(red: 0.12, green: 0.12, blue: 0.14)
+                            }
                         }
                     }
 
@@ -172,6 +181,8 @@ final class AppState: ObservableObject {
     let statusBarState = StatusBarState()
     /// Picker state for command palette.
     let pickerState = PickerState()
+    /// Agent chat state.
+    let agentChatState = AgentChatState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: InputEncoder?
 }
@@ -268,6 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.breadcrumbState = appState.breadcrumbState
         disp.statusBarState = appState.statusBarState
         disp.pickerState = appState.pickerState
+        disp.agentChatState = appState.agentChatState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
