@@ -9,17 +9,19 @@ defmodule Minga.Port.Protocol.GUI do
 
   ## GUI Chrome Commands (BEAM → Frontend)
 
+  Contiguous range 0x70-0x78 for easy classification by frontends.
+
   | Opcode | Name          | Description                    |
   |--------|---------------|--------------------------------|
-  | 0x1C   | gui_tab_bar   | Tab bar with tab entries       |
-  | 0x1D   | gui_which_key | Which-key popup bindings       |
-  | 0x1E   | gui_completion| Completion popup items         |
-  | 0x1F   | gui_theme     | Theme color slots              |
   | 0x70   | gui_file_tree | File tree entries              |
-  | 0x71   | gui_breadcrumb| Path breadcrumb segments       |
-  | 0x72   | gui_status_bar| Status bar data                |
-  | 0x73   | gui_picker    | Fuzzy picker items             |
-  | 0x74   | gui_agent_chat| Agent conversation view        |
+  | 0x71   | gui_tab_bar   | Tab bar with tab entries       |
+  | 0x72   | gui_which_key | Which-key popup bindings       |
+  | 0x73   | gui_completion| Completion popup items         |
+  | 0x74   | gui_theme     | Theme color slots              |
+  | 0x75   | gui_breadcrumb| Path breadcrumb segments       |
+  | 0x76   | gui_status_bar| Status bar data                |
+  | 0x77   | gui_picker    | Fuzzy picker items             |
+  | 0x78   | gui_agent_chat| Agent conversation view        |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -45,16 +47,17 @@ defmodule Minga.Port.Protocol.GUI do
   alias Minga.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──
+  # Contiguous range 0x70-0x78 for easy range-check classification.
 
   @op_gui_file_tree 0x70
-  @op_gui_tab_bar 0x1C
-  @op_gui_which_key 0x1D
-  @op_gui_completion 0x1E
-  @op_gui_theme 0x1F
-  @op_gui_breadcrumb 0x71
-  @op_gui_status_bar 0x72
-  @op_gui_picker 0x73
-  @op_gui_agent_chat 0x74
+  @op_gui_tab_bar 0x71
+  @op_gui_which_key 0x72
+  @op_gui_completion 0x73
+  @op_gui_theme 0x74
+  @op_gui_breadcrumb 0x75
+  @op_gui_status_bar 0x76
+  @op_gui_picker 0x77
+  @op_gui_agent_chat 0x78
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 

@@ -51,34 +51,34 @@ struct ContentView: View {
         ZStack {
         HStack(spacing: 0) {
             // File tree sidebar
-            if appState.fileTreeState.visible {
+            if appState.gui.fileTreeState.visible {
                 FileTreeView(
-                    fileTreeState: appState.fileTreeState,
-                    theme: appState.themeColors,
+                    fileTreeState: appState.gui.fileTreeState,
+                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
 
                 // 1px separator between sidebar and editor
                 Rectangle()
-                    .fill(appState.themeColors.treeSeparatorFg)
+                    .fill(appState.gui.themeColors.treeSeparatorFg)
                     .frame(width: 1)
             }
 
             // Right pane: tab bar + breadcrumb + editor + status bar
             VStack(spacing: 0) {
                 // Native tab bar
-                if !appState.tabBarState.tabs.isEmpty {
+                if !appState.gui.tabBarState.tabs.isEmpty {
                     TabBarView(
-                        tabBarState: appState.tabBarState,
-                        theme: appState.themeColors,
+                        tabBarState: appState.gui.tabBarState,
+                        theme: appState.gui.themeColors,
                         encoder: appState.encoder
                     )
                 }
 
                 // Breadcrumb path bar
                 BreadcrumbBar(
-                    state: appState.breadcrumbState,
-                    theme: appState.themeColors,
+                    state: appState.gui.breadcrumbState,
+                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
 
@@ -95,26 +95,26 @@ struct ContentView: View {
                     // Show the agent view on top when visible. Keeping the
                     // metal view underneath means EditorNSView stays in the
                     // responder chain for keyboard input.
-                    .opacity(appState.agentChatState.visible ? 0 : 1)
+                    .opacity(appState.gui.agentChatState.visible ? 0 : 1)
 
-                    if appState.agentChatState.visible {
+                    if appState.gui.agentChatState.visible {
                         AgentChatView(
-                            state: appState.agentChatState,
-                            theme: appState.themeColors,
-                            isInsertMode: appState.statusBarState.isInsertMode
+                            state: appState.gui.agentChatState,
+                            theme: appState.gui.themeColors,
+                            isInsertMode: appState.gui.statusBarState.isInsertMode
                         )
                     }
 
                     // Completion overlay (positioned at cursor)
-                    if appState.completionState.visible {
+                    if appState.gui.completionState.visible {
                         let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
                         let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                        let x = CGFloat(appState.completionState.anchorCol) * cw
-                        let y = (CGFloat(appState.completionState.anchorRow) + 1) * ch
+                        let x = CGFloat(appState.gui.completionState.anchorCol) * cw
+                        let y = (CGFloat(appState.gui.completionState.anchorRow) + 1) * ch
 
                         CompletionOverlay(
-                            state: appState.completionState,
-                            theme: appState.themeColors,
+                            state: appState.gui.completionState,
+                            theme: appState.gui.themeColors,
                             encoder: appState.encoder,
                             cellWidth: cw,
                             cellHeight: ch
@@ -125,8 +125,8 @@ struct ContentView: View {
 
                 // Status bar
                 StatusBarView(
-                    state: appState.statusBarState,
-                    theme: appState.themeColors,
+                    state: appState.gui.statusBarState,
+                    theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
             }
@@ -139,8 +139,8 @@ struct ContentView: View {
             HStack {
                 Spacer()
                 WhichKeyOverlay(
-                    state: appState.whichKeyState,
-                    theme: appState.themeColors
+                    state: appState.gui.whichKeyState,
+                    theme: appState.gui.themeColors
                 )
                 Spacer()
             }
@@ -148,8 +148,8 @@ struct ContentView: View {
 
         // Picker overlay (floats over entire window)
         PickerOverlay(
-            state: appState.pickerState,
-            theme: appState.themeColors
+            state: appState.gui.pickerState,
+            theme: appState.gui.themeColors
         )
         }
         .navigationTitle(appState.windowTitle)
@@ -169,24 +169,8 @@ final class AppState: ObservableObject {
     @Published var windowBgColor: Color?
     /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
     @Published var windowBgIsDark: Bool = true
-    /// Theme colors for SwiftUI chrome views.
-    let themeColors = ThemeColors()
-    /// Tab bar state for SwiftUI chrome.
-    let tabBarState = TabBarState()
-    /// File tree state for SwiftUI sidebar.
-    let fileTreeState = FileTreeState()
-    /// Completion state for floating popup.
-    let completionState = CompletionState()
-    /// Which-key state for floating popup.
-    let whichKeyState = WhichKeyState()
-    /// Breadcrumb state for path bar.
-    let breadcrumbState = BreadcrumbState()
-    /// Status bar state.
-    let statusBarState = StatusBarState()
-    /// Picker state for command palette.
-    let pickerState = PickerState()
-    /// Agent chat state.
-    let agentChatState = AgentChatState()
+    /// All GUI chrome sub-states in a single container.
+    let gui = GUIState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: InputEncoder?
 }
@@ -248,7 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.editorNSView = nsView
 
         // Command dispatcher.
-        let disp = CommandDispatcher(grid: grid)
+        let disp = CommandDispatcher(grid: grid, guiState: appState.gui)
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
         }
@@ -275,15 +259,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         disp.fontFace = face
-        disp.themeColors = appState.themeColors
-        disp.tabBarState = appState.tabBarState
-        disp.fileTreeState = appState.fileTreeState
-        disp.completionState = appState.completionState
-        disp.whichKeyState = appState.whichKeyState
-        disp.breadcrumbState = appState.breadcrumbState
-        disp.statusBarState = appState.statusBarState
-        disp.pickerState = appState.pickerState
-        disp.agentChatState = appState.agentChatState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }
