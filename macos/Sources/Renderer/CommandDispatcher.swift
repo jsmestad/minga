@@ -19,6 +19,7 @@ struct Region {
 }
 
 /// Dispatches render commands to a CellGrid and notifies when a frame is complete.
+@MainActor
 final class CommandDispatcher {
     let grid: CellGrid
     private var regions: [UInt16: Region] = [:]

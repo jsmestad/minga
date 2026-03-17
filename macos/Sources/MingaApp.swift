@@ -48,23 +48,31 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Native tab bar (driven by BEAM gui_tab_bar messages)
-            if !appState.tabBarState.tabs.isEmpty {
-                TabBarView(
-                    tabBarState: appState.tabBarState,
-                    theme: appState.themeColors,
-                    encoder: appState.encoder
-                )
-            }
+        HStack(spacing: 0) {
+            // File tree sidebar (will be added in step 6)
+            // Placeholder: sidebar goes here, conditional on visibility
 
-            // Editor surface (Metal)
-            Group {
-                if let nsView = appState.editorNSView {
-                    EditorView(editorNSView: nsView)
-                } else {
-                    Color(red: 0.12, green: 0.12, blue: 0.14)
+            // Right pane: tab bar + editor + status bar
+            VStack(spacing: 0) {
+                // Native tab bar (driven by BEAM gui_tab_bar messages)
+                if !appState.tabBarState.tabs.isEmpty {
+                    TabBarView(
+                        tabBarState: appState.tabBarState,
+                        theme: appState.themeColors,
+                        encoder: appState.encoder
+                    )
                 }
+
+                // Editor surface (Metal)
+                Group {
+                    if let nsView = appState.editorNSView {
+                        EditorView(editorNSView: nsView)
+                    } else {
+                        Color(red: 0.12, green: 0.12, blue: 0.14)
+                    }
+                }
+
+                // Status bar (will be added in step 10)
             }
         }
         .navigationTitle(appState.windowTitle)

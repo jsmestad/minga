@@ -33,6 +33,10 @@ final class EditorNSView: MTKView {
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
     private var readySent = false
 
+    /// First responder guard that prevents SwiftUI from stealing keyboard focus.
+    /// Installed when the view moves to a window.
+    private var firstResponderGuard: FirstResponderGuard?
+
     init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
         self.encoder = encoder
         self.metalRenderer = metalRenderer
@@ -124,6 +128,12 @@ final class EditorNSView: MTKView {
                 name: NSWindow.didBecomeKeyNotification,
                 object: window
             )
+
+            // Install the first responder guard. This uses KVO to monitor
+            // first responder changes and immediately redirect them back
+            // to this editor view. Combined with .focusable(false) on all
+            // SwiftUI chrome, this ensures vim keybindings always work.
+            firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
         }
         updateTrackingArea()
         claimFirstResponder()

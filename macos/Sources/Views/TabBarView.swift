@@ -43,6 +43,8 @@ struct TabBarView: View {
         }
         .frame(height: tabHeight)
         .background(theme.tabBg)
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     @ViewBuilder
