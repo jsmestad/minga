@@ -10,6 +10,7 @@ import SwiftUI
 struct AgentChatView: View {
     let state: AgentChatState
     let theme: ThemeColors
+    let isInsertMode: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -235,19 +236,34 @@ struct AgentChatView: View {
         HStack(spacing: 8) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(theme.accent)
+                .foregroundStyle(isInsertMode ? theme.accent : theme.popupFg.opacity(0.3))
 
             if state.prompt.isEmpty {
-                Text("Type a message, Enter to send")
+                Text(isInsertMode ? "Type a message, Enter to send" : "Press i to type")
                     .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(0.3))
+                    .foregroundStyle(theme.popupFg.opacity(isInsertMode ? 0.4 : 0.25))
             } else {
                 Text(state.prompt)
                     .font(.system(size: 13))
                     .foregroundStyle(theme.popupFg)
+                if isInsertMode {
+                    // Cursor indicator
+                    Rectangle()
+                        .fill(theme.accent)
+                        .frame(width: 1.5, height: 16)
+                }
             }
 
             Spacer()
+
+            if !isInsertMode {
+                Text("NORMAL")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.modeNormalFg)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(theme.modeNormalBg))
+            }
 
             Text(state.model)
                 .font(.system(size: 10))
@@ -255,7 +271,7 @@ struct AgentChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(theme.modelineBarBg)
+        .background(isInsertMode ? theme.modelineBarBg : theme.modelineBarBg.opacity(0.7))
     }
 
     // MARK: - Helpers

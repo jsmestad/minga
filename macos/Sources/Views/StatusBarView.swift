@@ -46,6 +46,7 @@ final class StatusBarState {
 
     var hasGit: Bool { flags & 0x02 != 0 }
     var hasLsp: Bool { flags & 0x01 != 0 }
+    var isInsertMode: Bool { mode == 1 }
 }
 
 struct StatusBarView: View {

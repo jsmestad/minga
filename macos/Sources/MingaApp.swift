@@ -100,7 +100,8 @@ struct ContentView: View {
                     if appState.agentChatState.visible {
                         AgentChatView(
                             state: appState.agentChatState,
-                            theme: appState.themeColors
+                            theme: appState.themeColors,
+                            isInsertMode: appState.statusBarState.isInsertMode
                         )
                     }
 
