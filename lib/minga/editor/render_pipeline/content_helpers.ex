@@ -27,6 +27,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.WrapMap
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Highlight
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
 
@@ -166,12 +167,22 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
     max_rows = length(lines)
 
+    # Pre-compute highlight segments for all visible lines in one O(N) pass.
+    highlight_segments_list =
+      if ctx.highlight do
+        lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
+        Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+      else
+        List.duplicate(nil, max_rows)
+      end
+
     {gutters, contents_rev, _byte_off, window} =
       lines
+      |> Enum.zip(highlight_segments_list)
       |> Enum.with_index()
       |> Enum.reduce(
         {[], [], first_byte_off, window},
-        fn {line_text, screen_row}, {g, c, byte_off, win} ->
+        fn {{line_text, hl_segments}, screen_row}, {g, c, byte_off, win} ->
           buf_line = first_line + screen_row
           next_byte_off = byte_off + byte_size(line_text) + 1
 
@@ -190,7 +201,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
                 wrap_entry: nil,
                 max_rows: max_rows,
                 row_offset: row_off,
-                col_offset: col_off
+                col_offset: col_off,
+                highlight_segments: hl_segments
               })
 
             win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
@@ -867,5 +879,17 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     else
       ""
     end
+  end
+
+  # Build {line_text, byte_offset} tuples for batch highlight computation.
+  @spec build_lines_with_offsets([String.t()], non_neg_integer()) ::
+          [{String.t(), non_neg_integer()}]
+  defp build_lines_with_offsets(lines, first_byte_off) do
+    {pairs_rev, _} =
+      Enum.reduce(lines, {[], first_byte_off}, fn line, {acc, off} ->
+        {[{line, off} | acc], off + byte_size(line) + 1}
+      end)
+
+    Enum.reverse(pairs_rev)
   end
 end

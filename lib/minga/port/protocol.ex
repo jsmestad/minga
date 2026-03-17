@@ -189,7 +189,9 @@ defmodule Minga.Port.Protocol do
   @type highlight_span :: %{
           start_byte: non_neg_integer(),
           end_byte: non_neg_integer(),
-          capture_id: non_neg_integer()
+          capture_id: non_neg_integer(),
+          pattern_index: non_neg_integer(),
+          layer: non_neg_integer()
         }
 
   @typedoc "Text style attributes."
@@ -823,11 +825,19 @@ defmodule Minga.Port.Protocol do
   defp decode_spans(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
 
   defp decode_spans(
-         <<start_byte::32, end_byte::32, capture_id::16, rest::binary>>,
+         <<start_byte::32, end_byte::32, capture_id::16, pattern_index::16, layer::16,
+           rest::binary>>,
          remaining,
          acc
        ) do
-    span = %{start_byte: start_byte, end_byte: end_byte, capture_id: capture_id}
+    span = %{
+      start_byte: start_byte,
+      end_byte: end_byte,
+      capture_id: capture_id,
+      pattern_index: pattern_index,
+      layer: layer
+    }
+
     decode_spans(rest, remaining - 1, [span | acc])
   end
 

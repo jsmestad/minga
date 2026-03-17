@@ -26,6 +26,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
+  alias Minga.Highlight
 
   @typedoc """
   Per-line values that vary across lines in a render pass.
@@ -45,19 +46,20 @@ defmodule Minga.Editor.Renderer.BufferLine do
   - `col_offset`    — column shift for split windows (0 for single buffer)
   """
   @type line_params :: %{
-          line_text: String.t(),
-          buf_line: non_neg_integer(),
-          cursor_line: non_neg_integer(),
-          byte_offset: non_neg_integer(),
-          screen_row: non_neg_integer(),
-          ctx: Context.t(),
-          ln_style: Gutter.line_number_style(),
-          gutter_w: non_neg_integer(),
-          sign_w: non_neg_integer(),
-          wrap_entry: WrapMap.wrap_entry() | nil,
-          max_rows: pos_integer(),
-          row_offset: non_neg_integer(),
-          col_offset: non_neg_integer()
+          required(:line_text) => String.t(),
+          required(:buf_line) => non_neg_integer(),
+          required(:cursor_line) => non_neg_integer(),
+          required(:byte_offset) => non_neg_integer(),
+          required(:screen_row) => non_neg_integer(),
+          required(:ctx) => Context.t(),
+          required(:ln_style) => Gutter.line_number_style(),
+          required(:gutter_w) => non_neg_integer(),
+          required(:sign_w) => non_neg_integer(),
+          required(:wrap_entry) => WrapMap.wrap_entry() | nil,
+          required(:max_rows) => pos_integer(),
+          required(:row_offset) => non_neg_integer(),
+          required(:col_offset) => non_neg_integer(),
+          optional(:highlight_segments) => [Highlight.styled_segment()] | nil
         }
 
   @doc """
@@ -90,7 +92,14 @@ defmodule Minga.Editor.Renderer.BufferLine do
     gutter_cmd = render_number(p, sr)
 
     content_cmds =
-      LineRenderer.render(p.line_text, sr, p.buf_line, p.ctx, p.byte_offset)
+      LineRenderer.render(
+        p.line_text,
+        sr,
+        p.buf_line,
+        p.ctx,
+        p.byte_offset,
+        Map.get(p, :highlight_segments)
+      )
 
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)

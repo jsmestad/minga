@@ -169,7 +169,7 @@ pub const Span = struct {
     pattern_index: u16,
     /// Priority layer: 0 = outer language, 1+ = injection depth.
     /// Higher layers win when spans overlap at the same byte position.
-    /// Not serialized in the port protocol.
+    /// Serialized in the port protocol as u16.
     layer: u16 = 0,
 };
 
@@ -485,11 +485,11 @@ pub fn writeMessage(writer: anytype, payload: []const u8) !void {
 
 // ── Encoding: highlight responses (Zig → BEAM) ──
 
-/// Encodes highlight_spans: opcode(1) + version(4) + count(4) + spans(count * 10)
-/// Each span: start_byte:u32, end_byte:u32, capture_id:u16
+/// Encodes highlight_spans: opcode(1) + buffer_id(4) + version(4) + count(4) + spans(count * 14)
+/// Each span: start_byte:u32, end_byte:u32, capture_id:u16, pattern_index:u16, layer:u16
 pub fn encodeHighlightSpans(allocator: std.mem.Allocator, buffer_id: u32, version: u32, spans: []const Span) ![]u8 {
     const header_size = 1 + 4 + 4 + 4; // opcode + buffer_id + version + count
-    const span_size = 10; // 4 + 4 + 2
+    const span_size = 14; // 4 + 4 + 2 + 2 + 2
     const total = header_size + spans.len * span_size;
     const buf = try allocator.alloc(u8, total);
 
@@ -503,6 +503,8 @@ pub fn encodeHighlightSpans(allocator: std.mem.Allocator, buffer_id: u32, versio
         std.mem.writeInt(u32, buf[off..][0..4], span.start_byte, .big);
         std.mem.writeInt(u32, buf[off + 4 ..][0..4], span.end_byte, .big);
         std.mem.writeInt(u16, buf[off + 8 ..][0..2], span.capture_id, .big);
+        std.mem.writeInt(u16, buf[off + 10 ..][0..2], span.pattern_index, .big);
+        std.mem.writeInt(u16, buf[off + 12 ..][0..2], span.layer, .big);
     }
 
     return buf;
@@ -1932,8 +1934,8 @@ test "commandSize: load_grammar" {
 
 test "encodeHighlightSpans round-trip" {
     const spans = [_]Span{
-        .{ .start_byte = 0, .end_byte = 9, .capture_id = 0, .pattern_index = 0 },
-        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 1 },
+        .{ .start_byte = 0, .end_byte = 9, .capture_id = 0, .pattern_index = 5, .layer = 0 },
+        .{ .start_byte = 10, .end_byte = 15, .capture_id = 1, .pattern_index = 3, .layer = 1 },
     };
     const buf = try encodeHighlightSpans(std.testing.allocator, 5, 42, &spans);
     defer std.testing.allocator.free(buf);
@@ -1942,14 +1944,18 @@ test "encodeHighlightSpans round-trip" {
     try std.testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, buf[1..5], .big)); // buffer_id
     try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, buf[5..9], .big)); // version
     try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, buf[9..13], .big)); // count
-    // First span
-    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[13..17], .big));
-    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, buf[17..21], .big));
-    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[21..23], .big));
+    // First span (14 bytes each)
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[13..17], .big)); // start
+    try std.testing.expectEqual(@as(u32, 9), std.mem.readInt(u32, buf[17..21], .big)); // end
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[21..23], .big)); // capture_id
+    try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, buf[23..25], .big)); // pattern_index
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, buf[25..27], .big)); // layer
     // Second span
-    try std.testing.expectEqual(@as(u32, 10), std.mem.readInt(u32, buf[23..27], .big));
-    try std.testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buf[27..31], .big));
-    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[31..33], .big));
+    try std.testing.expectEqual(@as(u32, 10), std.mem.readInt(u32, buf[27..31], .big)); // start
+    try std.testing.expectEqual(@as(u32, 15), std.mem.readInt(u32, buf[31..35], .big)); // end
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[35..37], .big)); // capture_id
+    try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, buf[37..39], .big)); // pattern_index
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, buf[39..41], .big)); // layer
 }
 
 test "encodeHighlightNames round-trip" {
