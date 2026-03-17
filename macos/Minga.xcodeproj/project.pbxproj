@@ -19,6 +19,8 @@
 		16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A647814918768E62822D4A1 /* MingaApp.swift */; };
 		1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57909975ED8C2222150ABE2 /* MetalRenderer.swift */; };
 		1F9F7B302A2A8598C1391FA0 /* AgentChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A6978869574031 /* GUIState.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F3 /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A6978869574031 /* GUIState.swift */; };
 		2534C98EBC14F9F08600AE7A /* SymbolsNerdFontMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */; };
 		27236A210603A4548A56F072 /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */; };
 		2A14A36D7CB3580A73355970 /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
@@ -108,6 +110,7 @@
 		DD14027C8C7BD17057DE820B /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatView.swift; sourceTree = "<group>"; };
 		DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
 		E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatState.swift; sourceTree = "<group>"; };
+		F1E2D3C4B5A6978869574031 /* GUIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIState.swift; sourceTree = "<group>"; };
 		E892F827AFBE959F9DF25C05 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
@@ -155,6 +158,7 @@
 			isa = PBXGroup;
 			children = (
 				E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */,
+				F1E2D3C4B5A6978869574031 /* GUIState.swift */,
 				DD14027C8C7BD17057DE820B /* AgentChatView.swift */,
 				CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */,
 				DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */,
@@ -347,6 +351,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				49CE8F263AD2A900F0894F32 /* AgentChatState.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* GUIState.swift in Sources */,
 				0A5FA884302FD99B07B78852 /* AgentChatView.swift in Sources */,
 				6C386E10E81099D724B28984 /* BreadcrumbBar.swift in Sources */,
 				8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */,
@@ -385,6 +390,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1F9F7B302A2A8598C1391FA0 /* AgentChatState.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F3 /* GUIState.swift in Sources */,
 				0D5DFD181E86D51707D3A59E /* AgentChatView.swift in Sources */,
 				8F6865441CD813045F071273 /* BreadcrumbBar.swift in Sources */,
 				0507E71BCDE82EBBDD37DAEA /* CellGrid.swift in Sources */,
