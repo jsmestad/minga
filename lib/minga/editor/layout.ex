@@ -28,6 +28,7 @@ defmodule Minga.Editor.Layout do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.FileTree
+  alias Minga.Port.Capabilities
 
   # ── Constraints ────────────────────────────────────────────────────────────
   # Minimum sizes and collapse priorities for each region.
@@ -64,7 +65,7 @@ defmodule Minga.Editor.Layout do
   @typedoc "Complete layout for one frame."
   @type t :: %__MODULE__{
           terminal: rect(),
-          tab_bar: rect(),
+          tab_bar: rect() | nil,
           file_tree: rect() | nil,
           editor_area: rect(),
           window_layouts: %{Window.id() => window_layout()},
@@ -72,12 +73,12 @@ defmodule Minga.Editor.Layout do
           minibuffer: rect()
         }
 
-  @enforce_keys [:terminal, :editor_area, :minibuffer, :tab_bar]
+  @enforce_keys [:terminal, :editor_area, :minibuffer]
   defstruct [
     :terminal,
     :editor_area,
     :minibuffer,
-    :tab_bar,
+    tab_bar: nil,
     file_tree: nil,
     window_layouts: %{},
     agent_panel: nil
@@ -117,9 +118,60 @@ defmodule Minga.Editor.Layout do
 
   This is a pure function: given the same state, it always produces the
   same rectangles. No side effects, no GenServer calls.
+
+  In GUI mode (`Capabilities.gui?`), the Metal viewport IS the editor
+  area. SwiftUI handles tab bar, file tree sidebar, breadcrumb, and
+  status bar outside the Metal view. The BEAM doesn't reserve rows or
+  columns for chrome that SwiftUI renders natively.
   """
   @spec compute(EditorState.t()) :: t()
   def compute(state) do
+    if Capabilities.gui?(state.capabilities) do
+      compute_gui(state)
+    else
+      compute_tui(state)
+    end
+  end
+
+  # GUI layout: Metal viewport is pure editor area.
+  # No tab bar row, no file tree columns. Minibuffer stays as the bottom
+  # row (: command input needs the same font/key handling as the editor).
+  # Per-window modeline stays (part of vim split UX inside the Metal view).
+  @spec compute_gui(EditorState.t()) :: t()
+  defp compute_gui(state) do
+    vp = state.viewport
+    terminal = {0, 0, vp.cols, vp.rows}
+
+    # Minibuffer takes the last row (stays in Metal for command-line input).
+    minibuffer = {vp.rows - 1, 0, vp.cols, 1}
+    editor_height = max(vp.rows - 1, 1)
+
+    # Editor area is the full viewport minus the minibuffer row.
+    # No tab bar row, no file tree columns, no agent panel.
+    editor_area = {0, 0, vp.cols, editor_height}
+
+    # Window layouts within the editor area.
+    window_layouts =
+      if EditorState.split?(state) do
+        compute_window_layouts(state.windows.tree, editor_area)
+      else
+        %{state.windows.active => single_window_layout(editor_area)}
+      end
+
+    %__MODULE__{
+      terminal: terminal,
+      tab_bar: nil,
+      file_tree: nil,
+      editor_area: editor_area,
+      window_layouts: window_layouts,
+      agent_panel: nil,
+      minibuffer: minibuffer
+    }
+  end
+
+  # TUI layout: existing behavior (Metal/Zig renders everything).
+  @spec compute_tui(EditorState.t()) :: t()
+  defp compute_tui(state) do
     vp = state.viewport
     terminal = {0, 0, vp.cols, vp.rows}
 

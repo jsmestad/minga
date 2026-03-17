@@ -1095,12 +1095,17 @@ defmodule Minga.Editor.Mouse do
           {:command, atom()} | :not_tab_bar
   defp tab_bar_click(state, row, col) do
     layout = Layout.get(state)
-    {tb_row, tb_col, tb_width, _tb_height} = layout.tab_bar
 
-    if row == tb_row and col >= tb_col and col < tb_col + tb_width do
-      find_tab_bar_region(state.tab_bar_click_regions, col)
-    else
-      :not_tab_bar
+    case layout.tab_bar do
+      nil ->
+        :not_tab_bar
+
+      {tb_row, tb_col, tb_width, _tb_height} ->
+        if row == tb_row and col >= tb_col and col < tb_col + tb_width do
+          find_tab_bar_region(state.tab_bar_click_regions, col)
+        else
+          :not_tab_bar
+        end
     end
   end
 
