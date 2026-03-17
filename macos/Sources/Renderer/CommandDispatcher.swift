@@ -52,6 +52,18 @@ final class CommandDispatcher {
     /// File tree state for SwiftUI sidebar. Updated on gui_file_tree commands.
     var fileTreeState: FileTreeState?
 
+    /// Completion state for floating popup. Updated on gui_completion commands.
+    var completionState: CompletionState?
+
+    /// Which-key state for floating popup. Updated on gui_which_key commands.
+    var whichKeyState: WhichKeyState?
+
+    /// Breadcrumb state for path bar. Updated on gui_breadcrumb commands.
+    var breadcrumbState: BreadcrumbState?
+
+    /// Status bar state. Updated on gui_status_bar commands.
+    var statusBarState: StatusBarState?
+
     init(grid: CellGrid) {
         self.grid = grid
     }
@@ -133,6 +145,26 @@ final class CommandDispatcher {
 
         case .guiFileTree(let selectedIndex, let treeWidth, let entries):
             fileTreeState?.update(selectedIndex: selectedIndex, treeWidth: treeWidth, rawEntries: entries)
+
+        case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
+            if visible {
+                completionState?.update(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, rawItems: items)
+            } else {
+                completionState?.hide()
+            }
+
+        case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
+            if visible {
+                whichKeyState?.update(visible: true, prefix: prefix, page: page, pageCount: pageCount, rawBindings: bindings)
+            } else {
+                whichKeyState?.hide()
+            }
+
+        case .guiBreadcrumb(let segments):
+            breadcrumbState?.update(segments: segments)
+
+        case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype):
+            statusBarState?.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
         }
     }
 

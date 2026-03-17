@@ -29,6 +29,10 @@ let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 
 let OP_GUI_FILE_TREE: UInt8 = 0x70
 let OP_GUI_TAB_BAR: UInt8 = 0x1C
+let OP_GUI_WHICH_KEY: UInt8 = 0x1D
+let OP_GUI_COMPLETION: UInt8 = 0x1E
+let OP_GUI_BREADCRUMB: UInt8 = 0x71
+let OP_GUI_STATUS_BAR: UInt8 = 0x72
 let OP_GUI_THEME: UInt8 = 0x1F
 
 // GUI theme color slot IDs

@@ -63,9 +63,9 @@ struct ContentView: View {
                     .frame(width: 1)
             }
 
-            // Right pane: tab bar + editor + status bar
+            // Right pane: tab bar + breadcrumb + editor + status bar
             VStack(spacing: 0) {
-                // Native tab bar (driven by BEAM gui_tab_bar messages)
+                // Native tab bar
                 if !appState.tabBarState.tabs.isEmpty {
                     TabBarView(
                         tabBarState: appState.tabBarState,
@@ -74,16 +74,55 @@ struct ContentView: View {
                     )
                 }
 
-                // Editor surface (Metal)
-                Group {
-                    if let nsView = appState.editorNSView {
-                        EditorView(editorNSView: nsView)
-                    } else {
-                        Color(red: 0.12, green: 0.12, blue: 0.14)
+                // Breadcrumb path bar
+                BreadcrumbBar(
+                    state: appState.breadcrumbState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
+
+                // Editor surface (Metal) with overlays
+                ZStack(alignment: .bottom) {
+                    Group {
+                        if let nsView = appState.editorNSView {
+                            EditorView(editorNSView: nsView)
+                        } else {
+                            Color(red: 0.12, green: 0.12, blue: 0.14)
+                        }
+                    }
+
+                    // Which-key overlay (anchored to bottom)
+                    WhichKeyOverlay(
+                        state: appState.whichKeyState,
+                        theme: appState.themeColors
+                    )
+
+                    // Completion overlay (positioned near cursor)
+                    // Positioning by offset will be refined when connected to BEAM
+                    if appState.completionState.visible {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                CompletionOverlay(
+                                    state: appState.completionState,
+                                    theme: appState.themeColors,
+                                    encoder: appState.encoder,
+                                    cellWidth: CGFloat(appState.editorNSView?.cellWidth ?? 8),
+                                    cellHeight: CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                                )
+                                Spacer()
+                            }
+                            Spacer()
+                        }
                     }
                 }
 
-                // Status bar (will be added in step 10)
+                // Status bar
+                StatusBarView(
+                    state: appState.statusBarState,
+                    theme: appState.themeColors,
+                    encoder: appState.encoder
+                )
             }
         }
         .navigationTitle(appState.windowTitle)
@@ -109,6 +148,14 @@ final class AppState: ObservableObject {
     let tabBarState = TabBarState()
     /// File tree state for SwiftUI sidebar.
     let fileTreeState = FileTreeState()
+    /// Completion state for floating popup.
+    let completionState = CompletionState()
+    /// Which-key state for floating popup.
+    let whichKeyState = WhichKeyState()
+    /// Breadcrumb state for path bar.
+    let breadcrumbState = BreadcrumbState()
+    /// Status bar state.
+    let statusBarState = StatusBarState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
     var encoder: InputEncoder?
 }
@@ -197,6 +244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.themeColors = appState.themeColors
         disp.tabBarState = appState.tabBarState
         disp.fileTreeState = appState.fileTreeState
+        disp.completionState = appState.completionState
+        disp.whichKeyState = appState.whichKeyState
+        disp.breadcrumbState = appState.breadcrumbState
+        disp.statusBarState = appState.statusBarState
         disp.onFontChanged = { [weak self] family, size, ligatures, weight in
             self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
         }

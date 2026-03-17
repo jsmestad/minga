@@ -24,6 +24,25 @@ enum RenderCommand: Sendable {
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
     case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
+    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
+    case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
+    case guiBreadcrumb(segments: [String])
+    case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String)
+}
+
+/// A completion item from gui_completion.
+struct GUICompletionItem: Sendable {
+    let kind: UInt8
+    let label: String
+    let detail: String
+}
+
+/// A which-key binding from gui_which_key.
+struct GUIWhichKeyBinding: Sendable {
+    let kind: UInt8  // 0 = command, 1 = group
+    let key: String
+    let description: String
+    let icon: String
 }
 
 /// A single file tree entry decoded from the gui_file_tree protocol message.
@@ -300,6 +319,103 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             slots.append((data[base], data[base + 1], data[base + 2], data[base + 3]))
         }
         return (.guiTheme(slots: slots), 1 + 1 + count * 4)
+
+    case OP_GUI_COMPLETION:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        if !visible {
+            return (.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0, selectedIndex: 0, items: []), 2)
+        }
+        guard data.count >= rest + 9 else { throw ProtocolDecodeError.malformed }
+        let anchorRow = readU16(data, rest + 1)
+        let anchorCol = readU16(data, rest + 3)
+        let selectedIndex = readU16(data, rest + 5)
+        let itemCount = Int(readU16(data, rest + 7))
+        var items: [GUICompletionItem] = []
+        items.reserveCapacity(itemCount)
+        var pos = rest + 9
+        for _ in 0..<itemCount {
+            guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
+            let kind = data[pos]
+            let labelLen = Int(readU16(data, pos + 1))
+            guard data.count >= pos + 3 + labelLen + 2 else { throw ProtocolDecodeError.malformed }
+            let label = String(data: data[(pos + 3)..<(pos + 3 + labelLen)], encoding: .utf8) ?? ""
+            let detailLen = Int(readU16(data, pos + 3 + labelLen))
+            guard data.count >= pos + 5 + labelLen + detailLen else { throw ProtocolDecodeError.malformed }
+            let detail = String(data: data[(pos + 5 + labelLen)..<(pos + 5 + labelLen + detailLen)], encoding: .utf8) ?? ""
+            items.append(GUICompletionItem(kind: kind, label: label, detail: detail))
+            pos += 5 + labelLen + detailLen
+        }
+        return (.guiCompletion(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, items: items), pos - offset)
+
+    case OP_GUI_WHICH_KEY:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        if !visible {
+            return (.guiWhichKey(visible: false, prefix: "", page: 0, pageCount: 0, bindings: []), 2)
+        }
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let prefixLen = Int(readU16(data, rest + 1))
+        guard data.count >= rest + 3 + prefixLen + 4 else { throw ProtocolDecodeError.malformed }
+        let prefix = String(data: data[(rest + 3)..<(rest + 3 + prefixLen)], encoding: .utf8) ?? ""
+        let page = data[rest + 3 + prefixLen]
+        let pageCount = data[rest + 4 + prefixLen]
+        let bindingCount = Int(readU16(data, rest + 5 + prefixLen))
+        var bindings: [GUIWhichKeyBinding] = []
+        bindings.reserveCapacity(bindingCount)
+        var pos = rest + 7 + prefixLen
+        for _ in 0..<bindingCount {
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let bKind = data[pos]
+            let keyLen = Int(data[pos + 1])
+            guard data.count >= pos + 2 + keyLen + 2 else { throw ProtocolDecodeError.malformed }
+            let key = String(data: data[(pos + 2)..<(pos + 2 + keyLen)], encoding: .utf8) ?? ""
+            let descLen = Int(readU16(data, pos + 2 + keyLen))
+            guard data.count >= pos + 4 + keyLen + descLen + 1 else { throw ProtocolDecodeError.malformed }
+            let desc = String(data: data[(pos + 4 + keyLen)..<(pos + 4 + keyLen + descLen)], encoding: .utf8) ?? ""
+            let iconLen = Int(data[pos + 4 + keyLen + descLen])
+            guard data.count >= pos + 5 + keyLen + descLen + iconLen else { throw ProtocolDecodeError.malformed }
+            let icon = String(data: data[(pos + 5 + keyLen + descLen)..<(pos + 5 + keyLen + descLen + iconLen)], encoding: .utf8) ?? ""
+            bindings.append(GUIWhichKeyBinding(kind: bKind, key: key, description: desc, icon: icon))
+            pos += 5 + keyLen + descLen + iconLen
+        }
+        return (.guiWhichKey(visible: true, prefix: prefix, page: page, pageCount: pageCount, bindings: bindings), pos - offset)
+
+    case OP_GUI_BREADCRUMB:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let segCount = Int(data[rest])
+        var segments: [String] = []
+        segments.reserveCapacity(segCount)
+        var pos = rest + 1
+        for _ in 0..<segCount {
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let segLen = Int(readU16(data, pos))
+            guard data.count >= pos + 2 + segLen else { throw ProtocolDecodeError.malformed }
+            let seg = String(data: data[(pos + 2)..<(pos + 2 + segLen)], encoding: .utf8) ?? ""
+            segments.append(seg)
+            pos += 2 + segLen
+        }
+        return (.guiBreadcrumb(segments: segments), pos - offset)
+
+    case OP_GUI_STATUS_BAR:
+        // mode:1 cursor_line:4 cursor_col:4 line_count:4 flags:1 lsp:1 git_len:1 git message_len:2 message filetype_len:1 filetype
+        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
+        let mode = data[rest]
+        let cursorLine = readU32(data, rest + 1)
+        let cursorCol = readU32(data, rest + 5)
+        let lineCount = readU32(data, rest + 9)
+        let flags = data[rest + 13]
+        let lspStatus = data[rest + 14]
+        let gitLen = Int(data[rest + 15])
+        guard data.count >= rest + 16 + gitLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gitBranch = String(data: data[(rest + 16)..<(rest + 16 + gitLen)], encoding: .utf8) ?? ""
+        let msgLen = Int(readU16(data, rest + 16 + gitLen))
+        guard data.count >= rest + 18 + gitLen + msgLen + 1 else { throw ProtocolDecodeError.malformed }
+        let message = String(data: data[(rest + 18 + gitLen)..<(rest + 18 + gitLen + msgLen)], encoding: .utf8) ?? ""
+        let ftLen = Int(data[rest + 18 + gitLen + msgLen])
+        guard data.count >= rest + 19 + gitLen + msgLen + ftLen else { throw ProtocolDecodeError.malformed }
+        let filetype = String(data: data[(rest + 19 + gitLen + msgLen)..<(rest + 19 + gitLen + msgLen + ftLen)], encoding: .utf8) ?? ""
+        return (.guiStatusBar(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype), rest + 19 + gitLen + msgLen + ftLen - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

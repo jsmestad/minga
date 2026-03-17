@@ -81,7 +81,11 @@ defmodule Minga.Port.Protocol do
   # GUI chrome commands (BEAM → Swift)
   @op_gui_file_tree 0x70
   @op_gui_tab_bar 0x1C
+  @op_gui_which_key 0x1D
+  @op_gui_completion 0x1E
   @op_gui_theme 0x1F
+  @op_gui_breadcrumb 0x71
+  @op_gui_status_bar 0x72
 
   # GUI theme color slot IDs
   @gui_color_editor_bg 0x01
@@ -861,6 +865,146 @@ defmodule Minga.Port.Protocol do
   defp encode_git_status(:conflict), do: 4
   defp encode_git_status(:ignored), do: 5
   defp encode_git_status(_), do: 0
+
+  # ── Completion ──
+
+  @doc "Encodes a gui_completion command."
+  @spec encode_gui_completion(Minga.Completion.t() | nil, non_neg_integer(), non_neg_integer()) ::
+          binary()
+  def encode_gui_completion(nil, _row, _col), do: <<@op_gui_completion, 0::8>>
+
+  def encode_gui_completion(%Minga.Completion{filtered: []}, _row, _col) do
+    <<@op_gui_completion, 0::8>>
+  end
+
+  def encode_gui_completion(%Minga.Completion{} = comp, cursor_row, cursor_col) do
+    items = Enum.take(comp.filtered, comp.max_visible)
+
+    entries =
+      Enum.map(items, fn item ->
+        kind_byte = encode_completion_kind(item.kind)
+        label = :erlang.iolist_to_binary([item.label])
+        detail = :erlang.iolist_to_binary([item.detail || ""])
+
+        <<kind_byte::8, byte_size(label)::16, label::binary, byte_size(detail)::16,
+          detail::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_completion,
+      <<1::8, cursor_row::16, cursor_col::16, comp.selected::16, length(items)::16>>
+      | entries
+    ])
+  end
+
+  @spec encode_completion_kind(atom()) :: non_neg_integer()
+  defp encode_completion_kind(:function), do: 1
+  defp encode_completion_kind(:method), do: 2
+  defp encode_completion_kind(:variable), do: 3
+  defp encode_completion_kind(:field), do: 4
+  defp encode_completion_kind(:module), do: 5
+  defp encode_completion_kind(:keyword), do: 7
+  defp encode_completion_kind(:snippet), do: 8
+  defp encode_completion_kind(:constant), do: 9
+  defp encode_completion_kind(:struct), do: 11
+  defp encode_completion_kind(:enum), do: 12
+  defp encode_completion_kind(_), do: 0
+
+  # ── Which-key ──
+
+  @doc "Encodes a gui_which_key command."
+  @spec encode_gui_which_key(Minga.Editor.State.WhichKey.t()) :: binary()
+  def encode_gui_which_key(%{show: false}), do: <<@op_gui_which_key, 0::8>>
+  def encode_gui_which_key(%{show: true, node: nil}), do: <<@op_gui_which_key, 0::8>>
+
+  def encode_gui_which_key(%{show: true, node: node, prefix_keys: prefix_keys, page: page}) do
+    bindings = Minga.WhichKey.bindings_from_node(node)
+    prefix_bytes = prefix_keys |> Enum.join(" ") |> :erlang.iolist_to_binary()
+
+    page_size = 20
+    page_count = max(div(length(bindings) + page_size - 1, page_size), 1)
+    page_bindings = bindings |> Enum.drop(page * page_size) |> Enum.take(page_size)
+
+    entries =
+      Enum.map(page_bindings, fn b ->
+        kind_byte = if b.kind == :group, do: 1, else: 0
+        key = :erlang.iolist_to_binary([b.key])
+        desc = :erlang.iolist_to_binary([b.description])
+        icon = :erlang.iolist_to_binary([b.icon || ""])
+
+        <<kind_byte::8, byte_size(key)::8, key::binary, byte_size(desc)::16, desc::binary,
+          byte_size(icon)::8, icon::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_which_key,
+      <<1::8, byte_size(prefix_bytes)::16, prefix_bytes::binary, page::8, page_count::8,
+        length(page_bindings)::16>>
+      | entries
+    ])
+  end
+
+  # ── Breadcrumb ──
+
+  @doc "Encodes a gui_breadcrumb command."
+  @spec encode_gui_breadcrumb(String.t() | nil, String.t()) :: binary()
+  def encode_gui_breadcrumb(nil, _root), do: <<@op_gui_breadcrumb, 0::8>>
+
+  def encode_gui_breadcrumb(file_path, root) do
+    segments = file_path |> Path.relative_to(root) |> Path.split()
+
+    entries =
+      Enum.map(segments, fn seg ->
+        seg_bytes = :erlang.iolist_to_binary([seg])
+        <<byte_size(seg_bytes)::16, seg_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([@op_gui_breadcrumb, <<length(segments)::8>> | entries])
+  end
+
+  # ── Status bar ──
+
+  @doc "Encodes a gui_status_bar command."
+  @spec encode_gui_status_bar(map()) :: binary()
+  def encode_gui_status_bar(data) do
+    mode_byte = encode_vim_mode(data.mode)
+    lsp_byte = encode_lsp_status(data[:lsp_status])
+    flags = build_status_flags(data)
+
+    git_branch = :erlang.iolist_to_binary([data[:git_branch] || ""])
+    message = :erlang.iolist_to_binary([data[:status_msg] || ""])
+    filetype = :erlang.iolist_to_binary([Atom.to_string(data[:filetype] || :text)])
+
+    <<@op_gui_status_bar, mode_byte::8, data.cursor_line::32, data.cursor_col::32,
+      data.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
+      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary>>
+  end
+
+  @spec encode_vim_mode(atom()) :: non_neg_integer()
+  defp encode_vim_mode(:normal), do: 0
+  defp encode_vim_mode(:insert), do: 1
+  defp encode_vim_mode(:visual), do: 2
+  defp encode_vim_mode(:command), do: 3
+  defp encode_vim_mode(:operator_pending), do: 4
+  defp encode_vim_mode(:search), do: 5
+  defp encode_vim_mode(:search_prompt), do: 5
+  defp encode_vim_mode(:replace), do: 6
+  defp encode_vim_mode(_), do: 0
+
+  @spec encode_lsp_status(atom() | nil) :: non_neg_integer()
+  defp encode_lsp_status(:ready), do: 1
+  defp encode_lsp_status(:initializing), do: 2
+  defp encode_lsp_status(:starting), do: 3
+  defp encode_lsp_status(:error), do: 4
+  defp encode_lsp_status(_), do: 0
+
+  @spec build_status_flags(map()) :: non_neg_integer()
+  defp build_status_flags(data) do
+    has_lsp = if data[:lsp_status] && data[:lsp_status] != :none, do: 1, else: 0
+    has_git = if data[:git_branch], do: 1, else: 0
+    is_dirty = if data[:dirty_marker] && data[:dirty_marker] != "", do: 1, else: 0
+    Bitwise.bor(has_lsp, Bitwise.bor(Bitwise.bsl(has_git, 1), Bitwise.bsl(is_dirty, 2)))
+  end
 
   # ── Decoding (Zig → BEAM) ──
 
