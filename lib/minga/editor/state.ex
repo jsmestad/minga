@@ -629,6 +629,8 @@ defmodule Minga.Editor.State do
       :error ->
         state
     end
+  catch
+    :exit, _ -> state
   end
 
   @doc """

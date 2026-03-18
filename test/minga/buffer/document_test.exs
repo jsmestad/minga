@@ -831,6 +831,40 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.position_to_offset(buf, {2, 0}) == 12
       assert Document.position_to_offset(buf, {2, 2}) == 14
     end
+
+    test "position_to_offset clamps column beyond line length to text_size" do
+      buf = Document.new("ab\ncd")
+      # Total text_size = 5. Line 0 starts at 0, line 1 starts at 3.
+      # Column 50 on line 0 would be 0 + 50 = 50, but clamps to 5.
+      assert Document.position_to_offset(buf, {0, 50}) == 5
+    end
+
+    test "position_to_offset clamps line beyond last line" do
+      buf = Document.new("ab\ncd")
+      # Only lines 0 and 1. Line 99 clamps to line 1 (offset 3) + col 0.
+      assert Document.position_to_offset(buf, {99, 0}) == 3
+    end
+
+    test "get_range with out-of-bounds coordinates does not crash" do
+      buf = Document.new("hello\n\nworld")
+      # Line 1 is empty. Anchor at {1, 43} is beyond the line.
+      # This previously crashed with binary_part("", 43, -43).
+      result = Document.get_range(buf, {1, 43}, {0, 0})
+      assert is_binary(result)
+    end
+
+    test "get_range with both positions beyond text_size returns empty" do
+      buf = Document.new("ab")
+      result = Document.get_range(buf, {99, 99}, {99, 99})
+      assert result == ""
+    end
+
+    test "content_range with stale coordinates clamps gracefully" do
+      buf = Document.new("line1\n\nline3")
+      # Line 1 is empty, col 20 is beyond it.
+      result = Document.content_range(buf, {0, 0}, {1, 20})
+      assert is_binary(result)
+    end
   end
 
   # Convert a byte offset in text to a {line, byte_col} position.

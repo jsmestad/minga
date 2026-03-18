@@ -29,6 +29,11 @@ final class FirstResponderGuard {
     private weak var editorView: EditorNSView?
     private nonisolated(unsafe) var observer: NSObjectProtocol?
 
+    /// When true, the guard does not reclaim first responder. Set this
+    /// when a SwiftUI overlay (like the agent chat view) needs to handle
+    /// its own text selection without the guard stealing focus back.
+    var suspended: Bool = false
+
     init(window: NSWindow, editorView: EditorNSView) {
         self.window = window
         self.editorView = editorView
@@ -48,6 +53,7 @@ final class FirstResponderGuard {
     }
 
     private func checkFirstResponder() {
+        guard !suspended else { return }
         guard let window, let editor = editorView else { return }
         if window.firstResponder !== editor {
             window.makeFirstResponder(editor)
