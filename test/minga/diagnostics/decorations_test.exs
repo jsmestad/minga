@@ -57,6 +57,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       [range] = ranges
       assert Keyword.get(range.style, :underline) == true
+      assert Keyword.get(range.style, :underline_color) == @gutter_colors.error_fg
       assert range.group == :diagnostics
     end
 
@@ -131,6 +132,31 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
       [range] = Decorations.highlights_for_line(decs, 0)
       assert range.start == {0, 6}
+    end
+
+    test "each severity uses its theme color for underlines", ctx do
+      colors = %{
+        error: @gutter_colors.error_fg,
+        warning: @gutter_colors.warning_fg,
+        info: @gutter_colors.info_fg,
+        hint: @gutter_colors.hint_fg
+      }
+
+      for {severity, expected_color} <- colors do
+        {:ok, pid} = BufferServer.start_link(content: "hello world")
+        uri = "file:///test/color_#{severity}.ex"
+
+        Diagnostics.publish(ctx.diag_name, :test, uri, [
+          make_diagnostic(severity, 0, 0, 0, 5)
+        ])
+
+        DiagDecorations.apply(pid, uri, @gutter_colors, ctx.diag_name)
+
+        [range] = Decorations.highlights_for_line(BufferServer.decorations(pid), 0)
+
+        assert Keyword.get(range.style, :underline_color) == expected_color,
+               "#{severity} underline should be #{inspect(expected_color)}"
+      end
     end
 
     test "diagnostic decorations don't affect other groups", ctx do

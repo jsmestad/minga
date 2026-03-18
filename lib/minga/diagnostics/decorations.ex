@@ -70,7 +70,7 @@ defmodule Minga.Diagnostics.Decorations do
   end
 
   @spec add_one(Decorations.t(), Diagnostic.t(), Minga.Theme.Gutter.t()) :: Decorations.t()
-  defp add_one(decs, %Diagnostic{range: range} = diag, _gutter_colors) do
+  defp add_one(decs, %Diagnostic{range: range} = diag, gutter_colors) do
     start_pos = {range.start_line, range.start_col}
     end_pos = {range.end_line, range.end_col}
 
@@ -78,11 +78,13 @@ defmodule Minga.Diagnostics.Decorations do
     if start_pos == end_pos do
       decs
     else
-      # Use underline: true (universally supported by TUI and GUI).
-      # TODO: Add underline_color: severity_color(diag.severity, gutter_colors)
-      # once the Zig TUI renderer handles opcode 0x1C (draw_styled_text).
-      # GUI mode can consume underline_color now via the Frame struct.
-      style = [underline: true]
+      color = severity_color(diag.severity, gutter_colors)
+
+      style = [
+        underline: true,
+        underline_color: color
+      ]
+
       priority = severity_priority(diag.severity)
 
       {_id, decs} =
@@ -96,15 +98,11 @@ defmodule Minga.Diagnostics.Decorations do
     end
   end
 
-  # Maps severity to underline color. Currently unused because the TUI
-  # renderer doesn't support underline_color yet (opcode 0x1C). Will be
-  # wired into the style when Zig support lands.
-  @doc false
   @spec severity_color(Diagnostic.severity(), Minga.Theme.Gutter.t()) :: non_neg_integer()
-  def severity_color(:error, colors), do: colors.error_fg
-  def severity_color(:warning, colors), do: colors.warning_fg
-  def severity_color(:info, colors), do: colors.info_fg
-  def severity_color(:hint, colors), do: colors.hint_fg
+  defp severity_color(:error, colors), do: colors.error_fg
+  defp severity_color(:warning, colors), do: colors.warning_fg
+  defp severity_color(:info, colors), do: colors.info_fg
+  defp severity_color(:hint, colors), do: colors.hint_fg
 
   @spec severity_priority(Diagnostic.severity()) :: integer()
   defp severity_priority(:error), do: 40
