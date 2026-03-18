@@ -183,6 +183,27 @@ defmodule Minga.Face.RegistryTest do
       assert face.strikethrough == true
     end
 
+    test "deprecated modifier composes strikethrough with type color" do
+      syntax = %{"function" => [fg: 0x51AFEF]}
+      reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
+
+      # Composite name: type + modifier
+      style = Registry.style_for(reg, "@lsp.type.function+deprecated")
+
+      # Gets function's color AND deprecated's strikethrough
+      assert Keyword.get(style, :fg) == 0x51AFEF
+      assert Keyword.get(style, :strikethrough) == true
+    end
+
+    test "multiple modifiers compose" do
+      syntax = %{"variable" => [fg: 0xBD93F9]}
+      reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
+
+      style = Registry.style_for(reg, "@lsp.type.variable+deprecated+readonly")
+      assert Keyword.get(style, :fg) == 0xBD93F9
+      assert Keyword.get(style, :strikethrough) == true
+    end
+
     test "LSP faces can be overridden by themes" do
       syntax = %{
         "function" => [fg: 0x51AFEF],

@@ -174,35 +174,49 @@ defmodule Minga.LSP.SemanticTokens do
       start_byte = line_offset + start_byte_col
       end_byte = line_offset + end_byte_col
 
-      # Primary capture: @lsp.type.{type}
-      type_name = "@lsp.type.#{token.type}"
-      type_id = capture_name_to_id.(type_name)
+      # Build a composite capture name that encodes both the type and
+      # its modifiers, e.g., "@lsp.type.variable+deprecated+readonly".
+      # The Face.Registry resolves this via style_for_with_modifiers,
+      # composing modifier attributes on top of the type's colors.
+      capture_name = composite_capture_name(token.type, token.modifiers)
+      capture_id = capture_name_to_id.(capture_name)
 
-      type_span = %{
-        start_byte: start_byte,
-        end_byte: end_byte,
-        capture_id: type_id,
-        pattern_index: 0,
-        layer: @semantic_layer
-      }
-
-      # Modifier captures: @lsp.mod.{modifier}
-      mod_spans =
-        Enum.map(token.modifiers, fn mod ->
-          mod_name = "@lsp.mod.#{mod}"
-          mod_id = capture_name_to_id.(mod_name)
-
-          %{
-            start_byte: start_byte,
-            end_byte: end_byte,
-            capture_id: mod_id,
-            pattern_index: 1,
-            layer: @semantic_layer
-          }
-        end)
-
-      [type_span | mod_spans]
+      [
+        %{
+          start_byte: start_byte,
+          end_byte: end_byte,
+          capture_id: capture_id,
+          pattern_index: 0,
+          layer: @semantic_layer
+        }
+      ]
     end)
+  end
+
+  @doc """
+  Builds a composite capture name from a token type and its modifiers.
+
+  For tokens without modifiers, returns `"@lsp.type.{type}"`.
+  For tokens with modifiers, returns `"@lsp.type.{type}+{mod1}+{mod2}"`.
+  The modifiers are sorted for deterministic names.
+
+  ## Examples
+
+      iex> SemanticTokens.composite_capture_name("variable", [])
+      "@lsp.type.variable"
+
+      iex> SemanticTokens.composite_capture_name("function", ["deprecated"])
+      "@lsp.type.function+deprecated"
+
+      iex> SemanticTokens.composite_capture_name("variable", ["readonly", "deprecated"])
+      "@lsp.type.variable+deprecated+readonly"
+  """
+  @spec composite_capture_name(String.t(), [String.t()]) :: String.t()
+  def composite_capture_name(type, []), do: "@lsp.type.#{type}"
+
+  def composite_capture_name(type, modifiers) do
+    suffix = modifiers |> Enum.sort() |> Enum.join("+")
+    "@lsp.type.#{type}+#{suffix}"
   end
 
   @doc """

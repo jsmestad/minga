@@ -132,7 +132,7 @@ defmodule Minga.LSP.SemanticTokensTest do
       assert span.layer == 2
     end
 
-    test "tokens with modifiers produce additional spans" do
+    test "tokens with modifiers produce a single composite span" do
       tokens = [
         %{line: 0, start_char: 0, length: 5, type: "function", modifiers: ["deprecated"]}
       ]
@@ -140,8 +140,7 @@ defmodule Minga.LSP.SemanticTokensTest do
       offsets = %{0 => 0}
 
       name_to_id = fn
-        "@lsp.type.function" -> 0
-        "@lsp.mod.deprecated" -> 1
+        "@lsp.type.function+deprecated" -> 0
         _ -> 99
       end
 
@@ -154,13 +153,11 @@ defmodule Minga.LSP.SemanticTokensTest do
           :utf8
         )
 
-      assert length(spans) == 2
-      [type_span, mod_span] = spans
-      assert type_span.capture_id == 0
-      assert type_span.layer == 2
-      assert mod_span.capture_id == 1
-      assert mod_span.layer == 2
-      assert mod_span.pattern_index == 1
+      # Single composite span, not separate type + modifier spans
+      assert length(spans) == 1
+      [span] = spans
+      assert span.capture_id == 0
+      assert span.layer == 2
     end
 
     test "multi-line tokens use correct byte offsets" do

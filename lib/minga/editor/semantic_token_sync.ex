@@ -133,13 +133,11 @@ defmodule Minga.Editor.SemanticTokenSync do
   @spec ensure_capture_names(Highlight.t(), [SemanticTokens.token()]) ::
           {Highlight.t(), %{String.t() => non_neg_integer()}}
   defp ensure_capture_names(hl, tokens) do
-    # Collect all capture names needed by tokens
+    # Collect all composite capture names needed by tokens
     needed_names =
       tokens
-      |> Enum.flat_map(fn token ->
-        type_name = SemanticTokens.capture_name(token.type)
-        mod_names = Enum.map(token.modifiers, &SemanticTokens.modifier_capture_name/1)
-        [type_name | mod_names]
+      |> Enum.map(fn token ->
+        SemanticTokens.composite_capture_name(token.type, token.modifiers)
       end)
       |> Enum.uniq()
 
