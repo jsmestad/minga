@@ -243,6 +243,72 @@ defmodule Minga.Face.Registry do
     Map.keys(faces)
   end
 
+  @doc """
+  Adds default LSP semantic token faces to the registry.
+
+  Maps `@lsp.type.*` captures to their closest tree-sitter equivalents
+  so semantic tokens render with sensible colors even without explicit
+  theme support. Themes can override these by defining faces for
+  `@lsp.type.variable`, `@lsp.mod.deprecated`, etc.
+
+  Also adds modifier faces:
+  - `@lsp.mod.deprecated` gets strikethrough
+  - `@lsp.mod.readonly` inherits from the type face (no visual change by default)
+  """
+  @spec with_lsp_defaults(t()) :: t()
+  def with_lsp_defaults(%__MODULE__{} = reg) do
+    # Map LSP types to tree-sitter equivalents for fallback styling
+    lsp_type_mappings = %{
+      "@lsp.type.namespace" => "type",
+      "@lsp.type.type" => "type",
+      "@lsp.type.class" => "type",
+      "@lsp.type.enum" => "type",
+      "@lsp.type.interface" => "type",
+      "@lsp.type.struct" => "type",
+      "@lsp.type.typeParameter" => "type",
+      "@lsp.type.parameter" => "variable",
+      "@lsp.type.variable" => "variable",
+      "@lsp.type.property" => "property",
+      "@lsp.type.enumMember" => "constant",
+      "@lsp.type.event" => "function",
+      "@lsp.type.function" => "function",
+      "@lsp.type.method" => "function.method",
+      "@lsp.type.macro" => "function.macro",
+      "@lsp.type.keyword" => "keyword",
+      "@lsp.type.modifier" => "keyword.modifier",
+      "@lsp.type.comment" => "comment",
+      "@lsp.type.string" => "string",
+      "@lsp.type.number" => "number",
+      "@lsp.type.regexp" => "string.special.regex",
+      "@lsp.type.operator" => "operator",
+      "@lsp.type.decorator" => "attribute"
+    }
+
+    # Add type faces that inherit from their tree-sitter equivalent,
+    # but don't overwrite faces the theme already defines.
+    reg =
+      Enum.reduce(lsp_type_mappings, reg, fn {lsp_name, ts_name}, acc ->
+        if get(acc, lsp_name) do
+          acc
+        else
+          put(acc, %Face{name: lsp_name, inherit: ts_name})
+        end
+      end)
+
+    # Add modifier faces (only if not already defined)
+    modifier_defaults = [
+      %Face{name: "@lsp.mod.deprecated", inherit: "default", strikethrough: true},
+      %Face{name: "@lsp.mod.readonly", inherit: "default"}
+    ]
+
+    reg =
+      Enum.reduce(modifier_defaults, reg, fn face, acc ->
+        if get(acc, face.name), do: acc, else: put(acc, face)
+      end)
+
+    resolve_all(reg)
+  end
+
   # Walk up the dotted name hierarchy to find the nearest matching face.
   @spec resolve_with_fallback(t(), String.t()) :: Face.t()
   defp resolve_with_fallback(%__MODULE__{resolved: resolved}, name) do

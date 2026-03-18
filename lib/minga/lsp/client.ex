@@ -32,6 +32,7 @@ defmodule Minga.LSP.Client do
   alias Minga.LSP.Client.State
   alias Minga.LSP.JsonRpc
   alias Minga.LSP.PositionEncoding
+  alias Minga.LSP.SemanticTokens
 
   @request_timeout 30_000
 
@@ -142,6 +143,44 @@ defmodule Minga.LSP.Client do
     ref
   end
 
+  @doc """
+  Returns the semantic token legend if the server supports semantic tokens.
+
+  Returns `{token_types, token_modifiers}` or `nil`.
+  """
+  @spec semantic_token_legend(GenServer.server()) :: {[String.t()], [String.t()]} | nil
+  def semantic_token_legend(server) do
+    GenServer.call(server, :semantic_token_legend)
+  end
+
+  @doc """
+  Requests full semantic tokens for a document.
+
+  Returns a reference. The response will be delivered as
+  `{:lsp_response, ref, {:ok, %{"data" => [...]}}}` with the
+  delta-encoded token array.
+  """
+  @spec request_semantic_tokens(GenServer.server(), String.t()) :: reference()
+  def request_semantic_tokens(server, uri) when is_binary(uri) do
+    request(server, "textDocument/semanticTokens/full", %{
+      "textDocument" => %{"uri" => uri}
+    })
+  end
+
+  @doc """
+  Requests semantic tokens for a specific range of a document.
+
+  More efficient than full tokens when only the visible viewport
+  needs highlighting.
+  """
+  @spec request_semantic_tokens_range(GenServer.server(), String.t(), map()) :: reference()
+  def request_semantic_tokens_range(server, uri, range) when is_binary(uri) and is_map(range) do
+    request(server, "textDocument/semanticTokens/range", %{
+      "textDocument" => %{"uri" => uri},
+      "range" => range
+    })
+  end
+
   @doc "Sends a shutdown request and exit notification to the server."
   @spec shutdown(GenServer.server()) :: :ok
   def shutdown(server) do
@@ -185,6 +224,10 @@ defmodule Minga.LSP.Client do
   @impl true
   def handle_call(:capabilities, _from, state) do
     {:reply, state.capabilities, state}
+  end
+
+  def handle_call(:semantic_token_legend, _from, state) do
+    {:reply, state.semantic_token_legend, state}
   end
 
   def handle_call(:status, _from, state) do
@@ -441,9 +484,29 @@ defmodule Minga.LSP.Client do
       "LSP server #{state.server_config.name} initialized (encoding: #{encoding})"
     )
 
+    legend =
+      case SemanticTokens.extract_legend(capabilities) do
+        {types, mods} ->
+          Minga.Log.info(
+            :lsp,
+            "LSP #{state.server_config.name} supports semantic tokens (#{length(types)} types, #{length(mods)} modifiers)"
+          )
+
+          {types, mods}
+
+        :not_supported ->
+          nil
+      end
+
     notify_subscribers(state.subscribers, {:lsp_ready, state.server_config.name})
 
-    %{state | capabilities: capabilities, encoding: encoding, status: :ready}
+    %{
+      state
+      | capabilities: capabilities,
+        encoding: encoding,
+        status: :ready,
+        semantic_token_legend: legend
+    }
   end
 
   defp handle_method_response("initialize", {:error, error}, _from, state) do
@@ -687,6 +750,18 @@ defmodule Minga.LSP.Client do
             "parameterInformation" => %{"labelOffsetSupport" => true},
             "activeParameterSupport" => true
           }
+        },
+        "semanticTokens" => %{
+          "dynamicRegistration" => false,
+          "requests" => %{
+            "full" => true,
+            "range" => true
+          },
+          "tokenTypes" => SemanticTokens.standard_token_types(),
+          "tokenModifiers" => SemanticTokens.standard_token_modifiers(),
+          "formats" => ["relative"],
+          "overlappingTokenSupport" => false,
+          "multilineTokenSupport" => false
         }
       }
     }

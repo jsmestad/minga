@@ -34,6 +34,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.MessageLog
   alias Minga.Editor.NavFlash
   alias Minga.Editor.Renderer
+  alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
   alias Minga.Editor.WarningLog
@@ -399,6 +400,8 @@ defmodule Minga.Editor do
 
   def handle_info(:setup_highlight, state) do
     new_state = HighlightSync.setup_for_buffer(state)
+    # Also request semantic tokens from LSP if available
+    new_state = SemanticTokenSync.request_tokens(new_state)
     {:noreply, new_state}
   end
 
@@ -625,6 +628,12 @@ defmodule Minga.Editor do
       {:signature_help, pending} ->
         new_state = put_in(state.lsp_pending, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {{:semantic_tokens, buf_pid}, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 

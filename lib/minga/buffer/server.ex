@@ -277,6 +277,45 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc """
+  Returns the buffer-local face overrides map.
+
+  Face overrides are `%{face_name => [attr: value, ...]}` pairs that
+  are merged on top of the theme's face registry when rendering this
+  buffer. Used for filetype-specific styling (e.g., Markdown uses a
+  different default font) and buffer-local customization.
+  """
+  @spec face_overrides(GenServer.server()) :: %{String.t() => keyword()}
+  def face_overrides(server) do
+    GenServer.call(server, :face_overrides)
+  end
+
+  @doc """
+  Sets a buffer-local face override.
+
+  Merges the given attributes on top of the named face for this buffer
+  only. Other buffers are unaffected. The override persists until
+  cleared with `clear_face_override/2`.
+
+  ## Examples
+
+      Buffer.Server.remap_face(buf, "default", fg: 0x000000, bg: 0xFFFFFF)
+      Buffer.Server.remap_face(buf, "comment", italic: false)
+  """
+  @spec remap_face(GenServer.server(), String.t(), keyword()) :: :ok
+  def remap_face(server, face_name, attrs)
+      when is_binary(face_name) and is_list(attrs) do
+    GenServer.call(server, {:remap_face, face_name, attrs})
+  end
+
+  @doc """
+  Clears a buffer-local face override, restoring the theme default.
+  """
+  @spec clear_face_override(GenServer.server(), String.t()) :: :ok
+  def clear_face_override(server, face_name) when is_binary(face_name) do
+    GenServer.call(server, {:clear_face_override, face_name})
+  end
+
+  @doc """
   Changes the buffer's filetype and re-seeds per-filetype options.
 
   The buffer content is not modified; only metadata (filetype, tab_width,
@@ -1016,6 +1055,20 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:filetype, _from, state) do
     {:reply, state.filetype, state}
+  end
+
+  def handle_call(:face_overrides, _from, state) do
+    {:reply, state.face_overrides, state}
+  end
+
+  def handle_call({:remap_face, face_name, attrs}, _from, state) do
+    overrides = Map.put(state.face_overrides, face_name, attrs)
+    {:reply, :ok, %{state | face_overrides: overrides}}
+  end
+
+  def handle_call({:clear_face_override, face_name}, _from, state) do
+    overrides = Map.delete(state.face_overrides, face_name)
+    {:reply, :ok, %{state | face_overrides: overrides}}
   end
 
   def handle_call({:set_filetype, filetype}, _from, state) do

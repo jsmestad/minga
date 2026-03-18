@@ -161,4 +161,40 @@ defmodule Minga.Face.RegistryTest do
       end
     end
   end
+
+  describe "with_lsp_defaults/1" do
+    test "adds LSP type faces that inherit from tree-sitter equivalents" do
+      syntax = %{"function" => [fg: 0x51AFEF], "type" => [fg: 0xECBE7B]}
+      reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
+
+      # @lsp.type.function inherits from function
+      face = Registry.resolve(reg, "@lsp.type.function")
+      assert face.fg == 0x51AFEF
+
+      # @lsp.type.class inherits from type
+      face = Registry.resolve(reg, "@lsp.type.class")
+      assert face.fg == 0xECBE7B
+    end
+
+    test "adds deprecated modifier face with strikethrough" do
+      reg = Registry.from_syntax(%{}) |> Registry.with_lsp_defaults()
+
+      face = Registry.resolve(reg, "@lsp.mod.deprecated")
+      assert face.strikethrough == true
+    end
+
+    test "LSP faces can be overridden by themes" do
+      syntax = %{
+        "function" => [fg: 0x51AFEF],
+        "@lsp.type.function" => [fg: 0xFF0000, bold: true]
+      }
+
+      reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
+
+      # Theme override wins over the LSP default
+      face = Registry.resolve(reg, "@lsp.type.function")
+      assert face.fg == 0xFF0000
+      assert face.bold == true
+    end
+  end
 end
