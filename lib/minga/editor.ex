@@ -281,7 +281,7 @@ defmodule Minga.Editor do
     alias Minga.Mode.ExtensionConfirmState
 
     ms = %ExtensionConfirmState{updates: updates}
-    new_state = %{state | vim: %{state.vim | mode: :extension_confirm, mode_state: ms}}
+    new_state = EditorState.transition_mode(state, :extension_confirm, ms)
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end

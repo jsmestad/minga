@@ -76,9 +76,8 @@ defmodule Minga.Input.Interrupt do
   end
 
   @spec maybe_reset_mode(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_reset_mode(%{vim: %{mode: mode} = vim} = state, resets) when mode != :normal do
-    new_vim = %{vim | mode: :normal, mode_state: Mode.initial_state()}
-    {%{state | vim: new_vim}, ["mode #{mode} → :normal" | resets]}
+  defp maybe_reset_mode(%{vim: %{mode: mode}} = state, resets) when mode != :normal do
+    {EditorState.transition_mode(state, :normal), ["mode #{mode} → :normal" | resets]}
   end
 
   defp maybe_reset_mode(%{vim: vim} = state, resets) do
