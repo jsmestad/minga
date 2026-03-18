@@ -12,6 +12,7 @@ enum RenderCommand: Sendable {
     case clear
     case batchEnd
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
+    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, text: String)
     case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
@@ -165,6 +166,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let textData = data[(rest + 13)..<(rest + 13 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
         return (.drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text), 1 + 13 + textLen)
+
+    case OP_DRAW_STYLED_TEXT:
+        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, text_len:2 = 18 bytes after opcode
+        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
+        let row = readU16(data, rest)
+        let col = readU16(data, rest + 2)
+        let fg = readU24(data, rest + 4)
+        let bg = readU24(data, rest + 7)
+        let attrs16 = UInt16(data[rest + 10]) << 8 | UInt16(data[rest + 11])
+        let ulColor = readU24(data, rest + 12)
+        let blend = data[rest + 15]
+        let textLen = Int(readU16(data, rest + 16))
+        guard data.count >= rest + 18 + textLen else { throw ProtocolDecodeError.malformed }
+        let textData = data[(rest + 18)..<(rest + 18 + textLen)]
+        let text = String(data: textData, encoding: .utf8) ?? ""
+        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, text: text), 1 + 18 + textLen)
 
     case OP_SET_CURSOR:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }

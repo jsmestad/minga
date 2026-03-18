@@ -36,9 +36,34 @@ struct Glyph {
     var isColor: Bool
 }
 
+/// Cache key for glyphs: codepoint + font style (bold/italic bits).
+struct GlyphKey: Hashable {
+    let codepoint: UInt32
+    /// Bold/italic bits from attrs (0x00=regular, 0x01=bold, 0x04=italic, 0x05=bold+italic).
+    let style: UInt8
+}
+
+/// Cache key for ligatures: text + font style.
+struct LigatureKey: Hashable {
+    let text: String
+    /// Bold/italic bits from attrs (0x00=regular, 0x01=bold, 0x04=italic, 0x05=bold+italic).
+    let style: UInt8
+}
+
 /// Font face with glyph cache and atlas.
+///
+/// Holds up to four CTFont variants (regular, bold, italic, bold-italic)
+/// sharing a single glyph atlas. The glyph cache uses a compound key
+/// (codepoint + style bits) so each variant's glyphs are cached separately
+/// but packed into the same GPU texture.
 final class FontFace {
     let ctFont: CTFont
+    /// Bold variant, or nil if the font family doesn't have one.
+    let ctFontBold: CTFont?
+    /// Italic variant, or nil if the font family doesn't have one.
+    let ctFontItalic: CTFont?
+    /// Bold-italic variant, or nil if the font family doesn't have one.
+    let ctFontBoldItalic: CTFont?
     /// Cell dimensions in points (for grid layout).
     let cellWidth: Int
     let cellHeight: Int
@@ -50,16 +75,16 @@ final class FontFace {
     let scale: CGFloat
 
     let atlas: GlyphAtlas
-    private var cache: [UInt32: Glyph] = [:]
+    private var cache: [GlyphKey: Glyph] = [:]
 
     /// Whether programming ligatures are enabled. When true, multi-character
     /// sequences like `->`, `!=`, `=>` are shaped via CoreText and rendered
     /// as a single wide glyph spanning multiple cells.
     let ligaturesEnabled: Bool
 
-    /// Cache of shaped ligature glyphs keyed by the input string.
+    /// Cache of shaped ligature glyphs keyed by text + style.
     /// A nil value means "no ligature for this sequence."
-    private var ligatureCache: [String: LigatureResult?] = [:]
+    private var ligatureCache: [LigatureKey: LigatureResult?] = [:]
 
     /// Protocol weight byte → NSFontManager weight (0-15 scale).
     /// NSFontManager uses: 2=ultralight, 3=thin, 4=light, 5=regular,
@@ -95,6 +120,21 @@ final class FontFace {
         self.scale = scale
         self.ligaturesEnabled = ligatures
 
+        // Derive bold, italic, and bold-italic variants from the base font.
+        // CTFontCreateCopyWithSymbolicTraits returns nil if the variant doesn't
+        // exist in the font family. We fall back to the regular font at
+        // rasterization time when a variant is missing.
+        self.ctFontBold = FontFace.deriveVariant(font, traits: .boldTrait)
+        self.ctFontItalic = FontFace.deriveVariant(font, traits: .italicTrait)
+        self.ctFontBoldItalic = FontFace.deriveVariant(font, traits: [.boldTrait, .italicTrait])
+
+        if ctFontBold == nil {
+            PortLogger.warn("Font '\(name)' has no bold variant; bold text will render as regular")
+        }
+        if ctFontItalic == nil {
+            PortLogger.warn("Font '\(name)' has no italic variant; italic text will render as regular")
+        }
+
         let asc = CTFontGetAscent(font)
         let desc = CTFontGetDescent(font)
         let lead = CTFontGetLeading(font)
@@ -107,6 +147,29 @@ final class FontFace {
         self.cellHeight = Int(ceil(asc + desc + lead))
 
         self.atlas = GlyphAtlas(initialSize: 512)
+    }
+
+    /// Derive a font variant using CTFontCreateCopyWithSymbolicTraits.
+    /// Returns nil if the font family doesn't have the requested variant.
+    private static func deriveVariant(_ base: CTFont, traits: CTFontSymbolicTraits) -> CTFont? {
+        let size = CTFontGetSize(base)
+        // Pass the desired traits as both the value and the mask so only
+        // the requested bits are changed.
+        guard let derived = CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, traits) else {
+            return nil
+        }
+        return derived
+    }
+
+    /// Returns the CTFont for the given style bits (bold=0x01, italic=0x04).
+    /// Falls back to regular if the requested variant is unavailable.
+    func fontForStyle(_ style: UInt8) -> CTFont {
+        switch style & FONT_STYLE_MASK {
+        case 0x05: return ctFontBoldItalic ?? ctFont  // bold(0x01) | italic(0x04)
+        case 0x01: return ctFontBold ?? ctFont        // bold only
+        case 0x04: return ctFontItalic ?? ctFont      // italic only
+        default:   return ctFont                      // regular
+        }
     }
 
     /// Resolve a font name to a CTFont, trying multiple strategies:
@@ -140,13 +203,19 @@ final class FontFace {
         return CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)!
     }
 
-    /// Look up a glyph by codepoint, rasterizing on first access.
-    func getGlyph(_ codepoint: UInt32) -> Glyph? {
-        if let cached = cache[codepoint] {
+    /// Look up a glyph by codepoint and style, rasterizing on first access.
+    ///
+    /// `style` is the bold/italic bits (0x00=regular, 0x01=bold, 0x04=italic,
+    /// 0x05=bold+italic). The glyph is rasterized using the appropriate font
+    /// variant and cached with a compound key.
+    func getGlyph(_ codepoint: UInt32, style: UInt8 = 0) -> Glyph? {
+        let key = GlyphKey(codepoint: codepoint, style: style & FONT_STYLE_MASK)
+        if let cached = cache[key] {
             return cached
         }
 
-        guard let info = rasterizeGlyph(codepoint) else { return nil }
+        let font = fontForStyle(style)
+        guard let info = rasterizeGlyph(codepoint, using: font) else { return nil }
 
         let glyph = Glyph(
             atlasX: info.atlasX, atlasY: info.atlasY,
@@ -154,14 +223,15 @@ final class FontFace {
             offsetX: info.offsetX, offsetY: info.offsetY,
             isColor: info.isColor
         )
-        cache[codepoint] = glyph
+        cache[key] = glyph
         return glyph
     }
 
-    /// Pre-rasterize all printable ASCII glyphs to avoid hitches during rendering.
+    /// Pre-rasterize all printable ASCII glyphs for the regular variant.
+    /// Other variants are rasterized lazily on first use.
     func preloadAscii() {
         for cp: UInt32 in 0x20...0x7E {
-            _ = getGlyph(cp)
+            _ = getGlyph(cp, style: 0)
         }
     }
 
@@ -181,28 +251,30 @@ final class FontFace {
     /// input characters (indicating a ligature substitution happened).
     /// Returns nil if no ligature was produced or ligatures are disabled.
     ///
-    /// The result is cached, so repeated calls with the same string are cheap.
-    func shapeLigature(_ text: String) -> LigatureResult? {
+    /// `style` is the bold/italic bits. The correct font variant is used
+    /// for shaping so bold ligatures render at the right weight.
+    func shapeLigature(_ text: String, style: UInt8 = 0) -> LigatureResult? {
         guard ligaturesEnabled, text.count >= 2 else { return nil }
 
-        // Check cache first.
-        if let cached = ligatureCache[text] {
+        let key = LigatureKey(text: text, style: style & FONT_STYLE_MASK)
+        if let cached = ligatureCache[key] {
             return cached
         }
 
-        let result = detectAndRasterizeLigature(text)
-        ligatureCache[text] = result
+        let font = fontForStyle(style)
+        let result = detectAndRasterizeLigature(text, using: font)
+        ligatureCache[key] = result
         return result
     }
 
     /// Core ligature detection using CTLine shaping.
     ///
-    /// Creates an attributed string with the font, asks CoreText to shape it,
-    /// then inspects the glyph runs. If the number of glyphs is less than
+    /// Creates an attributed string with the given font, asks CoreText to shape
+    /// it, then inspects the glyph runs. If the number of glyphs is less than
     /// the number of characters, a ligature substitution occurred.
-    private func detectAndRasterizeLigature(_ text: String) -> LigatureResult? {
+    private func detectAndRasterizeLigature(_ text: String, using font: CTFont) -> LigatureResult? {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: ctFont as Any,
+            .font: font as Any,
             // Enable all ligatures (1 = standard, 2 = all including rare ones).
             .ligature: 2
         ]
@@ -318,8 +390,9 @@ final class FontFace {
         return advance.width
     }
 
-    /// Rasterize a single codepoint into the atlas.
-    private func rasterizeGlyph(_ codepoint: UInt32) -> GlyphInfo? {
+    /// Rasterize a single codepoint into the atlas using the given font variant.
+    private func rasterizeGlyph(_ codepoint: UInt32, using baseFont: CTFont? = nil) -> GlyphInfo? {
+        let primaryFont = baseFont ?? ctFont
         // Convert codepoint to UTF-16 for CoreText.
         var utf16: [UniChar] = []
         if codepoint <= 0xFFFF {
@@ -330,16 +403,16 @@ final class FontFace {
             utf16 = [UniChar(0xD800 + (cp >> 10)), UniChar(0xDC00 + (cp & 0x3FF))]
         }
 
-        // Look up glyph ID, with font fallback for emoji.
+        // Look up glyph ID using the requested font variant, with fallback for emoji.
         var glyphs: [CGGlyph] = Array(repeating: 0, count: utf16.count)
-        var renderFont = ctFont
+        var renderFont = primaryFont
         var ownsFallback = false
 
-        if !CTFontGetGlyphsForCharacters(ctFont, &utf16, &glyphs, utf16.count) {
-            // Primary font doesn't have this glyph; ask CoreText for a fallback.
+        if !CTFontGetGlyphsForCharacters(primaryFont, &utf16, &glyphs, utf16.count) {
+            // Variant font doesn't have this glyph; ask CoreText for a fallback.
             let cfStr = CFStringCreateWithCharacters(nil, &utf16, utf16.count)!
             let range = CFRange(location: 0, length: utf16.count)
-            let fallback = CTFontCreateForString(ctFont, cfStr, range)
+            let fallback = CTFontCreateForString(primaryFont, cfStr, range)
             if CTFontGetGlyphsForCharacters(fallback, &utf16, &glyphs, utf16.count) {
                 renderFont = fallback
                 ownsFallback = true

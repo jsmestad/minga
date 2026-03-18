@@ -24,6 +24,7 @@ let OP_SET_WINDOW_BG: UInt8 = 0x17
 let OP_CLEAR_REGION: UInt8 = 0x18
 let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
+let OP_DRAW_STYLED_TEXT: UInt8 = 0x1C
 
 // MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x78)
 
@@ -122,9 +123,22 @@ let TEXT_PROPORTIONAL: UInt8 = 1
 // MARK: - Text attribute bits
 
 let ATTR_BOLD: UInt8 = 0x01
-let ATTR_ITALIC: UInt8 = 0x02
-let ATTR_UNDERLINE: UInt8 = 0x04
+let ATTR_UNDERLINE: UInt8 = 0x02
+let ATTR_ITALIC: UInt8 = 0x04
 let ATTR_REVERSE: UInt8 = 0x08
+let ATTR_STRIKETHROUGH: UInt16 = 0x10
+
+// Underline style (3 bits at position 5-7 in extended 16-bit attrs)
+let UL_STYLE_SHIFT: UInt16 = 5
+let UL_STYLE_MASK: UInt16 = 0x07  // 3 bits
+let UL_STYLE_LINE: UInt16 = 0
+let UL_STYLE_CURL: UInt16 = 1
+let UL_STYLE_DASHED: UInt16 = 2
+let UL_STYLE_DOTTED: UInt16 = 3
+let UL_STYLE_DOUBLE: UInt16 = 4
+
+// Bold/italic style mask for font variant selection (bits 0 and 2 of attrs)
+let FONT_STYLE_MASK: UInt8 = 0x05
 
 // MARK: - Mouse button constants
 

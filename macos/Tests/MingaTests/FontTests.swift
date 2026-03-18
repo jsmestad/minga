@@ -96,6 +96,90 @@ struct FontResolutionTests {
     }
 }
 
+@Suite("FontFace variants")
+struct FontVariantTests {
+    @Test("Menlo has bold, italic, and bold-italic variants")
+    func menloHasAllVariants() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        #expect(face.ctFontBold != nil, "Menlo should have a bold variant")
+        #expect(face.ctFontItalic != nil, "Menlo should have an italic variant")
+        #expect(face.ctFontBoldItalic != nil, "Menlo should have a bold-italic variant")
+    }
+
+    @Test("fontForStyle returns correct variant")
+    func fontForStyleReturnsCorrectVariant() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        let regular = face.fontForStyle(0x00)
+        let bold = face.fontForStyle(0x01)
+        let italic = face.fontForStyle(0x04)
+        let boldItalic = face.fontForStyle(0x05)
+
+        // Regular should be the base font.
+        let regularName = CTFontCopyPostScriptName(regular) as String
+        #expect(regularName.contains("Menlo"))
+
+        // Bold variant should differ from regular.
+        if let boldFont = face.ctFontBold {
+            let boldName = CTFontCopyPostScriptName(boldFont) as String
+            #expect(boldName != regularName || boldName.contains("Bold"))
+            #expect(bold as CTFont === boldFont as CTFont)
+        }
+
+        // Italic variant should differ from regular.
+        if let italicFont = face.ctFontItalic {
+            let italicName = CTFontCopyPostScriptName(italicFont) as String
+            #expect(italicName != regularName || italicName.contains("Italic"))
+            #expect(italic as CTFont === italicFont as CTFont)
+        }
+
+        // Bold-italic should be set.
+        if face.ctFontBoldItalic != nil {
+            #expect(boldItalic as CTFont === face.ctFontBoldItalic! as CTFont)
+        }
+    }
+
+    @Test("Bold glyph is rasterized separately from regular")
+    func boldGlyphIsSeparate() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        let regularA = face.getGlyph(0x41, style: 0)
+        let boldA = face.getGlyph(0x41, style: 0x01)
+        #expect(regularA != nil)
+        #expect(boldA != nil)
+        // They should be at different atlas positions (different rasterizations).
+        if let r = regularA, let b = boldA {
+            #expect(r.atlasX != b.atlasX || r.atlasY != b.atlasY,
+                    "Bold and regular 'A' should occupy different atlas positions")
+        }
+    }
+
+    @Test("Italic glyph is rasterized separately from regular")
+    func italicGlyphIsSeparate() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        let regularA = face.getGlyph(0x41, style: 0)
+        let italicA = face.getGlyph(0x41, style: 0x04)
+        #expect(regularA != nil)
+        #expect(italicA != nil)
+        if let r = regularA, let i = italicA {
+            #expect(r.atlasX != i.atlasX || r.atlasY != i.atlasY,
+                    "Italic and regular 'A' should occupy different atlas positions")
+        }
+    }
+
+    @Test("Style bits beyond bold/italic are masked out")
+    func styleMaskIgnoresOtherBits() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        // 0x03 = bold(0x01) | underline(0x02). Only bold should affect glyph lookup.
+        let boldA = face.getGlyph(0x41, style: 0x01)
+        let boldUnderlineA = face.getGlyph(0x41, style: 0x03)
+        #expect(boldA != nil)
+        #expect(boldUnderlineA != nil)
+        // Same glyph (underline bit is masked out for font selection).
+        if let b = boldA, let bu = boldUnderlineA {
+            #expect(b.atlasX == bu.atlasX && b.atlasY == bu.atlasY)
+        }
+    }
+}
+
 @Suite("FontFace ligature shaping")
 struct FontLigatureTests {
     @Test("Ligatures disabled returns nil")

@@ -24,6 +24,18 @@ struct CellGPU {
     var isColor: Float = 0
 }
 
+/// GPU data for an underlined cell (must match UnderlineData in Shaders.metal).
+struct UnderlineGPU {
+    /// Grid position (column, row).
+    var gridPos: SIMD2<Float> = .zero
+    /// Underline color (RGB, 0..1).
+    var color: SIMD3<Float> = .init(1, 1, 1)
+    /// Underline style: 0=line, 1=curl, 2=dashed, 3=dotted, 4=double.
+    var style: Float = 0
+    /// Cell width in grid units (>1 for wide characters).
+    var cellSpan: Float = 1
+}
+
 /// Uniforms shared across all cells (must match Uniforms in Shaders.metal).
 struct Uniforms {
     var cellSize: SIMD2<Float>
@@ -43,6 +55,7 @@ final class MetalRenderer {
     let commandQueue: MTLCommandQueue
     private let bgPipeline: MTLRenderPipelineState
     private let glyphPipeline: MTLRenderPipelineState
+    private let underlinePipeline: MTLRenderPipelineState
 
     /// Reusable Metal buffer for cell data (avoids setVertexBytes 4KB limit).
     private var cellBuffer: MTLBuffer?
@@ -87,9 +100,21 @@ final class MetalRenderer {
         glyphDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
         glyphDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
+        // Underline pipeline (alpha blending for anti-aliased curl underlines).
+        let ulDesc = MTLRenderPipelineDescriptor()
+        ulDesc.vertexFunction = library.makeFunction(name: "underline_vertex")
+        ulDesc.fragmentFunction = library.makeFunction(name: "underline_fragment")
+        ulDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
+        ulDesc.colorAttachments[0].isBlendingEnabled = true
+        ulDesc.colorAttachments[0].sourceRGBBlendFactor = .one
+        ulDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        ulDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+        ulDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
         do {
             self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
             self.glyphPipeline = try device.makeRenderPipelineState(descriptor: glyphDesc)
+            self.underlinePipeline = try device.makeRenderPipelineState(descriptor: ulDesc)
         } catch {
             NSLog("Failed to create Metal pipeline: \(error)")
             return nil
@@ -156,9 +181,11 @@ final class MetalRenderer {
                 continue
             }
 
+            let fontStyle = cell.attrs & FONT_STYLE_MASK
+
             // Ligature head cell: use the shaped ligature glyph.
             if cell.ligatureCellCount > 1, !cell.ligatureText.isEmpty,
-               let lig = face.shapeLigature(cell.ligatureText) {
+               let lig = face.shapeLigature(cell.ligatureText, style: fontStyle) {
                 gpu.hasGlyph = 1.0
                 gpu.isColor = 0.0
                 gpu.uvOrigin = SIMD2<Float>(Float(lig.glyph.atlasX) / atlasSize,
@@ -175,7 +202,7 @@ final class MetalRenderer {
             // Normal single-cell glyph.
             else if !cell.grapheme.isEmpty, cell.grapheme != " " {
                 if let scalar = cell.grapheme.unicodeScalars.first,
-                   let glyph = face.getGlyph(scalar.value) {
+                   let glyph = face.getGlyph(scalar.value, style: fontStyle) {
                     gpu.hasGlyph = 1.0
                     gpu.isColor = glyph.isColor ? 1.0 : 0.0
                     gpu.uvOrigin = SIMD2<Float>(Float(glyph.atlasX) / atlasSize,
@@ -192,6 +219,35 @@ final class MetalRenderer {
             }
 
             gpuCells[i] = gpu
+        }
+
+        // Collect underlined cells for the underline pass.
+        var underlineCells: [UnderlineGPU] = []
+        for i in 0..<count {
+            let cell = grid.cells[i]
+            guard (cell.attrs & ATTR_UNDERLINE) != 0 else { continue }
+            guard !cell.isContinuation else { continue }
+
+            let col = UInt16(i % Int(grid.cols))
+            let row = UInt16(i / Int(grid.cols))
+
+            let ulColorRaw = cell.underlineColor
+            let ulColor: SIMD3<Float>
+            if ulColorRaw != 0 {
+                ulColor = colorFromU24(ulColorRaw, default: gpuCells[i].fgColor)
+            } else {
+                ulColor = gpuCells[i].fgColor
+            }
+
+            var ul = UnderlineGPU()
+            ul.gridPos = SIMD2<Float>(
+                col >= grid.gutterCol ? Float(col) + gutterPaddingCells : Float(col),
+                Float(row)
+            )
+            ul.color = ulColor
+            ul.style = Float(cell.underlineStyle)
+            ul.cellSpan = Float(cell.width)
+            underlineCells.append(ul)
         }
 
         // Ensure the Metal buffer is large enough.
@@ -236,6 +292,14 @@ final class MetalRenderer {
                 encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
                 encoder.setFragmentTexture(atlas, index: 0)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
+            }
+
+            // Underline pass: draw underlines for cells with ATTR_UNDERLINE set.
+            if !underlineCells.isEmpty {
+                encoder.setRenderPipelineState(underlinePipeline)
+                encoder.setVertexBytes(&underlineCells, length: underlineCells.count * MemoryLayout<UnderlineGPU>.stride, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: underlineCells.count)
             }
 
             // Gutter gap fill: draw a background-colored rect to cover the

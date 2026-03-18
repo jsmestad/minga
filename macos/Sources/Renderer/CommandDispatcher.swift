@@ -61,6 +61,14 @@ final class CommandDispatcher {
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
 
+        case .drawStyledText(let row, let col, let fg, let bg, let attrs16, let ulColor, _, let text):
+            // Extended draw: 16-bit attrs with underline style, strikethrough, and underline color.
+            // The low 8 bits of attrs16 match the regular attrs byte layout.
+            let attrs8 = UInt8(attrs16 & 0xFF)
+            let ulStyle = UInt8((attrs16 >> UL_STYLE_SHIFT) & UL_STYLE_MASK)
+            drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs8, text: text,
+                     underlineColor: ulColor, underlineStyle: ulStyle)
+
         case .setCursor(let row, let col):
             var absRow = row
             var absCol = col
@@ -212,7 +220,8 @@ final class CommandDispatcher {
         return byLen.sorted { $0.key > $1.key }.map { ($0.key, $0.value) }
     }()
 
-    private func drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String) {
+    private func drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String,
+                          underlineColor: UInt32 = 0, underlineStyle: UInt8 = 0) {
         var absRow = row
         var absCol = col
         var maxCol = grid.cols
@@ -235,7 +244,7 @@ final class CommandDispatcher {
                 let w = graphemeWidth(grapheme)
                 grid.writeCell(col: currentCol, row: absRow, cell: Cell(
                     grapheme: grapheme, width: UInt8(w),
-                    fg: fg, bg: bg, attrs: attrs
+                    fg: fg, bg: bg, attrs: attrs, underlineColor: underlineColor, underlineStyle: underlineStyle
                 ))
                 currentCol &+= UInt16(w)
             }
@@ -265,10 +274,11 @@ final class CommandDispatcher {
                     let candidate = String(chars[i..<(i + seqLen)])
                     guard candidates.contains(candidate) else { continue }
 
-                    if let lig = face.shapeLigature(candidate) {
+                    if let lig = face.shapeLigature(candidate, style: attrs) {
                         grid.writeCell(col: currentCol, row: absRow, cell: Cell(
                             grapheme: candidate, width: UInt8(lig.cellCount),
                             fg: fg, bg: bg, attrs: attrs,
+                            underlineColor: underlineColor, underlineStyle: underlineStyle,
                             ligatureText: candidate,
                             ligatureCellCount: UInt8(lig.cellCount),
                             isContinuation: false
@@ -277,6 +287,7 @@ final class CommandDispatcher {
                             grid.writeCell(col: currentCol &+ offset, row: absRow, cell: Cell(
                                 grapheme: "", width: 1,
                                 fg: fg, bg: bg, attrs: attrs,
+                                underlineColor: underlineColor, underlineStyle: underlineStyle,
                                 isContinuation: true
                             ))
                         }
@@ -293,7 +304,7 @@ final class CommandDispatcher {
                 let w = graphemeWidth(grapheme)
                 grid.writeCell(col: currentCol, row: absRow, cell: Cell(
                     grapheme: grapheme, width: UInt8(w),
-                    fg: fg, bg: bg, attrs: attrs
+                    fg: fg, bg: bg, attrs: attrs, underlineColor: underlineColor, underlineStyle: underlineStyle
                 ))
                 currentCol &+= UInt16(w)
                 i += 1
