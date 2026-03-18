@@ -116,11 +116,27 @@ defmodule Minga.Editor.FoldMap do
         unfold_at(fm, line)
 
       :none ->
-        case Enum.find(available_ranges, &FoldRange.contains?(&1, line)) do
+        # Pick the innermost (smallest) range containing the cursor line.
+        # Without this, the outermost range (e.g., defmodule) always wins.
+        case innermost_range(available_ranges, line) do
           nil -> fm
           range -> fold(fm, range)
         end
     end
+  end
+
+  @doc """
+  Finds the innermost (smallest) fold range containing the given line.
+
+  When multiple ranges contain the same line (e.g., a `def` inside a
+  `defmodule`), returns the one with the smallest span. This ensures
+  `za` folds the nearest enclosing block, not the outermost one.
+  """
+  @spec innermost_range([FoldRange.t()], non_neg_integer()) :: FoldRange.t() | nil
+  def innermost_range(ranges, line) do
+    ranges
+    |> Enum.filter(&FoldRange.contains?(&1, line))
+    |> Enum.min_by(fn %FoldRange{start_line: s, end_line: e} -> e - s end, fn -> nil end)
   end
 
   @doc "Removes all folds."

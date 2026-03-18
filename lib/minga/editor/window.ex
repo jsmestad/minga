@@ -219,16 +219,24 @@ defmodule Minga.Editor.Window do
   @doc "Toggles the fold at the given buffer line using the window's available fold ranges."
   @spec toggle_fold(t(), non_neg_integer()) :: t()
   def toggle_fold(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
-    %{window | fold_map: FoldMap.toggle(fm, line, ranges)}
+    new_fm = FoldMap.toggle(fm, line, ranges)
+
+    %{window | fold_map: new_fm}
+    |> clamp_cursor_to_visible()
     |> invalidate()
   end
 
   @doc "Folds the range containing the given buffer line."
   @spec fold_at(t(), non_neg_integer()) :: t()
   def fold_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
-    case Enum.find(ranges, &FoldRange.contains?(&1, line)) do
-      nil -> window
-      range -> %{window | fold_map: FoldMap.fold(fm, range)} |> invalidate()
+    case FoldMap.innermost_range(ranges, line) do
+      nil ->
+        window
+
+      range ->
+        %{window | fold_map: FoldMap.fold(fm, range)}
+        |> clamp_cursor_to_visible()
+        |> invalidate()
     end
   end
 
@@ -248,6 +256,7 @@ defmodule Minga.Editor.Window do
   @spec fold_all(t()) :: t()
   def fold_all(%__MODULE__{fold_ranges: ranges} = window) do
     %{window | fold_map: FoldMap.fold_all(FoldMap.new(), ranges)}
+    |> clamp_cursor_to_visible()
     |> invalidate()
   end
 
@@ -256,6 +265,36 @@ defmodule Minga.Editor.Window do
   def unfold_all(%__MODULE__{} = window) do
     %{window | fold_map: FoldMap.unfold_all(window.fold_map)}
     |> invalidate()
+  end
+
+  # If the cursor is inside a folded (hidden) region, move it to the
+  # start of the fold that contains it. Also clamps the viewport top
+  # so the scroll stage doesn't start from a stale position.
+  @spec clamp_cursor_to_visible(t()) :: t()
+  defp clamp_cursor_to_visible(%__MODULE__{fold_map: fm, cursor: {line, col}} = window) do
+    window =
+      if FoldMap.folded?(fm, line) do
+        case FoldMap.fold_at(fm, line) do
+          {:ok, %FoldRange{start_line: start}} -> %{window | cursor: {start, col}}
+          :none -> window
+        end
+      else
+        window
+      end
+
+    # Clamp viewport top: after folding, the visible line count may shrink
+    # below the current viewport top, causing negative cursor screen rows.
+    # Map the cursor to visible-line space and ensure the viewport top
+    # doesn't exceed it.
+    {cursor_line, _} = window.cursor
+    visible_cursor = FoldMap.buffer_to_visible(fm, cursor_line)
+    vp = window.viewport
+
+    if vp.top > visible_cursor do
+      %{window | viewport: %{vp | top: max(visible_cursor - 5, 0)}}
+    else
+      window
+    end
   end
 
   @doc "Updates the available fold ranges (from a provider). Preserves existing folds that still exist in the new ranges."
@@ -271,7 +310,9 @@ defmodule Minga.Editor.Window do
       end)
 
     new_fm = FoldMap.from_ranges(surviving_folds)
+
     %{window | fold_ranges: new_ranges, fold_map: new_fm}
+    |> clamp_cursor_to_visible()
   end
 
   @doc "Unfolds any folds that contain the given lines (used by search auto-unfold)."

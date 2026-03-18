@@ -96,14 +96,12 @@ defmodule Minga.Input.Interrupt do
   @spec mode_state_dirty?(Mode.state(), Mode.state()) :: boolean()
   defp mode_state_dirty?(current, fresh) do
     current.leader_node != fresh.leader_node or
-      current.pending_g != fresh.pending_g or
-      current.pending_z != fresh.pending_z or
+      current.prefix_node != fresh.prefix_node or
       current.pending_find != fresh.pending_find or
       current.pending_replace != fresh.pending_replace or
       current.pending_mark != fresh.pending_mark or
       current.pending_register != fresh.pending_register or
-      current.count != fresh.count or
-      current.pending_bracket != fresh.pending_bracket
+      current.count != fresh.count
   end
 
   @spec maybe_close_picker(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

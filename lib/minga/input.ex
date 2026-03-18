@@ -127,7 +127,8 @@ defmodule Minga.Input do
   def key_sequence_pending?(%{vim: %{mode_state: %{leader_node: node}}}) when node != nil,
     do: true
 
-  def key_sequence_pending?(%{vim: %{mode_state: %{pending_g: true}}}), do: true
+  def key_sequence_pending?(%{vim: %{mode_state: %{prefix_node: node}}}) when node != nil,
+    do: true
 
   def key_sequence_pending?(%{vim: %{mode: mode}}) when mode in [:operator_pending, :command],
     do: true

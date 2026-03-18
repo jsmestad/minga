@@ -80,7 +80,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
       {:handled, state} = walk_surface_handlers(state, ?G, 0)
       assert state.file_tree.tree.cursor > 0
 
-      # Then gg to top (g is pending_g, second g triggers)
+      # Then gg to top (g enters prefix trie, second g triggers)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
       assert state.file_tree.tree.cursor == 0
@@ -204,9 +204,9 @@ defmodule Minga.Input.VimNavIntegrationTest do
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
       assert state.file_tree.tree.cursor == 2
 
-      # g should delegate to mode FSM (pending_g)
+      # g should delegate to mode FSM (prefix trie)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      assert state.vim.mode_state.pending_g == true
+      assert state.vim.mode_state.prefix_node != nil
 
       # second g should trigger gg (go to top)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)

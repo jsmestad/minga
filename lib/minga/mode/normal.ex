@@ -311,6 +311,45 @@ defmodule Minga.Mode.Normal do
     {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
   end
 
+  # ── Normal prefix trie (g, z, [, ]) ──────────────────────────────────────
+  # Replaces the old pending_g / pending_z / pending_bracket boolean flags.
+  # When a prefix key is pressed, we enter trie-walking mode. The next key
+  # is looked up in the trie. Found? Execute. Prefix? Keep walking. Not found? Cancel.
+
+  # Trigger keys: start walking the prefix trie.
+  def handle_key({key, 0}, %ModeState{prefix_node: nil} = state)
+      when key in [?g, ?z, ?], ?[] do
+    trie = get_prefix_trie()
+
+    case Bindings.lookup(trie, {key, 0}) do
+      {:prefix, sub_node} ->
+        formatted = WhichKey.format_key({key, 0})
+        {:continue, %{state | prefix_node: sub_node, prefix_keys: [formatted]}}
+
+      {:command, command} ->
+        dispatch_prefix_command(command, state)
+
+      :not_found ->
+        {:continue, state}
+    end
+  end
+
+  # Walking the prefix trie: resolve the next key.
+  def handle_key(key, %ModeState{prefix_node: node} = state) when is_map(node) do
+    case Bindings.lookup(node, key) do
+      {:prefix, sub_node} ->
+        formatted = WhichKey.format_key(key)
+        new_keys = [formatted | state.prefix_keys]
+        {:continue, %{state | prefix_node: sub_node, prefix_keys: new_keys}}
+
+      {:command, command} ->
+        dispatch_prefix_command(command, %{state | prefix_node: nil, prefix_keys: []})
+
+      :not_found ->
+        {:continue, %{state | prefix_node: nil, prefix_keys: []}}
+    end
+  end
+
   # ── Count prefix accumulation ─────────────────────────────────────────────
 
   # Digits 1-9 always start or extend the count.
@@ -336,7 +375,7 @@ defmodule Minga.Mode.Normal do
     {:transition, :insert, state}
   end
 
-  def handle_key({?a, 0}, %ModeState{pending_bracket: nil} = state) do
+  def handle_key({?a, 0}, state) do
     {:execute_then_transition, [:move_right], :insert, state}
   end
 
@@ -410,7 +449,7 @@ defmodule Minga.Mode.Normal do
     {:execute, :word_forward, state}
   end
 
-  def handle_key({?b, 0}, %ModeState{pending_z: false} = state) do
+  def handle_key({?b, 0}, state) do
     {:execute, :word_backward, state}
   end
 
@@ -435,177 +474,7 @@ defmodule Minga.Mode.Normal do
     {:execute, {:goto_line, count}, %{state | count: nil}}
   end
 
-  # ] prefix — wait for second key (next diagnostic, etc.)
-  def handle_key({?], 0}, %ModeState{pending_bracket: nil} = state) do
-    {:continue, %{state | pending_bracket: :next}}
-  end
-
-  # [ prefix — wait for second key (prev diagnostic, etc.)
-  def handle_key({?[, 0}, %ModeState{pending_bracket: nil} = state) do
-    {:continue, %{state | pending_bracket: :prev}}
-  end
-
-  # ]d — next diagnostic
-  def handle_key({?d, 0}, %ModeState{pending_bracket: :next} = state) do
-    {:execute, :next_diagnostic, %{state | pending_bracket: nil}}
-  end
-
-  # [d — previous diagnostic
-  def handle_key({?d, 0}, %ModeState{pending_bracket: :prev} = state) do
-    {:execute, :prev_diagnostic, %{state | pending_bracket: nil}}
-  end
-
-  # ]c — next git hunk
-  def handle_key({?c, 0}, %ModeState{pending_bracket: :next} = state) do
-    {:execute, :next_git_hunk, %{state | pending_bracket: nil}}
-  end
-
-  # [c — previous git hunk
-  def handle_key({?c, 0}, %ModeState{pending_bracket: :prev} = state) do
-    {:execute, :prev_git_hunk, %{state | pending_bracket: nil}}
-  end
-
-  # ]f — next function
-  def handle_key({?f, 0}, %ModeState{pending_bracket: :next} = state) do
-    {:execute, {:goto_next_textobject, :function}, %{state | pending_bracket: nil}}
-  end
-
-  # [f — previous function
-  def handle_key({?f, 0}, %ModeState{pending_bracket: :prev} = state) do
-    {:execute, {:goto_prev_textobject, :function}, %{state | pending_bracket: nil}}
-  end
-
-  # ]t — next type/class
-  def handle_key({?t, 0}, %ModeState{pending_bracket: :next} = state) do
-    {:execute, {:goto_next_textobject, :class}, %{state | pending_bracket: nil}}
-  end
-
-  # [t — previous type/class
-  def handle_key({?t, 0}, %ModeState{pending_bracket: :prev} = state) do
-    {:execute, {:goto_prev_textobject, :class}, %{state | pending_bracket: nil}}
-  end
-
-  # ]a — next argument/parameter
-  def handle_key({?a, 0}, %ModeState{pending_bracket: :next} = state) do
-    {:execute, {:goto_next_textobject, :parameter}, %{state | pending_bracket: nil}}
-  end
-
-  # [a — previous argument/parameter
-  def handle_key({?a, 0}, %ModeState{pending_bracket: :prev} = state) do
-    {:execute, {:goto_prev_textobject, :parameter}, %{state | pending_bracket: nil}}
-  end
-
-  # Cancel bracket prefix on any unrecognized key
-  def handle_key(_key, %ModeState{pending_bracket: bracket} = state)
-      when bracket != nil do
-    {:continue, %{state | pending_bracket: nil}}
-  end
-
-  # g prefix — wait for second key
-  def handle_key({?g, 0}, %ModeState{pending_g: false} = state) do
-    {:continue, %{state | pending_g: true}}
-  end
-
-  # gg — document start
-  def handle_key({?g, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :move_to_document_start, %{state | pending_g: false}}
-  end
-
-  # gc — enter comment operator-pending mode
-  def handle_key({?c, 0}, %ModeState{pending_g: true} = state) do
-    count = state.count || 1
-
-    {:transition, :operator_pending,
-     %Minga.Mode.OperatorPendingState{operator: :comment, op_count: count || 1}}
-  end
-
-  # gd — go to definition
-  def handle_key({?d, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :goto_definition, %{state | pending_g: false}}
-  end
-
-  # gj — logical line down (always moves by logical lines, even with wrap on)
-  def handle_key({?j, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :move_logical_down, %{state | pending_g: false}}
-  end
-
-  # gk — logical line up (always moves by logical lines, even with wrap on)
-  def handle_key({?k, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :move_logical_up, %{state | pending_g: false}}
-  end
-
-  # g0 — logical line start (always moves to column 0 of the logical line)
-  def handle_key({?0, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :move_to_logical_line_start, %{state | pending_g: false}}
-  end
-
-  # g$ — logical line end
-  def handle_key({?$, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :move_to_logical_line_end, %{state | pending_g: false}}
-  end
-
-  # gt — next tab
-  def handle_key({?t, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :tab_next, %{state | pending_g: false}}
-  end
-
-  # gT — previous tab
-  def handle_key({?T, 0}, %ModeState{pending_g: true} = state) do
-    {:execute, :tab_prev, %{state | pending_g: false}}
-  end
-
-  # ── Fold commands (z prefix) ──────────────────────────────────────────────
-
-  # z prefix — wait for second key
-  def handle_key({?z, 0}, %ModeState{pending_z: false} = state) do
-    {:continue, %{state | pending_z: true}}
-  end
-
-  # za — toggle fold
-  def handle_key({?a, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :fold_toggle, %{state | pending_z: false}}
-  end
-
-  # zc — close (fold) at cursor
-  def handle_key({?c, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :fold_close, %{state | pending_z: false}}
-  end
-
-  # zo — open (unfold) at cursor
-  def handle_key({?o, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :fold_open, %{state | pending_z: false}}
-  end
-
-  # zM — close all folds
-  def handle_key({?M, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :fold_close_all, %{state | pending_z: false}}
-  end
-
-  # zR — open all folds
-  def handle_key({?R, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :fold_open_all, %{state | pending_z: false}}
-  end
-
-  # zz — center viewport on cursor
-  def handle_key({?z, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :scroll_center, %{state | pending_z: false}}
-  end
-
-  # zt — scroll cursor to top
-  def handle_key({?t, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :scroll_cursor_top, %{state | pending_z: false}}
-  end
-
-  # zb — scroll cursor to bottom
-  def handle_key({?b, 0}, %ModeState{pending_z: true} = state) do
-    {:execute, :scroll_cursor_bottom, %{state | pending_z: false}}
-  end
-
-  # Unknown z{key} — cancel
-  def handle_key(_key, %ModeState{pending_z: true} = state) do
-    {:continue, %{state | pending_z: false}}
-  end
-
+  # (g, z, ], [ prefix sequences are handled by the prefix trie above)
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do
@@ -973,5 +842,24 @@ defmodule Minga.Mode.Normal do
     KeymapActive.normal_bindings()
   catch
     :exit, _ -> Defaults.normal_bindings()
+  end
+
+  @prefix_trie Minga.Keymap.NormalPrefixes.trie()
+
+  @spec get_prefix_trie() :: Bindings.node_t()
+  defp get_prefix_trie, do: @prefix_trie
+
+  # Dispatches a command from the prefix trie. Most commands are simple
+  # :execute results. A few need special handling (mode transitions).
+  @spec dispatch_prefix_command(atom() | tuple(), ModeState.t()) :: Mode.result()
+  defp dispatch_prefix_command(:enter_comment_operator, state) do
+    count = state.count || 1
+
+    {:transition, :operator_pending,
+     %Minga.Mode.OperatorPendingState{operator: :comment, op_count: count}}
+  end
+
+  defp dispatch_prefix_command(command, state) do
+    {:execute, command, state}
   end
 end
