@@ -26,6 +26,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
+  alias Minga.Face.Registry, as: FaceRegistry
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Highlight
@@ -751,7 +752,40 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     hl =
       Map.get(state.highlight.highlights, window.buffer, Minga.Highlight.from_theme(state.theme))
 
-    if hl.capture_names != [], do: hl, else: nil
+    if hl.capture_names == [] do
+      nil
+    else
+      apply_buffer_face_overrides(hl, window.buffer)
+    end
+  end
+
+  # Applies buffer-local face overrides to the highlight's face registry.
+  # Uses the pre-merged cache from Buffer.State when available, falling
+  # back to computing it once and caching for subsequent frames.
+  # This avoids per-frame with_overrides + resolve_all cost.
+  @spec apply_buffer_face_overrides(Highlight.t(), pid()) :: Highlight.t()
+  defp apply_buffer_face_overrides(hl, buf_pid) when is_pid(buf_pid) do
+    overrides = BufferServer.face_overrides(buf_pid)
+
+    if overrides == %{} do
+      hl
+    else
+      registry =
+        case BufferServer.face_registry_cache(buf_pid) do
+          nil ->
+            # Cache miss: compute and store for next frame
+            merged = FaceRegistry.with_overrides(hl.face_registry, overrides)
+            BufferServer.set_face_registry_cache(buf_pid, merged)
+            merged
+
+          cached ->
+            cached
+        end
+
+      %{hl | face_registry: registry}
+    end
+  catch
+    :exit, _ -> hl
   end
 
   @doc "Returns git signs for a window's buffer."

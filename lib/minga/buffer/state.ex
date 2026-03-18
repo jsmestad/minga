@@ -51,6 +51,7 @@ defmodule Minga.Buffer.State do
             pending_edits: [],
             decorations: %Decorations{},
             face_overrides: %{},
+            face_registry_cache: nil,
             options: %{},
             explicit_options: MapSet.new()
 
@@ -74,6 +75,7 @@ defmodule Minga.Buffer.State do
           pending_edits: [EditDelta.t()],
           decorations: Decorations.t(),
           face_overrides: %{String.t() => keyword()},
+          face_registry_cache: Minga.Face.Registry.t() | nil,
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom())
         }

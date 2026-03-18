@@ -290,6 +290,30 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc """
+  Stores a pre-merged face registry cache on the buffer.
+
+  Called by the render pipeline after computing `with_overrides` so
+  subsequent frames can reuse the result. The cache is invalidated
+  when `remap_face/3` or `clear_face_override/2` is called.
+  """
+  @spec set_face_registry_cache(GenServer.server(), Minga.Face.Registry.t()) :: :ok
+  def set_face_registry_cache(server, registry) do
+    GenServer.cast(server, {:set_face_registry_cache, registry})
+  end
+
+  @doc """
+  Returns the pre-merged face registry cache, or nil if no overrides.
+
+  The cache is computed once when `remap_face/3` is called and reused
+  on every render frame. Callers merge this with the highlight's base
+  registry to avoid per-frame `with_overrides` + `resolve_all` cost.
+  """
+  @spec face_registry_cache(GenServer.server()) :: Minga.Face.Registry.t() | nil
+  def face_registry_cache(server) do
+    GenServer.call(server, :face_registry_cache)
+  end
+
+  @doc """
   Sets a buffer-local face override.
 
   Merges the given attributes on top of the named face for this buffer
@@ -1061,14 +1085,23 @@ defmodule Minga.Buffer.Server do
     {:reply, state.face_overrides, state}
   end
 
+  def handle_call(:face_registry_cache, _from, state) do
+    {:reply, state.face_registry_cache, state}
+  end
+
   def handle_call({:remap_face, face_name, attrs}, _from, state) do
     overrides = Map.put(state.face_overrides, face_name, attrs)
-    {:reply, :ok, %{state | face_overrides: overrides}}
+    # Invalidate cache — will be rebuilt lazily by the render pipeline
+    {:reply, :ok, %{state | face_overrides: overrides, face_registry_cache: nil}}
   end
 
   def handle_call({:clear_face_override, face_name}, _from, state) do
     overrides = Map.delete(state.face_overrides, face_name)
-    {:reply, :ok, %{state | face_overrides: overrides}}
+
+    cache =
+      if overrides == %{}, do: nil, else: state.face_registry_cache
+
+    {:reply, :ok, %{state | face_overrides: overrides, face_registry_cache: cache}}
   end
 
   def handle_call({:set_filetype, filetype}, _from, state) do
@@ -1364,6 +1397,13 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:decorations_version, _from, state) do
     {:reply, state.decorations.version, state}
+  end
+
+  # ── Face registry cache (async, set by render pipeline) ──
+
+  @impl true
+  def handle_cast({:set_face_registry_cache, registry}, state) do
+    {:noreply, %{state | face_registry_cache: registry}}
   end
 
   # ── Private ──
