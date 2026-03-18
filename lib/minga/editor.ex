@@ -702,7 +702,9 @@ defmodule Minga.Editor do
 
   # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
   # Debounced because multiple diagnostics may arrive in rapid succession.
-  def handle_info({:diagnostics_changed, _uri}, state) do
+  def handle_info({:diagnostics_changed, uri}, state) do
+    # Apply diagnostic underline decorations to the affected buffer
+    apply_diagnostic_decorations(state, uri)
     {:noreply, schedule_render(state, 16)}
   end
 
@@ -984,6 +986,30 @@ defmodule Minga.Editor do
   defp schedule_render(state, delay_ms) do
     ref = Process.send_after(self(), :debounced_render, delay_ms)
     %{state | render_timer: ref}
+  end
+
+  # ── Diagnostic decorations ──────────────────────────────────────────────────
+
+  # Applies diagnostic underline decorations to the buffer matching the URI.
+  # Called when {:diagnostics_changed, uri} arrives from the Diagnostics server.
+  @spec apply_diagnostic_decorations(state(), String.t()) :: :ok
+  defp apply_diagnostic_decorations(state, uri) do
+    path = Minga.LSP.SyncServer.uri_to_path(uri)
+
+    buf_pid =
+      Enum.find(state.buffers.list, fn buf ->
+        try do
+          BufferServer.file_path(buf) == path
+        catch
+          :exit, _ -> false
+        end
+      end)
+
+    if buf_pid do
+      Minga.Diagnostics.Decorations.apply(buf_pid, uri, state.theme.gutter)
+    end
+
+    :ok
   end
 
   # ── Nav-flash detection ───────────────────────────────────────────────────────

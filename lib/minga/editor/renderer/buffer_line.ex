@@ -107,6 +107,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
+    content_cmds = overlay_decoration_styles(content_cmds, sr, p)
 
     gutters = build_gutter_list(sign_cmd, gutter_cmd, p.row_offset, p.col_offset)
     contents = maybe_offset(content_cmds, p.row_offset, p.col_offset)
@@ -162,6 +163,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
     content_cmds = LineRenderer.render(p.line_text, sr, p.buf_line, vrow_ctx, p.byte_offset)
     content_cmds = maybe_apply_cursorline(content_cmds, sr, p)
     content_cmds = maybe_apply_decoration_bg(content_cmds, sr, p)
+    content_cmds = overlay_decoration_styles(content_cmds, sr, p)
 
     # Draw the border and shift text rightward to make room.
     content_cmds =
@@ -283,6 +285,194 @@ defmodule Minga.Editor.Renderer.BufferLine do
       if bg && hl.start == {buf_line, 0}, do: bg, else: nil
     end)
   end
+
+  # Overlays decoration highlight range styles (underlines, strikethrough, etc.)
+  # onto content draws. Splits draws at decoration range boundaries and merges
+  # the decoration's style properties. This is how diagnostic underlines appear
+  # on top of syntax-highlighted text.
+  @spec overlay_decoration_styles([DisplayList.draw()], non_neg_integer(), line_params()) ::
+          [DisplayList.draw()]
+  defp overlay_decoration_styles(cmds, _sr, p) do
+    ranges = Decorations.highlights_for_line(p.ctx.decorations, p.buf_line)
+
+    # Filter to ranges that have non-bg style attributes (underline, strikethrough, etc.)
+    overlay_ranges =
+      Enum.filter(ranges, fn hl ->
+        style = hl.style
+
+        Keyword.has_key?(style, :underline) or
+          Keyword.has_key?(style, :underline_color) or
+          Keyword.has_key?(style, :underline_style) or
+          Keyword.has_key?(style, :strikethrough) or
+          Keyword.has_key?(style, :blend)
+      end)
+
+    if overlay_ranges == [] do
+      cmds
+    else
+      apply_overlays(cmds, overlay_ranges, p.buf_line)
+    end
+  end
+
+  @spec apply_overlays([DisplayList.draw()], [term()], non_neg_integer()) ::
+          [DisplayList.draw()]
+  defp apply_overlays(cmds, overlay_ranges, buf_line) do
+    Enum.flat_map(cmds, fn {row, col, text, style} = cmd ->
+      overlapping =
+        Enum.filter(overlay_ranges, fn hl ->
+          range_overlaps_draw?(hl, buf_line, col, col + display_width(text))
+        end)
+
+      if overlapping == [] do
+        [cmd]
+      else
+        split_and_merge(row, col, text, style, overlapping, buf_line)
+      end
+    end)
+  end
+
+  # Check if a highlight range overlaps a draw command's column span.
+  @spec range_overlaps_draw?(
+          Minga.Buffer.Decorations.HighlightRange.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  defp range_overlaps_draw?(hl, buf_line, draw_start_col, draw_end_col) do
+    {hl_start_line, hl_start_col} = hl.start
+    {hl_end_line, hl_end_col} = hl.end_
+
+    # Range starts before or on this line, and ends on or after this line
+    starts_before_end =
+      hl_start_line < buf_line or (hl_start_line == buf_line and hl_start_col < draw_end_col)
+
+    ends_after_start =
+      hl_end_line > buf_line or (hl_end_line == buf_line and hl_end_col > draw_start_col)
+
+    starts_before_end and ends_after_start
+  end
+
+  # Split a draw command at decoration range boundaries and merge
+  # each segment with the appropriate decoration's style.
+  @spec split_and_merge(
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          keyword(),
+          [Minga.Buffer.Decorations.HighlightRange.t()],
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp split_and_merge(row, col, text, base_style, ranges, buf_line) do
+    draw_end = col + display_width(text)
+
+    # Collect boundary columns from all overlapping ranges
+    boundaries =
+      ranges
+      |> Enum.flat_map(fn hl ->
+        {sl, sc} = hl.start
+        {el, ec} = hl.end_
+        start_c = if sl < buf_line, do: col, else: max(sc, col)
+        end_c = if el > buf_line, do: draw_end, else: min(ec, draw_end)
+        [start_c, end_c]
+      end)
+      |> Enum.concat([col, draw_end])
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.filter(&(&1 >= col and &1 <= draw_end))
+
+    # Build a segment for each consecutive boundary pair
+    boundaries
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn [seg_start, seg_end] ->
+      build_split_segment(row, col, text, base_style, ranges, buf_line, seg_start, seg_end)
+    end)
+  end
+
+  @spec build_split_segment(
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          keyword(),
+          [Minga.Buffer.Decorations.HighlightRange.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DisplayList.draw()]
+  defp build_split_segment(_row, _col, _text, _base_style, _ranges, _buf_line, s, e) when s >= e,
+    do: []
+
+  defp build_split_segment(row, col, text, base_style, ranges, buf_line, seg_start, seg_end) do
+    seg_text = slice_by_display_width(text, seg_start - col, seg_end - seg_start)
+
+    if seg_text == "" do
+      []
+    else
+      covering =
+        Enum.filter(ranges, fn hl ->
+          {sl, sc} = hl.start
+          {el, ec} = hl.end_
+          after_start = sl < buf_line or (sl == buf_line and sc <= seg_start)
+          before_end = el > buf_line or (el == buf_line and ec > seg_start)
+          after_start and before_end
+        end)
+
+      style =
+        case covering do
+          [] ->
+            base_style
+
+          _ ->
+            best = Enum.max_by(covering, & &1.priority)
+            merge_overlay_style(base_style, best.style)
+        end
+
+      [{row, seg_start, seg_text, style}]
+    end
+  end
+
+  # Slice text by display width offset and length.
+  @spec slice_by_display_width(String.t(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defp slice_by_display_width(text, offset, length) do
+    {_, _, result} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce({0, 0, []}, fn grapheme, {pos, collected, acc} ->
+        w = Minga.Buffer.Unicode.display_width(grapheme)
+
+        cond do
+          pos + w <= offset -> {pos + w, collected, acc}
+          collected >= length -> {pos + w, collected, acc}
+          true -> {pos + w, collected + w, [grapheme | acc]}
+        end
+      end)
+
+    result |> Enum.reverse() |> Enum.join()
+  end
+
+  # Merges overlay decoration style attributes onto a base style.
+  # Only merges decorative attributes (underline, strikethrough, blend).
+  # Does NOT override fg/bg from the decoration (preserves syntax colors).
+  @spec merge_overlay_style(keyword(), keyword()) :: keyword()
+  defp merge_overlay_style(base, overlay) do
+    base
+    |> merge_kw(:underline, overlay)
+    |> merge_kw(:underline_color, overlay)
+    |> merge_kw(:underline_style, overlay)
+    |> merge_kw(:strikethrough, overlay)
+    |> merge_kw(:blend, overlay)
+  end
+
+  # Merge a single key from overlay into base if present in overlay.
+  @spec merge_kw(keyword(), atom(), keyword()) :: keyword()
+  defp merge_kw(base, key, overlay) do
+    case Keyword.get(overlay, key) do
+      nil -> base
+      value -> Keyword.put(base, key, value)
+    end
+  end
+
+  @spec display_width(String.t()) :: non_neg_integer()
+  defp display_width(text), do: Minga.Buffer.Unicode.display_width(text)
 
   # Removes inline virtual texts for a specific line from the decorations.
   # Used during wrapped rendering to prevent the VT from interfering with
