@@ -18,12 +18,14 @@ defmodule Minga.Editor do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
   alias Minga.Config.Options
+
+  alias Minga.Diagnostics.Decorations, as: DiagDecorations
+
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
-
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.FoldRange
   alias Minga.Editor.HighlightEvents
@@ -39,8 +41,10 @@ defmodule Minga.Editor do
   alias Minga.Editor.Viewport
   alias Minga.Editor.WarningLog
   alias Minga.Editor.Window
+
   alias Minga.FileTree
   alias Minga.Input
+  alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
   alias Minga.Port.Manager, as: PortManager
@@ -994,7 +998,7 @@ defmodule Minga.Editor do
   # Called when {:diagnostics_changed, uri} arrives from the Diagnostics server.
   @spec apply_diagnostic_decorations(state(), String.t()) :: :ok
   defp apply_diagnostic_decorations(state, uri) do
-    path = Minga.LSP.SyncServer.uri_to_path(uri)
+    path = LspSyncServer.uri_to_path(uri)
 
     buf_pid =
       Enum.find(state.buffers.list, fn buf ->
@@ -1006,7 +1010,7 @@ defmodule Minga.Editor do
       end)
 
     if buf_pid do
-      Minga.Diagnostics.Decorations.apply(buf_pid, uri, state.theme.gutter)
+      DiagDecorations.apply(buf_pid, uri, state.theme.gutter)
     end
 
     :ok

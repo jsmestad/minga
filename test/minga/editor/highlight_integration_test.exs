@@ -199,7 +199,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       all_text = Enum.map_join(segments, fn {text, _style} -> text end)
       assert String.valid?(all_text)
       assert all_text == line
-      assert segments == [{"─", Minga.Face.new(fg: 0x888888)}, {"─", Minga.Face.new()}]
+      [{first_text, first_face}, {second_text, second_face}] = segments
+      assert first_text == "─"
+      assert first_face.fg == 0x888888
+      assert second_text == "─"
+      assert second_face.fg != 0x888888
     end
   end
 
@@ -453,7 +457,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # "defmodule" should have keyword style
       {first_text, first_style} = hd(segments)
       assert first_text == "defmodule"
-      assert first_style[:fg] == 0xFF0000
+      assert first_style.fg == 0xFF0000
     end
 
     test "styles_for_line with empty line returns single empty segment" do

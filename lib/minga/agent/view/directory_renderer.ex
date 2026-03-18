@@ -8,8 +8,8 @@ defmodule Minga.Agent.View.DirectoryRenderer do
   """
 
   alias Minga.Editor.DisplayList
-  alias Minga.Theme
   alias Minga.Face
+  alias Minga.Theme
 
   @typedoc "A draw rectangle: {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}

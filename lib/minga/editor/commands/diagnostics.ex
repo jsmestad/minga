@@ -10,6 +10,8 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
+  alias Minga.Diagnostics.PickerSource, as: DiagPickerSource
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.Supervisor, as: LSPSupervisor
@@ -29,7 +31,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
   def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
 
   def execute(state, :diagnostic_list) do
-    Minga.Editor.PickerUI.open(state, Minga.Diagnostics.PickerSource)
+    PickerUI.open(state, DiagPickerSource)
   end
 
   def execute(%{buffers: %{active: buf}} = state, :next_diagnostic) do

@@ -17,8 +17,8 @@ defmodule Minga.Editor.Modeline do
   alias Minga.Buffer.Unicode
   alias Minga.Devicon
   alias Minga.Editor.DisplayList
-  alias Minga.Mode
   alias Minga.Face
+  alias Minga.Mode
 
   alias Minga.Theme
 
