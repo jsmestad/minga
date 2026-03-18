@@ -2,7 +2,20 @@ defmodule Minga.Agent.MarkdownHighlightTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.MarkdownHighlight
+  alias Minga.Face
   alias Minga.Highlight
+
+  defp make_highlight(attrs) do
+    theme = Keyword.get(attrs, :theme, %{})
+
+    %Highlight{
+      version: Keyword.get(attrs, :version, 1),
+      spans: Keyword.get(attrs, :spans, {}),
+      capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
+      theme: theme,
+      face_registry: Face.Registry.from_syntax(theme)
+    }
+  end
 
   @theme_syntax %{
     "keyword" => [fg: 0x51AFEF],
@@ -89,12 +102,12 @@ defmodule Minga.Agent.MarkdownHighlightTest do
 
       # Tree-sitter would highlight "def" in the code line.
       # The code line "def hello" starts at byte 10 (after "```elixir\n")
-      highlight = %Highlight{
-        version: 1,
-        spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
-        capture_names: ["keyword"],
-        theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
-      }
+      highlight =
+        make_highlight(
+          spans: {%{start_byte: 10, end_byte: 13, capture_id: 0}},
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
+        )
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 0)
 
@@ -120,12 +133,12 @@ defmodule Minga.Agent.MarkdownHighlightTest do
 
       # "def hello" is 10 bytes into this message's text.
       # With buffer_byte_offset=100, the "def" keyword is at bytes 110-113.
-      highlight = %Highlight{
-        version: 1,
-        spans: {%{start_byte: 110, end_byte: 113, capture_id: 0}},
-        capture_names: ["keyword"],
-        theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
-      }
+      highlight =
+        make_highlight(
+          spans: {%{start_byte: 110, end_byte: 113, capture_id: 0}},
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000, bold: true]}
+        )
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 100)
 
@@ -141,12 +154,7 @@ defmodule Minga.Agent.MarkdownHighlightTest do
       # A header line should NOT be overridden by tree-sitter
       text = "# My Header"
 
-      highlight = %Highlight{
-        version: 1,
-        spans: {},
-        capture_names: [],
-        theme: %{}
-      }
+      highlight = make_highlight(spans: {}, capture_names: [], theme: %{})
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax, 0)
 
@@ -161,12 +169,7 @@ defmodule Minga.Agent.MarkdownHighlightTest do
     test "falls back when highlight has no spans" do
       text = "**bold**"
 
-      highlight = %Highlight{
-        version: 0,
-        spans: {},
-        capture_names: [],
-        theme: %{}
-      }
+      highlight = make_highlight(version: 0, spans: {}, capture_names: [], theme: %{})
 
       result = MarkdownHighlight.stylize(text, highlight, @theme_syntax)
 
