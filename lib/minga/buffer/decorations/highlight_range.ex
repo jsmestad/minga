@@ -10,12 +10,13 @@ defmodule Minga.Buffer.Decorations.HighlightRange do
   """
 
   alias Minga.Buffer.IntervalTree
+  alias Minga.Face
 
   @enforce_keys [:id, :start, :end_, :style]
   defstruct id: nil,
             start: {0, 0},
             end_: {0, 0},
-            style: [],
+            style: %Face{name: "_"},
             priority: 0,
             group: nil
 
@@ -23,7 +24,7 @@ defmodule Minga.Buffer.Decorations.HighlightRange do
           id: reference(),
           start: IntervalTree.position(),
           end_: IntervalTree.position(),
-          style: keyword(),
+          style: Face.t(),
           priority: integer(),
           group: atom() | nil
         }

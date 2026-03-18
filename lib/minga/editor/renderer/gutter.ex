@@ -13,6 +13,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.DisplayList
+  alias Minga.Face
 
   @sign_col_width 2
 
@@ -62,7 +63,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
       severity ->
         {icon, fg} = sign_for_severity(severity, colors)
-        DisplayList.draw(screen_row, col_offset, icon, fg: fg)
+        DisplayList.draw(screen_row, col_offset, icon, Face.new(fg: fg))
     end
   end
 
@@ -85,7 +86,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
     num_str = Integer.to_string(number)
     padded = String.pad_leading(num_str, line_number_w - 1)
-    DisplayList.draw(screen_row, col_offset, padded, fg: fg)
+    DisplayList.draw(screen_row, col_offset, padded, Face.new(fg: fg))
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -103,13 +104,13 @@ defmodule Minga.Editor.Renderer.Gutter do
         DisplayList.draw(screen_row, col_offset, "  ")
 
       :added ->
-        DisplayList.draw(screen_row, col_offset, "▎ ", fg: git_colors.added_fg)
+        DisplayList.draw(screen_row, col_offset, "▎ ", Face.new(fg: git_colors.added_fg))
 
       :modified ->
-        DisplayList.draw(screen_row, col_offset, "▎ ", fg: git_colors.modified_fg)
+        DisplayList.draw(screen_row, col_offset, "▎ ", Face.new(fg: git_colors.modified_fg))
 
       :deleted ->
-        DisplayList.draw(screen_row, col_offset, "▁ ", fg: git_colors.deleted_fg)
+        DisplayList.draw(screen_row, col_offset, "▁ ", Face.new(fg: git_colors.deleted_fg))
     end
   end
 

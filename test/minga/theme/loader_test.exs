@@ -40,8 +40,8 @@ defmodule Minga.Theme.LoaderTest do
       """)
 
       {:ok, loaded} = Loader.load_file(path)
-      style = Minga.Face.Registry.style_for(loaded.face_registry, "keyword")
-      assert Keyword.get(style, :fg) == 0xFF0000
+      face = Minga.Face.Registry.style_for(loaded.face_registry, "keyword")
+      assert face.fg == 0xFF0000
     end
 
     test "editor color overrides are applied", %{tmp_dir: dir} do

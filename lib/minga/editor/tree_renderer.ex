@@ -16,6 +16,7 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.FileTree
   alias Minga.Filetype
   alias Minga.Theme
+  alias Minga.Face
 
   # Box-drawing characters for indent guides
   @guide_pipe "│ "
@@ -125,10 +126,11 @@ defmodule Minga.Editor.TreeRenderer do
     header_display = String.slice(header_text, 0, width) |> String.pad_trailing(width)
 
     header = [
-      DisplayList.draw(row_off, col_off, header_display,
-        fg: theme.tree.header_fg,
-        bg: theme.tree.header_bg,
-        bold: true
+      DisplayList.draw(
+        row_off,
+        col_off,
+        header_display,
+        Face.new(fg: theme.tree.header_fg, bg: theme.tree.header_bg, bold: true)
       )
     ]
 
@@ -271,7 +273,8 @@ defmodule Minga.Editor.TreeRenderer do
 
       if drawn_width < width do
         pad = String.duplicate(" ", width - drawn_width)
-        draws ++ [DisplayList.draw(row, col + drawn_width, pad, [fg: theme.tree.fg] ++ row_bg)]
+        pad_face = %{row_bg | fg: theme.tree.fg}
+        draws ++ [DisplayList.draw(row, col + drawn_width, pad, pad_face)]
       else
         draws
       end
@@ -319,60 +322,60 @@ defmodule Minga.Editor.TreeRenderer do
 
   # ── Style helpers ──────────────────────────────────────────────────────
 
-  @spec row_background(boolean(), boolean(), Theme.t()) :: keyword()
+  @spec row_background(boolean(), boolean(), Theme.t()) :: Face.t()
   defp row_background(true = _is_cursor, true = _focused, theme) do
-    [bg: theme.tree.dir_fg]
+    Face.new(bg: theme.tree.dir_fg)
   end
 
   defp row_background(true = _is_cursor, false = _focused, theme) do
-    [bg: theme.tree.cursor_bg]
+    Face.new(bg: theme.tree.cursor_bg)
   end
 
   defp row_background(false = _is_cursor, _focused, theme) do
-    [bg: theme.tree.bg]
+    Face.new(bg: theme.tree.bg)
   end
 
-  @spec guide_draw_style(boolean(), boolean(), Theme.t()) :: keyword()
+  @spec guide_draw_style(boolean(), boolean(), Theme.t()) :: Face.t()
   defp guide_draw_style(true = _is_cursor, true = _focused, theme) do
-    [fg: theme.tree.bg, bg: theme.tree.dir_fg]
+    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
   end
 
   defp guide_draw_style(true = _is_cursor, false = _focused, theme) do
-    [fg: theme.tree.separator_fg, bg: theme.tree.cursor_bg]
+    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.cursor_bg)
   end
 
   defp guide_draw_style(_is_cursor, _focused, theme) do
-    [fg: theme.tree.separator_fg, bg: theme.tree.bg]
+    Face.new(fg: theme.tree.separator_fg, bg: theme.tree.bg)
   end
 
-  @spec icon_draw_style(non_neg_integer(), boolean(), boolean(), Theme.t()) :: keyword()
+  @spec icon_draw_style(non_neg_integer(), boolean(), boolean(), Theme.t()) :: Face.t()
   defp icon_draw_style(_icon_color, true = _is_cursor, true = _focused, theme) do
     # Focused cursor row: invert, use bg as fg
-    [fg: theme.tree.bg, bg: theme.tree.dir_fg]
+    Face.new(fg: theme.tree.bg, bg: theme.tree.dir_fg)
   end
 
   defp icon_draw_style(icon_color, true = _is_cursor, false = _focused, theme) do
-    [fg: icon_color, bg: theme.tree.cursor_bg]
+    Face.new(fg: icon_color, bg: theme.tree.cursor_bg)
   end
 
   defp icon_draw_style(icon_color, _is_cursor, _focused, theme) do
-    [fg: icon_color, bg: theme.tree.bg]
+    Face.new(fg: icon_color, bg: theme.tree.bg)
   end
 
-  @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: keyword()
+  @spec dirty_indicator_style(boolean(), boolean(), Theme.t()) :: Face.t()
   defp dirty_indicator_style(true = _is_cursor, true = _focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
-    [fg: theme.tree.bg, bg: color]
+    Face.new(fg: theme.tree.bg, bg: color)
   end
 
   defp dirty_indicator_style(true = _is_cursor, false = _focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
-    [fg: color, bg: theme.tree.cursor_bg]
+    Face.new(fg: color, bg: theme.tree.cursor_bg)
   end
 
   defp dirty_indicator_style(_is_cursor, _focused, theme) do
     color = theme.tree.modified_fg || theme.tree.fg
-    [fg: color, bg: theme.tree.bg]
+    Face.new(fg: color, bg: theme.tree.bg)
   end
 
   @spec git_indicator_style(
@@ -380,18 +383,18 @@ defmodule Minga.Editor.TreeRenderer do
           boolean(),
           boolean(),
           Theme.t()
-        ) :: keyword()
+        ) :: Face.t()
   defp git_indicator_style(status, true = _is_cursor, true = _focused, theme) do
     # Focused cursor row: invert
-    [fg: theme.tree.bg, bg: git_status_color(status, theme)]
+    Face.new(fg: theme.tree.bg, bg: git_status_color(status, theme))
   end
 
   defp git_indicator_style(status, true = _is_cursor, false = _focused, theme) do
-    [fg: git_status_color(status, theme), bg: theme.tree.cursor_bg]
+    Face.new(fg: git_status_color(status, theme), bg: theme.tree.cursor_bg)
   end
 
   defp git_indicator_style(status, _is_cursor, _focused, theme) do
-    [fg: git_status_color(status, theme), bg: theme.tree.bg]
+    Face.new(fg: git_status_color(status, theme), bg: theme.tree.bg)
   end
 
   @spec git_status_color(Minga.FileTree.GitStatus.file_status(), Theme.t()) ::
@@ -403,7 +406,7 @@ defmodule Minga.Editor.TreeRenderer do
   defp git_status_color(:renamed, theme), do: theme.tree.git_staged_fg || theme.tree.fg
   defp git_status_color(:deleted, theme), do: theme.tree.git_conflict_fg || theme.tree.fg
 
-  @spec name_draw_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: keyword()
+  @spec name_draw_style(FileTree.entry(), boolean(), boolean(), boolean(), Theme.t()) :: Face.t()
   defp name_draw_style(entry, is_cursor, is_active, focused, theme) do
     tree = theme.tree
 
@@ -416,13 +419,13 @@ defmodule Minga.Editor.TreeRenderer do
 
     case {is_cursor, focused} do
       {true, true} ->
-        [fg: tree.bg, bg: base_fg, bold: entry.dir?]
+        Face.new(fg: tree.bg, bg: base_fg, bold: entry.dir?)
 
       {true, false} ->
-        [fg: base_fg, bg: tree.cursor_bg, bold: entry.dir?]
+        Face.new(fg: base_fg, bg: tree.cursor_bg, bold: entry.dir?)
 
       _ ->
-        [fg: base_fg, bg: tree.bg, bold: entry.dir?]
+        Face.new(fg: base_fg, bg: tree.bg, bold: entry.dir?)
     end
   end
 
@@ -443,7 +446,7 @@ defmodule Minga.Editor.TreeRenderer do
 
   defp render_blanks(rendered, total, row_start, col, width, theme) do
     blank = String.duplicate(" ", width)
-    style = [fg: theme.tree.fg, bg: theme.tree.bg]
+    style = Face.new(fg: theme.tree.fg, bg: theme.tree.bg)
 
     for i <- rendered..(total - 1) do
       DisplayList.draw(row_start + i, col, blank, style)
@@ -457,7 +460,7 @@ defmodule Minga.Editor.TreeRenderer do
           Theme.t()
         ) :: [DisplayList.draw()]
   defp render_separator(col, row_start, height, theme) do
-    style = [fg: theme.tree.separator_fg, bg: theme.tree.bg]
+    style = Face.new(fg: theme.tree.separator_fg, bg: theme.tree.bg)
 
     for row <- row_start..(row_start + height - 1) do
       DisplayList.draw(row, col, "│", style)

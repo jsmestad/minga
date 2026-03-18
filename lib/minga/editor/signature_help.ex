@@ -21,6 +21,7 @@ defmodule Minga.Editor.SignatureHelp do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles
+  alias Minga.Face
 
   @enforce_keys [:signatures, :active_signature, :active_parameter, :anchor_row, :anchor_col]
   defstruct signatures: [],
@@ -248,15 +249,23 @@ defmodule Minga.Editor.SignatureHelp do
         after_text = String.slice(label, end_col, String.length(label) - end_col)
 
         [
-          DisplayList.draw(0, 0, before, fg: base_fg),
-          DisplayList.draw(0, String.length(before), active, fg: highlight_fg, bold: true),
-          DisplayList.draw(0, String.length(before) + String.length(active), after_text,
-            fg: base_fg
+          DisplayList.draw(0, 0, before, Face.new(fg: base_fg)),
+          DisplayList.draw(
+            0,
+            String.length(before),
+            active,
+            Face.new(fg: highlight_fg, bold: true)
+          ),
+          DisplayList.draw(
+            0,
+            String.length(before) + String.length(active),
+            after_text,
+            Face.new(fg: base_fg)
           )
         ]
 
       nil ->
-        [DisplayList.draw(0, 0, label, fg: base_fg)]
+        [DisplayList.draw(0, 0, label, Face.new(fg: base_fg))]
     end
   end
 

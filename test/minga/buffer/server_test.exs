@@ -4,6 +4,7 @@ defmodule Minga.Buffer.ServerTest do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server
   alias Minga.Config.Options
+  alias Minga.Face
 
   @moduletag :tmp_dir
 

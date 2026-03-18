@@ -4,6 +4,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Face
 
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do
@@ -13,7 +14,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       :ok =
         BufferServer.batch_decorations(pid, fn decs ->
           {_id, decs} =
-            Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: [fg: 0xFF0000])
+            Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: Minga.Face.new(fg: 0xFF0000))
 
           decs
         end)
@@ -42,7 +43,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       BufferServer.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_virtual_text(decs, {0, 0},
-            segments: [{"hint", []}],
+            segments: [{"hint", Minga.Face.new()}],
             placement: :eol
           )
 
@@ -70,13 +71,13 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       {_id, decs} =
         Decorations.add_highlight(decs, {0, 0}, {0, 5},
-          style: [fg: 0xFF0000],
+          style: Minga.Face.new(fg: 0xFF0000),
           group: :test_group
         )
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"hint", []}],
+          segments: [{"hint", Minga.Face.new()}],
           placement: :eol,
           group: :test_group
         )
@@ -84,7 +85,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       {_id, decs} =
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
-          render: fn _w -> [{"block", []}] end,
+          render: fn _w -> [{"block", Minga.Face.new()}] end,
           group: :test_group
         )
 
@@ -94,7 +95,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       # Also add decorations from another group
       {_id, decs} =
         Decorations.add_highlight(decs, {1, 0}, {1, 5},
-          style: [fg: 0x00FF00],
+          style: Minga.Face.new(fg: 0x00FF00),
           group: :other_group
         )
 
@@ -116,13 +117,13 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       {_id, decs} =
         Decorations.add_highlight(decs, {0, 0}, {0, 3},
-          style: [fg: 0xFF0000],
+          style: Minga.Face.new(fg: 0xFF0000),
           group: {:lsp, :elixir_ls}
         )
 
       {_id, decs} =
         Decorations.add_highlight(decs, {1, 0}, {1, 3},
-          style: [fg: 0x00FF00],
+          style: Minga.Face.new(fg: 0x00FF00),
           group: {:lsp, :rust_analyzer}
         )
 
@@ -141,7 +142,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
         "new content",
         fn decs ->
           {_id, decs} =
-            Decorations.add_highlight(decs, {0, 0}, {0, 3}, style: [fg: 0xFF0000])
+            Decorations.add_highlight(decs, {0, 0}, {0, 3}, style: Minga.Face.new(fg: 0xFF0000))
 
           decs
         end
@@ -173,13 +174,13 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"hint1", []}],
+          segments: [{"hint1", Minga.Face.new()}],
           placement: :eol
         )
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {2, 0},
-          segments: [{"hint2", []}],
+          segments: [{"hint2", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -199,7 +200,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"first", []}],
+          segments: [{"first", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -207,7 +208,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"second", []}],
+          segments: [{"second", Minga.Face.new()}],
           placement: :eol
         )
 

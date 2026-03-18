@@ -18,6 +18,7 @@ defmodule Minga.Editor.Modeline do
   alias Minga.Devicon
   alias Minga.Editor.DisplayList
   alias Minga.Mode
+  alias Minga.Face
 
   alias Minga.Theme
 
@@ -160,7 +161,7 @@ defmodule Minga.Editor.Modeline do
     {commands, click_regions, _} =
       Enum.reduce(all_segments, {[], [], col_off}, fn {text, fg, bg, opts, target},
                                                       {cmds, regions, col} ->
-        cmd = DisplayList.draw(row, col, text, [{:fg, fg}, {:bg, bg} | opts])
+        cmd = DisplayList.draw(row, col, text, Face.new([{:fg, fg}, {:bg, bg} | opts]))
         width = Unicode.display_width(text)
         next_col = col + width
 

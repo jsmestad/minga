@@ -16,6 +16,7 @@ defmodule Minga.Editor.CompletionUI do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles
+  alias Minga.Face
 
   @max_rows 10
   @max_width 50
@@ -139,25 +140,23 @@ defmodule Minga.Editor.CompletionUI do
     full_text = String.slice(full_text, 0, width)
 
     cmds = [
-      DisplayList.draw(row, col, String.pad_trailing(full_text, width),
-        fg: fg,
-        bg: bg,
-        bold: is_selected
+      DisplayList.draw(
+        row,
+        col,
+        String.pad_trailing(full_text, width),
+        Face.new(fg: fg, bg: bg, bold: is_selected)
       )
     ]
 
     # Render kind character with dim color
     kind_cmd =
-      DisplayList.draw(row, col + 1, kind_char,
-        fg: colors.dim_fg,
-        bg: bg
-      )
+      DisplayList.draw(row, col + 1, kind_char, Face.new(fg: colors.dim_fg, bg: bg))
 
     # Render detail with dim color if present
     detail_cmds =
       if detail_part != "" do
         detail_col = col + String.length(label_part) + padding
-        [DisplayList.draw(row, detail_col, detail_part, fg: colors.dim_fg, bg: bg)]
+        [DisplayList.draw(row, detail_col, detail_part, Face.new(fg: colors.dim_fg, bg: bg))]
       else
         []
       end

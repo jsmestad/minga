@@ -2,6 +2,7 @@ defmodule Minga.ThemeTest do
   use ExUnit.Case, async: true
 
   alias Minga.Theme
+  alias Minga.Face
 
   describe "available/0" do
     test "returns 7 built-in themes" do

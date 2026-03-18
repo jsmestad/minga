@@ -6,6 +6,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
+  alias Minga.Face
 
   @search_colors %Minga.Theme.Search{
     highlight_bg: 0xECBE7B,
@@ -41,7 +42,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
       {_id, decs_v1} =
         Decorations.add_block_decoration(decs_v1, 0,
           placement: :above,
-          render: fn _w -> [{"Header v1", [bold: true]}] end,
+          render: fn _w -> [{"Header v1", Minga.Face.new(bold: true)}] end,
           priority: 10
         )
 
@@ -58,14 +59,14 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
       {_id, decs_v2} =
         Decorations.add_block_decoration(decs_v2, 0,
           placement: :above,
-          render: fn _w -> [{"Header A", [bold: true]}] end,
+          render: fn _w -> [{"Header A", Minga.Face.new(bold: true)}] end,
           priority: 10
         )
 
       {_id, decs_v2} =
         Decorations.add_block_decoration(decs_v2, 1,
           placement: :above,
-          render: fn _w -> [{"Header B", [bold: true]}] end,
+          render: fn _w -> [{"Header B", Minga.Face.new(bold: true)}] end,
           priority: 10
         )
 

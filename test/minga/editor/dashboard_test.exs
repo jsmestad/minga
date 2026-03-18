@@ -9,6 +9,7 @@ defmodule Minga.Editor.DashboardTest do
   alias Minga.Editor.Viewport
   alias Minga.Picker
   alias Minga.Picker.Item
+  alias Minga.Face
 
   describe "new_state/1" do
     test "creates state with quick actions when no recent files" do
@@ -162,7 +163,7 @@ defmodule Minga.Editor.DashboardTest do
       # The first quick action (cursor=0) should have item_active_bg
       active_bg_draws =
         Enum.filter(draws, fn {_, _, _, style} ->
-          Keyword.get(style, :bg) == dt.item_active_bg
+          style.bg == dt.item_active_bg
         end)
 
       assert active_bg_draws != [], "expected active item to have highlight background"

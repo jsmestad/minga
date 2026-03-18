@@ -16,7 +16,7 @@ defmodule Minga.Buffer.ConcealRangeTest do
       }
 
       assert range.replacement == nil
-      assert range.replacement_style == []
+      assert %Minga.Face{name: "_"} = range.replacement_style
       assert range.priority == 0
       assert range.group == nil
     end
@@ -27,11 +27,11 @@ defmodule Minga.Buffer.ConcealRangeTest do
         start_pos: {0, 0},
         end_pos: {0, 5},
         replacement: "·",
-        replacement_style: [fg: 0x555555]
+        replacement_style: Minga.Face.new(fg: 0x555555)
       }
 
       assert range.replacement == "·"
-      assert range.replacement_style == [fg: 0x555555]
+      assert range.replacement_style.fg == 0x555555
     end
   end
 
@@ -106,13 +106,13 @@ defmodule Minga.Buffer.ConcealRangeTest do
       {_id, decs} =
         Decorations.add_conceal(decs, {0, 0}, {0, 2},
           replacement: "·",
-          replacement_style: [fg: 0x555555],
+          replacement_style: Minga.Face.new(fg: 0x555555),
           group: :markdown
         )
 
       [range] = decs.conceal_ranges
       assert range.replacement == "·"
-      assert range.replacement_style == [fg: 0x555555]
+      assert range.replacement_style.fg == 0x555555
       assert range.group == :markdown
     end
 

@@ -22,6 +22,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
+  alias Minga.Face
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -145,8 +146,11 @@ defmodule Minga.Editor.RenderPipeline.Content do
     tilde_draws =
       if rows_used < visible_rows do
         for row <- rows_used..(visible_rows - 1) do
-          DisplayList.draw(row + row_off, col_off + gutter_w, "~",
-            fg: state.theme.editor.tilde_fg
+          DisplayList.draw(
+            row + row_off,
+            col_off + gutter_w,
+            "~",
+            Face.new(fg: state.theme.editor.tilde_fg)
           )
         end
       else
@@ -251,8 +255,11 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
           separator =
             for row <- 0..(sh - 1) do
-              DisplayList.draw(sr + row, separator_col, "│",
-                fg: state.theme.editor.split_border_fg
+              DisplayList.draw(
+                sr + row,
+                separator_col,
+                "│",
+                Face.new(fg: state.theme.editor.split_border_fg)
               )
             end
 
@@ -470,7 +477,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   defp build_tilde_draws(rendered_rows, chat_height, row_off, col_off) do
     if rendered_rows < chat_height do
       for r <- rendered_rows..(chat_height - 1) do
-        DisplayList.draw(r + row_off, col_off, "~", fg: 0x555555)
+        DisplayList.draw(r + row_off, col_off, "~", Face.new(fg: 0x555555))
       end
     else
       []

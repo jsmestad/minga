@@ -27,6 +27,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.Window
   alias Minga.Input
   alias Minga.Test.StubServer
+  alias Minga.Face
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 

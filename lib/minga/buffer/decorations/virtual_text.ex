@@ -19,6 +19,7 @@ defmodule Minga.Buffer.Decorations.VirtualText do
 
   alias Minga.Buffer.IntervalTree
   alias Minga.Buffer.Unicode
+  alias Minga.Face
 
   @enforce_keys [:id, :anchor, :segments, :placement]
   defstruct id: nil,
@@ -29,9 +30,9 @@ defmodule Minga.Buffer.Decorations.VirtualText do
             group: nil
 
   @typedoc """
-  A styled text segment: the text string and its style properties.
+  A styled text segment: the text string and its Face style.
   """
-  @type segment :: {text :: String.t(), style :: keyword()}
+  @type segment :: {text :: String.t(), style :: Face.t()}
 
   @typedoc """
   Placement mode for virtual text.

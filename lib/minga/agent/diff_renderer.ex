@@ -10,6 +10,7 @@ defmodule Minga.Agent.DiffRenderer do
   alias Minga.Agent.DiffReview
   alias Minga.Editor.DisplayList
   alias Minga.Theme
+  alias Minga.Face
 
   @typedoc "A draw command for the display list."
   @type draw :: DisplayList.draw()
@@ -84,7 +85,7 @@ defmodule Minga.Agent.DiffRenderer do
     padded = String.pad_trailing(String.slice(text, 0, width), width)
 
     at = theme.agent
-    [DisplayList.draw(row, col, padded, fg: at.header_fg, bg: at.header_bg, bold: true)]
+    [DisplayList.draw(row, col, padded, Face.new(fg: at.header_fg, bg: at.header_bg, bold: true))]
   end
 
   # ── Line rendering ─────────────────────────────────────────────────────────
@@ -131,17 +132,19 @@ defmodule Minga.Agent.DiffRenderer do
     gutter_text = String.pad_trailing("#{resolution_marker}#{gutter_char}", gutter_w)
     content_text = String.slice(text, 0, content_w) |> String.pad_trailing(content_w)
 
-    gutter_cmd = DisplayList.draw(row, gutter_col, gutter_text, fg: fg, bg: bg)
-    content_cmd = DisplayList.draw(row, content_col, content_text, fg: fg, bg: bg)
+    line_face = Face.new(fg: fg, bg: bg)
+    gutter_cmd = DisplayList.draw(row, gutter_col, gutter_text, line_face)
+    content_cmd = DisplayList.draw(row, content_col, content_text, line_face)
 
     highlight_cmds =
       if is_current and hunk_idx != nil do
         # Subtle left-border highlight for current hunk
         [
-          DisplayList.draw(row, gutter_col, resolution_marker,
-            fg: theme.editor.fg,
-            bg: bg,
-            bold: true
+          DisplayList.draw(
+            row,
+            gutter_col,
+            resolution_marker,
+            Face.new(fg: theme.editor.fg, bg: bg, bold: true)
           )
         ]
       else

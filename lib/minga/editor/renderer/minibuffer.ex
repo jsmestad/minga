@@ -13,6 +13,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
+  alias Minga.Face
   alias Minga.LSP.SyncServer
 
   @typedoc """
@@ -39,8 +40,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(search_text, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -52,8 +52,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(prompt_text, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -67,8 +66,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(prompt, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -80,8 +78,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(prompt, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -93,8 +90,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(cmd_text, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -106,8 +102,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(eval_text, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -132,8 +127,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(prompt, cols),
-      fg: mb.fg,
-      bg: mb.bg
+      Face.new(fg: mb.fg, bg: mb.bg)
     )
   end
 
@@ -144,8 +138,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(msg, cols),
-      fg: mb.warning_fg,
-      bg: mb.bg
+      Face.new(fg: mb.warning_fg, bg: mb.bg)
     )
   end
 
@@ -158,8 +151,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.pad_trailing(hint, cols),
-      fg: mb.dim_fg,
-      bg: mb.bg
+      Face.new(fg: mb.dim_fg, bg: mb.bg)
     )
   end
 
@@ -177,8 +169,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
           row,
           0,
           String.pad_trailing(msg, cols),
-          fg: mb.dim_fg,
-          bg: mb.bg
+          Face.new(fg: mb.dim_fg, bg: mb.bg)
         )
     end
   end
@@ -192,8 +183,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.duplicate(" ", cols),
-      fg: mb.dim_fg,
-      bg: mb.bg
+      Face.new(fg: mb.dim_fg, bg: mb.bg)
     )
   end
 
@@ -203,8 +193,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
       row,
       0,
       String.duplicate(" ", cols),
-      fg: 0x888888,
-      bg: 0x000000
+      Face.new(fg: 0x888888, bg: 0x000000)
     )
   end
 

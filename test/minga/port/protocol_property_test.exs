@@ -11,6 +11,7 @@ defmodule Minga.Port.ProtocolPropertyTest do
   use ExUnitProperties
 
   alias Minga.Port.Protocol
+  alias Minga.Face
 
   import Minga.Test.Generators
 

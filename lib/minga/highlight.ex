@@ -22,11 +22,11 @@ defmodule Minga.Highlight do
           face_registry: Face.Registry.t()
         }
 
-  @typedoc "Style resolver: a function that maps capture names to style keyword lists."
-  @type style_resolver :: (String.t() -> Minga.Port.Protocol.style())
+  @typedoc "Style resolver: a function that maps capture names to Face structs."
+  @type style_resolver :: (String.t() -> Face.t())
 
   @typedoc "A styled text segment for rendering."
-  @type styled_segment :: {text :: String.t(), style :: Minga.Port.Protocol.style()}
+  @type styled_segment :: {text :: String.t(), style :: Face.t()}
 
   @doc "Creates an empty highlight state with the default theme."
   @spec new() :: t()
@@ -108,15 +108,9 @@ defmodule Minga.Highlight do
   Splits a line into styled segments based on highlight spans.
 
   Given a line's text and its starting byte offset within the buffer,
-  finds all overlapping spans and produces `[{text_segment, style}]`.
-  Unstyled regions get `[]` as their style.
-
-  ## Examples
-
-      iex> hl = Minga.Highlight.new(%{"keyword" => [fg: 0xFF0000]})
-      iex> hl = %{hl | version: 1, spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}], capture_names: {"keyword"}}
-      iex> Minga.Highlight.styles_for_line(hl, "def foo", 0)
-      [{"def", [fg: 0xFF0000]}, {" foo", []}]
+  finds all overlapping spans and produces `[{text_segment, Face.t()}]`.
+  Unstyled regions get `Face.new()` as their style (anonymous face with
+  all fields nil).
   """
   @spec styles_for_line(t(), String.t(), non_neg_integer(), style_resolver() | nil) ::
           [styled_segment()]
@@ -124,7 +118,7 @@ defmodule Minga.Highlight do
 
   def styles_for_line(%__MODULE__{spans: spans}, line_text, _line_start_byte, _resolver)
       when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
-    [{line_text, []}]
+    [{line_text, Face.new()}]
   end
 
   # Fast path: tuple spans (production path from Zig)
@@ -137,7 +131,7 @@ defmodule Minga.Highlight do
     overlapping = collect_overlapping(spans, span_count, 0, line_start_byte, line_end_byte, [])
 
     case overlapping do
-      [] -> [{line_text, []}]
+      [] -> [{line_text, Face.new()}]
       _ -> build_segments(line_text, line_start_byte, overlapping, hl, resolver)
     end
   end
@@ -166,7 +160,7 @@ defmodule Minga.Highlight do
 
   def styles_for_visible_lines(%__MODULE__{spans: spans}, lines, _resolver)
       when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
-    Enum.map(lines, fn {text, _} -> [{text, []}] end)
+    Enum.map(lines, fn {text, _} -> [{text, Face.new()}] end)
   end
 
   def styles_for_visible_lines(%__MODULE__{spans: spans} = hl, lines, resolver)
@@ -198,7 +192,7 @@ defmodule Minga.Highlight do
 
     segments =
       case overlapping do
-        [] -> [{line_text, []}]
+        [] -> [{line_text, Face.new()}]
         _ -> build_segments(line_text, line_start, overlapping, hl, resolver)
       end
 
@@ -275,7 +269,7 @@ defmodule Minga.Highlight do
 
     case spans do
       [] ->
-        [{line_text, []}]
+        [{line_text, Face.new()}]
 
       _ ->
         line_len = byte_size(line_text)
@@ -348,7 +342,7 @@ defmodule Minga.Highlight do
 
     if pos < line_len do
       seg = safe_binary_slice(line_text, pos, line_len - pos)
-      Enum.reverse([{seg, []} | acc])
+      Enum.reverse([{seg, Face.new()} | acc])
     else
       Enum.reverse(acc)
     end
@@ -381,9 +375,8 @@ defmodule Minga.Highlight do
     sweep_events(rest, line_text, hl, resolver, new_pos, active, acc)
   end
 
-  @spec winning_style([active_entry()], t(), style_resolver() | nil) ::
-          Minga.Port.Protocol.style()
-  defp winning_style([], _hl, _resolver), do: []
+  @spec winning_style([active_entry()], t(), style_resolver() | nil) :: Face.t()
+  defp winning_style([], _hl, _resolver), do: Face.new()
 
   defp winning_style([{_layer, _width, _pidx, capture_id} | _], hl, resolver),
     do: resolve_style(hl, capture_id, resolver)
@@ -410,12 +403,11 @@ defmodule Minga.Highlight do
   defp remove_active([entry | tail], entry), do: tail
   defp remove_active([head | tail], entry), do: [head | remove_active(tail, entry)]
 
-  @spec resolve_style(t(), non_neg_integer(), style_resolver() | nil) ::
-          Minga.Port.Protocol.style()
+  @spec resolve_style(t(), non_neg_integer(), style_resolver() | nil) :: Face.t()
   defp resolve_style(hl, capture_id, resolver) do
     case capture_name_at(hl, capture_id) do
       nil ->
-        []
+        Face.new()
 
       name ->
         if resolver do

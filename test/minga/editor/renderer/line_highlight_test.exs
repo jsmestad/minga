@@ -39,23 +39,23 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     }
   end
 
-  defp decode_draw({row, col, text, style}) do
+  defp decode_draw({row, col, text, %Minga.Face{} = face}) do
     %{
       row: row,
       col: col,
       text: text,
-      fg: Keyword.get(style, :fg, 0xFFFFFF),
-      bg: Keyword.get(style, :bg, 0x000000),
-      attrs: decode_attrs(style)
+      fg: face.fg || 0xFFFFFF,
+      bg: face.bg || 0x000000,
+      attrs: decode_attrs(face)
     }
   end
 
-  defp decode_attrs(style) do
+  defp decode_attrs(%Minga.Face{} = face) do
     []
-    |> then(fn a -> if Keyword.get(style, :bold, false), do: [:bold | a], else: a end)
-    |> then(fn a -> if Keyword.get(style, :italic, false), do: [:italic | a], else: a end)
-    |> then(fn a -> if Keyword.get(style, :underline, false), do: [:underline | a], else: a end)
-    |> then(fn a -> if Keyword.get(style, :reverse, false), do: [:reverse | a], else: a end)
+    |> then(fn a -> if face.bold, do: [:bold | a], else: a end)
+    |> then(fn a -> if face.italic, do: [:italic | a], else: a end)
+    |> then(fn a -> if face.underline, do: [:underline | a], else: a end)
+    |> then(fn a -> if face.reverse, do: [:reverse | a], else: a end)
     |> Enum.reverse()
   end
 

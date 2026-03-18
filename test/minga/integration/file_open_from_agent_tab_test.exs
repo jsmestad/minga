@@ -27,6 +27,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   alias Minga.Editor.Window.Content
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
+  alias Minga.Face
 
   @moduletag :tmp_dir
 

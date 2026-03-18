@@ -5,6 +5,7 @@ defmodule Minga.Editor.TabBarRendererTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.TabBarRenderer
   alias Minga.Theme
+  alias Minga.Face
 
   defp doom_theme, do: Theme.get!(:doom_one)
 
@@ -43,11 +44,11 @@ defmodule Minga.Editor.TabBarRendererTest do
 
       assert active_draw != nil
       {_, _, _, active_style} = active_draw
-      assert Keyword.get(active_style, :bg) == colors.active_bg
+      assert active_style.bg == colors.active_bg
 
       assert inactive_draw != nil
       {_, _, _, inactive_style} = inactive_draw
-      assert Keyword.get(inactive_style, :bg) == colors.inactive_bg
+      assert inactive_style.bg == colors.inactive_bg
     end
 
     test "fills remaining width with background" do
@@ -107,7 +108,7 @@ defmodule Minga.Editor.TabBarRendererTest do
       assert inactive_body_idx != nil
       close_draw = Enum.at(draws, inactive_body_idx + 1)
       {_, _, _close_text, close_style} = close_draw
-      assert Keyword.get(close_style, :fg) == colors.inactive_bg
+      assert close_style.fg == colors.inactive_bg
     end
 
     test "inactive tab shows close icon when hovered" do
@@ -137,7 +138,7 @@ defmodule Minga.Editor.TabBarRendererTest do
       close_draw = Enum.at(draws_hovered, inactive_body_idx + 1)
       {_, _, close_text, close_style} = close_draw
       assert String.contains?(close_text, "✕")
-      assert Keyword.get(close_style, :fg) == colors.close_hover_fg
+      assert close_style.fg == colors.close_hover_fg
     end
 
     test "close icon on active tab uses close_hover_fg color" do
@@ -152,7 +153,7 @@ defmodule Minga.Editor.TabBarRendererTest do
       close_draw = Enum.find(draws, fn {_, _, text, _} -> String.contains?(text, "✕") end)
       assert close_draw != nil
       {_, _, _, close_style} = close_draw
-      assert Keyword.get(close_style, :fg) == colors.close_hover_fg
+      assert close_style.fg == colors.close_hover_fg
     end
 
     test "tab widths are stable regardless of hover state" do

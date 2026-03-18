@@ -24,6 +24,7 @@ defmodule Minga.Editor.TabBarRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Face
   alias Minga.Filetype
   alias Minga.Theme
 
@@ -177,7 +178,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
     left_draws =
       if show_left do
-        [{row, 0, @overflow_left, [fg: colors.separator_fg, bg: colors.bg]}]
+        [{row, 0, @overflow_left, Face.new(fg: colors.separator_fg, bg: colors.bg)}]
       else
         []
       end
@@ -189,7 +190,7 @@ defmodule Minga.Editor.TabBarRenderer do
       if show_right do
         [
           {row, cols - right_indicator_w, @overflow_right,
-           [fg: colors.separator_fg, bg: colors.bg]}
+           Face.new(fg: colors.separator_fg, bg: colors.bg)}
         ]
       else
         []
@@ -244,14 +245,14 @@ defmodule Minga.Editor.TabBarRenderer do
   defp emit_segments(row, start_col, segments, colors, hover_col) do
     Enum.reduce(segments, {[], [], start_col}, fn seg, {draws, regions, col} ->
       # Body draw
-      body_draw = {row, col, seg.body_text, [fg: seg.fg, bg: seg.bg]}
+      body_draw = {row, col, seg.body_text, Face.new(fg: seg.fg, bg: seg.bg)}
       body_end = col + seg.body_width
 
       # Close icon draw (visible or hidden based on active/hover state)
       close_visible = close_icon_visible?(seg, col, col + seg.width, hover_col)
       close_fg = if close_visible, do: colors.close_hover_fg, else: seg.bg
       close_text = if close_visible, do: seg.close_text, else: placeholder_text(seg.close_width)
-      close_draw = {row, body_end, close_text, [fg: close_fg, bg: seg.bg]}
+      close_draw = {row, body_end, close_text, Face.new(fg: close_fg, bg: seg.bg)}
       close_end = body_end + seg.close_width
 
       # Click regions: body for tab switch, close icon for tab close
@@ -320,8 +321,8 @@ defmodule Minga.Editor.TabBarRenderer do
     close_text =
       if close_visible, do: seg.close_text, else: placeholder_text(seg.close_width)
 
-    body_draw = {row, screen_col, seg.body_text, [fg: seg.fg, bg: seg.bg]}
-    close_draw = {row, body_screen_end, close_text, [fg: close_fg, bg: seg.bg]}
+    body_draw = {row, screen_col, seg.body_text, Face.new(fg: seg.fg, bg: seg.bg)}
+    close_draw = {row, body_screen_end, close_text, Face.new(fg: close_fg, bg: seg.bg)}
 
     body_region =
       clipped_region(
@@ -368,7 +369,7 @@ defmodule Minga.Editor.TabBarRenderer do
   @spec powerline_sep(non_neg_integer(), non_neg_integer(), Theme.color(), Theme.color(), map()) ::
           {[DisplayList.draw()], non_neg_integer()}
   defp powerline_sep(row, col, left_bg, right_bg, _colors) do
-    sep_draw = {row, col, @sep_right, [fg: left_bg, bg: right_bg]}
+    sep_draw = {row, col, @sep_right, Face.new(fg: left_bg, bg: right_bg)}
     {[sep_draw], col + 1}
   end
 
@@ -378,7 +379,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
   defp fill_draws(row, col, max_col, bg) do
     fill = String.duplicate(" ", max_col - col)
-    [{row, col, fill, [bg: bg]}]
+    [{row, col, fill, Face.new(bg: bg)}]
   end
 
   # ── Close icon visibility ─────────────────────────────────────────────────

@@ -34,6 +34,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
   """
 
   alias Minga.Buffer.IntervalTree
+  alias Minga.Face
 
   @enforce_keys [:id, :start_pos, :end_pos]
   defstruct [
@@ -42,7 +43,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
     :end_pos,
     :group,
     replacement: nil,
-    replacement_style: [],
+    replacement_style: %Face{name: "_"},
     priority: 0
   ]
 
@@ -62,7 +63,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
           start_pos: IntervalTree.position(),
           end_pos: IntervalTree.position(),
           replacement: String.t() | nil,
-          replacement_style: keyword(),
+          replacement_style: Face.t(),
           priority: integer(),
           group: atom() | nil
         }

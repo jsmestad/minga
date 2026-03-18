@@ -95,16 +95,17 @@ defmodule Minga.Face.RegistryTest do
   end
 
   describe "style_for/2" do
-    test "returns keyword list compatible with Protocol.style()" do
+    test "returns a resolved Face struct" do
       syntax = %{
         "keyword" => [fg: 0xC678DD, bold: true]
       }
 
       reg = Registry.from_syntax(syntax)
-      style = Registry.style_for(reg, "keyword")
+      face = Registry.style_for(reg, "keyword")
 
-      assert Keyword.get(style, :fg) == 0xC678DD
-      assert Keyword.get(style, :bold) == true
+      assert %Face{} = face
+      assert face.fg == 0xC678DD
+      assert face.bold == true
     end
   end
 
@@ -188,20 +189,20 @@ defmodule Minga.Face.RegistryTest do
       reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
 
       # Composite name: type + modifier
-      style = Registry.style_for(reg, "@lsp.type.function+deprecated")
+      face = Registry.style_for(reg, "@lsp.type.function+deprecated")
 
       # Gets function's color AND deprecated's strikethrough
-      assert Keyword.get(style, :fg) == 0x51AFEF
-      assert Keyword.get(style, :strikethrough) == true
+      assert face.fg == 0x51AFEF
+      assert face.strikethrough == true
     end
 
     test "multiple modifiers compose" do
       syntax = %{"variable" => [fg: 0xBD93F9]}
       reg = Registry.from_syntax(syntax) |> Registry.with_lsp_defaults()
 
-      style = Registry.style_for(reg, "@lsp.type.variable+deprecated+readonly")
-      assert Keyword.get(style, :fg) == 0xBD93F9
-      assert Keyword.get(style, :strikethrough) == true
+      face = Registry.style_for(reg, "@lsp.type.variable+deprecated+readonly")
+      assert face.fg == 0xBD93F9
+      assert face.strikethrough == true
     end
 
     test "LSP faces can be overridden by themes" do

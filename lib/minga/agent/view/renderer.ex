@@ -21,6 +21,7 @@ defmodule Minga.Agent.View.Renderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Face
 
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.Scroll
@@ -280,7 +281,7 @@ defmodule Minga.Agent.View.Renderer do
     # Background fill
     bg_cmds =
       for row <- 0..(height - 1) do
-        DisplayList.draw(row_off + row, col_off, blank, bg: at.panel_bg)
+        DisplayList.draw(row_off + row, col_off, blank, Face.new(bg: at.panel_bg))
       end
 
     sections = dashboard_sections(input, width, at)
@@ -289,9 +290,13 @@ defmodule Minga.Agent.View.Renderer do
     cwd = File.cwd!() |> shorten_path()
 
     dir_label =
-      dashboard_text(" Directory", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      dashboard_text(
+        " Directory",
+        width,
+        Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      )
 
-    dir_value = dashboard_text("  #{cwd}", width, fg: at.text_fg, bg: at.panel_bg)
+    dir_value = dashboard_text("  #{cwd}", width, Face.new(fg: at.text_fg, bg: at.panel_bg))
 
     dir_start = row_off + max(height - 2, 0)
 
@@ -325,10 +330,10 @@ defmodule Minga.Agent.View.Renderer do
 
     # ── Session title section ──
     title_lines = [
-      dashboard_text(" #{input.session_title}", width,
-        fg: at.header_fg,
-        bg: at.panel_bg,
-        bold: true
+      dashboard_text(
+        " #{input.session_title}",
+        width,
+        Face.new(fg: at.header_fg, bg: at.panel_bg, bold: true)
       ),
       dashboard_blank(width, at)
     ]
@@ -340,7 +345,11 @@ defmodule Minga.Agent.View.Renderer do
     limit = ModelLimits.context_limit(bare_model)
 
     context_lines = [
-      dashboard_text(" Context", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      dashboard_text(
+        " Context",
+        width,
+        Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      )
     ]
 
     context_lines =
@@ -355,35 +364,40 @@ defmodule Minga.Agent.View.Renderer do
 
         context_lines ++
           [
-            dashboard_text("  #{format_tokens(total_tokens)} tokens#{pct_text}", width,
-              fg: at.text_fg,
-              bg: at.panel_bg
+            dashboard_text(
+              "  #{format_tokens(total_tokens)} tokens#{pct_text}",
+              width,
+              Face.new(fg: at.text_fg, bg: at.panel_bg)
             ),
             dashboard_text(
               "  ↑ #{format_tokens(Map.get(usage, :input, 0))} in  ↓ #{format_tokens(Map.get(usage, :output, 0))} out",
               width,
-              fg: at.hint_fg,
-              bg: at.panel_bg
+              Face.new(fg: at.hint_fg, bg: at.panel_bg)
             )
           ] ++
           if cache_read > 0 do
             [
-              dashboard_text("  cache: #{format_tokens(cache_read)} read", width,
-                fg: at.hint_fg,
-                bg: at.panel_bg
+              dashboard_text(
+                "  cache: #{format_tokens(cache_read)} read",
+                width,
+                Face.new(fg: at.hint_fg, bg: at.panel_bg)
               )
             ]
           else
             []
           end ++
           [
-            dashboard_text("  #{cost_text} spent", width, fg: at.text_fg, bg: at.panel_bg),
+            dashboard_text(
+              "  #{cost_text} spent",
+              width,
+              Face.new(fg: at.text_fg, bg: at.panel_bg)
+            ),
             dashboard_blank(width, at)
           ]
       else
         context_lines ++
           [
-            dashboard_text("  No usage yet", width, fg: at.hint_fg, bg: at.panel_bg),
+            dashboard_text("  No usage yet", width, Face.new(fg: at.hint_fg, bg: at.panel_bg)),
             dashboard_blank(width, at)
           ]
       end
@@ -392,10 +406,15 @@ defmodule Minga.Agent.View.Renderer do
     thinking = if panel.thinking_level != "", do: " (#{panel.thinking_level})", else: ""
 
     model_lines = [
-      dashboard_text(" Model", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
-      dashboard_text("  #{bare_model}#{thinking}", width,
-        fg: at.text_fg,
-        bg: at.panel_bg
+      dashboard_text(
+        " Model",
+        width,
+        Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      ),
+      dashboard_text(
+        "  #{bare_model}#{thinking}",
+        width,
+        Face.new(fg: at.text_fg, bg: at.panel_bg)
       ),
       dashboard_blank(width, at)
     ]
@@ -411,37 +430,41 @@ defmodule Minga.Agent.View.Renderer do
         ]
   defp dashboard_lsp_section([], width, at) do
     [
-      dashboard_text(" LSP", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true),
-      dashboard_text("  No servers active", width, fg: at.hint_fg, bg: at.panel_bg),
+      dashboard_text(
+        " LSP",
+        width,
+        Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      ),
+      dashboard_text("  No servers active", width, Face.new(fg: at.hint_fg, bg: at.panel_bg)),
       dashboard_blank(width, at)
     ]
   end
 
   defp dashboard_lsp_section(servers, width, at) do
     header = [
-      dashboard_text(" LSP", width, fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+      dashboard_text(" LSP", width, Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true))
     ]
 
     server_lines =
       Enum.map(servers, fn name ->
-        dashboard_text("  #{name}", width, fg: at.text_fg, bg: at.panel_bg)
+        dashboard_text("  #{name}", width, Face.new(fg: at.text_fg, bg: at.panel_bg))
       end)
 
     header ++ server_lines ++ [dashboard_blank(width, at)]
   end
 
-  @spec dashboard_text(String.t(), pos_integer(), keyword()) ::
+  @spec dashboard_text(String.t(), pos_integer(), Face.t()) ::
           (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
-  defp dashboard_text(text, width, opts) do
+  defp dashboard_text(text, width, face) do
     padded = String.slice(text, 0, width) |> String.pad_trailing(width)
-    fn row, col -> DisplayList.draw(row, col, padded, opts) end
+    fn row, col -> DisplayList.draw(row, col, padded, face) end
   end
 
   @spec dashboard_blank(pos_integer(), Theme.Agent.t()) ::
           (non_neg_integer(), non_neg_integer() -> DisplayList.draw())
   defp dashboard_blank(width, at) do
     blank = String.duplicate(" ", width)
-    fn row, col -> DisplayList.draw(row, col, blank, bg: at.panel_bg) end
+    fn row, col -> DisplayList.draw(row, col, blank, Face.new(bg: at.panel_bg)) end
   end
 
   @spec shorten_path(String.t()) :: String.t()
@@ -467,7 +490,7 @@ defmodule Minga.Agent.View.Renderer do
   defp render_input_from_input(input, row, col_off, width) do
     at = Theme.agent_theme(input.theme)
     panel = input.panel
-    border_style = [fg: at.input_border, bg: at.panel_bg]
+    border_style = Face.new(fg: at.input_border, bg: at.panel_bg)
 
     is_empty = panel.input_lines == [""]
     inner_width = input_inner_width(width)
@@ -499,12 +522,14 @@ defmodule Minga.Agent.View.Renderer do
         fill = String.pad_trailing(inner, max(width - 2, 0))
 
         [
-          DisplayList.draw(content_start, col_off, "│" <> fill <> "│", bg: at.input_bg),
+          DisplayList.draw(content_start, col_off, "│" <> fill <> "│", Face.new(bg: at.input_bg)),
           DisplayList.draw(content_start, col_off, "│", border_style),
           DisplayList.draw(content_start, col_off + width - 1, "│", border_style),
-          DisplayList.draw(content_start, col_off + 1 + pad_left, padded,
-            fg: at.input_placeholder,
-            bg: at.input_bg
+          DisplayList.draw(
+            content_start,
+            col_off + 1 + pad_left,
+            padded,
+            Face.new(fg: at.input_placeholder, bg: at.input_bg)
           )
         ]
       else
@@ -612,10 +637,10 @@ defmodule Minga.Agent.View.Renderer do
     text_col = c + 1 + chrome.pad_left
 
     base = [
-      DisplayList.draw(row, c, "│" <> fill <> "│", bg: chrome.input_bg),
+      DisplayList.draw(row, c, "│" <> fill <> "│", Face.new(bg: chrome.input_bg)),
       DisplayList.draw(row, c, "│", chrome.border_style),
       DisplayList.draw(row, c + chrome.width - 1, "│", chrome.border_style),
-      DisplayList.draw(row, text_col, padded, fg: fg_color, bg: chrome.input_bg)
+      DisplayList.draw(row, text_col, padded, Face.new(fg: fg_color, bg: chrome.input_bg))
     ]
 
     case selection_slice(logical_idx, vl.col_offset, String.length(display_text), sel_range) do
@@ -630,10 +655,11 @@ defmodule Minga.Agent.View.Renderer do
 
         base ++
           [
-            DisplayList.draw(row, text_col + sel_start, sel_text,
-              fg: fg_color,
-              bg: chrome.input_bg,
-              reverse: true
+            DisplayList.draw(
+              row,
+              text_col + sel_start,
+              sel_text,
+              Face.new(fg: fg_color, bg: chrome.input_bg, reverse: true)
             )
           ]
     end
