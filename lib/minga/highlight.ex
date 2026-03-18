@@ -7,17 +7,19 @@ defmodule Minga.Highlight do
   to split a line into styled segments for rendering.
   """
 
+  alias Minga.Face
   alias Minga.Theme
 
-  @enforce_keys [:version, :spans, :capture_names, :theme]
-  defstruct [:version, :spans, :capture_names, :theme]
+  @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
+  defstruct [:version, :spans, :capture_names, :theme, :face_registry]
 
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
           version: non_neg_integer(),
           spans: tuple() | [map()],
           capture_names: [String.t()],
-          theme: Theme.syntax()
+          theme: Theme.syntax(),
+          face_registry: Face.Registry.t()
         }
 
   @typedoc "A styled text segment for rendering."
@@ -26,29 +28,41 @@ defmodule Minga.Highlight do
   @doc "Creates an empty highlight state with the default theme."
   @spec new() :: t()
   def new do
-    %__MODULE__{
-      version: 0,
-      spans: {},
-      capture_names: [],
-      theme: Theme.get!(:doom_one).syntax
-    }
+    theme = Theme.get!(:doom_one)
+    from_theme(theme)
   end
 
-  @doc "Creates an empty highlight state with a syntax theme map."
+  @doc """
+  Creates an empty highlight state with a syntax theme map.
+
+  Builds a `Face.Registry` from the syntax map so face inheritance
+  is always available.
+  """
   @spec new(Theme.syntax()) :: t()
-  def new(theme) when is_map(theme) do
+  def new(syntax) when is_map(syntax) do
+    registry = Face.Registry.from_syntax(syntax)
+
     %__MODULE__{
       version: 0,
       spans: {},
       capture_names: [],
-      theme: theme
+      theme: syntax,
+      face_registry: registry
     }
   end
 
   @doc "Creates an empty highlight state using the syntax map from a `Minga.Theme.t()` struct."
   @spec from_theme(Minga.Theme.t()) :: t()
-  def from_theme(%Minga.Theme{syntax: syntax}) do
-    new(syntax)
+  def from_theme(%Minga.Theme{} = theme) do
+    registry = Face.Registry.from_theme(theme)
+
+    %__MODULE__{
+      version: 0,
+      spans: {},
+      capture_names: [],
+      theme: theme.syntax,
+      face_registry: registry
+    }
   end
 
   @doc "Stores capture names from a `highlight_names` event."
@@ -96,12 +110,8 @@ defmodule Minga.Highlight do
 
   ## Examples
 
-      iex> hl = %Minga.Highlight{
-      ...>   version: 1,
-      ...>   spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
-      ...>   capture_names: ["keyword"],
-      ...>   theme: %{"keyword" => [fg: 0xFF0000]}
-      ...> }
+      iex> hl = Minga.Highlight.new(%{"keyword" => [fg: 0xFF0000]})
+      iex> hl = %{hl | version: 1, spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}], capture_names: ["keyword"]}
       iex> Minga.Highlight.styles_for_line(hl, "def foo", 0)
       [{"def", [fg: 0xFF0000]}, {" foo", []}]
   """
@@ -386,7 +396,7 @@ defmodule Minga.Highlight do
   defp resolve_style(hl, capture_id) do
     case Enum.at(hl.capture_names, capture_id) do
       nil -> []
-      name -> Theme.style_for_capture(hl.theme, name)
+      name -> Face.Registry.style_for(hl.face_registry, name)
     end
   end
 

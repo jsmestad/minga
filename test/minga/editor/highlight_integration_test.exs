@@ -13,8 +13,22 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
+  alias Minga.Face
   alias Minga.Highlight
   alias Minga.Test.HeadlessPort
+
+  # Helper: builds a %Highlight{} with a face registry from a theme map.
+  defp highlight_with(attrs) do
+    theme = Keyword.get(attrs, :theme, %{})
+
+    %Highlight{
+      version: Keyword.get(attrs, :version, 1),
+      spans: Keyword.get(attrs, :spans, {}),
+      capture_names: Keyword.get(attrs, :capture_names, []),
+      theme: theme,
+      face_registry: Face.Registry.from_syntax(theme)
+    }
+  end
 
   describe "buffer switch resets highlights" do
     @tag :tmp_dir
@@ -134,15 +148,15 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     test "styles_for_line with mismatched spans on Unicode line" do
       # Simulates: spans from auto_pair.ex applied to editor.ex content
       # containing Unicode box-drawing characters (─ is 3 bytes each)
-      hl = %Highlight{
-        version: 1,
-        spans: [
-          %{start_byte: 2, end_byte: 5, capture_id: 0},
-          %{start_byte: 10, end_byte: 20, capture_id: 0}
-        ],
-        capture_names: ["keyword"],
-        theme: %{"keyword" => [fg: 0xFF0000]}
-      }
+      hl =
+        highlight_with(
+          spans: [
+            %{start_byte: 2, end_byte: 5, capture_id: 0},
+            %{start_byte: 10, end_byte: 20, capture_id: 0}
+          ],
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000]}
+        )
 
       line = "# ── Server Callbacks ──────"
       segments = Highlight.styles_for_line(hl, line, 0)
@@ -157,12 +171,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Span at byte 1 lands inside the first character
       line = "──"
 
-      hl = %Highlight{
-        version: 1,
-        spans: [%{start_byte: 0, end_byte: 1, capture_id: 0}],
-        capture_names: ["comment"],
-        theme: %{"comment" => [fg: 0x888888]}
-      }
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 1, capture_id: 0}],
+          capture_names: ["comment"],
+          theme: %{"comment" => [fg: 0x888888]}
+        )
 
       # Must not crash; byte count must be preserved
       segments = Highlight.styles_for_line(hl, line, 0)
@@ -174,12 +188,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # ─ is 3 bytes; span covers exactly the first character (bytes 0-3)
       line = "──"
 
-      hl = %Highlight{
-        version: 1,
-        spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
-        capture_names: ["comment"],
-        theme: %{"comment" => [fg: 0x888888]}
-      }
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
+          capture_names: ["comment"],
+          theme: %{"comment" => [fg: 0x888888]}
+        )
 
       segments = Highlight.styles_for_line(hl, line, 0)
       all_text = Enum.map_join(segments, fn {text, _style} -> text end)
@@ -426,15 +440,15 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Incomplete Elixir — defmodule without end
       _content = "defmodule Broken do\n  def foo, do: :\nno end here"
 
-      hl = %Highlight{
-        version: 1,
-        spans: [
-          %{start_byte: 0, end_byte: 9, capture_id: 0},
-          %{start_byte: 22, end_byte: 25, capture_id: 1}
-        ],
-        capture_names: ["keyword", "function"],
-        theme: %{"keyword" => [fg: 0xFF0000], "function" => [fg: 0x00FF00]}
-      }
+      hl =
+        highlight_with(
+          spans: [
+            %{start_byte: 0, end_byte: 9, capture_id: 0},
+            %{start_byte: 22, end_byte: 25, capture_id: 1}
+          ],
+          capture_names: ["keyword", "function"],
+          theme: %{"keyword" => [fg: 0xFF0000], "function" => [fg: 0x00FF00]}
+        )
 
       # First line: "defmodule Broken do" — span 0-9 covers "defmodule"
       segments = Highlight.styles_for_line(hl, "defmodule Broken do", 0)
@@ -448,12 +462,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     end
 
     test "styles_for_line with empty line returns single empty segment" do
-      hl = %Highlight{
-        version: 1,
-        spans: [%{start_byte: 0, end_byte: 10, capture_id: 0}],
-        capture_names: ["keyword"],
-        theme: %{"keyword" => [fg: 0xFF0000]}
-      }
+      hl =
+        highlight_with(
+          spans: [%{start_byte: 0, end_byte: 10, capture_id: 0}],
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000]}
+        )
 
       segments = Highlight.styles_for_line(hl, "", 5)
       assert segments == []

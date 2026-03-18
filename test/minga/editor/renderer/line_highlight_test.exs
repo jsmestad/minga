@@ -34,7 +34,8 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
       version: 1,
       spans: spans,
       capture_names: names,
-      theme: theme
+      theme: theme,
+      face_registry: Minga.Face.Registry.from_syntax(theme)
     }
   end
 

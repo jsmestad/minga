@@ -232,6 +232,114 @@ defmodule Minga.Port.ProtocolTest do
     end
   end
 
+  describe "encode_draw_styled/4" do
+    test "round-trips with strikethrough" do
+      encoded = Protocol.encode_draw_styled(1, 2, "deprecated", strikethrough: true)
+
+      assert {:ok, {:draw_styled_text, %{row: 1, col: 2, text: "deprecated", attrs: attrs}}} =
+               Protocol.decode_command(encoded)
+
+      assert {:strikethrough, true} in attrs
+    end
+
+    test "round-trips with underline style" do
+      encoded =
+        Protocol.encode_draw_styled(0, 0, "error",
+          underline: true,
+          underline_style: :curl,
+          underline_color: 0xFF0000
+        )
+
+      assert {:ok, {:draw_styled_text, %{text: "error", attrs: attrs}}} =
+               Protocol.decode_command(encoded)
+
+      assert :underline in attrs
+      assert {:underline_style, :curl} in attrs
+      assert {:underline_color, 0xFF0000} in attrs
+    end
+
+    test "round-trips all underline styles" do
+      for style <- [:line, :curl, :dashed, :dotted, :double] do
+        encoded =
+          Protocol.encode_draw_styled(0, 0, "test", underline: true, underline_style: style)
+
+        assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
+
+        if style == :line do
+          # :line is the default, not explicitly included
+          refute Keyword.has_key?(attrs, :underline_style)
+        else
+          assert {:underline_style, ^style} = List.keyfind(attrs, :underline_style, 0)
+        end
+      end
+    end
+
+    test "round-trips blend" do
+      encoded = Protocol.encode_draw_styled(0, 0, "ghost", blend: 30)
+
+      assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
+      assert {:blend, 30} in attrs
+    end
+
+    test "blend 100 is omitted from attrs" do
+      encoded = Protocol.encode_draw_styled(0, 0, "opaque", blend: 100)
+
+      assert {:ok, {:draw_styled_text, %{attrs: attrs}}} = Protocol.decode_command(encoded)
+      refute Keyword.has_key?(attrs, :blend)
+    end
+
+    test "round-trips all extended attributes together" do
+      style = [
+        fg: 0xFF6C6B,
+        bg: 0x282C34,
+        bold: true,
+        italic: true,
+        underline: true,
+        strikethrough: true,
+        underline_style: :curl,
+        underline_color: 0x00FF00,
+        blend: 50
+      ]
+
+      encoded = Protocol.encode_draw_styled(3, 7, "all", style)
+
+      assert {:ok,
+              {:draw_styled_text,
+               %{row: 3, col: 7, fg: 0xFF6C6B, bg: 0x282C34, text: "all", attrs: attrs}}} =
+               Protocol.decode_command(encoded)
+
+      assert :bold in attrs
+      assert :italic in attrs
+      assert :underline in attrs
+      assert {:strikethrough, true} in attrs
+      assert {:underline_style, :curl} in attrs
+      assert {:underline_color, 0x00FF00} in attrs
+      assert {:blend, 50} in attrs
+    end
+  end
+
+  describe "encode_draw_smart/4" do
+    test "uses draw_text for simple styles" do
+      encoded = Protocol.encode_draw_smart(0, 0, "simple", fg: 0xFF0000, bold: true)
+      assert {:ok, {:draw_text, _}} = Protocol.decode_command(encoded)
+    end
+
+    test "uses draw_styled_text when extended attrs present" do
+      encoded = Protocol.encode_draw_smart(0, 0, "fancy", strikethrough: true)
+      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
+    end
+
+    test "uses draw_styled_text for underline_style" do
+      encoded = Protocol.encode_draw_smart(0, 0, "wavy", underline: true, underline_style: :curl)
+      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
+    end
+
+    test "uses draw_styled_text for blend" do
+      encoded = Protocol.encode_draw_smart(0, 0, "dim", blend: 50)
+      assert {:ok, {:draw_styled_text, _}} = Protocol.decode_command(encoded)
+    end
+  end
+
   describe "encode_cursor/2" do
     test "encodes set_cursor" do
       encoded = Protocol.encode_cursor(10, 25)
