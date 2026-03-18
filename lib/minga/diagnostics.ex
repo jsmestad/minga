@@ -188,6 +188,22 @@ defmodule Minga.Diagnostics do
   end
 
   @doc """
+  Returns diagnostic counts as a tuple for the modeline, or nil if none.
+
+  Returns `{errors, warnings, info, hints}` when any diagnostics exist,
+  or `nil` when there are none. Used by both the TUI modeline and the
+  GUI status bar protocol encoder.
+  """
+  @spec count_tuple(GenServer.server(), uri()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  def count_tuple(server \\ __MODULE__, uri) when is_binary(uri) do
+    case count(server, uri) do
+      %{error: 0, warning: 0, info: 0, hint: 0} -> nil
+      %{error: e, warning: w, info: i, hint: h} -> {e, w, i, h}
+    end
+  end
+
+  @doc """
   Returns all diagnostics on a specific line for a URI, from all sources.
 
   Useful for showing diagnostic messages in the minibuffer when the cursor

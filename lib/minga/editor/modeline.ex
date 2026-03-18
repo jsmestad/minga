@@ -56,7 +56,9 @@ defmodule Minga.Editor.Modeline do
           optional(:lsp_status) => lsp_status(),
           optional(:parser_status) => parser_status(),
           optional(:git_branch) => String.t() | nil,
-          optional(:git_diff_summary) => git_diff_summary()
+          optional(:git_diff_summary) => git_diff_summary(),
+          optional(:diagnostic_counts) =>
+            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
         }
 
   @doc """
@@ -111,6 +113,7 @@ defmodule Minga.Editor.Modeline do
     lsp_segments = build_lsp_segments(data, bar_bg, ml)
     parser_segments = build_parser_segments(data, bar_bg, ml)
     git_segments = build_git_segments(data, bar_bg, theme)
+    diagnostic_segments = build_diagnostic_segments(data, bar_bg, theme)
 
     # Segments are {text, fg, bg, opts, click_target}
     # click_target is an atom command or nil for non-clickable segments
@@ -125,7 +128,8 @@ defmodule Minga.Editor.Modeline do
         Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
 
     right_segments =
-      parser_segments ++
+      diagnostic_segments ++
+        parser_segments ++
         lsp_segments ++
         [
           {" #{devicon}", devicon_color, filetype_bg, [], nil},
@@ -252,6 +256,58 @@ defmodule Minga.Editor.Modeline do
 
   @spec build_lsp_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
           [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  # Nerd Font diagnostic icons
+  @diag_error_icon "\u{F057}"
+  @diag_warning_icon "\u{F071}"
+  @diag_info_icon "\u{F05A}"
+
+  @spec build_diagnostic_segments(modeline_data(), non_neg_integer(), Theme.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_diagnostic_segments(%{diagnostic_counts: nil}, _bar_bg, _theme), do: []
+  defp build_diagnostic_segments(%{diagnostic_counts: {0, 0, 0, 0}}, _bar_bg, _theme), do: []
+
+  defp build_diagnostic_segments(
+         %{diagnostic_counts: {errors, warnings, info, _hints}},
+         bar_bg,
+         theme
+       ) do
+    gutter = theme.gutter
+    segments = []
+
+    segments =
+      if errors > 0 do
+        [
+          {" #{@diag_error_icon} #{errors}", gutter.error_fg, bar_bg, [], :diagnostic_list}
+          | segments
+        ]
+      else
+        segments
+      end
+
+    segments =
+      if warnings > 0 do
+        [
+          {" #{@diag_warning_icon} #{warnings}", gutter.warning_fg, bar_bg, [], :diagnostic_list}
+          | segments
+        ]
+      else
+        segments
+      end
+
+    segments =
+      if info > 0 do
+        [{" #{@diag_info_icon} #{info}", gutter.info_fg, bar_bg, [], :diagnostic_list} | segments]
+      else
+        segments
+      end
+
+    # Hints are intentionally omitted from the modeline (too noisy).
+    # Reverse because we prepended.
+    Enum.reverse(segments)
+  end
+
+  defp build_diagnostic_segments(_data, _bar_bg, _theme), do: []
+
   defp build_lsp_segments(data, bar_bg, ml) do
     case Map.get(data, :lsp_status) do
       :ready -> [{"●", ml.lsp_ready || 0x98BE65, bar_bg, [], :lsp_info}]

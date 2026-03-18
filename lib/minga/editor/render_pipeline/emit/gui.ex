@@ -181,6 +181,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     line_count = if buf, do: BufferServer.line_count(buf), else: 1
     file_name = if buf, do: BufferServer.file_path(buf) || "", else: ""
 
+    diagnostic_counts = diagnostic_counts_for_gui(buf)
+
     %{
       mode: state.vim.mode,
       cursor_line: line + 1,
@@ -190,7 +192,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       dirty_marker: if(buf && BufferServer.dirty?(buf), do: "●", else: ""),
       lsp_status: state.lsp_status,
       git_branch: resolve_git_branch(state),
-      status_msg: state.status_msg
+      status_msg: state.status_msg,
+      diagnostic_counts: diagnostic_counts
     }
   end
 
@@ -203,6 +206,24 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   end
 
   defp resolve_git_branch(_state), do: nil
+
+  @spec diagnostic_counts_for_gui(pid() | nil) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  defp diagnostic_counts_for_gui(nil), do: nil
+
+  defp diagnostic_counts_for_gui(buf) do
+    path =
+      try do
+        BufferServer.file_path(buf)
+      catch
+        :exit, _ -> nil
+      end
+
+    case path do
+      nil -> nil
+      path -> Minga.Diagnostics.count_tuple(Minga.LSP.SyncServer.path_to_uri(path))
+    end
+  end
 
   # ── Picker ──
 

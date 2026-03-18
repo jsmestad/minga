@@ -27,7 +27,7 @@ enum RenderCommand: Sendable {
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
-    case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String)
+    case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16)
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
@@ -451,7 +451,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let ftLen = Int(data[rest + 18 + gitLen + msgLen])
         guard data.count >= rest + 19 + gitLen + msgLen + ftLen else { throw ProtocolDecodeError.malformed }
         let filetype = String(data: data[(rest + 19 + gitLen + msgLen)..<(rest + 19 + gitLen + msgLen + ftLen)], encoding: .utf8) ?? ""
-        return (.guiStatusBar(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype), rest + 19 + gitLen + msgLen + ftLen - offset)
+        let diagBase = rest + 19 + gitLen + msgLen + ftLen
+        let errorCount: UInt16 = data.count >= diagBase + 4 ? readU16(data, diagBase) : 0
+        let warningCount: UInt16 = data.count >= diagBase + 4 ? readU16(data, diagBase + 2) : 0
+        let totalConsumed = data.count >= diagBase + 4 ? diagBase + 4 : diagBase
+        return (.guiStatusBar(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount), totalConsumed - offset)
 
     case OP_GUI_PICKER:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

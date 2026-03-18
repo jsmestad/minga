@@ -17,9 +17,12 @@ final class StatusBarState {
     var gitBranch: String = ""
     var message: String = ""
     var filetype: String = ""
+    var errorCount: UInt16 = 0
+    var warningCount: UInt16 = 0
 
     func update(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32,
-                flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String) {
+                flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String,
+                errorCount: UInt16, warningCount: UInt16) {
         self.mode = mode
         self.cursorLine = cursorLine
         self.cursorCol = cursorCol
@@ -29,6 +32,8 @@ final class StatusBarState {
         self.gitBranch = gitBranch
         self.message = message
         self.filetype = filetype
+        self.errorCount = errorCount
+        self.warningCount = warningCount
     }
 
     var modeName: String {
@@ -110,6 +115,11 @@ struct StatusBarView: View {
             if state.hasLsp {
                 lspIndicator
             }
+
+            // Diagnostic counts
+            if state.errorCount > 0 || state.warningCount > 0 {
+                diagnosticIndicators
+            }
         }
     }
 
@@ -120,6 +130,31 @@ struct StatusBarView: View {
             .font(.system(size: 9))
             .foregroundStyle(color)
             .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private var diagnosticIndicators: some View {
+        HStack(spacing: 6) {
+            if state.errorCount > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 9))
+                    Text("\(state.errorCount)")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+            }
+            if state.warningCount > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9))
+                    Text("\(state.warningCount)")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(Color(red: 0.92, green: 0.74, blue: 0.48))
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     private func lspDisplay(_ status: UInt8) -> (String, Color) {
