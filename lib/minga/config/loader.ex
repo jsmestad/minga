@@ -5,9 +5,10 @@ defmodule Minga.Config.Loader do
   ## Load order (both startup and reload)
 
   1. `~/.config/minga/modules/*.ex` (compile user modules)
-  2. `~/.config/minga/config.exs` (global config)
-  3. `.minga.exs` in the current working directory (project-local config)
-  4. `~/.config/minga/after.exs` (post-init hook)
+  2. `~/.config/minga/themes/*.exs` (load user themes, before config eval)
+  3. `~/.config/minga/config.exs` (global config)
+  4. `.minga.exs` in the current working directory (project-local config)
+  5. `~/.config/minga/after.exs` (post-init hook)
 
   Later sources override earlier ones (last-writer-wins for options and
   keybindings). Errors at any stage are captured and stored for the
@@ -32,6 +33,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Theme.Loader, as: ThemeLoader
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -160,7 +162,10 @@ defmodule Minga.Config.Loader do
     # 1. Compile user modules
     {loaded_modules, modules_errors} = compile_user_modules(config_dir)
 
-    # 2. Eval global config
+    # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
+    load_user_themes()
+
+    # 3. Eval global config
     custom_config? = cli_config_file() != nil
 
     load_error =
@@ -179,18 +184,18 @@ defmodule Minga.Config.Loader do
         load_error
       end
 
-    # 3. Eval project-local config
+    # 4. Eval project-local config
     project_path = resolve_project_config_path()
     project_config_error = eval_if_exists(project_path)
 
-    # 4. Eval after.exs
+    # 5. Eval after.exs
     after_path = Path.join(config_dir, "after.exs")
     after_error = eval_if_exists(after_path)
 
-    # 5. Apply log level from config
+    # 6. Apply log level from config
     apply_log_level()
 
-    # 6. Start declared extensions (if the supervisor is running)
+    # 7. Start declared extensions (if the supervisor is running)
     if Process.whereis(Minga.Extension.Supervisor) do
       ExtSupervisor.start_all()
     end
@@ -204,6 +209,18 @@ defmodule Minga.Config.Loader do
       project_config_error: project_config_error,
       after_error: after_error
     }
+  end
+
+  @spec load_user_themes() :: :ok
+  defp load_user_themes do
+    {themes, errors} = ThemeLoader.load_all()
+    Minga.Theme.register_user_themes(themes)
+
+    for %{path: path, error: error} <- errors do
+      Minga.Log.warning(:editor, "Theme load error: #{path}: #{error}")
+    end
+
+    :ok
   end
 
   @spec apply_log_level() :: :ok
