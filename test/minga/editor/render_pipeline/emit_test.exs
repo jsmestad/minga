@@ -284,6 +284,27 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
              end)
     end
 
+    test "GUI path strips per-window modeline draws" do
+      state = base_state()
+      gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+
+      frame = build_frame_with_modeline(gui_state, viewport_top: 0)
+
+      assert :ok = Emit.emit(frame, gui_state)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+      # Extract all draw commands
+      draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
+
+      # Modeline text (" NORMAL " and " main.ex ") should NOT appear
+      refute Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24, _attrs::8,
+                                           len::16, text::binary-size(len)>> ->
+               text == " NORMAL " or text == " main.ex "
+             end),
+             "Modeline draws should be stripped from GUI frame"
+    end
+
     test "GUI path preserves Metal-rendered overlays (hover, signature help)" do
       state = base_state()
       gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
@@ -379,5 +400,21 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       windows: [win_frame],
       minibuffer: [DisplayList.draw(height + 1, 0, " ", fg: 0xBBC2CF, bg: 0x282C34)]
     }
+  end
+
+  defp build_frame_with_modeline(state, opts) do
+    frame = build_frame_with_window(state, opts)
+
+    modeline_draws = [
+      DisplayList.draw(0, 0, " NORMAL ", fg: 0x21242B, bg: 0x51AFEF),
+      DisplayList.draw(0, 9, " main.ex ", fg: 0xBBC2CF, bg: 0x21242B)
+    ]
+
+    windows =
+      Enum.map(frame.windows, fn wf ->
+        %{wf | modeline: DisplayList.draws_to_layer(modeline_draws)}
+      end)
+
+    %{frame | windows: windows}
   end
 end

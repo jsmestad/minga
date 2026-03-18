@@ -233,11 +233,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   # GUI mode: only emit editor content (windows + minibuffer).
   # All chrome (tab bar, file tree, overlays, modeline) is handled by SwiftUI.
-  # Window modeline stays in Metal (it's inside the editor area for vim splits).
-  # Filters a Frame for the GUI path by zeroing out fields that SwiftUI
-  # handles natively (tab bar, file tree, agent panel, splash). Window
-  # content, minibuffer, separators, and regions pass through to
-  # DisplayList.to_commands/1.
+  # Per-window modeline draws are stripped because the GUI has its own native
+  # status bar. Window content, minibuffer, separators, and regions pass
+  # through to DisplayList.to_commands/1.
   #
   # Overlays pass through intentionally: the Chrome stage already filters
   # them in build_gui_chrome (picker, which-key, completion are empty).
@@ -245,7 +243,19 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   # are Metal-rendered and belong in the cell-grid output.
   @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
   defp filter_frame_for_gui(frame) do
-    %{frame | tab_bar: [], file_tree: [], agent_panel: [], agentic_view: [], splash: nil}
+    # Strip per-window modeline draws (GUI has its own SwiftUI status bar).
+    windows =
+      Enum.map(frame.windows, fn wf -> %{wf | modeline: %{}} end)
+
+    %{
+      frame
+      | tab_bar: [],
+        file_tree: [],
+        agent_panel: [],
+        agentic_view: [],
+        splash: nil,
+        windows: windows
+    }
   end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
