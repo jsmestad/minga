@@ -10,8 +10,9 @@
 ///   0x06 paste_event:  text_len:u16, text:u8[text_len]
 ///
 /// Render commands (BEAM → Zig):
-///   0x10 draw_text:  row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
-///   0x11 set_cursor: row:u16, col:u16
+///   0x10 draw_text:        row:u16, col:u16, fg:u24, bg:u24, attrs:u8, text_len:u16, text
+///   0x1C draw_styled_text: row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, text_len:u16, text
+///   0x11 set_cursor:       row:u16, col:u16
 ///   0x12 clear:      (empty)
 ///   0x13 batch_end:  (empty)
 ///
@@ -39,6 +40,7 @@ pub const OP_CLEAR_REGION: u8 = 0x18;
 pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 pub const OP_SCROLL_REGION: u8 = 0x1B;
+pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
 
 // Config commands (BEAM → frontend, TUI ignores)
 pub const OP_SET_FONT: u8 = 0x50;
@@ -209,6 +211,11 @@ pub const ATTR_BOLD: u8 = 0x01;
 pub const ATTR_UNDERLINE: u8 = 0x02;
 pub const ATTR_ITALIC: u8 = 0x04;
 pub const ATTR_REVERSE: u8 = 0x08;
+pub const ATTR_STRIKETHROUGH: u16 = 0x10;
+// Underline style occupies bits 5-7 of the extended u16 attrs:
+// 0b000 = line (default), 0b001 = curl, 0b010 = dashed, 0b011 = dotted, 0b100 = double
+pub const UL_STYLE_SHIFT: u4 = 5;
+pub const UL_STYLE_MASK: u16 = 0x07 << UL_STYLE_SHIFT;
 
 // ── Decoded types ──
 
@@ -220,6 +227,7 @@ pub const CursorShape = enum(u8) {
 
 pub const RenderCommand = union(enum) {
     draw_text: DrawText,
+    draw_styled_text: DrawStyledText,
     set_cursor: SetCursor,
     set_cursor_shape: CursorShape,
     set_title: []const u8,
@@ -359,6 +367,20 @@ pub const DrawText = struct {
     fg: u24,
     bg: u24,
     attrs: u8,
+    text: []const u8,
+};
+
+/// Extended draw command with 16-bit attrs, underline color, and blend.
+/// Opcode 0x1C. Wire format:
+///   row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, text_len:u16, text
+pub const DrawStyledText = struct {
+    row: u16,
+    col: u16,
+    fg: u24,
+    bg: u24,
+    attrs: u16,
+    ul_color: u24,
+    blend: u8,
     text: []const u8,
 };
 
@@ -583,6 +605,30 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,
+                .text = text,
+            } };
+        },
+        OP_DRAW_STYLED_TEXT => {
+            // row:2, col:2, fg:3, bg:3, attrs:2, ul_color:3, blend:1, text_len:2 = 18 bytes min
+            if (rest.len < 18) return error.Malformed;
+            const row = std.mem.readInt(u16, rest[0..2], .big);
+            const col = std.mem.readInt(u16, rest[2..4], .big);
+            const fg = readU24(rest[4..7]);
+            const bg = readU24(rest[7..10]);
+            const attrs = std.mem.readInt(u16, rest[10..12], .big);
+            const ul_color = readU24(rest[12..15]);
+            const blend = rest[15];
+            const text_len = std.mem.readInt(u16, rest[16..18], .big);
+            if (rest.len < 18 + text_len) return error.Malformed;
+            const text = rest[18 .. 18 + text_len];
+            return .{ .draw_styled_text = .{
+                .row = row,
+                .col = col,
+                .fg = fg,
+                .bg = bg,
+                .attrs = attrs,
+                .ul_color = ul_color,
+                .blend = blend,
                 .text = text,
             } };
         },
@@ -2105,4 +2151,68 @@ test "batch decode: scroll_region + draw_text + batch_end" {
     try std.testing.expect(cmds[0] == .scroll_region);
     try std.testing.expect(cmds[1] == .draw_text);
     try std.testing.expect(cmds[2] == .batch_end);
+}
+
+// ── draw_styled_text (0x1C) tests ────────────────────────────────────────────
+
+test "decode draw_styled_text command" {
+    // Opcode 0x1C, row=3, col=7, fg=0xFF6C6B, bg=0x282C34,
+    // attrs=0x0015 (bold | strikethrough), ul_color=0xFF0000, blend=50,
+    // text_len=5, "error"
+    const data = [_]u8{
+        0x1C,
+        0x00, 0x03, // row
+        0x00, 0x07, // col
+        0xFF, 0x6C, 0x6B, // fg
+        0x28, 0x2C, 0x34, // bg
+        0x00, 0x11, // attrs: bold(0x01) | strikethrough(0x10)
+        0xFF, 0x00, 0x00, // ul_color: red
+        0x32, // blend: 50
+        0x00, 0x05, // text_len
+    } ++ "error".*;
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .draw_styled_text => |dt| {
+            try std.testing.expectEqual(@as(u16, 3), dt.row);
+            try std.testing.expectEqual(@as(u16, 7), dt.col);
+            try std.testing.expectEqual(@as(u24, 0xFF6C6B), dt.fg);
+            try std.testing.expectEqual(@as(u24, 0x282C34), dt.bg);
+            try std.testing.expectEqual(@as(u16, 0x0011), dt.attrs);
+            try std.testing.expectEqual(@as(u24, 0xFF0000), dt.ul_color);
+            try std.testing.expectEqual(@as(u8, 50), dt.blend);
+            try std.testing.expectEqualStrings("error", dt.text);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "decode draw_styled_text with underline style curl" {
+    // attrs: underline(0x02) | curl style (1 << 5 = 0x20) = 0x0022
+    const data = [_]u8{
+        0x1C,
+        0x00, 0x00, // row
+        0x00, 0x00, // col
+        0xFF, 0xFF, 0xFF, // fg
+        0x00, 0x00, 0x00, // bg
+        0x00, 0x22, // attrs: underline | curl
+        0xFF, 0x00, 0x00, // ul_color: red
+        0x64, // blend: 100
+        0x00, 0x03, // text_len
+    } ++ "abc".*;
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .draw_styled_text => |dt| {
+            try std.testing.expectEqual(@as(u16, 0x0022), dt.attrs);
+            // Verify underline style bits: (attrs >> 5) & 0x07 == 1 (curl)
+            try std.testing.expectEqual(@as(u16, 1), (dt.attrs >> 5) & 0x07);
+        },
+        else => return error.Malformed,
+    }
+}
+
+test "decode draw_styled_text truncated returns malformed" {
+    const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
 }

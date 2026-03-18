@@ -275,8 +275,36 @@ fn cellToStyle(cell: Cell) vaxis.Cell.Style {
 
     if (cell.attrs & protocol.ATTR_BOLD != 0) style.bold = true;
     if (cell.attrs & protocol.ATTR_ITALIC != 0) style.italic = true;
-    if (cell.attrs & protocol.ATTR_UNDERLINE != 0) style.ul_style = .single;
     if (cell.attrs & protocol.ATTR_REVERSE != 0) style.reverse = true;
+
+    // Underline: check extended ul_style first (from draw_styled_text),
+    // then fall back to basic ATTR_UNDERLINE flag (from draw_text).
+    if (cell.ul_style != 0) {
+        style.ul_style = switch (cell.ul_style) {
+            1 => .curly,
+            2 => .dashed,
+            3 => .dotted,
+            4 => .double,
+            else => .single,
+        };
+    } else if (cell.attrs & protocol.ATTR_UNDERLINE != 0) {
+        style.ul_style = .single;
+    }
+
+    // Underline color (0 = use foreground, which is the libvaxis default)
+    if (cell.ul_color != 0) {
+        style.ul = .{ .rgb = .{
+            @as(u8, @intCast((cell.ul_color >> 16) & 0xFF)),
+            @as(u8, @intCast((cell.ul_color >> 8) & 0xFF)),
+            @as(u8, @intCast(cell.ul_color & 0xFF)),
+        } };
+    }
+
+    // Strikethrough
+    if (cell.strikethrough) style.strikethrough = true;
+
+    // Blend: values < 50 map to dim attribute
+    if (cell.blend < 50) style.dim = true;
 
     return style;
 }
@@ -1012,4 +1040,51 @@ test "g_quit can be set and read back" {
     g_quit.store(true, .release);
     try std.testing.expect(g_quit.load(.acquire) == true);
     g_quit.store(false, .release);
+}
+
+// ── Extended cell style tests ────────────────────────────────────────────────
+
+test "cellToStyle with strikethrough" {
+    const style = cellToStyle(.{ .strikethrough = true });
+    try std.testing.expect(style.strikethrough);
+}
+
+test "cellToStyle with curly underline and color" {
+    const style = cellToStyle(.{
+        .ul_style = 1, // curl
+        .ul_color = 0xFF0000,
+    });
+    try std.testing.expectEqual(vaxis.Cell.Style.Underline.curly, style.ul_style);
+    // Check underline color is red
+    try std.testing.expectEqual(vaxis.Cell.Color{ .rgb = .{ 0xFF, 0x00, 0x00 } }, style.ul);
+}
+
+test "cellToStyle with dashed underline" {
+    const style = cellToStyle(.{ .ul_style = 2 }); // dashed
+    try std.testing.expectEqual(vaxis.Cell.Style.Underline.dashed, style.ul_style);
+}
+
+test "cellToStyle with dotted underline" {
+    const style = cellToStyle(.{ .ul_style = 3 }); // dotted
+    try std.testing.expectEqual(vaxis.Cell.Style.Underline.dotted, style.ul_style);
+}
+
+test "cellToStyle with double underline" {
+    const style = cellToStyle(.{ .ul_style = 4 }); // double
+    try std.testing.expectEqual(vaxis.Cell.Style.Underline.double, style.ul_style);
+}
+
+test "cellToStyle with blend < 50 sets dim" {
+    const style = cellToStyle(.{ .blend = 30 });
+    try std.testing.expect(style.dim);
+}
+
+test "cellToStyle with blend >= 50 does not set dim" {
+    const style = cellToStyle(.{ .blend = 50 });
+    try std.testing.expect(!style.dim);
+}
+
+test "cellToStyle basic underline from attrs still works" {
+    const style = cellToStyle(.{ .attrs = protocol.ATTR_UNDERLINE });
+    try std.testing.expectEqual(vaxis.Cell.Style.Underline.single, style.ul_style);
 }
