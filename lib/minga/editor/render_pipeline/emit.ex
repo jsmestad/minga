@@ -56,7 +56,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     commands =
       if Capabilities.gui?(state.capabilities) do
         frame
-        |> frame_for_gui()
+        |> filter_frame_for_gui()
         |> DisplayList.to_commands()
       else
         build_commands(frame, scroll_deltas)
@@ -233,26 +233,13 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   # GUI mode: allowlist of Frame fields sent to Metal.
   #
-  # Builds a new Frame containing only what the Metal renderer needs.
-  # Any new field added to Frame is excluded by default (fail-closed).
-  # If the GUI needs a new field, add it here explicitly.
-  #
-  # Included: window content (gutter, lines, tildes), cursor, overlays
-  # (hover, signature help), separators (split borders), regions.
-  # Excluded: tab_bar, file_tree, agent_panel, agentic_view, splash,
-  # minibuffer, per-window modeline (all handled by SwiftUI).
-  @spec frame_for_gui(Frame.t()) :: Frame.t()
-  defp frame_for_gui(frame) do
-    windows =
-      Enum.map(frame.windows, fn wf -> %{wf | modeline: %{}} end)
-
-    %Frame{
-      cursor: frame.cursor,
-      windows: windows,
-      overlays: frame.overlays,
-      separators: frame.separators,
-      regions: frame.regions
-    }
+  # Overlays pass through intentionally: the Chrome stage already filters
+  # them in Chrome.GUI.build (picker, which-key, completion are empty).
+  # The remaining overlays (hover popup, signature help, float popups)
+  # are Metal-rendered and belong in the cell-grid output.
+  @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
+  defp filter_frame_for_gui(frame) do
+    %{frame | tab_bar: [], file_tree: [], agent_panel: [], agentic_view: [], splash: nil}
   end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
