@@ -24,15 +24,18 @@ struct AgentChatView: View {
                         ForEach(state.messages) { msg in
                             messageView(msg)
                         }
+
+                        // Bottom padding so the last message has breathing room
+                        // above the prompt separator / approval banner.
+                        Spacer(minLength: 16)
+                            .id("bottom-padding")
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.top, 12)
                 }
                 .onChange(of: state.messages.count) { _, _ in
                     withAnimation(nil) {
-                        if let last = state.messages.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                        proxy.scrollTo("bottom-padding", anchor: .bottom)
                     }
                 }
             }
