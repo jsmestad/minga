@@ -91,5 +91,11 @@ defmodule Minga.Editor.Renderer do
 
   def render(state) do
     RenderPipeline.run(state)
+  rescue
+    e ->
+      msg = Exception.message(e)
+      Minga.Log.warning(:render, "Render pipeline crashed: #{msg}")
+      Minga.Editor.log_to_messages("[render] frame dropped: #{msg}")
+      state
   end
 end

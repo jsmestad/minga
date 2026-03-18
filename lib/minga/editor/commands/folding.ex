@@ -12,6 +12,7 @@ defmodule Minga.Editor.Commands.Folding do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.FoldMap
+  alias Minga.Editor.FoldRange
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
 
@@ -78,18 +79,20 @@ defmodule Minga.Editor.Commands.Folding do
 
   defp update_active_window(state, _fun), do: state
 
-  # Dispatches a fold command at the cursor line. Per-window folds take
-  # precedence. If no per-window fold exists, falls back to decoration folds.
+  # Dispatches a fold command at the cursor line. Checks both active folds
+  # (already collapsed) and available fold ranges (from tree-sitter).
+  # Falls back to decoration folds if no window fold range covers the line.
   @spec dispatch_fold_command(state(), Window.t(), :toggle | :close | :open) :: state()
   defp dispatch_fold_command(state, window, action) do
     {cursor_line, _col} = window.cursor
 
-    case FoldMap.fold_at(window.fold_map, cursor_line) do
-      {:ok, _range} ->
-        apply_window_fold(state, window, cursor_line, action)
+    has_active_fold = FoldMap.fold_at(window.fold_map, cursor_line) != :none
+    has_available_range = Enum.any?(window.fold_ranges, &FoldRange.contains?(&1, cursor_line))
 
-      :none ->
-        apply_decoration_fold(state, window.buffer, cursor_line, action)
+    if has_active_fold or has_available_range do
+      apply_window_fold(state, window, cursor_line, action)
+    else
+      apply_decoration_fold(state, window.buffer, cursor_line, action)
     end
   end
 

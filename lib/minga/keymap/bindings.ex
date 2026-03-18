@@ -45,7 +45,7 @@ defmodule Minga.Keymap.Bindings do
 
     @type t :: %__MODULE__{
             children: %{Minga.Keymap.Bindings.key() => t()},
-            command: atom() | nil,
+            command: atom() | tuple() | nil,
             description: String.t() | nil
           }
   end
@@ -91,9 +91,9 @@ defmodule Minga.Keymap.Bindings do
       iex> Minga.Keymap.Bindings.lookup(trie, {?k, 0})
       :not_found
   """
-  @spec bind(node_t(), [key()], atom(), String.t()) :: node_t()
+  @spec bind(node_t(), [key()], atom() | tuple(), String.t()) :: node_t()
   def bind(%Node{children: children} = root, [key | rest], command, description)
-      when is_atom(command) and is_binary(description) do
+      when (is_atom(command) or is_tuple(command)) and is_binary(description) do
     child = Map.get(children, key, new())
 
     updated_child =

@@ -116,14 +116,14 @@ defmodule Minga.Input.InterruptTest do
       assert new_state.vim.mode == :normal
     end
 
-    test "fresh mode_state clears pending_g" do
+    test "fresh mode_state clears prefix_node" do
       state = base_state()
-      mode_state = %{Mode.initial_state() | pending_g: true}
+      mode_state = %{Mode.initial_state() | prefix_node: %{?a => :fold_toggle}}
       vim = %{state.vim | mode: :normal, mode_state: mode_state}
       state = %{state | vim: vim}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.vim.mode_state.pending_g == false
+      assert new_state.vim.mode_state.prefix_node == nil
     end
 
     test "fresh mode_state clears leader_node" do
