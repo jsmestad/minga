@@ -89,6 +89,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "make", .has_scanner = false },
         .{ .name = "diff", .has_scanner = false },
         .{ .name = "elisp", .has_scanner = false },
+        .{ .name = "clojure", .has_scanner = false },
+        .{ .name = "objc", .has_scanner = false },
 
     };
 

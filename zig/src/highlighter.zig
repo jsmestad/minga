@@ -1422,6 +1422,8 @@ extern fn tree_sitter_dart() ?*const c.TSLanguage;
 extern fn tree_sitter_make() ?*const c.TSLanguage;
 extern fn tree_sitter_diff() ?*const c.TSLanguage;
 extern fn tree_sitter_elisp() ?*const c.TSLanguage;
+extern fn tree_sitter_clojure() ?*const c.TSLanguage;
+extern fn tree_sitter_objc() ?*const c.TSLanguage;
 
 /// Helper to resolve a highlight query via the query_loader, which handles
 /// `; inherits:` directives at comptime. All parent queries are prepended
@@ -1491,6 +1493,8 @@ const builtin_grammars = [_]BuiltinGrammar{
     .{ .name = "make", .func = tree_sitter_make, .query = ql("make"), .fold_query = qlFold("make") },
     .{ .name = "diff", .func = tree_sitter_diff, .query = ql("diff"), .fold_query = qlFold("diff") },
     .{ .name = "elisp", .func = tree_sitter_elisp, .query = ql("elisp") },
+    .{ .name = "clojure", .func = tree_sitter_clojure, .query = ql("clojure") },
+    .{ .name = "objc", .func = tree_sitter_objc, .query = ql("objc") },
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────
