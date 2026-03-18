@@ -63,10 +63,14 @@ defmodule Minga.Editor.Commands.UI do
   defp execute_parser_restart(state) do
     case ParserManager.restart() do
       :ok ->
-        %{state | status_msg: "Parser restarted"}
+        %{state | status_msg: "Parser restarted", parser_status: :available}
 
       {:error, :binary_not_found} ->
-        %{state | status_msg: "Parser restart failed: binary not found"}
+        %{
+          state
+          | status_msg: "Parser restart failed: binary not found",
+            parser_status: :unavailable
+        }
     end
   catch
     :exit, _ ->

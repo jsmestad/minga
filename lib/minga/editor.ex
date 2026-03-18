@@ -534,21 +534,41 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
+  # Parser process crashed; Manager is scheduling a restart.
+  def handle_info({:minga_highlight, :parser_crashed}, state) do
+    {:noreply, %{state | parser_status: :restarting}}
+  end
+
   # Parser recovered after a crash; buffer re-sync already happened in Manager.
-  # Reset the highlight version so resync spans (sent at version 0) pass
-  # the version guard in Highlight.put_spans/3.
+  # Reset both the global highlight version AND each per-buffer highlight's
+  # version to 0 so resync spans (sent at version 0) pass the version guard
+  # in Highlight.put_spans/3. Without resetting per-buffer versions, the
+  # resync spans would be silently discarded (0 < previous_version).
   def handle_info({:minga_highlight, :parser_restarted}, state) do
     hl = state.highlight
-    new_state = %{state | highlight: %{hl | version: 0}}
+
+    reset_highlights =
+      Map.new(hl.highlights, fn {pid, buf_hl} ->
+        {pid, %{buf_hl | version: 0}}
+      end)
+
+    new_state = %{
+      state
+      | highlight: %{hl | version: 0, highlights: reset_highlights},
+        parser_status: :available
+    }
+
     new_state = log_message(new_state, "Parser restarted, syntax highlighting recovered")
     {:noreply, new_state}
   end
 
   # Parser gave up retrying after repeated crashes.
   def handle_info({:minga_highlight, :parser_gave_up}, state) do
+    new_state = %{state | parser_status: :unavailable}
+
     new_state =
       log_message(
-        state,
+        new_state,
         "Parser crashed repeatedly, syntax highlighting disabled. Use :parser-restart to retry."
       )
 

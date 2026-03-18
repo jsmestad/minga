@@ -103,6 +103,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
             else: nil
           ),
         lsp_status: lsp_status,
+        parser_status: state.parser_status,
         git_branch: git_branch,
         git_diff_summary: git_diff_summary
       },

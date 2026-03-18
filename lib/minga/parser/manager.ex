@@ -274,7 +274,12 @@ defmodule Minga.Parser.Manager do
   end
 
   def handle_call(:restart, _from, state) do
-    state = %{state | gave_up: false, current_backoff_ms: @initial_backoff_ms}
+    state = %{
+      state
+      | gave_up: false,
+        current_backoff_ms: @initial_backoff_ms,
+        restart_timestamps: []
+    }
 
     # Close existing port if still open
     state = close_port(state)
@@ -356,6 +361,7 @@ defmodule Minga.Parser.Manager do
     # Fail any pending synchronous requests so callers don't hang.
     state = fail_pending_requests(state)
     state = %{state | port: nil, ready: false}
+    broadcast(state.subscribers, {:minga_highlight, :parser_crashed})
     state = schedule_restart(state)
     {:noreply, state}
   end
