@@ -305,7 +305,7 @@ defmodule Minga.Editor.AgentLifecycle do
 
   # Computes the byte offset of each message's start line within the full buffer text.
   @spec message_byte_offsets(
-          [AgentBufferSync.ChatDecorations.line_offset()],
+          [Minga.Agent.ChatDecorations.line_offset()],
           [String.t()]
         ) :: %{non_neg_integer() => non_neg_integer()}
   defp message_byte_offsets(line_offsets, full_lines) do
