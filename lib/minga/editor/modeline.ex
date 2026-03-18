@@ -31,6 +31,9 @@ defmodule Minga.Editor.Modeline do
   @typedoc "LSP connection status for the modeline indicator."
   @type lsp_status :: :ready | :initializing | :starting | :error | :none
 
+  @typedoc "Parser availability status for the modeline indicator."
+  @type parser_status :: :available | :unavailable | :restarting
+
   @typedoc "Git diff summary: {added, modified, deleted} line counts."
   @type git_diff_summary :: {non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
 
@@ -51,6 +54,7 @@ defmodule Minga.Editor.Modeline do
           optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
+          optional(:parser_status) => parser_status(),
           optional(:git_branch) => String.t() | nil,
           optional(:git_diff_summary) => git_diff_summary()
         }
@@ -105,6 +109,7 @@ defmodule Minga.Editor.Modeline do
 
     agent_segments = build_agent_segments(data, bar_bg)
     lsp_segments = build_lsp_segments(data, bar_bg, ml)
+    parser_segments = build_parser_segments(data, bar_bg, ml)
     git_segments = build_git_segments(data, bar_bg, theme)
 
     # Segments are {text, fg, bg, opts, click_target}
@@ -120,7 +125,8 @@ defmodule Minga.Editor.Modeline do
         Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
 
     right_segments =
-      lsp_segments ++
+      parser_segments ++
+        lsp_segments ++
         [
           {" #{devicon}", devicon_color, filetype_bg, [], nil},
           {" #{filetype_label} ", filetype_fg, filetype_bg, [], :filetype_menu},
@@ -253,6 +259,24 @@ defmodule Minga.Editor.Modeline do
       :starting -> [{"◯", ml.lsp_starting || 0x5B6268, bar_bg, [], :lsp_info}]
       :error -> [{"✗", ml.lsp_error || 0xFF6C6B, bar_bg, [bold: true], :lsp_info}]
       _ -> []
+    end
+  end
+
+  @spec build_parser_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_parser_segments(data, bar_bg, ml) do
+    case Map.get(data, :parser_status) do
+      :unavailable ->
+        # Red warning: parser is down, highlighting disabled
+        [{"🌳✗", ml.lsp_error || 0xFF6C6B, bar_bg, [bold: true], :parser_restart}]
+
+      :restarting ->
+        # Yellow: parser is restarting
+        [{"🌳⟳", ml.lsp_initializing || 0xECBE7B, bar_bg, [bold: true], :parser_restart}]
+
+      _ ->
+        # :available or nil — normal state, show nothing
+        []
     end
   end
 

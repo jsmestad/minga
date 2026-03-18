@@ -105,6 +105,7 @@ defmodule Minga.Editor.State do
             windows: %Windows{},
             file_tree: %FileTreeState{},
             lsp_status: :none,
+            parser_status: :available,
             hover_popup: nil,
             signature_help: nil,
             injection_ranges: %{},
@@ -146,6 +147,7 @@ defmodule Minga.Editor.State do
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           lsp_status: Minga.Editor.Modeline.lsp_status(),
+          parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
           injection_ranges: %{

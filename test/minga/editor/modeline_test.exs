@@ -246,4 +246,33 @@ defmodule Minga.Editor.ModelineTest do
       assert Modeline.cursor_shape(:operator_pending) == :block
     end
   end
+
+  describe "parser status indicator" do
+    test "shows nothing when parser is available" do
+      data = Map.put(@base_data, :parser_status, :available)
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      refute Enum.any?(texts, &String.contains?(&1, "🌳"))
+    end
+
+    test "shows tree icon with ✗ when parser is unavailable" do
+      data = Map.put(@base_data, :parser_status, :unavailable)
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "🌳✗"))
+    end
+
+    test "shows tree icon with spinner when parser is restarting" do
+      data = Map.put(@base_data, :parser_status, :restarting)
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_row, _col, text, _opts} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "🌳⟳"))
+    end
+
+    test "parser unavailable indicator is clickable to parser_restart" do
+      data = Map.put(@base_data, :parser_status, :unavailable)
+      {_commands, regions} = Modeline.render(0, 120, data)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :parser_restart end)
+    end
+  end
 end
