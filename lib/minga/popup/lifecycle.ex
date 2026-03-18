@@ -41,6 +41,7 @@ defmodule Minga.Popup.Lifecycle do
   alias Minga.Popup.Active, as: PopupActive
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
+  alias Minga.Face
 
   @type state :: EditorState.t()
 
@@ -234,7 +235,7 @@ defmodule Minga.Popup.Lifecycle do
     |> Enum.flat_map(fn {line, row} ->
       if row < interior_h do
         text = String.slice(line, 0, interior_w)
-        [DisplayList.draw(row, 0, text, fg: theme.fg, bg: theme.bg)]
+        [DisplayList.draw(row, 0, text, Face.new(fg: theme.fg, bg: theme.bg))]
       else
         []
       end

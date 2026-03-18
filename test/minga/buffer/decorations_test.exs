@@ -2,11 +2,12 @@ defmodule Minga.Buffer.DecorationsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
+  alias Minga.Face
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp add_hl(decs, start_pos, end_pos, opts \\ []) do
-    style = Keyword.get(opts, :style, bg: 0x3E4452)
+    style = Keyword.get(opts, :style, Face.new(bg: 0x3E4452))
     priority = Keyword.get(opts, :priority, 0)
     group = Keyword.get(opts, :group)
 
@@ -49,8 +50,8 @@ defmodule Minga.Buffer.DecorationsTest do
 
     test "adds overlapping ranges" do
       decs = Decorations.new()
-      {_id1, decs} = add_hl(decs, {0, 0}, {5, 0}, style: [bg: 0xFF0000])
-      {_id2, decs} = add_hl(decs, {3, 0}, {8, 0}, style: [bg: 0x00FF00])
+      {_id1, decs} = add_hl(decs, {0, 0}, {5, 0}, style: Face.new(bg: 0xFF0000))
+      {_id2, decs} = add_hl(decs, {3, 0}, {8, 0}, style: Face.new(bg: 0x00FF00))
 
       assert Decorations.highlight_count(decs) == 2
     end
@@ -70,8 +71,8 @@ defmodule Minga.Buffer.DecorationsTest do
   describe "remove_highlight/2" do
     test "removes a specific range by ID" do
       decs = Decorations.new()
-      {id1, decs} = add_hl(decs, {0, 0}, {0, 10}, style: [bg: 0xFF0000])
-      {_id2, decs} = add_hl(decs, {5, 0}, {5, 10}, style: [bg: 0x00FF00])
+      {id1, decs} = add_hl(decs, {0, 0}, {0, 10}, style: Face.new(bg: 0xFF0000))
+      {_id2, decs} = add_hl(decs, {5, 0}, {5, 10}, style: Face.new(bg: 0x00FF00))
 
       decs = Decorations.remove_highlight(decs, id1)
       assert Decorations.highlight_count(decs) == 1
@@ -79,7 +80,7 @@ defmodule Minga.Buffer.DecorationsTest do
       # Remaining range should be the second one
       ranges = Decorations.highlights_for_line(decs, 5)
       assert length(ranges) == 1
-      assert hd(ranges).style == [bg: 0x00FF00]
+      assert hd(ranges).style.bg == 0x00FF00
     end
 
     test "no-op for non-existent ID" do
@@ -180,20 +181,20 @@ defmodule Minga.Buffer.DecorationsTest do
   describe "highlights_for_lines/3" do
     test "returns ranges intersecting the line range" do
       decs = Decorations.new()
-      {_, decs} = add_hl(decs, {0, 0}, {3, 0}, style: [bg: 0xFF0000])
-      {_, decs} = add_hl(decs, {5, 0}, {8, 0}, style: [bg: 0x00FF00])
-      {_, decs} = add_hl(decs, {10, 0}, {15, 0}, style: [bg: 0x0000FF])
+      {_, decs} = add_hl(decs, {0, 0}, {3, 0}, style: Face.new(bg: 0xFF0000))
+      {_, decs} = add_hl(decs, {5, 0}, {8, 0}, style: Face.new(bg: 0x00FF00))
+      {_, decs} = add_hl(decs, {10, 0}, {15, 0}, style: Face.new(bg: 0x0000FF))
 
       results = Decorations.highlights_for_lines(decs, 4, 9)
       assert length(results) == 1
-      assert hd(results).style == [bg: 0x00FF00]
+      assert hd(results).style.bg == 0x00FF00
     end
 
     test "returns ranges sorted by priority" do
       decs = Decorations.new()
-      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: [bg: 0xFF0000], priority: 10)
-      {_, decs} = add_hl(decs, {5, 5}, {5, 15}, style: [fg: 0x00FF00], priority: 5)
-      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: [bold: true], priority: 20)
+      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: Face.new(bg: 0xFF0000), priority: 10)
+      {_, decs} = add_hl(decs, {5, 5}, {5, 15}, style: Face.new(fg: 0x00FF00), priority: 5)
+      {_, decs} = add_hl(decs, {5, 0}, {5, 20}, style: Face.new(bold: true), priority: 20)
 
       results = Decorations.highlights_for_lines(decs, 5, 5)
       priorities = Enum.map(results, & &1.priority)
@@ -342,19 +343,19 @@ defmodule Minga.Buffer.DecorationsTest do
 
   describe "merge_highlights/3" do
     test "no ranges returns segments unchanged" do
-      segments = [{"hello", [fg: 0xFF0000]}, {" world", [fg: 0x00FF00]}]
+      segments = [{"hello", Face.new(fg: 0xFF0000)}, {" world", Face.new(fg: 0x00FF00)}]
       assert Decorations.merge_highlights(segments, [], 0) == segments
     end
 
     test "full-line range applies bg to all segments" do
-      segments = [{"hello", [fg: 0xFF0000]}, {" world", [fg: 0x00FF00]}]
+      segments = [{"hello", Face.new(fg: 0xFF0000)}, {" world", Face.new(fg: 0x00FF00)}]
 
       ranges = [
         %{
           id: make_ref(),
           start: {0, 0},
           end_: {1, 0},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -364,23 +365,23 @@ defmodule Minga.Buffer.DecorationsTest do
 
       # All segments should have bg added but fg preserved
       Enum.each(result, fn {_text, style} ->
-        assert Keyword.get(style, :bg) == 0x3E4452
+        assert style.bg == 0x3E4452
       end)
 
       # First segment should still have its original fg
       {_, first_style} = hd(result)
-      assert Keyword.get(first_style, :fg) == 0xFF0000
+      assert first_style.fg == 0xFF0000
     end
 
     test "partial range splits segment at boundary" do
-      segments = [{"hello world", [fg: 0xFF0000]}]
+      segments = [{"hello world", Face.new(fg: 0xFF0000)}]
 
       ranges = [
         %{
           id: make_ref(),
           start: {0, 0},
           end_: {0, 5},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -392,22 +393,22 @@ defmodule Minga.Buffer.DecorationsTest do
       assert length(result) == 2
       [{text1, style1}, {text2, style2}] = result
       assert text1 == "hello"
-      assert Keyword.get(style1, :bg) == 0x3E4452
-      assert Keyword.get(style1, :fg) == 0xFF0000
+      assert style1.bg == 0x3E4452
+      assert style1.fg == 0xFF0000
       assert text2 == " world"
-      assert Keyword.get(style2, :bg) == nil
-      assert Keyword.get(style2, :fg) == 0xFF0000
+      assert style2.bg == nil
+      assert style2.fg == 0xFF0000
     end
 
     test "overlapping ranges with priority resolution" do
-      segments = [{"abcdef", []}]
+      segments = [{"abcdef", Face.new()}]
 
       ranges = [
         %{
           id: make_ref(),
           start: {0, 0},
           end_: {0, 6},
-          style: [bg: 0xFF0000],
+          style: Face.new(bg: 0xFF0000),
           priority: 1,
           group: nil
         },
@@ -415,7 +416,7 @@ defmodule Minga.Buffer.DecorationsTest do
           id: make_ref(),
           start: {0, 2},
           end_: {0, 4},
-          style: [bg: 0x00FF00],
+          style: Face.new(bg: 0x00FF00),
           priority: 10,
           group: nil
         }
@@ -426,20 +427,24 @@ defmodule Minga.Buffer.DecorationsTest do
       # Should be split into "ab" (red bg), "cd" (green bg, higher priority), "ef" (red bg)
       assert length(result) == 3
       [{_, s1}, {_, s2}, {_, s3}] = result
-      assert Keyword.get(s1, :bg) == 0xFF0000
-      assert Keyword.get(s2, :bg) == 0x00FF00
-      assert Keyword.get(s3, :bg) == 0xFF0000
+      assert s1.bg == 0xFF0000
+      assert s2.bg == 0x00FF00
+      assert s3.bg == 0xFF0000
     end
 
     test "range spanning multiple segments" do
-      segments = [{"aaa", [fg: 0xFF0000]}, {"bbb", [fg: 0x00FF00]}, {"ccc", [fg: 0x0000FF]}]
+      segments = [
+        {"aaa", Face.new(fg: 0xFF0000)},
+        {"bbb", Face.new(fg: 0x00FF00)},
+        {"ccc", Face.new(fg: 0x0000FF)}
+      ]
 
       ranges = [
         %{
           id: make_ref(),
           start: {0, 1},
           end_: {0, 8},
-          style: [bold: true],
+          style: Face.new(bold: true),
           priority: 0,
           group: nil
         }
@@ -461,18 +466,18 @@ defmodule Minga.Buffer.DecorationsTest do
       # Verify bold is applied where expected
       {first_text, first_style} = hd(result)
       assert first_text == "a"
-      refute Keyword.get(first_style, :bold, false)
+      refute first_style.bold || false
     end
 
     test "range on a different line from segments is ignored" do
-      segments = [{"hello", [fg: 0xFF0000]}]
+      segments = [{"hello", Face.new(fg: 0xFF0000)}]
 
       ranges = [
         %{
           id: make_ref(),
           start: {5, 0},
           end_: {5, 5},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -502,7 +507,7 @@ defmodule Minga.Buffer.DecorationsTest do
     end
 
     test "multi-line range on an intermediate line covers full width" do
-      segments = [{"full line content", [fg: 0xFF0000]}]
+      segments = [{"full line content", Face.new(fg: 0xFF0000)}]
 
       # Range spans lines 3-8, rendering line 5 (in the middle)
       ranges = [
@@ -510,7 +515,7 @@ defmodule Minga.Buffer.DecorationsTest do
           id: make_ref(),
           start: {3, 5},
           end_: {8, 10},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -522,12 +527,12 @@ defmodule Minga.Buffer.DecorationsTest do
       # covers cols 0..infinity
       assert length(result) == 1
       {_, style} = hd(result)
-      assert Keyword.get(style, :bg) == 0x3E4452
-      assert Keyword.get(style, :fg) == 0xFF0000
+      assert style.bg == 0x3E4452
+      assert style.fg == 0xFF0000
     end
 
     test "range on start line only covers from start_col onward" do
-      segments = [{"0123456789", [fg: 0xFF0000]}]
+      segments = [{"0123456789", Face.new(fg: 0xFF0000)}]
 
       # Range starts at line 0 col 5, extends to line 2
       ranges = [
@@ -535,7 +540,7 @@ defmodule Minga.Buffer.DecorationsTest do
           id: make_ref(),
           start: {0, 5},
           end_: {2, 0},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -547,13 +552,13 @@ defmodule Minga.Buffer.DecorationsTest do
       assert length(result) == 2
       [{text1, style1}, {text2, style2}] = result
       assert text1 == "01234"
-      refute Keyword.has_key?(style1, :bg)
+      refute style1.bg != nil
       assert text2 == "56789"
-      assert Keyword.get(style2, :bg) == 0x3E4452
+      assert style2.bg == 0x3E4452
     end
 
     test "range on end line only covers up to end_col" do
-      segments = [{"0123456789", [fg: 0xFF0000]}]
+      segments = [{"0123456789", Face.new(fg: 0xFF0000)}]
 
       # Range starts at line 0, ends at this line col 5
       ranges = [
@@ -561,7 +566,7 @@ defmodule Minga.Buffer.DecorationsTest do
           id: make_ref(),
           start: {0, 0},
           end_: {3, 5},
-          style: [bg: 0x3E4452],
+          style: Face.new(bg: 0x3E4452),
           priority: 0,
           group: nil
         }
@@ -573,33 +578,38 @@ defmodule Minga.Buffer.DecorationsTest do
       assert length(result) == 2
       [{text1, style1}, {text2, style2}] = result
       assert text1 == "01234"
-      assert Keyword.get(style1, :bg) == 0x3E4452
+      assert style1.bg == 0x3E4452
       assert text2 == "56789"
-      refute Keyword.has_key?(style2, :bg)
+      refute style2.bg != nil
     end
   end
 
   describe "merge_style_props/2" do
+    alias Minga.Face
+
     test "overlay properties override base" do
-      result = Decorations.merge_style_props([fg: 0xFF0000], fg: 0x00FF00)
-      assert Keyword.get(result, :fg) == 0x00FF00
+      result = Decorations.merge_style_props(Face.new(fg: 0xFF0000), Face.new(fg: 0x00FF00))
+      assert result.fg == 0x00FF00
     end
 
     test "base properties are preserved when not overridden" do
-      result = Decorations.merge_style_props([fg: 0xFF0000, bold: true], bg: 0x3E4452)
-      assert Keyword.get(result, :fg) == 0xFF0000
-      assert Keyword.get(result, :bold) == true
-      assert Keyword.get(result, :bg) == 0x3E4452
+      result =
+        Decorations.merge_style_props(Face.new(fg: 0xFF0000, bold: true), Face.new(bg: 0x3E4452))
+
+      assert result.fg == 0xFF0000
+      assert result.bold == true
+      assert result.bg == 0x3E4452
     end
 
     test "empty overlay returns base unchanged" do
-      base = [fg: 0xFF0000, bold: true]
-      assert Decorations.merge_style_props(base, []) == base
+      base = Face.new(fg: 0xFF0000, bold: true)
+      assert Decorations.merge_style_props(base, Face.new()) == base
     end
 
     test "empty base returns overlay" do
-      overlay = [bg: 0x3E4452]
-      assert Decorations.merge_style_props([], overlay) == overlay
+      overlay = Face.new(bg: 0x3E4452)
+      result = Decorations.merge_style_props(Face.new(), overlay)
+      assert result.bg == 0x3E4452
     end
   end
 

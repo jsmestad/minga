@@ -26,6 +26,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
+  alias Minga.Face
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Highlight
@@ -575,14 +576,14 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     render_styled_segments(vt.segments, pos)
   end
 
-  @spec render_placeholder_segments([{String.t(), keyword()}], RenderPosition.t()) ::
+  @spec render_placeholder_segments([{String.t(), Face.t()}], RenderPosition.t()) ::
           [DisplayList.draw()]
   defp render_placeholder_segments(segments, pos) do
     render_styled_segments(segments, pos)
   end
 
   # Shared renderer for styled segments at a screen position.
-  @spec render_styled_segments([{String.t(), keyword()}], RenderPosition.t()) ::
+  @spec render_styled_segments([{String.t(), Face.t()}], RenderPosition.t()) ::
           [DisplayList.draw()]
   defp render_styled_segments(segments, %RenderPosition{} = pos) do
     row = pos.screen_row + pos.row_off
@@ -720,9 +721,9 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
     {style, priority} =
       if is_confirm do
-        {[bg: colors.current_bg, fg: colors.highlight_fg], -5}
+        {Face.new(bg: colors.current_bg, fg: colors.highlight_fg), -5}
       else
-        {[bg: colors.highlight_bg, fg: colors.highlight_fg], -10}
+        {Face.new(bg: colors.highlight_bg, fg: colors.highlight_fg), -10}
       end
 
     {_id, decs} =

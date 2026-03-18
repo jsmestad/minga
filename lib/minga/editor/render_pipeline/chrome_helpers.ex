@@ -27,6 +27,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.LSP.SyncServer
   alias Minga.Theme
   alias Minga.WhichKey
+  alias Minga.Face
 
   @type state :: EditorState.t()
 
@@ -183,7 +184,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     separators = collect_separators(tree, screen_rect)
 
     for {col, start_row, end_row} <- separators, row <- start_row..end_row do
-      DisplayList.draw(row, col, "│", fg: theme.editor.split_border_fg)
+      DisplayList.draw(row, col, "│", Face.new(fg: theme.editor.split_border_fg))
     end
   end
 
@@ -272,7 +273,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     # for every entry so keys stay aligned.
     {draws, cur_col} =
       if binding.icon do
-        icon_draw = DisplayList.draw(row, cur_col, binding.icon, fg: desc_fg, bg: bg)
+        icon_draw = DisplayList.draw(row, cur_col, binding.icon, Face.new(fg: desc_fg, bg: bg))
         {[icon_draw | draws], cur_col + 2}
       else
         if has_icons do
@@ -283,15 +284,15 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
       end
 
     # Key
-    key_draw = DisplayList.draw(row, cur_col, binding.key, fg: key_fg, bg: bg)
+    key_draw = DisplayList.draw(row, cur_col, binding.key, Face.new(fg: key_fg, bg: bg))
     cur_col = cur_col + String.length(binding.key)
 
     # Separator
-    sep_draw = DisplayList.draw(row, cur_col, " : ", fg: sep_fg, bg: bg)
+    sep_draw = DisplayList.draw(row, cur_col, " : ", Face.new(fg: sep_fg, bg: bg))
     cur_col = cur_col + 3
 
     # Description
-    desc_draw = DisplayList.draw(row, cur_col, binding.description, fg: desc_fg, bg: bg)
+    desc_draw = DisplayList.draw(row, cur_col, binding.description, Face.new(fg: desc_fg, bg: bg))
 
     Enum.reverse([desc_draw, sep_draw, key_draw | draws])
   end

@@ -115,14 +115,15 @@ defmodule Minga.Face.SparsityPropertyTest do
     names = Registry.names(reg)
 
     check all(name <- member_of(names)) do
-      style = Registry.style_for(reg, name)
+      face = Registry.style_for(reg, name)
 
-      # bg should only be present if the face explicitly overrides it
-      if Keyword.has_key?(style, :bg) do
-        face = Registry.resolve(reg, name)
+      # For faces that have a bg matching the default, to_style should NOT emit bg
+      # This tests that to_style still produces sparse output for the protocol layer
+      style_kw = Face.to_style(face, base)
 
-        assert face.bg != base.bg,
-               "style_for(#{inspect(name)}) emitted bg=#{inspect(face.bg)} which matches default bg=#{inspect(base.bg)}"
+      if face.bg == base.bg do
+        refute Keyword.has_key?(style_kw, :bg),
+               "to_style for #{inspect(name)} emitted bg=#{inspect(face.bg)} which matches default bg=#{inspect(base.bg)}"
       end
     end
   end

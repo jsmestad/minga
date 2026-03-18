@@ -26,6 +26,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
+  alias Minga.Face
   alias Minga.Highlight
 
   @typedoc """
@@ -248,14 +249,17 @@ defmodule Minga.Editor.Renderer.BufferLine do
   @spec apply_line_bg([DisplayList.draw()], non_neg_integer(), non_neg_integer(), Context.t()) ::
           [DisplayList.draw()]
   defp apply_line_bg(cmds, sr, bg, ctx) do
-    fill = DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), bg: bg)
+    default_bg = ctx.editor_bg
+
+    fill =
+      DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), Face.new(bg: bg))
 
     tinted =
-      Enum.map(cmds, fn {row, col, text, style} ->
-        if Keyword.has_key?(style, :bg) or Keyword.has_key?(style, :reverse) do
-          {row, col, text, style}
+      Enum.map(cmds, fn {row, col, text, %Face{} = face} ->
+        if (face.bg != nil and face.bg != default_bg) or face.reverse do
+          {row, col, text, face}
         else
-          {row, col, text, Keyword.put(style, :bg, bg)}
+          {row, col, text, %{face | bg: bg}}
         end
       end)
 
@@ -281,7 +285,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
     decorations
     |> Decorations.highlights_for_line(buf_line)
     |> Enum.find_value(fn hl ->
-      bg = Keyword.get(hl.style, :bg)
+      bg = hl.style.bg
       if bg && hl.start == {buf_line, 0}, do: bg, else: nil
     end)
   end
@@ -298,13 +302,13 @@ defmodule Minga.Editor.Renderer.BufferLine do
     # Filter to ranges that have non-bg style attributes (underline, strikethrough, etc.)
     overlay_ranges =
       Enum.filter(ranges, fn hl ->
-        style = hl.style
+        face = hl.style
 
-        Keyword.has_key?(style, :underline) or
-          Keyword.has_key?(style, :underline_color) or
-          Keyword.has_key?(style, :underline_style) or
-          Keyword.has_key?(style, :strikethrough) or
-          Keyword.has_key?(style, :blend)
+        face.underline != nil or
+          face.underline_color != nil or
+          face.underline_style != nil or
+          face.strikethrough != nil or
+          face.blend != nil
       end)
 
     if overlay_ranges == [] do
@@ -358,7 +362,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
-          keyword(),
+          Face.t(),
           [Minga.Buffer.Decorations.HighlightRange.t()],
           non_neg_integer()
         ) :: [DisplayList.draw()]
@@ -392,7 +396,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
-          keyword(),
+          Face.t(),
           [Minga.Buffer.Decorations.HighlightRange.t()],
           non_neg_integer(),
           non_neg_integer(),
@@ -449,25 +453,24 @@ defmodule Minga.Editor.Renderer.BufferLine do
     result |> Enum.reverse() |> Enum.join()
   end
 
-  # Merges overlay decoration style attributes onto a base style.
+  # Merges overlay decoration style attributes onto a base face.
   # Only merges decorative attributes (underline, strikethrough, blend).
   # Does NOT override fg/bg from the decoration (preserves syntax colors).
-  @spec merge_overlay_style(keyword(), keyword()) :: keyword()
-  defp merge_overlay_style(base, overlay) do
+  @spec merge_overlay_style(Face.t(), Face.t()) :: Face.t()
+  defp merge_overlay_style(%Face{} = base, %Face{} = overlay) do
     base
-    |> merge_kw(:underline, overlay)
-    |> merge_kw(:underline_color, overlay)
-    |> merge_kw(:underline_style, overlay)
-    |> merge_kw(:strikethrough, overlay)
-    |> merge_kw(:blend, overlay)
+    |> merge_face_field(:underline, overlay)
+    |> merge_face_field(:underline_color, overlay)
+    |> merge_face_field(:underline_style, overlay)
+    |> merge_face_field(:strikethrough, overlay)
+    |> merge_face_field(:blend, overlay)
   end
 
-  # Merge a single key from overlay into base if present in overlay.
-  @spec merge_kw(keyword(), atom(), keyword()) :: keyword()
-  defp merge_kw(base, key, overlay) do
-    case Keyword.get(overlay, key) do
+  @spec merge_face_field(Face.t(), atom(), Face.t()) :: Face.t()
+  defp merge_face_field(base, key, overlay) do
+    case Map.get(overlay, key) do
       nil -> base
-      value -> Keyword.put(base, key, value)
+      value -> Map.put(base, key, value)
     end
   end
 
@@ -551,8 +554,11 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   @spec render_blank_gutter(line_params(), non_neg_integer()) :: DisplayList.draw()
   defp render_blank_gutter(p, sr) do
-    DisplayList.draw(sr, p.sign_w, String.duplicate(" ", max(p.gutter_w - p.sign_w, 0)),
-      fg: p.ctx.gutter_colors.fg
+    DisplayList.draw(
+      sr,
+      p.sign_w,
+      String.duplicate(" ", max(p.gutter_w - p.sign_w, 0)),
+      Face.new(fg: p.ctx.gutter_colors.fg)
     )
   end
 

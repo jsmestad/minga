@@ -8,6 +8,7 @@ defmodule Minga.Agent.View.ShellRenderer do
 
   alias Minga.Editor.DisplayList
   alias Minga.Theme
+  alias Minga.Face
 
   @typedoc "Bounding rectangle: `{row, col, width, height}`."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
@@ -71,7 +72,7 @@ defmodule Minga.Agent.View.ShellRenderer do
     truncated_cmd = String.slice(command, 0, max(width - 10, 10))
     text = String.pad_trailing(" #{icon} $ #{truncated_cmd} ", width)
 
-    [DisplayList.draw(row, col, text, fg: icon_fg, bg: at.header_bg)]
+    [DisplayList.draw(row, col, text, Face.new(fg: icon_fg, bg: at.header_bg))]
   end
 
   @spec render_output(
@@ -106,9 +107,14 @@ defmodule Minga.Agent.View.ShellRenderer do
         content_text = String.slice(line, 0, content_w)
 
         [
-          DisplayList.draw(row, col, blank, bg: at.panel_bg),
-          DisplayList.draw(row, col, gutter_text, fg: at.tool_border, bg: at.panel_bg),
-          DisplayList.draw(row, col + gutter_w, content_text, fg: at.text_fg, bg: at.panel_bg)
+          DisplayList.draw(row, col, blank, Face.new(bg: at.panel_bg)),
+          DisplayList.draw(row, col, gutter_text, Face.new(fg: at.tool_border, bg: at.panel_bg)),
+          DisplayList.draw(
+            row,
+            col + gutter_w,
+            content_text,
+            Face.new(fg: at.text_fg, bg: at.panel_bg)
+          )
         ]
       end)
 
@@ -132,7 +138,7 @@ defmodule Minga.Agent.View.ShellRenderer do
     blank = String.duplicate(" ", width)
 
     for r <- (start_row + rendered)..(start_row + height - 1) do
-      DisplayList.draw(r, col, blank, bg: at.panel_bg)
+      DisplayList.draw(r, col, blank, Face.new(bg: at.panel_bg))
     end
   end
 

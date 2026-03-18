@@ -27,6 +27,7 @@ defmodule Minga.Editor.DisplayList do
   """
 
   alias Minga.Editor.Layout
+  alias Minga.Face
   alias Minga.Port.Protocol
 
   # ── Fundamental types ──────────────────────────────────────────────────────
@@ -34,19 +35,18 @@ defmodule Minga.Editor.DisplayList do
   @typedoc "RGB color as a 24-bit integer (e.g. `0xFF6C6B`)."
   @type color :: non_neg_integer()
 
-  @typedoc "Style attributes as a keyword list, matching `Protocol.style()`."
-  @type style :: keyword()
+  @typedoc "Style: a resolved Face struct."
+  @type style :: Face.t()
 
   @typedoc """
-  A pending draw command: `{row, col, text, style}`.
+  A pending draw command: `{row, col, text, Face.t()}`.
 
   This is the intermediate representation that renderer modules produce.
-  Replaces `Protocol.encode_draw` in the rendering pipeline.
   """
-  @type draw :: {non_neg_integer(), non_neg_integer(), String.t(), style()}
+  @type draw :: {non_neg_integer(), non_neg_integer(), String.t(), Face.t()}
 
   @typedoc "A single styled text span at a specific column."
-  @type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: style()}
+  @type text_run :: {col :: non_neg_integer(), text :: String.t(), style :: Face.t()}
 
   @typedoc "All text runs on one screen row."
   @type display_line :: [text_run()]
@@ -177,20 +177,20 @@ defmodule Minga.Editor.DisplayList do
   # ── Draw constructor ───────────────────────────────────────────────────────
 
   @doc """
-  Creates a draw tuple. Drop-in replacement for `Protocol.encode_draw/4`.
+  Creates a draw tuple with a Face style.
 
   ## Examples
 
       iex> DisplayList.draw(0, 5, "hello")
-      {0, 5, "hello", []}
+      {0, 5, "hello", %Face{name: "_"}}
 
-      iex> DisplayList.draw(0, 5, "hello", fg: 0xFF0000, bold: true)
-      {0, 5, "hello", [fg: 0xFF0000, bold: true]}
+      iex> DisplayList.draw(0, 5, "hello", Face.new(fg: 0xFF0000, bold: true))
+      {0, 5, "hello", %Face{name: "_", fg: 0xFF0000, bold: true}}
   """
-  @spec draw(non_neg_integer(), non_neg_integer(), String.t(), style()) :: draw()
-  def draw(row, col, text, style \\ [])
+  @spec draw(non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: draw()
+  def draw(row, col, text, %Face{} = face \\ Face.new())
       when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
-    {row, col, text, style}
+    {row, col, text, face}
   end
 
   # ── Layer helpers ──────────────────────────────────────────────────────────
@@ -228,19 +228,12 @@ defmodule Minga.Editor.DisplayList do
   @doc "Converts draw tuples to grayscale (luminance-weighted)."
   @spec grayscale_draws([draw()]) :: [draw()]
   def grayscale_draws(draws) do
-    Enum.map(draws, fn {row, col, text, style} ->
-      fg = Keyword.get(style, :fg, 0xFFFFFF)
-      bg = Keyword.get(style, :bg, 0x000000)
+    Enum.map(draws, fn {row, col, text, %Face{} = face} ->
+      fg = face.fg || 0xFFFFFF
+      bg = face.bg || 0x000000
 
-      fg_gray = grayscale_color(fg)
-      bg_gray = grayscale_color(bg)
-
-      new_style =
-        style
-        |> Keyword.put(:fg, fg_gray)
-        |> Keyword.put(:bg, bg_gray)
-
-      {row, col, text, new_style}
+      %{face | fg: grayscale_color(fg), bg: grayscale_color(bg)}
+      |> then(fn new_face -> {row, col, text, new_face} end)
     end)
   end
 
@@ -315,8 +308,8 @@ defmodule Minga.Editor.DisplayList do
   """
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
-    Enum.map(draws, fn {row, col, text, style} ->
-      Protocol.encode_draw_smart(row, col, text, style)
+    Enum.map(draws, fn {row, col, text, %Face{} = face} ->
+      Protocol.encode_draw_smart(row, col, text, Face.to_style(face))
     end)
   end
 

@@ -6,6 +6,7 @@ defmodule Minga.Editor.DisplayMapTest do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
+  alias Minga.Face
 
   # ── No folds or decorations ──────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"▎ Agent", [bold: true]}],
+          segments: [{"▎ Agent", Minga.Face.new(bold: true)}],
           placement: :above
         )
 
@@ -232,7 +233,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"separator", []}],
+          segments: [{"separator", Minga.Face.new()}],
           placement: :below
         )
 
@@ -257,19 +258,19 @@ defmodule Minga.Editor.DisplayMapTest do
       # Add 3 virtual lines above line 5
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header1", []}],
+          segments: [{"header1", Minga.Face.new()}],
           placement: :above
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header2", []}],
+          segments: [{"header2", Minga.Face.new()}],
           placement: :above
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header3", []}],
+          segments: [{"header3", Minga.Face.new()}],
           placement: :above
         )
 
@@ -343,7 +344,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header", []}],
+          segments: [{"header", Minga.Face.new()}],
           placement: :above
         )
 
@@ -365,7 +366,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"header", []}],
+          segments: [{"header", Minga.Face.new()}],
           placement: :above
         )
 

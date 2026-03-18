@@ -43,6 +43,20 @@ defmodule Minga.Buffer.Decorations do
   alias Minga.Buffer.Decorations.HighlightRange
   alias Minga.Buffer.Decorations.VirtualText
   alias Minga.Buffer.IntervalTree
+  alias Minga.Face
+
+  @mergeable_style_fields [
+    :fg,
+    :bg,
+    :bold,
+    :italic,
+    :underline,
+    :underline_style,
+    :underline_color,
+    :strikethrough,
+    :reverse,
+    :blend
+  ]
 
   @typedoc "A position used in highlight range start/end."
   @type highlight_range_pos :: IntervalTree.position()
@@ -51,10 +65,10 @@ defmodule Minga.Buffer.Decorations do
   @type color :: non_neg_integer()
 
   @typedoc """
-  Style properties for a highlight range. Each key is optional;
-  only specified keys override the underlying syntax style.
+  Style for a highlight range: a Face struct where nil fields
+  inherit from the underlying syntax style.
   """
-  @type style :: keyword()
+  @type style :: Face.t()
 
   @typedoc """
   A highlight range decoration.
@@ -114,15 +128,15 @@ defmodule Minga.Buffer.Decorations do
 
   ## Options
 
-  - `:style` (required) - keyword list of style properties (e.g., `[bg: 0x3E4452, bold: true]`)
+  - `:style` (required) - a `Face.t()` struct with the properties to apply (e.g., `Face.new(bg: 0x3E4452, bold: true)`)
   - `:priority` (optional, default 0) - higher values win per-property on overlap
   - `:group` (optional) - atom for bulk removal (e.g., `:search`, `:diagnostics`)
 
   ## Examples
 
-      {id, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 10}, style: [bg: 0x3E4452])
+      {id, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 10}, style: Face.new(bg: 0x3E4452))
       {id, decs} = Decorations.add_highlight(decs, {5, 0}, {10, 0},
-        style: [underline: true, fg: 0xFF6C6B],
+        style: Face.new(underline: true, fg: 0xFF6C6B),
         priority: 10,
         group: :diagnostics
       )
@@ -236,7 +250,7 @@ defmodule Minga.Buffer.Decorations do
 
   ## Options
 
-  - `:segments` (required) - list of `{text, style}` tuples
+  - `:segments` (required) - list of `{text, Face.t()}` tuples
   - `:placement` (required) - `:inline`, `:eol`, `:above`, or `:below`
   - `:priority` (optional, default 0) - determines ordering when multiple
     virtual texts share the same anchor
@@ -244,12 +258,12 @@ defmodule Minga.Buffer.Decorations do
   ## Examples
 
       {id, decs} = Decorations.add_virtual_text(decs, {5, 10},
-        segments: [{"← error here", [fg: 0xFF6C6B, italic: true]}],
+        segments: [{"← error here", Face.new(fg: 0xFF6C6B, italic: true)}],
         placement: :eol
       )
 
       {id, decs} = Decorations.add_virtual_text(decs, {0, 0},
-        segments: [{"▎ Agent", [fg: 0x51AFEF, bold: true]}],
+        segments: [{"▎ Agent", Face.new(fg: 0x51AFEF, bold: true)}],
         placement: :above
       )
   """
@@ -550,7 +564,7 @@ defmodule Minga.Buffer.Decorations do
   ## Options
 
   - `:replacement` (optional) - string to show in place of concealed text (nil = invisible)
-  - `:replacement_style` (optional) - style keyword list for the replacement character
+  - `:replacement_style` (optional) - Face.t() struct for the replacement character
   - `:priority` (optional, default 0) - higher values take precedence on overlap
   - `:group` (optional) - atom for bulk removal (e.g., `:markdown`, `:agent`)
 
@@ -572,7 +586,7 @@ defmodule Minga.Buffer.Decorations do
       start_pos: start_pos,
       end_pos: end_pos,
       replacement: Keyword.get(opts, :replacement),
-      replacement_style: Keyword.get(opts, :replacement_style, []),
+      replacement_style: Keyword.get(opts, :replacement_style, Face.new()),
       priority: Keyword.get(opts, :priority, 0),
       group: Keyword.get(opts, :group)
     }
@@ -817,8 +831,8 @@ defmodule Minga.Buffer.Decorations do
 
       decs = Decorations.batch(decs, fn decs ->
         decs = Decorations.remove_group(decs, :search)
-        {_id1, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: [bg: 0xECBE7B], group: :search)
-        {_id2, decs} = Decorations.add_highlight(decs, {3, 0}, {3, 5}, style: [bg: 0xECBE7B], group: :search)
+        {_id1, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: Face.new(bg: 0xECBE7B), group: :search)
+        {_id2, decs} = Decorations.add_highlight(decs, {3, 0}, {3, 5}, style: Face.new(bg: 0xECBE7B), group: :search)
         decs
       end)
   """
@@ -1348,7 +1362,7 @@ defmodule Minga.Buffer.Decorations do
   A list of `{text, merged_style}` tuples with finer granularity where
   ranges split syntax segments.
   """
-  @spec merge_highlights([{String.t(), keyword()}], [highlight_range()], non_neg_integer()) ::
+  @spec merge_highlights([{String.t(), Face.t()}], [highlight_range()], non_neg_integer()) ::
           [{String.t(), keyword()}]
   def merge_highlights(segments, [], _line), do: segments
 
@@ -1366,7 +1380,7 @@ defmodule Minga.Buffer.Decorations do
   @typedoc "A column-indexed style overlay: applies from start_col (inclusive) to end_col (exclusive)."
   @type overlay ::
           {start_col :: non_neg_integer(), end_col :: non_neg_integer() | :infinity,
-           style :: keyword(), priority :: integer()}
+           style :: Face.t(), priority :: integer()}
 
   @spec ranges_to_line_overlays([highlight_range()], non_neg_integer()) :: [overlay()]
   defp ranges_to_line_overlays(ranges, line) do
@@ -1383,8 +1397,8 @@ defmodule Minga.Buffer.Decorations do
     |> Enum.sort_by(fn {sc, _, _, priority} -> {sc, priority} end)
   end
 
-  @spec split_and_merge_segments([{String.t(), keyword()}], [overlay()]) ::
-          [{String.t(), keyword()}]
+  @spec split_and_merge_segments([{String.t(), Face.t()}], [overlay()]) ::
+          [{String.t(), Face.t()}]
   defp split_and_merge_segments(segments, overlays) do
     # Walk through segments tracking the current column position.
     # At each column, determine which overlays are active and merge styles.
@@ -1416,8 +1430,8 @@ defmodule Minga.Buffer.Decorations do
     end)
   end
 
-  @spec split_segment_at_boundaries(String.t(), keyword(), non_neg_integer(), [overlay()]) ::
-          [{String.t(), keyword()}]
+  @spec split_segment_at_boundaries(String.t(), Face.t(), non_neg_integer(), [overlay()]) ::
+          [{String.t(), Face.t()}]
   defp split_segment_at_boundaries(text, base_style, seg_start, overlays) do
     seg_end = seg_start + String.length(text)
 
@@ -1448,10 +1462,10 @@ defmodule Minga.Buffer.Decorations do
     |> Enum.reject(fn {t, _} -> t == "" end)
   end
 
-  @spec render_sub_segment([non_neg_integer()], String.t(), non_neg_integer(), keyword(), [
+  @spec render_sub_segment([non_neg_integer()], String.t(), non_neg_integer(), Face.t(), [
           overlay()
         ]) ::
-          {String.t(), keyword()}
+          {String.t(), Face.t()}
   defp render_sub_segment([sub_start, sub_end], text, seg_start, base_style, overlays) do
     sub_text = String.slice(text, (sub_start - seg_start)..(sub_end - seg_start - 1)//1)
 
@@ -1472,22 +1486,20 @@ defmodule Minga.Buffer.Decorations do
   end
 
   @doc """
-  Merges overlay style properties onto a base style.
+  Merges overlay face properties onto a base face.
 
-  Only properties present in the overlay override the base. This preserves
+  Only non-nil properties in the overlay override the base. This preserves
   tree-sitter syntax colors when a decoration only specifies background.
-
-  ## Examples
-
-      merge_style_props([fg: 0xFF0000], [bg: 0x3E4452])
-      #=> [fg: 0xFF0000, bg: 0x3E4452]
-
-      merge_style_props([fg: 0xFF0000, bold: true], [fg: 0x00FF00])
-      #=> [fg: 0x00FF00, bold: true]
   """
-  @spec merge_style_props(keyword(), keyword()) :: keyword()
-  def merge_style_props(base, overlay) do
-    Keyword.merge(base, overlay)
+  @spec merge_style_props(Face.t(), Face.t()) :: Face.t()
+  def merge_style_props(%Face{} = base, %Face{} = overlay) do
+    @mergeable_style_fields
+    |> Enum.reduce(base, fn field, acc ->
+      case Map.get(overlay, field) do
+        nil -> acc
+        value -> Map.put(acc, field, value)
+      end
+    end)
   end
 
   # ── Internal helpers ─────────────────────────────────────────────────────

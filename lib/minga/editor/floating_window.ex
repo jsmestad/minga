@@ -15,7 +15,7 @@ defmodule Minga.Editor.FloatingWindow do
 
       spec = %FloatingWindow.Spec{
         title: "Select Model",
-        content: [DisplayList.draw(0, 0, "claude-sonnet-4-20250514", fg: :white)],
+        content: [DisplayList.draw(0, 0, "claude-sonnet-4-20250514", Face.new(fg: :white))],
         width: {:percent, 60},
         height: {:rows, 15},
         border: :rounded,
@@ -27,6 +27,7 @@ defmodule Minga.Editor.FloatingWindow do
   """
 
   alias Minga.Editor.DisplayList
+  alias Minga.Face
 
   # ── Border character sets ────────────────────────────────────────────────
 
@@ -215,7 +216,7 @@ defmodule Minga.Editor.FloatingWindow do
 
   @spec render_background(box(), map()) :: [DisplayList.draw()]
   defp render_background(%{row: row, col: col, w: w, h: h}, theme) do
-    bg_style = [bg: theme.bg]
+    bg_style = Face.new(bg: theme.bg)
     fill = String.duplicate(" ", w)
 
     for r <- row..(row + h - 1) do
@@ -230,7 +231,7 @@ defmodule Minga.Editor.FloatingWindow do
 
   defp render_border(%{row: row, col: col, w: w, h: h}, style, theme) do
     chars = border_chars(style)
-    border_style = [fg: theme.border_fg, bg: theme.bg]
+    border_style = Face.new(fg: theme.border_fg, bg: theme.bg)
     inner_w = max(w - 2, 0)
     horiz = String.duplicate(chars.h, inner_w)
 
@@ -277,7 +278,7 @@ defmodule Minga.Editor.FloatingWindow do
     footer_text = " #{truncated} "
     footer_len = String.length(footer_text)
     start_col = col + max(div(w - footer_len, 2), 1)
-    footer_style = [fg: theme.border_fg, bg: theme.bg]
+    footer_style = Face.new(fg: theme.border_fg, bg: theme.bg)
     [DisplayList.draw(row + h - 1, start_col, footer_text, footer_style)]
   end
 
@@ -329,9 +330,9 @@ defmodule Minga.Editor.FloatingWindow do
     end
   end
 
-  @spec title_style(map()) :: keyword()
+  @spec title_style(map()) :: Face.t()
   defp title_style(theme) do
     fg = Map.get(theme, :title_fg, theme.border_fg)
-    [fg: fg, bg: theme.bg, bold: true]
+    Face.new(fg: fg, bg: theme.bg, bold: true)
   end
 end

@@ -44,6 +44,7 @@ defmodule Minga.Face do
             underline_style: nil,
             underline_color: nil,
             strikethrough: nil,
+            reverse: nil,
             blend: nil,
             # GUI-only fields (silently ignored in TUI):
             font_family: nil,
@@ -75,6 +76,7 @@ defmodule Minga.Face do
           underline_style: underline_style() | nil,
           underline_color: color() | nil,
           strikethrough: boolean() | nil,
+          reverse: boolean() | nil,
           blend: 0..100 | nil,
           font_family: String.t() | nil,
           font_weight: font_weight() | nil,
@@ -101,6 +103,7 @@ defmodule Minga.Face do
       underline_style: :line,
       underline_color: nil,
       strikethrough: false,
+      reverse: false,
       blend: 100,
       font_family: nil,
       font_weight: :regular,
@@ -143,6 +146,7 @@ defmodule Minga.Face do
     :underline,
     :underline_style,
     :strikethrough,
+    :reverse,
     :blend,
     :font_weight,
     :font_slant,
@@ -197,6 +201,25 @@ defmodule Minga.Face do
   end
 
   @doc """
+  Creates an anonymous face from keyword attributes.
+
+  Convenience constructor for inline styles in renderer modules.
+  Equivalent to `from_style("_", attrs)` but more concise.
+
+  ## Examples
+
+      iex> Face.new(fg: 0xFF6C6B, bold: true)
+      %Face{name: "_", fg: 0xFF6C6B, bold: true}
+
+      iex> Face.new()
+      %Face{name: "_"}
+  """
+  @spec new(keyword()) :: t()
+  def new(attrs \\ []) when is_list(attrs) do
+    from_style("_", attrs)
+  end
+
+  @doc """
   Converts a face to a style keyword list compatible with `Protocol.style()`.
 
   This is the bridge between the face system and the existing render
@@ -227,7 +250,8 @@ defmodule Minga.Face do
     style = if face.bold, do: [{:bold, true} | style], else: style
     style = if face.italic, do: [{:italic, true} | style], else: style
     style = if face.underline, do: [{:underline, true} | style], else: style
-    if face.strikethrough, do: [{:strikethrough, true} | style], else: style
+    style = if face.strikethrough, do: [{:strikethrough, true} | style], else: style
+    if face.reverse, do: [{:reverse, true} | style], else: style
   end
 
   @spec add_extended_attrs(keyword(), t()) :: keyword()
@@ -276,6 +300,7 @@ defmodule Minga.Face do
       underline_style: Keyword.get(style, :underline_style),
       underline_color: Keyword.get(style, :underline_color),
       strikethrough: Keyword.get(style, :strikethrough),
+      reverse: Keyword.get(style, :reverse),
       blend: Keyword.get(style, :blend),
       font_family: Keyword.get(style, :font_family),
       font_weight: Keyword.get(style, :font_weight),

@@ -13,6 +13,7 @@ defmodule Minga.Editor.Dashboard do
   alias Minga.Editor.DisplayList
   alias Minga.Theme
   alias Minga.Theme.Dashboard, as: DashTheme
+  alias Minga.Face
 
   @typedoc "Command dispatched when a dashboard item is selected."
   @type command :: atom() | {:open_file, String.t()}
@@ -87,7 +88,9 @@ defmodule Minga.Editor.Dashboard do
 
     # Background fill
     blank = String.duplicate(" ", width)
-    bg_draws = for row <- 0..(height - 1), do: DisplayList.draw(row, 0, blank, bg: dt.bg)
+
+    bg_draws =
+      for row <- 0..(height - 1), do: DisplayList.draw(row, 0, blank, Face.new(bg: dt.bg))
 
     # Build content sections
     logo_lines = logo()
@@ -116,7 +119,10 @@ defmodule Minga.Editor.Dashboard do
         row = row + logo_height
 
         title = "M I N G A"
-        title_draw = centered_draw(row, width, title, fg: dt.heading_fg, bg: dt.bg, bold: true)
+
+        title_draw =
+          centered_draw(row, width, title, Face.new(fg: dt.heading_fg, bg: dt.bg, bold: true))
+
         row = row + 2
         {draws ++ [title_draw], row}
       else
@@ -127,7 +133,12 @@ defmodule Minga.Editor.Dashboard do
 
     # Quick actions heading
     actions_heading =
-      centered_draw(row, width, "Quick Actions", fg: dt.heading_fg, bg: dt.bg, bold: true)
+      centered_draw(
+        row,
+        width,
+        "Quick Actions",
+        Face.new(fg: dt.heading_fg, bg: dt.bg, bold: true)
+      )
 
     row = row + 1
 
@@ -140,7 +151,12 @@ defmodule Minga.Editor.Dashboard do
     {recent_draws, _row} =
       if has_recent do
         heading =
-          centered_draw(row, width, "Recent Files", fg: dt.heading_fg, bg: dt.bg, bold: true)
+          centered_draw(
+            row,
+            width,
+            "Recent Files",
+            Face.new(fg: dt.heading_fg, bg: dt.bg, bold: true)
+          )
 
         row = row + 1
         offset = length(action_items)
@@ -152,7 +168,9 @@ defmodule Minga.Editor.Dashboard do
 
     # Version pinned to bottom
     version_text = "Minga v#{Minga.version()}"
-    version_draw = centered_draw(height - 1, width, version_text, fg: dt.muted_fg, bg: dt.bg)
+
+    version_draw =
+      centered_draw(height - 1, width, version_text, Face.new(fg: dt.muted_fg, bg: dt.bg))
 
     all_draws =
       bg_draws ++
@@ -188,7 +206,7 @@ defmodule Minga.Editor.Dashboard do
 
     Enum.with_index(lines, fn line, idx ->
       pad = max(div(width - max_line_width, 2), 0)
-      DisplayList.draw(start_row + idx, pad, line, fg: dt.logo_fg, bg: dt.bg)
+      DisplayList.draw(start_row + idx, pad, line, Face.new(fg: dt.logo_fg, bg: dt.bg))
     end)
   end
 
@@ -257,38 +275,42 @@ defmodule Minga.Editor.Dashboard do
       highlight_bg = String.duplicate(" ", highlight_width)
 
       [
-        DisplayList.draw(row, highlight_pad, highlight_bg, bg: dt.item_active_bg),
+        DisplayList.draw(row, highlight_pad, highlight_bg, Face.new(bg: dt.item_active_bg)),
         if item.shortcut != "" do
-          DisplayList.draw(row, pad, "  #{item.shortcut}",
-            fg: dt.shortcut_fg,
-            bg: dt.item_active_bg,
-            bold: true
+          DisplayList.draw(
+            row,
+            pad,
+            "  #{item.shortcut}",
+            Face.new(fg: dt.shortcut_fg, bg: dt.item_active_bg, bold: true)
           )
         else
-          DisplayList.draw(row, pad, " ", bg: dt.item_active_bg)
+          DisplayList.draw(row, pad, " ", Face.new(bg: dt.item_active_bg))
         end,
         DisplayList.draw(
           row,
           pad + String.length(shortcut_part),
           item.label,
-          fg: dt.item_fg,
-          bg: dt.item_active_bg
+          Face.new(fg: dt.item_fg, bg: dt.item_active_bg)
         )
       ]
       |> List.flatten()
     else
       draws = [
         if item.shortcut != "" do
-          DisplayList.draw(row, pad, "  #{item.shortcut}", fg: dt.shortcut_fg, bg: dt.bg)
+          DisplayList.draw(
+            row,
+            pad,
+            "  #{item.shortcut}",
+            Face.new(fg: dt.shortcut_fg, bg: dt.bg)
+          )
         else
-          DisplayList.draw(row, pad, " ", bg: dt.bg)
+          DisplayList.draw(row, pad, " ", Face.new(bg: dt.bg))
         end,
         DisplayList.draw(
           row,
           pad + String.length(shortcut_part),
           item.label,
-          fg: dt.item_fg,
-          bg: dt.bg
+          Face.new(fg: dt.item_fg, bg: dt.bg)
         )
       ]
 
@@ -298,10 +320,10 @@ defmodule Minga.Editor.Dashboard do
 
   # ── Helpers ───────────────────────────────────────────────────────────────
 
-  @spec centered_draw(non_neg_integer(), pos_integer(), String.t(), keyword()) ::
+  @spec centered_draw(non_neg_integer(), pos_integer(), String.t(), Face.t()) ::
           DisplayList.draw()
-  defp centered_draw(row, width, text, style) do
+  defp centered_draw(row, width, text, face) do
     pad = max(div(width - String.length(text), 2), 0)
-    DisplayList.draw(row, pad, text, style)
+    DisplayList.draw(row, pad, text, face)
   end
 end

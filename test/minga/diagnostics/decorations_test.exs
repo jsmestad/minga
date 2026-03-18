@@ -6,6 +6,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.Face
 
   @gutter_colors %Minga.Theme.Gutter{
     fg: 0x555555,
@@ -56,8 +57,8 @@ defmodule Minga.Diagnostics.DecorationsTest do
       assert length(ranges) == 1
 
       [range] = ranges
-      assert Keyword.get(range.style, :underline) == true
-      assert Keyword.get(range.style, :underline_color) == @gutter_colors.error_fg
+      assert range.style.underline == true
+      assert range.style.underline_color == @gutter_colors.error_fg
       assert range.group == :diagnostics
     end
 
@@ -154,7 +155,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
 
         [range] = Decorations.highlights_for_line(BufferServer.decorations(pid), 0)
 
-        assert Keyword.get(range.style, :underline_color) == expected_color,
+        assert range.style.underline_color == expected_color,
                "#{severity} underline should be #{inspect(expected_color)}"
       end
     end
@@ -167,7 +168,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       BufferServer.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
-            style: [fg: 0x00FF00],
+            style: Minga.Face.new(fg: 0x00FF00),
             group: :search
           )
 

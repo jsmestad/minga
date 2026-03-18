@@ -3,6 +3,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Decorations.VirtualText
+  alias Minga.Face
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {id, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"← error", [fg: 0xFF6C6B]}],
+          segments: [{"← error", Minga.Face.new(fg: 0xFF6C6B)}],
           placement: :eol
         )
 
@@ -25,7 +26,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {3, 10},
-          segments: [{"ghost text", [fg: 0x555555, italic: true]}],
+          segments: [{"ghost text", Minga.Face.new(fg: 0x555555, italic: true)}],
           placement: :inline
         )
 
@@ -40,13 +41,13 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"▎ Agent", [fg: 0x51AFEF, bold: true]}],
+          segments: [{"▎ Agent", Minga.Face.new(fg: 0x51AFEF, bold: true)}],
           placement: :above
         )
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"───────", [fg: 0x555555]}],
+          segments: [{"───────", Minga.Face.new(fg: 0x555555)}],
           placement: :below
         )
 
@@ -61,7 +62,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"x", []}],
+          segments: [{"x", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -75,7 +76,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {id, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -88,7 +89,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_id, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -106,19 +107,19 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {3, 0},
-          segments: [{"line 3", []}],
+          segments: [{"line 3", Minga.Face.new()}],
           placement: :eol
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"line 5", []}],
+          segments: [{"line 5", Minga.Face.new()}],
           placement: :eol
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {3, 10},
-          segments: [{"also line 3", []}],
+          segments: [{"also line 3", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -132,21 +133,21 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 20},
-          segments: [{"b", []}],
+          segments: [{"b", Minga.Face.new()}],
           placement: :inline,
           priority: 5
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 10},
-          segments: [{"a", []}],
+          segments: [{"a", Minga.Face.new()}],
           placement: :inline,
           priority: 10
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 10},
-          segments: [{"a2", []}],
+          segments: [{"a2", Minga.Face.new()}],
           placement: :inline,
           priority: 1
         )
@@ -163,26 +164,26 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header", []}],
+          segments: [{"header", Minga.Face.new()}],
           placement: :above
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"separator", []}],
+          segments: [{"separator", Minga.Face.new()}],
           placement: :below
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {10, 0},
-          segments: [{"another header", []}],
+          segments: [{"another header", Minga.Face.new()}],
           placement: :above
         )
 
       # EOL doesn't count as a virtual line
       {_, decs} =
         Decorations.add_virtual_text(decs, {7, 0},
-          segments: [{"eol text", []}],
+          segments: [{"eol text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -211,7 +212,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"GHOST", []}],
+          segments: [{"GHOST", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -228,13 +229,13 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"AAA", []}],
+          segments: [{"AAA", Minga.Face.new()}],
           placement: :inline
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 10},
-          segments: [{"BB", []}],
+          segments: [{"BB", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -250,7 +251,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"eol stuff", []}],
+          segments: [{"eol stuff", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -269,7 +270,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"GHOST", []}],
+          segments: [{"GHOST", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -284,7 +285,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 5},
-          segments: [{"GHOST", []}],
+          segments: [{"GHOST", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -304,7 +305,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 10},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -319,7 +320,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 10},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :inline
         )
 
@@ -335,7 +336,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 10},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -351,7 +352,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 10},
-          segments: [{"text", []}],
+          segments: [{"text", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -369,7 +370,7 @@ defmodule Minga.Buffer.VirtualTextTest do
       vt = %VirtualText{
         id: make_ref(),
         anchor: {0, 0},
-        segments: [{"hello", []}, {" world", []}],
+        segments: [{"hello", Minga.Face.new()}, {" world", Minga.Face.new()}],
         placement: :inline
       }
 
@@ -400,7 +401,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"x", []}],
+          segments: [{"x", Minga.Face.new()}],
           placement: :eol
         )
 
@@ -412,7 +413,7 @@ defmodule Minga.Buffer.VirtualTextTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"x", []}],
+          segments: [{"x", Minga.Face.new()}],
           placement: :eol
         )
 

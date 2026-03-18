@@ -6,6 +6,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
+  alias Minga.Face
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {id, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"▎ Agent", [fg: 0x51AFEF, bold: true]}] end
+          render: fn _w -> [{"▎ Agent", Minga.Face.new(fg: 0x51AFEF, bold: true)}] end
         )
 
       assert is_reference(id)
@@ -29,14 +30,14 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"header", []}] end,
+          render: fn _w -> [{"header", Minga.Face.new()}] end,
           priority: 1
         )
 
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :below,
-          render: fn _w -> [{"separator", []}] end,
+          render: fn _w -> [{"separator", Minga.Face.new()}] end,
           priority: 2
         )
 
@@ -51,7 +52,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
-          render: fn _w -> [{"x", []}] end
+          render: fn _w -> [{"x", Minga.Face.new()}] end
         )
 
       assert decs.version == 1
@@ -65,7 +66,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {id, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"x", []}] end
+          render: fn _w -> [{"x", Minga.Face.new()}] end
         )
 
       decs = Decorations.remove_block_decoration(decs, id)
@@ -78,7 +79,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_id, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"x", []}] end
+          render: fn _w -> [{"x", Minga.Face.new()}] end
         )
 
       decs2 = Decorations.remove_block_decoration(decs, make_ref())
@@ -96,7 +97,13 @@ defmodule Minga.Buffer.BlockDecorationTest do
         anchor_line: 0,
         placement: :above,
         height: 3,
-        render: fn _w -> [[{"line1", []}], [{"line2", []}], [{"line3", []}]] end
+        render: fn _w ->
+          [
+            [{"line1", Minga.Face.new()}],
+            [{"line2", Minga.Face.new()}],
+            [{"line3", Minga.Face.new()}]
+          ]
+        end
       }
 
       assert BlockDecoration.resolve_height(block, 80) == 3
@@ -108,7 +115,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
         anchor_line: 0,
         placement: :above,
         height: :dynamic,
-        render: fn _w -> [[{"line1", []}], [{"line2", []}]] end
+        render: fn _w -> [[{"line1", Minga.Face.new()}], [{"line2", Minga.Face.new()}]] end
       }
 
       assert BlockDecoration.resolve_height(block, 80) == 2
@@ -120,7 +127,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
         anchor_line: 0,
         placement: :above,
         height: :dynamic,
-        render: fn _w -> [{"single", []}] end
+        render: fn _w -> [{"single", Minga.Face.new()}] end
       }
 
       assert BlockDecoration.resolve_height(block, 80) == 1
@@ -129,12 +136,12 @@ defmodule Minga.Buffer.BlockDecorationTest do
 
   describe "normalize_render_result/1" do
     test "single-line segments wrapped in list" do
-      result = BlockDecoration.normalize_render_result([{"hello", [bold: true]}])
-      assert result == [[{"hello", [bold: true]}]]
+      result = BlockDecoration.normalize_render_result([{"hello", Minga.Face.new(bold: true)}])
+      assert result == [[{"hello", Minga.Face.new(bold: true)}]]
     end
 
     test "multi-line segments returned as-is" do
-      input = [[{"line1", []}], [{"line2", []}]]
+      input = [[{"line1", Minga.Face.new()}], [{"line2", Minga.Face.new()}]]
       assert BlockDecoration.normalize_render_result(input) == input
     end
 
@@ -153,7 +160,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"▎ Agent", []}] end
+          render: fn _w -> [{"▎ Agent", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -181,7 +188,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :below,
-          render: fn _w -> [{"separator", []}] end
+          render: fn _w -> [{"separator", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -207,7 +214,13 @@ defmodule Minga.Buffer.BlockDecorationTest do
         Decorations.add_block_decoration(decs, 3,
           placement: :above,
           height: 3,
-          render: fn _w -> [[{"line1", []}], [{"line2", []}], [{"line3", []}]] end
+          render: fn _w ->
+            [
+              [{"line1", Minga.Face.new()}],
+              [{"line2", Minga.Face.new()}],
+              [{"line3", Minga.Face.new()}]
+            ]
+          end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -230,7 +243,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 7,
           placement: :above,
-          render: fn _w -> [{"hidden", []}] end
+          render: fn _w -> [{"hidden", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -250,7 +263,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"▎ Agent", [bold: true]}] end
+          render: fn _w -> [{"▎ Agent", Minga.Face.new(bold: true)}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -277,7 +290,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -295,7 +308,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :below,
-          render: fn _w -> [{"separator", []}] end
+          render: fn _w -> [{"separator", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 15, 20)
@@ -311,7 +324,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       dm = DisplayMap.compute(fm, decs, 0, 10, 20)
@@ -331,7 +344,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 10,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       decs = Decorations.adjust_for_edit(decs, {5, 0}, {5, 0}, {8, 0})
@@ -345,7 +358,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       decs = Decorations.adjust_for_edit(decs, {10, 0}, {15, 0}, {10, 0})
@@ -359,7 +372,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 10,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       decs = Decorations.adjust_for_edit(decs, {5, 0}, {15, 0}, {5, 0})
@@ -381,7 +394,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
           placement: :above,
           render: fn w ->
             :persistent_term.put(:test_block_width, w)
-            [{"header", []}]
+            [{"header", Minga.Face.new()}]
           end
         )
 
@@ -405,7 +418,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_id, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"clickable", []}] end,
+          render: fn _w -> [{"clickable", Minga.Face.new()}] end,
           on_click: fn row, col -> send(test_pid, {:block_clicked, row, col}) end
         )
 
@@ -421,7 +434,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_id, decs} =
         Decorations.add_block_decoration(decs, 5,
           placement: :above,
-          render: fn _w -> [{"header", []}] end
+          render: fn _w -> [{"header", Minga.Face.new()}] end
         )
 
       block = hd(decs.block_decorations)
@@ -438,7 +451,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
-          render: fn _w -> [{"x", []}] end
+          render: fn _w -> [{"x", Minga.Face.new()}] end
         )
 
       refute Decorations.empty?(decs)
@@ -450,7 +463,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
       {_, decs} =
         Decorations.add_block_decoration(decs, 0,
           placement: :above,
-          render: fn _w -> [{"x", []}] end
+          render: fn _w -> [{"x", Minga.Face.new()}] end
         )
 
       decs = Decorations.clear(decs)

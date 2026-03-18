@@ -24,6 +24,7 @@ defmodule Minga.Diagnostics.Decorations do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.Face
 
   @diagnostic_group :diagnostics
 
@@ -80,10 +81,11 @@ defmodule Minga.Diagnostics.Decorations do
     else
       color = severity_color(diag.severity, gutter_colors)
 
-      style = [
-        underline: true,
-        underline_color: color
-      ]
+      style =
+        Face.new(
+          underline: true,
+          underline_color: color
+        )
 
       priority = severity_priority(diag.severity)
 

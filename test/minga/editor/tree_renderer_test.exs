@@ -7,6 +7,7 @@ defmodule Minga.Editor.TreeRendererTest do
   alias Minga.Editor.TreeRenderer.RenderInput
   alias Minga.FileTree
   alias Minga.Theme
+  alias Minga.Face
 
   @moduletag :tmp_dir
 
@@ -54,7 +55,7 @@ defmodule Minga.Editor.TreeRendererTest do
       {_r, _c, text, style} = header
       # Contains the folder open icon (nf-md-folder-open U+F0256)
       assert String.contains?(text, "\u{F0256}")
-      assert Keyword.get(style, :bold) == true
+      assert style.bold == true
     end
 
     test "renders separator column", %{tmp_dir: tmp_dir} do
@@ -155,7 +156,7 @@ defmodule Minga.Editor.TreeRendererTest do
       staged_draw = Enum.find(draws, fn {_r, _c, text, _s} -> String.contains?(text, "✚") end)
       assert staged_draw != nil
       {_r, _c, _text, style} = staged_draw
-      assert Keyword.get(style, :fg) == theme.tree.git_staged_fg
+      assert style.fg == theme.tree.git_staged_fg
     end
 
     test "renders modified buffer dot for dirty files", %{tmp_dir: tmp_dir} do
@@ -184,7 +185,7 @@ defmodule Minga.Editor.TreeRendererTest do
 
       {_r, _c, _text, style} = hd(dirty_draws)
       theme = Theme.get!(:doom_one)
-      assert Keyword.get(style, :fg) == theme.tree.modified_fg
+      assert style.fg == theme.tree.modified_fg
     end
 
     test "dirty dot and git status coexist on same row", %{tmp_dir: tmp_dir} do

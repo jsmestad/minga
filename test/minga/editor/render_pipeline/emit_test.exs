@@ -213,10 +213,16 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       frame_with_chrome = %{
         frame
-        | file_tree: [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)],
-          tab_bar: [DisplayList.draw(0, 0, " main.ex ", fg: 0xBBC2CF, bg: 0x21242B)],
-          agent_panel: [DisplayList.draw(0, 0, "agent", fg: 0xBBC2CF, bg: 0x21242B)],
-          minibuffer: [DisplayList.draw(24, 0, ":quit", fg: 0xBBC2CF, bg: 0x282C34)]
+        | file_tree: [DisplayList.draw(0, 0, "src/", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))],
+          tab_bar: [
+            DisplayList.draw(0, 0, " main.ex ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))
+          ],
+          agent_panel: [
+            DisplayList.draw(0, 0, "agent", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))
+          ],
+          minibuffer: [
+            DisplayList.draw(24, 0, ":quit", Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
+          ]
       }
 
       assert :ok = Emit.emit(frame_with_chrome, gui_state)
@@ -252,8 +258,8 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       frame_with_chrome = %{
         frame
-        | file_tree: [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)],
-          tab_bar: [DisplayList.draw(0, 0, " tab ", fg: 0xBBC2CF, bg: 0x21242B)]
+        | file_tree: [DisplayList.draw(0, 0, "src/", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))],
+          tab_bar: [DisplayList.draw(0, 0, " tab ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))]
       }
 
       assert :ok = Emit.emit(frame_with_chrome, gui_state)
@@ -283,7 +289,9 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       frame_with_chrome = %{
         frame
-        | minibuffer: [DisplayList.draw(24, 0, ":write", fg: 0xBBC2CF, bg: 0x282C34)]
+        | minibuffer: [
+            DisplayList.draw(24, 0, ":write", Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
+          ]
       }
 
       assert :ok = Emit.emit(frame_with_chrome, gui_state)
@@ -304,7 +312,9 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
 
       frame = build_frame_with_window(gui_state, viewport_top: 0)
-      hover_draw = DisplayList.draw(5, 10, "hover info", fg: 0xBBC2CF, bg: 0x3E4451)
+
+      hover_draw =
+        DisplayList.draw(5, 10, "hover info", Minga.Face.new(fg: 0xBBC2CF, bg: 0x3E4451))
 
       frame_with_overlay = %{
         frame
@@ -366,17 +376,21 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
     # Build some content draws for the visible area
     content_draws =
       for row <- 0..(height - 1) do
-        DisplayList.draw(row, 4, "line #{viewport_top + row}: content",
-          fg: 0xBBC2CF,
-          bg: 0x282C34
+        DisplayList.draw(
+          row,
+          4,
+          "line #{viewport_top + row}: content",
+          Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
         )
       end
 
     gutter_draws =
       for row <- 0..(height - 1) do
-        DisplayList.draw(row, 0, String.pad_leading("#{viewport_top + row + 1}", 3) <> " ",
-          fg: 0x5B6268,
-          bg: 0x282C34
+        DisplayList.draw(
+          row,
+          0,
+          String.pad_leading("#{viewport_top + row + 1}", 3) <> " ",
+          Minga.Face.new(fg: 0x5B6268, bg: 0x282C34)
         )
       end
 
@@ -392,7 +406,9 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
     %Frame{
       cursor: Cursor.new(0, 4, :block),
       windows: [win_frame],
-      minibuffer: [DisplayList.draw(height + 1, 0, " ", fg: 0xBBC2CF, bg: 0x282C34)]
+      minibuffer: [
+        DisplayList.draw(height + 1, 0, " ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
+      ]
     }
   end
 end

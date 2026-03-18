@@ -136,20 +136,17 @@ defmodule Minga.Face.Registry do
   end
 
   @doc """
-  Resolves a face and converts it to a style keyword list.
+  Resolves a face by name and returns a `Face.t()`.
 
   This is the main entry point for the render pipeline, replacing
-  `Theme.style_for_capture/2`. Only includes attributes that differ
-  from the registry's resolved default face, producing sparse styles
-  compatible with the existing render pipeline.
+  `Theme.style_for_capture/2`. Returns a fully resolved face struct.
+  For composite capture names (e.g., "@lsp.type.variable+deprecated"),
+  modifier attributes are composed on top of the base face.
 
-  Style sparsity is a semantic signal: `buffer_line.ex` uses
-  `Keyword.has_key?(style, :bg)` to decide whether a token has an
-  explicit background or should inherit the cursorline/decoration bg.
-  Emitting inherited-default bg would break that contract.
+  Always returns a face (falls back to default).
   """
-  @spec style_for(t(), String.t()) :: keyword()
-  def style_for(%__MODULE__{resolved: resolved} = reg, name) when is_binary(name) do
+  @spec style_for(t(), String.t()) :: Face.t()
+  def style_for(%__MODULE__{} = reg, name) when is_binary(name) do
     # Check for composite capture names (e.g., "@lsp.type.variable+deprecated")
     case String.split(name, "+") do
       [base_name | modifiers] when modifiers != [] ->
@@ -157,8 +154,7 @@ defmodule Minga.Face.Registry do
         style_for_with_modifiers(reg, base_name, mod_names)
 
       _ ->
-        base = Map.get(resolved, "default", Face.default())
-        reg |> resolve(name) |> Face.to_style(base)
+        resolve(reg, name)
     end
   end
 
@@ -321,50 +317,53 @@ defmodule Minga.Face.Registry do
   Resolves a face with modifier composition.
 
   Takes a base capture name and a list of modifier names, resolves each,
-  and merges modifier attributes on top of the base face's style. This is
-  how `@lsp.mod.deprecated` adds strikethrough to whatever the type's
-  color is, rather than replacing it.
+  and merges modifier attributes on top of the base face. This is how
+  `@lsp.mod.deprecated` adds strikethrough to whatever the type's color
+  is, rather than replacing it.
 
-  Returns a style keyword list with the base face's colors and the
-  modifier face's decorative attributes composed.
+  Returns a `Face.t()` with the base face's colors and the modifier
+  face's decorative attributes composed.
   """
-  @spec style_for_with_modifiers(t(), String.t(), [String.t()]) :: keyword()
+  @spec style_for_with_modifiers(t(), String.t(), [String.t()]) :: Face.t()
   def style_for_with_modifiers(%__MODULE__{} = reg, base_name, modifiers)
       when is_binary(base_name) and is_list(modifiers) do
-    base_style = style_for(reg, base_name)
+    base_face = style_for(reg, base_name)
 
-    Enum.reduce(modifiers, base_style, fn mod_name, acc ->
+    Enum.reduce(modifiers, base_face, fn mod_name, acc ->
       mod_face = resolve(reg, mod_name)
       compose_modifier(acc, mod_face)
     end)
   end
 
-  # Compose modifier attributes on top of a base style.
+  # Compose modifier attributes on top of a base face.
   # Only merges decorative attributes (strikethrough, underline, blend, italic, bold).
   # Does NOT override fg/bg from the modifier (those come from the base type).
-  @spec compose_modifier(keyword(), Face.t()) :: keyword()
-  defp compose_modifier(style, %Face{} = mod) do
-    style
-    |> merge_if(mod.strikethrough, :strikethrough)
-    |> merge_if(mod.underline, :underline)
-    |> merge_if(mod.italic, :italic)
-    |> merge_if(mod.bold, :bold)
-    |> merge_underline_style(mod)
-    |> merge_blend(mod)
+  @spec compose_modifier(Face.t(), Face.t()) :: Face.t()
+  defp compose_modifier(%Face{} = base, %Face{} = mod) do
+    base
+    |> merge_face_if(mod.strikethrough, :strikethrough)
+    |> merge_face_if(mod.underline, :underline)
+    |> merge_face_if(mod.italic, :italic)
+    |> merge_face_if(mod.bold, :bold)
+    |> merge_face_underline_style(mod)
+    |> merge_face_blend(mod)
   end
 
-  defp merge_if(style, true, key), do: Keyword.put_new(style, key, true)
-  defp merge_if(style, _, _key), do: style
+  @spec merge_face_if(Face.t(), boolean() | nil, atom()) :: Face.t()
+  defp merge_face_if(face, true, key), do: Map.put(face, key, true)
+  defp merge_face_if(face, _, _key), do: face
 
-  defp merge_underline_style(style, %Face{underline_style: nil}), do: style
-  defp merge_underline_style(style, %Face{underline_style: :line}), do: style
+  @spec merge_face_underline_style(Face.t(), Face.t()) :: Face.t()
+  defp merge_face_underline_style(face, %Face{underline_style: nil}), do: face
+  defp merge_face_underline_style(face, %Face{underline_style: :line}), do: face
 
-  defp merge_underline_style(style, %Face{underline_style: us}),
-    do: Keyword.put_new(style, :underline_style, us)
+  defp merge_face_underline_style(face, %Face{underline_style: us}),
+    do: %{face | underline_style: us}
 
-  defp merge_blend(style, %Face{blend: nil}), do: style
-  defp merge_blend(style, %Face{blend: 100}), do: style
-  defp merge_blend(style, %Face{blend: b}), do: Keyword.put_new(style, :blend, b)
+  @spec merge_face_blend(Face.t(), Face.t()) :: Face.t()
+  defp merge_face_blend(face, %Face{blend: nil}), do: face
+  defp merge_face_blend(face, %Face{blend: 100}), do: face
+  defp merge_face_blend(face, %Face{blend: b}), do: %{face | blend: b}
 
   # Walk up the dotted name hierarchy to find the nearest matching face.
   @spec resolve_with_fallback(t(), String.t()) :: Face.t()

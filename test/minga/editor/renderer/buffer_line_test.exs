@@ -13,8 +13,8 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       row: row,
       col: col,
       text: text,
-      fg: Keyword.get(style, :fg, 0xFFFFFF),
-      bg: Keyword.get(style, :bg, 0x000000),
+      fg: style.fg || 0xFFFFFF,
+      bg: style.bg || 0x000000,
       attrs: style
     }
   end
@@ -611,11 +611,13 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       reversed_draws =
         content
         |> List.flatten()
-        |> Enum.filter(fn {_r, _c, _t, style} -> Keyword.get(style, :reverse, false) end)
+        |> Enum.filter(fn {_r, _c, _t, style} -> style.reverse end)
 
-      Enum.each(reversed_draws, fn {_r, _c, _t, style} ->
-        refute Keyword.has_key?(style, :bg),
-               "reversed (selected) draw should not have cursorline bg applied"
+      default_bg = 0x282C34
+
+      Enum.each(reversed_draws, fn {_r, _c, _t, face} ->
+        assert face.bg == nil or face.bg == default_bg,
+               "reversed (selected) draw should not have cursorline bg applied, got bg: #{inspect(face.bg)}"
       end)
 
       # The fill draw should still have cursorline bg

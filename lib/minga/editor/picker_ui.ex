@@ -22,6 +22,7 @@ defmodule Minga.Editor.PickerUI do
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Picker
   alias Minga.Port.Protocol
+  alias Minga.Face
 
   import Bitwise
 
@@ -327,9 +328,11 @@ defmodule Minga.Editor.PickerUI do
     separator_cmd =
       if separator_row >= 0 do
         [
-          DisplayList.draw(separator_row, 0, String.pad_trailing(sep_text, viewport.cols),
-            fg: dim_fg,
-            bg: bg
+          DisplayList.draw(
+            separator_row,
+            0,
+            String.pad_trailing(sep_text, viewport.cols),
+            Face.new(fg: dim_fg, bg: bg)
           )
         ]
       else
@@ -377,8 +380,7 @@ defmodule Minga.Editor.PickerUI do
         prompt_row,
         0,
         String.pad_trailing(prompt_text, viewport.cols),
-        fg: highlight_fg,
-        bg: prompt_bg
+        Face.new(fg: highlight_fg, bg: prompt_bg)
       )
 
     cursor_col = Unicode.display_width(prompt_text)
@@ -482,9 +484,11 @@ defmodule Minga.Editor.PickerUI do
     prompt_text = "> " <> picker.query
 
     prompt_draw =
-      DisplayList.draw(interior_h - 1, 0, String.pad_trailing(prompt_text, interior_w),
-        fg: pc.highlight_fg,
-        bg: pc.prompt_bg
+      DisplayList.draw(
+        interior_h - 1,
+        0,
+        String.pad_trailing(prompt_text, interior_w),
+        Face.new(fg: pc.highlight_fg, bg: pc.prompt_bg)
       )
 
     content = item_draws ++ [prompt_draw]
@@ -532,10 +536,10 @@ defmodule Minga.Editor.PickerUI do
     padded = String.pad_trailing(full_text, width)
 
     # Base draw (full row background)
-    base = [DisplayList.draw(row, 0, padded, fg: pc.dim_fg, bg: bg)]
+    base = [DisplayList.draw(row, 0, padded, Face.new(fg: pc.dim_fg, bg: bg))]
 
     # Label (brighter text)
-    label_draw = [DisplayList.draw(row, 0, label, fg: fg, bg: bg)]
+    label_draw = [DisplayList.draw(row, 0, label, Face.new(fg: fg, bg: bg))]
 
     # Icon color overlay
     icon_draws = render_icon_color(row, icon_color, bg, label, 0)
@@ -564,7 +568,7 @@ defmodule Minga.Editor.PickerUI do
   defp render_icon_color(row, color, bg, label, col_offset) when is_integer(color) do
     case String.next_grapheme(label) do
       {icon, _rest} ->
-        [DisplayList.draw(row, col_offset, icon, fg: color, bg: bg)]
+        [DisplayList.draw(row, col_offset, icon, Face.new(fg: color, bg: bg))]
 
       nil ->
         []
@@ -597,7 +601,7 @@ defmodule Minga.Editor.PickerUI do
 
   defp do_highlight_matches(row, [lc | lt], [ll | llt], [qc | qt] = query, col, fg, bg, acc) do
     if ll == qc do
-      draw = DisplayList.draw(row, col, lc, fg: fg, bg: bg, bold: true)
+      draw = DisplayList.draw(row, col, lc, Face.new(fg: fg, bg: bg, bold: true))
 
       do_highlight_matches(row, lt, llt, qt, col + Unicode.display_width(lc), fg, bg, [draw | acc])
     else
@@ -659,10 +663,11 @@ defmodule Minga.Editor.PickerUI do
     row_text = String.slice(row_text, 0, cols)
 
     bg_cmd =
-      DisplayList.draw(row, 0, String.pad_trailing(row_text, cols),
-        fg: fg,
-        bg: row_bg,
-        bold: is_selected
+      DisplayList.draw(
+        row,
+        0,
+        String.pad_trailing(row_text, cols),
+        Face.new(fg: fg, bg: row_bg, bold: is_selected)
       )
 
     highlight_cmds = render_match_highlights(row, label, query, colors.match_fg, row_bg)
@@ -672,7 +677,7 @@ defmodule Minga.Editor.PickerUI do
     desc_cmds =
       if desc_display != "" do
         desc_start = cols - Unicode.display_width(desc_display) - 1
-        [DisplayList.draw(row, desc_start, desc_display, fg: colors.dim_fg, bg: row_bg)]
+        [DisplayList.draw(row, desc_start, desc_display, Face.new(fg: colors.dim_fg, bg: row_bg))]
       else
         []
       end
@@ -698,7 +703,7 @@ defmodule Minga.Editor.PickerUI do
     |> Enum.filter(&(&1 < label_len))
     |> Enum.map(fn pos ->
       char = Enum.at(label_graphemes, pos)
-      DisplayList.draw(row, pos + 1, char, fg: match_fg, bg: row_bg, bold: true)
+      DisplayList.draw(row, pos + 1, char, Face.new(fg: match_fg, bg: row_bg, bold: true))
     end)
   end
 
@@ -738,10 +743,11 @@ defmodule Minga.Editor.PickerUI do
     header_cmd =
       if header_row >= 0 and header_row < viewport.rows do
         [
-          DisplayList.draw(header_row, menu_col, header_text,
-            fg: border_fg,
-            bg: menu_bg,
-            bold: true
+          DisplayList.draw(
+            header_row,
+            menu_col,
+            header_text,
+            Face.new(fg: border_fg, bg: menu_bg, bold: true)
           )
         ]
       else
@@ -788,6 +794,6 @@ defmodule Minga.Editor.PickerUI do
     bg = if is_sel, do: colors.sel_bg, else: colors.bg
     text = String.pad_trailing(" #{name}", width)
 
-    [DisplayList.draw(row, col, text, fg: fg, bg: bg, bold: is_sel)]
+    [DisplayList.draw(row, col, text, Face.new(fg: fg, bg: bg, bold: is_sel))]
   end
 end

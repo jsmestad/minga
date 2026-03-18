@@ -199,7 +199,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       all_text = Enum.map_join(segments, fn {text, _style} -> text end)
       assert String.valid?(all_text)
       assert all_text == line
-      assert [{"─", [fg: 0x888888]}, {"─", []}] = segments
+      assert segments == [{"─", Minga.Face.new(fg: 0x888888)}, {"─", Minga.Face.new()}]
     end
   end
 

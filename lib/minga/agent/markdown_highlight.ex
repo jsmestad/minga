@@ -157,14 +157,14 @@ defmodule Minga.Agent.MarkdownHighlight do
   end
 
   @spec segment_to_run(Highlight.styled_segment()) :: styled_run()
-  defp segment_to_run({text, style}) when is_list(style) do
-    fg = Keyword.get(style, :fg, 0)
-    bg = Keyword.get(style, :bg, 0)
+  defp segment_to_run({text, %Minga.Face{} = face}) do
+    fg = face.fg || 0
+    bg = face.bg || 0
 
     flags =
-      if(Keyword.get(style, :bold, false), do: @flag_bold, else: 0) +
-        if(Keyword.get(style, :italic, false), do: @flag_italic, else: 0) +
-        if Keyword.get(style, :underline, false), do: @flag_underline, else: 0
+      if(face.bold, do: @flag_bold, else: 0) +
+        if(face.italic, do: @flag_italic, else: 0) +
+        if face.underline, do: @flag_underline, else: 0
 
     {text, fg, bg, flags}
   end

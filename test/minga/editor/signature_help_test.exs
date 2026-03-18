@@ -3,6 +3,7 @@ defmodule Minga.Editor.SignatureHelpTest do
 
   alias Minga.Editor.SignatureHelp
   alias Minga.Theme
+  alias Minga.Face
 
   @theme Theme.get!(:doom_one)
   @viewport {24, 80}
@@ -137,8 +138,8 @@ defmodule Minga.Editor.SignatureHelpTest do
       bar_draws = Enum.filter(draws, fn {_r, _c, text, _s} -> text == "bar" end)
       assert bar_draws != []
 
-      [{_r, _c, _text, style}] = bar_draws
-      assert Keyword.get(style, :bold) == true
+      [{_r, _c, _text, %Minga.Face{} = face}] = bar_draws
+      assert face.bold == true
     end
 
     test "shows signature counter when multiple overloads" do

@@ -9,6 +9,7 @@ defmodule Minga.Agent.View.DirectoryRenderer do
 
   alias Minga.Editor.DisplayList
   alias Minga.Theme
+  alias Minga.Face
 
   @typedoc "A draw rectangle: {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
@@ -43,7 +44,7 @@ defmodule Minga.Agent.View.DirectoryRenderer do
           DisplayList.draw()
   defp render_header(row, col, width, path, at) do
     text = String.pad_trailing(" 📂 #{path}", width)
-    DisplayList.draw(row, col, text, fg: at.header_fg, bg: at.header_bg)
+    DisplayList.draw(row, col, text, Face.new(fg: at.header_fg, bg: at.header_bg))
   end
 
   @spec render_entries(
@@ -69,8 +70,8 @@ defmodule Minga.Agent.View.DirectoryRenderer do
       display = String.slice("  #{icon}#{entry}", 0, width)
 
       [
-        DisplayList.draw(row, col, blank, bg: at.panel_bg),
-        DisplayList.draw(row, col, display, fg: fg, bg: at.panel_bg)
+        DisplayList.draw(row, col, blank, Face.new(bg: at.panel_bg)),
+        DisplayList.draw(row, col, display, Face.new(fg: fg, bg: at.panel_bg))
       ]
     end)
   end
@@ -91,7 +92,7 @@ defmodule Minga.Agent.View.DirectoryRenderer do
       blank = String.duplicate(" ", width)
 
       for r <- (start_row + visible_count)..(start_row + content_rows - 1) do
-        DisplayList.draw(r, col, blank, bg: at.panel_bg)
+        DisplayList.draw(r, col, blank, Face.new(bg: at.panel_bg))
       end
     else
       []

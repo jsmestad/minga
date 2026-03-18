@@ -13,6 +13,7 @@ defmodule Minga.Agent.ChatDecorations do
 
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Face
 
   # All decorations created by this module belong to the :chat group.
   # This allows remove_group(:chat) to clear chat decorations without
@@ -160,7 +161,7 @@ defmodule Minga.Agent.ChatDecorations do
       add_block(decs, line,
         placement: :above,
         render: fn _w ->
-          [{"▎ Agent", [fg: theme.assistant_border, bold: true, bg: theme.header_bg]}]
+          [{"▎ Agent", Face.new(fg: theme.assistant_border, bold: true, bg: theme.header_bg)}]
         end,
         priority: 10
       )
@@ -170,7 +171,7 @@ defmodule Minga.Agent.ChatDecorations do
       if streaming do
         {_id, decs} =
           add_vtext(decs, {line, 0},
-            segments: [{spinner_frame(), [fg: theme.status_thinking, italic: true]}],
+            segments: [{spinner_frame(), Face.new(fg: theme.status_thinking, italic: true)}],
             placement: :eol
           )
 
@@ -199,7 +200,7 @@ defmodule Minga.Agent.ChatDecorations do
       add_block(decs, line,
         placement: :above,
         render: fn _w ->
-          [{"┌─ 💭 Thinking", [fg: theme.thinking_fg, italic: true]}]
+          [{"┌─ 💭 Thinking", Face.new(fg: theme.thinking_fg, italic: true)}]
         end,
         priority: 5
       )
@@ -211,7 +212,10 @@ defmodule Minga.Agent.ChatDecorations do
           add_fold(decs, line, line + line_count - 1,
             closed: true,
             placeholder: fn _s, _e, _w ->
-              [{"└─ 💭 Thinking (#{line_count} lines)...", [fg: theme.thinking_fg, italic: true]}]
+              [
+                {"└─ 💭 Thinking (#{line_count} lines)...",
+                 Face.new(fg: theme.thinking_fg, italic: true)}
+              ]
             end
           )
 
@@ -223,7 +227,7 @@ defmodule Minga.Agent.ChatDecorations do
     # Dim thinking text
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.thinking_fg],
+        style: Face.new(fg: theme.thinking_fg),
         priority: 5,
         group: :chat_thinking
       )
@@ -236,7 +240,7 @@ defmodule Minga.Agent.ChatDecorations do
       add_block(decs, last_line,
         placement: :below,
         render: fn _w ->
-          [{"└─", [fg: theme.thinking_fg]}]
+          [{"└─", Face.new(fg: theme.thinking_fg)}]
         end,
         priority: 5
       )
@@ -269,7 +273,7 @@ defmodule Minga.Agent.ChatDecorations do
     # Dim the usage stats line
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.usage_fg],
+        style: Face.new(fg: theme.usage_fg),
         priority: 10,
         group: :chat_usage
       )
@@ -292,7 +296,7 @@ defmodule Minga.Agent.ChatDecorations do
       add_block(decs, line,
         placement: :above,
         render: fn _w ->
-          [{"System", [fg: label_fg, bold: true, bg: theme.header_bg]}]
+          [{"System", Face.new(fg: label_fg, bold: true, bg: theme.header_bg)}]
         end,
         priority: 5
       )
@@ -300,7 +304,7 @@ defmodule Minga.Agent.ChatDecorations do
     # Dim the system message text
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.system_fg],
+        style: Face.new(fg: theme.system_fg),
         priority: 5,
         group: :chat_system
       )
@@ -363,7 +367,7 @@ defmodule Minga.Agent.ChatDecorations do
           add_fold(decs, line, line + line_count - 1,
             closed: tc.collapsed,
             placeholder: fn _s, _e, _w ->
-              [{fold_placeholder, [fg: status_fg, italic: true]}]
+              [{fold_placeholder, Face.new(fg: status_fg, italic: true)}]
             end
           )
 
@@ -375,7 +379,7 @@ defmodule Minga.Agent.ChatDecorations do
     # Dim tool output text
     {_id, decs} =
       add_highlight(decs, {line, 0}, {line + line_count, 0},
-        style: [fg: theme.text_fg],
+        style: Face.new(fg: theme.text_fg),
         priority: -10,
         group: :chat_tool
       )
@@ -389,7 +393,7 @@ defmodule Minga.Agent.ChatDecorations do
     {_id, decs} =
       add_block(decs, last_line,
         placement: :below,
-        render: fn _w -> [{"└─", [fg: status_fg]}] end,
+        render: fn _w -> [{"└─", Face.new(fg: status_fg)}] end,
         priority: 5
       )
 
@@ -411,26 +415,26 @@ defmodule Minga.Agent.ChatDecorations do
   end
 
   @spec tool_header_render(String.t(), non_neg_integer(), Minga.Theme.Agent.t(), boolean()) ::
-          (non_neg_integer() -> [{String.t(), keyword()}])
+          (non_neg_integer() -> [{String.t(), Face.t()}])
   defp tool_header_render(header_text, status_fg, theme, true = _awaiting) do
     fn _w ->
       [
-        {header_text, [fg: status_fg, bold: true]},
-        {" ", []},
-        {"Approve? ", [fg: status_fg, bold: true]},
-        {"[y]", [fg: theme.tool_header, bold: true]},
-        {"es ", [fg: status_fg]},
-        {"[n]", [fg: theme.status_error, bold: true]},
-        {"o ", [fg: status_fg]},
-        {"[Y]", [fg: theme.tool_header, bold: true]},
-        {"es-all", [fg: status_fg]}
+        {header_text, Face.new(fg: status_fg, bold: true)},
+        {" ", Face.new()},
+        {"Approve? ", Face.new(fg: status_fg, bold: true)},
+        {"[y]", Face.new(fg: theme.tool_header, bold: true)},
+        {"es ", Face.new(fg: status_fg)},
+        {"[n]", Face.new(fg: theme.status_error, bold: true)},
+        {"o ", Face.new(fg: status_fg)},
+        {"[Y]", Face.new(fg: theme.tool_header, bold: true)},
+        {"es-all", Face.new(fg: status_fg)}
       ]
     end
   end
 
   defp tool_header_render(header_text, status_fg, _theme, false) do
     fn _w ->
-      [{header_text, [fg: status_fg, bold: true]}]
+      [{header_text, Face.new(fg: status_fg, bold: true)}]
     end
   end
 
@@ -464,7 +468,7 @@ defmodule Minga.Agent.ChatDecorations do
   defp toggle_code_block(decs, true, block_start, idx, base_line, code_bg) do
     {_id, decs} =
       add_highlight(decs, {base_line + block_start, 0}, {base_line + idx + 1, 0},
-        style: [bg: code_bg],
+        style: Face.new(bg: code_bg),
         priority: -18,
         group: :chat_code_bg
       )
@@ -492,7 +496,7 @@ defmodule Minga.Agent.ChatDecorations do
 
       {_id, d} =
         add_vtext(d, {line, 0},
-          segments: [{"│ ", [fg: border_fg]}],
+          segments: [{"│ ", Face.new(fg: border_fg)}],
           placement: :inline,
           priority: 10
         )
@@ -517,7 +521,7 @@ defmodule Minga.Agent.ChatDecorations do
 
       {_id, d} =
         add_vtext(d, {line, 0},
-          segments: [{"▎ ", [fg: border_fg]}],
+          segments: [{"▎ ", Face.new(fg: border_fg)}],
           placement: :inline,
           priority: 10
         )
@@ -565,7 +569,9 @@ defmodule Minga.Agent.ChatDecorations do
     {_id, decs} =
       add_block(decs, line,
         placement: :above,
-        render: fn _w -> [{"▎ You", [fg: theme.user_border, bold: true, bg: theme.header_bg]}] end,
+        render: fn _w ->
+          [{"▎ You", Face.new(fg: theme.user_border, bold: true, bg: theme.header_bg)}]
+        end,
         priority: 10
       )
 

@@ -23,14 +23,14 @@ defmodule Minga.Editor.FloatingWindowTest do
       assert draws != []
     end
 
-    test "all draws are valid {row, col, text, style} tuples" do
+    test "all draws are valid {row, col, text, Face.t()} tuples" do
       draws = FloatingWindow.render(spec())
 
       Enum.each(draws, fn {row, col, text, style} ->
         assert is_integer(row) and row >= 0
         assert is_integer(col) and col >= 0
         assert is_binary(text)
-        assert is_list(style)
+        assert %Minga.Face{} = style
       end)
     end
   end
@@ -213,7 +213,7 @@ defmodule Minga.Editor.FloatingWindowTest do
 
   describe "content" do
     test "content draws are offset into the interior" do
-      content = [DisplayList.draw(0, 0, "hello", fg: 0xFFFFFF)]
+      content = [DisplayList.draw(0, 0, "hello", Minga.Face.new(fg: 0xFFFFFF))]
 
       draws =
         FloatingWindow.render(
@@ -235,7 +235,7 @@ defmodule Minga.Editor.FloatingWindowTest do
       # Interior of a 10-row bordered window = 8 rows (0..7)
       content =
         for r <- 0..15 do
-          DisplayList.draw(r, 0, "line #{r}", [])
+          DisplayList.draw(r, 0, "line #{r}")
         end
 
       draws =
@@ -249,7 +249,7 @@ defmodule Minga.Editor.FloatingWindowTest do
     end
 
     test "content text is truncated at the right edge" do
-      content = [DisplayList.draw(0, 0, "this is a long text that overflows", [])]
+      content = [DisplayList.draw(0, 0, "this is a long text that overflows")]
 
       draws =
         FloatingWindow.render(
@@ -264,7 +264,7 @@ defmodule Minga.Editor.FloatingWindowTest do
     end
 
     test "content with no border gets full box dimensions" do
-      content = [DisplayList.draw(0, 0, "hello", [])]
+      content = [DisplayList.draw(0, 0, "hello")]
 
       draws =
         FloatingWindow.render(

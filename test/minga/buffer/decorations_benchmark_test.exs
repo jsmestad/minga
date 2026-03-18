@@ -9,6 +9,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
+  alias Minga.Face
 
   describe "performance: query scaling" do
     setup do
@@ -43,7 +44,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       merge_fn = fn decs, offset ->
         for {line, i} <- Enum.with_index(ctx.lines, offset) do
           ranges = Decorations.highlights_for_line(decs, i)
-          Decorations.merge_highlights([{line, []}], ranges, i)
+          Decorations.merge_highlights([{line, Minga.Face.new()}], ranges, i)
         end
       end
 
@@ -77,7 +78,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
             Enum.reduce(0..9_999, d, fn i, acc ->
               {_, acc} =
                 Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                  style: [bg: 0xECBE7B],
+                  style: Minga.Face.new(bg: 0xECBE7B),
                   group: :diagnostics
                 )
 
@@ -111,7 +112,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
     Enum.reduce(0..(count - 1), Decorations.new(), fn i, decs ->
       {_id, decs} =
         Decorations.add_highlight(decs, {i, 0}, {i, 20},
-          style: [bg: 0x3E4452],
+          style: Minga.Face.new(bg: 0x3E4452),
           priority: rem(i, 5),
           group: :diagnostics
         )

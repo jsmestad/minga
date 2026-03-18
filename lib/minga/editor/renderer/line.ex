@@ -19,6 +19,7 @@ defmodule Minga.Editor.Renderer.Line do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Context
+  alias Minga.Face
   alias Minga.Highlight
 
   @typedoc "Column range of a selection on a single line (display columns, end exclusive)."
@@ -115,7 +116,7 @@ defmodule Minga.Editor.Renderer.Line do
 
       :full ->
         visible_text = join_pairs(effective_visible)
-        [DisplayList.draw(screen_row, ctx.gutter_w, visible_text, reverse: true)]
+        [DisplayList.draw(screen_row, ctx.gutter_w, visible_text, Face.new(reverse: true))]
 
       {sel_start, sel_end} ->
         render_partial_selection(
@@ -269,7 +270,7 @@ defmodule Minga.Editor.Renderer.Line do
         screen_row,
         gutter_w + before_width,
         sel_text,
-        reverse: true
+        Face.new(reverse: true)
       ),
       DisplayList.draw(
         screen_row,
@@ -336,7 +337,7 @@ defmodule Minga.Editor.Renderer.Line do
           [Decorations.highlight_range()]
         ) :: [DisplayList.draw()]
   defp render_decorated_plain_line(line_text, screen_row, buf_line, ctx, line_highlights) do
-    segments = [{line_text, []}]
+    segments = [{line_text, Face.new()}]
     segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
     segments = apply_conceals_to_segments(segments, ctx.decorations, buf_line)
     segments = inject_inline_virtual_text(segments, ctx.decorations, buf_line)
@@ -347,13 +348,11 @@ defmodule Minga.Editor.Renderer.Line do
 
   # Injects inline virtual text segments into the styled segment list at their
   # anchor column positions, displacing subsequent content rightward.
-  # Virtual text segments are tagged with {:virtual, true} in their style so
-  # selection rendering can skip them.
   @spec inject_inline_virtual_text(
-          [{String.t(), keyword()}],
+          [{String.t(), Face.t()}],
           Decorations.t(),
           non_neg_integer()
-        ) :: [{String.t(), keyword()}]
+        ) :: [{String.t(), Face.t()}]
   defp inject_inline_virtual_text(segments, decorations, buf_line) do
     inline_vts = Decorations.inline_virtual_texts_for_line(decorations, buf_line)
 
@@ -368,20 +367,14 @@ defmodule Minga.Editor.Renderer.Line do
   # text's anchor column falls within the current segment, split the segment
   # and insert the virtual text segments between the halves.
   @spec do_inject_inline(
-          [{String.t(), keyword()}],
+          [{String.t(), Face.t()}],
           [Decorations.VirtualText.t()],
           non_neg_integer(),
-          [{String.t(), keyword()}]
-        ) :: [{String.t(), keyword()}]
+          [{String.t(), Face.t()}]
+        ) :: [{String.t(), Face.t()}]
   defp do_inject_inline([], remaining_vts, _col, acc) do
     # Append any remaining virtual texts after all buffer content
-    vt_segments =
-      Enum.flat_map(remaining_vts, fn vt ->
-        Enum.map(vt.segments, fn {text, style} ->
-          {text, Keyword.put(style, :virtual, true)}
-        end)
-      end)
-
+    vt_segments = Enum.flat_map(remaining_vts, fn vt -> vt.segments end)
     Enum.reverse(acc, vt_segments)
   end
 
@@ -413,19 +406,18 @@ defmodule Minga.Editor.Renderer.Line do
 
   # Virtual text anchor is at or before the current segment start: inject before
   @spec inject_at_position(
-          {String.t(), keyword()},
-          [{String.t(), keyword()}],
+          {String.t(), Face.t()},
+          [{String.t(), Face.t()}],
           Decorations.VirtualText.t(),
           [Decorations.VirtualText.t()],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          [{String.t(), keyword()}]
-        ) :: [{String.t(), keyword()}]
+          [{String.t(), Face.t()}]
+        ) :: [{String.t(), Face.t()}]
   defp inject_at_position(seg, rest_segs, vt, rest_vts, col, _seg_end, anchor_col, acc)
        when anchor_col <= col do
-    vt_segs = tag_virtual_segments(vt.segments)
-    do_inject_inline([seg | rest_segs], rest_vts, col, vt_segs ++ acc)
+    do_inject_inline([seg | rest_segs], rest_vts, col, vt.segments ++ acc)
   end
 
   # Virtual text anchor is within the current segment: split and inject
@@ -442,10 +434,8 @@ defmodule Minga.Editor.Renderer.Line do
        when anchor_col < seg_end do
     split_at = anchor_col - col
     {before_text, after_text} = split_text_at_display_col(seg_text, split_at)
-    vt_segs = tag_virtual_segments(vt.segments)
-
     after_part = if after_text != "", do: [{after_text, seg_style}], else: []
-    new_acc = after_part ++ vt_segs ++ [{before_text, seg_style} | acc]
+    new_acc = after_part ++ vt.segments ++ [{before_text, seg_style} | acc]
     do_inject_inline(rest_segs, rest_vts, seg_end, new_acc)
   end
 
@@ -461,13 +451,6 @@ defmodule Minga.Editor.Renderer.Line do
          acc
        ) do
     do_inject_inline(rest_segs, [vt | rest_vts], seg_end, [{seg_text, seg_style} | acc])
-  end
-
-  @spec tag_virtual_segments([{String.t(), keyword()}]) :: [{String.t(), keyword()}]
-  defp tag_virtual_segments(segments) do
-    Enum.map(segments, fn {text, style} ->
-      {text, Keyword.put(style, :virtual, true)}
-    end)
   end
 
   # Split text at a display column position (not byte or grapheme index).
@@ -792,7 +775,9 @@ defmodule Minga.Editor.Renderer.Line do
     if col <= conceal_start_on_line do
       # Merge: conceal replacement_style wins over the segment's style,
       # but the segment's style provides bg/fg from overlapping decorations.
-      merged_style = Keyword.merge(seg_style, conceal.replacement_style)
+      merged_style =
+        Minga.Buffer.Decorations.merge_style_props(seg_style, conceal.replacement_style)
+
       [{conceal.replacement, merged_style} | acc]
     else
       acc

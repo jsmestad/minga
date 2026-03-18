@@ -20,6 +20,7 @@ defmodule Minga.Integration.AgentCursorTest do
   alias Minga.Editor.Window
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
+  alias Minga.Face
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 

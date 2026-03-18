@@ -4,6 +4,24 @@ defmodule Minga.HighlightTest do
   alias Minga.Face
   alias Minga.Highlight
 
+  # Helper: asserts styled segments match expected {text, face_attrs} pairs.
+  # Only checks face attributes that are explicitly specified in expected.
+  defp assert_segments(result, expected) do
+    assert length(result) == length(expected),
+           "expected #{length(expected)} segments, got #{length(result)}: #{inspect(Enum.map(result, fn {t, _} -> t end))}"
+
+    Enum.zip(result, expected)
+    |> Enum.each(fn {{actual_text, actual_face}, {expected_text, expected_attrs}} ->
+      assert actual_text == expected_text
+      assert %Face{} = actual_face
+
+      for {key, val} <- expected_attrs do
+        assert Map.get(actual_face, key) == val,
+               "segment #{inspect(expected_text)}: expected #{key}=#{inspect(val)}, got #{inspect(Map.get(actual_face, key))}"
+      end
+    end)
+  end
+
   # Helper: builds a %Highlight{} with a face registry from a theme map.
   # Replaces manual struct construction in tests that need styles_for_line.
   defp highlight_with(attrs) do
@@ -100,7 +118,9 @@ defmodule Minga.HighlightTest do
   describe "styles_for_line/3" do
     test "empty spans returns whole line unstyled" do
       hl = Highlight.new()
-      assert Highlight.styles_for_line(hl, "hello world", 0) == [{"hello world", []}]
+      result = Highlight.styles_for_line(hl, "hello world", 0)
+      assert [{text, %Face{}}] = result
+      assert text == "hello world"
     end
 
     test "single span covering part of line" do
@@ -112,7 +132,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "def foo", 0)
-      assert [{"def", [fg: 0xFF0000]}, {" foo", []}] = result
+      assert_segments(result, [{"def", fg: 0xFF0000}, {" foo", []}])
     end
 
     test "span in middle of line" do
@@ -124,7 +144,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "x = :foo + 1", 0)
-      assert [{"x = ", []}, {":fo", [fg: 0x00FF00]}, {"o + 1", []}] = result
+      assert_segments(result, [{"x = ", []}, {":fo", fg: 0x00FF00}, {"o + 1", []}])
     end
 
     test "multiple spans on one line" do
@@ -139,7 +159,13 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "def foo()", 0)
-      assert [{"def", [fg: 0xFF0000]}, {" ", []}, {"foo", [fg: 0x00FF00]}, {"()", []}] = result
+
+      assert_segments(result, [
+        {"def", fg: 0xFF0000},
+        {" ", []},
+        {"foo", fg: 0x00FF00},
+        {"()", []}
+      ])
     end
 
     test "span crossing line boundary is clamped" do
@@ -151,10 +177,10 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "hello", 5)
-      assert [{text, style}] = result
+      assert [{text, %Minga.Face{} = style}] = result
       assert text == "hello"
-      assert Keyword.get(style, :fg) == 0x888888
-      assert Keyword.get(style, :italic) == true
+      assert style.fg == 0x888888
+      assert style.italic == true
     end
 
     test "span not overlapping this line is excluded" do
@@ -166,7 +192,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "hello", 0)
-      assert [{"hello", []}] = result
+      assert_segments(result, [{"hello", []}])
     end
 
     test "unknown capture_id returns empty style" do
@@ -178,7 +204,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "def foo", 0)
-      assert [{"def", []}, {" foo", []}] = result
+      assert_segments(result, [{"def", []}, {" foo", []}])
     end
 
     test "same-width spans: higher pattern_index wins" do
@@ -201,7 +227,7 @@ defmodule Minga.HighlightTest do
       assert all_text == "defmodule Foo do"
 
       # Higher pattern_index wins
-      assert [{"defmodule", [fg: 0x00FF00]}, {" Foo do", []}] = result
+      assert_segments(result, [{"defmodule", fg: 0x00FF00}, {" Foo do", []}])
     end
 
     test "partially overlapping spans don't duplicate text" do
@@ -241,11 +267,11 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "\#{content}"
 
-      assert [
-               {"\#{", [fg: 0xFF0000]},
-               {"content", [fg: 0xAAAAAA]},
-               {"}", [fg: 0xFF0000]}
-             ] = result
+      assert_segments(result, [
+        {"\#{", fg: 0xFF0000},
+        {"content", fg: 0xAAAAAA},
+        {"}", fg: 0xFF0000}
+      ])
     end
 
     test "innermost-wins: module attribute with atoms" do
@@ -272,15 +298,15 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == line
 
-      assert [
-               {"@reference_forms [", [fg: 0xDA8548]},
-               {":alias", [fg: 0xAA00FF]},
-               {", ", [fg: 0xDA8548]},
-               {":import", [fg: 0xAA00FF]},
-               {", ", [fg: 0xDA8548]},
-               {":require", [fg: 0xAA00FF]},
-               {"]", [fg: 0xDA8548]}
-             ] = result
+      assert_segments(result, [
+        {"@reference_forms [", fg: 0xDA8548},
+        {":alias", fg: 0xAA00FF},
+        {", ", fg: 0xDA8548},
+        {":import", fg: 0xAA00FF},
+        {", ", fg: 0xDA8548},
+        {":require", fg: 0xAA00FF},
+        {"]", fg: 0xDA8548}
+      ])
     end
 
     test "innermost-wins: three nesting levels" do
@@ -304,13 +330,13 @@ defmodule Minga.HighlightTest do
       all_text = Enum.map_join(result, fn {text, _} -> text end)
       assert all_text == "01234567890123456789"
 
-      assert [
-               {"01234", [fg: 0x111111]},
-               {"567", [fg: 0x222222]},
-               {"8901", [fg: 0x333333]},
-               {"234", [fg: 0x222222]},
-               {"56789", [fg: 0x111111]}
-             ] = result
+      assert_segments(result, [
+        {"01234", fg: 0x111111},
+        {"567", fg: 0x222222},
+        {"8901", fg: 0x333333},
+        {"234", fg: 0x222222},
+        {"56789", fg: 0x111111}
+      ])
     end
 
     test "injection layer always wins over outer layer" do
@@ -332,7 +358,7 @@ defmodule Minga.HighlightTest do
       result = Highlight.styles_for_line(hl, "hello world", 0)
 
       # Injection wins everywhere it covers, even though outer is narrower
-      assert [{"hello", [fg: 0x00FF00]}, {" worl", [fg: 0x00FF00]}, {"d", []}] = result
+      assert_segments(result, [{"hello", fg: 0x00FF00}, {" worl", fg: 0x00FF00}, {"d", []}])
     end
 
     test "with line_start_byte offset" do
@@ -344,7 +370,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "bar baz", 8)
-      assert [{"bar", [fg: 0xFF0000]}, {" baz", []}] = result
+      assert_segments(result, [{"bar", fg: 0xFF0000}, {" baz", []}])
     end
   end
 
@@ -358,7 +384,9 @@ defmodule Minga.HighlightTest do
           {"world", 6}
         ])
 
-      assert result == [[{"hello", []}], [{"world", []}]]
+      assert length(result) == 2
+      assert_segments(Enum.at(result, 0), [{"hello", []}])
+      assert_segments(Enum.at(result, 1), [{"world", []}])
     end
 
     test "results match per-line styles_for_line" do
@@ -399,11 +427,10 @@ defmodule Minga.HighlightTest do
       lines = [{"first", 0}, {"second", 6}, {"third", 13}]
       result = Highlight.styles_for_visible_lines(hl, lines)
 
-      assert result == [
-               [{"first", [fg: 0x888888]}],
-               [{"second", [fg: 0x888888]}],
-               [{"third", [fg: 0x888888]}]
-             ]
+      assert length(result) == 3
+      assert_segments(Enum.at(result, 0), [{"first", fg: 0x888888}])
+      assert_segments(Enum.at(result, 1), [{"second", fg: 0x888888}])
+      assert_segments(Enum.at(result, 2), [{"third", fg: 0x888888}])
     end
 
     test "watermark advances past consumed spans" do
@@ -421,11 +448,10 @@ defmodule Minga.HighlightTest do
       lines = [{"def foo", 0}, {"hello", 8}, {"world", 14}]
       result = Highlight.styles_for_visible_lines(hl, lines)
 
-      assert result == [
-               [{"def", [fg: 0xFF0000]}, {" foo", []}],
-               [{"he", []}, {"llo", [fg: 0x00FF00]}],
-               [{"w", [fg: 0x00FF00]}, {"orld", []}]
-             ]
+      assert length(result) == 3
+      assert_segments(Enum.at(result, 0), [{"def", fg: 0xFF0000}, {" foo", []}])
+      assert_segments(Enum.at(result, 1), [{"he", []}, {"llo", fg: 0x00FF00}])
+      assert_segments(Enum.at(result, 2), [{"w", fg: 0x00FF00}, {"orld", []}])
     end
   end
 
@@ -442,9 +468,9 @@ defmodule Minga.HighlightTest do
       hl = Highlight.from_theme(theme)
 
       # "keyword" is defined in doom_one, should resolve with bold
-      style = Minga.Face.Registry.style_for(hl.face_registry, "keyword")
-      assert Keyword.get(style, :bold) == true
-      assert Keyword.get(style, :fg) != nil
+      face = Minga.Face.Registry.style_for(hl.face_registry, "keyword")
+      assert face.bold == true
+      assert face.fg != nil
     end
 
     test "face registry falls back through dotted names" do
@@ -452,9 +478,9 @@ defmodule Minga.HighlightTest do
       hl = Highlight.from_theme(theme)
 
       # "keyword.function.builtin.whatever" doesn't exist, should fall back
-      style = Minga.Face.Registry.style_for(hl.face_registry, "keyword.function.builtin.whatever")
+      face = Minga.Face.Registry.style_for(hl.face_registry, "keyword.function.builtin.whatever")
       # Should get keyword.function or keyword's style
-      assert Keyword.get(style, :fg) != nil
+      assert face.fg != nil
     end
   end
 end
