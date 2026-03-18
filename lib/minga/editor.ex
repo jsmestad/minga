@@ -649,6 +649,30 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  # Buffer-local face overrides changed. Pre-compute the merged registry
+  # so the render pipeline reads from editor state with zero GenServer calls.
+  def handle_info({:face_overrides_changed, buf_pid, overrides}, state) do
+    registries =
+      if overrides == %{} do
+        Map.delete(state.face_override_registries, buf_pid)
+      else
+        # Get the base highlight for this buffer to merge overrides with
+        hl = Map.get(state.highlight.highlights, buf_pid)
+
+        merged =
+          if hl do
+            Minga.Face.Registry.with_overrides(hl.face_registry, overrides)
+          else
+            base = Minga.Face.Registry.from_theme(state.theme)
+            Minga.Face.Registry.with_overrides(base, overrides)
+          end
+
+        Map.put(state.face_override_registries, buf_pid, merged)
+      end
+
+    {:noreply, %{state | face_override_registries: registries}}
+  end
+
   # Refresh the cached LSP status for the modeline indicator.
   # Fired after buffer open (with delay for async LSP initialization)
   # and periodically while LSP clients are connecting.

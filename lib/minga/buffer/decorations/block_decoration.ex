@@ -38,7 +38,8 @@ defmodule Minga.Buffer.Decorations.BlockDecoration do
             height: 1,
             render: nil,
             on_click: nil,
-            priority: 0
+            priority: 0,
+            group: nil
 
   @typedoc "Render callback: receives available width, returns styled content."
   @type render_fn :: (width :: pos_integer() -> render_result())
@@ -61,7 +62,8 @@ defmodule Minga.Buffer.Decorations.BlockDecoration do
           height: pos_integer() | :dynamic,
           render: render_fn(),
           on_click: click_fn(),
-          priority: integer()
+          priority: integer(),
+          group: term() | nil
         }
 
   @doc """

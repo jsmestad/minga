@@ -24,7 +24,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
     %Highlight{
       version: Keyword.get(attrs, :version, 1),
       spans: Keyword.get(attrs, :spans, {}),
-      capture_names: Keyword.get(attrs, :capture_names, []),
+      capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
       theme: theme,
       face_registry: Face.Registry.from_syntax(theme)
     }
@@ -286,7 +286,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       state = :sys.get_state(editor)
       assert HighlightSync.get_active_highlight(state).spans == {}
-      assert HighlightSync.get_active_highlight(state).capture_names == []
+      assert HighlightSync.get_active_highlight(state).capture_names == {}
     end
   end
 
@@ -300,11 +300,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
           %{start_byte: 10, end_byte: 15, capture_id: 1}
         ])
 
-      assert HighlightSync.get_active_highlight(state).capture_names == [
-               "keyword",
-               "string",
-               "comment"
-             ]
+      assert HighlightSync.get_active_highlight(state).capture_names ==
+               {"keyword", "string", "comment"}
 
       assert tuple_size(HighlightSync.get_active_highlight(state).spans) == 2
       assert HighlightSync.get_active_highlight(state).version == 1
@@ -317,10 +314,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
         |> HighlightSync.handle_spans(1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
         |> HighlightSync.handle_names(["new_keyword", "new_string"])
 
-      assert HighlightSync.get_active_highlight(state).capture_names == [
-               "new_keyword",
-               "new_string"
-             ]
+      assert HighlightSync.get_active_highlight(state).capture_names ==
+               {"new_keyword", "new_string"}
 
       assert tuple_size(HighlightSync.get_active_highlight(state).spans) == 1
     end
@@ -424,7 +419,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert_row_contains(ctx, 1, "just plain text")
 
       state = :sys.get_state(ctx.editor)
-      assert HighlightSync.get_active_highlight(state).capture_names == []
+      assert HighlightSync.get_active_highlight(state).capture_names == {}
       assert HighlightSync.get_active_highlight(state).spans == {}
     end
 

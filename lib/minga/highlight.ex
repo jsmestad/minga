@@ -17,7 +17,7 @@ defmodule Minga.Highlight do
   @type t :: %__MODULE__{
           version: non_neg_integer(),
           spans: tuple() | [map()],
-          capture_names: [String.t()],
+          capture_names: tuple(),
           theme: Theme.syntax(),
           face_registry: Face.Registry.t()
         }
@@ -45,7 +45,7 @@ defmodule Minga.Highlight do
     %__MODULE__{
       version: 0,
       spans: {},
-      capture_names: [],
+      capture_names: {},
       theme: syntax,
       face_registry: registry
     }
@@ -59,7 +59,7 @@ defmodule Minga.Highlight do
     %__MODULE__{
       version: 0,
       spans: {},
-      capture_names: [],
+      capture_names: {},
       theme: theme.syntax,
       face_registry: registry
     }
@@ -68,7 +68,7 @@ defmodule Minga.Highlight do
   @doc "Stores capture names from a `highlight_names` event."
   @spec put_names(t(), [String.t()]) :: t()
   def put_names(%__MODULE__{} = hl, names) when is_list(names) do
-    %{hl | capture_names: names}
+    %{hl | capture_names: List.to_tuple(names)}
   end
 
   @doc """
@@ -111,7 +111,7 @@ defmodule Minga.Highlight do
   ## Examples
 
       iex> hl = Minga.Highlight.new(%{"keyword" => [fg: 0xFF0000]})
-      iex> hl = %{hl | version: 1, spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}], capture_names: ["keyword"]}
+      iex> hl = %{hl | version: 1, spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}], capture_names: {"keyword"}}
       iex> Minga.Highlight.styles_for_line(hl, "def foo", 0)
       [{"def", [fg: 0xFF0000]}, {" foo", []}]
   """
@@ -281,11 +281,19 @@ defmodule Minga.Highlight do
 
   @spec internal_capture?(t(), non_neg_integer()) :: boolean()
   defp internal_capture?(hl, capture_id) do
-    case Enum.at(hl.capture_names, capture_id) do
+    case capture_name_at(hl, capture_id) do
       "_" <> _ -> true
       _ -> false
     end
   end
+
+  # O(1) capture name lookup via tuple elem/2.
+  @spec capture_name_at(t(), non_neg_integer()) :: String.t() | nil
+  defp capture_name_at(%__MODULE__{capture_names: names}, id) when id >= 0 do
+    if id < tuple_size(names), do: elem(names, id), else: nil
+  end
+
+  defp capture_name_at(_hl, _id), do: nil
 
   @typep span_event :: {non_neg_integer(), :open | :close, map()}
 
@@ -394,7 +402,7 @@ defmodule Minga.Highlight do
 
   @spec resolve_style(t(), non_neg_integer()) :: Minga.Port.Protocol.style()
   defp resolve_style(hl, capture_id) do
-    case Enum.at(hl.capture_names, capture_id) do
+    case capture_name_at(hl, capture_id) do
       nil -> []
       name -> Face.Registry.style_for(hl.face_registry, name)
     end

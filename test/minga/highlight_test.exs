@@ -12,7 +12,7 @@ defmodule Minga.HighlightTest do
     %Highlight{
       version: Keyword.get(attrs, :version, 1),
       spans: Keyword.get(attrs, :spans, {}),
-      capture_names: Keyword.get(attrs, :capture_names, []),
+      capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
       theme: theme,
       face_registry: Face.Registry.from_syntax(theme)
     }
@@ -23,7 +23,7 @@ defmodule Minga.HighlightTest do
       hl = Highlight.new()
       assert hl.version == 0
       assert hl.spans == {}
-      assert hl.capture_names == []
+      assert hl.capture_names == {}
       assert is_map(hl.theme)
       assert map_size(hl.theme) > 0
     end
@@ -40,7 +40,7 @@ defmodule Minga.HighlightTest do
   describe "put_names/2" do
     test "stores capture names" do
       hl = Highlight.new() |> Highlight.put_names(["keyword", "string"])
-      assert hl.capture_names == ["keyword", "string"]
+      assert hl.capture_names == {"keyword", "string"}
     end
   end
 

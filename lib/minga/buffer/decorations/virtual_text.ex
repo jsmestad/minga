@@ -25,7 +25,8 @@ defmodule Minga.Buffer.Decorations.VirtualText do
             anchor: {0, 0},
             segments: [],
             placement: :eol,
-            priority: 0
+            priority: 0,
+            group: nil
 
   @typedoc """
   A styled text segment: the text string and its style properties.
@@ -47,7 +48,8 @@ defmodule Minga.Buffer.Decorations.VirtualText do
           anchor: IntervalTree.position(),
           segments: [segment()],
           placement: placement(),
-          priority: integer()
+          priority: integer(),
+          group: term() | nil
         }
 
   @doc "Returns the total display width of the virtual text segments."

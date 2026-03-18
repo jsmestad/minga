@@ -87,6 +87,7 @@ defmodule Minga.Events do
           | :buffer_opened
           | :buffer_closed
           | :buffer_changed
+          | :content_replaced
           | :mode_changed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
@@ -162,7 +163,7 @@ defmodule Minga.Events do
   Returns `:ok`. If no processes are subscribed to the topic, this is a
   no-op with negligible cost.
   """
-  @spec broadcast(:buffer_saved | :buffer_opened, BufferEvent.t()) :: :ok
+  @spec broadcast(:buffer_saved | :buffer_opened | :content_replaced, BufferEvent.t()) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok

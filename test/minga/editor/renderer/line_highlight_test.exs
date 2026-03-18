@@ -33,7 +33,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     %Highlight{
       version: 1,
       spans: spans,
-      capture_names: names,
+      capture_names: List.to_tuple(names),
       theme: theme,
       face_registry: Minga.Face.Registry.from_syntax(theme)
     }

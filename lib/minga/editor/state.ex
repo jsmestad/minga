@@ -123,7 +123,8 @@ defmodule Minga.Editor.State do
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
-            buffer_monitors: %{}
+            buffer_monitors: %{},
+            face_override_registries: %{}
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -169,7 +170,8 @@ defmodule Minga.Editor.State do
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
-          buffer_monitors: %{pid() => reference()}
+          buffer_monitors: %{pid() => reference()},
+          face_override_registries: %{pid() => Minga.Face.Registry.t()}
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

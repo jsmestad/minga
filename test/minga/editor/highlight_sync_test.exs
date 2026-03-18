@@ -29,7 +29,7 @@ defmodule Minga.Editor.HighlightSyncTest do
       names = ["keyword", "string", "comment"]
       new_state = HighlightSync.handle_names(state, names)
 
-      assert get_hl(new_state).capture_names == names
+      assert get_hl(new_state).capture_names == List.to_tuple(names)
     end
 
     test "replaces previous capture names" do
@@ -38,7 +38,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         |> HighlightSync.handle_names(["old"])
         |> HighlightSync.handle_names(["new1", "new2"])
 
-      assert get_hl(state).capture_names == ["new1", "new2"]
+      assert get_hl(state).capture_names == {"new1", "new2"}
     end
   end
 
@@ -179,7 +179,7 @@ defmodule Minga.Editor.HighlightSyncTest do
 
     test "returns state unchanged when no highlighting active" do
       state = base_state()
-      assert get_hl(state).capture_names == []
+      assert get_hl(state).capture_names == {}
       assert HighlightSync.request_reparse(state) == state
     end
   end
