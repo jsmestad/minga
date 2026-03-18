@@ -229,7 +229,7 @@ defmodule Minga.Editor.Window do
   @doc "Folds the range containing the given buffer line."
   @spec fold_at(t(), non_neg_integer()) :: t()
   def fold_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
-    case Enum.find(ranges, &FoldRange.contains?(&1, line)) do
+    case FoldMap.innermost_range(ranges, line) do
       nil ->
         window
 
@@ -268,15 +268,30 @@ defmodule Minga.Editor.Window do
   end
 
   # If the cursor is inside a folded (hidden) region, move it to the
-  # start of the fold that contains it. Prevents negative visible-line
-  # coordinates in the render pipeline.
+  # start of the fold that contains it. Also clamps the viewport top
+  # so the scroll stage doesn't start from a stale position.
   @spec clamp_cursor_to_visible(t()) :: t()
   defp clamp_cursor_to_visible(%__MODULE__{fold_map: fm, cursor: {line, col}} = window) do
-    if FoldMap.folded?(fm, line) do
-      case FoldMap.fold_at(fm, line) do
-        {:ok, %FoldRange{start_line: start}} -> %{window | cursor: {start, col}}
-        :none -> window
+    window =
+      if FoldMap.folded?(fm, line) do
+        case FoldMap.fold_at(fm, line) do
+          {:ok, %FoldRange{start_line: start}} -> %{window | cursor: {start, col}}
+          :none -> window
+        end
+      else
+        window
       end
+
+    # Clamp viewport top: after folding, the visible line count may shrink
+    # below the current viewport top, causing negative cursor screen rows.
+    # Map the cursor to visible-line space and ensure the viewport top
+    # doesn't exceed it.
+    {cursor_line, _} = window.cursor
+    visible_cursor = FoldMap.buffer_to_visible(fm, cursor_line)
+    vp = window.viewport
+
+    if vp.top > visible_cursor do
+      %{window | viewport: %{vp | top: max(visible_cursor - 5, 0)}}
     else
       window
     end
@@ -295,6 +310,7 @@ defmodule Minga.Editor.Window do
       end)
 
     new_fm = FoldMap.from_ranges(surviving_folds)
+
     %{window | fold_ranges: new_ranges, fold_map: new_fm}
     |> clamp_cursor_to_visible()
   end

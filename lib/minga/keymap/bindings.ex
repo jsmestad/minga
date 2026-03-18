@@ -127,7 +127,7 @@ defmodule Minga.Keymap.Bindings do
       iex> Minga.Keymap.Bindings.lookup(trie, {?z, 0})
       :not_found
   """
-  @spec lookup(node_t(), key()) :: {:command, atom()} | {:prefix, node_t()} | :not_found
+  @spec lookup(node_t(), key()) :: {:command, atom() | tuple()} | {:prefix, node_t()} | :not_found
   def lookup(%Node{children: children}, key) do
     case Map.fetch(children, key) do
       :error ->

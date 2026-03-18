@@ -471,7 +471,8 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:fold_ranges, buffer_id, _version, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    Minga.Editor.log_to_messages("Fold ranges received: buffer=#{buffer_id}, count=#{length(ranges)}")
+    Minga.Log.debug(:editor, "Fold ranges received: buffer=#{buffer_id}, count=#{length(ranges)}")
+
     pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
 
     new_state =

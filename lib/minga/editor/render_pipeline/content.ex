@@ -166,6 +166,12 @@ defmodule Minga.Editor.RenderPipeline.Content do
           end
 
         cr = visible_cursor - viewport.top + row_off
+
+        # Defensive clamp: fold/scroll misalignment can produce negative rows.
+        # Clamp to 0 so encode_cursor doesn't crash. The scroll stage will
+        # correct the viewport on the next frame.
+        cr = max(cr, 0)
+
         # Adjust cursor column for inline virtual text that shifts content right
         adjusted_cursor_col =
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)

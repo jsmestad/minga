@@ -14,7 +14,7 @@ defmodule Minga.Keymap.NormalPrefixes do
   alias Minga.Keymap.Bindings
 
   @typedoc "A prefix sequence definition: {key_sequence, command, description}."
-  @type prefix_def :: {[Bindings.key()], atom(), String.t()}
+  @type prefix_def :: {[Bindings.key()], atom() | tuple(), String.t()}
 
   @prefix_sequences [
     # g prefix
