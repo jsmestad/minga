@@ -57,6 +57,7 @@ defmodule Minga.Command.Parser do
           | {:extensions, []}
           | {:extension_update, []}
           | {:extension_update_all, []}
+          | {:parser_restart, []}
           | {:agent_abort, []}
           | {:agent_new_session, []}
           | {:agent_set_provider, [String.t()]}
@@ -138,6 +139,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("ext"), do: {:extensions, []}
   defp do_parse("ExtUpdate"), do: {:extension_update, []}
   defp do_parse("ExtUpdateAll"), do: {:extension_update_all, []}
+  defp do_parse("parser-restart"), do: {:parser_restart, []}
+  defp do_parse("ParserRestart"), do: {:parser_restart, []}
   defp do_parse("agent-stop"), do: {:agent_abort, []}
   defp do_parse("agent-new"), do: {:agent_new_session, []}
   defp do_parse("agent-provider " <> provider), do: {:agent_set_provider, [String.trim(provider)]}

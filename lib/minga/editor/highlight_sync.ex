@@ -128,6 +128,29 @@ defmodule Minga.Editor.HighlightSync do
 
     ParserManager.send_commands(commands)
 
+    # Register this buffer for crash recovery re-sync. The setup_commands_fn
+    # replays the full command set (including custom queries) so user overrides
+    # survive a parser crash.
+    setup_fn = fn bid ->
+      fresh_content = BufferServer.content(buf_pid)
+
+      Enum.concat([
+        [Protocol.encode_set_language(bid, language)],
+        user_query_override(bid, language),
+        user_injection_query_override(bid, language),
+        user_fold_query_override(bid, language),
+        user_textobject_query_override(bid, language),
+        [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
+      ])
+    end
+
+    ParserManager.register_buffer(
+      buffer_id,
+      language,
+      fn -> BufferServer.content(buf_pid) end,
+      setup_commands_fn: setup_fn
+    )
+
     # Use custom syntax theme if provided (e.g., agent buffer with dimmed delimiters),
     # otherwise use the global editor theme. Store the override so
     # request_reparse_buffer can recover it if the buffer_id is lost.
@@ -203,6 +226,29 @@ defmodule Minga.Editor.HighlightSync do
 
     ParserManager.send_commands(commands)
 
+    # Register for crash recovery re-sync (including custom queries).
+    active = state.buffers.active
+
+    setup_fn = fn bid ->
+      fresh_content = BufferServer.content(active)
+
+      Enum.concat([
+        [Protocol.encode_set_language(bid, language)],
+        user_query_override(bid, language),
+        user_injection_query_override(bid, language),
+        user_fold_query_override(bid, language),
+        user_textobject_query_override(bid, language),
+        [Protocol.encode_parse_buffer(bid, 0, fresh_content)]
+      ])
+    end
+
+    ParserManager.register_buffer(
+      buffer_id,
+      language,
+      fn -> BufferServer.content(active) end,
+      setup_commands_fn: setup_fn
+    )
+
     state = put_active_highlight(state, Highlight.from_theme(state.theme))
     hl2 = state.highlight
     state = %{state | highlight: %{hl2 | version: version}}
@@ -257,6 +303,7 @@ defmodule Minga.Editor.HighlightSync do
 
       {buffer_id, remaining_ids} ->
         ParserManager.close_buffer(buffer_id)
+        ParserManager.unregister_buffer(buffer_id)
 
         %{
           state

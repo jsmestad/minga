@@ -207,4 +207,14 @@ defmodule Minga.Command.ParserTest do
       assert {:set_filetype, ["python"]} = Parser.parse("set ft=  python  ")
     end
   end
+
+  describe "parse/1 — parser commands" do
+    test ":parser-restart parses to {:parser_restart, []}" do
+      assert {:parser_restart, []} = Parser.parse("parser-restart")
+    end
+
+    test ":ParserRestart parses to {:parser_restart, []}" do
+      assert {:parser_restart, []} = Parser.parse("ParserRestart")
+    end
+  end
 end

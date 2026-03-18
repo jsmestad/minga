@@ -14,6 +14,62 @@ const protocol = @import("protocol.zig");
 const highlighter_mod = @import("highlighter.zig");
 const c = highlighter_mod.c;
 
+// ── Custom log function ───────────────────────────────────────────────────────
+// Routes std.log calls over the port protocol to the BEAM instead of stderr.
+// The parser uses a blocking writer since it has a simple stdin/stdout loop
+// (no event loop like the renderer).
+
+/// Module-level blocking writer for the port channel (stdout).
+/// Set during main() init, before the event loop starts.
+var g_port_writer: ?*std.Io.Writer = null;
+
+fn parserLogFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
+    _ = scope;
+
+    const level: u8 = switch (message_level) {
+        .err => protocol.LOG_LEVEL_ERR,
+        .warn => protocol.LOG_LEVEL_WARN,
+        .info => protocol.LOG_LEVEL_INFO,
+        .debug => protocol.LOG_LEVEL_DEBUG,
+    };
+
+    // Format the message into a stack buffer. Truncate if it doesn't fit.
+    var msg_buf: [4096]u8 = undefined;
+    const msg = std.fmt.bufPrint(&msg_buf, format, args) catch msg_buf[0..msg_buf.len];
+
+    var payload_buf: [4096 + 4]u8 = undefined;
+    const payload_len = protocol.encodeLogMessage(&payload_buf, level, msg) catch return;
+
+    if (g_port_writer) |writer| {
+        protocol.writeMessage(writer, payload_buf[0..payload_len]) catch return;
+        writer.flush() catch {};
+    }
+}
+
+pub const std_options = std.Options{
+    .log_level = .info,
+    .logFn = parserLogFn,
+};
+
+// ── Panic handler ─────────────────────────────────────────────────────────────
+// Best-effort: write a log message over the protocol before aborting.
+// The allocator may be corrupted, so we only use stack buffers.
+
+fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
+    // Try to send the panic message to the BEAM before dying.
+    if (g_port_writer) |writer| {
+        var payload_buf: [4096 + 4]u8 = undefined;
+        const payload_len = protocol.encodeLogMessage(&payload_buf, protocol.LOG_LEVEL_ERR, msg) catch 0;
+        if (payload_len > 0) {
+            protocol.writeMessage(writer, payload_buf[0..payload_len]) catch {};
+            writer.flush() catch {};
+        }
+    }
+    std.debug.defaultPanic(msg, ret_addr);
+}
+
+pub const panic = std.debug.FullPanic(panicImpl);
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -27,6 +83,9 @@ pub fn main() !void {
     var stdout_buf: [4096]u8 = undefined;
     var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
     const stdout: *std.Io.Writer = &stdout_writer_obj.interface;
+
+    // Enable protocol-routed logging (and panic messages) now that stdout is ready.
+    g_port_writer = stdout;
 
     const stdin_fd = std.posix.STDIN_FILENO;
     var msg_buf: [65536]u8 = undefined;
