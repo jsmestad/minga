@@ -40,6 +40,22 @@ pub const Cell = struct {
     /// Style attribute flags (bold, italic, underline, reverse).
     /// Uses protocol.ATTR_* constants.
     attrs: u8 = 0,
+
+    // ── Extended style attributes (from draw_styled_text opcode 0x1C) ──
+
+    /// Underline style: 0=off, 1=curl, 2=dashed, 3=dotted, 4=double.
+    /// Matches the BEAM-side encoding in protocol.ex (ul_style_to_bits).
+    /// When attrs has ATTR_UNDERLINE set and ul_style is 0, defaults to single.
+    ul_style: u3 = 0,
+
+    /// Underline color as 24-bit RGB. 0 = use foreground color.
+    ul_color: u24 = 0,
+
+    /// Strikethrough text decoration.
+    strikethrough: bool = false,
+
+    /// Opacity (0-100). 100 = fully opaque (default). Values < 50 map to dim.
+    blend: u8 = 100,
 };
 
 /// Validates at comptime that a type implements the Surface interface.

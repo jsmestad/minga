@@ -115,6 +115,51 @@ pub fn Renderer(comptime SurfaceT: type) type {
                     }
                 },
 
+                .draw_styled_text => |dt| {
+                    // Same as draw_text but with extended attrs.
+                    // Reuse draw_text logic by converting to a compatible form.
+                    var abs_row = dt.row;
+                    var abs_col = dt.col;
+                    var max_col: u16 = self.surface.width();
+
+                    if (self.active_region) |region| {
+                        abs_row +|= region.row;
+                        abs_col +|= region.col;
+                        if (abs_row >= region.row +| region.height) return;
+                        max_col = @min(self.surface.width(), region.col +| region.width);
+                    }
+
+                    var col: u16 = abs_col;
+                    var iter = vaxis.unicode.graphemeIterator(dt.text);
+
+                    while (iter.next()) |grapheme| {
+                        if (col >= max_col) break;
+
+                        const raw = grapheme.bytes(dt.text);
+                        const stable = try self.arena.allocator().dupe(u8, raw);
+                        const w: u16 = vaxis.gwidth.gwidth(stable, .wcwidth);
+
+                        const effective_bg = if (dt.bg == 0) self.default_bg else dt.bg;
+
+                        // Extract base attrs (bits 0-3)
+                        const base_attrs: u8 = @intCast(dt.attrs & 0x0F);
+
+                        self.surface.writeCell(col, abs_row, .{
+                            .grapheme = stable,
+                            .width = @intCast(if (w == 0) 1 else w),
+                            .fg = dt.fg,
+                            .bg = effective_bg,
+                            .attrs = base_attrs,
+                            .strikethrough = (dt.attrs & protocol.ATTR_STRIKETHROUGH) != 0,
+                            .ul_style = decodeUnderlineStyle(dt.attrs),
+                            .ul_color = dt.ul_color,
+                            .blend = dt.blend,
+                        });
+
+                        col +|= if (w == 0) 1 else w;
+                    }
+                },
+
                 .set_cursor => |sc| {
                     self.surface.showCursor(sc.col, sc.row);
                 },
@@ -201,6 +246,15 @@ pub fn Renderer(comptime SurfaceT: type) type {
             }
         }
     };
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Decodes the underline style from the extended 16-bit attrs field.
+/// Bits 5-7 encode the style: 0=off/single, 1=curl, 2=dashed, 3=dotted, 4=double.
+/// Returns 0 for plain underline (renderer maps this based on ATTR_UNDERLINE flag).
+fn decodeUnderlineStyle(attrs: u16) u3 {
+    return @intCast((attrs >> protocol.UL_STYLE_SHIFT) & 0x07);
 }
 
 // ── Mock Surface for testing ──────────────────────────────────────────────────
@@ -556,4 +610,34 @@ test "clear then draw_text then batch_end full sequence" {
     try std.testing.expectEqual(@as(usize, 5), mock.cells_written);
     try std.testing.expectEqual(@as(u16, 3), mock.last_cursor_col);
     try std.testing.expectEqual(@as(usize, 1), mock.render_count);
+}
+
+test "handleCommand draw_styled_text passes extended attrs to cell" {
+    var mock = MockSurface{};
+    var rend = Renderer(MockSurface).init(&mock, std.testing.allocator);
+    defer rend.deinit();
+
+    // attrs: bold(0x01) | underline(0x02) | strikethrough(0x10) | curl style (1 << 5 = 0x20)
+    const attrs: u16 = 0x0033; // bold | underline | strikethrough | curl
+    try rend.handleCommand(.{ .draw_styled_text = .{
+        .row = 0,
+        .col = 0,
+        .fg = 0xFF6C6B,
+        .bg = 0x282C34,
+        .attrs = attrs,
+        .ul_color = 0xFF0000,
+        .blend = 50,
+        .text = "x",
+    } });
+    const cell = mock.last_cell.?;
+    // Base attrs (bits 0-3): bold | underline = 0x03
+    try std.testing.expectEqual(@as(u8, 0x03), cell.attrs);
+    // Extended: strikethrough
+    try std.testing.expect(cell.strikethrough);
+    // Extended: underline style curl (1)
+    try std.testing.expectEqual(@as(u3, 1), cell.ul_style);
+    // Extended: underline color
+    try std.testing.expectEqual(@as(u24, 0xFF0000), cell.ul_color);
+    // Extended: blend
+    try std.testing.expectEqual(@as(u8, 50), cell.blend);
 }
