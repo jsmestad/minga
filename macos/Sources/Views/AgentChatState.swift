@@ -6,6 +6,8 @@ import SwiftUI
 enum ChatMessageEntry: Identifiable {
     case user(id: Int, text: String)
     case assistant(id: Int, text: String)
+    /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
+    case styledAssistant(id: Int, lines: [[StyledTextRun]])
     case thinking(id: Int, text: String, collapsed: Bool)
     case toolCall(id: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
     case system(id: Int, text: String, isError: Bool)
@@ -13,7 +15,8 @@ enum ChatMessageEntry: Identifiable {
 
     var id: Int {
         switch self {
-        case .user(let id, _), .assistant(let id, _), .thinking(let id, _, _),
+        case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
+             .thinking(let id, _, _),
              .toolCall(let id, _, _, _, _, _, _), .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
             return id
@@ -60,6 +63,8 @@ final class AgentChatState {
                 return .user(id: i, text: text)
             case .assistant(let text):
                 return .assistant(id: i, text: text)
+            case .styledAssistant(let lines):
+                return .styledAssistant(id: i, lines: lines)
             case .thinking(let text, let collapsed):
                 return .thinking(id: i, text: text, collapsed: collapsed)
             case .toolCall(let name, let st, let isError, let collapsed, let duration, let result):

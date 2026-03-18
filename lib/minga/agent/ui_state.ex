@@ -73,6 +73,7 @@ defmodule Minga.Agent.UIState do
           mention_completion: Minga.Agent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), BufferSync.line_type()}],
+          cached_styled_messages: [Minga.Agent.MarkdownHighlight.styled_lines()] | nil,
           active: boolean(),
           focus: focus(),
           preview: Preview.t(),
@@ -112,6 +113,7 @@ defmodule Minga.Agent.UIState do
             mention_completion: nil,
             pasted_blocks: [],
             cached_line_index: [],
+            cached_styled_messages: nil,
             # View/layout fields (formerly View.State)
             active: false,
             focus: :chat,

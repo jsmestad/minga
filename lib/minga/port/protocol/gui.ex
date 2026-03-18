@@ -521,7 +521,18 @@ defmodule Minga.Port.Protocol.GUI do
   defp summarize_tool_args(_name, args) when map_size(args) == 0, do: ""
   defp summarize_tool_args(_name, args), do: inspect(args, limit: 80)
 
-  @spec encode_chat_message(Minga.Agent.Message.t()) :: binary()
+  @typedoc "A styled text run for GUI rendering: {text, fg_rgb, bg_rgb, flags}."
+  @type styled_run :: {String.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+
+  @typedoc "A line of styled runs."
+  @type styled_line :: [styled_run()]
+
+  @typedoc "A chat message that may carry pre-computed styled runs."
+  @type gui_chat_message ::
+          Minga.Agent.Message.t()
+          | {:styled_assistant, [[styled_run()]]}
+
+  @spec encode_chat_message(gui_chat_message()) :: binary()
   defp encode_chat_message({:user, text}) do
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
@@ -535,6 +546,24 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_chat_message({:assistant, text}) do
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x02::8, byte_size(text_bytes)::32, text_bytes::binary>>
+  end
+
+  # Styled assistant message: opcode 0x07, line_count::16, then per line:
+  # run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+  defp encode_chat_message({:styled_assistant, styled_lines}) do
+    line_binaries =
+      Enum.map(styled_lines, fn runs ->
+        run_binaries =
+          Enum.map(runs, fn {text, fg, bg, flags} ->
+            text_bytes = :erlang.iolist_to_binary([text])
+
+            <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, flags::8>>
+          end)
+
+        [<<length(runs)::16>> | run_binaries]
+      end)
+
+    IO.iodata_to_binary([<<0x07::8, length(styled_lines)::16>> | line_binaries])
   end
 
   defp encode_chat_message({:thinking, text, collapsed}) do

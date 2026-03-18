@@ -925,6 +925,54 @@ defmodule Minga.Port.ProtocolTest do
       assert <<0x78, 0::8>> = encoded
     end
 
+    test "encodes styled_assistant message with styled runs" do
+      styled_lines = [
+        [{"def ", 0xFF0000, 0, 1}, {"hello", 0xBBC2CF, 0, 0}],
+        [{"  :world", 0x98BE65, 0, 0}]
+      ]
+
+      data = %{
+        visible: true,
+        messages: [{:styled_assistant, styled_lines}],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+      assert <<0x78, 1::8, _rest::binary>> = encoded
+
+      # Verify the styled assistant message is encoded with opcode 0x07
+      # Find the message section (after header + pending + msg count)
+      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
+        _prompt::binary-size(prompt_len), 0::8, msg_count::16, msg_data::binary>> = encoded
+
+      assert msg_count == 1
+
+      # First byte should be 0x07 (styled_assistant opcode)
+      assert <<0x07, line_count::16, rest::binary>> = msg_data
+      assert line_count == 2
+
+      # First line: 2 runs
+      assert <<2::16, rest2::binary>> = rest
+
+      # Run 1: "def " (4 bytes), fg=0xFF0000, bg=0x000000, flags=1 (bold)
+      assert <<4::16, "def ", 0xFF::8, 0x00::8, 0x00::8, 0x00::8, 0x00::8, 0x00::8, 1::8,
+               rest3::binary>> = rest2
+
+      # Run 2: "hello" (5 bytes), fg=0xBBC2CF, bg=0x000000, flags=0
+      assert <<5::16, "hello", 0xBB::8, 0xC2::8, 0xCF::8, 0x00::8, 0x00::8, 0x00::8, 0::8,
+               rest4::binary>> = rest3
+
+      # Second line: 1 run
+      assert <<1::16, rest5::binary>> = rest4
+
+      # Run: "  :world" (8 bytes), fg=0x98BE65, bg=0x000000, flags=0
+      assert <<8::16, "  :world", 0x98::8, 0xBE::8, 0x65::8, 0x00::8, 0x00::8, 0x00::8, 0::8>> =
+               rest5
+    end
+
     test "nil colors are skipped" do
       theme = Minga.Theme.get!(:doom_one)
       encoded = ProtocolGUI.encode_gui_theme(theme)

@@ -33,10 +33,26 @@ enum RenderCommand: Sendable {
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
 }
 
+/// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
+struct StyledTextRun: Sendable {
+    let text: String
+    let fgR: UInt8
+    let fgG: UInt8
+    let fgB: UInt8
+    let bgR: UInt8
+    let bgG: UInt8
+    let bgB: UInt8
+    let bold: Bool
+    let italic: Bool
+    let underline: Bool
+}
+
 /// A chat message from gui_agent_chat.
 enum GUIChatMessage: Sendable {
     case user(text: String)
     case assistant(text: String)
+    /// Assistant message with pre-styled text runs from tree-sitter.
+    case styledAssistant(lines: [[StyledTextRun]])
     case thinking(text: String, collapsed: Bool)
     case toolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
     case system(text: String, isError: Bool)
@@ -562,6 +578,47 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let costM = readU32(data, pos + 17)
                 messages.append(.usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM))
                 pos += 21
+            case 0x07: // styled_assistant
+                // Format: 0x07, line_count::16, then per line:
+                //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+                guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
+                let lineCount = Int(readU16(data, pos + 1))
+                var lines: [[StyledTextRun]] = []
+                lines.reserveCapacity(lineCount)
+                var rPos = pos + 3
+                for _ in 0..<lineCount {
+                    guard data.count >= rPos + 2 else { throw ProtocolDecodeError.malformed }
+                    let runCount = Int(readU16(data, rPos))
+                    var runs: [StyledTextRun] = []
+                    runs.reserveCapacity(runCount)
+                    rPos += 2
+                    for _ in 0..<runCount {
+                        guard data.count >= rPos + 9 else { throw ProtocolDecodeError.malformed }
+                        let textLen = Int(readU16(data, rPos))
+                        guard data.count >= rPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
+                        let runText = String(data: data[(rPos + 2)..<(rPos + 2 + textLen)], encoding: .utf8) ?? ""
+                        let fgOff = rPos + 2 + textLen
+                        let fgR = data[fgOff]
+                        let fgG = data[fgOff + 1]
+                        let fgB = data[fgOff + 2]
+                        let bgR = data[fgOff + 3]
+                        let bgG = data[fgOff + 4]
+                        let bgB = data[fgOff + 5]
+                        let flags = data[fgOff + 6]
+                        runs.append(StyledTextRun(
+                            text: runText,
+                            fgR: fgR, fgG: fgG, fgB: fgB,
+                            bgR: bgR, bgG: bgG, bgB: bgB,
+                            bold: (flags & 0x01) != 0,
+                            italic: (flags & 0x02) != 0,
+                            underline: (flags & 0x04) != 0
+                        ))
+                        rPos = fgOff + 7
+                    }
+                    lines.append(runs)
+                }
+                messages.append(.styledAssistant(lines: lines))
+                pos = rPos
             default:
                 break
             }

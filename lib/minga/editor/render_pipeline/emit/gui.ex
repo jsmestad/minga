@@ -244,6 +244,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
           :exit, _ -> []
         end
 
+      # Use cached styled runs for assistant messages when available.
+      # This avoids recomputing tree-sitter/markdown styling per frame.
+      styled_cache = state.agent_ui.cached_styled_messages
+      gui_messages = build_gui_messages(messages, styled_cache)
+
       prompt_text =
         case state.agent_ui.prompt_buffer do
           nil -> ""
@@ -254,7 +259,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
       %{
         visible: true,
-        messages: messages,
+        messages: gui_messages,
         status: state.agent.status || :idle,
         model: state.agent_ui.model_name,
         prompt: prompt_text,
@@ -264,6 +269,35 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       %{visible: false}
     end
   end
+
+  # Builds the message list for GUI encoding. Replaces assistant messages
+  # with {:styled_assistant, styled_lines} when cached styled runs are
+  # available. Other message types pass through unchanged.
+  #
+  # Uses Enum.zip (O(n)) instead of Enum.at in a loop (O(n²)) since this
+  # runs every render frame at 60fps.
+  @spec build_gui_messages([term()], [term()] | nil) :: [term()]
+  defp build_gui_messages(messages, nil), do: messages
+
+  defp build_gui_messages(messages, styled_cache) when is_list(styled_cache) do
+    # Pad the cache to match message length if needed (messages may have grown)
+    padded = pad_cache(styled_cache, length(messages))
+
+    Enum.zip(messages, padded)
+    |> Enum.map(&maybe_style_message/1)
+  end
+
+  @spec maybe_style_message({term(), term()}) :: term()
+  defp maybe_style_message({{:assistant, _text} = msg, nil}), do: msg
+
+  defp maybe_style_message({{:assistant, _text}, styled_lines}),
+    do: {:styled_assistant, styled_lines}
+
+  defp maybe_style_message({msg, _cache_entry}), do: msg
+
+  @spec pad_cache([term()], non_neg_integer()) :: [term()]
+  defp pad_cache(cache, target_len) when length(cache) >= target_len, do: cache
+  defp pad_cache(cache, target_len), do: cache ++ List.duplicate(nil, target_len - length(cache))
 
   # ── Gutter separator ──
 
