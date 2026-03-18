@@ -128,15 +128,15 @@ defmodule Minga.Buffer.Decorations do
 
   ## Options
 
-  - `:style` (required) - keyword list of style properties (e.g., `[bg: 0x3E4452, bold: true]`)
+  - `:style` (required) - a `Face.t()` struct with the properties to apply (e.g., `Face.new(bg: 0x3E4452, bold: true)`)
   - `:priority` (optional, default 0) - higher values win per-property on overlap
   - `:group` (optional) - atom for bulk removal (e.g., `:search`, `:diagnostics`)
 
   ## Examples
 
-      {id, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 10}, style: [bg: 0x3E4452])
+      {id, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 10}, style: Face.new(bg: 0x3E4452))
       {id, decs} = Decorations.add_highlight(decs, {5, 0}, {10, 0},
-        style: [underline: true, fg: 0xFF6C6B],
+        style: Face.new(underline: true, fg: 0xFF6C6B),
         priority: 10,
         group: :diagnostics
       )
@@ -250,7 +250,7 @@ defmodule Minga.Buffer.Decorations do
 
   ## Options
 
-  - `:segments` (required) - list of `{text, style}` tuples
+  - `:segments` (required) - list of `{text, Face.t()}` tuples
   - `:placement` (required) - `:inline`, `:eol`, `:above`, or `:below`
   - `:priority` (optional, default 0) - determines ordering when multiple
     virtual texts share the same anchor
@@ -258,12 +258,12 @@ defmodule Minga.Buffer.Decorations do
   ## Examples
 
       {id, decs} = Decorations.add_virtual_text(decs, {5, 10},
-        segments: [{"← error here", [fg: 0xFF6C6B, italic: true]}],
+        segments: [{"← error here", Face.new(fg: 0xFF6C6B, italic: true)}],
         placement: :eol
       )
 
       {id, decs} = Decorations.add_virtual_text(decs, {0, 0},
-        segments: [{"▎ Agent", [fg: 0x51AFEF, bold: true]}],
+        segments: [{"▎ Agent", Face.new(fg: 0x51AFEF, bold: true)}],
         placement: :above
       )
   """
@@ -564,7 +564,7 @@ defmodule Minga.Buffer.Decorations do
   ## Options
 
   - `:replacement` (optional) - string to show in place of concealed text (nil = invisible)
-  - `:replacement_style` (optional) - style keyword list for the replacement character
+  - `:replacement_style` (optional) - Face.t() struct for the replacement character
   - `:priority` (optional, default 0) - higher values take precedence on overlap
   - `:group` (optional) - atom for bulk removal (e.g., `:markdown`, `:agent`)
 
@@ -831,8 +831,8 @@ defmodule Minga.Buffer.Decorations do
 
       decs = Decorations.batch(decs, fn decs ->
         decs = Decorations.remove_group(decs, :search)
-        {_id1, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: [bg: 0xECBE7B], group: :search)
-        {_id2, decs} = Decorations.add_highlight(decs, {3, 0}, {3, 5}, style: [bg: 0xECBE7B], group: :search)
+        {_id1, decs} = Decorations.add_highlight(decs, {0, 0}, {0, 5}, style: Face.new(bg: 0xECBE7B), group: :search)
+        {_id2, decs} = Decorations.add_highlight(decs, {3, 0}, {3, 5}, style: Face.new(bg: 0xECBE7B), group: :search)
         decs
       end)
   """

@@ -54,7 +54,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
   - `start_pos` - inclusive start position `{line, col}` (display columns)
   - `end_pos` - exclusive end position `{line, col}` (display columns)
   - `replacement` - nil for invisible, or a string shown in place of the concealed text
-  - `replacement_style` - style keyword list for the replacement character
+  - `replacement_style` - Face.t() struct for the replacement character
   - `priority` - higher values take precedence on overlap (default 0)
   - `group` - optional atom for bulk removal (e.g., `:markdown`, `:agent`)
   """
