@@ -43,6 +43,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
   alias Minga.Mode
+  alias Minga.Parser.Manager, as: ParserManager
   alias Minga.WhichKey
 
   @typedoc "Internal editor state."
@@ -358,6 +359,19 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:execute_ex_command, {:lsp_start, []}}),
     do: LspCommands.execute(state, :lsp_start)
+
+  def execute(state, {:execute_ex_command, {:parser_restart, []}}) do
+    case ParserManager.restart() do
+      :ok ->
+        %{state | status_msg: "Parser restarted"}
+
+      {:error, :binary_not_found} ->
+        %{state | status_msg: "Parser restart failed: binary not found"}
+    end
+  catch
+    :exit, _ ->
+      %{state | status_msg: "Parser restart failed: manager not available"}
+  end
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
     ExtCommands.list(state)
