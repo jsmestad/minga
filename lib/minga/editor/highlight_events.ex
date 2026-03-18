@@ -97,7 +97,7 @@ defmodule Minga.Editor.HighlightEvents do
     if content_changed do
       active_hl = HighlightSync.get_active_highlight(state)
 
-      if active_hl.capture_names != [] do
+      if active_hl.capture_names != {} do
         HighlightSync.request_reparse(state)
       else
         state

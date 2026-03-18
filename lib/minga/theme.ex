@@ -490,12 +490,16 @@ defmodule Minga.Theme do
     one_light: OneLight
   }
 
-  @doc "Returns the theme struct for the given name atom."
+  @doc """
+  Returns the theme struct for the given name atom.
+
+  Checks user-defined themes first, then built-in themes.
+  """
   @spec get(atom()) :: {:ok, t()} | :error
   def get(name) when is_atom(name) do
-    case Map.get(@themes, name) do
-      nil -> :error
-      module -> {:ok, module.theme()}
+    case get_user_theme(name) do
+      {:ok, _} = result -> result
+      :error -> get_builtin(name)
     end
   end
 
@@ -512,13 +516,55 @@ defmodule Minga.Theme do
     end
   end
 
-  @doc "Returns the list of available built-in theme name atoms."
+  @doc """
+  Returns all available theme name atoms (built-in + user-defined).
+  """
   @spec available() :: [atom()]
-  def available, do: Map.keys(@themes)
+  def available do
+    builtin = Map.keys(@themes)
+    user = Map.keys(user_themes())
+    Enum.uniq(builtin ++ user) |> Enum.sort()
+  end
 
   @doc "Returns the default theme name atom."
   @spec default() :: atom()
   def default, do: :doom_one
+
+  @doc """
+  Registers user-defined themes loaded from disk.
+
+  Called by the theme loader at startup and on reload. Stores themes
+  in `:persistent_term` for fast reads on the render path.
+  """
+  @spec register_user_themes(%{atom() => Minga.Theme.Loader.loaded_theme()}) :: :ok
+  def register_user_themes(themes) when is_map(themes) do
+    :persistent_term.put({__MODULE__, :user_themes}, themes)
+    :ok
+  end
+
+  @doc "Returns the map of registered user themes."
+  @spec user_themes() :: %{atom() => Minga.Theme.Loader.loaded_theme()}
+  def user_themes do
+    :persistent_term.get({__MODULE__, :user_themes}, %{})
+  end
+
+  # ── Private: theme lookup helpers ──
+
+  @spec get_builtin(atom()) :: {:ok, t()} | :error
+  defp get_builtin(name) do
+    case Map.get(@themes, name) do
+      nil -> :error
+      module -> {:ok, module.theme()}
+    end
+  end
+
+  @spec get_user_theme(atom()) :: {:ok, t()} | :error
+  defp get_user_theme(name) do
+    case Map.get(user_themes(), name) do
+      nil -> :error
+      loaded -> {:ok, loaded.theme}
+    end
+  end
 
   @doc "Returns the agent theme section, falling back to a basic default."
   @spec agent_theme(t()) :: Agent.t()

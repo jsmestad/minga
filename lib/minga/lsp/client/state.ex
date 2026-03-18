@@ -17,6 +17,7 @@ defmodule Minga.LSP.Client.State do
     pending: %{},
     open_documents: %{},
     capabilities: %{},
+    semantic_token_legend: nil,
     status: :starting,
     subscribers: []
   ]
@@ -51,6 +52,7 @@ defmodule Minga.LSP.Client.State do
           pending: %{integer() => pending_entry()},
           open_documents: %{String.t() => open_doc()},
           capabilities: map(),
+          semantic_token_legend: {[String.t()], [String.t()]} | nil,
           status: status(),
           subscribers: [pid()]
         }

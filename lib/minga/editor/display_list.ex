@@ -305,11 +305,18 @@ defmodule Minga.Editor.DisplayList do
       ]
   end
 
-  @doc "Converts a list of draw tuples to protocol command binaries."
+  @doc """
+  Converts a list of draw tuples to protocol command binaries.
+
+  Uses `encode_draw_smart/4` which automatically selects the compact
+  `draw_text` opcode for simple styles (fg/bg/bold/italic/underline/reverse)
+  or the extended `draw_styled_text` opcode when the style includes
+  strikethrough, underline_style, underline_color, or blend.
+  """
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
     Enum.map(draws, fn {row, col, text, style} ->
-      Protocol.encode_draw(row, col, text, style)
+      Protocol.encode_draw_smart(row, col, text, style)
     end)
   end
 

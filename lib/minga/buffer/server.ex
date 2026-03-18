@@ -23,6 +23,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
+  alias Minga.Events
   alias Minga.Filetype
   alias Minga.NavigableContent.BufferSnapshot
   alias Minga.Scroll
@@ -274,6 +275,45 @@ defmodule Minga.Buffer.Server do
   @spec filetype(GenServer.server()) :: atom()
   def filetype(server) do
     GenServer.call(server, :filetype)
+  end
+
+  @doc """
+  Returns the buffer-local face overrides map.
+
+  Face overrides are `%{face_name => [attr: value, ...]}` pairs that
+  are merged on top of the theme's face registry when rendering this
+  buffer. Used for filetype-specific styling (e.g., Markdown uses a
+  different default font) and buffer-local customization.
+  """
+  @spec face_overrides(GenServer.server()) :: %{String.t() => keyword()}
+  def face_overrides(server) do
+    GenServer.call(server, :face_overrides)
+  end
+
+  @doc """
+  Sets a buffer-local face override.
+
+  Merges the given attributes on top of the named face for this buffer
+  only. Other buffers are unaffected. The override persists until
+  cleared with `clear_face_override/2`.
+
+  ## Examples
+
+      Buffer.Server.remap_face(buf, "default", fg: 0x000000, bg: 0xFFFFFF)
+      Buffer.Server.remap_face(buf, "comment", italic: false)
+  """
+  @spec remap_face(GenServer.server(), String.t(), keyword()) :: :ok
+  def remap_face(server, face_name, attrs)
+      when is_binary(face_name) and is_list(attrs) do
+    GenServer.call(server, {:remap_face, face_name, attrs})
+  end
+
+  @doc """
+  Clears a buffer-local face override, restoring the theme default.
+  """
+  @spec clear_face_override(GenServer.server(), String.t()) :: :ok
+  def clear_face_override(server, face_name) when is_binary(face_name) do
+    GenServer.call(server, {:clear_face_override, face_name})
   end
 
   @doc """
@@ -546,6 +586,24 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc """
+  Atomically replaces buffer content and rebuilds decorations in a single GenServer call.
+
+  The `decoration_fn` receives a fresh `Decorations.new()` and returns
+  the new decorations. Optional `cursor` clamps the cursor position.
+  This prevents a render frame from seeing new content with zero decorations.
+  """
+  @spec replace_content_with_decorations(
+          GenServer.server(),
+          String.t(),
+          (Decorations.t() -> Decorations.t()),
+          keyword()
+        ) :: :ok
+  def replace_content_with_decorations(server, content, decoration_fn, opts \\ [])
+      when is_binary(content) and is_function(decoration_fn, 1) do
+    GenServer.call(server, {:replace_content_with_decorations, content, decoration_fn, opts})
+  end
+
+  @doc """
   Adds a virtual text decoration to the buffer.
 
   Returns the decoration ID (a reference) for later removal.
@@ -668,7 +726,10 @@ defmodule Minga.Buffer.Server do
             filetype: filetype,
             dirty: false,
             mtime: mtime,
-            file_size: size
+            file_size: size,
+            decorations: Decorations.new(),
+            undo_stack: [],
+            redo_stack: []
         }
 
         {:reply, :ok, new_state}
@@ -926,9 +987,11 @@ defmodule Minga.Buffer.Server do
             mtime: new_mtime,
             file_size: new_size,
             undo_stack: [],
-            redo_stack: []
+            redo_stack: [],
+            decorations: Decorations.new()
         }
 
+        defer_content_replaced(new_state)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -963,7 +1026,17 @@ defmodule Minga.Buffer.Server do
   # that are read-only to the user but need programmatic content updates.
   def handle_call({:replace_content_force, new_content}, _from, state) do
     new_buf = Document.new(new_content)
-    {:reply, :ok, %{state | document: new_buf, version: state.version + 1, pending_edits: []}}
+
+    new_state = %{
+      state
+      | document: new_buf,
+        version: state.version + 1,
+        pending_edits: [],
+        decorations: Decorations.new()
+    }
+
+    defer_content_replaced(new_state)
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:content, _from, state) do
@@ -1016,6 +1089,22 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:filetype, _from, state) do
     {:reply, state.filetype, state}
+  end
+
+  def handle_call(:face_overrides, _from, state) do
+    {:reply, state.face_overrides, state}
+  end
+
+  def handle_call({:remap_face, face_name, attrs}, _from, state) do
+    overrides = Map.put(state.face_overrides, face_name, attrs)
+    notify_face_overrides_changed(overrides)
+    {:reply, :ok, %{state | face_overrides: overrides}}
+  end
+
+  def handle_call({:clear_face_override, face_name}, _from, state) do
+    overrides = Map.delete(state.face_overrides, face_name)
+    notify_face_overrides_changed(overrides)
+    {:reply, :ok, %{state | face_overrides: overrides}}
   end
 
   def handle_call({:set_filetype, filetype}, _from, state) do
@@ -1285,6 +1374,30 @@ defmodule Minga.Buffer.Server do
     {:reply, :ok, %{state | decorations: decs}}
   end
 
+  def handle_call({:replace_content_with_decorations, content, decoration_fn, opts}, _from, state) do
+    new_doc = Document.new(content)
+
+    # Optional cursor clamping
+    new_doc =
+      case Keyword.get(opts, :cursor) do
+        nil -> new_doc
+        {line, col} -> Document.move_to(new_doc, {line, col})
+      end
+
+    new_decs = decoration_fn.(Decorations.new())
+
+    new_state = %{
+      state
+      | document: new_doc,
+        version: state.version + 1,
+        pending_edits: [],
+        decorations: new_decs
+    }
+
+    defer_content_replaced(new_state)
+    {:reply, :ok, new_state}
+  end
+
   def handle_call({:add_virtual_text, anchor, opts}, _from, state) do
     {id, decs} = Decorations.add_virtual_text(state.decorations, anchor, opts)
     {:reply, id, %{state | decorations: decs}}
@@ -1313,7 +1426,45 @@ defmodule Minga.Buffer.Server do
     {:reply, state.decorations.version, state}
   end
 
+  # ── Deferred broadcasts (avoid deadlock in handle_call) ──
+
+  @impl true
+  def handle_info({:deferred_broadcast, topic, payload}, state) do
+    Events.broadcast(topic, payload)
+    {:noreply, state}
+  end
+
   # ── Private ──
+
+  # Defers a :content_replaced broadcast to a subsequent handle_info turn.
+  # Broadcasting inside handle_call would deadlock if any subscriber calls
+  # back into this GenServer. The self-send pattern unblocks the caller
+  # immediately; the broadcast happens after the reply.
+  @spec defer_content_replaced(State.t()) :: :ok
+  defp defer_content_replaced(state) do
+    path = state.file_path || ""
+
+    send(
+      self(),
+      {:deferred_broadcast, :content_replaced, %Events.BufferEvent{buffer: self(), path: path}}
+    )
+
+    :ok
+  end
+
+  # Notifies the Editor process (if one is monitoring this buffer) that
+  # face overrides changed, so it can pre-compute the merged registry.
+  @spec notify_face_overrides_changed(%{String.t() => keyword()}) :: :ok
+  defp notify_face_overrides_changed(overrides) do
+    # The Editor monitors buffers and receives messages from them.
+    # Use a simple send to the process group; the Editor's handle_info
+    # will pick it up. If no Editor is running (tests), this is a no-op.
+    if editor = Process.whereis(Minga.Editor) do
+      send(editor, {:face_overrides_changed, self(), overrides})
+    end
+
+    :ok
+  end
 
   # Resolves an option using the chain: buffer-local → filetype → global.
   # With eager seeding, the buffer-local map already contains filetype/global

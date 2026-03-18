@@ -86,8 +86,9 @@ defmodule Minga.Buffer.Decorations do
           block_decorations: [BlockDecoration.t()],
           conceal_ranges: [ConcealRange.t()],
           pending:
-            [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()}] | nil,
-          version: non_neg_integer()
+            [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, term()}] | nil,
+          version: non_neg_integer(),
+          vt_line_cache: %{non_neg_integer() => [VirtualText.t()]} | nil
         }
 
   @enforce_keys []
@@ -97,7 +98,8 @@ defmodule Minga.Buffer.Decorations do
             block_decorations: [],
             conceal_ranges: [],
             pending: nil,
-            version: 0
+            version: 0,
+            vt_line_cache: nil
 
   # ── Construction ─────────────────────────────────────────────────────────
 
@@ -166,25 +168,54 @@ defmodule Minga.Buffer.Decorations do
   end
 
   @doc """
-  Removes all highlight ranges belonging to a group.
+  Removes all decorations belonging to the given group across all types.
 
-  This is the efficient way to clear and re-apply decorations for a
-  specific feature (e.g., clearing all `:search` highlights before
-  adding new ones, or clearing all `:diagnostics` on a refresh).
+  Clears highlight ranges, virtual texts, block decorations, fold regions,
+  and conceal ranges that have a matching `:group` field. This is the
+  correct way for a decoration consumer (e.g., agent chat, search, LSP)
+  to clear its own decorations without affecting other consumers.
+
+  The `group` parameter is typed as `term()` to support structured keys
+  like `{:lsp, server_id}` in the future.
   """
-  @spec remove_group(t(), atom()) :: t()
-  def remove_group(%__MODULE__{pending: nil} = decs, group) when is_atom(group) do
+  @spec remove_group(t(), term()) :: t()
+  def remove_group(%__MODULE__{pending: pending} = decs, group) when pending != nil do
+    # During a batch, defer highlight removal to pending (processed by apply_pending).
+    # But immediately remove non-highlight types since they don't participate
+    # in the pending queue system.
+    %{
+      decs
+      | pending: [{:remove_group, group} | pending],
+        virtual_texts: Enum.reject(decs.virtual_texts, &(&1.group == group)),
+        block_decorations: Enum.reject(decs.block_decorations, &(&1.group == group)),
+        fold_regions: Enum.reject(decs.fold_regions, &(&1.group == group)),
+        conceal_ranges: Enum.reject(decs.conceal_ranges, &(&1.group == group)),
+        vt_line_cache: nil
+    }
+  end
+
+  def remove_group(%__MODULE__{} = decs, group) do
     new_highlights =
       IntervalTree.map_filter(decs.highlights, &filter_group(&1, group))
 
-    %{decs | highlights: new_highlights, version: decs.version + 1}
+    new_virtual_texts = Enum.reject(decs.virtual_texts, &(&1.group == group))
+    new_blocks = Enum.reject(decs.block_decorations, &(&1.group == group))
+    new_folds = Enum.reject(decs.fold_regions, &(&1.group == group))
+    new_conceals = Enum.reject(decs.conceal_ranges, &(&1.group == group))
+
+    %{
+      decs
+      | highlights: new_highlights,
+        virtual_texts: new_virtual_texts,
+        block_decorations: new_blocks,
+        fold_regions: new_folds,
+        conceal_ranges: new_conceals,
+        version: decs.version + 1,
+        vt_line_cache: nil
+    }
   end
 
-  def remove_group(%__MODULE__{pending: pending} = decs, group) when is_atom(group) do
-    %{decs | pending: [{:remove_group, group} | pending]}
-  end
-
-  @spec filter_group(IntervalTree.interval(), atom()) ::
+  @spec filter_group(IntervalTree.interval(), term()) ::
           {:keep, IntervalTree.interval()} | :remove
   defp filter_group(interval, group) do
     if interval.value.group == group, do: :remove, else: {:keep, interval}
@@ -231,11 +262,12 @@ defmodule Minga.Buffer.Decorations do
       anchor: anchor,
       segments: Keyword.fetch!(opts, :segments),
       placement: Keyword.fetch!(opts, :placement),
-      priority: Keyword.get(opts, :priority, 0)
+      priority: Keyword.get(opts, :priority, 0),
+      group: Keyword.get(opts, :group)
     }
 
     new_vts = [vt | decs.virtual_texts]
-    {id, %{decs | virtual_texts: new_vts, version: decs.version + 1}}
+    {id, %{decs | virtual_texts: new_vts, version: decs.version + 1, vt_line_cache: nil}}
   end
 
   @doc "Removes a virtual text decoration by ID."
@@ -246,7 +278,7 @@ defmodule Minga.Buffer.Decorations do
     if length(new_vts) == length(decs.virtual_texts) do
       decs
     else
-      %{decs | virtual_texts: new_vts, version: decs.version + 1}
+      %{decs | virtual_texts: new_vts, version: decs.version + 1, vt_line_cache: nil}
     end
   end
 
@@ -257,10 +289,42 @@ defmodule Minga.Buffer.Decorations do
   sorted by column then priority.
   """
   @spec virtual_texts_for_line(t(), non_neg_integer()) :: [VirtualText.t()]
+  def virtual_texts_for_line(%__MODULE__{vt_line_cache: cache}, line) when cache != nil do
+    Map.get(cache, line, [])
+  end
+
   def virtual_texts_for_line(%__MODULE__{virtual_texts: vts}, line) do
     vts
     |> Enum.filter(fn %VirtualText{anchor: {l, _c}} -> l == line end)
     |> Enum.sort_by(fn %VirtualText{anchor: {_l, c}, priority: p} -> {c, p} end)
+  end
+
+  @doc """
+  Builds the virtual text line cache.
+
+  Call this once before a render pass to get O(1) per-line lookups.
+  Returns an updated Decorations struct with the cache populated.
+  The cache is invalidated on any mutation (add, remove, adjust).
+  """
+  @spec build_vt_line_cache(t()) :: t()
+  def build_vt_line_cache(%__MODULE__{vt_line_cache: cache} = decs) when cache != nil, do: decs
+
+  def build_vt_line_cache(%__MODULE__{virtual_texts: []} = decs) do
+    %{decs | vt_line_cache: %{}}
+  end
+
+  def build_vt_line_cache(%__MODULE__{virtual_texts: vts} = decs) do
+    cache =
+      vts
+      |> Enum.group_by(fn %VirtualText{anchor: {l, _c}} -> l end)
+      |> Map.new(fn {line, line_vts} ->
+        sorted =
+          Enum.sort_by(line_vts, fn %VirtualText{anchor: {_l, c}, priority: p} -> {c, p} end)
+
+        {line, sorted}
+      end)
+
+    %{decs | vt_line_cache: cache}
   end
 
   @doc """
@@ -351,7 +415,8 @@ defmodule Minga.Buffer.Decorations do
       start_line: start_line,
       end_line: end_line,
       closed: Keyword.get(opts, :closed, true),
-      placeholder: Keyword.get(opts, :placeholder)
+      placeholder: Keyword.get(opts, :placeholder),
+      group: Keyword.get(opts, :group)
     }
 
     {id, %{decs | fold_regions: [fold | decs.fold_regions], version: decs.version + 1}}
@@ -423,7 +488,8 @@ defmodule Minga.Buffer.Decorations do
       render: Keyword.fetch!(opts, :render),
       height: Keyword.get(opts, :height, 1),
       on_click: Keyword.get(opts, :on_click),
-      priority: Keyword.get(opts, :priority, 0)
+      priority: Keyword.get(opts, :priority, 0),
+      group: Keyword.get(opts, :group)
     }
 
     new_blocks = [block | decs.block_decorations]
@@ -788,7 +854,7 @@ defmodule Minga.Buffer.Decorations do
   end
 
   @spec apply_batch_op(
-          {:add, highlight_range()} | {:remove, reference()} | {:remove_group, atom()},
+          {:add, highlight_range()} | {:remove, reference()} | {:remove_group, term()},
           [IntervalTree.interval()]
         ) :: [IntervalTree.interval()]
   defp apply_batch_op({:add, range}, intervals), do: [range_to_interval(range) | intervals]
@@ -916,7 +982,8 @@ defmodule Minga.Buffer.Decorations do
         fold_regions: new_folds,
         block_decorations: new_blocks,
         conceal_ranges: new_conceals,
-        version: decs.version + 1
+        version: decs.version + 1,
+        vt_line_cache: nil
     }
   end
 

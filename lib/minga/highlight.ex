@@ -7,18 +7,23 @@ defmodule Minga.Highlight do
   to split a line into styled segments for rendering.
   """
 
+  alias Minga.Face
   alias Minga.Theme
 
-  @enforce_keys [:version, :spans, :capture_names, :theme]
-  defstruct [:version, :spans, :capture_names, :theme]
+  @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
+  defstruct [:version, :spans, :capture_names, :theme, :face_registry]
 
   @typedoc "Highlight state for a buffer."
   @type t :: %__MODULE__{
           version: non_neg_integer(),
           spans: tuple() | [map()],
-          capture_names: [String.t()],
-          theme: Theme.syntax()
+          capture_names: tuple(),
+          theme: Theme.syntax(),
+          face_registry: Face.Registry.t()
         }
+
+  @typedoc "Style resolver: a function that maps capture names to style keyword lists."
+  @type style_resolver :: (String.t() -> Minga.Port.Protocol.style())
 
   @typedoc "A styled text segment for rendering."
   @type styled_segment :: {text :: String.t(), style :: Minga.Port.Protocol.style()}
@@ -26,35 +31,47 @@ defmodule Minga.Highlight do
   @doc "Creates an empty highlight state with the default theme."
   @spec new() :: t()
   def new do
-    %__MODULE__{
-      version: 0,
-      spans: {},
-      capture_names: [],
-      theme: Theme.get!(:doom_one).syntax
-    }
+    theme = Theme.get!(:doom_one)
+    from_theme(theme)
   end
 
-  @doc "Creates an empty highlight state with a syntax theme map."
+  @doc """
+  Creates an empty highlight state with a syntax theme map.
+
+  Builds a `Face.Registry` from the syntax map so face inheritance
+  is always available.
+  """
   @spec new(Theme.syntax()) :: t()
-  def new(theme) when is_map(theme) do
+  def new(syntax) when is_map(syntax) do
+    registry = Face.Registry.from_syntax(syntax)
+
     %__MODULE__{
       version: 0,
       spans: {},
-      capture_names: [],
-      theme: theme
+      capture_names: {},
+      theme: syntax,
+      face_registry: registry
     }
   end
 
   @doc "Creates an empty highlight state using the syntax map from a `Minga.Theme.t()` struct."
   @spec from_theme(Minga.Theme.t()) :: t()
-  def from_theme(%Minga.Theme{syntax: syntax}) do
-    new(syntax)
+  def from_theme(%Minga.Theme{} = theme) do
+    registry = Face.Registry.from_theme(theme)
+
+    %__MODULE__{
+      version: 0,
+      spans: {},
+      capture_names: {},
+      theme: theme.syntax,
+      face_registry: registry
+    }
   end
 
   @doc "Stores capture names from a `highlight_names` event."
   @spec put_names(t(), [String.t()]) :: t()
   def put_names(%__MODULE__{} = hl, names) when is_list(names) do
-    %{hl | capture_names: names}
+    %{hl | capture_names: List.to_tuple(names)}
   end
 
   @doc """
@@ -96,45 +113,40 @@ defmodule Minga.Highlight do
 
   ## Examples
 
-      iex> hl = %Minga.Highlight{
-      ...>   version: 1,
-      ...>   spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}],
-      ...>   capture_names: ["keyword"],
-      ...>   theme: %{"keyword" => [fg: 0xFF0000]}
-      ...> }
+      iex> hl = Minga.Highlight.new(%{"keyword" => [fg: 0xFF0000]})
+      iex> hl = %{hl | version: 1, spans: [%{start_byte: 0, end_byte: 3, capture_id: 0}], capture_names: {"keyword"}}
       iex> Minga.Highlight.styles_for_line(hl, "def foo", 0)
       [{"def", [fg: 0xFF0000]}, {" foo", []}]
   """
-  @spec styles_for_line(t(), String.t(), non_neg_integer()) :: [styled_segment()]
-  def styles_for_line(%__MODULE__{spans: spans}, line_text, _line_start_byte)
+  @spec styles_for_line(t(), String.t(), non_neg_integer(), style_resolver() | nil) ::
+          [styled_segment()]
+  def styles_for_line(hl, line_text, line_start_byte, resolver \\ nil)
+
+  def styles_for_line(%__MODULE__{spans: spans}, line_text, _line_start_byte, _resolver)
       when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
     [{line_text, []}]
   end
 
   # Fast path: tuple spans (production path from Zig)
-  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte, resolver)
       when is_tuple(spans) and is_binary(line_text) and is_integer(line_start_byte) and
              line_start_byte >= 0 do
     line_end_byte = line_start_byte + byte_size(line_text)
     span_count = tuple_size(spans)
 
-    # Linear scan from index 0: end_byte is non-monotonic in the start_byte-
-    # sorted span array (a large parent can start before a line but extend
-    # past it), so binary search on end_byte is unsound. The batch path
-    # (styles_for_visible_lines/2) avoids this cost via an advancing watermark.
     overlapping = collect_overlapping(spans, span_count, 0, line_start_byte, line_end_byte, [])
 
     case overlapping do
       [] -> [{line_text, []}]
-      _ -> build_segments(line_text, line_start_byte, overlapping, hl)
+      _ -> build_segments(line_text, line_start_byte, overlapping, hl, resolver)
     end
   end
 
   # Fallback: list spans (used by tests that construct Highlight structs directly)
-  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte)
+  def styles_for_line(%__MODULE__{spans: spans} = hl, line_text, line_start_byte, resolver)
       when is_list(spans) and is_binary(line_text) and is_integer(line_start_byte) and
              line_start_byte >= 0 do
-    styles_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte)
+    styles_for_line(%{hl | spans: List.to_tuple(spans)}, line_text, line_start_byte, resolver)
   end
 
   @doc """
@@ -148,17 +160,19 @@ defmodule Minga.Highlight do
 
   Each element in `lines` is `{line_text, line_start_byte}`.
   """
-  @spec styles_for_visible_lines(t(), [{String.t(), non_neg_integer()}]) ::
+  @spec styles_for_visible_lines(t(), [{String.t(), non_neg_integer()}], style_resolver() | nil) ::
           [[styled_segment()]]
-  def styles_for_visible_lines(%__MODULE__{spans: spans}, lines)
+  def styles_for_visible_lines(hl, lines, resolver \\ nil)
+
+  def styles_for_visible_lines(%__MODULE__{spans: spans}, lines, _resolver)
       when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
     Enum.map(lines, fn {text, _} -> [{text, []}] end)
   end
 
-  def styles_for_visible_lines(%__MODULE__{spans: spans} = hl, lines)
+  def styles_for_visible_lines(%__MODULE__{spans: spans} = hl, lines, resolver)
       when is_tuple(spans) and is_list(lines) do
     span_count = tuple_size(spans)
-    {results_rev, _watermark} = batch_lines(lines, spans, span_count, hl, 0, [])
+    {results_rev, _watermark} = batch_lines(lines, spans, span_count, hl, resolver, 0, [])
     Enum.reverse(results_rev)
   end
 
@@ -169,15 +183,15 @@ defmodule Minga.Highlight do
           tuple(),
           non_neg_integer(),
           t(),
+          style_resolver() | nil,
           non_neg_integer(),
           [[styled_segment()]]
         ) :: {[[styled_segment()]], non_neg_integer()}
-  defp batch_lines([], _spans, _count, _hl, watermark, acc), do: {acc, watermark}
+  defp batch_lines([], _spans, _count, _hl, _resolver, watermark, acc), do: {acc, watermark}
 
-  defp batch_lines([{line_text, line_start} | rest], spans, count, hl, watermark, acc) do
+  defp batch_lines([{line_text, line_start} | rest], spans, count, hl, resolver, watermark, acc) do
     line_end = line_start + byte_size(line_text)
 
-    # Advance watermark past spans that can't overlap this or any later line.
     watermark = advance_watermark(spans, count, watermark, line_start)
 
     overlapping = collect_overlapping(spans, count, watermark, line_start, line_end, [])
@@ -185,10 +199,10 @@ defmodule Minga.Highlight do
     segments =
       case overlapping do
         [] -> [{line_text, []}]
-        _ -> build_segments(line_text, line_start, overlapping, hl)
+        _ -> build_segments(line_text, line_start, overlapping, hl, resolver)
       end
 
-    batch_lines(rest, spans, count, hl, watermark, [segments | acc])
+    batch_lines(rest, spans, count, hl, resolver, watermark, [segments | acc])
   end
 
   @spec advance_watermark(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
@@ -251,8 +265,9 @@ defmodule Minga.Highlight do
   #   4. Priority: layer DESC, width ASC, pattern_index DESC
   #   5. Emit segments at each style-change boundary
 
-  @spec build_segments(String.t(), non_neg_integer(), [map()], t()) :: [styled_segment()]
-  defp build_segments(line_text, line_start, spans, hl) do
+  @spec build_segments(String.t(), non_neg_integer(), [map()], t(), style_resolver() | nil) ::
+          [styled_segment()]
+  defp build_segments(line_text, line_start, spans, hl, resolver) do
     # Filter out internal captures (names starting with _) before the sweep.
     # These are used by tree-sitter queries for predicate matching only,
     # not for highlighting. Neovim and Helix both skip these.
@@ -265,17 +280,25 @@ defmodule Minga.Highlight do
       _ ->
         line_len = byte_size(line_text)
         events = spans_to_events(spans, line_start, line_len)
-        sweep_events(events, line_text, hl, 0, [], [])
+        sweep_events(events, line_text, hl, resolver, 0, [], [])
     end
   end
 
   @spec internal_capture?(t(), non_neg_integer()) :: boolean()
   defp internal_capture?(hl, capture_id) do
-    case Enum.at(hl.capture_names, capture_id) do
+    case capture_name_at(hl, capture_id) do
       "_" <> _ -> true
       _ -> false
     end
   end
+
+  # O(1) capture name lookup via tuple elem/2.
+  @spec capture_name_at(t(), non_neg_integer()) :: String.t() | nil
+  defp capture_name_at(%__MODULE__{capture_names: names}, id) when id >= 0 do
+    if id < tuple_size(names), do: elem(names, id), else: nil
+  end
+
+  defp capture_name_at(_hl, _id), do: nil
 
   @typep span_event :: {non_neg_integer(), :open | :close, map()}
 
@@ -311,11 +334,16 @@ defmodule Minga.Highlight do
   @typep active_entry ::
            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
-  @spec sweep_events([span_event()], String.t(), t(), non_neg_integer(), [active_entry()], [
-          styled_segment()
-        ]) ::
+  @spec sweep_events(
+          [span_event()],
+          String.t(),
+          t(),
+          style_resolver() | nil,
+          non_neg_integer(),
+          [active_entry()],
           [styled_segment()]
-  defp sweep_events([], line_text, _hl, pos, _active, acc) do
+        ) :: [styled_segment()]
+  defp sweep_events([], line_text, _hl, _resolver, pos, _active, acc) do
     line_len = byte_size(line_text)
 
     if pos < line_len do
@@ -326,11 +354,10 @@ defmodule Minga.Highlight do
     end
   end
 
-  defp sweep_events([{event_pos, type, span} | rest], line_text, hl, pos, active, acc) do
-    # Emit text from pos to event_pos with current winning style
+  defp sweep_events([{event_pos, type, span} | rest], line_text, hl, resolver, pos, active, acc) do
     acc =
       if event_pos > pos do
-        style = winning_style(active, hl)
+        style = winning_style(active, hl, resolver)
         seg = safe_binary_slice(line_text, pos, event_pos - pos)
         [{seg, style} | acc]
       else
@@ -351,14 +378,15 @@ defmodule Minga.Highlight do
         :close -> remove_active(active, entry)
       end
 
-    sweep_events(rest, line_text, hl, new_pos, active, acc)
+    sweep_events(rest, line_text, hl, resolver, new_pos, active, acc)
   end
 
-  @spec winning_style([active_entry()], t()) :: Minga.Port.Protocol.style()
-  defp winning_style([], _hl), do: []
+  @spec winning_style([active_entry()], t(), style_resolver() | nil) ::
+          Minga.Port.Protocol.style()
+  defp winning_style([], _hl, _resolver), do: []
 
-  defp winning_style([{_layer, _width, _pidx, capture_id} | _], hl),
-    do: resolve_style(hl, capture_id)
+  defp winning_style([{_layer, _width, _pidx, capture_id} | _], hl, resolver),
+    do: resolve_style(hl, capture_id, resolver)
 
   # Insert into active set maintaining priority order:
   # (layer DESC, width ASC, pattern_index DESC)
@@ -382,12 +410,32 @@ defmodule Minga.Highlight do
   defp remove_active([entry | tail], entry), do: tail
   defp remove_active([head | tail], entry), do: [head | remove_active(tail, entry)]
 
-  @spec resolve_style(t(), non_neg_integer()) :: Minga.Port.Protocol.style()
-  defp resolve_style(hl, capture_id) do
-    case Enum.at(hl.capture_names, capture_id) do
-      nil -> []
-      name -> Theme.style_for_capture(hl.theme, name)
+  @spec resolve_style(t(), non_neg_integer(), style_resolver() | nil) ::
+          Minga.Port.Protocol.style()
+  defp resolve_style(hl, capture_id, resolver) do
+    case capture_name_at(hl, capture_id) do
+      nil ->
+        []
+
+      name ->
+        if resolver do
+          resolver.(name)
+        else
+          Face.Registry.style_for(hl.face_registry, name)
+        end
     end
+  end
+
+  @doc """
+  Returns a style resolver function for the given face registry.
+
+  Use this to pass to `styles_for_line/4` when you want to override
+  the Highlight struct's built-in face registry (e.g., with buffer-local
+  face overrides applied).
+  """
+  @spec resolver_for(Face.Registry.t()) :: style_resolver()
+  def resolver_for(registry) do
+    fn name -> Face.Registry.style_for(registry, name) end
   end
 
   # Safely extract a substring using byte offsets. When highlight spans are

@@ -18,7 +18,8 @@ defmodule Minga.Buffer.Decorations.FoldRegion do
             start_line: 0,
             end_line: 0,
             closed: true,
-            placeholder: nil
+            placeholder: nil,
+            group: nil
 
   @typedoc """
   Placeholder render callback for a closed fold region.
@@ -36,7 +37,8 @@ defmodule Minga.Buffer.Decorations.FoldRegion do
           start_line: non_neg_integer(),
           end_line: non_neg_integer(),
           closed: boolean(),
-          placeholder: placeholder_fn()
+          placeholder: placeholder_fn(),
+          group: term() | nil
         }
 
   @doc "Returns the number of lines hidden when this fold is closed."

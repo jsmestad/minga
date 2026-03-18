@@ -739,6 +739,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
     BufferServer.decorations(buf)
+    |> Decorations.build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
   end
@@ -751,7 +752,23 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     hl =
       Map.get(state.highlight.highlights, window.buffer, Minga.Highlight.from_theme(state.theme))
 
-    if hl.capture_names != [], do: hl, else: nil
+    if hl.capture_names == {} do
+      nil
+    else
+      apply_buffer_face_overrides(hl, window.buffer, state)
+    end
+  end
+
+  # Applies buffer-local face overrides to the highlight's face registry.
+  # Reads from the editor's pre-computed face_override_registries map,
+  # which is updated via push from Buffer.Server when overrides change.
+  # Zero GenServer calls on the render path.
+  @spec apply_buffer_face_overrides(Highlight.t(), pid(), state()) :: Highlight.t()
+  defp apply_buffer_face_overrides(hl, buf_pid, state) when is_pid(buf_pid) do
+    case Map.get(state.face_override_registries, buf_pid) do
+      nil -> hl
+      registry -> %{hl | face_registry: registry}
+    end
   end
 
   @doc "Returns git signs for a window's buffer."

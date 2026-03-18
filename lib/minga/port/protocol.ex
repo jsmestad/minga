@@ -20,6 +20,7 @@ defmodule Minga.Port.Protocol do
   | Opcode | Name             | Payload                                                              |
   |--------|------------------|----------------------------------------------------------------------|
   | 0x10   | draw_text        | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
+  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, text_len::16, text` |
   | 0x11   | set_cursor       | `row::16, col::16`                                                   |
   | 0x12   | clear            | (empty)                                                              |
   | 0x13   | batch_end        | (empty)                                                              |
@@ -63,6 +64,7 @@ defmodule Minga.Port.Protocol do
   @op_destroy_region 0x19
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
+  @op_draw_styled_text 0x1C
 
   # GUI chrome commands live in Protocol.GUI (contiguous range 0x70-0x78)
 
@@ -207,6 +209,10 @@ defmodule Minga.Port.Protocol do
           | {:underline, boolean()}
           | {:italic, boolean()}
           | {:reverse, boolean()}
+          | {:strikethrough, boolean()}
+          | {:underline_style, :line | :curl | :dashed | :dotted | :double}
+          | {:underline_color, non_neg_integer()}
+          | {:blend, 0..100}
         ]
 
   # ── Modifier helpers ──
@@ -246,6 +252,53 @@ defmodule Minga.Port.Protocol do
     text_len = byte_size(text)
 
     <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
+  end
+
+  @doc """
+  Encodes a draw_styled_text command with extended attributes.
+
+  Extended over `draw_text` with:
+  - `attrs` expanded to 16 bits (adds strikethrough 0x10, underline_style 3 bits at 0xE0)
+  - `underline_color` as a separate 24-bit RGB field (0x000000 = use fg)
+  - `blend` as an 8-bit opacity value (0-100, 100 = fully opaque)
+
+  Use this for text that needs underline styles, strikethrough, underline
+  color, or blend. For simple text (fg/bg/bold/italic/underline/reverse),
+  `encode_draw/4` is more compact.
+  """
+  @spec encode_draw_styled(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
+  def encode_draw_styled(row, col, text, style \\ [])
+      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
+    fg = Keyword.get(style, :fg, 0xFFFFFF)
+    bg = Keyword.get(style, :bg, 0x000000)
+    attrs = encode_attrs_extended(style)
+    ul_color = Keyword.get(style, :underline_color, 0x000000)
+    blend = Keyword.get(style, :blend, 100)
+    text_len = byte_size(text)
+
+    <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8,
+      text_len::16, text::binary>>
+  end
+
+  @doc """
+  Smart encoder: uses `draw_styled_text` if the style contains extended
+  attributes, otherwise falls back to the more compact `draw_text`.
+  """
+  @spec encode_draw_smart(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
+  def encode_draw_smart(row, col, text, style \\ []) do
+    if needs_extended_encoding?(style) do
+      encode_draw_styled(row, col, text, style)
+    else
+      encode_draw(row, col, text, style)
+    end
+  end
+
+  @spec needs_extended_encoding?(style()) :: boolean()
+  defp needs_extended_encoding?(style) do
+    Keyword.has_key?(style, :strikethrough) ||
+      Keyword.has_key?(style, :underline_style) ||
+      Keyword.has_key?(style, :underline_color) ||
+      Keyword.has_key?(style, :blend)
   end
 
   @doc "Encodes a set_cursor command."
@@ -711,6 +764,7 @@ defmodule Minga.Port.Protocol do
            :clear
            | :batch_end
            | {:draw_text, map()}
+           | {:draw_styled_text, map()}
            | {:set_cursor, non_neg_integer(), non_neg_integer()}
            | {:set_cursor_shape, cursor_shape()}}
           | {:error, :unknown_opcode | :malformed}
@@ -720,6 +774,20 @@ defmodule Minga.Port.Protocol do
       ) do
     {:ok,
      {:draw_text, %{row: row, col: col, fg: fg, bg: bg, attrs: decode_attrs(attrs), text: text}}}
+  end
+
+  def decode_command(
+        <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24,
+          blend::8, text_len::16, text::binary-size(text_len)>>
+      ) do
+    decoded_attrs = decode_attrs_extended(attrs)
+
+    style =
+      decoded_attrs
+      |> then(fn a -> if ul_color != 0, do: [{:underline_color, ul_color} | a], else: a end)
+      |> then(fn a -> if blend < 100, do: [{:blend, blend} | a], else: a end)
+
+    {:ok, {:draw_styled_text, %{row: row, col: col, fg: fg, bg: bg, attrs: style, text: text}}}
   end
 
   def decode_command(<<@op_set_cursor, row::16, col::16>>) do
@@ -805,6 +873,10 @@ defmodule Minga.Port.Protocol do
   @attr_underline 0x02
   @attr_italic 0x04
   @attr_reverse 0x08
+  @attr_strikethrough 0x10
+  # Underline style occupies bits 5-7 (3 bits) in extended attrs (u16)
+  # 0b000 = line (default), 0b001 = curl, 0b010 = dashed, 0b011 = dotted, 0b100 = double
+  @ul_style_shift 5
 
   @spec encode_attrs(style()) :: non_neg_integer()
   defp encode_attrs(style) do
@@ -819,6 +891,38 @@ defmodule Minga.Port.Protocol do
     |> then(fn a -> if Keyword.get(style, :reverse, false), do: a ||| @attr_reverse, else: a end)
   end
 
+  @spec encode_attrs_extended(style()) :: non_neg_integer()
+  defp encode_attrs_extended(style) do
+    import Bitwise
+
+    base = encode_attrs(style)
+
+    base
+    |> then(fn a ->
+      if Keyword.get(style, :strikethrough, false), do: a ||| @attr_strikethrough, else: a
+    end)
+    |> then(fn a ->
+      ul_style = Keyword.get(style, :underline_style, :line)
+      a ||| ul_style_to_bits(ul_style) <<< @ul_style_shift
+    end)
+  end
+
+  @spec ul_style_to_bits(atom()) :: non_neg_integer()
+  defp ul_style_to_bits(:line), do: 0
+  defp ul_style_to_bits(:curl), do: 1
+  defp ul_style_to_bits(:dashed), do: 2
+  defp ul_style_to_bits(:dotted), do: 3
+  defp ul_style_to_bits(:double), do: 4
+  defp ul_style_to_bits(_), do: 0
+
+  @spec bits_to_ul_style(non_neg_integer()) :: atom()
+  defp bits_to_ul_style(0), do: :line
+  defp bits_to_ul_style(1), do: :curl
+  defp bits_to_ul_style(2), do: :dashed
+  defp bits_to_ul_style(3), do: :dotted
+  defp bits_to_ul_style(4), do: :double
+  defp bits_to_ul_style(_), do: :line
+
   @spec decode_attrs(non_neg_integer()) :: [atom()]
   defp decode_attrs(attrs) do
     import Bitwise
@@ -829,6 +933,26 @@ defmodule Minga.Port.Protocol do
     |> then(fn a -> if (attrs &&& @attr_italic) != 0, do: [:italic | a], else: a end)
     |> then(fn a -> if (attrs &&& @attr_reverse) != 0, do: [:reverse | a], else: a end)
     |> Enum.reverse()
+  end
+
+  @spec decode_attrs_extended(non_neg_integer()) :: keyword()
+  defp decode_attrs_extended(attrs) do
+    import Bitwise
+
+    base = decode_attrs(Bitwise.band(attrs, 0x0F))
+
+    base =
+      if (attrs &&& @attr_strikethrough) != 0,
+        do: [{:strikethrough, true} | base],
+        else: base
+
+    ul_bits = attrs >>> @ul_style_shift &&& 0x07
+
+    if ul_bits != 0 do
+      [{:underline_style, bits_to_ul_style(ul_bits)} | base]
+    else
+      base
+    end
   end
 
   # ── Highlight helpers ──

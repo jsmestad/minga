@@ -34,6 +34,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.MessageLog
   alias Minga.Editor.NavFlash
   alias Minga.Editor.Renderer
+  alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
   alias Minga.Editor.WarningLog
@@ -399,6 +400,8 @@ defmodule Minga.Editor do
 
   def handle_info(:setup_highlight, state) do
     new_state = HighlightSync.setup_for_buffer(state)
+    # Also request semantic tokens from LSP if available
+    new_state = SemanticTokenSync.request_tokens(new_state)
     {:noreply, new_state}
   end
 
@@ -638,6 +641,12 @@ defmodule Minga.Editor do
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
+      {{:semantic_tokens, buf_pid}, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
       {nil, _} ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)
@@ -648,6 +657,30 @@ defmodule Minga.Editor do
   def handle_info({:completion_resolve, index}, state) do
     state = CompletionHandling.flush_resolve(state, index)
     {:noreply, state}
+  end
+
+  # Buffer-local face overrides changed. Pre-compute the merged registry
+  # so the render pipeline reads from editor state with zero GenServer calls.
+  def handle_info({:face_overrides_changed, buf_pid, overrides}, state) do
+    registries =
+      if overrides == %{} do
+        Map.delete(state.face_override_registries, buf_pid)
+      else
+        # Get the base highlight for this buffer to merge overrides with
+        hl = Map.get(state.highlight.highlights, buf_pid)
+
+        merged =
+          if hl do
+            Minga.Face.Registry.with_overrides(hl.face_registry, overrides)
+          else
+            base = Minga.Face.Registry.from_theme(state.theme)
+            Minga.Face.Registry.with_overrides(base, overrides)
+          end
+
+        Map.put(state.face_override_registries, buf_pid, merged)
+      end
+
+    {:noreply, %{state | face_override_registries: registries}}
   end
 
   # Refresh the cached LSP status for the modeline indicator.

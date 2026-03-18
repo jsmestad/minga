@@ -805,4 +805,37 @@ defmodule Minga.Buffer.ServerTest do
       assert Server.get_option(pid, :tab_width) == 8
     end
   end
+
+  describe "face_overrides/1 and remap_face/3" do
+    test "starts with empty overrides" do
+      {:ok, pid} = Server.start_link()
+      assert Server.face_overrides(pid) == %{}
+    end
+
+    test "sets and retrieves a face override" do
+      {:ok, pid} = Server.start_link()
+      :ok = Server.remap_face(pid, "default", fg: 0x000000, bg: 0xFFFFFF)
+
+      overrides = Server.face_overrides(pid)
+      assert overrides == %{"default" => [fg: 0x000000, bg: 0xFFFFFF]}
+    end
+
+    test "clears a face override" do
+      {:ok, pid} = Server.start_link()
+      :ok = Server.remap_face(pid, "comment", italic: false)
+      :ok = Server.clear_face_override(pid, "comment")
+
+      assert Server.face_overrides(pid) == %{}
+    end
+
+    test "multiple overrides coexist" do
+      {:ok, pid} = Server.start_link()
+      :ok = Server.remap_face(pid, "keyword", fg: 0xFF0000)
+      :ok = Server.remap_face(pid, "comment", italic: false)
+
+      overrides = Server.face_overrides(pid)
+      assert Map.has_key?(overrides, "keyword")
+      assert Map.has_key?(overrides, "comment")
+    end
+  end
 end

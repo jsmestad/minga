@@ -426,7 +426,7 @@ defmodule Minga.Editor.HighlightSync do
   def request_reparse(%EditorState{} = state) when state.buffers.active != nil do
     active_hl = get_active_highlight(state)
 
-    if active_hl.spans == {} and active_hl.capture_names == [] do
+    if active_hl.spans == {} and active_hl.capture_names == {} do
       # No highlighting active for this buffer — skip
       state
     else

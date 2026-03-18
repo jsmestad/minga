@@ -70,23 +70,30 @@ defmodule Minga.Agent.BufferSync do
       "[buffer_sync] offsets: #{inspect(line_offsets)}, text_lines: #{length(text_lines)}"
     )
 
-    BufferServer.replace_content_force(pid, text)
+    # Atomically replace content and rebuild decorations in one GenServer call.
+    # This prevents a render frame from seeing new content with zero decorations.
+    agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
+    last_line = max(length(text_lines) - 1, 0)
 
-    # Apply decorations using pre-computed line offsets (no re-derivation)
     try do
-      agent_theme = Keyword.get(opts, :agent_theme, default_agent_theme())
-      ChatDecorations.apply(pid, messages, line_offsets, agent_theme, opts)
+      BufferServer.replace_content_with_decorations(
+        pid,
+        text,
+        fn decs ->
+          ChatDecorations.build_decorations(decs, messages, line_offsets, agent_theme, opts)
+        end,
+        cursor: {last_line, 0}
+      )
     rescue
       e ->
         Minga.Log.error(
           :agent,
-          "[buffer_sync] decoration apply failed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
+          "[buffer_sync] atomic sync failed: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
         )
-    end
 
-    # Move cursor to end (auto-scroll)
-    line_count = BufferServer.line_count(pid)
-    BufferServer.move_to(pid, {max(line_count - 1, 0), 0})
+        # Fallback: at least replace content
+        BufferServer.replace_content_force(pid, text)
+    end
 
     # Return the line index, reusing the already-computed text and offsets
     build_line_index(messages, text_lines, line_offsets)
