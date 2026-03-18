@@ -275,4 +275,42 @@ defmodule Minga.Editor.ModelineTest do
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :parser_restart end)
     end
   end
+
+  describe "diagnostic counts" do
+    test "shows error count with icon when errors present" do
+      data = Map.put(@base_data, :diagnostic_counts, {3, 0, 0, 0})
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "3"))
+    end
+
+    test "shows warning count with icon when warnings present" do
+      data = Map.put(@base_data, :diagnostic_counts, {0, 5, 0, 0})
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "5"))
+    end
+
+    test "shows both error and warning counts" do
+      data = Map.put(@base_data, :diagnostic_counts, {2, 3, 0, 0})
+      {commands, _regions} = Modeline.render(0, 120, data)
+      texts = Enum.map(commands, fn {_r, _c, text, _s} -> text end)
+      assert Enum.any?(texts, &String.contains?(&1, "2"))
+      assert Enum.any?(texts, &String.contains?(&1, "3"))
+    end
+
+    test "shows nothing when no diagnostics" do
+      data = Map.put(@base_data, :diagnostic_counts, nil)
+      {commands_with, _} = Modeline.render(0, 120, data)
+      {commands_without, _} = Modeline.render(0, 120, @base_data)
+      # Both should produce the same output (no diagnostic segment)
+      assert length(commands_with) == length(commands_without)
+    end
+
+    test "diagnostic counts are clickable to diagnostic_list" do
+      data = Map.put(@base_data, :diagnostic_counts, {1, 0, 0, 0})
+      {_commands, regions} = Modeline.render(0, 120, data)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :diagnostic_list end)
+    end
+  end
 end

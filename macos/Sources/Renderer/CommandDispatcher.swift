@@ -151,8 +151,8 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype):
-            guiState.statusBarState.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype)
+        case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount):
+            guiState.statusBarState.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount)
 
         case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
             if visible {

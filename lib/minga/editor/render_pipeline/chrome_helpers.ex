@@ -9,7 +9,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   """
 
   alias Minga.Agent.Session
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
+  alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
@@ -22,6 +24,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.WindowTree
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.LSP.SyncServer
   alias Minga.Theme
   alias Minga.WhichKey
 
@@ -79,6 +82,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
     buf = scroll.window.buffer
     {git_branch, git_diff_summary} = git_modeline_data(buf)
+    diagnostic_counts = diagnostic_modeline_data(buf)
 
     Modeline.render(
       modeline_row,
@@ -105,7 +109,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
         lsp_status: lsp_status,
         parser_status: state.parser_status,
         git_branch: git_branch,
-        git_diff_summary: git_diff_summary
+        git_diff_summary: git_diff_summary,
+        diagnostic_counts: diagnostic_counts
       },
       state.theme,
       col_off
@@ -516,6 +521,24 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
         catch
           :exit, _ -> {nil, nil}
         end
+    end
+  end
+
+  @spec diagnostic_modeline_data(pid() | nil) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  defp diagnostic_modeline_data(nil), do: nil
+
+  defp diagnostic_modeline_data(buf) when is_pid(buf) do
+    path =
+      try do
+        BufferServer.file_path(buf)
+      catch
+        :exit, _ -> nil
+      end
+
+    case path do
+      nil -> nil
+      path -> Diagnostics.count_tuple(SyncServer.path_to_uri(path))
     end
   end
 end

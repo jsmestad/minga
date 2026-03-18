@@ -392,9 +392,12 @@ defmodule Minga.Port.Protocol.GUI do
     message = :erlang.iolist_to_binary([data[:status_msg] || ""])
     filetype = :erlang.iolist_to_binary([Atom.to_string(data[:filetype] || :text)])
 
+    {error_count, warning_count} = diagnostic_counts_for_status(data)
+
     <<@op_gui_status_bar, mode_byte::8, data.cursor_line::32, data.cursor_col::32,
       data.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary>>
+      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
+      error_count::16, warning_count::16>>
   end
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
@@ -414,6 +417,14 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_lsp_status(:starting), do: 3
   defp encode_lsp_status(:error), do: 4
   defp encode_lsp_status(_), do: 0
+
+  @spec diagnostic_counts_for_status(map()) :: {non_neg_integer(), non_neg_integer()}
+  defp diagnostic_counts_for_status(data) do
+    case data[:diagnostic_counts] do
+      {errors, warnings, _info, _hints} -> {errors, warnings}
+      _ -> {0, 0}
+    end
+  end
 
   @spec build_status_flags(map()) :: non_neg_integer()
   defp build_status_flags(data) do
