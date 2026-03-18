@@ -29,6 +29,7 @@ defmodule Minga.Language.Registry do
   @language_modules [
     Minga.Language.Bash,
     Minga.Language.C,
+    Minga.Language.Clojure,
     Minga.Language.Conf,
     Minga.Language.Cpp,
     Minga.Language.CSharp,
@@ -61,6 +62,7 @@ defmodule Minga.Language.Registry do
     Minga.Language.Make,
     Minga.Language.Markdown,
     Minga.Language.Nix,
+    Minga.Language.ObjectiveC,
     Minga.Language.OCaml,
     Minga.Language.Perl,
     Minga.Language.Php,
