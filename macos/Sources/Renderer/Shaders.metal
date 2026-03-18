@@ -160,3 +160,89 @@ fragment float4 glyph_fragment(
     float3 linear_fg = srgbToLinear(in.fg_color);
     return alpha < 0.01 ? float4(0.0) : float4(linear_fg * alpha, alpha);
 }
+
+// ── Underline pass ────────────────────────────────────────────────────────────
+
+/// Per-underline instance data.
+struct UnderlineData {
+    float2 grid_pos;    // Column, row in grid units.
+    float3 color;       // Underline color (RGB, 0..1).
+    float  style;       // 0=line, 1=curl, 2=dashed, 3=dotted, 4=double.
+    float  cell_span;   // Width in cells (1 for normal, 2 for wide chars).
+};
+
+struct UnderlineOut {
+    float4 position [[position]];
+    float3 color;
+    float  style;
+    float2 uv;         // Normalized position within the underline quad.
+};
+
+vertex UnderlineOut underline_vertex(
+    uint vertex_id [[vertex_id]],
+    uint instance_id [[instance_id]],
+    constant UnderlineData* underlines [[buffer(0)]],
+    constant Uniforms& uniforms [[buffer(1)]]
+) {
+    constant UnderlineData& ul = underlines[instance_id];
+    float2 pos = quadPositions[vertex_id];
+
+    // Underline is drawn at the bottom of the cell (last 2px at content scale).
+    float underline_height = 2.0;
+    float cell_width = uniforms.cell_size.x * ul.cell_span;
+    float cell_height = uniforms.cell_size.y;
+
+    // Position at bottom of cell.
+    float2 cell_origin = ul.grid_pos * uniforms.cell_size - uniforms.scroll_offset;
+    float2 ul_origin = float2(cell_origin.x, cell_origin.y + cell_height - underline_height);
+    float2 ul_size = float2(cell_width, underline_height);
+    float2 pixel_pos = ul_origin + pos * ul_size;
+
+    UnderlineOut out;
+    out.position = float4(pixelToNDC(pixel_pos, uniforms.viewport_size), 0.0, 1.0);
+    out.color = ul.color;
+    out.style = ul.style;
+    out.uv = pos;
+    return out;
+}
+
+fragment float4 underline_fragment(UnderlineOut in [[stage_in]]) {
+    float3 linear_color = srgbToLinear(in.color);
+    int style = int(in.style + 0.5);
+
+    // Style 0: solid line (full coverage).
+    if (style == 0) {
+        return float4(linear_color, 1.0);
+    }
+
+    // Style 1: curl (sine wave).
+    if (style == 1) {
+        float wave = sin(in.uv.x * 3.14159 * 4.0) * 0.5 + 0.5;
+        float dist = abs(in.uv.y - wave);
+        float alpha = smoothstep(0.4, 0.0, dist);
+        return float4(linear_color * alpha, alpha);
+    }
+
+    // Style 2: dashed (4 dashes per cell).
+    if (style == 2) {
+        float pattern = step(0.5, fract(in.uv.x * 4.0));
+        return float4(linear_color * pattern, pattern);
+    }
+
+    // Style 3: dotted (8 dots per cell).
+    if (style == 3) {
+        float pattern = step(0.5, fract(in.uv.x * 8.0));
+        return float4(linear_color * pattern, pattern);
+    }
+
+    // Style 4: double (two thin lines).
+    if (style == 4) {
+        float line1 = step(in.uv.y, 0.3);
+        float line2 = step(0.7, in.uv.y);
+        float alpha = max(line1, line2);
+        return float4(linear_color * alpha, alpha);
+    }
+
+    // Fallback: solid.
+    return float4(linear_color, 1.0);
+}

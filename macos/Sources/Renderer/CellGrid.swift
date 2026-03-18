@@ -17,8 +17,14 @@ struct Cell {
     var fg: UInt32 = 0
     /// Background color as 24-bit RGB (0 = default).
     var bg: UInt32 = 0
-    /// Text attributes bitmask (bold, italic, underline, reverse).
+    /// Text attributes bitmask (bold, italic, underline, reverse, strikethrough).
     var attrs: UInt8 = 0
+    /// Underline color as 24-bit RGB (0 = use fg color).
+    /// Set by draw_styled_text; plain draw_text leaves this at 0.
+    var underlineColor: UInt32 = 0
+    /// Underline style (0=line, 1=curl, 2=dashed, 3=dotted, 4=double).
+    /// Only meaningful when ATTR_UNDERLINE is set.
+    var underlineStyle: UInt8 = 0
     /// For ligature head cells: the full source text that was shaped (e.g., "->").
     /// Empty for non-ligature cells.
     var ligatureText: String = ""
