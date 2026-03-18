@@ -14,11 +14,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Diagnostics
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Filetype
   alias Minga.Git
+  alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
@@ -221,7 +223,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
     case path do
       nil -> nil
-      path -> Minga.Diagnostics.count_tuple(Minga.LSP.SyncServer.path_to_uri(path))
+      path -> Diagnostics.count_tuple(LspSyncServer.path_to_uri(path))
     end
   end
 

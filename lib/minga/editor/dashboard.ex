@@ -11,9 +11,9 @@ defmodule Minga.Editor.Dashboard do
   """
 
   alias Minga.Editor.DisplayList
+  alias Minga.Face
   alias Minga.Theme
   alias Minga.Theme.Dashboard, as: DashTheme
-  alias Minga.Face
 
   @typedoc "Command dispatched when a dashboard item is selected."
   @type command :: atom() | {:open_file, String.t()}

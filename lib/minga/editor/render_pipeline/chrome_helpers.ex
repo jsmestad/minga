@@ -22,12 +22,12 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
+  alias Minga.Face
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.SyncServer
   alias Minga.Theme
   alias Minga.WhichKey
-  alias Minga.Face
 
   @type state :: EditorState.t()
 

@@ -776,7 +776,7 @@ defmodule Minga.Editor.Renderer.Line do
       # Merge: conceal replacement_style wins over the segment's style,
       # but the segment's style provides bg/fg from overlapping decorations.
       merged_style =
-        Minga.Buffer.Decorations.merge_style_props(seg_style, conceal.replacement_style)
+        Decorations.merge_style_props(seg_style, conceal.replacement_style)
 
       [{conceal.replacement, merged_style} | acc]
     else
