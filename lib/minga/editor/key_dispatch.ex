@@ -63,7 +63,7 @@ defmodule Minga.Editor.KeyDispatch do
     new_mode_state =
       ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
 
-    base_state = %{state | vim: %{state.vim | mode: new_mode, mode_state: new_mode_state}}
+    base_state = EditorState.transition_mode(state, new_mode, new_mode_state)
 
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do

@@ -305,7 +305,7 @@ defmodule Minga.Editor.Commands.Search do
 
         state
         |> put_in_search(:last_pattern, pattern)
-        |> then(&%{&1 | vim: %{&1.vim | mode: :substitute_confirm, mode_state: ms}})
+        |> then(&EditorState.transition_mode(&1, :substitute_confirm, ms))
     end
   end
 
@@ -454,14 +454,7 @@ defmodule Minga.Editor.Commands.Search do
         description: "Search across project files",
         requires_buffer: false,
         execute: fn state ->
-          %{
-            state
-            | vim: %{
-                state.vim
-                | mode: :search_prompt,
-                  mode_state: %Minga.Mode.SearchPromptState{}
-              }
-          }
+          EditorState.transition_mode(state, :search_prompt, %Minga.Mode.SearchPromptState{})
         end
       }
     ]

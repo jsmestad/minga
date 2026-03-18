@@ -60,4 +60,41 @@ defmodule Minga.Editor.VimState do
       mode_state: Mode.initial_state()
     }
   end
+
+  @doc """
+  Transitions to a new mode, returning an updated VimState.
+
+  This is the single gate function for all mode changes. Every mode
+  transition in the codebase must go through this function (or the
+  `EditorState.transition_mode/3` convenience wrapper). A custom Credo
+  check enforces this by flagging raw `mode:` writes on the vim struct.
+
+  When `mode_state` is nil, sensible defaults are used:
+  - `:normal`, `:insert` → `Mode.initial_state()`
+  - `:command` → `%CommandState{}`
+  - `:eval` → `%EvalState{}`
+  - `:replace` → `%ReplaceState{}`
+
+  Modes that require context (`:visual`, `:search`, `:search_prompt`,
+  `:substitute_confirm`, `:extension_confirm`, `:operator_pending`)
+  must be given an explicit `mode_state`.
+  """
+  @spec transition(t(), Mode.mode(), Mode.state() | nil) :: t()
+  def transition(%__MODULE__{} = vim, mode, mode_state \\ nil) do
+    ms = mode_state || default_mode_state(mode)
+    %{vim | mode: mode, mode_state: ms}
+  end
+
+  @spec default_mode_state(Mode.mode()) :: Mode.state()
+  defp default_mode_state(:normal), do: Mode.initial_state()
+  defp default_mode_state(:insert), do: Mode.initial_state()
+  defp default_mode_state(:command), do: %Minga.Mode.CommandState{}
+  defp default_mode_state(:eval), do: %Minga.Mode.EvalState{}
+  defp default_mode_state(:replace), do: %Minga.Mode.ReplaceState{}
+
+  defp default_mode_state(mode) do
+    raise ArgumentError,
+          "Mode #{inspect(mode)} requires an explicit mode_state argument. " <>
+            "Call VimState.transition(vim, #{inspect(mode)}, mode_state) instead."
+  end
 end

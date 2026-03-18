@@ -1108,4 +1108,27 @@ defmodule Minga.Editor.State do
   end
 
   defp rebuild_agent_from_session(state, _tab), do: state
+
+  # ── Mode transitions ────────────────────────────────────────────────────────
+
+  @doc """
+  Transitions the editor to a new vim mode.
+
+  Convenience wrapper around `VimState.transition/3` that operates on
+  the full EditorState. This is the preferred API for call sites that
+  already have an EditorState.
+
+  ## Examples
+
+      # Simple transition (uses default mode_state):
+      EditorState.transition_mode(state, :normal)
+      EditorState.transition_mode(state, :insert)
+
+      # With explicit mode_state (required for visual, search, etc.):
+      EditorState.transition_mode(state, :visual, %VisualState{...})
+  """
+  @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
+  def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
+    %{state | vim: VimState.transition(state.vim, mode, mode_state)}
+  end
 end

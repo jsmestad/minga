@@ -136,7 +136,7 @@ defmodule Minga.Agent.MarkdownHighlight do
       segments = Highlight.styles_for_line(highlight, original_line, line_start_byte)
 
       case segments do
-        [{^original_line, []}] -> base_runs
+        [{^original_line, %Minga.Face{fg: nil}}] -> base_runs
         _ -> Enum.map(segments, &segment_to_run/1)
       end
     end

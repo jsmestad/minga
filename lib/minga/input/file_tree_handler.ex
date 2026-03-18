@@ -122,7 +122,7 @@ defmodule Minga.Input.FileTreeHandler do
 
     state =
       if state.vim.mode != :normal do
-        %{state | vim: %{state.vim | mode: :normal, mode_state: Minga.Mode.initial_state()}}
+        EditorState.transition_mode(state, :normal)
       else
         state
       end

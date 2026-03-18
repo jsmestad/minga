@@ -1440,7 +1440,7 @@ defmodule Minga.Buffer.Server do
   # Broadcasting inside handle_call would deadlock if any subscriber calls
   # back into this GenServer. The self-send pattern unblocks the caller
   # immediately; the broadcast happens after the reply.
-  @spec defer_content_replaced(State.t()) :: :ok
+  @spec defer_content_replaced(BufState.t()) :: :ok
   defp defer_content_replaced(state) do
     path = state.file_path || ""
 

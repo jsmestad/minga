@@ -141,7 +141,7 @@ defmodule Minga.Input.AgentPanel do
 
   defp panel_nav_key(state, ?i, _mods) do
     state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
-    {:panel, %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}}
+    {:panel, EditorState.transition_mode(state, :insert)}
   end
 
   defp panel_nav_key(_state, _cp, _mods), do: :delegate
