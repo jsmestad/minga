@@ -113,6 +113,7 @@ struct AgentChatView: View {
             Text(text)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg)
+                .textSelection(.enabled)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
@@ -150,6 +151,7 @@ struct AgentChatView: View {
                 Text(text)
                     .font(.system(size: 12))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
+                    .textSelection(.enabled)
                     .lineSpacing(3)
                     .padding(.leading, 14)
             }
@@ -215,6 +217,7 @@ struct AgentChatView: View {
                 .font(.system(size: 10))
             Text(text)
                 .font(.system(size: 11))
+                .textSelection(.enabled)
         }
         .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.popupFg.opacity(0.4))
         .frame(maxWidth: .infinity, alignment: .center)

@@ -37,6 +37,13 @@ final class EditorNSView: MTKView {
     /// Installed when the view moves to a window.
     private var firstResponderGuard: FirstResponderGuard?
 
+    /// When true, the agent chat SwiftUI overlay is visible. A local key
+    /// event monitor intercepts all keyboard input and forwards it to
+    /// `keyDown` so the BEAM still receives keys even though the
+    /// FirstResponderGuard is suspended (needed for SwiftUI text selection).
+    private(set) var agentChatVisible: Bool = false
+    private var agentKeyMonitor: Any?
+
     init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
         self.encoder = encoder
         self.metalRenderer = metalRenderer
@@ -191,6 +198,60 @@ final class EditorNSView: MTKView {
         )
         addTrackingArea(area)
         trackingArea = area
+    }
+
+    // MARK: - Agent chat key forwarding
+
+    /// Activates the agent chat overlay mode: suspends the first responder
+    /// guard (so SwiftUI text selection works) and installs a local key
+    /// monitor that forwards all keyboard input to `keyDown` (so the BEAM
+    /// still receives keys for vim navigation and prompt typing).
+    func setAgentChatVisible(_ visible: Bool) {
+        agentChatVisible = visible
+        firstResponderGuard?.suspended = visible
+
+        if visible {
+            installAgentKeyMonitor()
+        } else {
+            removeAgentKeyMonitor()
+            claimFirstResponder()
+        }
+    }
+
+    private func installAgentKeyMonitor() {
+        guard agentKeyMonitor == nil else { return }
+        agentKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+
+            // CMD+C: trigger system copy for SwiftUI text selection
+            if event.modifierFlags.contains(.command),
+               let chars = event.charactersIgnoringModifiers,
+               chars == "c"
+            {
+                NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                return nil
+            }
+
+            // `y` with no modifiers: trigger copy, swallow the event.
+            // Without swallowing, the BEAM enters operator-pending yank
+            // mode and the next keypress is misinterpreted as a motion.
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.characters == "y" && flags.isEmpty {
+                NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                return nil
+            }
+
+            // Forward all other keys to keyDown so the BEAM receives them
+            self.keyDown(with: event)
+            return nil
+        }
+    }
+
+    private func removeAgentKeyMonitor() {
+        if let monitor = agentKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            agentKeyMonitor = nil
+        }
     }
 
     // MARK: - Keyboard

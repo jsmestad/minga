@@ -62,6 +62,7 @@ defmodule Minga.Mode.Visual do
 
   # Modifier flags (mirrors Minga.Port.Protocol)
   @ctrl 0x02
+  @super 0x08
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_352
@@ -340,6 +341,11 @@ defmodule Minga.Mode.Visual do
   # d — delete selection, return to Normal
   def handle_key({?d, 0}, state) do
     {:execute_then_transition, [:delete_visual_selection], :normal, state}
+  end
+
+  # Cmd+C (GUI) / Super+C — copy selection to system clipboard, return to Normal
+  def handle_key({?c, mods}, state) when band(mods, @super) != 0 do
+    {:execute_then_transition, [:yank_visual_selection], :normal, state}
   end
 
   # c — delete selection, enter Insert

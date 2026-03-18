@@ -96,6 +96,9 @@ struct ContentView: View {
                     // metal view underneath means EditorNSView stays in the
                     // responder chain for keyboard input.
                     .opacity(appState.gui.agentChatState.visible ? 0 : 1)
+                    .onChange(of: appState.gui.agentChatState.visible) { _, visible in
+                        appState.editorNSView?.setAgentChatVisible(visible)
+                    }
 
                     if appState.gui.agentChatState.visible {
                         AgentChatView(

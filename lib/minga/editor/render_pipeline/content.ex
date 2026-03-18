@@ -280,6 +280,14 @@ defmodule Minga.Editor.RenderPipeline.Content do
     line_count = BufferServer.line_count(buf)
     viewport = agent_chat_viewport(window, chat_height, chat_width, cursor_line, line_count, buf)
 
+    # Store the computed viewport back on the window so the mouse handler
+    # uses the same scroll offset as the renderer. Without this, the mouse
+    # handler reads window.viewport.top (stale) while the renderer computes
+    # a different viewport (e.g., snapped to bottom when pinned), causing
+    # clicks to land on wrong buffer lines and visual selections to appear
+    # off-screen.
+    window = %{window | viewport: viewport}
+
     visible_rows = Viewport.content_rows(viewport)
     {first_line, _} = Viewport.visible_range(viewport)
 

@@ -175,8 +175,8 @@ defmodule Minga.Buffer.Document do
   @spec position_to_offset(t(), position()) :: non_neg_integer()
   def position_to_offset(%__MODULE__{} = buf, {line, col})
       when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 do
-    {offsets, _text} = ensure_line_offsets(buf)
-    offset_for_position(offsets, line, col)
+    {offsets, text} = ensure_line_offsets(buf)
+    offset_for_position(offsets, line, col, byte_size(text))
   end
 
   @doc """
@@ -383,8 +383,8 @@ defmodule Minga.Buffer.Document do
   def content_range(%__MODULE__{} = buf, from_pos, to_pos) do
     {offsets, text} = ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1))
+    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
     {start_off, end_off} = if from_off <= to_off, do: {from_off, to_off}, else: {to_off, from_off}
 
     # end_off points to the start of the last character. Find its byte length.
@@ -404,8 +404,8 @@ defmodule Minga.Buffer.Document do
   def delete_range(%__MODULE__{} = buf, from_pos, to_pos) do
     {offsets, text} = ensure_line_offsets(buf)
     text_size = byte_size(text)
-    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1))
-    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1))
+    from_off = offset_for_position(offsets, elem(from_pos, 0), elem(from_pos, 1), text_size)
+    to_off = offset_for_position(offsets, elem(to_pos, 0), elem(to_pos, 1), text_size)
 
     {start_off, end_off, cursor_pos} =
       if from_off <= to_off,
@@ -435,8 +435,8 @@ defmodule Minga.Buffer.Document do
     text_size = byte_size(text)
 
     {s, e} = sort_positions(start_pos, end_pos)
-    s_off = offset_for_position(offsets, elem(s, 0), elem(s, 1))
-    e_off = offset_for_position(offsets, elem(e, 0), elem(e, 1))
+    s_off = offset_for_position(offsets, elem(s, 0), elem(s, 1), text_size)
+    e_off = offset_for_position(offsets, elem(e, 0), elem(e, 1), text_size)
 
     # e_off points to the start of the last character. Find its byte length.
     remaining = binary_part(text, e_off, text_size - e_off)
@@ -767,12 +767,13 @@ defmodule Minga.Buffer.Document do
 
   # Computes the byte offset from start of text for a {line, byte_col} position
   # using the line offset tuple. O(1) lookup instead of O(lines) iteration.
-  @spec offset_for_position(tuple(), non_neg_integer(), non_neg_integer()) ::
+  @spec offset_for_position(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
-  defp offset_for_position(offsets, line, col) do
+  defp offset_for_position(offsets, line, col, text_size) do
     max_line = tuple_size(offsets) - 1
     clamped_line = min(line, max_line)
-    elem(offsets, clamped_line) + col
+    offset = elem(offsets, clamped_line) + col
+    min(offset, text_size)
   end
 
   # Returns the byte size of the next grapheme in `text`, or 0 for empty.
