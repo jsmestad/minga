@@ -96,7 +96,7 @@ defmodule Minga.Theme do
   defmodule Gutter do
     @moduledoc "Gutter (line number column) colors."
     @enforce_keys [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg]
-    defstruct [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg]
+    defstruct [:fg, :current_fg, :error_fg, :warning_fg, :info_fg, :hint_fg, :separator_fg]
 
     @type t :: %__MODULE__{
             fg: Minga.Theme.color(),
@@ -104,7 +104,8 @@ defmodule Minga.Theme do
             error_fg: Minga.Theme.color(),
             warning_fg: Minga.Theme.color(),
             info_fg: Minga.Theme.color(),
-            hint_fg: Minga.Theme.color()
+            hint_fg: Minga.Theme.color(),
+            separator_fg: Minga.Theme.color() | nil
           }
   end
 

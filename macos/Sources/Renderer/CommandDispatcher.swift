@@ -167,6 +167,10 @@ final class CommandDispatcher {
             } else {
                 guiState.agentChatState.hide()
             }
+
+        case .guiGutterSeparator(let col, let r, let g, let b):
+            grid.gutterCol = col
+            grid.gutterSeparatorColor = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
         }
     }
 

@@ -72,6 +72,16 @@ inline float2 pixelToNDC(float2 pixel, float2 viewport) {
     );
 }
 
+// ── sRGB linearization ────────────────────────────────────────────────────────
+
+/// Convert sRGB-encoded color to linear for correct blending and output.
+/// Uses the exact sRGB EOTF (piecewise: linear below 0.04045, gamma above).
+inline float3 srgbToLinear(float3 c) {
+    return mix(pow((c + 0.055) / 1.055, float3(2.4)),
+               c / 12.92,
+               step(c, float3(0.04045)));
+}
+
 // ── Background pass ───────────────────────────────────────────────────────────
 
 vertex VertexOut bg_vertex(
@@ -96,7 +106,7 @@ vertex VertexOut bg_vertex(
 }
 
 fragment float4 bg_fragment(VertexOut in [[stage_in]]) {
-    return float4(in.bg_color, 1.0);
+    return float4(srgbToLinear(in.bg_color), 1.0);
 }
 
 // ── Glyph pass ────────────────────────────────────────────────────────────────
@@ -147,5 +157,6 @@ fragment float4 glyph_fragment(
     }
 
     float alpha = texel.a;
-    return alpha < 0.01 ? float4(0.0) : float4(in.fg_color * alpha, alpha);
+    float3 linear_fg = srgbToLinear(in.fg_color);
+    return alpha < 0.01 ? float4(0.0) : float4(linear_fg * alpha, alpha);
 }

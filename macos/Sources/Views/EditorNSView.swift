@@ -50,7 +50,7 @@ final class EditorNSView: MTKView {
         enableSetNeedsDisplay = true
 
         // Standard Metal layer config.
-        colorPixelFormat = .bgra8Unorm
+        colorPixelFormat = .bgra8Unorm_srgb
         layer?.isOpaque = true
     }
 

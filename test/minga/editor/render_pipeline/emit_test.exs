@@ -202,55 +202,46 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
   end
 
   describe "GUI frame filtering" do
-    test "TUI and GUI paths produce identical editor content window draws" do
+    test "GUI path excludes SwiftUI-owned chrome, keeps window content and minibuffer" do
       state = base_state(rows: 24, cols: 80, content: long_content(20))
+      gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
 
-      # Build a frame with window content, file tree, and tab bar draws
-      frame = build_frame_with_window(state, viewport_top: 0)
-
-      file_tree_draws = [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)]
-      tab_bar_draws = [DisplayList.draw(0, 0, " main.ex ", fg: 0xBBC2CF, bg: 0x21242B)]
+      # SwiftUI-owned fields (file_tree, tab_bar, agent_panel) are stripped
+      # by filter_frame_for_gui. Minibuffer passes through because
+      # Chrome.GUI handles its content upstream.
+      frame = build_frame_with_window(gui_state, viewport_top: 0)
 
       frame_with_chrome = %{
         frame
-        | file_tree: file_tree_draws,
-          tab_bar: tab_bar_draws,
-          agent_panel: [DisplayList.draw(0, 0, "agent", fg: 0xBBC2CF, bg: 0x21242B)]
+        | file_tree: [DisplayList.draw(0, 0, "src/", fg: 0xBBC2CF, bg: 0x21242B)],
+          tab_bar: [DisplayList.draw(0, 0, " main.ex ", fg: 0xBBC2CF, bg: 0x21242B)],
+          agent_panel: [DisplayList.draw(0, 0, "agent", fg: 0xBBC2CF, bg: 0x21242B)],
+          minibuffer: [DisplayList.draw(24, 0, ":quit", fg: 0xBBC2CF, bg: 0x282C34)]
       }
 
-      # TUI path: gets everything
-      tui_commands = DisplayList.to_commands(frame_with_chrome)
+      assert :ok = Emit.emit(frame_with_chrome, gui_state)
 
-      # GUI path: filters out SwiftUI-handled fields, then same to_commands
-      gui_frame = %{
-        frame_with_chrome
-        | tab_bar: [],
-          file_tree: [],
-          agent_panel: [],
-          agentic_view: [],
-          splash: nil
-      }
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
 
-      gui_commands = DisplayList.to_commands(gui_frame)
+      draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
 
-      # Both should have clear, cursor, and batch_end
-      assert [<<0x12>> | _] = tui_commands
-      assert [<<0x12>> | _] = gui_commands
-
-      # GUI should have fewer commands (no file tree, tab bar, agent panel draws)
-      assert length(gui_commands) < length(tui_commands)
-
-      # Extract just the draw commands (opcode 0x10) from both
-      tui_draws = Enum.filter(tui_commands, &match?(<<0x10, _::binary>>, &1))
-      gui_draws = Enum.filter(gui_commands, &match?(<<0x10, _::binary>>, &1))
-
-      # GUI should have exactly 3 fewer draws (file_tree + tab_bar + agent_panel)
-      assert length(tui_draws) - length(gui_draws) == 3
-
-      # All GUI draws should be present in TUI draws (same window content)
-      for draw <- gui_draws do
-        assert draw in tui_draws, "GUI draw command not found in TUI commands"
+      # SwiftUI-owned chrome should NOT appear
+      for chrome_text <- ["src/", " main.ex ", "agent"] do
+        refute Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24,
+                                             _attrs::8, len::16, text::binary-size(len)>> ->
+                 text == chrome_text
+               end),
+               "SwiftUI chrome '#{chrome_text}' should not appear in GUI draw commands"
       end
+
+      # Window content should still be present
+      assert draw_commands != []
+
+      # Minibuffer passes through (Chrome.GUI handles its content)
+      assert Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24, _attrs::8,
+                                           len::16, text::binary-size(len)>> ->
+               text == ":quit"
+             end)
     end
 
     test "GUI emit path uses filtered frame via to_commands" do
@@ -282,6 +273,30 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
                                            len::16, text::binary-size(len)>> ->
                text == "src/" or text == " tab "
              end)
+    end
+
+    test "GUI path passes through modeline and minibuffer (Chrome.GUI handles content)" do
+      state = base_state()
+      gui_state = %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+
+      frame = build_frame_with_window(gui_state, viewport_top: 0)
+
+      frame_with_chrome = %{
+        frame
+        | minibuffer: [DisplayList.draw(24, 0, ":write", fg: 0xBBC2CF, bg: 0x282C34)]
+      }
+
+      assert :ok = Emit.emit(frame_with_chrome, gui_state)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+      draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
+
+      assert Enum.any?(draw_commands, fn <<0x10, _row::16, _col::16, _fg::24, _bg::24, _attrs::8,
+                                           len::16, text::binary-size(len)>> ->
+               text == ":write"
+             end),
+             "Minibuffer should pass through to Metal renderer"
     end
 
     test "GUI path preserves Metal-rendered overlays (hover, signature help)" do

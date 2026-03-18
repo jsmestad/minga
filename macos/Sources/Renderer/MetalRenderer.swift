@@ -33,7 +33,9 @@ struct Uniforms {
 }
 
 /// Background clear color (dark gray matching the default bg).
-private let bgClearColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
+// Linear equivalents of sRGB (0.12, 0.12, 0.14). MTLClearColor bypasses
+// shaders, so it must be specified in linear space for the sRGB framebuffer.
+private let bgClearColor = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
 
 /// Renders the cell grid to a CAMetalLayer using instanced drawing.
 final class MetalRenderer {
@@ -72,13 +74,13 @@ final class MetalRenderer {
         let bgDesc = MTLRenderPipelineDescriptor()
         bgDesc.vertexFunction = library.makeFunction(name: "bg_vertex")
         bgDesc.fragmentFunction = library.makeFunction(name: "bg_fragment")
-        bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        bgDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
 
         // Glyph pipeline (premultiplied alpha blending).
         let glyphDesc = MTLRenderPipelineDescriptor()
         glyphDesc.vertexFunction = library.makeFunction(name: "glyph_vertex")
         glyphDesc.fragmentFunction = library.makeFunction(name: "glyph_fragment")
-        glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        glyphDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
         glyphDesc.colorAttachments[0].isBlendingEnabled = true
         glyphDesc.colorAttachments[0].sourceRGBBlendFactor = .one
         glyphDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
@@ -119,13 +121,22 @@ final class MetalRenderer {
         let count = Int(grid.cols) * Int(grid.rows)
         var gpuCells = [CellGPU](repeating: CellGPU(), count: count)
 
+        // GUI gutter padding: shift content cells right by a fractional amount
+        // to create Zed-style breathing room between line numbers and code.
+        // Round to whole backing pixels to avoid sub-pixel seams.
+        let gutterPaddingPt: Float = grid.gutterCol > 0 ? round(12.0 * contentScale) / contentScale : 0
+        let gutterPaddingCells = gutterPaddingPt / cellW
+
         for i in 0..<count {
             let row = UInt16(i / Int(grid.cols))
             let col = UInt16(i % Int(grid.cols))
             let cell = grid.cells[i]
 
             var gpu = CellGPU()
-            gpu.gridPos = SIMD2<Float>(Float(col), Float(row))
+            gpu.gridPos = SIMD2<Float>(
+                col >= grid.gutterCol ? Float(col) + gutterPaddingCells : Float(col),
+                Float(row)
+            )
 
             let isReverse = (cell.attrs & ATTR_REVERSE) != 0
             let defaultFg = SIMD3<Float>(1, 1, 1)
@@ -227,6 +238,31 @@ final class MetalRenderer {
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
             }
 
+            // Gutter gap fill: draw a background-colored rect to cover the
+            // pixel gap created by shifting content cells right.
+            if grid.gutterCol > 0 && gutterPaddingCells > 0 {
+                let fillBg = grid.defaultBg != 0
+                    ? colorFromU24(grid.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
+                    : SIMD3<Float>(0.12, 0.12, 0.14)
+                var fillCell = CellGPU()
+                fillCell.bgColor = fillBg
+                fillCell.hasGlyph = 0
+
+                var fillUniforms = uniforms
+                let fillWidth = gutterPaddingPt * contentScale
+                fillUniforms.cellSize = SIMD2<Float>(fillWidth, Float(viewportSize.height))
+                fillCell.gridPos = SIMD2<Float>(
+                    Float(grid.gutterCol) * cellW * contentScale / fillWidth,
+                    0
+                )
+                fillUniforms.scrollOffset = .zero
+
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&fillCell, length: MemoryLayout<CellGPU>.stride, index: 0)
+                encoder.setVertexBytes(&fillUniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+            }
+
             // Cursor overlay. Shape varies by mode: block (normal), beam (insert), underline.
             if grid.cursorVisible {
                 let cursorIdx = Int(grid.cursorRow) * Int(grid.cols) + Int(grid.cursorCol)
@@ -238,12 +274,15 @@ final class MetalRenderer {
 
                     var cursorUniforms = uniforms
 
+                    // Apply gutter padding offset to cursor position.
+                    let cursorPadding: Float = (grid.gutterCol > 0 && grid.cursorCol >= grid.gutterCol) ? gutterPaddingCells : 0
+
                     switch grid.cursorShape {
                     case .beam:
                         // Thin vertical bar at the left edge of the cell (2px at content scale).
                         let beamWidth = 2.0 * contentScale
                         cursorUniforms.cellSize.x = beamWidth
-                        cursorCell.gridPos.x = Float(grid.cursorCol) * cellW * contentScale / beamWidth
+                        cursorCell.gridPos.x = (Float(grid.cursorCol) + cursorPadding) * cellW * contentScale / beamWidth
 
                     case .underline:
                         // Thin horizontal bar at the bottom of the cell (2px at content scale).
@@ -273,7 +312,7 @@ final class MetalRenderer {
 
     private func uploadAtlas(_ atlas: GlyphAtlas) {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .bgra8Unorm,
+            pixelFormat: .bgra8Unorm_srgb,
             width: Int(atlas.size),
             height: Int(atlas.size),
             mipmapped: false

@@ -43,6 +43,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_status_bar(state)
     send_gui_picker(state)
     send_gui_agent_chat(state)
+    send_gui_gutter_separator(state)
     :ok
   end
 
@@ -262,5 +263,31 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     else
       %{visible: false}
     end
+  end
+
+  # ── Gutter separator ──
+
+  @spec send_gui_gutter_separator(state()) :: :ok
+  defp send_gui_gutter_separator(state) do
+    alias Minga.Config.Options
+
+    show? = Options.get(:show_gutter_separator)
+    active_window = Map.get(state.windows.map, state.windows.active)
+    gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
+
+    # Only send separator when enabled, visible gutter (gutter_w > 0).
+    # Use the theme's gutter separator color, falling back to gutter fg.
+    # Theme colors are already 24-bit RGB integers.
+    {col, color_rgb} =
+      if show? and gutter_w > 0 do
+        color = state.theme.gutter.separator_fg || state.theme.gutter.fg
+        {gutter_w, color}
+      else
+        {0, 0}
+      end
+
+    cmd = ProtocolGUI.encode_gui_gutter_separator(max(col, 0), color_rgb)
+    PortManager.send_commands(state.port_manager, [cmd])
+    :ok
   end
 end

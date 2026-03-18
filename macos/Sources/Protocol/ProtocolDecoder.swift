@@ -30,6 +30,7 @@ enum RenderCommand: Sendable {
     case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
+    case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
 }
 
 /// A chat message from gui_agent_chat.
@@ -566,6 +567,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             }
         }
         return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, messages: messages), pos - offset)
+
+    case OP_GUI_GUTTER_SEP:
+        // col:2, r:1, g:1, b:1 = 5 bytes after opcode
+        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        let col = readU16(data, rest)
+        return (.guiGutterSeparator(col: col, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

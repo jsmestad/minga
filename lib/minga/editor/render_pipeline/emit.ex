@@ -231,16 +231,10 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   # ── Command building ─────────────────────────────────────────────────────
 
-  # GUI mode: only emit editor content (windows + minibuffer).
-  # All chrome (tab bar, file tree, overlays, modeline) is handled by SwiftUI.
-  # Window modeline stays in Metal (it's inside the editor area for vim splits).
-  # Filters a Frame for the GUI path by zeroing out fields that SwiftUI
-  # handles natively (tab bar, file tree, agent panel, splash). Window
-  # content, minibuffer, separators, and regions pass through to
-  # DisplayList.to_commands/1.
+  # GUI mode: allowlist of Frame fields sent to Metal.
   #
   # Overlays pass through intentionally: the Chrome stage already filters
-  # them in build_gui_chrome (picker, which-key, completion are empty).
+  # them in Chrome.GUI.build (picker, which-key, completion are empty).
   # The remaining overlays (hover popup, signature help, float popups)
   # are Metal-rendered and belong in the cell-grid output.
   @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
@@ -408,15 +402,19 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   @spec send_title(state()) :: :ok
   defp send_title(state) do
-    format = Options.get(:title_format) |> to_string()
-    title = Title.format(state, format)
-
-    # Prepend [!] when any agent tab needs attention
     title =
-      if state.tab_bar && TabBar.any_attention?(state.tab_bar) do
-        "[!] " <> title
+      if Capabilities.gui?(state.capabilities) do
+        Title.format_gui(state)
       else
-        title
+        format = Options.get(:title_format) |> to_string()
+        title = Title.format(state, format)
+
+        # Prepend [!] when any agent tab needs attention (TUI only).
+        if state.tab_bar && TabBar.any_attention?(state.tab_bar) do
+          "[!] " <> title
+        else
+          title
+        end
       end
 
     if title != Process.get(:last_title) do

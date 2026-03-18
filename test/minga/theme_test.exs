@@ -281,7 +281,7 @@ defmodule Minga.ThemeTest do
           assert is_integer(color) and color >= 0
         end
 
-        for {_key, color} <- Map.from_struct(theme.gutter) do
+        for {_key, color} <- Map.from_struct(theme.gutter), color != nil do
           assert is_integer(color) and color >= 0
         end
 

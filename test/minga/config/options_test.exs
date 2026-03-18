@@ -29,6 +29,7 @@ defmodule Minga.Config.OptionsTest do
       assert Options.all(s) == %{
                tab_width: 2,
                line_numbers: :hybrid,
+               show_gutter_separator: true,
                autopair: true,
                scroll_margin: 5,
                scroll_lines: 1,

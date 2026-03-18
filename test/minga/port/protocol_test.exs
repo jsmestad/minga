@@ -938,4 +938,22 @@ defmodule Minga.Port.ProtocolTest do
       assert is_binary(encoded)
     end
   end
+
+  describe "encode_gui_gutter_separator/2" do
+    test "encodes gutter column and RGB color" do
+      encoded = ProtocolGUI.encode_gui_gutter_separator(5, 0x3F444A)
+
+      assert <<0x79, col::16, r::8, g::8, b::8>> = encoded
+      assert col == 5
+      assert r == 0x3F
+      assert g == 0x44
+      assert b == 0x4A
+    end
+
+    test "encodes zero column for no separator" do
+      encoded = ProtocolGUI.encode_gui_gutter_separator(0, 0)
+
+      assert <<0x79, 0::16, 0::8, 0::8, 0::8>> = encoded
+    end
+  end
 end
