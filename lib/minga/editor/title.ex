@@ -37,6 +37,34 @@ defmodule Minga.Editor.Title do
     end)
   end
 
+  @doc """
+  Formats the window title for GUI mode.
+
+  Uses a clean format: `filename.ext — ProjectName` or `● filename.ext — ProjectName`
+  when dirty. Special buffers strip `*` markers. Agent view shows `Agent — ProjectName`.
+  """
+  @spec format_gui(state()) :: String.t()
+  def format_gui(%EditorState{} = state) do
+    ctx = EditorState.active_content_context(state)
+    project = ctx.directory
+
+    case ctx.type do
+      :agent ->
+        if project != "", do: "Agent — #{project}", else: "Agent — Minga"
+
+      :buffer ->
+        # Strip * from special buffer names (e.g., "*Messages*" → "Messages")
+        name = String.replace(ctx.display_name, "*", "")
+        dirty_prefix = if ctx.dirty, do: "● ", else: ""
+
+        if project != "" do
+          "#{dirty_prefix}#{name} — #{project}"
+        else
+          "#{dirty_prefix}#{name} — Minga"
+        end
+    end
+  end
+
   @spec build_vars(state()) :: [{String.t(), String.t()}]
   defp build_vars(%EditorState{} = state) do
     ctx = EditorState.active_content_context(state)

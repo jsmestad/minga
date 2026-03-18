@@ -45,7 +45,8 @@ defmodule Minga.Theme.DoomOne do
         error_fg: @red,
         warning_fg: @yellow,
         info_fg: @blue,
-        hint_fg: @base5
+        hint_fg: @base5,
+        separator_fg: @base5
       },
       git: %Minga.Theme.Git{
         added_fg: @green,

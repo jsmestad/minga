@@ -27,7 +27,8 @@ defmodule Minga.Theme.Catppuccin do
         error_fg: p.red,
         warning_fg: p.yellow,
         info_fg: p.blue,
-        hint_fg: p.overlay0
+        hint_fg: p.overlay0,
+        separator_fg: p.overlay0
       },
       git: %Minga.Theme.Git{
         added_fg: p.green,

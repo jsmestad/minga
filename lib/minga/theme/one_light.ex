@@ -42,7 +42,8 @@ defmodule Minga.Theme.OneLight do
         error_fg: @hue_5,
         warning_fg: @hue_6,
         info_fg: @hue_2,
-        hint_fg: @syntax_gutter
+        hint_fg: @syntax_gutter,
+        separator_fg: @syntax_gutter
       },
       git: %Minga.Theme.Git{
         added_fg: @hue_4,

@@ -149,4 +149,111 @@ defmodule Minga.Editor.TitleTest do
       assert result == "editor.ex (lib) - Minga"
     end
   end
+
+  describe "format_gui/1" do
+    test "buffer window shows clean GUI title" do
+      {:ok, buf} =
+        BufferServer.start_link(
+          content: "hello",
+          file_path: "/home/user/project/lib/editor.ex"
+        )
+
+      window = Window.new(1, buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format_gui(state)
+      assert result == "editor.ex — lib"
+    end
+
+    test "dirty buffer shows dot indicator" do
+      {:ok, buf} =
+        BufferServer.start_link(
+          content: "hello",
+          file_path: "/home/user/project/lib/editor.ex"
+        )
+
+      BufferServer.insert_char(buf, "x")
+      window = Window.new(1, buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format_gui(state)
+      assert result == "● editor.ex — lib"
+    end
+
+    test "special buffer strips asterisks" do
+      {:ok, buf} =
+        BufferServer.start_link(
+          content: "",
+          buffer_name: "*Messages*"
+        )
+
+      window = Window.new(1, buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format_gui(state)
+      assert result == "Messages — Minga"
+    end
+
+    test "agent chat window shows Agent" do
+      {:ok, agent_buf} = BufferServer.start_link(content: "")
+      {:ok, file_buf} = BufferServer.start_link(content: "code")
+      agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: file_buf, list: []},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
+        },
+        focus_stack: Minga.Input.default_stack()
+      }
+
+      result = Title.format_gui(state)
+      assert String.starts_with?(result, "Agent")
+    end
+  end
 end
