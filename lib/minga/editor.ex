@@ -466,6 +466,16 @@ defmodule Minga.Editor do
         end
       end
 
+    # Re-cache GUI styled messages whenever the agent buffer gets new
+    # tree-sitter highlights, regardless of whether it's the active
+    # buffer or not.
+    new_state =
+      if pid == new_state.agent.buffer do
+        AgentLifecycle.update_styled_cache(new_state)
+      else
+        new_state
+      end
+
     {:noreply, new_state}
   end
 

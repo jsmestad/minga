@@ -127,6 +127,20 @@ func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
         return ["kind": "user", "text": text]
     case .assistant(let text):
         return ["kind": "assistant", "text": text]
+    case .styledAssistant(let lines):
+        let linesJSON: [[Any]] = lines.map { runs in
+            runs.map { run -> [String: Any] in
+                return [
+                    "text": run.text,
+                    "fg": [Int(run.fgR), Int(run.fgG), Int(run.fgB)],
+                    "bg": [Int(run.bgR), Int(run.bgG), Int(run.bgB)],
+                    "bold": run.bold,
+                    "italic": run.italic,
+                    "underline": run.underline
+                ]
+            }
+        }
+        return ["kind": "styled_assistant", "lines": linesJSON]
     case .thinking(let text, let collapsed):
         return ["kind": "thinking", "text": text, "collapsed": collapsed]
     case .toolCall(let name, let status, let isError, let collapsed, let durationMs, let result):

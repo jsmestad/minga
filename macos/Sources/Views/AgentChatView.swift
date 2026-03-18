@@ -95,6 +95,8 @@ struct AgentChatView: View {
             userBubble(text)
         case .assistant(_, let text):
             assistantBlock(text)
+        case .styledAssistant(_, let lines):
+            styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
         case .toolCall(_, let name, let status, let isError, let collapsed, let duration, let result):
@@ -132,6 +134,65 @@ struct AgentChatView: View {
                 .lineSpacing(4)
             Spacer(minLength: 40)
         }
+    }
+
+    @ViewBuilder
+    private func styledAssistantBlock(_ lines: [[StyledTextRun]]) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
+                    if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
+                        // Empty line: render as a spacer with line height
+                        Text(" ")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.clear)
+                    } else {
+                        Text(buildAttributedString(runs))
+                            .font(.system(size: 13))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            Spacer(minLength: 40)
+        }
+    }
+
+    private func buildAttributedString(_ runs: [StyledTextRun]) -> AttributedString {
+        var result = AttributedString()
+        for run in runs {
+            var attr = AttributedString(run.text)
+            let fg = Color(
+                red: Double(run.fgR) / 255.0,
+                green: Double(run.fgG) / 255.0,
+                blue: Double(run.fgB) / 255.0
+            )
+            // Only apply foreground if not all zeros (default/unstyled)
+            if run.fgR != 0 || run.fgG != 0 || run.fgB != 0 {
+                attr.foregroundColor = fg
+            } else {
+                attr.foregroundColor = theme.popupFg.opacity(0.9)
+            }
+            // Apply background if non-zero
+            if run.bgR != 0 || run.bgG != 0 || run.bgB != 0 {
+                attr.backgroundColor = Color(
+                    red: Double(run.bgR) / 255.0,
+                    green: Double(run.bgG) / 255.0,
+                    blue: Double(run.bgB) / 255.0
+                )
+            }
+            if run.bold && run.italic {
+                attr.font = .system(size: 13, weight: .bold).italic()
+            } else if run.bold {
+                attr.font = .system(size: 13, weight: .bold)
+            } else if run.italic {
+                attr.font = .system(size: 13).italic()
+            }
+            if run.underline {
+                attr.underlineStyle = .single
+            }
+            result += attr
+        }
+        return result
     }
 
     @ViewBuilder

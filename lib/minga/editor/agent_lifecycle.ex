@@ -11,6 +11,7 @@ defmodule Minga.Editor.AgentLifecycle do
   """
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
+  alias Minga.Agent.MarkdownHighlight
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
@@ -125,11 +126,18 @@ defmodule Minga.Editor.AgentLifecycle do
 
     line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
 
-    # Cache the line index in the panel state so callers (scroll_context,
-    # code_block_index_for_scroll) can read it without recomputing.
+    # Compute styled runs for GUI rendering. Use tree-sitter highlights
+    # if available, otherwise fall back to regex-based markdown parser.
+    # Tree-sitter highlights arrive async, so the first call typically
+    # uses the fallback. When highlights land, update_styled_cache/1
+    # re-caches with full tree-sitter quality.
+    styled = compute_styled_messages(state, buffer, messages)
+
+    # Cache the line index and styled messages in the UI state so
+    # callers can read them without recomputing.
     state =
       AgentAccess.update_agent_ui(state, fn ui ->
-        %{ui | cached_line_index: line_index}
+        %{ui | cached_line_index: line_index, cached_styled_messages: styled}
       end)
 
     # Trigger tree-sitter reparse for markdown highlighting.
@@ -232,5 +240,82 @@ defmodule Minga.Editor.AgentLifecycle do
     else
       line
     end
+  end
+
+  # ── Styled message caching for GUI ─────────────────────────────────────────
+
+  @doc """
+  Re-computes cached styled messages when tree-sitter highlights update
+  for the agent buffer. Called from the Editor's highlight_spans handler
+  when new spans arrive for the `*Agent*` buffer.
+  """
+  @spec update_styled_cache(state()) :: state()
+  def update_styled_cache(state) do
+    agent = AgentAccess.agent(state)
+
+    with true <- is_pid(agent.buffer) and is_pid(agent.session),
+         messages when messages != [] <- safe_messages(agent.session) do
+      styled = compute_styled_messages(state, agent.buffer, messages)
+
+      AgentAccess.update_agent_ui(state, fn ui ->
+        %{ui | cached_styled_messages: styled}
+      end)
+    else
+      _ -> state
+    end
+  end
+
+  @spec safe_messages(pid()) :: [term()]
+  defp safe_messages(session) do
+    AgentSession.messages(session)
+  catch
+    :exit, _ -> []
+  end
+
+  # Computes styled runs for each message. Only assistant messages get
+  # tree-sitter/markdown styling; other message types pass through as nil.
+  #
+  # Computes per-message byte offsets into the full buffer so tree-sitter
+  # highlights (which reference the full buffer) align correctly with
+  # per-message line content.
+  @spec compute_styled_messages(state(), pid(), [term()]) :: [
+          MarkdownHighlight.styled_lines() | nil
+        ]
+  defp compute_styled_messages(state, buffer, messages) do
+    highlight = Map.get(state.highlight.highlights, buffer)
+    theme_syntax = state.theme.syntax
+
+    # Get the full buffer text and per-message line offsets so we can
+    # compute each message's byte offset within the buffer.
+    {full_text, line_offsets} = AgentBufferSync.messages_to_markdown_with_offsets(messages)
+    full_lines = String.split(full_text, "\n")
+    byte_offset_map = message_byte_offsets(line_offsets, full_lines)
+
+    messages
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {{:assistant, text}, idx} ->
+        byte_offset = Map.get(byte_offset_map, idx, 0)
+        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+
+      _ ->
+        nil
+    end)
+  end
+
+  # Computes the byte offset of each message's start line within the full buffer text.
+  @spec message_byte_offsets(
+          [AgentBufferSync.ChatDecorations.line_offset()],
+          [String.t()]
+        ) :: %{non_neg_integer() => non_neg_integer()}
+  defp message_byte_offsets(line_offsets, full_lines) do
+    Map.new(line_offsets, fn {msg_idx, start_line, _count} ->
+      byte_offset =
+        full_lines
+        |> Enum.take(start_line)
+        |> Enum.reduce(0, fn line, acc -> acc + byte_size(line) + 1 end)
+
+      {msg_idx, byte_offset}
+    end)
   end
 end
