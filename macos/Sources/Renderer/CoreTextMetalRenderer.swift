@@ -50,7 +50,8 @@ final class CoreTextMetalRenderer {
     /// The CoreText line rendering engine.
     private(set) var lineRenderer: CoreTextLineRenderer?
 
-    init?(device: MTLDevice) {
+    init?() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         self.device = device
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue

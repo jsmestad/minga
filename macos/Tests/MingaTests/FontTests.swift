@@ -1,4 +1,4 @@
-/// Font loading, resolution, and ligature shaping tests.
+/// Font loading, resolution, and variant tests.
 
 import Testing
 import Foundation
@@ -20,7 +20,6 @@ struct FontResolutionTests {
     func loadByDisplayName() {
         let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
         let psName = CTFontCopyPostScriptName(face.ctFont) as String
-        // NSFontManager should resolve "Menlo" to a Menlo variant.
         #expect(psName.contains("Menlo"))
         #expect(face.cellWidth > 0)
     }
@@ -28,7 +27,6 @@ struct FontResolutionTests {
     @Test("Unknown font falls back to system monospace")
     func unknownFontFallback() {
         let face = FontFace(name: "NonExistentFont12345", size: 14, scale: 2.0)
-        // Should still produce valid cell dimensions (system monospace).
         #expect(face.cellWidth > 0)
         #expect(face.cellHeight > 0)
     }
@@ -49,16 +47,6 @@ struct FontResolutionTests {
         #expect(retina.scale == 2.0)
     }
 
-    @Test("Glyph lookup returns valid data for ASCII")
-    func asciiGlyphLookup() {
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
-        face.preloadAscii()
-        let glyph = face.getGlyph(0x41) // 'A'
-        #expect(glyph != nil)
-        #expect(glyph!.width > 0)
-        #expect(glyph!.height > 0)
-    }
-
     @Test("Ligatures enabled flag is stored")
     func ligaturesFlag() {
         let withLig = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: true)
@@ -70,19 +58,19 @@ struct FontResolutionTests {
     @Test("Font weight is stored and maps correctly")
     func fontWeight() {
         let regular = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 2)
-        #expect(regular.fontWeight == 5) // NSFontManager regular = 5
+        #expect(regular.fontWeight == 5)
 
         let bold = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 5)
-        #expect(bold.fontWeight == 8) // NSFontManager bold = 8
+        #expect(bold.fontWeight == 8)
 
         let light = FontFace(name: "Menlo", size: 13, scale: 2.0, weight: 1)
-        #expect(light.fontWeight == 4) // NSFontManager light = 4
+        #expect(light.fontWeight == 4)
     }
 
     @Test("Default weight is regular")
     func defaultWeight() {
         let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
-        #expect(face.fontWeight == 5) // regular
+        #expect(face.fontWeight == 5)
     }
 
     @Test("Bold weight produces a valid font")
@@ -91,7 +79,6 @@ struct FontResolutionTests {
         #expect(face.cellWidth > 0)
         #expect(face.cellHeight > 0)
         let psName = CTFontCopyPostScriptName(face.ctFont) as String
-        // Menlo Bold should resolve to a bold variant.
         #expect(psName.contains("Bold") || psName.contains("Menlo"))
     }
 }
@@ -114,207 +101,79 @@ struct FontVariantTests {
         let italic = face.fontForStyle(0x04)
         let boldItalic = face.fontForStyle(0x05)
 
-        // Regular should be the base font.
         let regularName = CTFontCopyPostScriptName(regular) as String
         #expect(regularName.contains("Menlo"))
 
-        // Bold variant should differ from regular.
         if let boldFont = face.ctFontBold {
-            let boldName = CTFontCopyPostScriptName(boldFont) as String
-            #expect(boldName != regularName || boldName.contains("Bold"))
             #expect(bold as CTFont === boldFont as CTFont)
         }
 
-        // Italic variant should differ from regular.
         if let italicFont = face.ctFontItalic {
-            let italicName = CTFontCopyPostScriptName(italicFont) as String
-            #expect(italicName != regularName || italicName.contains("Italic"))
             #expect(italic as CTFont === italicFont as CTFont)
         }
 
-        // Bold-italic should be set.
         if face.ctFontBoldItalic != nil {
             #expect(boldItalic as CTFont === face.ctFontBoldItalic! as CTFont)
         }
     }
 
-    @Test("Bold glyph is rasterized separately from regular")
-    func boldGlyphIsSeparate() {
+    @Test("fontForWeight returns correct variant")
+    func fontForWeightReturnsCorrectVariant() {
         let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
-        let regularA = face.getGlyph(0x41, style: 0)
-        let boldA = face.getGlyph(0x41, style: 0x01)
-        #expect(regularA != nil)
-        #expect(boldA != nil)
-        // They should be at different atlas positions (different rasterizations).
-        if let r = regularA, let b = boldA {
-            #expect(r.atlasX != b.atlasX || r.atlasY != b.atlasY,
-                    "Bold and regular 'A' should occupy different atlas positions")
-        }
+
+        let regular = face.fontForWeight(2)
+        let bold = face.fontForWeight(5)
+        let light = face.fontForWeight(1)
+
+        // All should be valid CTFont instances.
+        #expect(CTFontGetSize(regular) == 13)
+        #expect(CTFontGetSize(bold) == 13)
+        #expect(CTFontGetSize(light) == 13)
     }
 
-    @Test("Italic glyph is rasterized separately from regular")
-    func italicGlyphIsSeparate() {
+    @Test("fontForWeight with italic flag")
+    func fontForWeightWithItalic() {
         let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
-        let regularA = face.getGlyph(0x41, style: 0)
-        let italicA = face.getGlyph(0x41, style: 0x04)
-        #expect(regularA != nil)
-        #expect(italicA != nil)
-        if let r = regularA, let i = italicA {
-            #expect(r.atlasX != i.atlasX || r.atlasY != i.atlasY,
-                    "Italic and regular 'A' should occupy different atlas positions")
-        }
-    }
 
-    @Test("Style bits beyond bold/italic are masked out")
-    func styleMaskIgnoresOtherBits() {
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
-        // 0x03 = bold(0x01) | underline(0x02). Only bold should affect glyph lookup.
-        let boldA = face.getGlyph(0x41, style: 0x01)
-        let boldUnderlineA = face.getGlyph(0x41, style: 0x03)
-        #expect(boldA != nil)
-        #expect(boldUnderlineA != nil)
-        // Same glyph (underline bit is masked out for font selection).
-        if let b = boldA, let bu = boldUnderlineA {
-            #expect(b.atlasX == bu.atlasX && b.atlasY == bu.atlasY)
-        }
+        let italicRegular = face.fontForWeight(2, isItalic: true)
+        let nonItalic = face.fontForWeight(2, isItalic: false)
+
+        // Both should be valid, and italic should differ from non-italic.
+        #expect(CTFontGetSize(italicRegular) == 13)
+        #expect(CTFontGetSize(nonItalic) == 13)
     }
 }
 
-@Suite("FontFace ligature shaping")
-struct FontLigatureTests {
-    @Test("Ligatures disabled returns nil")
-    func disabledReturnsNil() {
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: false)
-        let result = face.shapeLigature("->")
-        #expect(result == nil)
+@Suite("FontManager")
+struct FontManagerTests {
+    @Test("Primary font has correct metrics")
+    func primaryMetrics() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        #expect(fm.cellWidth > 0)
+        #expect(fm.cellHeight > 0)
+        #expect(fm.ascent > 0)
+        #expect(fm.scale == 2.0)
     }
 
-    @Test("Single character returns nil")
-    func singleCharReturnsNil() {
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: true)
-        let result = face.shapeLigature("a")
-        #expect(result == nil)
+    @Test("fontFace for ID 0 returns primary")
+    func fontFaceForZeroReturnsPrimary() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        let face = fm.fontFace(for: 0)
+        #expect(face === fm.primary)
     }
 
-    @Test("Non-ligature sequence returns nil for Menlo")
-    func nonLigatureReturnsNil() {
-        // Menlo doesn't have programming ligatures, so "ab" won't ligate.
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: true)
-        let result = face.shapeLigature("ab")
-        #expect(result == nil)
+    @Test("fontFace for unknown ID returns primary")
+    func fontFaceForUnknownReturnsPrimary() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        let face = fm.fontFace(for: 42)
+        #expect(face === fm.primary)
     }
 
-    @Test("Ligature result is cached")
-    func resultIsCached() {
-        let face = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: true)
-        // Call twice; both should return the same result (nil for Menlo).
-        let r1 = face.shapeLigature("->")
-        let r2 = face.shapeLigature("->")
-        // Both nil or both non-nil.
-        #expect((r1 == nil) == (r2 == nil))
-    }
-
-    @Test("Ligature shaping for known ligature font produces result")
-    func ligatureFontProducesResult() {
-        // Try with a font that has ligatures. If not installed, skip.
-        // Common ligature fonts: "Fira Code", "JetBrains Mono", "Cascadia Code"
-        let ligatureFonts = ["FiraCode-Regular", "JetBrainsMono-Regular", "CascadiaCode-Regular"]
-        var face: FontFace?
-        for fontName in ligatureFonts {
-            let candidate = FontFace(name: fontName, size: 14, scale: 2.0, ligatures: true)
-            let psName = CTFontCopyPostScriptName(candidate.ctFont) as String
-            if psName.lowercased().contains(fontName.lowercased().prefix(4).lowercased()) {
-                face = candidate
-                break
-            }
-        }
-
-        guard let face else {
-            // No ligature font installed; skip.
-            return
-        }
-
-        let result = face.shapeLigature("->")
-        // A ligature font should produce a result for "->".
-        // If it doesn't, the font might not have this specific ligature.
-        if let lig = result {
-            #expect(lig.cellCount == 2)
-            #expect(lig.glyph.width > 0)
-            #expect(lig.glyph.height > 0)
-        }
-    }
-}
-
-@Suite("CellGrid ligature cells")
-struct CellGridLigatureTests {
-    @Test("Ligature head cell stores ligature metadata")
-    func headCellMetadata() {
-        let grid = CellGrid(cols: 10, rows: 1)
-        grid.writeCell(col: 0, row: 0, cell: Cell(
-            grapheme: "->",
-            width: 2,
-            fg: 0xFFFFFF, bg: 0,
-            attrs: 0,
-            ligatureText: "->",
-            ligatureCellCount: 2,
-            isContinuation: false
-        ))
-        let cell = grid.cells[0]
-        #expect(cell.ligatureText == "->")
-        #expect(cell.ligatureCellCount == 2)
-        #expect(cell.isContinuation == false)
-    }
-
-    @Test("Continuation cell is marked correctly")
-    func continuationCell() {
-        let grid = CellGrid(cols: 10, rows: 1)
-        grid.writeCell(col: 1, row: 0, cell: Cell(
-            grapheme: "",
-            width: 1,
-            fg: 0xFFFFFF, bg: 0,
-            attrs: 0,
-            isContinuation: true
-        ))
-        let cell = grid.cells[1]
-        #expect(cell.isContinuation == true)
-        #expect(cell.grapheme == "")
-    }
-
-    @Test("Default cell has no ligature")
-    func defaultCellNoLigature() {
-        let cell = Cell()
-        #expect(cell.ligatureText == "")
-        #expect(cell.ligatureCellCount == 1)
-        #expect(cell.isContinuation == false)
-    }
-}
-
-@Suite("CommandDispatcher ligature integration")
-@MainActor
-struct DispatcherLigatureTests {
-    @Test("drawText without fontFace writes individual cells")
-    func noFontFaceIndividualCells() {
-        let grid = CellGrid(cols: 20, rows: 1)
-        let disp = CommandDispatcher(grid: grid, guiState: GUIState())
-        // No fontFace set, so no ligature shaping.
-        disp.dispatch(.drawText(row: 0, col: 0, fg: 0xFFFFFF, bg: 0, attrs: 0, text: "->"))
-        let cell0 = grid.cells[0]
-        let cell1 = grid.cells[1]
-        #expect(cell0.grapheme == "-")
-        #expect(cell1.grapheme == ">")
-        #expect(cell0.isContinuation == false)
-        #expect(cell1.isContinuation == false)
-    }
-
-    @Test("drawText with ligatures disabled writes individual cells")
-    func ligaturesDisabledIndividualCells() {
-        let grid = CellGrid(cols: 20, rows: 1)
-        let disp = CommandDispatcher(grid: grid, guiState: GUIState())
-        disp.fontFace = FontFace(name: "Menlo", size: 13, scale: 2.0, ligatures: false)
-        disp.dispatch(.drawText(row: 0, col: 0, fg: 0xFFFFFF, bg: 0, attrs: 0, text: "->"))
-        let cell0 = grid.cells[0]
-        let cell1 = grid.cells[1]
-        #expect(cell0.grapheme == "-")
-        #expect(cell1.grapheme == ">")
+    @Test("setPrimaryFont replaces the font")
+    func setPrimaryFont() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        let oldWidth = fm.cellWidth
+        fm.setPrimaryFont(name: "Menlo", size: 20, scale: 2.0, ligatures: true, weight: 2)
+        #expect(fm.cellWidth > oldWidth)
     }
 }

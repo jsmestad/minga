@@ -14,19 +14,16 @@ import MetalKit
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
     let encoder: InputEncoder
-    let metalRenderer: MetalRenderer
     private(set) var fontFace: FontFace
-    let cellGrid: CellGrid
 
     /// Line-based styled run buffer for CoreText rendering.
-    /// Resized alongside cellGrid to keep dimensions in sync.
-    var lineBuffer: LineBuffer?
+    let lineBuffer: LineBuffer
 
-    /// CoreText-based renderer (replaces cell-grid MetalRenderer).
-    var coreTextRenderer: CoreTextMetalRenderer?
+    /// CoreText-based renderer.
+    let coreTextRenderer: CoreTextMetalRenderer
 
     /// Font manager for per-span font family support.
-    var fontManager: FontManager?
+    let fontManager: FontManager
 
     private var trackingArea: NSTrackingArea?
 
@@ -54,12 +51,14 @@ final class EditorNSView: MTKView {
     private(set) var agentChatVisible: Bool = false
     private var agentKeyMonitor: Any?
 
-    init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
+    init(encoder: InputEncoder, fontFace: FontFace, lineBuffer: LineBuffer,
+         coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
-        self.metalRenderer = metalRenderer
         self.fontFace = fontFace
-        self.cellGrid = cellGrid
-        super.init(frame: .zero, device: metalRenderer.device)
+        self.lineBuffer = lineBuffer
+        self.coreTextRenderer = coreTextRenderer
+        self.fontManager = fontManager
+        super.init(frame: .zero, device: coreTextRenderer.device)
 
         // Event-driven rendering: MTKView only calls draw() when we set
         // needsDisplay = true. No continuous 60fps loop burning GPU cycles.
@@ -94,16 +93,10 @@ final class EditorNSView: MTKView {
         guard let drawable = currentDrawable else { return }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
 
-        // Use CoreText renderer when available, fall back to cell-grid renderer.
-        if let ctRenderer = coreTextRenderer, let lb = lineBuffer, let fm = fontManager {
-            ctRenderer.render(lineBuffer: lb, fontManager: fm, drawable: drawable,
-                              viewportSize: drawableSize, contentScale: scale)
-            lb.dirty = false
-        } else {
-            metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
-                                 viewportSize: drawableSize, contentScale: scale)
-            cellGrid.dirty = false
-        }
+        coreTextRenderer.render(lineBuffer: lineBuffer, fontManager: fontManager,
+                                drawable: drawable, viewportSize: drawableSize,
+                                contentScale: scale)
+        lineBuffer.dirty = false
     }
 
     // MARK: - Font update
@@ -122,9 +115,8 @@ final class EditorNSView: MTKView {
         let newCols = UInt16(max(frame.width / newCellW, 1))
         let newRows = UInt16(max(frame.height / newCellH, 1))
 
-        if newCols != cellGrid.cols || newRows != cellGrid.rows {
-            cellGrid.resize(newCols: newCols, newRows: newRows)
-            lineBuffer?.resize(newCols: newCols, newRows: newRows)
+        if newCols != lineBuffer.cols || newRows != lineBuffer.rows {
+            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
         }
 
@@ -187,13 +179,11 @@ final class EditorNSView: MTKView {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
-            cellGrid.resize(newCols: newCols, newRows: newRows)
-            lineBuffer?.resize(newCols: newCols, newRows: newRows)
+            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
             PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
-        } else if newCols != cellGrid.cols || newRows != cellGrid.rows {
-            cellGrid.resize(newCols: newCols, newRows: newRows)
-            lineBuffer?.resize(newCols: newCols, newRows: newRows)
+        } else if newCols != lineBuffer.cols || newRows != lineBuffer.rows {
+            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }

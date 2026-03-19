@@ -315,49 +315,25 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendNewTab() {}
 }
 
-@Suite("CellGrid Resize")
-struct CellGridResizeTests {
-    @Test("resize updates dimensions and clears cells")
-    func resizeUpdatesDimensions() {
-        let grid = CellGrid(cols: 80, rows: 24)
-        grid.writeCell(col: 0, row: 0, cell: Cell(grapheme: "A"))
-
-        grid.resize(newCols: 100, newRows: 30)
-
-        #expect(grid.cols == 100)
-        #expect(grid.rows == 30)
-        // All cells should be blank after resize.
-        #expect(grid.cells.count == 100 * 30)
-        #expect(grid.cells[0].grapheme == "")
-    }
-
-    @Test("resize is a no-op when dimensions unchanged")
-    func resizeNoOpWhenSame() {
-        let grid = CellGrid(cols: 80, rows: 24)
-        grid.writeCell(col: 0, row: 0, cell: Cell(grapheme: "X"))
-
-        grid.resize(newCols: 80, newRows: 24)
-
-        // Cell should still be there since resize was skipped.
-        #expect(grid.cells[0].grapheme == "X")
-    }
-}
-
 @Suite("EditorNSView Resize")
 struct EditorNSViewResizeTests {
+    /// Helper to create an EditorNSView with CoreText renderer.
+    @MainActor private func makeView(spy: SpyEncoder, cols: UInt16 = 80, rows: UInt16 = 24) -> EditorNSView? {
+        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
+        let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
+        let lineBuffer = LineBuffer(cols: cols, rows: rows)
+        guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
+        ctRenderer.setupLineRenderer(fontManager: fm)
+        return EditorNSView(encoder: spy, fontFace: face, lineBuffer: lineBuffer,
+                            coreTextRenderer: ctRenderer, fontManager: fm)
+    }
+
     @Test("setFrameSize sends resize when cell dimensions change")
     @MainActor func setFrameSizeSendsResize() throws {
         let spy = SpyEncoder()
-        let grid = CellGrid(cols: 80, rows: 24)
-        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
-        guard let renderer = MetalRenderer() else {
-            // No GPU available (CI), skip gracefully.
-            return
-        }
+        guard let view = makeView(spy: spy) else { return }
+        let face = view.fontFace
 
-        let view = EditorNSView(encoder: spy, metalRenderer: renderer, fontFace: face, cellGrid: grid)
-
-        // Simulate a frame resize that changes the cell grid dimensions.
         let newWidth = CGFloat(face.cellWidth) * 100
         let newHeight = CGFloat(face.cellHeight) * 40
         view.setFrameSize(NSSize(width: newWidth, height: newHeight))
@@ -365,8 +341,8 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls.count == 1)
         #expect(spy.resizeCalls[0].cols == 100)
         #expect(spy.resizeCalls[0].rows == 40)
-        #expect(grid.cols == 100)
-        #expect(grid.rows == 40)
+        #expect(view.lineBuffer.cols == 100)
+        #expect(view.lineBuffer.rows == 40)
     }
 
     @Test("setFrameSize does not send resize when dimensions unchanged")
@@ -375,12 +351,8 @@ struct EditorNSViewResizeTests {
         let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let cols = UInt16(800 / CGFloat(face.cellWidth))
         let rows = UInt16(600 / CGFloat(face.cellHeight))
-        let grid = CellGrid(cols: cols, rows: rows)
-        guard let renderer = MetalRenderer() else { return }
+        guard let view = makeView(spy: spy, cols: cols, rows: rows) else { return }
 
-        let view = EditorNSView(encoder: spy, metalRenderer: renderer, fontFace: face, cellGrid: grid)
-
-        // Set frame to the same logical cell dimensions.
         view.setFrameSize(NSSize(width: CGFloat(cols) * CGFloat(face.cellWidth),
                                   height: CGFloat(rows) * CGFloat(face.cellHeight)))
 
@@ -390,20 +362,15 @@ struct EditorNSViewResizeTests {
     @Test("setFrameSize clamps to minimum 1x1")
     @MainActor func setFrameSizeClampsMinimum() throws {
         let spy = SpyEncoder()
-        let grid = CellGrid(cols: 80, rows: 24)
-        let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
-        guard let renderer = MetalRenderer() else { return }
+        guard let view = makeView(spy: spy) else { return }
 
-        let view = EditorNSView(encoder: spy, metalRenderer: renderer, fontFace: face, cellGrid: grid)
-
-        // A tiny frame should clamp to 1x1, not overflow or crash.
         view.setFrameSize(NSSize(width: 1, height: 1))
 
         #expect(spy.resizeCalls.count == 1)
         #expect(spy.resizeCalls[0].cols >= 1)
         #expect(spy.resizeCalls[0].rows >= 1)
-        #expect(grid.cols >= 1)
-        #expect(grid.rows >= 1)
+        #expect(view.lineBuffer.cols >= 1)
+        #expect(view.lineBuffer.rows >= 1)
     }
 }
 
