@@ -415,17 +415,25 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:highlight_names, buffer_id, names}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    # Resolve buffer_id to PID; fall back to active buffer for unregistered IDs
-    # (e.g., buffer_id 0 from test injection or legacy code paths).
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     new_state =
-      if pid == state.buffers.active do
-        HighlightEvents.handle_names(state, names)
-      else
-        existing = HighlightSync.get_highlight(state, pid)
-        updated = Minga.Highlight.put_names(existing, names)
-        HighlightSync.put_highlight(state, pid, updated)
+      case pid do
+        nil ->
+          Minga.Log.warning(
+            :editor,
+            "highlight_names for unknown buffer_id=#{buffer_id}, discarding"
+          )
+
+          state
+
+        ^pid when pid == state.buffers.active ->
+          HighlightEvents.handle_names(state, names)
+
+        _ ->
+          existing = HighlightSync.get_highlight(state, pid)
+          updated = Minga.Highlight.put_names(existing, names)
+          HighlightSync.put_highlight(state, pid, updated)
       end
 
     {:noreply, new_state}
@@ -433,12 +441,17 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:injection_ranges, buffer_id, ranges}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     new_state =
       if pid do
         %{state | injection_ranges: Map.put(state.injection_ranges, pid, ranges)}
       else
+        Minga.Log.warning(
+          :editor,
+          "injection_ranges for unknown buffer_id=#{buffer_id}, discarding"
+        )
+
         state
       end
 
@@ -452,31 +465,41 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:highlight_spans, buffer_id, version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     new_state =
-      if pid == state.buffers.active do
-        HighlightEvents.handle_spans(state, version, spans)
-      else
-        # Non-active buffer: store spans in highlights map.
-        existing = HighlightSync.get_highlight(state, pid)
-        updated = Minga.Highlight.put_spans(existing, version, spans)
-        state_with_hl = HighlightSync.put_highlight(state, pid, updated)
+      case pid do
+        nil ->
+          Minga.Log.warning(
+            :editor,
+            "highlight_spans for unknown buffer_id=#{buffer_id}, discarding"
+          )
 
-        # If this buffer is visible in any window (e.g., agent panel),
-        # trigger a render so the highlights appear immediately.
-        if buffer_visible_in_window?(state_with_hl, pid) do
-          Renderer.render(state_with_hl)
-        else
-          state_with_hl
-        end
+          state
+
+        ^pid when pid == state.buffers.active ->
+          HighlightEvents.handle_spans(state, version, spans)
+
+        _ ->
+          # Non-active buffer: store spans in highlights map.
+          existing = HighlightSync.get_highlight(state, pid)
+          updated = Minga.Highlight.put_spans(existing, version, spans)
+          state_with_hl = HighlightSync.put_highlight(state, pid, updated)
+
+          # If this buffer is visible in any window (e.g., agent panel),
+          # trigger a render so the highlights appear immediately.
+          if buffer_visible_in_window?(state_with_hl, pid) do
+            Renderer.render(state_with_hl)
+          else
+            state_with_hl
+          end
       end
 
     # Re-cache GUI styled messages whenever the agent buffer gets new
     # tree-sitter highlights, regardless of whether it's the active
     # buffer or not.
     new_state =
-      if pid == new_state.agent.buffer do
+      if pid != nil and pid == new_state.agent.buffer do
         AgentLifecycle.update_styled_cache(new_state)
       else
         new_state
@@ -487,10 +510,12 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:conceal_spans, buffer_id, _version, spans}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     if pid do
       HighlightEvents.handle_conceal_spans(state, pid, spans)
+    else
+      Minga.Log.warning(:editor, "conceal_spans for unknown buffer_id=#{buffer_id}, discarding")
     end
 
     {:noreply, state}
@@ -500,25 +525,31 @@ defmodule Minga.Editor do
       when tag in [:minga_highlight, :minga_input] do
     Minga.Log.debug(:editor, "Fold ranges received: buffer=#{buffer_id}, count=#{length(ranges)}")
 
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     new_state =
-      if pid == state.buffers.active do
-        fold_ranges =
-          Enum.map(ranges, fn {start_line, end_line} ->
-            FoldRange.new!(start_line, end_line)
-          end)
+      case pid do
+        nil ->
+          Minga.Log.warning(:editor, "fold_ranges for unknown buffer_id=#{buffer_id}, discarding")
+          state
 
-        case EditorState.active_window_struct(state) do
-          nil ->
-            state
+        ^pid when pid == state.buffers.active ->
+          fold_ranges =
+            Enum.map(ranges, fn {start_line, end_line} ->
+              FoldRange.new!(start_line, end_line)
+            end)
 
-          %Window{id: id} ->
-            EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
-        end
-      else
-        # Stale response for a non-active buffer; discard.
-        state
+          case EditorState.active_window_struct(state) do
+            nil ->
+              state
+
+            %Window{id: id} ->
+              EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
+          end
+
+        _ ->
+          # Response for a non-active buffer; discard.
+          state
       end
 
     {:noreply, new_state}
@@ -526,14 +557,24 @@ defmodule Minga.Editor do
 
   def handle_info({tag, {:textobject_positions, buffer_id, _version, positions}}, state)
       when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id) || state.buffers.active
+    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
 
     new_state =
-      if pid == state.buffers.active do
-        apply_textobject_positions(state, positions)
-      else
-        # Stale response for a non-active buffer; discard.
-        state
+      case pid do
+        nil ->
+          Minga.Log.warning(
+            :editor,
+            "textobject_positions for unknown buffer_id=#{buffer_id}, discarding"
+          )
+
+          state
+
+        ^pid when pid == state.buffers.active ->
+          apply_textobject_positions(state, positions)
+
+        _ ->
+          # Response for a non-active buffer; discard.
+          state
       end
 
     {:noreply, new_state}

@@ -128,12 +128,62 @@ defmodule Minga.Test.EditorCase do
   def inject_highlights(ctx, capture_names, version \\ 1, spans) do
     # Flush pending messages (e.g. :setup_highlight from :ready)
     _ = :sys.get_state(ctx.editor)
-    # buffer_id 0 is used in test injection since no real parser is involved
-    send(ctx.editor, {:minga_input, {:highlight_names, 0, capture_names}})
-    send(ctx.editor, {:minga_input, {:highlight_spans, 0, version, spans}})
+
+    # Ensure the active buffer has a registered parser buffer_id so the
+    # highlight event handlers can route the message correctly. Previously
+    # this used a hardcoded buffer_id=0 with a fallback to active buffer,
+    # but that fallback was removed (it could misroute spans to the wrong
+    # buffer after a buffer switch).
+    #
+    # For test buffers that don't have a recognized filetype (no tree-sitter
+    # grammar), setup_highlight won't assign a buffer_id. We use
+    # :sys.replace_state to directly assign one, which is safe in tests.
+    buffer_id = ensure_test_buffer_id(ctx.editor)
+
+    send(ctx.editor, {:minga_input, {:highlight_names, buffer_id, capture_names}})
+    send(ctx.editor, {:minga_input, {:highlight_spans, buffer_id, version, spans}})
     # Sync: ensure both messages have been processed before returning
     _ = :sys.get_state(ctx.editor)
     ctx
+  end
+
+  # Ensures the active buffer has a registered parser buffer_id.
+  # Returns the buffer_id (existing or newly assigned).
+  @spec ensure_test_buffer_id(pid()) :: non_neg_integer()
+  defp ensure_test_buffer_id(editor) do
+    state = :sys.get_state(editor)
+    buf = state.buffers.active
+
+    if buf == nil do
+      0
+    else
+      hl = state.highlight
+
+      case Map.fetch(hl.buffer_ids, buf) do
+        {:ok, id} ->
+          id
+
+        :error ->
+          # Assign a buffer_id directly via :sys.replace_state
+          id = hl.next_buffer_id
+
+          :sys.replace_state(editor, fn st ->
+            h = st.highlight
+
+            %{
+              st
+              | highlight: %{
+                  h
+                  | buffer_ids: Map.put(h.buffer_ids, buf, id),
+                    reverse_buffer_ids: Map.put(h.reverse_buffer_ids, id, buf),
+                    next_buffer_id: id + 1
+                }
+            }
+          end)
+
+          id
+      end
+    end
   end
 
   # ── Key sending helpers ──────────────────────────────────────────────────────
