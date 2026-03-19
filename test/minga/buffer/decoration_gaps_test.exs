@@ -5,7 +5,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.IntervalTree
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Face
+
 
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do
