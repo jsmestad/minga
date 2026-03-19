@@ -105,6 +105,21 @@ defmodule Minga.Application do
     result
   end
 
+  @impl true
+  @spec stop(term()) :: :ok
+  def stop(_state) do
+    # Clean shutdown: restore the default console logger and stderr device.
+    # This only runs when the application is stopping gracefully, not on
+    # Editor crashes (where the LoggerHandler stays installed so crash
+    # reports flow through the ETS buffer and get replayed on restart).
+    case :logger.get_handler_config(:minga_messages) do
+      {:ok, _} -> Minga.LoggerHandler.uninstall()
+      _ -> :ok
+    end
+
+    :ok
+  end
+
   @spec prune_old_sessions() :: :ok
   defp prune_old_sessions do
     retention_days =
