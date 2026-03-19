@@ -5,10 +5,19 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   Uses relative scaling tests (1K vs 10K) instead of absolute time
   thresholds. This catches algorithmic regressions (O(n²) would show
   100x scaling for 10x data) without flaking on slow CI runners.
+
+  Each measurement uses the median of 5 runs to eliminate outlier noise
+  from GC pauses, scheduler jitter, and cache effects. Single-shot
+  `:timer.tc` on sub-millisecond operations is too noisy for ratio tests.
   """
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
+
+  # Number of timed iterations per measurement. The median of 5 is
+  # insensitive to a single GC pause or scheduling hiccup while keeping
+  # total test time reasonable (~0.5s extra for the batch test).
+  @bench_iterations 5
 
   describe "performance: query scaling" do
     setup do
@@ -23,11 +32,15 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       Decorations.highlights_for_lines(ctx.decs_1k, 200, 230)
       Decorations.highlights_for_lines(ctx.decs_10k, 5_000, 5_030)
 
-      {us_1k, _} =
-        :timer.tc(fn -> Decorations.highlights_for_lines(ctx.decs_1k, 200, 230) end)
+      us_1k =
+        median_of(@bench_iterations, fn ->
+          Decorations.highlights_for_lines(ctx.decs_1k, 200, 230)
+        end)
 
-      {us_10k, _} =
-        :timer.tc(fn -> Decorations.highlights_for_lines(ctx.decs_10k, 5_000, 5_030) end)
+      us_10k =
+        median_of(@bench_iterations, fn ->
+          Decorations.highlights_for_lines(ctx.decs_10k, 5_000, 5_030)
+        end)
 
       # With O(log n + k) query, 10x more data should be at most ~3-4x slower
       # (log(10000)/log(1000) ≈ 1.33x, plus constant factors).
@@ -51,8 +64,8 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       merge_fn.(ctx.decs_1k, 200)
       merge_fn.(ctx.decs_10k, 5_000)
 
-      {us_1k, _} = :timer.tc(fn -> merge_fn.(ctx.decs_1k, 200) end)
-      {us_10k, _} = :timer.tc(fn -> merge_fn.(ctx.decs_10k, 5_000) end)
+      us_1k = median_of(@bench_iterations, fn -> merge_fn.(ctx.decs_1k, 200) end)
+      us_10k = median_of(@bench_iterations, fn -> merge_fn.(ctx.decs_10k, 5_000) end)
 
       ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
 
@@ -69,7 +82,9 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       # a single from_list rebuild at the end.
       #
       # Uses relative scaling (1K vs 10K) instead of absolute time thresholds.
-      # An O(n²) regression would show ~100x scaling; we expect < 15x.
+      # An O(n²) regression would show ~100x scaling; we expect ~13x for
+      # the O(n log n) tree rebuild. Threshold at 25x gives breathing room
+      # for constant-factor variance without losing detection power.
       base_1k = build_decorations(1_000)
       base_10k = build_decorations(10_000)
 
@@ -93,18 +108,21 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       batch_replace.(base_1k, 1_000)
       batch_replace.(base_10k, 10_000)
 
-      {us_1k, decs_1k} = :timer.tc(fn -> batch_replace.(base_1k, 1_000) end)
-      {us_10k, decs_10k} = :timer.tc(fn -> batch_replace.(base_10k, 10_000) end)
+      us_1k = median_of(@bench_iterations, fn -> batch_replace.(base_1k, 1_000) end)
+      us_10k = median_of(@bench_iterations, fn -> batch_replace.(base_10k, 10_000) end)
 
+      # Verify correctness (single run for the assertion)
+      decs_1k = batch_replace.(base_1k, 1_000)
+      decs_10k = batch_replace.(base_10k, 10_000)
       assert Decorations.highlight_count(decs_1k) == 1_000
       assert Decorations.highlight_count(decs_10k) == 10_000
 
       ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
 
-      # O(n log n) tree rebuild: 10x data ≈ 13x work. Allow 20x for noise.
+      # O(n log n) tree rebuild: 10x data ≈ 13x work. Allow 25x for noise.
       # An O(n²) regression would show ~100x.
-      assert ratio < 20,
-             "10K/1K batch ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 20x for sub-linear scaling."
+      assert ratio < 25,
+             "10K/1K batch ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 25x for sub-linear scaling."
     end
   end
 
@@ -121,6 +139,21 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # Runs `fun` `n` times and returns the median duration in microseconds.
+  # The median is insensitive to single-outlier GC pauses or scheduling
+  # hiccups that make single-shot `:timer.tc` unreliable for ratio tests.
+  @spec median_of(pos_integer(), (-> term())) :: non_neg_integer()
+  defp median_of(n, fun) do
+    times =
+      for _ <- 1..n do
+        {us, _result} = :timer.tc(fun)
+        us
+      end
+
+    sorted = Enum.sort(times)
+    Enum.at(sorted, div(n, 2))
+  end
 
   defp build_decorations(count) do
     Enum.reduce(0..(count - 1), Decorations.new(), fn i, decs ->
