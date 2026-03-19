@@ -186,8 +186,12 @@ final class CoreTextLineRenderer {
             return cached
         }
 
-        // Build NSAttributedString from runs.
-        let attributedString = buildAttributedString(runs: runs)
+        // Resolve overlapping runs (e.g., cursorline fill + text overwrites).
+        let resolved = resolveOverlaps(runs)
+        guard !resolved.isEmpty else { return nil }
+
+        // Build NSAttributedString from resolved runs.
+        let attributedString = buildAttributedString(runs: resolved)
 
         // Create CTLine.
         let ctLine = CTLineCreateWithAttributedString(attributedString)
@@ -256,6 +260,95 @@ final class CoreTextLineRenderer {
     var cacheCount: Int { lineCache.count }
 
     // MARK: - Private
+
+    /// Resolve overlapping runs using last-writer-wins (cell-grid) semantics.
+    ///
+    /// The BEAM renders like a terminal: later draw_text commands overwrite
+    /// earlier ones at the same columns. For example, the cursorline fill
+    /// draws 80 spaces at col=gutter_w, then the actual text runs overwrite
+    /// those same columns. In a cell grid, this "just works" because cells
+    /// are overwritten in place. For CoreText, we need to resolve overlaps
+    /// before building the attributed string.
+    ///
+    /// Algorithm: walk runs in order (preserving draw order), track which
+    /// columns are covered. Later runs that overlap earlier ones clip or
+    /// replace the earlier runs.
+    private func resolveOverlaps(_ runs: [StyledRun]) -> [StyledRun] {
+        guard runs.count > 1 else { return runs }
+
+        // Build a column-indexed array of (run, startCol, endCol) entries.
+        // Process in reverse draw order so earlier runs can be clipped by later ones.
+        struct RunSpan {
+            let run: StyledRun
+            let startCol: UInt16
+            let endCol: UInt16  // exclusive
+        }
+
+        var spans: [RunSpan] = runs.map { run in
+            RunSpan(run: run, startCol: run.col, endCol: run.col + UInt16(run.text.count))
+        }
+
+        // Process from last to first. Later runs have priority (they overwrote
+        // earlier runs in the cell grid). Mark columns claimed by later runs.
+        var claimed = Set<UInt16>()
+        var result: [StyledRun] = []
+
+        for i in stride(from: spans.count - 1, through: 0, by: -1) {
+            let span = spans[i]
+            // Check if any columns in this span are NOT yet claimed.
+            var unclaimed: [UInt16] = []
+            for col in span.startCol..<span.endCol {
+                if !claimed.contains(col) {
+                    unclaimed.append(col)
+                }
+            }
+
+            if unclaimed.isEmpty {
+                // Fully overwritten by later runs. Skip entirely.
+                continue
+            }
+
+            // Claim all columns in this span's range.
+            for col in span.startCol..<span.endCol {
+                claimed.insert(col)
+            }
+
+            if unclaimed.count == Int(span.endCol - span.startCol) {
+                // No overlap. Keep the run as-is.
+                result.append(span.run)
+            } else {
+                // Partial overlap. Extract the unclaimed portion.
+                // Find the contiguous unclaimed range starting from the beginning.
+                let firstUnclaimed = unclaimed.first!
+                let text = span.run.text
+                let startOffset = Int(firstUnclaimed - span.startCol)
+                let endOffset = min(startOffset + unclaimed.count, text.count)
+
+                if startOffset < text.count && endOffset > startOffset {
+                    let startIdx = text.index(text.startIndex, offsetBy: startOffset)
+                    let endIdx = text.index(text.startIndex, offsetBy: min(endOffset, text.count))
+                    let clippedText = String(text[startIdx..<endIdx])
+
+                    if !clippedText.isEmpty {
+                        let clipped = StyledRun(
+                            col: firstUnclaimed, text: clippedText,
+                            fg: span.run.fg, bg: span.run.bg, attrs: span.run.attrs,
+                            underlineColor: span.run.underlineColor,
+                            underlineStyle: span.run.underlineStyle,
+                            fontWeight: span.run.fontWeight, fontId: span.run.fontId
+                        )
+                        result.append(clipped)
+                    }
+                }
+            }
+        }
+
+        // Reverse to restore draw order (we processed back-to-front).
+        result.reverse()
+        // Sort by column for buildAttributedString's gap-filling logic.
+        result.sort { $0.col < $1.col }
+        return result
+    }
 
     /// Build an NSAttributedString from styled runs.
     ///
