@@ -15,8 +15,6 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
-  alias Minga.Git.Tracker, as: GitTracker
-  alias Minga.LSP.SyncServer
   alias Minga.PrettifySymbols
 
   @doc """
@@ -87,9 +85,7 @@ defmodule Minga.Editor.HighlightEvents do
         buf = state.buffers.active
 
         if buf do
-          Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
-          SyncServer.notify_change(buf)
-          GitTracker.notify_change(buf)
+          Minga.Events.notify_buffer_changed(buf)
         end
 
         state
