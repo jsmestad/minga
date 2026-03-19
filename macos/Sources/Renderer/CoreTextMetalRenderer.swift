@@ -6,9 +6,11 @@
 ///
 /// Passes:
 /// 1. Background fill: one colored quad per line (using run bg colors)
-/// 2. Line texture blit: one textured quad per line (CoreText-rendered text)
-/// 3. Cursor overlay: single colored quad (block/beam/underline)
-/// 4. Gutter fill: colored rect to cover gutter padding gap
+/// 2. Block cursor background (drawn before text so text shows on top)
+/// 3. Line texture blit: one textured quad per line (CoreText-rendered text)
+/// 4. Gutter gap fill: colored rect to cover gutter padding gap
+/// 5. Gutter separator line
+/// 6. Beam/underline cursor overlay (drawn after text)
 
 import Metal
 import QuartzCore
@@ -166,10 +168,12 @@ final class CoreTextMetalRenderer {
             if !runs.isEmpty {
                 let contentHash = lineBuffer.computeLineHash(row: row)
                 if let cached = lineRenderer.renderLine(row: row, runs: runs, contentHash: contentHash) {
-                    let xPos = runs.first.map { r -> Float in
-                        let colPx = Float(r.col) * cellW * scale
-                        return r.col >= lineBuffer.gutterCol ? colPx + gutterPaddingPx : colPx
-                    } ?? 0
+                    // The texture starts at the first run's column. Gap-filling
+                    // spaces in the attributed string handle intra-line positioning.
+                    let firstCol = runs.first.map { Float($0.col) } ?? 0
+                    let colPx = firstCol * cellW * scale
+                    let xPos = firstCol >= Float(lineBuffer.gutterCol)
+                        ? colPx + gutterPaddingPx : colPx
 
                     var lineGPU = LineGPU()
                     lineGPU.position = SIMD2<Float>(xPos, yPos)
@@ -204,7 +208,28 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: bgQuads.count)
         }
 
-        // Pass 2: Line textures (one draw call per line since each has its own texture).
+        // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
+        // For block cursors, draw the cursor bg here so the text pass composites over it.
+        // Beam and underline cursors are drawn AFTER text (pass 5).
+        if lineBuffer.cursorVisible && lineBuffer.cursorShape == .block {
+            let cursorRow = Float(lineBuffer.cursorRow)
+            let cursorCol = Float(lineBuffer.cursorCol)
+            let cursorPadding: Float = (lineBuffer.gutterCol > 0 && lineBuffer.cursorCol >= lineBuffer.gutterCol)
+                ? gutterPaddingPx : 0
+
+            var cursorQuad = QuadGPU()
+            cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
+            cursorQuad.size = SIMD2<Float>(cellW * scale, cellH * scale)
+            cursorQuad.color = SIMD3<Float>(0.8, 0.8, 0.8)
+            cursorQuad.alpha = 1.0
+
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBytes(&cursorQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+        }
+
+        // Pass 3: Line textures (one draw call per line since each has its own texture).
         if !lineInstances.isEmpty {
             encoder.setRenderPipelineState(linePipeline)
             for var (lineGPU, texture) in lineInstances {
@@ -215,7 +240,7 @@ final class CoreTextMetalRenderer {
             }
         }
 
-        // Pass 3: Gutter gap fill.
+        // Pass 4: Gutter gap fill.
         if lineBuffer.gutterCol > 0 && gutterPaddingPx > 0 {
             var fillQuad = QuadGPU()
             fillQuad.position = SIMD2<Float>(Float(lineBuffer.gutterCol) * cellW * scale, 0)
@@ -229,7 +254,7 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
 
-        // Pass 4: Gutter separator line.
+        // Pass 5: Gutter separator line.
         if lineBuffer.gutterCol > 0 && lineBuffer.gutterSeparatorColor != 0 {
             var sepQuad = QuadGPU()
             let sepX = (Float(lineBuffer.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
@@ -244,8 +269,10 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
 
-        // Pass 5: Cursor overlay.
-        if lineBuffer.cursorVisible {
+        // Pass 6: Cursor overlay for beam and underline shapes.
+        // Block cursor is drawn in pass 2 (before text) so text shows on top.
+        // Beam and underline are drawn AFTER text so they overlay it.
+        if lineBuffer.cursorVisible && lineBuffer.cursorShape != .block {
             let cursorRow = Float(lineBuffer.cursorRow)
             let cursorCol = Float(lineBuffer.cursorCol)
             let cursorPadding: Float = (lineBuffer.gutterCol > 0 && lineBuffer.cursorCol >= lineBuffer.gutterCol)
@@ -257,8 +284,7 @@ final class CoreTextMetalRenderer {
 
             switch lineBuffer.cursorShape {
             case .block:
-                cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
-                cursorQuad.size = SIMD2<Float>(cellW * scale, cellH * scale)
+                break  // Handled in pass 2.
 
             case .beam:
                 let beamWidth: Float = 2.0 * scale

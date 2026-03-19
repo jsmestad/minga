@@ -214,7 +214,25 @@ final class CoreTextLineRenderer {
     private func buildAttributedString(runs: [StyledRun]) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
+        // Track the current column position to insert gap-filling spaces
+        // when runs aren't contiguous. This ensures each run's text starts
+        // at its declared column position in the final CTLine.
+        var currentCol: UInt16 = runs.first?.col ?? 0
+
         for run in runs {
+            // Fill gaps between runs with transparent spaces using the
+            // primary font so CoreText advances by exactly the right amount.
+            if run.col > currentCol {
+                let gapCount = Int(run.col - currentCol)
+                let gapText = String(repeating: " ", count: gapCount)
+                let gapAttrs: [NSAttributedString.Key: Any] = [
+                    .font: fontManager.primary.ctFont,
+                    .foregroundColor: NSColor.clear,
+                    .ligature: 0
+                ]
+                result.append(NSAttributedString(string: gapText, attributes: gapAttrs))
+            }
+
             let font = resolveFont(for: run)
 
             // Handle reverse attribute: swap fg and bg colors for text rendering.
@@ -251,6 +269,9 @@ final class CoreTextLineRenderer {
 
             let attrStr = NSAttributedString(string: run.text, attributes: attrs)
             result.append(attrStr)
+
+            // Advance current column past this run's text.
+            currentCol = run.col + UInt16(run.text.count)
         }
 
         return result
@@ -325,17 +346,16 @@ final class CoreTextLineRenderer {
         ctx.setAllowsAntialiasing(true)
         ctx.setShouldAntialias(true)
 
-        // Position each run at its column offset.
         // CoreText uses a bottom-up coordinate system.
         let baselineY = descent
 
-        // Position the CTLine. Each run's text starts at col * cellWidth.
-        // Since we built the attributed string by concatenating runs,
-        // we need to position the entire line at the first run's column.
-        let firstCol = runs.first.map { CGFloat($0.col) * cellWidth } ?? 0
-        ctx.textPosition = CGPoint(x: firstCol, y: baselineY)
+        // The CTLine starts at x=0 within the texture. Column positioning
+        // is handled by CoreTextMetalRenderer when it places the texture
+        // quad. The gap-filling spaces in buildAttributedString ensure
+        // each run's text appears at the correct relative offset.
+        ctx.textPosition = CGPoint(x: 0, y: baselineY)
 
-        // Draw the complete CTLine (CoreText handles all run positioning internally).
+        // Draw the complete CTLine.
         CTLineDraw(ctLine, ctx)
 
         return buffer
