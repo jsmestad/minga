@@ -52,6 +52,9 @@ final class CoreTextMetalRenderer {
     /// The CoreText line rendering engine.
     private(set) var lineRenderer: CoreTextLineRenderer?
 
+    /// Track last logged cursor row to avoid spamming logs every frame.
+    private var lastLoggedCursorRow: UInt16 = .max
+
     init?() {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         self.device = device
@@ -144,6 +147,14 @@ final class CoreTextMetalRenderer {
 
             // Per-run background fills (for runs with explicit bg color or reverse attribute).
             let runs = lineBuffer.runsForLine(row)
+
+            // Debug: log cursorline run info once per cursor move.
+            if row == lineBuffer.cursorRow && !runs.isEmpty && row != lastLoggedCursorRow {
+                lastLoggedCursorRow = row
+                let firstRun = runs[0]
+                PortLogger.debug("Cursorline row=\(row): \(runs.count) runs, first: col=\(firstRun.col) fg=0x\(String(firstRun.fg, radix: 16)) bg=0x\(String(firstRun.bg, radix: 16)) text=\"\(firstRun.text.prefix(20))\"")
+            }
+
             for run in runs {
                 let isReverse = (run.attrs & 0x08) != 0  // ATTR_REVERSE
                 if run.bg != 0 || isReverse {
@@ -181,6 +192,8 @@ final class CoreTextMetalRenderer {
                     lineGPU.uvOrigin = .zero
                     lineGPU.uvSize = SIMD2<Float>(1, 1)
                     lineInstances.append((lineGPU, cached.texture))
+                } else if row == lineBuffer.cursorRow {
+                    PortLogger.warn("renderLine returned nil for cursor row \(row) with \(runs.count) runs")
                 }
             }
         }

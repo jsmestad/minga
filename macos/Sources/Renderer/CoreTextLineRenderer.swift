@@ -156,7 +156,8 @@ final class CoreTextLineRenderer {
         // Rasterize into a BGRA bitmap.
         let bgraData = rasterizeLine(ctLine, runs: runs, width: pixelWidth, height: pixelHeight)
 
-        // Create or reuse texture.
+        // Create texture with shared storage so CPU writes are immediately
+        // visible to the GPU without explicit synchronization.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm_srgb,
             width: pixelWidth,
@@ -164,7 +165,7 @@ final class CoreTextLineRenderer {
             mipmapped: false
         )
         texDesc.usage = [.shaderRead]
-        texDesc.storageMode = .managed
+        texDesc.storageMode = .shared
 
         guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
 
