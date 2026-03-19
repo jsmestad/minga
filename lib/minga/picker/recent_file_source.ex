@@ -13,6 +13,7 @@ defmodule Minga.Picker.RecentFileSource do
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
+  alias Minga.Picker.Source
   alias Minga.Project
 
   @impl true
@@ -50,7 +51,7 @@ defmodule Minga.Picker.RecentFileSource do
 
     case EditorState.find_buffer_by_path(state, abs_path) do
       nil ->
-        case start_buffer(abs_path) do
+        case EditorState.start_buffer(abs_path) do
           {:ok, pid} ->
             EditorState.add_buffer(state, pid)
 
@@ -65,22 +66,9 @@ defmodule Minga.Picker.RecentFileSource do
   end
 
   @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    EditorState.switch_buffer(state, restore_idx)
-  end
-
-  def on_cancel(state), do: state
+  def on_cancel(state), do: Source.restore_or_keep(state)
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
   defdelegate project_root, to: Minga.Project, as: :resolve_root
-
-  @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_buffer(file_path) do
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
-    )
-  end
 end

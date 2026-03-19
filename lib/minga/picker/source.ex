@@ -33,6 +33,7 @@ defmodule Minga.Picker.Source do
       end
   """
 
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Picker
 
   @typedoc "Context passed to `candidates/1` — typically editor state or options."
@@ -79,6 +80,18 @@ defmodule Minga.Picker.Source do
   @callback layout() :: layout()
 
   @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0]
+
+  @doc """
+  Default `on_cancel` implementation: restores the buffer that was active
+  when the picker opened (stored in `picker_ui.restore`), or returns state
+  unchanged if no restore index was saved.
+  """
+  @spec restore_or_keep(term()) :: term()
+  def restore_or_keep(%{picker_ui: %{restore: idx}} = state) when is_integer(idx) do
+    EditorState.switch_buffer(state, idx)
+  end
+
+  def restore_or_keep(state), do: state
 
   @doc """
   Returns whether a source module supports preview.
