@@ -116,6 +116,7 @@ defmodule Minga.Port.Protocol do
   @op_indent_result 0x37
   @op_textobject_result 0x38
   @op_textobject_positions 0x39
+  @op_conceal_spans 0x3A
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -188,6 +189,8 @@ defmodule Minga.Port.Protocol do
           | {:highlight_spans, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              [highlight_span()]}
           | {:highlight_names, buffer_id :: non_neg_integer(), [String.t()]}
+          | {:conceal_spans, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
+             [conceal_span()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
           | {:injection_ranges, buffer_id :: non_neg_integer(),
              [%{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}]}
@@ -783,6 +786,13 @@ defmodule Minga.Port.Protocol do
     {:ok, {:textobject_positions, buffer_id, version, positions}}
   end
 
+  def decode_event(<<@op_conceal_spans, buffer_id::32, version::32, count::32, rest::binary>>) do
+    case decode_conceal_spans(rest, count, []) do
+      {:ok, spans} -> {:ok, {:conceal_spans, buffer_id, version, spans}}
+      :error -> {:error, :malformed}
+    end
+  end
+
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do
     level = decode_log_level(level_byte)
     {:ok, {:log_message, level, msg}}
@@ -1000,6 +1010,29 @@ defmodule Minga.Port.Protocol do
   end
 
   defp decode_font_fallback_entries(_rest, _remaining, _acc), do: :error
+
+  @typedoc "A conceal span from tree-sitter: byte range + replacement text."
+  @type conceal_span :: %{
+          start_byte: non_neg_integer(),
+          end_byte: non_neg_integer(),
+          replacement: String.t()
+        }
+
+  @spec decode_conceal_spans(binary(), non_neg_integer(), [conceal_span()]) ::
+          {:ok, [conceal_span()]} | :error
+  defp decode_conceal_spans(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_conceal_spans(
+         <<start_byte::32, end_byte::32, rep_len::16, rep::binary-size(rep_len), rest::binary>>,
+         remaining,
+         acc
+       )
+       when remaining > 0 do
+    span = %{start_byte: start_byte, end_byte: end_byte, replacement: rep}
+    decode_conceal_spans(rest, remaining - 1, [span | acc])
+  end
+
+  defp decode_conceal_spans(_rest, _remaining, _acc), do: :error
 
   @spec decode_attrs(non_neg_integer()) :: [atom()]
   defp decode_attrs(attrs) do

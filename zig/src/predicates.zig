@@ -41,9 +41,14 @@ pub const Predicate = union(enum) {
 /// Pre-parsed predicate table for a query. Indexed by pattern_index.
 /// Each entry is null (no predicates) or a slice of predicates that
 /// must ALL pass for a match to be accepted.
+///
+/// Also stores `#set! conceal "X"` metadata per pattern. These are not
+/// filter predicates; they attach replacement text to matched captures.
 pub const PredicateTable = struct {
     /// One entry per pattern. null = no predicates (always passes).
     entries: []?[]const Predicate,
+    /// Conceal replacement per pattern. null = no conceal, empty = hide entirely.
+    conceal_replacements: []?[]const u8,
     allocator: std.mem.Allocator,
     /// Track compiled regexes for cleanup
     regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex),
@@ -52,16 +57,21 @@ pub const PredicateTable = struct {
     pub fn init(query: *c.TSQuery, allocator: std.mem.Allocator) PredicateTable {
         const pattern_count = c.ts_query_pattern_count(query);
         const entries = allocator.alloc(?[]const Predicate, pattern_count) catch
-            return .{ .entries = &.{}, .allocator = allocator, .regexes = .empty };
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
+
+        const conceal_reps = allocator.alloc(?[]const u8, pattern_count) catch
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
 
         var regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex) = .empty;
 
         for (0..pattern_count) |i| {
             entries[i] = parsePattern(query, @intCast(i), allocator, &regexes);
+            conceal_reps[i] = parseConcealDirective(query, @intCast(i));
         }
 
         return .{
             .entries = entries,
+            .conceal_replacements = conceal_reps,
             .allocator = allocator,
             .regexes = regexes,
         };
@@ -87,6 +97,18 @@ pub const PredicateTable = struct {
             }
         }
         self.allocator.free(self.entries);
+
+        // conceal_replacements are string slices pointing into the query's
+        // string table (owned by TSQuery), so we only free the slice itself.
+        if (self.conceal_replacements.len > 0) {
+            self.allocator.free(self.conceal_replacements);
+        }
+    }
+
+    /// Returns the conceal replacement for a pattern, or null if no conceal directive.
+    pub fn getConcealReplacement(self: *const PredicateTable, pattern_index: u32) ?[]const u8 {
+        if (pattern_index >= self.conceal_replacements.len) return null;
+        return self.conceal_replacements[pattern_index];
     }
 
     /// Evaluate all predicates for a given match. Returns true if all pass.
@@ -290,6 +312,54 @@ fn parsePredicate(
     }
 
     // Unknown predicate: ignore (e.g., #set!, #offset!, etc.)
+    return null;
+}
+
+/// Parse a `#set! conceal "X"` directive from a pattern's predicates.
+/// Returns the replacement string (from the query's string table) or null.
+fn parseConcealDirective(query: *c.TSQuery, pattern_index: u32) ?[]const u8 {
+    var step_count: u32 = 0;
+    const steps = c.ts_query_predicates_for_pattern(query, pattern_index, &step_count);
+    if (step_count == 0) return null;
+
+    var i: u32 = 0;
+    while (i < step_count) {
+        // First step must be the directive name (string type)
+        if (steps[i].type != c.TSQueryPredicateStepTypeString) {
+            while (i < step_count and steps[i].type != c.TSQueryPredicateStepTypeDone) : (i += 1) {}
+            if (i < step_count) i += 1;
+            continue;
+        }
+
+        var name_len: u32 = 0;
+        const name_ptr = c.ts_query_string_value_for_id(query, steps[i].value_id, &name_len);
+        const name = name_ptr[0..name_len];
+        i += 1;
+
+        // Look for: set! conceal "replacement"
+        if (std.mem.eql(u8, name, "set!")) {
+            // Need at least 2 more args before Done: property_name and value
+            if (i + 2 <= step_count and
+                steps[i].type == c.TSQueryPredicateStepTypeString and
+                steps[i + 1].type == c.TSQueryPredicateStepTypeString)
+            {
+                var prop_len: u32 = 0;
+                const prop_ptr = c.ts_query_string_value_for_id(query, steps[i].value_id, &prop_len);
+                const prop_name = prop_ptr[0..prop_len];
+
+                if (std.mem.eql(u8, prop_name, "conceal")) {
+                    var val_len: u32 = 0;
+                    const val_ptr = c.ts_query_string_value_for_id(query, steps[i + 1].value_id, &val_len);
+                    return val_ptr[0..val_len];
+                }
+            }
+        }
+
+        // Skip to next Done
+        while (i < step_count and steps[i].type != c.TSQueryPredicateStepTypeDone) : (i += 1) {}
+        if (i < step_count) i += 1;
+    }
+
     return null;
 }
 

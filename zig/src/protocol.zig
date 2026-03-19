@@ -86,6 +86,7 @@ pub const OP_INDENT_RESULT: u8 = 0x37;
 // Textobject responses (Zig → BEAM)
 pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
 pub const OP_TEXTOBJECT_POSITIONS: u8 = 0x39;
+pub const OP_CONCEAL_SPANS: u8 = 0x3A;
 
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
@@ -531,6 +532,38 @@ pub fn encodeHighlightSpans(allocator: std.mem.Allocator, buffer_id: u32, versio
         std.mem.writeInt(u16, buf[off + 8 ..][0..2], span.capture_id, .big);
         std.mem.writeInt(u16, buf[off + 10 ..][0..2], span.pattern_index, .big);
         std.mem.writeInt(u16, buf[off + 12 ..][0..2], span.layer, .big);
+    }
+
+    return buf;
+}
+
+/// Encodes conceal_spans: opcode(1) + buffer_id(4) + version(4) + count(4) +
+/// (start_byte:4 + end_byte:4 + replacement_len:2 + replacement) for each.
+pub fn encodeConcealSpans(
+    allocator: std.mem.Allocator,
+    buffer_id: u32,
+    version: u32,
+    spans: []const @import("highlighter.zig").ConcealSpan,
+) ![]u8 {
+    const header_size = 1 + 4 + 4 + 4; // opcode + buffer_id + version + count
+    var total: usize = header_size;
+    for (spans) |span| {
+        total += 4 + 4 + 2 + span.replacement.len; // start + end + rep_len + rep
+    }
+
+    const buf = try allocator.alloc(u8, total);
+    buf[0] = OP_CONCEAL_SPANS;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
+    std.mem.writeInt(u32, buf[5..9], version, .big);
+    std.mem.writeInt(u32, buf[9..13], @intCast(spans.len), .big);
+
+    var off: usize = header_size;
+    for (spans) |span| {
+        std.mem.writeInt(u32, buf[off..][0..4], span.start_byte, .big);
+        std.mem.writeInt(u32, buf[off + 4 ..][0..4], span.end_byte, .big);
+        std.mem.writeInt(u16, buf[off + 8 ..][0..2], @intCast(span.replacement.len), .big);
+        @memcpy(buf[off + 10 .. off + 10 + span.replacement.len], span.replacement);
+        off += 10 + span.replacement.len;
     }
 
     return buf;
