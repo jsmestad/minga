@@ -1127,7 +1127,7 @@ defmodule Minga.Editor.Commands.Agent do
       line_map = cached_or_compute_line_index(panel, messages)
 
       # panel.scroll.offset is synced to the buffer cursor line by
-      # AgentChatNav.sync_scroll_to_cursor, so it maps directly to
+      # AgentNav.sync_scroll_to_cursor, so it maps directly to
       # buffer line numbers.
       total = length(line_map)
       target = Minga.Scroll.resolve(panel.scroll, total, 1)

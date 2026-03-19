@@ -7,6 +7,7 @@ defmodule Minga.Integration.MouseTest do
   """
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree
   alias Minga.Test.StubServer
 
@@ -253,7 +254,9 @@ defmodule Minga.Integration.MouseTest do
       state_before = :sys.get_state(ctx.editor)
       viewport_before = state_before.viewport.top
 
-      # Scroll down in the agent pane area
+      # Scroll down in the agent pane area. After rendering convergence,
+      # chat scroll unpins the window and passes through to Editor.Mouse
+      # which scrolls the window viewport directly.
       send_mouse(ctx, 5, sep_col + 5, :wheel_down)
       send_mouse(ctx, 5, sep_col + 5, :wheel_down)
 
@@ -263,9 +266,14 @@ defmodule Minga.Integration.MouseTest do
       assert state_after.viewport.top == viewport_before,
              "scrolling over agent pane should not scroll editor viewport"
 
-      # Agent chat scroll offset should have increased
-      panel = state_after.agent_ui
-      assert panel.scroll.offset > 0, "agent chat scroll offset should increase on wheel_down"
+      # Agent chat window should be unpinned (scroll handled by standard mouse)
+      case EditorState.find_agent_chat_window(state_after) do
+        nil ->
+          :ok
+
+        {_win_id, window} ->
+          refute window.pinned, "agent chat window should be unpinned after scroll"
+      end
     end
 
     test "scroll wheel over editor area does not scroll agent chat" do

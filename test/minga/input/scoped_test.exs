@@ -197,19 +197,19 @@ defmodule Minga.Input.ScopedTest do
       {:ok, state: base_state(keymap_scope: :agent, agentic_active: true)}
     end
 
-    test "j passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+    test "j passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
       assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
-      # Full chain handling (through AgentChatNav)
+      # Full chain handling (through AgentNav)
       assert {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
 
-    test "k passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+    test "k passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
       assert {:passthrough, _} = Scoped.handle_key(state, ?k, 0)
       # Full chain handling
       assert {:handled, _} = walk_surface_handlers(state, ?k, 0)
     end
 
-    test "G passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+    test "G passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
       assert {:passthrough, _} = Scoped.handle_key(state, ?G, 0)
       # Full chain handling
       assert {:handled, _} = walk_surface_handlers(state, ?G, 0)
@@ -285,9 +285,10 @@ defmodule Minga.Input.ScopedTest do
       assert {:handled, _} = Scoped.handle_key(g_state, ?g, 0)
     end
 
-    test "/ starts search", %{state: state} do
-      {:handled, new_state} = Scoped.handle_key(state, ?/, 0)
-      assert UIState.searching?(AgentAccess.agent_ui(new_state))
+    test "/ passthrough for standard vim search", %{state: state} do
+      # After #631, `/` is no longer bound in the agent scope trie.
+      # It passes through to AgentNav → Mode FSM for standard buffer search.
+      assert {:passthrough, _} = Scoped.handle_key(state, ?/, 0)
     end
 
     test "panel resize keys work", %{state: state} do
@@ -310,13 +311,13 @@ defmodule Minga.Input.ScopedTest do
                AgentAccess.agent_ui(state).chat_width_pct
     end
 
-    test "Ctrl+D passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+    test "Ctrl+D passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
       assert {:passthrough, _} = Scoped.handle_key(state, ?d, 0x02)
       # Full chain handling
       assert {:handled, _} = walk_surface_handlers(state, ?d, 0x02)
     end
 
-    test "Ctrl+U passthrough (handled by AgentChatNav → Mode FSM)", %{state: state} do
+    test "Ctrl+U passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
       assert {:passthrough, _} = Scoped.handle_key(state, ?u, 0x02)
       # Full chain handling
       assert {:handled, _} = walk_surface_handlers(state, ?u, 0x02)
@@ -331,9 +332,9 @@ defmodule Minga.Input.ScopedTest do
     end
 
     test "unbound key passthrough to Mode FSM", %{state: state} do
-      # tilde is not bound in agent scope, passes through to AgentChatNav → Mode FSM
+      # tilde is not bound in agent scope, passes through to AgentNav → Mode FSM
       assert {:passthrough, _} = Scoped.handle_key(state, ?~, 0)
-      # Full chain handling (AgentChatNav routes to Mode FSM)
+      # Full chain handling (AgentNav routes to Mode FSM)
       assert {:handled, _} = walk_surface_handlers(state, ?~, 0)
     end
   end
@@ -377,22 +378,16 @@ defmodule Minga.Input.ScopedTest do
     end
   end
 
-  describe "agent scope — search sub-state" do
-    test "search input captures printable chars" do
+  describe "agent scope — search (standard vim)" do
+    test "/ passes through to standard vim search" do
+      # After #631, search is handled by the standard Mode FSM.
+      # `/` is no longer bound in the agent scope trie.
       state = base_state(keymap_scope: :agent, agentic_active: true)
-      {:handled, searching} = Scoped.handle_key(state, ?/, 0)
-      assert UIState.searching?(AgentAccess.agent_ui(searching))
+      assert {:passthrough, _} = Scoped.handle_key(state, ?/, 0)
 
-      # Type a search char (goes through AgentSearch handler now)
-      {:handled, with_char} = walk_surface_handlers(searching, ?h, 0)
-      assert UIState.search_query(AgentAccess.agent_ui(with_char)) == "h"
-    end
-
-    test "ESC cancels search" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-      {:handled, searching} = Scoped.handle_key(state, ?/, 0)
-      {:handled, cancelled} = walk_surface_handlers(searching, 27, 0)
-      refute UIState.searching?(AgentAccess.agent_ui(cancelled))
+      # Full handler chain handles it (AgentNav → Mode FSM enters search mode)
+      {:handled, new_state} = walk_surface_handlers(state, ?/, 0)
+      assert new_state.vim.mode == :search
     end
   end
 
@@ -411,16 +406,16 @@ defmodule Minga.Input.ScopedTest do
       {:passthrough, new_state} = Scoped.handle_key(state, ?j, 0)
       # Toast should be dismissed
       refute UIState.toast_visible?(AgentAccess.agent_ui(new_state))
-      # Full chain still handles the key (through AgentChatNav)
+      # Full chain still handles the key (through AgentNav)
       {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
   end
 
   describe "agent scope — file viewer focus" do
-    test "j passthrough, handled by AgentChatNav in file_viewer focus" do
+    test "j passthrough, handled by AgentNav in file_viewer focus" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
       assert {:passthrough, _} = Scoped.handle_key(state, ?j, 0)
-      # Full chain handling through AgentChatNav
+      # Full chain handling through AgentNav
       assert {:handled, _} = walk_surface_handlers(state, ?j, 0)
     end
 
