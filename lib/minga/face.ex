@@ -20,10 +20,10 @@ defmodule Minga.Face do
 
   ## GUI-only fields
 
-  `font_family`, `font_weight`, `font_slant`, `font_size_delta`, and
-  `font_features` are silently ignored in the TUI backend. The TUI
-  uses bold/italic attrs from the base fields; the GUI uses the font
-  fields to select specific font variants.
+  `font_family`, `font_weight`, `font_slant`, and `font_features` are
+  silently ignored in the TUI backend. The TUI uses bold/italic attrs
+  from the base fields; the GUI uses the font fields to select specific
+  font variants.
 
   ## Blend
 
@@ -50,7 +50,6 @@ defmodule Minga.Face do
             font_family: nil,
             font_weight: nil,
             font_slant: nil,
-            font_size_delta: nil,
             font_features: nil
 
   @typedoc "RGB color as a 24-bit integer (e.g., `0xFF6C6B`)."
@@ -81,7 +80,6 @@ defmodule Minga.Face do
           font_family: String.t() | nil,
           font_weight: font_weight() | nil,
           font_slant: font_slant() | nil,
-          font_size_delta: integer() | nil,
           font_features: %{String.t() => boolean()} | nil
         }
 
@@ -108,7 +106,6 @@ defmodule Minga.Face do
       font_family: nil,
       font_weight: :regular,
       font_slant: :roman,
-      font_size_delta: 0,
       font_features: nil
     }
   end
@@ -149,8 +146,7 @@ defmodule Minga.Face do
     :reverse,
     :blend,
     :font_weight,
-    :font_slant,
-    :font_size_delta
+    :font_slant
   ]
 
   # All inheritable fields: required fields + fields where nil is a
@@ -315,7 +311,6 @@ defmodule Minga.Face do
       font_family: Keyword.get(style, :font_family),
       font_weight: Keyword.get(style, :font_weight),
       font_slant: Keyword.get(style, :font_slant),
-      font_size_delta: Keyword.get(style, :font_size_delta),
       font_features: Keyword.get(style, :font_features)
     }
   end

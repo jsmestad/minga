@@ -26,17 +26,6 @@ defmodule Minga.Editor.Renderer.Caps do
   def render_overlays?(%Capabilities{}), do: true
 
   @doc """
-  Returns true if the BEAM should use round-trip text measurement
-  (measure_text/text_width opcodes) instead of BEAM-side width tables.
-
-  Proportional-font frontends need the frontend to measure text width
-  because character widths vary by glyph and font metrics.
-  """
-  @spec measure_text_remotely?(Capabilities.t()) :: boolean()
-  def measure_text_remotely?(%Capabilities{text_rendering: :proportional}), do: true
-  def measure_text_remotely?(%Capabilities{}), do: false
-
-  @doc """
   Degrades a 24-bit RGB color to the nearest 256-color or monochrome
   equivalent based on the frontend's color depth.
 

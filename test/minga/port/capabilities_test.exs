@@ -16,11 +16,6 @@ defmodule Minga.Port.CapabilitiesTest do
       assert Capabilities.native_floats?(%Capabilities{float_support: :native})
     end
 
-    test "proportional?/1" do
-      refute Capabilities.proportional?(%Capabilities{text_rendering: :monospace})
-      assert Capabilities.proportional?(%Capabilities{text_rendering: :proportional})
-    end
-
     test "rgb?/1" do
       assert Capabilities.rgb?(%Capabilities{color_depth: :rgb})
       refute Capabilities.rgb?(%Capabilities{color_depth: :color_256})
@@ -44,7 +39,6 @@ defmodule Minga.Port.CapabilitiesTest do
       assert caps.unicode_width == :unicode_15
       assert caps.image_support == :kitty
       assert caps.float_support == :native
-      assert caps.text_rendering == :proportional
     end
 
     test "returns defaults for invalid binary" do

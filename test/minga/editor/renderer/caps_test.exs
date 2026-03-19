@@ -14,16 +14,6 @@ defmodule Minga.Editor.Renderer.CapsTest do
     end
   end
 
-  describe "measure_text_remotely?/1" do
-    test "false for monospace (TUI default)" do
-      refute Caps.measure_text_remotely?(%Capabilities{text_rendering: :monospace})
-    end
-
-    test "true for proportional fonts" do
-      assert Caps.measure_text_remotely?(%Capabilities{text_rendering: :proportional})
-    end
-  end
-
   describe "adapt_color/2" do
     test "passes through for RGB" do
       assert Caps.adapt_color(0xFF6C6B, %Capabilities{color_depth: :rgb}) == 0xFF6C6B
