@@ -89,11 +89,7 @@ defmodule Minga.Input.AgentChatNav do
     agent = AgentAccess.agent(state)
 
     if is_pid(agent.buffer) do
-      try do
-        {:handled, delegate_to_mode_fsm(state, agent.buffer, cp, mods)}
-      catch
-        :exit, _ -> {:passthrough, state}
-      end
+      {:handled, delegate_to_mode_fsm(state, agent.buffer, cp, mods)}
     else
       {:passthrough, state}
     end

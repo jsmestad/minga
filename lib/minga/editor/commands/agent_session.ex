@@ -54,7 +54,7 @@ defmodule Minga.Editor.Commands.AgentSession do
           if AgentAccess.agent(state).buffer == nil do
             buf = AgentBufferSync.start_buffer()
             state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buf))
-            # Register with tree-sitter parser for markdown highlighting
+            state = EditorState.monitor_buffer(state, buf)
             AgentLifecycle.setup_agent_highlight(state)
           else
             state
