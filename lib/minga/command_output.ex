@@ -18,6 +18,7 @@ defmodule Minga.CommandOutput do
   @type t :: %__MODULE__{
           name: String.t(),
           buffer: pid() | nil,
+          buffer_monitor: reference() | nil,
           port: port() | nil,
           command: String.t() | nil,
           cwd: String.t() | nil,
@@ -27,6 +28,7 @@ defmodule Minga.CommandOutput do
 
   defstruct name: nil,
             buffer: nil,
+            buffer_monitor: nil,
             port: nil,
             command: nil,
             cwd: nil,
@@ -147,33 +149,25 @@ defmodule Minga.CommandOutput do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) when is_binary(data) do
-    if state.buffer do
-      try do
-        BufferServer.append(state.buffer, data)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
+    if state.buffer, do: BufferServer.append(state.buffer, data)
     {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    status_line = "\n\n[Process exited with code #{code}]"
-
     if state.buffer do
-      try do
-        BufferServer.append(state.buffer, status_line)
-      catch
-        :exit, _ -> :ok
-      end
+      BufferServer.append(state.buffer, "\n\n[Process exited with code #{code}]")
     end
 
     {:noreply, %{state | port: nil, exit_code: code, running?: false}}
   end
 
-  # Ignore messages from old ports
-  def handle_info({_port, _}, state), do: {:noreply, state}
+  # Buffer died — clear the stale pid so we recreate on next use.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{buffer_monitor: ref} = state) do
+    {:noreply, %{state | buffer: nil, buffer_monitor: nil}}
+  end
+
+  # Ignore messages from old ports or stale monitors
+  def handle_info(_msg, state), do: {:noreply, state}
 
   # ── Private ────────────────────────────────────────────────────────────────
 
@@ -202,6 +196,8 @@ defmodule Minga.CommandOutput do
 
   @spec create_buffer(t()) :: t()
   defp create_buffer(state) do
+    if state.buffer_monitor, do: Process.demonitor(state.buffer_monitor, [:flush])
+
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
            {BufferServer,
@@ -211,8 +207,12 @@ defmodule Minga.CommandOutput do
             unlisted: true,
             persistent: true}
          ) do
-      {:ok, pid} -> %{state | buffer: pid}
-      _ -> state
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+        %{state | buffer: pid, buffer_monitor: ref}
+
+      _ ->
+        %{state | buffer: nil, buffer_monitor: nil}
     end
   end
 
