@@ -8,6 +8,7 @@ defmodule Minga.Picker.FileSource do
 
   @behaviour Minga.Picker.Source
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
