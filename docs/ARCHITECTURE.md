@@ -8,7 +8,7 @@ How a text editor built on process isolation and preemptive concurrency actually
 
 Most text editors are single-threaded programs with shared state. Buffers, rendering, input handling, plugin execution, AI agents: all living in one address space, contending for one event loop. When a background task does heavy work, your keystrokes queue up. When two things modify the same buffer, you get race conditions. When you want to know what a plugin is doing, you add `print` statements and restart.
 
-Minga splits the editor into **two OS processes** with completely isolated memory:
+Minga splits the editor into **separate OS processes** with completely isolated memory: a BEAM process for all editor logic, and one or more frontend processes for rendering and input.
 
 ```mermaid
 graph LR
@@ -25,27 +25,54 @@ graph LR
         ED2 --> PORT
     end
 
-    subgraph ZIG["Zig + libvaxis"]
-        EVLOOP["Event Loop"]
-        PROTO["Protocol<br/>decoder/encoder"]
-        RENDER["Renderer<br/>cell grid"]
-        TS["Tree-sitter<br/>parser"]
-        TTY["/dev/tty<br/>terminal I/O"]
+    subgraph SWIFT["Swift + Metal (macOS)"]
+        SW_PROTO["Protocol<br/>decoder/encoder"]
+        SW_CHROME["SwiftUI<br/>native chrome"]
+        SW_RENDER["Metal<br/>editor surface"]
+        SW_WIN["NSWindow"]
 
-        EVLOOP <--> PROTO
+        SW_PROTO --> SW_CHROME
+        SW_PROTO --> SW_RENDER
+        SW_CHROME --> SW_WIN
+        SW_RENDER --> SW_WIN
+    end
+
+    subgraph GTK["GTK4 (Linux, planned)"]
+        GTK_PROTO["Protocol<br/>decoder/encoder"]
+        GTK_CHROME["GTK4<br/>native chrome"]
+        GTK_RENDER["Cairo/GL<br/>editor surface"]
+
+        GTK_PROTO --> GTK_CHROME
+        GTK_PROTO --> GTK_RENDER
+    end
+
+    subgraph ZIG["Zig + libvaxis (TUI)"]
+        EVLOOP["Event Loop"]
+        ZIG_PROTO["Protocol<br/>decoder/encoder"]
+        RENDER["Renderer<br/>cell grid"]
+        TTY["/dev/tty"]
+
+        EVLOOP <--> ZIG_PROTO
         EVLOOP <--> RENDER
-        EVLOOP <--> TS
         RENDER <--> TTY
     end
 
-    PORT -- "render commands<br/>(draw_text, set_cursor, clear)" --> PROTO
-    PROTO -- "input events<br/>(key_press, resize, highlights)" --> PORT
+    PORT -- "render commands + GUI chrome" --> SW_PROTO
+    SW_PROTO -- "input events" --> PORT
+
+    PORT -. "render commands + GUI chrome" .-> GTK_PROTO
+    GTK_PROTO -. "input events" .-> PORT
+
+    PORT -- "render commands" --> ZIG_PROTO
+    ZIG_PROTO -- "input events + highlights" --> PORT
 
     style BEAM fill:#1a1a2e,stroke:#6c3483,color:#fff
-    style ZIG fill:#1a2e1a,stroke:#1e8449,color:#fff
+    style SWIFT fill:#1a2e1a,stroke:#1e8449,color:#fff
+    style GTK fill:#2e1a1a,stroke:#844935,color:#fff
+    style ZIG fill:#1a1a1a,stroke:#666666,color:#fff
 ```
 
-The two processes communicate over a binary protocol on stdin/stdout. They share no memory. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
+All frontends communicate with the BEAM over the same binary protocol on stdin/stdout. They share no memory. The BEAM is the single source of truth for all editor state; frontends are "dumb" renderers and input sources. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
 
 This isn't a workaround for a limitation. It's the whole point.
 
@@ -117,14 +144,16 @@ graph TD
     SUP --> SVC["Services.Supervisor<br/><i>LSP, extensions, diagnostics, agents</i>"]
     SUP --> RT["Runtime.Supervisor<br/><i>renderer, parser, editor orchestration</i>"]
 
-    RT -. "stdin/stdout" .-> ZIG["Zig Processes<br/><i>renderer + parser</i>"]
+    RT -. "stdin/stdout" .-> FE["Frontend Process<br/><i>Swift/Metal, GTK4, or Zig/libvaxis</i>"]
+    RT -. "stdin/stdout" .-> PARSER["Parser Process<br/><i>Zig + tree-sitter</i>"]
 
     style SUP fill:#6c3483,stroke:#4a235a,color:#fff
     style FOUND fill:#6c3483,stroke:#4a235a,color:#fff
     style BUFSUP fill:#1a5276,stroke:#154360,color:#fff
     style SVC fill:#6c3483,stroke:#4a235a,color:#fff
     style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
-    style ZIG fill:#1e8449,stroke:#196f3d,color:#fff
+    style FE fill:#1e8449,stroke:#196f3d,color:#fff
+    style PARSER fill:#1e8449,stroke:#196f3d,color:#fff
 ```
 
 ### Foundation tier
@@ -219,7 +248,7 @@ graph TD
     EDSUP --> PM["Port.Manager"]
     EDSUP --> ED["Editor"]
 
-    PM -. "stdin/stdout<br/>Port protocol" .-> ZIG_R["minga-renderer<br/><i>Zig + libvaxis</i>"]
+    PM -. "stdin/stdout<br/>Port protocol" .-> FE["Frontend<br/><i>Swift/Metal, GTK4, or Zig/libvaxis</i>"]
     PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
 
     style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
@@ -228,7 +257,7 @@ graph TD
     style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
     style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
     style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
-    style ZIG_R fill:#1e8449,stroke:#196f3d,color:#fff
+    style FE fill:#1e8449,stroke:#196f3d,color:#fff
     style ZIG_P fill:#1e8449,stroke:#196f3d,color:#fff
 ```
 
@@ -240,24 +269,33 @@ The system degrades in pieces rather than failing all at once. The BEAM was desi
 
 ---
 
-## Why Zig for Rendering?
+## Why Native Frontends?
 
-The BEAM is excellent at concurrency and isolation. It is terrible at drawing characters on a terminal. It has no concept of raw terminal mode, ANSI escape sequences, or low-level input decoding.
+The BEAM is excellent at concurrency and isolation. It is terrible at putting pixels on screen. It has no concept of terminal modes, GPU rendering, or native window systems. Minga solves this by running frontends as separate OS processes that communicate with the BEAM over a binary protocol.
 
-Rather than fight this with NIFs (which run inside the BEAM process and compromise isolation when they fail) or Ports to C (which require manual memory management), Minga uses **Zig**:
+### Platform-native rendering (GUI-first)
 
-- **No hidden allocations:** every byte of memory is explicit
+Minga's primary frontends use platform-native toolkits for the best possible user experience:
+
+- **macOS: Swift + Metal.** SwiftUI renders chrome (tab bar, file tree, status bar, popups) as native views. Metal renders the editor text surface with GPU-accelerated glyph rasterization via CoreText. This gives macOS users native scrolling, system fonts, trackpad gestures, and full accessibility support.
+- **Linux: GTK4 (planned).** GTK4 widgets for chrome, Cairo or OpenGL for the text surface. Native Wayland/X11 integration, IME support, system theming.
+- **TUI: Zig + libvaxis.** For terminal users. [libvaxis](https://github.com/rockorager/libvaxis) handles terminal differences, Unicode width calculation, and cell-level diffing.
+
+Each frontend is a "dumb" renderer: it reads binary commands from stdin, draws them, and writes input events back to stdout. All intelligence lives in the BEAM.
+
+### Why Zig for the TUI and parser?
+
+Zig fills two roles: the TUI terminal renderer and the tree-sitter parser process. It's a good fit for both because:
+
 - **Compiles C natively:** tree-sitter grammars (written in C) compile as part of the Zig build with zero FFI overhead
-- **Safety without runtime cost:** bounds checking, null safety in debug; zero overhead in release
+- **No hidden allocations:** important for the parser's memory-sensitive hot loop
 - **Single binary output:** no dynamic linking, no runtime dependencies
-
-The Zig process uses [libvaxis](https://github.com/rockorager/libvaxis) for terminal rendering, a modern library that handles the enormous complexity of terminal emulator differences, Unicode width calculation, and efficient screen updates.
 
 ### Why not a NIF?
 
 NIFs (Native Implemented Functions) run inside the BEAM process. A failure in a NIF takes down the entire Erlang VM: every buffer, every process, everything. This directly contradicts Minga's isolation model.
 
-A Port is an OS-level process boundary. The Zig renderer can fail completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Port Manager, and the Editor re-renders. Your data stays intact because it lives in completely separate processes.
+A Port is an OS-level process boundary. A frontend can crash completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Port Manager, and the Editor re-renders. Your data stays intact because it lives in completely separate processes.
 
 ---
 
@@ -271,39 +309,36 @@ The protocol has 20+ opcodes covering rendering, input, syntax highlighting, and
 
 ```mermaid
 graph LR
-    subgraph ZigToBEAM["Zig → BEAM"]
+    subgraph FrontendToBEAM["Frontend → BEAM"]
         K["0x01 Key Press<br/>codepoint::32, mods::8"]
         R["0x02 Resize<br/>width::16, height::16"]
-        RDY["0x03 Ready<br/>width::16, height::16"]
-        M["0x04 Mouse<br/>row, col, button, mods, type"]
+        RDY["0x03 Ready<br/>width::16, height::16, capabilities"]
+        M["0x04 Mouse<br/>row, col, button, mods, type, clicks"]
+        GA["0x07 GUI Action<br/>tab click, tree click, etc."]
         HS["0x30 Highlight Spans<br/>version, count, [start, end, id]"]
         HN["0x31 Highlight Names<br/>count, [len, name]"]
-        GL["0x32 Grammar Loaded<br/>success, name"]
     end
 
-    subgraph BEAMToZig["BEAM → Zig"]
+    subgraph BEAMToFrontend["BEAM → Frontend"]
         DT["0x10 Draw Text<br/>row, col, fg, bg, attrs, text"]
         SC["0x11 Set Cursor<br/>row::16, col::16"]
         CL["0x12 Clear"]
         BE["0x13 Batch End<br/>(flush frame)"]
         CS["0x15 Cursor Shape<br/>block/beam/underline"]
-        SL["0x20 Set Language"]
-        PB["0x21 Parse Buffer"]
-        SH["0x22 Set Highlight Query"]
-        LG["0x23 Load Grammar"]
+        GUI["0x70-0x78 GUI Chrome<br/>tabs, tree, status, popups"]
     end
 
-    style ZigToBEAM fill:#1a2e1a,stroke:#1e8449,color:#fff
-    style BEAMToZig fill:#1a1a2e,stroke:#6c3483,color:#fff
+    style FrontendToBEAM fill:#1a2e1a,stroke:#1e8449,color:#fff
+    style BEAMToFrontend fill:#1a1a2e,stroke:#6c3483,color:#fff
 ```
 
-For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. That document is the authoritative reference for anyone implementing a Minga frontend.
+For the full specification with byte-level field descriptions, sequencing rules, and implementation guidance, see **[docs/PROTOCOL.md](PROTOCOL.md)**. For the GUI chrome opcodes sent only to native frontends (SwiftUI, GTK4), see **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)**.
 
-Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend.
+Any process that implements the `Minga.Port.Frontend` behaviour (see `lib/minga/port/frontend.ex`) and speaks this protocol can serve as a Minga rendering backend. The macOS Swift frontend and Zig TUI are the current implementations; a GTK4 Linux frontend is planned.
 
 ### Display List (Rendering IR)
 
-The BEAM side owns a **display list** of styled text runs that sits between editor state and protocol encoding. This intermediate representation is the single source of truth for "what's on screen" and is consumed by all frontends (TUI, future macOS GUI, future Linux GUI).
+The BEAM side owns a **display list** of styled text runs that sits between editor state and protocol encoding. This intermediate representation is the single source of truth for "what's on screen" and is consumed by all frontends (macOS GUI, Linux GUI, TUI).
 
 The display list uses **styled text runs**, not a cell grid. A cell grid is terminal-shaped and would force GUI frontends to fake a terminal. Styled text runs stay line-and-column based (monospaced editing model) while being abstract enough for both TUI and GUI frontends:
 
@@ -323,11 +358,11 @@ The display list uses **styled text runs**, not a cell grid. A cell grid is term
 }
 ```
 
-Each frontend does the last-mile translation. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). A GUI frontend converts the same run into an attributed string draw at a pixel position derived from the monospaced font metrics. The IR doesn't change; only the frontend's interpretation does.
+Each frontend does the last-mile translation. The macOS GUI converts text runs into CoreText attributed strings drawn on a Metal surface at pixel positions derived from the font metrics. The TUI frontend converts text runs into terminal cells (a run `{5, "hello", green}` becomes five green cells at columns 5-9). The IR doesn't change; only the frontend's interpretation does.
 
-This design also keeps the door open for variable-width font support in future GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
+GUI frontends also receive **structured chrome data** (opcodes 0x70-0x78) for native UI elements: tab bars, file trees, status bars, which-key popups, completion menus, and agent chat views. These are rendered as platform-native widgets (SwiftUI views, GTK4 widgets) rather than painted as cells. See **[docs/GUI_PROTOCOL.md](GUI_PROTOCOL.md)** for the full specification.
 
-See **[docs/RENDERING_GAPS.md](RENDERING_GAPS.md)** for the full rendering pipeline analysis and implementation plan.
+This design also supports variable-width font rendering in GUI frontends. The IR uses character offsets, not pixel positions. A monospaced frontend multiplies by cell width; a proportional frontend measures the preceding characters to find the pixel X. The `measure_text` / `text_width` protocol opcodes handle the cases where the BEAM needs to query the frontend for precise measurements.
 
 ---
 
@@ -337,16 +372,14 @@ Here's what happens when you press `dd` (delete a line) in normal mode. The enti
 
 ```mermaid
 sequenceDiagram
-    participant Term as Terminal
-    participant Zig as Zig Process
+    participant FE as Frontend<br/>(Swift, GTK4, or Zig)
     participant PM as Port.Manager
     participant Ed as Editor
     participant Mode as Mode.Normal
     participant Buf as Buffer.Server
 
-    Term->>Zig: raw key bytes
-    Zig->>Zig: libvaxis decodes key
-    Zig->>PM: key_press(0x01) via stdout
+    FE->>FE: decode platform input event
+    FE->>PM: key_press(0x01) via stdout
 
     Note over Ed,Mode: First 'd'
     PM->>Ed: {:key_event, :d}
@@ -364,9 +397,8 @@ sequenceDiagram
     Note over Ed,Term: Render cycle
     Ed->>Ed: build render snapshot
     Ed->>PM: [clear, draw_text x N, set_cursor, batch_end]
-    PM->>Zig: render commands via stdin
-    Zig->>Zig: update cell grid (double-buffered)
-    Zig->>Term: write changed cells
+    PM->>FE: render commands via stdin
+    FE->>FE: render to screen (Metal/GTK4/terminal)
 ```
 
 ### Keymap Scopes
@@ -621,10 +653,11 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 These guide what we build and how:
 
+- **GUI-first, TUI-capable** — Design for native GUI frontends (Swift/Metal, GTK4) first. The TUI is a capable fallback, like Emacs's terminal mode, not the primary target.
 - **Fault tolerance over speed** — The BEAM's supervision model means crashes are recoverable events, not catastrophes.
-- **Two-process isolation** — Editor state and rendering never share memory; either can fail independently.
+- **Process isolation** — Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
 - **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus.
-- **Elixir for logic, Zig for pixels** — Each language where it excels.
+- **Elixir for logic, platform-native rendering** — The BEAM handles everything a text editor needs to think about. Swift, GTK4, and Zig handle everything a display needs to draw.
 - **Test everything** — Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
 - **Convention over configuration** — Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them.
 - **Core vs. extension** — If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
@@ -638,7 +671,7 @@ Honest accounting of what this architecture costs:
 | Trade-off | Why we accept it |
 |-----------|-----------------|
 | **Serialization overhead** (every render frame crosses a process boundary) | The protocol is ~50 bytes per draw command. At 60fps with 50 visible lines, that's ~150KB/s, trivial for a pipe. |
-| **Two binaries to ship** (Elixir release + Zig executable) | Burrito packages everything into a single distributable binary. |
+| **Multiple binaries to ship** (Elixir release + platform frontend) | macOS: `.app` bundle. Linux: Flatpak/AppImage. TUI: Burrito single binary. |
 | **BEAM startup time** (the Erlang VM isn't instant) | ~200ms cold start. Acceptable for an editor you keep open. |
 | **Memory overhead** (the BEAM VM has a baseline footprint) | ~30MB for the VM + processes. Comparable to Neovim with plugins. |
 | **Latency floor** (message passing adds microseconds vs direct function calls) | Measured end-to-end keystroke latency is <1ms. Below human perception. |

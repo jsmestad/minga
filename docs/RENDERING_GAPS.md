@@ -6,7 +6,7 @@ This document was originally written to identify missing architectural primitive
 
 ## Architecture Overview
 
-Minga's two-process architecture (BEAM for logic, Zig for terminal output) remains the foundation. The BEAM side owns all rendering decisions: layout, content composition, dirty tracking, caching. The Zig side is a thin terminal adapter that receives draw commands and puts cells on screen via libvaxis.
+Minga's multi-process architecture (BEAM for logic, platform-native frontends for display) is the foundation. The BEAM side owns all rendering decisions: layout, content composition, dirty tracking, caching. Frontends are thin adapters that receive draw commands and put pixels on screen. The macOS GUI (Swift/Metal) renders editor content on a Metal surface and chrome via SwiftUI. The TUI (Zig/libvaxis) renders to terminal cells. A Linux GUI (GTK4) is planned.
 
 The rendering pipeline lives in `Minga.Editor.RenderPipeline` and runs seven named stages per frame:
 
@@ -133,15 +133,20 @@ With all gaps closed, the rendering pipeline has these properties:
 - **Context changes** (entering/leaving visual mode, search highlight updates, new syntax highlights) trigger full redraws via the context fingerprint mechanism.
 - **Per-stage timing** is available at debug log level for profiling.
 
-## Relationship to the Zig Renderer
+## Relationship to the Frontends
 
-The Zig side (`zig/src/renderer.zig`) is intentionally thin: ~430 lines that translate protocol commands into libvaxis cell writes. It handles:
+Each frontend is intentionally thin. The BEAM side's dirty-line tracking reduces how much data crosses the Port boundary; the frontend's own optimizations reduce how much data hits the display.
 
-- `draw_text`: grapheme iteration, display width calculation, cell writes with region clipping
-- `set_cursor` / `set_cursor_shape`: cursor positioning
-- `define_region` / `set_active_region` / `clear_region`: region management
-- `batch_end`: triggers libvaxis frame diff and terminal flush
+### macOS GUI (Swift/Metal)
 
-libvaxis provides cell-level diffing (only changed cells are written to the terminal), grapheme cluster handling, and terminal capability detection. The BEAM side's dirty-line tracking reduces how much data crosses the Port boundary; libvaxis's cell diffing reduces how much data hits the terminal. Both layers contribute to rendering efficiency.
+The macOS frontend (`macos/Sources/`) handles two categories of rendering:
+- **Editor surface:** Metal renders the cell grid (text content, gutter, minibuffer). `CommandDispatcher` routes decoded commands to `CellGrid`, and `MetalRenderer` paints the grid with instanced glyph draws.
+- **Native chrome:** SwiftUI views render tab bar, file tree, status bar, which-key popup, completion menu, breadcrumb, and agent chat. These consume structured data from GUI chrome opcodes (0x70-0x78), not cell-grid commands.
 
-The `Surface` interface (`zig/src/surface.zig`) abstracts the terminal backend, enabling future backends (e.g., a Metal-based GUI surface) to implement the same 7-method interface without changing the renderer or protocol.
+### TUI (Zig/libvaxis)
+
+The Zig renderer (`zig/src/renderer.zig`) is ~430 lines that translate protocol commands into libvaxis cell writes. It handles `draw_text`, `set_cursor`, region management, and `batch_end` (which triggers libvaxis's cell-level diffing and terminal flush). libvaxis provides grapheme cluster handling and terminal capability detection.
+
+### Linux GUI (GTK4, planned)
+
+Will follow the same architecture as macOS: platform-native widgets for chrome, GPU-accelerated or Cairo-based rendering for the editor text surface. Implements the same protocol spec documented in [PROTOCOL.md](PROTOCOL.md) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).

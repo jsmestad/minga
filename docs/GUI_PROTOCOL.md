@@ -334,11 +334,22 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 
 ## Implementation References
 
+### BEAM (canonical source of truth)
+
 | Component | File | Language |
 |-----------|------|----------|
 | Encoder | `lib/minga/port/protocol/gui.ex` | Elixir |
 | Theme slot mapping | `lib/minga/theme/slots.ex` | Elixir |
+| Integration tests | `test/minga/integration/gui_protocol_test.exs` | Elixir |
+
+### macOS GUI
+
+| Component | File | Language |
+|-----------|------|----------|
 | Decoder | `macos/Sources/Protocol/ProtocolDecoder.swift` | Swift |
 | Constants | `macos/Sources/Protocol/ProtocolConstants.swift` | Swift |
 | Test harness | `macos/TestHarness/main.swift` | Swift |
-| Integration tests | `test/minga/integration/gui_protocol_test.exs` | Elixir |
+
+### Linux GUI (planned)
+
+The GTK4 frontend will need its own protocol decoder implementing the same opcodes. When building it, use the BEAM encoder and integration tests as the reference, not the Swift decoder (which may have platform-specific assumptions).
