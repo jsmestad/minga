@@ -208,6 +208,20 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — agent commands" do
+    test ":agent-clear-history parses to {:agent_clear_history, []}" do
+      assert {:agent_clear_history, []} = Parser.parse("agent-clear-history")
+    end
+
+    test ":agent-stop parses to {:agent_abort, []}" do
+      assert {:agent_abort, []} = Parser.parse("agent-stop")
+    end
+
+    test ":agent-new parses to {:agent_new_session, []}" do
+      assert {:agent_new_session, []} = Parser.parse("agent-new")
+    end
+  end
+
   describe "parse/1 — parser commands" do
     test ":parser-restart parses to {:parser_restart, []}" do
       assert {:parser_restart, []} = Parser.parse("parser-restart")
