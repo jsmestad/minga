@@ -2,12 +2,20 @@
 
 ## Project Overview
 
-Minga is a BEAM-powered modal text editor with a Zig terminal renderer. Read `PLAN.md` for full architecture and implementation roadmap. Read `docs/ARCHITECTURE.md` for the two-process design and its benefits.
+Minga is a BEAM-powered modal text editor with native GUI frontends. The editor core runs on the Erlang VM (Elixir), and platform-native frontends handle rendering and input. Read `docs/ARCHITECTURE.md` for the multi-frontend design and its benefits.
+
+## Strategic Direction: GUI-First
+
+Native GUI experiences lead the design. The macOS frontend (Swift/Metal) is the most mature and sets the quality bar. A Linux frontend (GTK4) is planned. The TUI frontend (Zig/libvaxis) continues to ship features, but new work is designed for GUI frontends first. Think Emacs: the GUI is the primary experience, the terminal mode is a capable fallback that benefits from the same core improvements.
+
+When building new features, design for the GUI rendering path first, then ensure the TUI has a reasonable equivalent.
 
 ## Tech Stack
 
 - **Elixir 1.19** / OTP 28 — editor core (buffers, modes, commands, orchestration)
-- **Zig 0.15** with libvaxis — terminal rendering (runs as BEAM Port)
+- **Swift 6 / Metal 3.1** — macOS native GUI frontend (primary)
+- **GTK4** — Linux native GUI frontend (planned)
+- **Zig 0.15** with libvaxis — TUI frontend + tree-sitter parser
 - **ExUnit** + **StreamData** — testing
 - Pinned versions in `.tool-versions`
 
@@ -31,7 +39,8 @@ lib/
       state.ex                # Buffer GenServer internal state
     port/
       protocol.ex             # Port protocol encoder/decoder
-      manager.ex              # GenServer managing the Zig renderer Port
+      protocol/gui.ex         # GUI chrome protocol encoder (native frontends only)
+      manager.ex              # GenServer managing the frontend Port
       frontend.ex             # Behaviour for pluggable rendering backends
       capabilities.ex         # Frontend capabilities struct
     parser/
@@ -79,13 +88,24 @@ lib/
     compilers/
       zig.ex                  # Custom Mix compiler for Zig builds
 
-zig/
+macos/                        # macOS native GUI frontend (primary)
+  project.yml                 # XcodeGen project definition
+  Sources/
+    MingaApp.swift            # App entry point, SwiftUI wiring
+    Protocol/                 # Binary protocol decoder/encoder
+    Renderer/                 # Metal cell grid renderer
+    Font/                     # CoreText font loading, glyph atlas
+    Views/                    # SwiftUI + NSView wrappers
+  Tests/                      # Protocol round-trip tests
+
+zig/                          # TUI frontend + tree-sitter parser
   build.zig                   # Zig build configuration
   build.zig.zon               # Zig package manifest (libvaxis dep)
   src/
     main.zig                  # Entry point, event loop
     protocol.zig              # Port protocol encoder/decoder
     renderer.zig              # libvaxis render command handler
+    highlighter.zig           # Tree-sitter highlighter (shared by all frontends via parser Port)
 
 test/                         # Mirrors lib/ structure
 ```
@@ -122,9 +142,9 @@ When a feature is done and the PR is merged:
 
 **After the first worktree experience, ask the user:** "How did the worktree workflow feel? Worth keeping, or would you rather go back to one branch at a time?" Update this section based on their answer.
 
-## Iterative Fixes (especially TUI/rendering)
+## Iterative Fixes (especially rendering)
 
-When a fix improves visible behavior (user confirms it's better), **commit it and stop**. Do not immediately try to "refine" or "optimize" the fix in the same session. The TUI rendering pipeline has race conditions between the BEAM, the Zig Port, and the physical terminal that are impossible to fully reason about without seeing real output. What looks like an obvious improvement in theory (e.g., "skip the stale frame") can make things worse because your mental model of the frame ordering is wrong.
+When a fix improves visible behavior (user confirms it's better), **commit it and stop**. Do not immediately try to "refine" or "optimize" the fix in the same session. The rendering pipeline has timing dependencies between the BEAM, the frontend Port, and the display surface that are impossible to fully reason about without seeing real output. What looks like an obvious improvement in theory (e.g., "skip the stale frame") can make things worse because your mental model of the frame ordering is wrong.
 
 Rules:
 1. Make one change. Rebuild. Have the user test.
@@ -354,38 +374,40 @@ type(scope): short description
 Longer body if needed.
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `cli`
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `macos`, `gtk`, `cli`
 
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`
+- `feat(macos): add native hover tooltips for LSP content`
 - `feat(zig): scaffold libvaxis renderer with port protocol`
 - `test(buffer): add property-based tests for insert/delete`
 
 ## Port Protocol
 
-BEAM ↔ Zig communication uses length-prefixed binary messages over stdin/stdout of the Zig process. The Zig process uses `/dev/tty` for terminal I/O (not stdout).
+BEAM ↔ frontend communication uses length-prefixed binary messages over stdin/stdout of the frontend process. All frontends (Swift, GTK4, Zig TUI) speak the same protocol. The TUI's Zig process uses `/dev/tty` for terminal I/O (not stdout).
 
-See `PLAN.md` § "Port Protocol" for the full message specification.
+See `docs/PROTOCOL.md` for the full message specification and `docs/GUI_PROTOCOL.md` for the additional GUI chrome opcodes sent only to native GUI frontends.
 
 ## Rendering Architecture
 
-The rendering pipeline is being refactored to support multiple frontends (TUI, macOS GUI, Linux GUI). Read `docs/RENDERING_GAPS.md` for the full analysis and ticket links.
+The rendering pipeline supports multiple frontends through a shared display list IR and a binary port protocol. The BEAM owns all rendering decisions; frontends are "dumb" renderers.
 
 Key design decisions:
 - **Display list IR:** The BEAM side owns a display list of styled text runs (not a cell grid) that sits between editor state and protocol encoding. All frontends consume this shared IR. See `docs/ARCHITECTURE.md` § "Display List (Rendering IR)" for the type definitions.
 - **Styled text runs over cell grids:** GUIs don't think in terminal cells. The IR uses `{col, text, style}` tuples organized by line within positioned rectangles. The TUI quantizes runs to cells; a GUI renders runs with its font engine.
+- **GUI chrome protocol:** Native GUI frontends receive structured data opcodes (0x70-0x78) for chrome elements like tab bars, file trees, status bars, and popups. These are rendered with platform-native widgets (SwiftUI, GTK4), not painted as cells. See `docs/GUI_PROTOCOL.md`.
 - **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
-- **Pipeline stages:** The renderer is being split into named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) for debuggability and per-stage caching.
+- **Pipeline stages:** Seven named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) with per-stage timing via telemetry.
 
 ## Mouse Support (first-class citizen)
 
-Mouse support is not optional or secondary to keyboard input. Minga ships two frontends (TUI via Zig/libvaxis, macOS GUI via Swift/Metal), and both must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
+Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Zig/libvaxis, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
 
 See [#217](https://github.com/jsmestad/minga/issues/217) for the full tracker.
 
 ### Architecture
 
-Mouse events flow through the same protocol as keyboard events. Both frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them to `Minga.Editor.Mouse`.
+Mouse events flow through the same protocol as keyboard events. All frontends encode mouse events as `mouse_event` messages (opcode `0x04`) with row, col, button, modifiers, event type, and click count. The BEAM side decodes them in `Minga.Port.Protocol` and dispatches them to `Minga.Editor.Mouse`.
 
 Key rules for mouse work:
 
@@ -450,10 +472,12 @@ Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool th
 
 > **Note:** Buffer routing is being implemented in phases. Today, tools still use `File.read/write` directly. When wiring a tool to use buffers, follow the pattern in `BUFFER-AWARE-AGENTS.md` Phase 1.
 
-### New render command (requires both sides)
-1. Add opcode constant and encoder in `Minga.Port.Protocol`
-2. Add decoder and handler in `zig/src/protocol.zig` + `zig/src/renderer.zig`
-3. Test encode/decode round-trip on both sides
+### New render command (requires BEAM + frontend changes)
+1. Add opcode constant and encoder in `Minga.Port.Protocol` (BEAM side, canonical source of truth)
+2. **macOS GUI:** Add decoder in `macos/Sources/Protocol/ProtocolDecoder.swift`, constant in `ProtocolConstants.swift`, handler in `CommandDispatcher.swift`
+3. **TUI:** Add decoder and handler in `zig/src/protocol.zig` + `zig/src/renderer.zig`
+4. **Linux GUI:** (when it exists) Add decoder and handler in the GTK4 frontend
+5. Test encode/decode round-trip on all sides. GUI chrome opcodes (0x70-0x78) only need GUI frontend support; the TUI ignores them.
 
 ### New tree-sitter grammar
 Adding syntax highlighting for a new language touches four places:
@@ -467,4 +491,3 @@ Adding syntax highlighting for a new language touches four places:
 After rebuilding (`zig build` or `mix compile`), the grammar is compiled into the binary and available immediately. No runtime loading needed.
 
 Users can override highlight queries without recompiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.
-mpiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.

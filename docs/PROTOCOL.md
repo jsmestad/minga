@@ -1,6 +1,6 @@
 # Minga Port Protocol Specification
 
-The BEAM editor core and the rendering frontend communicate over a binary protocol on stdin/stdout of the frontend process. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading only this file.
+The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends (Swift/Metal on macOS, GTK4 on Linux, Zig/libvaxis TUI) speak the same base protocol. GUI frontends additionally receive structured chrome opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md). This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading only this file (plus GUI_PROTOCOL.md for native GUIs).
 
 ## Transport
 
@@ -627,17 +627,9 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-The Zig process currently handles both rendering and tree-sitter parsing. The TUI runtime intercepts highlight opcodes before the renderer. The GUI runtime does not, so highlight opcodes are silently no-op'd.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70`-`0x78`). The parser process handles highlight commands (`0x20`-`0x26`) and sends highlight responses (`0x30`-`0x39`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
 
-### Planned evolution
-
-Tree-sitter parsing will be extracted into a separate `minga-parser` process (see #150). When this happens:
-- The **renderer** process handles only render commands (`0x10`-`0x16`)
-- The **parser** process handles only highlight commands (`0x20`-`0x25`) and sends highlight responses (`0x30`-`0x34`)
-- Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes
-- The BEAM manages two Port processes, routing commands to the appropriate one
-
-This separation means new rendering frontends (Swift, GTK4) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process.
+This separation means rendering frontends (Swift/Metal, GTK4, Zig/libvaxis) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 
 ---
 
