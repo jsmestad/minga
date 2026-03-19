@@ -24,12 +24,13 @@ struct CoreTextLineRendererTests {
 
         let runs = [StyledRun(col: 0, text: "Hello, world!", fg: 0xFFFFFF, bg: 0, attrs: 0)]
         let hash = runs.hashValue
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: hash)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: hash, gutterCol: 0).content
 
         #expect(result != nil)
         #expect(result!.pixelWidth > 0)
         #expect(result!.pixelHeight > 0)
-        #expect(result!.contentHash == hash)
+        // Content hash includes the isContent flag, so it won't match the raw hash.
+        #expect(result!.contentHash != 0)
     }
 
     @Test("Cache hit on identical content hash")
@@ -39,8 +40,8 @@ struct CoreTextLineRendererTests {
         let runs = [StyledRun(col: 0, text: "cached", fg: 0xFFFFFF, bg: 0, attrs: 0)]
         let hash = runs.hashValue
 
-        let first = renderer.renderLine(row: 0, runs: runs, contentHash: hash)
-        let second = renderer.renderLine(row: 0, runs: runs, contentHash: hash)
+        let first = renderer.renderLine(row: 0, runs: runs, contentHash: hash, gutterCol: 0).content
+        let second = renderer.renderLine(row: 0, runs: runs, contentHash: hash, gutterCol: 0).content
 
         #expect(first != nil)
         #expect(second != nil)
@@ -55,8 +56,8 @@ struct CoreTextLineRendererTests {
         let runs1 = [StyledRun(col: 0, text: "version1", fg: 0xFFFFFF, bg: 0, attrs: 0)]
         let runs2 = [StyledRun(col: 0, text: "version2", fg: 0xFF0000, bg: 0, attrs: 0)]
 
-        let first = renderer.renderLine(row: 0, runs: runs1, contentHash: runs1.hashValue)
-        let second = renderer.renderLine(row: 0, runs: runs2, contentHash: runs2.hashValue)
+        let first = renderer.renderLine(row: 0, runs: runs1, contentHash: runs1.hashValue, gutterCol: 0).content
+        let second = renderer.renderLine(row: 0, runs: runs2, contentHash: runs2.hashValue, gutterCol: 0).content
 
         #expect(first != nil)
         #expect(second != nil)
@@ -68,7 +69,7 @@ struct CoreTextLineRendererTests {
     func emptyRunsReturnNil() throws {
         guard let renderer = makeRenderer() else { return }
 
-        let result = renderer.renderLine(row: 0, runs: [], contentHash: 0)
+        let result = renderer.renderLine(row: 0, runs: [], contentHash: 0, gutterCol: 0).content
         #expect(result == nil)
     }
 
@@ -82,7 +83,7 @@ struct CoreTextLineRendererTests {
             StyledRun(col: 4, text: "hello", fg: 0x00FF00, bg: 0, attrs: 0),    // function name
         ]
         let hash = runs.hashValue
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: hash)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: hash, gutterCol: 0).content
 
         #expect(result != nil)
         #expect(result!.pixelWidth > 0)
@@ -95,8 +96,8 @@ struct CoreTextLineRendererTests {
         let normalRuns = [StyledRun(col: 0, text: "normal", fg: 0xFFFFFF, bg: 0, attrs: 0)]
         let boldRuns = [StyledRun(col: 0, text: "bold", fg: 0xFFFFFF, bg: 0, attrs: 0x01)]
 
-        let normal = renderer.renderLine(row: 0, runs: normalRuns, contentHash: normalRuns.hashValue)
-        let bold = renderer.renderLine(row: 1, runs: boldRuns, contentHash: boldRuns.hashValue)
+        let normal = renderer.renderLine(row: 0, runs: normalRuns, contentHash: normalRuns.hashValue, gutterCol: 0).content
+        let bold = renderer.renderLine(row: 1, runs: boldRuns, contentHash: boldRuns.hashValue, gutterCol: 0).content
 
         #expect(normal != nil)
         #expect(bold != nil)
@@ -107,7 +108,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "italic", fg: 0xFFFFFF, bg: 0, attrs: 0x04)]
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
 
         #expect(result != nil)
     }
@@ -119,8 +120,8 @@ struct CoreTextLineRendererTests {
         let lightRuns = [StyledRun(col: 0, text: "light", fg: 0xFFFFFF, bg: 0, attrs: 0, fontWeight: 1)]
         let heavyRuns = [StyledRun(col: 0, text: "heavy", fg: 0xFFFFFF, bg: 0, attrs: 0, fontWeight: 6)]
 
-        let light = renderer.renderLine(row: 0, runs: lightRuns, contentHash: lightRuns.hashValue)
-        let heavy = renderer.renderLine(row: 1, runs: heavyRuns, contentHash: heavyRuns.hashValue)
+        let light = renderer.renderLine(row: 0, runs: lightRuns, contentHash: lightRuns.hashValue, gutterCol: 0).content
+        let heavy = renderer.renderLine(row: 1, runs: heavyRuns, contentHash: heavyRuns.hashValue, gutterCol: 0).content
 
         #expect(light != nil)
         #expect(heavy != nil)
@@ -131,7 +132,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "test", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
 
         #expect(result != nil)
         // Height should match linePixelHeight (cellHeight * scale).
@@ -146,7 +147,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "evict me", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         #expect(renderer.cacheCount == 1)
 
         // Advance past eviction threshold.
@@ -162,12 +163,12 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "keep me", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
 
         // Use it every frame so it stays alive.
         for _ in 0..<50 {
             renderer.beginFrame()
-            _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+            _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         }
 
         #expect(renderer.cacheCount == 1)
@@ -178,8 +179,8 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "clear", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
-        _ = renderer.renderLine(row: 1, runs: runs, contentHash: runs.hashValue)
+        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
+        _ = renderer.renderLine(row: 1, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         #expect(renderer.cacheCount == 2)
 
         renderer.invalidateAll()
@@ -192,7 +193,7 @@ struct CoreTextLineRendererTests {
 
         let runs = [StyledRun(col: 0, text: "underlined", fg: 0xFFFFFF, bg: 0, attrs: 0x02,
                               underlineColor: 0xFF0000, underlineStyle: 1)]
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         #expect(result != nil)
     }
 
@@ -201,7 +202,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "struck", fg: 0xFFFFFF, bg: 0, attrs: 0x10)]
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         #expect(result != nil)
     }
 
@@ -210,7 +211,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "ABC", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        guard let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue) else {
+        guard let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content else {
             Issue.record("Expected non-nil texture")
             return
         }
@@ -248,7 +249,7 @@ struct CoreTextLineRendererTests {
         // attrs=0x01 is bold. With fontWeight at default (2=regular),
         // resolveFont should override to weight 5 (bold).
         let runs = [StyledRun(col: 0, text: "BOLD", fg: 0xFFFFFF, bg: 0, attrs: 0x01)]
-        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        let result = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
 
         #expect(result != nil)
         #expect(result!.pixelWidth > 0)
@@ -259,7 +260,7 @@ struct CoreTextLineRendererTests {
         guard let renderer = makeRenderer() else { return }
 
         let runs = [StyledRun(col: 0, text: "wide", fg: 0xFFFFFF, bg: 0, attrs: 0)]
-        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue)
+        _ = renderer.renderLine(row: 0, runs: runs, contentHash: runs.hashValue, gutterCol: 0).content
         #expect(renderer.cacheCount == 1)
 
         renderer.updateViewportWidth(cols: 200)

@@ -30,18 +30,24 @@ struct CachedLineTexture {
     let pixelHeight: Int
 }
 
+/// Cache key for line textures: row + whether it's the content region.
+struct LineCacheKey: Hashable {
+    let row: UInt16
+    let isContent: Bool
+}
+
 /// Renders styled text runs into Metal textures using CoreText.
 ///
-/// Each line's runs are converted to an NSAttributedString, shaped by
-/// CoreText into a CTLine, rasterized into a bitmap context, then uploaded
-/// to a Metal texture. Textures are cached per line and invalidated when
-/// the content hash changes.
+/// Each line is split into gutter and content textures so they can be
+/// positioned independently (the gutter padding gap doesn't correspond
+/// to any character column). Textures are cached per (row, region) and
+/// invalidated when the content hash changes.
 final class CoreTextLineRenderer {
     /// The Metal device for texture creation.
     private let device: MTLDevice
 
-    /// Per-line texture cache keyed by row index.
-    private var lineCache: [UInt16: CachedLineTexture] = [:]
+    /// Per-line texture cache keyed by (row, isContent).
+    private var lineCache: [LineCacheKey: CachedLineTexture] = [:]
 
     /// Current frame counter for LRU eviction.
     private var frameCounter: UInt64 = 0
@@ -119,19 +125,64 @@ final class CoreTextLineRenderer {
         }
     }
 
-    /// Render a line's styled runs into a cached Metal texture.
+    /// Result of rendering a line's gutter and content regions.
+    struct LineRenderResult {
+        /// Texture for the gutter region (line numbers), or nil if no gutter runs.
+        var gutter: CachedLineTexture?
+        /// Texture for the content region (code text), or nil if no content runs.
+        var content: CachedLineTexture?
+    }
+
+    /// Render a line's styled runs into cached Metal textures.
     ///
-    /// Returns the cached texture if the content hasn't changed (hash match),
-    /// or rasterizes a new texture and caches it.
-    ///
-    /// Returns nil if the line has no runs or texture creation fails.
-    func renderLine(row: UInt16, runs: [StyledRun], contentHash: Int) -> CachedLineTexture? {
+    /// Splits runs into gutter (col < gutterCol) and content (col >= gutterCol)
+    /// regions. Each region gets its own texture so they can be positioned
+    /// independently with the gutter padding gap between them.
+    func renderLine(row: UInt16, runs: [StyledRun], contentHash: Int, gutterCol: UInt16) -> LineRenderResult {
+        var result = LineRenderResult()
+        guard !runs.isEmpty else { return result }
+
+        // Partition runs into gutter and content.
+        let gutterRuns = runs.filter { $0.col < gutterCol }
+        let contentRuns = runs.filter { $0.col >= gutterCol }
+
+        // Render gutter texture.
+        if !gutterRuns.isEmpty {
+            var hasher = Hasher()
+            hasher.combine(contentHash)
+            hasher.combine(false)  // isContent = false
+            let gutterHash = hasher.finalize()
+
+            result.gutter = renderRegion(
+                row: row, runs: gutterRuns, contentHash: gutterHash, isContent: false
+            )
+        }
+
+        // Render content texture.
+        if !contentRuns.isEmpty {
+            var hasher = Hasher()
+            hasher.combine(contentHash)
+            hasher.combine(true)  // isContent = true
+            let contentHash = hasher.finalize()
+
+            result.content = renderRegion(
+                row: row, runs: contentRuns, contentHash: contentHash, isContent: true
+            )
+        }
+
+        return result
+    }
+
+    /// Render a single region (gutter or content) into a cached texture.
+    private func renderRegion(row: UInt16, runs: [StyledRun], contentHash: Int, isContent: Bool) -> CachedLineTexture? {
         guard !runs.isEmpty else { return nil }
 
+        let key = LineCacheKey(row: row, isContent: isContent)
+
         // Check cache.
-        if var cached = lineCache[row], cached.contentHash == contentHash {
+        if var cached = lineCache[key], cached.contentHash == contentHash {
             cached.lastUsedFrame = frameCounter
-            lineCache[row] = cached
+            lineCache[key] = cached
             return cached
         }
 
@@ -147,7 +198,7 @@ final class CoreTextLineRenderer {
         var lineLeading: CGFloat = 0
         let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
 
-        // Size the bitmap to cover the full line.
+        // Size the bitmap to cover the region.
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         let pixelHeight = linePixelHeight
 
@@ -156,8 +207,7 @@ final class CoreTextLineRenderer {
         // Rasterize into a BGRA bitmap.
         let bgraData = rasterizeLine(ctLine, runs: runs, width: pixelWidth, height: pixelHeight)
 
-        // Create texture with shared storage so CPU writes are immediately
-        // visible to the GPU without explicit synchronization.
+        // Create texture with shared storage.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm_srgb,
             width: pixelWidth,
@@ -184,7 +234,7 @@ final class CoreTextLineRenderer {
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight
         )
-        lineCache[row] = cached
+        lineCache[key] = cached
         return cached
     }
 
