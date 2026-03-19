@@ -116,35 +116,33 @@ defmodule Minga.Input.AgentMouseTest do
       {:ok, state: state, rect: rect}
     end
 
-    test "scroll down over agent chat window scrolls chat, not editor buffer", %{
+    test "scroll down over agent chat window unpins and passes through to Editor.Mouse", %{
       state: state,
       rect: rect
     } do
       {row, col, _w, _h} = rect
-      old_viewport_top = state.viewport.top
 
-      {:handled, new_state} =
+      # Chat area scroll unpins and passes through to standard Editor.Mouse
+      {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
-      # Chat scroll should have changed
-      panel = AgentAccess.panel(new_state)
-      assert panel.scroll.offset > 0 or panel.scroll.pinned == false
-
-      # Editor viewport should be untouched
-      assert new_state.viewport.top == old_viewport_top
+      # Window should be unpinned so viewport follows cursor
+      case EditorState.find_agent_chat_window(new_state) do
+        nil -> :ok
+        {_win_id, window} -> refute window.pinned
+      end
     end
 
-    test "scroll up over agent chat window scrolls chat", %{state: state, rect: rect} do
+    test "scroll up over agent chat window unpins and passes through", %{
+      state: state,
+      rect: rect
+    } do
       {row, col, _w, _h} = rect
 
-      # First scroll down to have something to scroll up from
-      {:handled, state} =
-        AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
-
-      {:handled, new_state} =
+      {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_up, 0, :press, 1)
 
-      # Should not crash and should handle gracefully
+      # Should not crash and should unpin
       assert %EditorState{} = new_state
     end
 
@@ -309,12 +307,15 @@ defmodule Minga.Input.AgentMouseTest do
 
       {row, col, _w, _h} = rect
 
-      {:handled, new_state} =
+      # Chat area scroll unpins and passes through to Editor.Mouse
+      {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
 
-      # Chat should have scrolled
-      panel = AgentAccess.panel(new_state)
-      assert panel.scroll.offset > 0 or panel.scroll.pinned == false
+      # Window should be unpinned
+      case EditorState.find_agent_chat_window(new_state) do
+        nil -> :ok
+        {_win_id, window} -> refute window.pinned
+      end
     end
 
     test "click in agent window works from editor scope" do

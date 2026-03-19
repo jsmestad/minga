@@ -107,8 +107,8 @@ defmodule Minga.Keymap.ScopeTest do
       assert {:command, :agent_close} = Scope.resolve_key(:agent, :normal, {?q, 0})
     end
 
-    test "/ resolves to agent_start_search in normal mode" do
-      assert {:command, :agent_start_search} = Scope.resolve_key(:agent, :normal, {?/, 0})
+    test "/ is not bound in agent scope (falls through to standard vim search)" do
+      assert :not_found = Scope.resolve_key(:agent, :normal, {?/, 0})
     end
 
     test "? resolves to agent_toggle_help in normal mode" do

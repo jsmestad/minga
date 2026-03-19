@@ -73,7 +73,7 @@ defmodule Minga.Keymap.Scope.Agent do
     Bindings.new()
     #
     # Navigation keys (j, k, w, b, e, G, Ctrl-D, Ctrl-U, /, n, N, etc.)
-    # are NOT bound here. They pass through to AgentChatNav, which routes
+    # are NOT bound here. They pass through to AgentNav, which routes
     # them through the Mode FSM against the *Agent* buffer. This gives
     # chat navigation the full vim grammar for free.
     #
@@ -111,6 +111,7 @@ defmodule Minga.Keymap.Scope.Agent do
     # Input focus
     |> Bindings.bind([{?i, 0}], :agent_focus_input, "Focus input")
     |> Bindings.bind([{?a, 0}], :agent_focus_input, "Focus input")
+    |> Bindings.bind([{?A, 0}], :agent_focus_input, "Focus input (append)")
     |> Bindings.bind([{@enter, 0}], :agent_focus_input, "Focus input")
     # Collapse toggle (magit-style o)
     |> Bindings.bind([{?o, 0}], :agent_toggle_collapse, "Toggle collapse")
@@ -119,10 +120,8 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{?{, 0}], :agent_shrink_panel, "Shrink chat panel")
     |> Bindings.bind([{?=, 0}], :agent_reset_panel, "Reset panel split")
     |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
-    # Search (agent-specific: searches structured messages, not buffer text)
-    |> Bindings.bind([{?/, 0}], :agent_start_search, "Search")
-    |> Bindings.bind([{?n, 0}], :agent_next_search_match, "Next search match")
-    |> Bindings.bind([{?N, 0}], :agent_prev_search_match, "Previous search match")
+    # Search: standard vim `/` search works on the *Agent* buffer.
+    # Keys `/`, `n`, `N` pass through to the Mode FSM.
     # Session
     |> Bindings.bind([{?s, 0}], :agent_session_switcher, "Session switcher")
     # Help
@@ -227,7 +226,7 @@ defmodule Minga.Keymap.Scope.Agent do
          {"j / k", "Scroll down / up"},
          {"Ctrl-d / Ctrl-u", "Half page down / up"},
          {"gg / G", "Scroll to top / bottom"},
-         {"/ (search)", "Search messages"},
+         {"/", "Search buffer (vim standard)"},
          {"n / N", "Next / prev search result"}
        ]},
       {"Fold / Collapse",
