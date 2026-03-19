@@ -207,6 +207,15 @@ defmodule Minga.Editor.State do
     end)
   end
 
+  @doc "Starts a new buffer under the buffer supervisor for the given file path."
+  @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
+  def start_buffer(file_path) do
+    DynamicSupervisor.start_child(
+      Minga.Buffer.Supervisor,
+      {BufferServer, file_path: file_path}
+    )
+  end
+
   # ── Buffer monitoring ──────────────────────────────────────────────────────
 
   @doc """

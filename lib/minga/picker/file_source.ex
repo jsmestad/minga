@@ -8,12 +8,12 @@ defmodule Minga.Picker.FileSource do
 
   @behaviour Minga.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
   alias Minga.Log
   alias Minga.Picker.Item
+  alias Minga.Picker.Source
 
   @impl true
   @spec title() :: String.t()
@@ -61,7 +61,7 @@ defmodule Minga.Picker.FileSource do
 
     case EditorState.find_buffer_by_path(state, abs_path) do
       nil ->
-        case start_buffer(abs_path) do
+        case EditorState.start_buffer(abs_path) do
           {:ok, pid} ->
             Log.debug(:editor, "[file_picker] new buffer pid=#{inspect(pid)}")
             EditorState.add_buffer(state, pid)
@@ -92,12 +92,7 @@ defmodule Minga.Picker.FileSource do
   end
 
   @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    EditorState.switch_buffer(state, restore_idx)
-  end
-
-  def on_cancel(state), do: state
+  def on_cancel(state), do: Source.restore_or_keep(state)
 
   @impl true
   @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
@@ -128,12 +123,4 @@ defmodule Minga.Picker.FileSource do
   # ── Private ─────────────────────────────────────────────────────────────────
 
   defdelegate project_root, to: Minga.Project, as: :resolve_root
-
-  @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_buffer(file_path) do
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
-    )
-  end
 end

@@ -14,6 +14,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
+  alias Minga.Picker.Source
 
   @impl true
   @spec title() :: String.t()
@@ -66,7 +67,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @spec open_new_buffer(map(), String.t(), non_neg_integer(), non_neg_integer()) :: map()
   defp open_new_buffer(state, abs_path, line, col) do
-    case start_buffer(abs_path) do
+    case EditorState.start_buffer(abs_path) do
       {:ok, pid} ->
         new_state = EditorState.add_buffer(state, pid)
         BufferServer.move_to(pid, {line, col})
@@ -87,20 +88,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   end
 
   @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    EditorState.switch_buffer(state, restore_idx)
-  end
-
-  def on_cancel(state), do: state
+  def on_cancel(state), do: Source.restore_or_keep(state)
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_buffer(file_path) do
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
-    )
-  end
 end

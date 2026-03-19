@@ -10,6 +10,7 @@ defmodule Minga.Picker.BufferSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Picker.Item
+  alias Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
@@ -89,12 +90,7 @@ defmodule Minga.Picker.BufferSource do
   end
 
   @impl true
-  @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_ui: %{restore: restore_idx}} = state) when is_integer(restore_idx) do
-    EditorState.switch_buffer(state, restore_idx)
-  end
-
-  def on_cancel(state), do: state
+  def on_cancel(state), do: Source.restore_or_keep(state)
 
   @impl true
   @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
