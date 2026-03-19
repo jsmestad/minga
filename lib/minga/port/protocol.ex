@@ -20,7 +20,7 @@ defmodule Minga.Port.Protocol do
   | Opcode | Name             | Payload                                                              |
   |--------|------------------|----------------------------------------------------------------------|
   | 0x10   | draw_text        | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
-  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, font_weight::8, text_len::16, text` |
+  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, font_weight::8, font_id::8, text_len::16, text` |
   | 0x11   | set_cursor       | `row::16, col::16`                                                   |
   | 0x12   | clear            | (empty)                                                              |
   | 0x13   | batch_end        | (empty)                                                              |
@@ -120,6 +120,7 @@ defmodule Minga.Port.Protocol do
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
   @op_set_font_fallback 0x51
+  @op_register_font 0x52
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -231,6 +232,7 @@ defmodule Minga.Port.Protocol do
           | {:blend, 0..100}
           | {:font_weight,
              :thin | :light | :regular | :medium | :semibold | :bold | :heavy | :black}
+          | {:font_id, non_neg_integer()}
         ]
 
   # ── Modifier helpers ──
@@ -294,10 +296,11 @@ defmodule Minga.Port.Protocol do
     ul_color = Keyword.get(style, :underline_color, 0x000000)
     blend = Keyword.get(style, :blend, 100)
     font_weight = Map.get(@font_weight_map, Keyword.get(style, :font_weight, :regular), 2)
+    font_id = Keyword.get(style, :font_id, 0)
     text_len = byte_size(text)
 
     <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8,
-      font_weight::8, text_len::16, text::binary>>
+      font_weight::8, font_id::8, text_len::16, text::binary>>
   end
 
   @doc """
@@ -319,7 +322,8 @@ defmodule Minga.Port.Protocol do
       Keyword.has_key?(style, :underline_style) ||
       Keyword.has_key?(style, :underline_color) ||
       Keyword.has_key?(style, :blend) ||
-      Keyword.has_key?(style, :font_weight)
+      Keyword.has_key?(style, :font_weight) ||
+      Keyword.has_key?(style, :font_id)
   end
 
   @doc "Encodes a set_cursor command."
@@ -409,6 +413,23 @@ defmodule Minga.Port.Protocol do
       end)
 
     IO.iodata_to_binary([@op_set_font_fallback, count | entries])
+  end
+
+  @doc """
+  Encodes a register_font command to associate a font_id with a font family.
+
+  Font ID 0 is the primary font (set via `set_font`). IDs 1-255 are
+  secondary fonts that can be referenced by `font_id` in `draw_styled_text`.
+  The GUI creates a FontFace for each registered font at the same size as
+  the primary. If the secondary font's cell metrics differ from the primary,
+  the GUI logs a warning and falls back to the primary for those glyphs.
+
+  Format: `opcode:8, font_id:8, name_len:16, name:bytes`
+  """
+  @spec encode_register_font(non_neg_integer(), String.t()) :: binary()
+  def encode_register_font(font_id, family)
+      when is_integer(font_id) and font_id >= 0 and font_id <= 255 and is_binary(family) do
+    <<@op_register_font, font_id::8, byte_size(family)::16, family::binary>>
   end
 
   # ── Encoding: region commands (BEAM → Zig) ──
@@ -808,7 +829,7 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(
         <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24,
-          blend::8, font_weight_byte::8, text_len::16, text::binary-size(text_len)>>
+          blend::8, font_weight_byte::8, font_id::8, text_len::16, text::binary-size(text_len)>>
       ) do
     decoded_attrs = decode_attrs_extended(attrs)
     font_weight = Map.get(@font_weight_reverse, font_weight_byte, :regular)
@@ -820,6 +841,7 @@ defmodule Minga.Port.Protocol do
       |> then(fn a ->
         if font_weight != :regular, do: [{:font_weight, font_weight} | a], else: a
       end)
+      |> then(fn a -> if font_id != 0, do: [{:font_id, font_id} | a], else: a end)
 
     {:ok, {:draw_styled_text, %{row: row, col: col, fg: fg, bg: bg, attrs: style, text: text}}}
   end

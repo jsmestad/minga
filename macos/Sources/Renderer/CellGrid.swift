@@ -28,6 +28,9 @@ struct Cell {
     /// Font weight for per-span weight variation (0-7, maps thin through black).
     /// 2 = regular (default). Set by draw_styled_text; plain draw_text leaves this at 2.
     var fontWeight: UInt8 = 2
+    /// Font ID for per-span font family (0 = primary, 1-255 = registered secondary fonts).
+    /// Set by draw_styled_text; plain draw_text leaves this at 0.
+    var fontId: UInt8 = 0
     /// For ligature head cells: the full source text that was shaped (e.g., "->").
     /// Empty for non-ligature cells.
     var ligatureText: String = ""

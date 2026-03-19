@@ -130,16 +130,33 @@ final class MetalRenderer {
     /// `layer.nextDrawable()` call that caused scroll lag.
     ///
     /// `scrollOffset` is the sub-cell-height pixel offset for smooth scrolling.
+    /// Render using a FontManager (supports per-cell font_id).
+    func render(grid: CellGrid, fontManager: FontManager, drawable: CAMetalDrawable,
+                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
+        renderImpl(grid: grid, fontManager: fontManager, drawable: drawable,
+                   viewportSize: viewportSize, contentScale: contentScale, scrollOffset: scrollOffset)
+    }
+
+    /// Render using a single FontFace (backward compatible).
     func render(grid: CellGrid, face: FontFace, drawable: CAMetalDrawable,
                 viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
+        renderImpl(grid: grid, fontManager: nil, primaryFace: face, drawable: drawable,
+                   viewportSize: viewportSize, contentScale: contentScale, scrollOffset: scrollOffset)
+    }
+
+    private func renderImpl(grid: CellGrid, fontManager: FontManager? = nil, primaryFace: FontFace? = nil,
+                            drawable: CAMetalDrawable, viewportSize: CGSize, contentScale: Float,
+                            scrollOffset: SIMD2<Float> = .zero) {
+        let face = primaryFace ?? fontManager!.primary
+        let atlas = fontManager?.atlas ?? face.atlas
         let cellW = Float(face.cellWidth)
         let cellH = Float(face.cellHeight)
-        let atlasSize = Float(face.atlas.size)
+        let atlasSize = Float(atlas.size)
 
         // Re-upload atlas if it changed.
-        if face.atlas.modified != atlasVersion {
-            uploadAtlas(face.atlas)
-            atlasVersion = face.atlas.modified
+        if atlas.modified != atlasVersion {
+            uploadAtlas(atlas)
+            atlasVersion = atlas.modified
         }
 
         // Build GPU cell data.
@@ -186,10 +203,14 @@ final class MetalRenderer {
             let isBold = (cell.attrs & ATTR_BOLD) != 0
             let cellWeight: UInt8 = (cell.fontWeight == 2 && isBold) ? 5 : cell.fontWeight
             let cellItalic = (cell.attrs & ATTR_ITALIC) != 0
+            let cellFontId = cell.fontId
+
+            // Select the correct font face for this cell's font_id.
+            let cellFace = fontManager?.fontFace(for: cellFontId) ?? face
 
             // Ligature head cell: use the shaped ligature glyph.
             if cell.ligatureCellCount > 1, !cell.ligatureText.isEmpty,
-               let lig = face.shapeLigature(cell.ligatureText, weight: cellWeight, italic: cellItalic) {
+               let lig = cellFace.shapeLigature(cell.ligatureText, weight: cellWeight, italic: cellItalic) {
                 gpu.hasGlyph = 1.0
                 gpu.isColor = 0.0
                 gpu.uvOrigin = SIMD2<Float>(Float(lig.glyph.atlasX) / atlasSize,
@@ -206,7 +227,7 @@ final class MetalRenderer {
             // Normal single-cell glyph.
             else if !cell.grapheme.isEmpty, cell.grapheme != " " {
                 if let scalar = cell.grapheme.unicodeScalars.first,
-                   let glyph = face.getGlyph(scalar.value, weight: cellWeight, italic: cellItalic) {
+                   let glyph = cellFace.getGlyph(scalar.value, weight: cellWeight, italic: cellItalic) {
                     gpu.hasGlyph = 1.0
                     gpu.isColor = glyph.isColor ? 1.0 : 0.0
                     gpu.uvOrigin = SIMD2<Float>(Float(glyph.atlasX) / atlasSize,

@@ -271,8 +271,13 @@ defmodule Minga.Face do
         do: [{:blend, face.blend} | style],
         else: style
 
-    if face.font_weight && face.font_weight != :regular,
-      do: [{:font_weight, face.font_weight} | style],
+    style =
+      if face.font_weight && face.font_weight != :regular,
+        do: [{:font_weight, face.font_weight} | style],
+        else: style
+
+    if face.font_family,
+      do: [{:font_family, face.font_family} | style],
       else: style
   end
 

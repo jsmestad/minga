@@ -124,7 +124,8 @@ defmodule Minga.Editor.State do
             last_test_command: nil,
             pending_quit: nil,
             buffer_monitors: %{},
-            face_override_registries: %{}
+            face_override_registries: %{},
+            font_registry: Minga.FontRegistry.new()
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -171,7 +172,8 @@ defmodule Minga.Editor.State do
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
-          face_override_registries: %{pid() => Minga.Face.Registry.t()}
+          face_override_registries: %{pid() => Minga.Face.Registry.t()},
+          font_registry: Minga.FontRegistry.t()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

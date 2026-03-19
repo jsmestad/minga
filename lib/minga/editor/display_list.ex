@@ -308,9 +308,31 @@ defmodule Minga.Editor.DisplayList do
   """
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
-    Enum.map(draws, fn {row, col, text, %Face{} = face} ->
-      Protocol.encode_draw_smart(row, col, text, Face.to_style(face))
+    Enum.flat_map(draws, fn {row, col, text, %Face{} = face} ->
+      style = Face.to_style(face)
+      {style, registration_cmds} = resolve_font_family(style)
+      registration_cmds ++ [Protocol.encode_draw_smart(row, col, text, style)]
     end)
+  end
+
+  # Resolves font_family in a style keyword list to a font_id.
+  # Uses the font registry from the process dictionary (set by Emit).
+  # Returns {updated_style, [register_font_commands]}.
+  @spec resolve_font_family(keyword()) :: {keyword(), [binary()]}
+  defp resolve_font_family(style) do
+    case Keyword.pop(style, :font_family) do
+      {nil, _} ->
+        {style, []}
+
+      {family, rest} ->
+        registry = Process.get(:emit_font_registry) || Minga.FontRegistry.new()
+        {font_id, updated_registry, new?} = Minga.FontRegistry.get_or_register(registry, family)
+        Process.put(:emit_font_registry, updated_registry)
+
+        style_with_id = if font_id > 0, do: [{:font_id, font_id} | rest], else: rest
+        reg_cmds = if new?, do: [Protocol.encode_register_font(font_id, family)], else: []
+        {style_with_id, reg_cmds}
+    end
   end
 
   # ── Layer ↔ draws ──────────────────────────────────────────────────────────
