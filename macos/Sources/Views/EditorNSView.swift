@@ -27,6 +27,9 @@ final class EditorNSView: MTKView {
 
     private var trackingArea: NSTrackingArea?
 
+    /// IME composition state (marked text tracking).
+    private var imeComposition = IMEComposition()
+
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
     var cellWidth: CGFloat { CGFloat(fontFace.cellWidth) }
     var cellHeight: CGFloat { CGFloat(fontFace.cellHeight) }
@@ -88,10 +91,22 @@ final class EditorNSView: MTKView {
         needsDisplay = true
     }
 
+    /// Previous cursor position for accessibility change detection.
+    private var lastAccessibilityCursorRow: UInt16 = 0
+    private var lastAccessibilityCursorCol: UInt16 = 0
+
     /// Called by MTKView's display link at vsync when needsDisplay is true.
     override func draw(_ dirtyRect: NSRect) {
         guard let drawable = currentDrawable else { return }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
+
+        // Check for cursor movement to post accessibility notifications.
+        if lineBuffer.cursorRow != lastAccessibilityCursorRow ||
+           lineBuffer.cursorCol != lastAccessibilityCursorCol {
+            lastAccessibilityCursorRow = lineBuffer.cursorRow
+            lastAccessibilityCursorCol = lineBuffer.cursorCol
+            NSAccessibility.post(element: self, notification: .selectedTextChanged)
+        }
 
         coreTextRenderer.render(lineBuffer: lineBuffer, fontManager: fontManager,
                                 drawable: drawable, viewportSize: drawableSize,
@@ -284,27 +299,50 @@ final class EditorNSView: MTKView {
             return
         }
 
-        // Special keys (arrows, Enter, Escape, etc.)
+        // Special keys (arrows, Enter, Escape, etc.) bypass IME.
         if let codepoint = mapKeyCode(event) {
+            // If IME is composing, Escape/Enter may need special handling.
+            if imeComposition.hasMarkedText {
+                if codepoint == 27 { // Escape: cancel composition
+                    imeComposition.clear()
+                    needsDisplay = true
+                    return
+                }
+                if codepoint == 13 { // Enter: commit composition
+                    if let text = imeComposition.unmark() {
+                        commitIMEText(text)
+                    }
+                    needsDisplay = true
+                    return
+                }
+            }
             encoder.sendKeyPress(codepoint: codepoint, modifiers: mods)
             return
         }
 
-        // Text characters: use event.characters which reflects Shift.
-        // Strip Shift bit since the codepoint already encodes it.
-        let textMods = mods & ~0x01
-
-        let chars: String?
-        if event.modifierFlags.contains(.control) {
-            chars = event.charactersIgnoringModifiers
-        } else {
-            chars = event.characters
+        // Control/Command key combinations bypass IME and go directly
+        // to the BEAM. Without this, Ctrl+A, Ctrl+W, etc. lose their
+        // modifier bits when routed through insertText.
+        if event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command) {
+            let textMods = mods & ~0x01  // strip shift (codepoint encodes it)
+            let chars = event.modifierFlags.contains(.control)
+                ? event.charactersIgnoringModifiers : event.characters
+            if let characters = chars, !characters.isEmpty {
+                for scalar in characters.unicodeScalars {
+                    encoder.sendKeyPress(codepoint: scalar.value, modifiers: textMods)
+                }
+            }
+            return
         }
 
-        guard let characters = chars, !characters.isEmpty else { return }
-
-        for scalar in characters.unicodeScalars {
-            encoder.sendKeyPress(codepoint: scalar.value, modifiers: textMods)
+        // Route through the input method system. This calls our
+        // NSTextInputClient methods (insertText, setMarkedText, etc.)
+        // for IME-aware input. For non-IME input, it calls insertText
+        // directly with the typed character.
+        if let ctx = inputContext {
+            _ = ctx.handleEvent(event)
+        } else {
+            interpretKeyEvents([event])
         }
     }
 
@@ -457,6 +495,13 @@ final class EditorNSView: MTKView {
                                modifiers: mods, eventType: MOUSE_PRESS)
     }
 
+    /// Send committed text from IME to the BEAM as individual key presses.
+    private func commitIMEText(_ text: String) {
+        for scalar in text.unicodeScalars {
+            encoder.sendKeyPress(codepoint: scalar.value, modifiers: 0)
+        }
+    }
+
     // MARK: - Helpers
 
     private func cellPosition(from event: NSEvent) -> (row: Int16, col: Int16) {
@@ -476,6 +521,174 @@ private func modifierBits(from flags: NSEvent.ModifierFlags) -> UInt8 {
     if flags.contains(.option)  { mods |= 0x04 }
     if flags.contains(.command) { mods |= 0x08 }
     return mods
+}
+
+// MARK: - NSTextInputClient (IME support)
+
+@MainActor
+extension EditorNSView: @preconcurrency NSTextInputClient {
+    /// Called when the input method commits text (final result of composition).
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        let text: String
+        if let attrStr = string as? NSAttributedString {
+            text = attrStr.string
+        } else if let str = string as? String {
+            text = str
+        } else {
+            return
+        }
+
+        // Clear any active composition.
+        imeComposition.clear()
+
+        // Send committed text to the BEAM.
+        guard !text.isEmpty else { return }
+        commitIMEText(text)
+        needsDisplay = true
+    }
+
+    /// Called during IME composition to show intermediate text.
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        let text: String
+        if let attrStr = string as? NSAttributedString {
+            text = attrStr.string
+        } else if let str = string as? String {
+            text = str
+        } else {
+            return
+        }
+
+        imeComposition.setMarked(text: text, selectedRange: selectedRange,
+                                  replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    /// Called to finalize/clear the composition.
+    func unmarkText() {
+        if let text = imeComposition.unmark() {
+            commitIMEText(text)
+        }
+        needsDisplay = true
+    }
+
+    /// Returns the range of the current composition text.
+    func markedRange() -> NSRange {
+        return imeComposition.markedRange
+    }
+
+    /// Returns the range of the current selection (cursor position as zero-length range).
+    func selectedRange() -> NSRange {
+        // The cursor position in terms of character offset from start of document.
+        // For a cell-based editor, approximate as col + row * cols.
+        let offset = Int(lineBuffer.cursorRow) * Int(lineBuffer.cols) + Int(lineBuffer.cursorCol)
+        return NSRange(location: offset, length: 0)
+    }
+
+    func hasMarkedText() -> Bool {
+        return imeComposition.hasMarkedText
+    }
+
+    /// Returns the screen rect for the given character range.
+    /// Used by the IME to position the candidate window.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        actualRange?.pointee = range
+
+        // Position at the cursor location.
+        let col = CGFloat(lineBuffer.cursorCol)
+        let row = CGFloat(lineBuffer.cursorRow)
+        let localRect = NSRect(x: col * cellWidth, y: row * cellHeight,
+                                width: cellWidth, height: cellHeight)
+
+        // Convert to screen coordinates.
+        guard let window else { return localRect }
+        let windowRect = convert(localRect, to: nil)
+        return window.convertToScreen(windowRect)
+    }
+
+    /// Returns the character index closest to a screen point.
+    func characterIndex(for point: NSPoint) -> Int {
+        guard let window else { return 0 }
+        let windowPoint = window.convertPoint(fromScreen: point)
+        let localPoint = convert(windowPoint, from: nil)
+        let col = Int(localPoint.x / cellWidth)
+        let row = Int(localPoint.y / cellHeight)
+        return row * Int(lineBuffer.cols) + col
+    }
+
+    /// Returns the attributed substring for the given range.
+    /// Used by the IME to inspect surrounding text context.
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        // We don't have a local text model. Return nil gracefully.
+        actualRange?.pointee = NSRange(location: NSNotFound, length: 0)
+        return nil
+    }
+
+    /// Attributes that can be applied to marked text.
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        return [.underlineStyle, .underlineColor]
+    }
+}
+
+// MARK: - NSAccessibility (VoiceOver support)
+
+extension EditorNSView {
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        return .textArea
+    }
+
+    override func accessibilityRoleDescription() -> String? {
+        return "code editor"
+    }
+
+    /// Returns the full text content of all visible lines.
+    override func accessibilityValue() -> Any? {
+        var lines: [String] = []
+        for row: UInt16 in 0..<lineBuffer.rows {
+            let runs = lineBuffer.runsForLine(row)
+            if runs.isEmpty {
+                lines.append("")
+            } else {
+                lines.append(runs.map(\.text).joined())
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    override func accessibilityNumberOfCharacters() -> Int {
+        var count = 0
+        for row: UInt16 in 0..<lineBuffer.rows {
+            let runs = lineBuffer.runsForLine(row)
+            for run in runs {
+                count += run.text.count
+            }
+            if row < lineBuffer.rows - 1 {
+                count += 1  // newline
+            }
+        }
+        return count
+    }
+
+    override func accessibilityInsertionPointLineNumber() -> Int {
+        return Int(lineBuffer.cursorRow)
+    }
+
+    override func accessibilitySelectedText() -> String? {
+        // No visual selection tracking in the GUI (owned by BEAM).
+        return ""
+    }
+
+    override func accessibilitySelectedTextRange() -> NSRange {
+        let offset = Int(lineBuffer.cursorRow) * Int(lineBuffer.cols) + Int(lineBuffer.cursorCol)
+        return NSRange(location: offset, length: 0)
+    }
+
+    override func isAccessibilityElement() -> Bool {
+        return true
+    }
+
+    override func isAccessibilityEnabled() -> Bool {
+        return true
+    }
 }
 
 /// Map special keys to Kitty keyboard protocol codepoints.

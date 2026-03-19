@@ -249,6 +249,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
         }
+        disp.onModeChanged = { [weak nsView] modeName in
+            guard let nsView else { return }
+            NSAccessibility.post(
+                element: nsView,
+                notification: .announcementRequested,
+                userInfo: [.announcement: "\(modeName) mode"]
+            )
+        }
         disp.onTitleChanged = { [weak appState] title in
             Task { @MainActor in
                 appState?.windowTitle = title

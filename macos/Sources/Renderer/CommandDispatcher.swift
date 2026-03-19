@@ -44,6 +44,13 @@ final class CommandDispatcher {
     /// Parameters: family, size, ligatures, weight byte.
     var onFontChanged: ((String, UInt16, Bool, UInt8) -> Void)?
 
+    /// Called when the editor mode changes (for accessibility announcements).
+    /// Parameter: mode name string (e.g., "NORMAL", "INSERT", "VISUAL").
+    var onModeChanged: ((String) -> Void)?
+
+    /// Tracks the last mode to detect changes.
+    private var lastMode: UInt8 = 0
+
     /// All GUI chrome sub-states. Injected at init from AppDelegate.
     /// Non-optional: forgetting to wire this is a compile-time error.
     let guiState: GUIState
@@ -169,6 +176,10 @@ final class CommandDispatcher {
 
         case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount):
             guiState.statusBarState.update(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount)
+            if mode != lastMode {
+                lastMode = mode
+                onModeChanged?(guiState.statusBarState.modeName)
+            }
 
         case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
             if visible {
