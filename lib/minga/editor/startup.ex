@@ -289,8 +289,18 @@ defmodule Minga.Editor.Startup do
     size = ConfigOptions.get(:font_size)
     ligatures = ConfigOptions.get(:font_ligatures)
     weight = ConfigOptions.get(:font_weight)
-    cmd = Minga.Port.Protocol.encode_set_font(family, size, ligatures, weight)
-    Minga.Port.Manager.send_commands(port, [cmd])
+    fallback = ConfigOptions.get(:font_fallback)
+
+    cmds = [Minga.Port.Protocol.encode_set_font(family, size, ligatures, weight)]
+
+    cmds =
+      if fallback != [] do
+        cmds ++ [Minga.Port.Protocol.encode_set_font_fallback(fallback)]
+      else
+        cmds
+      end
+
+    Minga.Port.Manager.send_commands(port, cmds)
   catch
     :exit, _ -> :ok
   end

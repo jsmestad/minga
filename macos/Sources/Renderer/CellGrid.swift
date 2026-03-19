@@ -25,6 +25,9 @@ struct Cell {
     /// Underline style (0=line, 1=curl, 2=dashed, 3=dotted, 4=double).
     /// Only meaningful when ATTR_UNDERLINE is set.
     var underlineStyle: UInt8 = 0
+    /// Font weight for per-span weight variation (0-7, maps thin through black).
+    /// 2 = regular (default). Set by draw_styled_text; plain draw_text leaves this at 2.
+    var fontWeight: UInt8 = 2
     /// For ligature head cells: the full source text that was shaped (e.g., "->").
     /// Empty for non-ligature cells.
     var ligatureText: String = ""

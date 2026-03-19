@@ -36,18 +36,26 @@ struct Glyph {
     var isColor: Bool
 }
 
-/// Cache key for glyphs: codepoint + font style (bold/italic bits).
+/// Cache key for glyphs: codepoint + font weight + italic flag.
+///
+/// The key uses the protocol weight byte (0-7) and a boolean italic flag
+/// rather than the old bold/italic style bits. This allows per-span font
+/// weight selection beyond binary bold/regular.
 struct GlyphKey: Hashable {
     let codepoint: UInt32
-    /// Bold/italic bits from attrs (0x00=regular, 0x01=bold, 0x04=italic, 0x05=bold+italic).
-    let style: UInt8
+    /// Protocol font weight (0=thin, 1=light, 2=regular, 3=medium, 4=semibold, 5=bold, 6=heavy, 7=black).
+    let weight: UInt8
+    /// Whether this glyph uses the italic variant.
+    let italic: Bool
 }
 
-/// Cache key for ligatures: text + font style.
+/// Cache key for ligatures: text + font weight + italic flag.
 struct LigatureKey: Hashable {
     let text: String
-    /// Bold/italic bits from attrs (0x00=regular, 0x01=bold, 0x04=italic, 0x05=bold+italic).
-    let style: UInt8
+    /// Protocol font weight (0-7).
+    let weight: UInt8
+    /// Whether this ligature uses the italic variant.
+    let italic: Bool
 }
 
 /// Font face with glyph cache and atlas.
@@ -86,6 +94,18 @@ final class FontFace {
     /// A nil value means "no ligature for this sequence."
     private var ligatureCache: [LigatureKey: LigatureResult?] = [:]
 
+    /// Cache of CTFont instances at different weights, lazily loaded via NSFontManager.
+    /// Keyed by protocol weight byte (0-7). The base font's weight is pre-populated.
+    private var weightedFonts: [UInt8: CTFont] = [:]
+
+    /// The font family name (for resolving weight variants via NSFontManager).
+    private let familyName: String
+
+    /// User-configured font fallback chain. Tried in order before the system
+    /// fallback (CTFontCreateForString) when the primary font doesn't have a glyph.
+    /// Populated by the set_font_fallback protocol command.
+    private var fallbackFonts: [CTFont] = []
+
     /// Protocol weight byte → NSFontManager weight (0-15 scale).
     /// NSFontManager uses: 2=ultralight, 3=thin, 4=light, 5=regular,
     /// 6=medium, 7=semibold, 8=bold, 9=heavy, 10+=black.
@@ -115,6 +135,7 @@ final class FontFace {
     init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
         let nsFontWeight = FontFace.weightMap[weight] ?? 5
         self.fontWeight = nsFontWeight
+        self.familyName = name
         let font = FontFace.resolveFont(name: name, size: size, weight: nsFontWeight)
         self.ctFont = font
         self.scale = scale
@@ -147,6 +168,9 @@ final class FontFace {
         self.cellHeight = Int(ceil(asc + desc + lead))
 
         self.atlas = GlyphAtlas(initialSize: 512)
+
+        // Pre-populate the weighted font cache with the base weight.
+        self.weightedFonts[weight] = font
     }
 
     /// Derive a font variant using CTFontCreateCopyWithSymbolicTraits.
@@ -170,6 +194,32 @@ final class FontFace {
         case 0x04: return ctFontItalic ?? ctFont      // italic only
         default:   return ctFont                      // regular
         }
+    }
+
+    /// Returns a CTFont at the specified protocol weight (0-7).
+    ///
+    /// Lazily resolves weight variants via NSFontManager and caches them.
+    /// When `isItalic` is true, derives the italic variant from the weighted font.
+    /// Falls back to the base font if the weight variant can't be resolved.
+    func fontForWeight(_ weight: UInt8, isItalic: Bool = false) -> CTFont {
+        let baseFont = weightedFont(weight)
+        if isItalic {
+            return FontFace.deriveVariant(baseFont, traits: .italicTrait) ?? baseFont
+        }
+        return baseFont
+    }
+
+    /// Lazily resolves and caches a CTFont at the given protocol weight.
+    private func weightedFont(_ weight: UInt8) -> CTFont {
+        if let cached = weightedFonts[weight] {
+            return cached
+        }
+
+        let nsFontWeight = FontFace.weightMap[weight] ?? 5
+        let size = CTFontGetSize(ctFont)
+        let resolved = FontFace.resolveFont(name: familyName, size: size, weight: nsFontWeight)
+        weightedFonts[weight] = resolved
+        return resolved
     }
 
     /// Resolve a font name to a CTFont, trying multiple strategies:
@@ -203,18 +253,21 @@ final class FontFace {
         return CTFontCreateUIFontForLanguage(.userFixedPitch, size, nil)!
     }
 
-    /// Look up a glyph by codepoint and style, rasterizing on first access.
+    /// Look up a glyph by codepoint, weight, and italic flag, rasterizing on first access.
     ///
-    /// `style` is the bold/italic bits (0x00=regular, 0x01=bold, 0x04=italic,
-    /// 0x05=bold+italic). The glyph is rasterized using the appropriate font
-    /// variant and cached with a compound key.
-    func getGlyph(_ codepoint: UInt32, style: UInt8 = 0) -> Glyph? {
-        let key = GlyphKey(codepoint: codepoint, style: style & FONT_STYLE_MASK)
+    /// `weight` is the protocol font weight byte (0-7). `italic` selects the italic
+    /// variant. The glyph is rasterized using the appropriate font variant and
+    /// cached with a compound key.
+    ///
+    /// For backward compatibility, also accepts the old `style` parameter
+    /// (bold/italic bits) via the convenience overload below.
+    func getGlyph(_ codepoint: UInt32, weight: UInt8, italic: Bool) -> Glyph? {
+        let key = GlyphKey(codepoint: codepoint, weight: weight, italic: italic)
         if let cached = cache[key] {
             return cached
         }
 
-        let font = fontForStyle(style)
+        let font = fontForWeight(weight, isItalic: italic)
         guard let info = rasterizeGlyph(codepoint, using: font) else { return nil }
 
         let glyph = Glyph(
@@ -227,8 +280,50 @@ final class FontFace {
         return glyph
     }
 
+    /// Convenience: look up a glyph using legacy style bits (bold=0x01, italic=0x04).
+    ///
+    /// Maps the bold bit to weight 5 (bold) or the base font's weight,
+    /// and the italic bit to the italic flag.
+    func getGlyph(_ codepoint: UInt32, style: UInt8 = 0) -> Glyph? {
+        let isBold = (style & 0x01) != 0
+        let isItalic = (style & 0x04) != 0
+        let weight: UInt8 = isBold ? 5 : 2  // bold=5, regular=2
+        return getGlyph(codepoint, weight: weight, italic: isItalic)
+    }
+
     /// Pre-rasterize all printable ASCII glyphs for the regular variant.
     /// Other variants are rasterized lazily on first use.
+    /// Configure the font fallback chain from a list of family names.
+    ///
+    /// Each name is resolved via NSFontManager at the same size as the primary font.
+    /// Names that can't be resolved are skipped with a warning. The fallback chain
+    /// is tried in order when the primary font doesn't have a glyph, before falling
+    /// through to the system fallback (CTFontCreateForString).
+    func setFallbackFonts(_ families: [String]) {
+        let size = CTFontGetSize(ctFont)
+        fallbackFonts = families.compactMap { name in
+            let fm = NSFontManager.shared
+            // Try fixed-pitch first, then any trait.
+            if let nsFont = fm.font(withFamily: name, traits: .fixedPitchFontMask, weight: 5, size: size) {
+                PortLogger.info("Font fallback: loaded '\(name)'")
+                return nsFont as CTFont
+            }
+            if let nsFont = fm.font(withFamily: name, traits: [], weight: 5, size: size) {
+                PortLogger.info("Font fallback: loaded '\(name)' (non-fixed-pitch)")
+                return nsFont as CTFont
+            }
+            // Try direct CTFont creation (PostScript name).
+            let direct = CTFontCreateWithName(name as CFString, size, nil)
+            let directName = CTFontCopyPostScriptName(direct) as String
+            if directName.lowercased().contains(name.lowercased().prefix(6).lowercased()) {
+                PortLogger.info("Font fallback: loaded '\(name)' (PostScript)")
+                return direct
+            }
+            PortLogger.warn("Font fallback: '\(name)' not found, skipping")
+            return nil
+        }
+    }
+
     func preloadAscii() {
         for cp: UInt32 in 0x20...0x7E {
             _ = getGlyph(cp, style: 0)
@@ -251,17 +346,26 @@ final class FontFace {
     /// input characters (indicating a ligature substitution happened).
     /// Returns nil if no ligature was produced or ligatures are disabled.
     ///
-    /// `style` is the bold/italic bits. The correct font variant is used
-    /// for shaping so bold ligatures render at the right weight.
+    /// `style` is the bold/italic bits (legacy). The correct font variant is
+    /// used for shaping so bold ligatures render at the right weight.
+    /// Use `shapeLigature(_:weight:italic:)` for per-span weight control.
     func shapeLigature(_ text: String, style: UInt8 = 0) -> LigatureResult? {
+        let isBold = (style & 0x01) != 0
+        let isItalic = (style & 0x04) != 0
+        let weight: UInt8 = isBold ? 5 : 2
+        return shapeLigature(text, weight: weight, italic: isItalic)
+    }
+
+    /// Attempt to shape a string into a ligature glyph with explicit weight control.
+    func shapeLigature(_ text: String, weight: UInt8, italic: Bool) -> LigatureResult? {
         guard ligaturesEnabled, text.count >= 2 else { return nil }
 
-        let key = LigatureKey(text: text, style: style & FONT_STYLE_MASK)
+        let key = LigatureKey(text: text, weight: weight, italic: italic)
         if let cached = ligatureCache[key] {
             return cached
         }
 
-        let font = fontForStyle(style)
+        let font = fontForWeight(weight, isItalic: italic)
         let result = detectAndRasterizeLigature(text, using: font)
         ligatureCache[key] = result
         return result
@@ -403,22 +507,33 @@ final class FontFace {
             utf16 = [UniChar(0xD800 + (cp >> 10)), UniChar(0xDC00 + (cp & 0x3FF))]
         }
 
-        // Look up glyph ID using the requested font variant, with fallback for emoji.
+        // Look up glyph ID using the requested font variant, with fallback chain.
+        // Order: primary font → configured fallbacks → system fallback (CTFontCreateForString).
         var glyphs: [CGGlyph] = Array(repeating: 0, count: utf16.count)
         var renderFont = primaryFont
-        var ownsFallback = false
 
         if !CTFontGetGlyphsForCharacters(primaryFont, &utf16, &glyphs, utf16.count) {
-            // Variant font doesn't have this glyph; ask CoreText for a fallback.
-            let cfStr = CFStringCreateWithCharacters(nil, &utf16, utf16.count)!
-            let range = CFRange(location: 0, length: utf16.count)
-            let fallback = CTFontCreateForString(primaryFont, cfStr, range)
-            if CTFontGetGlyphsForCharacters(fallback, &utf16, &glyphs, utf16.count) {
-                renderFont = fallback
-                ownsFallback = true
+            var found = false
+
+            // Try configured fallback fonts in order.
+            for fb in fallbackFonts {
+                if CTFontGetGlyphsForCharacters(fb, &utf16, &glyphs, utf16.count) {
+                    renderFont = fb
+                    found = true
+                    break
+                }
+            }
+
+            // System fallback: ask CoreText to find any font with this glyph.
+            if !found {
+                let cfStr = CFStringCreateWithCharacters(nil, &utf16, utf16.count)!
+                let range = CFRange(location: 0, length: utf16.count)
+                let systemFallback = CTFontCreateForString(primaryFont, cfStr, range)
+                if CTFontGetGlyphsForCharacters(systemFallback, &utf16, &glyphs, utf16.count) {
+                    renderFont = systemFallback
+                }
             }
         }
-        _ = ownsFallback // ARC handles lifetime
 
         let glyphId = glyphs[0]
 

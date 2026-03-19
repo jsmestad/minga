@@ -12,7 +12,7 @@ enum RenderCommand: Sendable {
     case clear
     case batchEnd
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
-    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, text: String)
+    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, text: String)
     case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
@@ -22,6 +22,7 @@ enum RenderCommand: Sendable {
     case destroyRegion(id: UInt16)
     case setActiveRegion(id: UInt16)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
+    case setFontFallback(families: [String])
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
     case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
@@ -168,8 +169,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text), 1 + 13 + textLen)
 
     case OP_DRAW_STYLED_TEXT:
-        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, text_len:2 = 18 bytes after opcode
-        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
+        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, font_weight:1, text_len:2 = 19 bytes after opcode
+        guard data.count >= rest + 19 else { throw ProtocolDecodeError.malformed }
         let row = readU16(data, rest)
         let col = readU16(data, rest + 2)
         let fg = readU24(data, rest + 4)
@@ -177,11 +178,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let attrs16 = UInt16(data[rest + 10]) << 8 | UInt16(data[rest + 11])
         let ulColor = readU24(data, rest + 12)
         let blend = data[rest + 15]
-        let textLen = Int(readU16(data, rest + 16))
-        guard data.count >= rest + 18 + textLen else { throw ProtocolDecodeError.malformed }
-        let textData = data[(rest + 18)..<(rest + 18 + textLen)]
+        let fontWeight = data[rest + 16]
+        let textLen = Int(readU16(data, rest + 17))
+        guard data.count >= rest + 19 + textLen else { throw ProtocolDecodeError.malformed }
+        let textData = data[(rest + 19)..<(rest + 19 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
-        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, text: text), 1 + 18 + textLen)
+        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, fontWeight: fontWeight, text: text), 1 + 19 + textLen)
 
     case OP_SET_CURSOR:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
@@ -243,6 +245,24 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let nameData = data[(rest + 6)..<(rest + 6 + nameLen)]
         let family = String(data: nameData, encoding: .utf8) ?? "Menlo"
         return (.setFont(family: family, size: fontSize, ligatures: ligatures, weight: weight), 1 + 6 + nameLen)
+
+    case OP_SET_FONT_FALLBACK:
+        // count:1, then count * (name_len:2, name:bytes)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let count = Int(data[rest])
+        var families: [String] = []
+        var offset = rest + 1
+        for _ in 0..<count {
+            guard data.count >= offset + 2 else { throw ProtocolDecodeError.malformed }
+            let nameLen = Int(readU16(data, offset))
+            offset += 2
+            guard data.count >= offset + nameLen else { throw ProtocolDecodeError.malformed }
+            let nameData = data[offset..<(offset + nameLen)]
+            let name = String(data: nameData, encoding: .utf8) ?? ""
+            families.append(name)
+            offset += nameLen
+        }
+        return (.setFontFallback(families: families), offset - rest + 1)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:

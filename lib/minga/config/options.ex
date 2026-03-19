@@ -42,6 +42,8 @@ defmodule Minga.Config.Options do
   | `:font_size`              | positive integer (point size)               | `13`        |
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
   | `:font_ligatures`         | boolean                                     | `true`      |
+  | `:font_fallback`          | list of font family strings                 | `[]`        |
+  | `:prettify_symbols`       | boolean                                     | `false`     |
   | `:whichkey_layout`        | `:bottom` or `:float`                       | `:bottom`   |
   | `:cursorline`             | boolean                                        | `true`    |
   | `:nav_flash`              | boolean                                        | `true`    |
@@ -129,6 +131,8 @@ defmodule Minga.Config.Options do
           | :font_size
           | :font_weight
           | :font_ligatures
+          | :font_fallback
+          | :prettify_symbols
           | :whichkey_layout
           | :log_level
           | :log_level_render
@@ -222,6 +226,8 @@ defmodule Minga.Config.Options do
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},
      :regular},
     {:font_ligatures, :boolean, true},
+    {:font_fallback, :string_list, []},
+    {:prettify_symbols, :boolean, false},
     {:log_level, {:enum, [:debug, :info, :warning, :error, :none]}, :info},
     {:log_level_render, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
     {:log_level_lsp, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
