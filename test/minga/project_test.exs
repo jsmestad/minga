@@ -38,6 +38,16 @@ defmodule Minga.ProjectTest do
     end
   end
 
+  describe "resolve_root/0" do
+    test "falls back to cwd when no project is set" do
+      assert Project.resolve_root() == File.cwd!()
+    end
+
+    test "falls back to cwd when Project GenServer is not running" do
+      assert is_binary(Project.resolve_root())
+    end
+  end
+
   describe "detect_and_set/2" do
     test "detects project root from a file inside a git repo", %{tmp_dir: tmp} do
       project = Path.join(tmp, "myproject")

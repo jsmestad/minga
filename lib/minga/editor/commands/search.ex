@@ -379,15 +379,7 @@ defmodule Minga.Editor.Commands.Search do
     Enum.join(new_lines, "\n")
   end
 
-  @spec project_root() :: String.t()
-  defp project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate project_root, to: Minga.Project, as: :resolve_root
 
   # Auto-unfold any fold containing the given line in the active window.
   # Handles both per-window folds and decoration folds.

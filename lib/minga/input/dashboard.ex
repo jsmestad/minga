@@ -66,10 +66,5 @@ defmodule Minga.Input.Dashboard do
     end
   end
 
-  @spec safe_project_root() :: String.t()
-  defp safe_project_root do
-    Minga.Project.root() || File.cwd!()
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate safe_project_root, to: Minga.Project, as: :resolve_root
 end

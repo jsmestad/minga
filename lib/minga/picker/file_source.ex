@@ -127,15 +127,7 @@ defmodule Minga.Picker.FileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec project_root() :: String.t()
-  defp project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate project_root, to: Minga.Project, as: :resolve_root
 
   @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
   defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do

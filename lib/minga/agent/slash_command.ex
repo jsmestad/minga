@@ -680,17 +680,7 @@ defmodule Minga.Agent.SlashCommand do
     emit_system_message(state, summary)
   end
 
-  @spec detect_project_root() :: String.t()
-  defp detect_project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  rescue
-    _ -> File.cwd!()
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate detect_project_root, to: Minga.Project, as: :resolve_root
 
   @spec emit_system_message(state(), String.t()) :: state()
   defp emit_system_message(state, message) do
