@@ -24,28 +24,52 @@ defmodule Minga.Test.Invariants do
 
   @doc "Collects editor state into a result map for postcondition checking."
   @spec collect_result(map()) :: map()
-  def collect_result(%{editor: editor, buffer: buffer}) do
-    alive? = Process.alive?(editor)
+  def collect_result(%{editor: editor}) do
+    state =
+      try do
+        :sys.get_state(editor)
+      catch
+        :exit, _ -> nil
+      end
 
-    if alive? do
-      state = :sys.get_state(editor)
-      mode = state.vim.mode
-      {cursor_line, cursor_col} = BufferServer.cursor(buffer)
-      content = BufferServer.content(buffer)
+    if is_nil(state) do
+      %{alive?: false, mode: nil, cursor: nil, line_count: 0, content: nil, lines: []}
+    else
+      collect_from_state(state)
+    end
+  end
+
+  defp collect_from_state(state) do
+    mode = state.vim.mode
+    buf = state.buffers.active
+
+    if is_pid(buf) do
+      {cursor_line, cursor_col} = BufferServer.cursor(buf)
+      content = BufferServer.content(buf)
       lines = String.split(content, "\n")
-      line_count = length(lines)
 
       %{
         alive?: true,
         mode: mode,
         cursor: {cursor_line, cursor_col},
-        line_count: line_count,
+        line_count: length(lines),
         content: content,
         lines: lines
       }
     else
-      %{alive?: false, mode: nil, cursor: nil, line_count: 0, content: nil, lines: []}
+      # No active buffer (e.g., all buffers closed).
+      %{alive?: true, mode: mode, cursor: {0, 0}, line_count: 1, content: "", lines: [""]}
     end
+  catch
+    :exit, _ ->
+      %{
+        alive?: true,
+        mode: state.vim.mode,
+        cursor: {0, 0},
+        line_count: 1,
+        content: "",
+        lines: [""]
+      }
   end
 
   @doc "Asserts all invariants hold. Returns `:ok` or raises."

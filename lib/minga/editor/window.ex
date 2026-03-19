@@ -154,12 +154,19 @@ defmodule Minga.Editor.Window do
   end
 
   @doc "Updates the viewport dimensions for this window, marking all lines dirty."
-  @spec resize(t(), pos_integer(), pos_integer()) :: t()
+  @spec resize(t(), non_neg_integer(), non_neg_integer()) :: t()
   def resize(%__MODULE__{} = window, rows, cols)
       when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
     window
     |> invalidate()
     |> Map.put(:viewport, Viewport.new(rows, cols))
+  end
+
+  # When a window is squeezed to zero dimensions (e.g., terminal resized
+  # too small with splits active), clamp to 1x1 to avoid downstream crashes.
+  def resize(%__MODULE__{} = window, rows, cols)
+      when is_integer(rows) and is_integer(cols) do
+    resize(window, max(rows, 1), max(cols, 1))
   end
 
   # ── Scroll helpers ──────────────────────────────────────────────────────────
