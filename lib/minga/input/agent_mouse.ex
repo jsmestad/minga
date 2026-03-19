@@ -138,8 +138,8 @@ defmodule Minga.Input.AgentMouse do
        })
        when button in [:wheel_down, :wheel_up] do
     {_cr, cc, cw, _ch} = window_content_rect(layout, win_id)
-    agent_ui = AgentAccess.agent_ui(state)
-    chat_width = max(div(cw * agent_ui.chat_width_pct, 100), 20)
+    view = AgentAccess.view(state)
+    chat_width = max(div(cw * view.chat_width_pct, 100), 20)
 
     if col < cc + chat_width do
       # Chat area scroll: unpin and passthrough to Editor.Mouse

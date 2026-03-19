@@ -153,8 +153,8 @@ defmodule Minga.Agent.View.Renderer do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused do
-      agent_ui = AgentAccess.agent_ui(state)
-      chat_width_pct = agent_ui.chat_width_pct
+      view = AgentAccess.view(state)
+      chat_width_pct = view.chat_width_pct
       chat_width = max(div(width * chat_width_pct, 100), 20)
       box_width = max(chat_width - 2 * @input_h_margin, 10)
       box_col = col_off + @input_h_margin
@@ -190,7 +190,7 @@ defmodule Minga.Agent.View.Renderer do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
     session = AgentAccess.session(state)
-    agent_ui = AgentAccess.agent_ui(state)
+    view = AgentAccess.view(state)
 
     messages =
       if session do
@@ -233,12 +233,12 @@ defmodule Minga.Agent.View.Renderer do
         pasted_blocks: panel.pasted_blocks
       },
       agent_ui: %{
-        chat_width_pct: agent_ui.chat_width_pct,
-        help_visible: agent_ui.help_visible,
-        focus: agent_ui.focus,
-        search: agent_ui.search,
-        toast: agent_ui.toast,
-        context_estimate: agent_ui.context_estimate
+        chat_width_pct: view.chat_width_pct,
+        help_visible: view.help_visible,
+        focus: view.focus,
+        search: view.search,
+        toast: view.toast,
+        context_estimate: view.context_estimate
       },
       messages: messages,
       usage: usage,

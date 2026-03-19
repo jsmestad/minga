@@ -106,7 +106,7 @@ defmodule Minga.Agent.Events do
   end
 
   def handle(state, {:tool_ended, "read_file", result, _status}) do
-    case AgentAccess.agent_ui(state).preview.content do
+    case AgentAccess.view(state).preview.content do
       {:file, path, _} ->
         state = update_preview(state, &Preview.set_file(&1, path, result))
         {state, [{:render, 16}]}
@@ -125,7 +125,7 @@ defmodule Minga.Agent.Events do
   def handle(state, {:tool_ended, "list_directory", result, _status}) do
     entries = result |> String.split("\n") |> Enum.reject(&(&1 == ""))
 
-    case AgentAccess.agent_ui(state).preview.content do
+    case AgentAccess.view(state).preview.content do
       {:directory, path, _} ->
         state = update_preview(state, &Preview.set_directory(&1, path, entries))
         {state, [{:render, 16}]}
@@ -206,7 +206,7 @@ defmodule Minga.Agent.Events do
 
   def handle(state, {:context_usage, estimated_tokens, _context_limit}) do
     state =
-      AgentAccess.update_agent_ui(state, fn a -> %{a | context_estimate: estimated_tokens} end)
+      AgentAccess.update_view(state, fn v -> %{v | context_estimate: estimated_tokens} end)
 
     {state, [{:render, 16}]}
   end
@@ -237,7 +237,7 @@ defmodule Minga.Agent.Events do
 
   @spec existing_diff_for_path(EditorState.t(), String.t()) :: DiffReview.t() | nil
   defp existing_diff_for_path(state, path) do
-    case Preview.diff_review(AgentAccess.agent_ui(state).preview) do
+    case Preview.diff_review(AgentAccess.view(state).preview) do
       %DiffReview{path: ^path} = review -> review
       _ -> nil
     end

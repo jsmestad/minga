@@ -196,7 +196,8 @@ defmodule Minga.Editor.Startup do
         ConfigOptions.get(:startup_view) == :agent
 
     if want_agent? do
-      av = %UIState{UIState.new() | active: true, focus: :chat}
+      base = UIState.new()
+      av = %UIState{base | view: %{base.view | active: true, focus: :chat}}
       {:agent, av}
     else
       {:editor, UIState.new()}

@@ -40,16 +40,20 @@ defmodule Minga.Input.AgentNavTest do
     }
 
     agentic = %UIState{
-      visible: true,
-      input_focused: Keyword.get(opts, :input_focused, false),
-      scroll: Minga.Scroll.new(),
-      spinner_frame: 0,
-      provider_name: "anthropic",
-      model_name: "claude-sonnet-4",
-      thinking_level: "medium",
-      prompt_buffer: prompt_buf,
-      active: true,
-      focus: Keyword.get(opts, :focus, :chat)
+      panel: %UIState.Panel{
+        visible: true,
+        input_focused: Keyword.get(opts, :input_focused, false),
+        scroll: Minga.Scroll.new(),
+        spinner_frame: 0,
+        provider_name: "anthropic",
+        model_name: "claude-sonnet-4",
+        thinking_level: "medium",
+        prompt_buffer: prompt_buf
+      },
+      view: %UIState.View{
+        active: true,
+        focus: Keyword.get(opts, :focus, :chat)
+      }
     }
 
     %EditorState{
@@ -252,7 +256,7 @@ defmodule Minga.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?j, 0)
 
-      preview = AgentAccess.agent_ui(new_state).preview
+      preview = AgentAccess.view(new_state).preview
       assert preview.scroll.offset == 1
     end
 
@@ -260,10 +264,10 @@ defmodule Minga.Input.AgentNavTest do
       state = make_state(focus: :file_viewer)
 
       {:handled, state} = AgentNav.handle_key(state, ?j, 0)
-      assert AgentAccess.agent_ui(state).preview.scroll.offset == 1
+      assert AgentAccess.view(state).preview.scroll.offset == 1
 
       {:handled, new_state} = AgentNav.handle_key(state, ?k, 0)
-      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
+      assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
 
     test "k at offset 0 stays at 0" do
@@ -271,7 +275,7 @@ defmodule Minga.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?k, 0)
 
-      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
+      assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
 
     test "Ctrl-D scrolls preview down by 10" do
@@ -279,17 +283,17 @@ defmodule Minga.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?d, @ctrl)
 
-      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 10
+      assert AgentAccess.view(new_state).preview.scroll.offset == 10
     end
 
     test "Ctrl-U scrolls preview up by 10" do
       state = make_state(focus: :file_viewer)
 
       {:handled, state} = AgentNav.handle_key(state, ?d, @ctrl)
-      assert AgentAccess.agent_ui(state).preview.scroll.offset == 10
+      assert AgentAccess.view(state).preview.scroll.offset == 10
 
       {:handled, new_state} = AgentNav.handle_key(state, ?u, @ctrl)
-      assert AgentAccess.agent_ui(new_state).preview.scroll.offset == 0
+      assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
 
     test "G pins preview to bottom" do
@@ -297,7 +301,7 @@ defmodule Minga.Input.AgentNavTest do
 
       {:handled, new_state} = AgentNav.handle_key(state, ?G, 0)
 
-      assert AgentAccess.agent_ui(new_state).preview.scroll.pinned == true
+      assert AgentAccess.view(new_state).preview.scroll.pinned == true
     end
 
     test "unbound key passes through" do

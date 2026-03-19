@@ -25,6 +25,7 @@ defmodule Minga.Input.Scoped do
   import Bitwise
 
   alias Minga.Agent.UIState
+  alias Minga.Agent.UIState.Panel
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
@@ -76,7 +77,7 @@ defmodule Minga.Input.Scoped do
 
   # Dismiss toast on any key (then re-process)
   defp handle_agent_key(state, cp, mods) do
-    if AgentAccess.agent_ui(state).toast != nil do
+    if AgentAccess.view(state).toast != nil do
       state = AgentAccess.update_agent_ui(state, &UIState.dismiss_toast/1)
       handle_agent_key(state, cp, mods)
     else
@@ -152,7 +153,7 @@ defmodule Minga.Input.Scoped do
     key = {cp, mods}
 
     # Check if we're continuing a prefix sequence
-    case AgentAccess.agent_ui(state).pending_prefix do
+    case AgentAccess.view(state).pending_prefix do
       nil ->
         # Fresh lookup
         resolve_scope_key(state, :agent, vim_state, key, cp, mods)
@@ -246,10 +247,10 @@ defmodule Minga.Input.Scoped do
 
   # Checks if the cursor is within the lines of an expanded paste block.
   # Used by handle_agent_key for Tab handling on paste placeholder lines.
-  @spec cursor_on_expanded_block?(UIState.t()) :: boolean()
-  defp cursor_on_expanded_block?(%UIState{pasted_blocks: blocks} = panel) do
-    {cursor_line, _} = UIState.input_cursor(panel)
-    lines = UIState.input_lines(panel)
+  @spec cursor_on_expanded_block?(Panel.t()) :: boolean()
+  defp cursor_on_expanded_block?(%Panel{pasted_blocks: blocks} = panel) do
+    {cursor_line, _} = Panel.input_cursor(panel)
+    lines = Panel.input_lines(panel)
 
     blocks
     |> Enum.filter(& &1.expanded)

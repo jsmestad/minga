@@ -281,7 +281,7 @@ defmodule Minga.Integration.MouseTest do
       {_ctx, _sep_col} = open_agent_split(ctx)
 
       state_before = :sys.get_state(ctx.editor)
-      agent_scroll_before = state_before.agent_ui.scroll.offset
+      agent_scroll_before = state_before.agent_ui.panel.scroll.offset
 
       # Scroll in the editor area (col 5, left of the separator)
       send_mouse(ctx, 5, 5, :wheel_down)
@@ -290,7 +290,7 @@ defmodule Minga.Integration.MouseTest do
       state_after = :sys.get_state(ctx.editor)
 
       # Agent scroll should not have changed
-      assert state_after.agent_ui.scroll.offset == agent_scroll_before,
+      assert state_after.agent_ui.panel.scroll.offset == agent_scroll_before,
              "scrolling in editor area should not affect agent chat scroll"
 
       # But editor window's viewport should have scrolled
@@ -318,7 +318,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.agent_ui.input_focused,
+      assert state.agent_ui.panel.input_focused,
              "clicking in the input area should focus the agent input"
     end
 
@@ -332,7 +332,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.agent_ui.input_focused,
+      assert state.agent_ui.panel.input_focused,
              "precondition: input should be focused after clicking input area"
 
       # Now click in the chat area (upper portion of agent pane) to unfocus
@@ -340,7 +340,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      refute state.agent_ui.input_focused,
+      refute state.agent_ui.panel.input_focused,
              "clicking in chat area should unfocus the agent input"
     end
   end

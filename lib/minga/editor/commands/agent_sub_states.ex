@@ -12,6 +12,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.FileMention
   alias Minga.Agent.Session
   alias Minga.Agent.UIState
+  alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -69,7 +70,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Jumps to the next search match."
   @spec next_match(state()) :: state()
   def next_match(state) do
-    if AgentAccess.agent_ui(state).search.input_active do
+    if AgentAccess.view(state).search.input_active do
       state
     else
       state = update_agent_ui(state, &UIState.next_search_match/1)
@@ -80,7 +81,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Jumps to the previous search match."
   @spec prev_match(state()) :: state()
   def prev_match(state) do
-    if AgentAccess.agent_ui(state).search.input_active do
+    if AgentAccess.view(state).search.input_active do
       state
     else
       state = update_agent_ui(state, &UIState.prev_search_match/1)
@@ -151,7 +152,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Accepts the current diff hunk during review."
   @spec accept_hunk(state()) :: state()
   def accept_hunk(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, _review}} ->
         state =
           update_preview(
@@ -169,7 +170,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Rejects the current diff hunk during review."
   @spec reject_hunk(state()) :: state()
   def reject_hunk(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, review}} ->
         hunk = DiffReview.current_hunk(review)
         if hunk, do: revert_hunk_on_disk(review.path, hunk)
@@ -190,7 +191,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Accepts all remaining diff hunks."
   @spec accept_all_hunks(state()) :: state()
   def accept_all_hunks(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, _}} ->
         state =
           update_preview(state, &Preview.update_diff(&1, fn r -> DiffReview.accept_all(r) end))
@@ -205,7 +206,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   @doc "Rejects all remaining diff hunks."
   @spec reject_all_hunks(state()) :: state()
   def reject_all_hunks(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, review}} ->
         unresolved_hunks =
           review.hunks
@@ -355,7 +356,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec scroll_to_current_match(state()) :: state()
   defp scroll_to_current_match(state) do
-    case AgentAccess.agent_ui(state).search do
+    case AgentAccess.view(state).search do
       nil ->
         state
 
@@ -380,7 +381,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec maybe_finish_review(state()) :: state()
   defp maybe_finish_review(state) do
-    case Preview.diff_review(AgentAccess.agent_ui(state).preview) do
+    case Preview.diff_review(AgentAccess.view(state).preview) do
       %DiffReview{} = review ->
         if DiffReview.resolved?(review), do: update_preview(state, &Preview.clear/1), else: state
 
@@ -437,8 +438,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
-    AgentAccess.update_agent_ui(state, fn ui ->
-      %{ui | preview: fun.(ui.preview)}
+    AgentAccess.update_view(state, fn v ->
+      %{v | preview: fun.(v.preview)}
     end)
   end
 
@@ -455,8 +456,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     state
   end
 
-  @spec update_panel(state(), (UIState.t() -> UIState.t())) :: state()
+  @spec update_panel(state(), (Panel.t() -> Panel.t())) :: state()
   defp update_panel(state, fun) do
-    AgentAccess.update_agent_ui(state, fun)
+    AgentAccess.update_panel(state, fun)
   end
 end

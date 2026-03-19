@@ -289,8 +289,8 @@ defmodule Minga.Editor.State do
       end
 
     state =
-      if state.agent_ui != nil and state.agent_ui.prompt_buffer == pid do
-        AgentAccess.update_agent_ui(state, fn ui -> %{ui | prompt_buffer: nil} end)
+      if state.agent_ui != nil and state.agent_ui.panel.prompt_buffer == pid do
+        AgentAccess.update_panel(state, fn p -> %{p | prompt_buffer: nil} end)
       else
         state
       end

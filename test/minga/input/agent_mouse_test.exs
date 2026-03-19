@@ -71,8 +71,8 @@ defmodule Minga.Input.AgentMouseTest do
 
   defp with_agent_panel(state) do
     state
-    |> AgentAccess.update_agent_ui(fn ui ->
-      %{ui | visible: true, input_focused: true}
+    |> AgentAccess.update_panel(fn p ->
+      %{p | visible: true, input_focused: true}
     end)
     |> Layout.invalidate()
   end

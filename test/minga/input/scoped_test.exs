@@ -38,11 +38,15 @@ defmodule Minga.Input.ScopedTest do
     }
 
     agentic = %UIState{
-      visible: Keyword.get(opts, :panel_visible, false),
-      input_focused: Keyword.get(opts, :input_focused, false),
-      prompt_buffer: prompt_buf,
-      active: Keyword.get(opts, :agentic_active, false),
-      focus: Keyword.get(opts, :focus, :chat)
+      panel: %UIState.Panel{
+        visible: Keyword.get(opts, :panel_visible, false),
+        input_focused: Keyword.get(opts, :input_focused, false),
+        prompt_buffer: prompt_buf
+      },
+      view: %UIState.View{
+        active: Keyword.get(opts, :agentic_active, false),
+        focus: Keyword.get(opts, :focus, :chat)
+      }
     }
 
     tab_bar =
@@ -233,12 +237,12 @@ defmodule Minga.Input.ScopedTest do
 
     test "? toggles help", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ??, 0)
-      assert AgentAccess.agent_ui(new_state).help_visible
+      assert AgentAccess.view(new_state).help_visible
     end
 
     test "Tab switches focus", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert AgentAccess.agent_ui(new_state).focus == :file_viewer
+      assert AgentAccess.view(new_state).focus == :file_viewer
     end
 
     test "i focuses input", %{state: state} do
@@ -262,22 +266,22 @@ defmodule Minga.Input.ScopedTest do
 
     test "g starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?g, 0)
-      assert AgentAccess.agent_ui(new_state).pending_prefix != nil
+      assert AgentAccess.view(new_state).pending_prefix != nil
     end
 
     test "z starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?z, 0)
-      assert AgentAccess.agent_ui(new_state).pending_prefix != nil
+      assert AgentAccess.view(new_state).pending_prefix != nil
     end
 
     test "] starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?], 0)
-      assert AgentAccess.agent_ui(new_state).pending_prefix != nil
+      assert AgentAccess.view(new_state).pending_prefix != nil
     end
 
     test "[ starts a prefix sequence", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, ?[, 0)
-      assert AgentAccess.agent_ui(new_state).pending_prefix != nil
+      assert AgentAccess.view(new_state).pending_prefix != nil
     end
 
     test "gg scrolls to top via prefix", %{state: state} do
@@ -294,21 +298,21 @@ defmodule Minga.Input.ScopedTest do
     test "panel resize keys work", %{state: state} do
       {:handled, grow} = Scoped.handle_key(state, ?}, 0)
 
-      assert AgentAccess.agent_ui(grow).chat_width_pct >
-               AgentAccess.agent_ui(state).chat_width_pct
+      assert AgentAccess.view(grow).chat_width_pct >
+               AgentAccess.view(state).chat_width_pct
 
       {:handled, shrink} = Scoped.handle_key(state, ?{, 0)
 
-      assert AgentAccess.agent_ui(shrink).chat_width_pct <
-               AgentAccess.agent_ui(state).chat_width_pct
+      assert AgentAccess.view(shrink).chat_width_pct <
+               AgentAccess.view(state).chat_width_pct
     end
 
     test "= resets panel split", %{state: state} do
       {:handled, resized} = Scoped.handle_key(state, ?}, 0)
       {:handled, reset} = Scoped.handle_key(resized, ?=, 0)
 
-      assert AgentAccess.agent_ui(reset).chat_width_pct ==
-               AgentAccess.agent_ui(state).chat_width_pct
+      assert AgentAccess.view(reset).chat_width_pct ==
+               AgentAccess.view(state).chat_width_pct
     end
 
     test "Ctrl+D passthrough (handled by AgentNav → Mode FSM)", %{state: state} do
@@ -325,10 +329,10 @@ defmodule Minga.Input.ScopedTest do
 
     test "ESC dismisses help when visible", %{state: state} do
       state =
-        AgentAccess.update_agent_ui(state, fn agentic -> %{agentic | help_visible: true} end)
+        AgentAccess.update_view(state, fn v -> %{v | help_visible: true} end)
 
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
-      refute AgentAccess.agent_ui(new_state).help_visible
+      refute AgentAccess.view(new_state).help_visible
     end
 
     test "unbound key passthrough to Mode FSM", %{state: state} do
@@ -396,8 +400,8 @@ defmodule Minga.Input.ScopedTest do
       state = base_state(keymap_scope: :agent, agentic_active: true)
 
       state =
-        AgentAccess.update_agent_ui(state, fn agentic ->
-          UIState.push_toast(agentic, "test", :info)
+        AgentAccess.update_agent_ui(state, fn ui ->
+          UIState.push_toast(ui, "test", :info)
         end)
 
       assert UIState.toast_visible?(AgentAccess.agent_ui(state))
@@ -422,7 +426,7 @@ defmodule Minga.Input.ScopedTest do
     test "Tab switches back to chat from viewer" do
       state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
       {:handled, new_state} = Scoped.handle_key(state, 9, 0)
-      assert AgentAccess.agent_ui(new_state).focus == :chat
+      assert AgentAccess.view(new_state).focus == :chat
     end
   end
 
@@ -591,8 +595,8 @@ defmodule Minga.Input.ScopedTest do
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =
-        AgentAccess.update_agent_ui(state, fn ui ->
-          %{ui | input_focused: true, visible: true}
+        AgentAccess.update_panel(state, fn p ->
+          %{p | input_focused: true, visible: true}
         end)
 
       state = %{state | vim: %{state.vim | mode: :insert}}
@@ -610,8 +614,8 @@ defmodule Minga.Input.ScopedTest do
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
       state =
-        AgentAccess.update_agent_ui(state, fn agentic ->
-          %{agentic | preview: %Preview{content: {:diff, review}}}
+        AgentAccess.update_view(state, fn v ->
+          %{v | preview: %Preview{content: {:diff, review}}}
         end)
 
       {:ok, state: state}
@@ -643,8 +647,8 @@ defmodule Minga.Input.ScopedTest do
       review = DiffReview.new("test.ex", "old line\n", "new line\n")
 
       state =
-        AgentAccess.update_agent_ui(state, fn agentic ->
-          %{agentic | preview: %Preview{content: {:diff, review}}}
+        AgentAccess.update_view(state, fn v ->
+          %{v | preview: %Preview{content: {:diff, review}}}
         end)
 
       # In :chat focus, y should resolve through the scope trie, not diff review
@@ -666,9 +670,7 @@ defmodule Minga.Input.ScopedTest do
       }
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui ->
-          put_in(ui.mention_completion, completion)
-        end)
+        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: completion} end)
 
       {:ok, state: state}
     end
@@ -700,7 +702,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "mention only intercepts in insert mode", %{state: state} do
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, false) end)
+        AgentAccess.update_panel(state, fn p -> %{p | input_focused: false} end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?j, 0)
     end
@@ -728,9 +730,7 @@ defmodule Minga.Input.ScopedTest do
       }
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui ->
-          put_in(ui.mention_completion, completion)
-        end)
+        AgentAccess.update_panel(state, fn p -> %{p | mention_completion: completion} end)
 
       {:ok, state: state}
     end

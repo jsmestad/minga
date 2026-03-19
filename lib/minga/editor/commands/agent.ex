@@ -18,6 +18,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.SessionStore
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.UIState
+  alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Clipboard
@@ -530,7 +531,7 @@ defmodule Minga.Editor.Commands.Agent do
         end
 
       # Reset panel scroll and auto-scroll to reflect new session's content
-      update_agent_ui(state, fn ui -> %{ui | scroll: Minga.Scroll.new()} end)
+      AgentAccess.update_panel(state, fn p -> %{p | scroll: Minga.Scroll.new()} end)
     end
   end
 
@@ -717,7 +718,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Jumps to next code block or diff hunk."
   @spec scope_next_code_block(state()) :: state()
   def scope_next_code_block(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.next_hunk(review) end))
 
@@ -737,7 +738,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Jumps to previous code block or diff hunk."
   @spec scope_prev_code_block(state()) :: state()
   def scope_prev_code_block(state) do
-    case AgentAccess.agent_ui(state).preview do
+    case AgentAccess.view(state).preview do
       %Preview{content: {:diff, review}} ->
         update_preview(state, &Preview.update_diff(&1, fn _ -> DiffReview.prev_hunk(review) end))
 
@@ -858,7 +859,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Switches focus between chat and file viewer panels."
   @spec scope_switch_focus(state()) :: state()
   def scope_switch_focus(state) do
-    if AgentAccess.agent_ui(state).focus == :chat do
+    if AgentAccess.view(state).focus == :chat do
       update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
     else
       update_agent_ui(state, &UIState.set_focus(&1, :chat))
@@ -899,7 +900,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Dismisses active overlays or does nothing (ESC behavior)."
   @spec scope_dismiss_or_noop(state()) :: state()
   def scope_dismiss_or_noop(state) do
-    if AgentAccess.agent_ui(state).help_visible do
+    if AgentAccess.view(state).help_visible do
       update_agent_ui(state, &UIState.dismiss_help/1)
     else
       state
@@ -1229,7 +1230,7 @@ defmodule Minga.Editor.Commands.Agent do
   # Returns the cached line index from the panel state if available,
   # otherwise recomputes from messages. The cache is populated by
   # sync_buffer in AgentLifecycle on every message update.
-  @spec cached_or_compute_line_index(UIState.t(), [Message.t()]) ::
+  @spec cached_or_compute_line_index(Panel.t(), [Message.t()]) ::
           [{non_neg_integer(), AgentBufferSync.line_type()}]
   defp cached_or_compute_line_index(panel, messages) do
     case panel.cached_line_index do
