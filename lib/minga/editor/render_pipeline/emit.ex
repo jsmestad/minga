@@ -53,6 +53,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   def emit(frame, state) do
     scroll_deltas = detect_scroll_regions(state)
 
+    # Make the font registry available for font_family → font_id resolution
+    # during draws_to_commands. Initialize only on first frame; subsequent
+    # frames reuse the accumulated registry so IDs are stable and register_font
+    # commands are only sent once per font family.
+    if Process.get(:emit_font_registry) == nil do
+      Process.put(:emit_font_registry, state.font_registry)
+    end
+
     commands =
       if Capabilities.gui?(state.capabilities) do
         frame

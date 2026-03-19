@@ -45,6 +45,7 @@ pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
 // Config commands (BEAM → frontend, TUI ignores)
 pub const OP_SET_FONT: u8 = 0x50;
 pub const OP_SET_FONT_FALLBACK: u8 = 0x51;
+pub const OP_REGISTER_FONT: u8 = 0x52;
 
 // Incremental content sync (BEAM → Zig)
 pub const OP_EDIT_BUFFER: u8 = 0x26;
@@ -371,9 +372,10 @@ pub const DrawText = struct {
     text: []const u8,
 };
 
-/// Extended draw command with 16-bit attrs, underline color, blend, and font weight.
+/// Extended draw command with 16-bit attrs, underline color, blend, font weight, and font ID.
 /// Opcode 0x1C. Wire format:
-///   row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, font_weight:u8, text_len:u16, text
+///   row:u16, col:u16, fg:u24, bg:u24, attrs:u16, ul_color:u24, blend:u8, font_weight:u8, font_id:u8, text_len:u16, text
+/// The TUI ignores font_id (not stored in DrawStyledText).
 pub const DrawStyledText = struct {
     row: u16,
     col: u16,
@@ -611,8 +613,8 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             } };
         },
         OP_DRAW_STYLED_TEXT => {
-            // row:2, col:2, fg:3, bg:3, attrs:2, ul_color:3, blend:1, font_weight:1, text_len:2 = 19 bytes min
-            if (rest.len < 19) return error.Malformed;
+            // row:2, col:2, fg:3, bg:3, attrs:2, ul_color:3, blend:1, font_weight:1, font_id:1, text_len:2 = 20 bytes min
+            if (rest.len < 20) return error.Malformed;
             const row = std.mem.readInt(u16, rest[0..2], .big);
             const col = std.mem.readInt(u16, rest[2..4], .big);
             const fg = readU24(rest[4..7]);
@@ -621,9 +623,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             const ul_color = readU24(rest[12..15]);
             const blend = rest[15];
             const font_weight = rest[16];
-            const text_len = std.mem.readInt(u16, rest[17..19], .big);
-            if (rest.len < 19 + text_len) return error.Malformed;
-            const text = rest[19 .. 19 + text_len];
+            // font_id at rest[17] (ignored by TUI)
+            const text_len = std.mem.readInt(u16, rest[18..20], .big);
+            if (rest.len < 20 + text_len) return error.Malformed;
+            const text = rest[20 .. 20 + text_len];
             return .{ .draw_styled_text = .{
                 .row = row,
                 .col = col,
@@ -855,6 +858,14 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             // TUI ignores font config; just return a no-op clear.
             return .clear;
         },
+        OP_REGISTER_FONT => {
+            // font_id:1, name_len:2, name:bytes
+            if (rest.len < 3) return error.Malformed;
+            const name_len = std.mem.readInt(u16, rest[1..3], .big);
+            if (rest.len < 3 + name_len) return error.Malformed;
+            // TUI ignores font registration; return no-op.
+            return .clear;
+        },
         OP_SET_FONT_FALLBACK => {
             // count:1, then count * (name_len:2, name:bytes)
             if (rest.len < 1) return error.Malformed;
@@ -968,6 +979,12 @@ pub fn commandSize(payload: []const u8) usize {
             if (payload.len < 7) break :blk payload.len;
             const name_len = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + name_len;
+        },
+        OP_REGISTER_FONT => blk: {
+            // opcode(1) + font_id(1) + name_len(2) + name
+            if (payload.len < 4) break :blk payload.len;
+            const name_len = std.mem.readInt(u16, payload[2..4], .big);
+            break :blk 4 + name_len;
         },
         OP_SET_FONT_FALLBACK => blk: {
             // opcode(1) + count(1), then count * (name_len:2, name:bytes)
@@ -2201,6 +2218,7 @@ test "decode draw_styled_text command" {
         0xFF, 0x00, 0x00, // ul_color: red
         0x32, // blend: 50
         0x05, // font_weight: bold
+        0x00, // font_id: primary
         0x00, 0x05, // text_len
     } ++ "error".*;
 
@@ -2233,6 +2251,7 @@ test "decode draw_styled_text with underline style curl" {
         0xFF, 0x00, 0x00, // ul_color: red
         0x64, // blend: 100
         0x02, // font_weight: regular
+        0x00, // font_id: primary
         0x00, 0x03, // text_len
     } ++ "abc".*;
 

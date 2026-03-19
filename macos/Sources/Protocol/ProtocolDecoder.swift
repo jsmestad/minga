@@ -12,7 +12,7 @@ enum RenderCommand: Sendable {
     case clear
     case batchEnd
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
-    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, text: String)
+    case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, fontId: UInt8, text: String)
     case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
@@ -23,6 +23,7 @@ enum RenderCommand: Sendable {
     case setActiveRegion(id: UInt16)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
+    case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
     case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
@@ -169,8 +170,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text), 1 + 13 + textLen)
 
     case OP_DRAW_STYLED_TEXT:
-        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, font_weight:1, text_len:2 = 19 bytes after opcode
-        guard data.count >= rest + 19 else { throw ProtocolDecodeError.malformed }
+        // row:2, col:2, fg:3, bg:3, attrs:2(16-bit), ul_color:3, blend:1, font_weight:1, font_id:1, text_len:2 = 20 bytes after opcode
+        guard data.count >= rest + 20 else { throw ProtocolDecodeError.malformed }
         let row = readU16(data, rest)
         let col = readU16(data, rest + 2)
         let fg = readU24(data, rest + 4)
@@ -179,11 +180,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let ulColor = readU24(data, rest + 12)
         let blend = data[rest + 15]
         let fontWeight = data[rest + 16]
-        let textLen = Int(readU16(data, rest + 17))
-        guard data.count >= rest + 19 + textLen else { throw ProtocolDecodeError.malformed }
-        let textData = data[(rest + 19)..<(rest + 19 + textLen)]
+        let fontId = data[rest + 17]
+        let textLen = Int(readU16(data, rest + 18))
+        guard data.count >= rest + 20 + textLen else { throw ProtocolDecodeError.malformed }
+        let textData = data[(rest + 20)..<(rest + 20 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
-        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, fontWeight: fontWeight, text: text), 1 + 19 + textLen)
+        return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, fontWeight: fontWeight, fontId: fontId, text: text), 1 + 20 + textLen)
 
     case OP_SET_CURSOR:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
@@ -263,6 +265,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             offset += nameLen
         }
         return (.setFontFallback(families: families), offset - rest + 1)
+
+    case OP_REGISTER_FONT:
+        // font_id:1, name_len:2, name:bytes
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let fontId = data[rest]
+        let nameLen = Int(readU16(data, rest + 1))
+        guard data.count >= rest + 3 + nameLen else { throw ProtocolDecodeError.malformed }
+        let nameData = data[(rest + 3)..<(rest + 3 + nameLen)]
+        let family = String(data: nameData, encoding: .utf8) ?? "Menlo"
+        return (.registerFont(id: fontId, family: family), 1 + 3 + nameLen)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:

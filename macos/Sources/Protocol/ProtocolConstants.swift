@@ -90,6 +90,7 @@ let GUI_COLOR_ACCENT: UInt8 = 0x40
 
 let OP_SET_FONT: UInt8 = 0x50
 let OP_SET_FONT_FALLBACK: UInt8 = 0x51
+let OP_REGISTER_FONT: UInt8 = 0x52
 
 // MARK: - Highlight opcodes (ignored by GUI, handled by minga-parser)
 

@@ -41,6 +41,10 @@ struct Glyph {
 /// The key uses the protocol weight byte (0-7) and a boolean italic flag
 /// rather than the old bold/italic style bits. This allows per-span font
 /// weight selection beyond binary bold/regular.
+///
+/// When multiple FontFace instances share an atlas, each instance uses
+/// its own glyph cache, so there's no collision between fonts. The fontId
+/// is not part of the key because each FontFace manages its own cache.
 struct GlyphKey: Hashable {
     let codepoint: UInt32
     /// Protocol font weight (0=thin, 1=light, 2=regular, 3=medium, 4=semibold, 5=bold, 6=heavy, 7=black).
@@ -132,7 +136,9 @@ final class FontFace {
     /// `scale` is the backing scale factor (2.0 for Retina).
     /// `ligatures` enables programming ligature shaping via CoreText.
     /// `weight` is the protocol weight byte (0-7), mapped to NSFontManager's scale.
-    init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2) {
+    /// Initialize with an externally-owned atlas (shared across FontFace instances).
+    /// When `atlas` is nil, creates a private atlas (backward compatible).
+    init(name: String, size: CGFloat, scale: CGFloat, ligatures: Bool = true, weight: UInt8 = 2, atlas: GlyphAtlas? = nil) {
         let nsFontWeight = FontFace.weightMap[weight] ?? 5
         self.fontWeight = nsFontWeight
         self.familyName = name
@@ -167,7 +173,7 @@ final class FontFace {
         self.cellWidth = Int(ceil(advanceWidth))
         self.cellHeight = Int(ceil(asc + desc + lead))
 
-        self.atlas = GlyphAtlas(initialSize: 512)
+        self.atlas = atlas ?? GlyphAtlas(initialSize: 512)
 
         // Pre-populate the weighted font cache with the base weight.
         self.weightedFonts[weight] = font

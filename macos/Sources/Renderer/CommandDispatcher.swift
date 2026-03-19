@@ -29,6 +29,11 @@ final class CommandDispatcher {
     /// on init and updated when a set_font command arrives.
     var fontFace: FontFace?
 
+    /// Font manager for per-span font family support. When set, glyph
+    /// lookups route through the manager (which handles font_id routing).
+    /// Set by the AppDelegate alongside fontFace.
+    var fontManager: FontManager?
+
     /// Called after each `batch_end` command. The MetalRenderer hooks into
     /// this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
@@ -61,13 +66,14 @@ final class CommandDispatcher {
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
 
-        case .drawStyledText(let row, let col, let fg, let bg, let attrs16, let ulColor, _, let fontWeight, let text):
+        case .drawStyledText(let row, let col, let fg, let bg, let attrs16, let ulColor, _, let fontWeight, let fontId, let text):
             // Extended draw: 16-bit attrs with underline style, strikethrough, and underline color.
             // The low 8 bits of attrs16 match the regular attrs byte layout.
             let attrs8 = UInt8(attrs16 & 0xFF)
             let ulStyle = UInt8((attrs16 >> UL_STYLE_SHIFT) & UL_STYLE_MASK)
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs8, text: text,
-                     underlineColor: ulColor, underlineStyle: ulStyle, fontWeight: fontWeight)
+                     underlineColor: ulColor, underlineStyle: ulStyle, fontWeight: fontWeight,
+                     fontId: fontId)
 
         case .setCursor(let row, let col):
             var absRow = row
@@ -131,6 +137,9 @@ final class CommandDispatcher {
 
         case .setFontFallback(let families):
             fontFace?.setFallbackFonts(families)
+
+        case .registerFont(let id, let family):
+            fontManager?.registerFont(id: id, name: family)
 
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
@@ -224,7 +233,8 @@ final class CommandDispatcher {
     }()
 
     private func drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String,
-                          underlineColor: UInt32 = 0, underlineStyle: UInt8 = 0, fontWeight: UInt8 = 2) {
+                          underlineColor: UInt32 = 0, underlineStyle: UInt8 = 0, fontWeight: UInt8 = 2,
+                          fontId: UInt8 = 0) {
         var absRow = row
         var absCol = col
         var maxCol = grid.cols
@@ -248,7 +258,8 @@ final class CommandDispatcher {
                 grid.writeCell(col: currentCol, row: absRow, cell: Cell(
                     grapheme: grapheme, width: UInt8(w),
                     fg: fg, bg: bg, attrs: attrs, underlineColor: underlineColor, underlineStyle: underlineStyle,
-                    fontWeight: fontWeight
+                    fontWeight: fontWeight,
+                    fontId: fontId
                 ))
                 currentCol &+= UInt16(w)
             }
@@ -284,6 +295,7 @@ final class CommandDispatcher {
                             fg: fg, bg: bg, attrs: attrs,
                             underlineColor: underlineColor, underlineStyle: underlineStyle,
                             fontWeight: fontWeight,
+                            fontId: fontId,
                             ligatureText: candidate,
                             ligatureCellCount: UInt8(lig.cellCount),
                             isContinuation: false
@@ -294,6 +306,7 @@ final class CommandDispatcher {
                                 fg: fg, bg: bg, attrs: attrs,
                                 underlineColor: underlineColor, underlineStyle: underlineStyle,
                                 fontWeight: fontWeight,
+                                fontId: fontId,
                                 isContinuation: true
                             ))
                         }
@@ -311,7 +324,8 @@ final class CommandDispatcher {
                 grid.writeCell(col: currentCol, row: absRow, cell: Cell(
                     grapheme: grapheme, width: UInt8(w),
                     fg: fg, bg: bg, attrs: attrs, underlineColor: underlineColor, underlineStyle: underlineStyle,
-                    fontWeight: fontWeight
+                    fontWeight: fontWeight,
+                    fontId: fontId
                 ))
                 currentCol &+= UInt16(w)
                 i += 1
