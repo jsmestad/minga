@@ -1112,4 +1112,115 @@ defmodule Minga.Port.ProtocolTest do
       assert <<0x79, 0::16, 0::8, 0::8, 0::8>> = encoded
     end
   end
+
+  describe "encode_draw_proportional/5" do
+    test "encodes single line with one segment (golden bytes)" do
+      encoded =
+        Protocol.encode_draw_proportional(5, 10, 200, 20, [
+          [
+            %{
+              text: "hello",
+              fg: 0xFF0000,
+              bg: 0x282C34,
+              font_id: 0,
+              font_weight: 2,
+              italic: false
+            }
+          ]
+        ])
+
+      assert <<0x1D, 5::16, 10::16, 200::16, 20::16, 1::16, 1::16, 0xFF::8, 0x00::8, 0x00::8,
+               0x28::8, 0x2C::8, 0x34::8, 0::8, 2::8, 0::8, 5::16, "hello">> = encoded
+    end
+
+    test "encodes multiple lines with multiple segments" do
+      encoded =
+        Protocol.encode_draw_proportional(0, 0, 100, 50, [
+          [%{text: "ab"}, %{text: "cd"}],
+          [%{text: "ef"}]
+        ])
+
+      <<0x1D, 0::16, 0::16, 100::16, 50::16, 2::16, rest::binary>> = encoded
+
+      # First line: 2 segments
+      <<2::16, _seg1::binary-size(13), _seg2::binary-size(13), remaining::binary>> = rest
+
+      # Second line: 1 segment
+      <<1::16, _seg3::binary-size(13), remaining2::binary>> = remaining
+      assert remaining2 == <<>>
+    end
+
+    test "encodes empty lines list" do
+      encoded = Protocol.encode_draw_proportional(0, 0, 100, 50, [])
+      assert <<0x1D, 0::16, 0::16, 100::16, 50::16, 0::16>> = encoded
+    end
+
+    test "encodes line with zero segments" do
+      encoded = Protocol.encode_draw_proportional(0, 0, 100, 50, [[]])
+      assert <<0x1D, 0::16, 0::16, 100::16, 50::16, 1::16, 0::16>> = encoded
+    end
+
+    test "defaults applied for missing optional fields" do
+      encoded = Protocol.encode_draw_proportional(0, 0, 100, 50, [[%{text: "hi"}]])
+
+      <<0x1D, _header::binary-size(10), 1::16, fg::24, bg::24, font_id::8, font_weight::8,
+        italic::8, 2::16, "hi">> = encoded
+
+      assert fg == 0xFFFFFF
+      assert bg == 0x000000
+      assert font_id == 0
+      assert font_weight == 2
+      assert italic == 0
+    end
+
+    test "italic flag encodes as 1" do
+      encoded =
+        Protocol.encode_draw_proportional(0, 0, 100, 50, [[%{text: "x", italic: true}]])
+
+      <<0x1D, _header::binary-size(10), 1::16, _fg::24, _bg::24, _fid::8, _fw::8, italic::8,
+        _tl::16, "x">> = encoded
+
+      assert italic == 1
+    end
+
+    test "unicode text uses byte_size not String.length" do
+      text = "こんにちは"
+      encoded = Protocol.encode_draw_proportional(0, 0, 100, 50, [[%{text: text}]])
+
+      <<0x1D, _header::binary-size(10), 1::16, _style::binary-size(9), text_len::16,
+        rest::binary>> = encoded
+
+      assert text_len == byte_size(text)
+      assert text_len == 15
+      assert rest == text
+    end
+
+    test "binary size matches computed size for complex input" do
+      lines = [
+        [%{text: "Hello, "}, %{text: "world!", italic: true}],
+        [%{text: "Line 2", fg: 0xFF6C6B}],
+        []
+      ]
+
+      encoded = Protocol.encode_draw_proportional(10, 20, 300, 100, lines)
+
+      # Header: opcode(1) + row(2) + col(2) + width(2) + height(2) + line_count(2) = 11
+      # Per line: seg_count(2)
+      # Per segment: fg(3) + bg(3) + font_id(1) + font_weight(1) + italic(1) + text_len(2) + text
+      expected =
+        11 +
+          Enum.sum(
+            Enum.map(lines, fn segs ->
+              2 +
+                Enum.sum(
+                  Enum.map(segs, fn seg ->
+                    11 + byte_size(Map.get(seg, :text, ""))
+                  end)
+                )
+            end)
+          )
+
+      assert byte_size(encoded) == expected
+    end
+  end
 end

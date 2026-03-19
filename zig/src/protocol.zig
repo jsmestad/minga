@@ -2312,3 +2312,78 @@ test "decode draw_styled_text truncated returns malformed" {
     const data = [_]u8{ 0x1C, 0x00, 0x03 }; // too short
     try std.testing.expectError(error.Malformed, decodeCommand(&data));
 }
+
+// ── draw_proportional (0x1D) tests ──────────────────────────────────────────
+
+test "commandSize: draw_proportional with 1 line, 1 segment" {
+    // opcode(1) + row(2) + col(2) + width(2) + height(2) + line_count(2)
+    // + seg_count(2) + fg(3) + bg(3) + font_id(1) + font_weight(1) + italic(1) + text_len(2) + "hello"(5) = 29
+    const data = [_]u8{
+        0x1D,
+        0x00, 0x05, // row
+        0x00, 0x0A, // col
+        0x00, 0xC8, // width
+        0x00, 0x14, // height
+        0x00, 0x01, // line_count: 1
+        0x00, 0x01, // seg_count: 1
+        0xFF, 0x00, 0x00, // fg: red
+        0x28, 0x2C, 0x34, // bg
+        0x00, // font_id
+        0x02, // font_weight: regular
+        0x00, // italic: false
+        0x00, 0x05, // text_len: 5
+    } ++ "hello".*;
+    try std.testing.expectEqual(@as(usize, 29), commandSize(&data));
+}
+
+test "commandSize: draw_proportional with 0 lines" {
+    // opcode(1) + header(10) = 11 bytes
+    const data = [_]u8{
+        0x1D,
+        0x00, 0x00, // row
+        0x00, 0x00, // col
+        0x00, 0x64, // width
+        0x00, 0x32, // height
+        0x00, 0x00, // line_count: 0
+    };
+    try std.testing.expectEqual(@as(usize, 11), commandSize(&data));
+}
+
+test "decode draw_proportional returns clear (TUI skip)" {
+    const data = [_]u8{
+        0x1D,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x32, // row, col, width, height
+        0x00, 0x01, // line_count: 1
+        0x00, 0x01, // seg_count: 1
+        0xFF, 0xFF, 0xFF, // fg
+        0x00, 0x00, 0x00, // bg
+        0x00, 0x02, 0x00, // font_id, font_weight, italic
+        0x00, 0x02, // text_len: 2
+    } ++ "hi".*;
+    const cmd = try decodeCommand(&data);
+    try std.testing.expect(cmd == .clear);
+}
+
+test "decode draw_proportional truncated header returns malformed" {
+    const data = [_]u8{ 0x1D, 0x00, 0x05 }; // too short (need 10 bytes after opcode)
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
+
+test "decode draw_proportional truncated segment returns malformed" {
+    // Claims 1 line, 1 segment, but payload is truncated
+    const data = [_]u8{
+        0x1D,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x64,
+        0x00,
+        0x32,
+        0x00, 0x01, // line_count: 1
+        0x00, 0x01, // seg_count: 1
+        0xFF, 0xFF, // truncated (need fg:3 + bg:3 + ...)
+    };
+    try std.testing.expectError(error.Malformed, decodeCommand(&data));
+}
