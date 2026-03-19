@@ -1477,10 +1477,6 @@ defmodule Minga.Agent.Providers.Native do
       value when is_binary(value) -> value
       _ -> ""
     end
-  rescue
-    _ -> ""
-  catch
-    :exit, _ -> ""
   end
 
   # Sets the provider's API key env var if it's stored in the credentials
@@ -1523,10 +1519,6 @@ defmodule Minga.Agent.Providers.Native do
   @spec read_config_model_list() :: [String.t()]
   defp read_config_model_list do
     Options.get(:agent_models)
-  rescue
-    _ -> []
-  catch
-    :exit, _ -> []
   end
 
   # Works with both LoopCtx and state since both have max_cost/session_cost fields.

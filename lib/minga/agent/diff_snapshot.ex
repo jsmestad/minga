@@ -64,14 +64,8 @@ defmodule Minga.Agent.DiffSnapshot do
     path
   end
 
-  @default_threshold 1_048_576
-
   @spec read_threshold() :: pos_integer()
   defp read_threshold do
     Options.get(:agent_diff_size_threshold)
-  rescue
-    ArgumentError -> @default_threshold
-  catch
-    :exit, _ -> @default_threshold
   end
 end

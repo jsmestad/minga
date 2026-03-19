@@ -54,7 +54,6 @@ defmodule Minga.Project do
 
   @known_projects_file "known-projects"
   @recent_files_file "recent-files"
-  @default_recent_files_limit 200
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -394,15 +393,11 @@ defmodule Minga.Project do
   @spec recent_files_limit() :: pos_integer()
   defp recent_files_limit do
     ConfigOptions.get(:recent_files_limit)
-  catch
-    :exit, _ -> @default_recent_files_limit
   end
 
   @spec persist_recent_files?() :: boolean()
   defp persist_recent_files? do
     ConfigOptions.get(:persist_recent_files)
-  catch
-    :exit, _ -> true
   end
 
   @spec persist_known_projects([String.t()]) :: :ok

@@ -116,19 +116,10 @@ defmodule Minga.Agent.ProviderResolver do
   @spec read_config_provider() :: :auto | :native | :pi_rpc
   defp read_config_provider do
     ConfigOptions.get(:agent_provider)
-  rescue
-    # ConfigOptions agent may not be running (e.g. in tests)
-    ArgumentError -> :auto
-  catch
-    :exit, _ -> :auto
   end
 
   @spec read_config_model() :: String.t() | nil
   defp read_config_model do
     ConfigOptions.get(:agent_model)
-  rescue
-    ArgumentError -> nil
-  catch
-    :exit, _ -> nil
   end
 end
