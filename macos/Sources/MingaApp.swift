@@ -187,6 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var encoder: ProtocolEncoder?
     private var dispatcher: CommandDispatcher?
     private var fontFace: FontFace?
+    private var fontManager: FontManager?
+    private var coreTextRenderer: CoreTextMetalRenderer?
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -210,13 +212,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
         let grid = CellGrid(cols: cols, rows: rows)
 
-        // Metal renderer.
+        // Metal renderer (legacy cell-grid, kept as fallback).
         guard let metalRenderer = MetalRenderer() else {
             // PortLogger isn't set up yet, fall back to NSLog.
             NSLog("Failed to initialize Metal renderer")
             NSApp.terminate(nil)
             return
         }
+
+        // Font manager for CoreText rendering.
+        let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
+        fm.preloadAscii()
+        self.fontManager = fm
+
+        // CoreText renderer (replaces cell-grid rendering).
+        let ctRenderer = CoreTextMetalRenderer(device: metalRenderer.device)
+        ctRenderer?.setupLineRenderer(fontManager: fm)
+        self.coreTextRenderer = ctRenderer
 
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
@@ -267,9 +279,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.dispatcher = disp
 
-        // Wire the line buffer from the dispatcher to the editor view
-        // so resize events keep both data structures in sync.
+        // Wire the line buffer, CoreText renderer, and font manager to the
+        // editor view so resize events keep everything in sync.
         nsView.lineBuffer = disp.lineBuffer
+        nsView.coreTextRenderer = ctRenderer
+        nsView.fontManager = fm
+
+        // Also wire FontManager to the dispatcher for font_id routing.
+        disp.fontManager = fm
 
         // The ready event is deferred: EditorNSView.setFrameSize sends it
         // once SwiftUI assigns the real frame dimensions. This avoids
@@ -315,6 +332,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         self.fontFace = newFace
         dispatcher.fontFace = newFace
+
+        // Update FontManager and CoreText renderer for the new font.
+        fontManager?.setPrimaryFont(name: family, size: size, scale: scale,
+                                     ligatures: ligatures, weight: weight)
+        fontManager?.preloadAscii()
+        if let fm = fontManager {
+            coreTextRenderer?.setupLineRenderer(fontManager: fm)
+        }
+
         nsView.updateFont(newFace)
     }
 

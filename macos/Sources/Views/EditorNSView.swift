@@ -22,6 +22,12 @@ final class EditorNSView: MTKView {
     /// Resized alongside cellGrid to keep dimensions in sync.
     var lineBuffer: LineBuffer?
 
+    /// CoreText-based renderer (replaces cell-grid MetalRenderer).
+    var coreTextRenderer: CoreTextMetalRenderer?
+
+    /// Font manager for per-span font family support.
+    var fontManager: FontManager?
+
     private var trackingArea: NSTrackingArea?
 
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
@@ -87,15 +93,17 @@ final class EditorNSView: MTKView {
     override func draw(_ dirtyRect: NSRect) {
         guard let drawable = currentDrawable else { return }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
-        // Sub-pixel offset is disabled for now. The scroll_offset uniform
-        // shifts ALL cells (including modeline and chrome), which makes
-        // the whole window wobble. Proper fix requires per-region scroll
-        // offsets in the shader so only the editor viewport shifts.
-        // The MTKView coalescing + 1-line-per-event accumulation already
-        // gives smooth scrolling without the fractional offset.
-        metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
-                             viewportSize: drawableSize, contentScale: scale)
-        cellGrid.dirty = false
+
+        // Use CoreText renderer when available, fall back to cell-grid renderer.
+        if let ctRenderer = coreTextRenderer, let lb = lineBuffer, let fm = fontManager {
+            ctRenderer.render(lineBuffer: lb, fontManager: fm, drawable: drawable,
+                              viewportSize: drawableSize, contentScale: scale)
+            lb.dirty = false
+        } else {
+            metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
+                                 viewportSize: drawableSize, contentScale: scale)
+            cellGrid.dirty = false
+        }
     }
 
     // MARK: - Font update

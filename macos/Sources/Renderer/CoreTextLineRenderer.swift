@@ -217,9 +217,19 @@ final class CoreTextLineRenderer {
         for run in runs {
             let font = resolveFont(for: run)
 
+            // Handle reverse attribute: swap fg and bg colors for text rendering.
+            let isReverse = (run.attrs & Self.ATTR_REVERSE) != 0
+            let textColor: NSColor
+            if isReverse {
+                // Reversed: use bg color as text color (or default white if bg is 0).
+                textColor = run.bg != 0 ? nsColor(from: run.bg) : NSColor.white
+            } else {
+                textColor = nsColor(from: run.fg)
+            }
+
             var attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: nsColor(from: run.fg),
+                .foregroundColor: textColor,
                 // Enable all ligatures for CoreText shaping.
                 .ligature: fontManager.primary.ligaturesEnabled ? 2 : 0
             ]
