@@ -20,7 +20,7 @@ defmodule Minga.Port.Protocol do
   | Opcode | Name             | Payload                                                              |
   |--------|------------------|----------------------------------------------------------------------|
   | 0x10   | draw_text        | `row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text`     |
-  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, text_len::16, text` |
+  | 0x1C   | draw_styled_text | `row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8, font_weight::8, text_len::16, text` |
   | 0x11   | set_cursor       | `row::16, col::16`                                                   |
   | 0x12   | clear            | (empty)                                                              |
   | 0x13   | batch_end        | (empty)                                                              |
@@ -65,6 +65,21 @@ defmodule Minga.Port.Protocol do
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
   @op_draw_styled_text 0x1C
+
+  # ── Font weight encoding (shared between set_font and draw_styled_text) ──
+
+  @font_weight_map %{
+    thin: 0,
+    light: 1,
+    regular: 2,
+    medium: 3,
+    semibold: 4,
+    bold: 5,
+    heavy: 6,
+    black: 7
+  }
+
+  @font_weight_reverse Map.new(@font_weight_map, fn {k, v} -> {v, k} end)
 
   # GUI chrome commands live in Protocol.GUI (contiguous range 0x70-0x78)
 
@@ -213,6 +228,8 @@ defmodule Minga.Port.Protocol do
           | {:underline_style, :line | :curl | :dashed | :dotted | :double}
           | {:underline_color, non_neg_integer()}
           | {:blend, 0..100}
+          | {:font_weight,
+             :thin | :light | :regular | :medium | :semibold | :bold | :heavy | :black}
         ]
 
   # ── Modifier helpers ──
@@ -261,10 +278,11 @@ defmodule Minga.Port.Protocol do
   - `attrs` expanded to 16 bits (adds strikethrough 0x10, underline_style 3 bits at 0xE0)
   - `underline_color` as a separate 24-bit RGB field (0x000000 = use fg)
   - `blend` as an 8-bit opacity value (0-100, 100 = fully opaque)
+  - `font_weight` as an 8-bit weight index (0-7, maps to thin through black)
 
   Use this for text that needs underline styles, strikethrough, underline
-  color, or blend. For simple text (fg/bg/bold/italic/underline/reverse),
-  `encode_draw/4` is more compact.
+  color, blend, or per-span font weight. For simple text
+  (fg/bg/bold/italic/underline/reverse), `encode_draw/4` is more compact.
   """
   @spec encode_draw_styled(non_neg_integer(), non_neg_integer(), String.t(), style()) :: binary()
   def encode_draw_styled(row, col, text, style \\ [])
@@ -274,10 +292,11 @@ defmodule Minga.Port.Protocol do
     attrs = encode_attrs_extended(style)
     ul_color = Keyword.get(style, :underline_color, 0x000000)
     blend = Keyword.get(style, :blend, 100)
+    font_weight = Map.get(@font_weight_map, Keyword.get(style, :font_weight, :regular), 2)
     text_len = byte_size(text)
 
     <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24, blend::8,
-      text_len::16, text::binary>>
+      font_weight::8, text_len::16, text::binary>>
   end
 
   @doc """
@@ -298,7 +317,8 @@ defmodule Minga.Port.Protocol do
     Keyword.has_key?(style, :strikethrough) ||
       Keyword.has_key?(style, :underline_style) ||
       Keyword.has_key?(style, :underline_color) ||
-      Keyword.has_key?(style, :blend)
+      Keyword.has_key?(style, :blend) ||
+      Keyword.has_key?(style, :font_weight)
   end
 
   @doc "Encodes a set_cursor command."
@@ -356,19 +376,6 @@ defmodule Minga.Port.Protocol do
   Fields are ordered by category: font identity (size, weight, name) then
   rendering features (ligatures). The variable-length name stays at the end.
   """
-  @font_weight_map %{
-    thin: 0,
-    light: 1,
-    regular: 2,
-    medium: 3,
-    semibold: 4,
-    bold: 5,
-    heavy: 6,
-    black: 7
-  }
-
-  @font_weight_reverse Map.new(@font_weight_map, fn {k, v} -> {v, k} end)
-
   @spec encode_set_font(String.t(), pos_integer(), boolean(), atom()) :: binary()
   def encode_set_font(family, size, ligatures, weight \\ :regular)
 
@@ -778,14 +785,18 @@ defmodule Minga.Port.Protocol do
 
   def decode_command(
         <<@op_draw_styled_text, row::16, col::16, fg::24, bg::24, attrs::16, ul_color::24,
-          blend::8, text_len::16, text::binary-size(text_len)>>
+          blend::8, font_weight_byte::8, text_len::16, text::binary-size(text_len)>>
       ) do
     decoded_attrs = decode_attrs_extended(attrs)
+    font_weight = Map.get(@font_weight_reverse, font_weight_byte, :regular)
 
     style =
       decoded_attrs
       |> then(fn a -> if ul_color != 0, do: [{:underline_color, ul_color} | a], else: a end)
       |> then(fn a -> if blend < 100, do: [{:blend, blend} | a], else: a end)
+      |> then(fn a ->
+        if font_weight != :regular, do: [{:font_weight, font_weight} | a], else: a
+      end)
 
     {:ok, {:draw_styled_text, %{row: row, col: col, fg: fg, bg: bg, attrs: style, text: text}}}
   end

@@ -619,16 +619,19 @@ test "handleCommand draw_styled_text passes extended attrs to cell" {
 
     // attrs: bold(0x01) | underline(0x02) | strikethrough(0x10) | curl style (1 << 5 = 0x20)
     const attrs: u16 = 0x0033; // bold | underline | strikethrough | curl
-    try rend.handleCommand(.{ .draw_styled_text = .{
-        .row = 0,
-        .col = 0,
-        .fg = 0xFF6C6B,
-        .bg = 0x282C34,
-        .attrs = attrs,
-        .ul_color = 0xFF0000,
-        .blend = 50,
-        .text = "x",
-    } });
+    try rend.handleCommand(.{
+        .draw_styled_text = .{
+            .row = 0,
+            .col = 0,
+            .fg = 0xFF6C6B,
+            .bg = 0x282C34,
+            .attrs = attrs,
+            .ul_color = 0xFF0000,
+            .blend = 50,
+            .font_weight = 2, // regular
+            .text = "x",
+        },
+    });
     const cell = mock.last_cell.?;
     // Base attrs (bits 0-3): bold | underline = 0x03
     try std.testing.expectEqual(@as(u8, 0x03), cell.attrs);
