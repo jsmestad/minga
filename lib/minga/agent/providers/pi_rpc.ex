@@ -305,15 +305,7 @@ defmodule Minga.Agent.Providers.PiRpc do
     end
   end
 
-  @spec project_root() :: String.t()
-  defp project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate project_root, to: Minga.Project, as: :resolve_root
 
   defp send_command(nil, _command), do: {:error, :no_port}
 

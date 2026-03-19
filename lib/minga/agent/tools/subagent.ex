@@ -134,15 +134,5 @@ defmodule Minga.Agent.Tools.Subagent do
     end
   end
 
-  @spec detect_project_root() :: String.t()
-  defp detect_project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  rescue
-    ArgumentError -> File.cwd!()
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate detect_project_root, to: Minga.Project, as: :resolve_root
 end

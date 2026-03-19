@@ -82,6 +82,23 @@ defmodule Minga.Project do
     GenServer.call(server, :root)
   end
 
+  @doc """
+  Returns the current project root, falling back to `File.cwd!()`.
+
+  Safe to call even when the Project GenServer is not running (e.g., during
+  early startup or in tests): catches `:exit` from the GenServer call and
+  falls back to the working directory.
+  """
+  @spec resolve_root() :: String.t()
+  def resolve_root do
+    case root() do
+      nil -> File.cwd!()
+      r -> r
+    end
+  catch
+    :exit, _ -> File.cwd!()
+  end
+
   @doc "Returns the cached file list for the current project."
   @spec files(GenServer.server()) :: [String.t()]
   def files(server \\ __MODULE__) do
