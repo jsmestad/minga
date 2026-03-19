@@ -22,27 +22,33 @@ defmodule Minga.Agent.UIState do
   alias Minga.Editor.State.Windows
   alias Minga.Scroll
 
-  # Re-export sub-struct types so existing callers that reference
-  # UIState.paste_block, UIState.search_state, etc. still resolve.
-  @typedoc "A collapsed paste block."
+  # Re-export sub-struct types for backward compat. New code should
+  # reference Panel.paste_block(), View.search_state(), etc. directly.
+  @typedoc deprecated: "Use Panel.paste_block() instead"
+  @typedoc "A collapsed paste block. Deprecated: use Panel.paste_block()."
   @type paste_block :: Panel.paste_block()
 
   @typedoc "Vim mode for the input field when focused."
   @type input_mode :: :insert | :normal | :visual | :visual_line | :operator_pending
 
-  @typedoc "Which panel has keyboard focus inside the agentic view."
+  @typedoc deprecated: "Use View.focus() instead"
+  @typedoc "Which panel has keyboard focus. Deprecated: use View.focus()."
   @type focus :: View.focus()
 
-  @typedoc "Active prefix key awaiting a follow-up keystroke."
+  @typedoc deprecated: "Use View.prefix() instead"
+  @typedoc "Active prefix key. Deprecated: use View.prefix()."
   @type prefix :: View.prefix()
 
-  @typedoc "A search match: message index, byte start, byte end."
+  @typedoc deprecated: "Use View.search_match() instead"
+  @typedoc "A search match. Deprecated: use View.search_match()."
   @type search_match :: View.search_match()
 
-  @typedoc "Search state for the chat panel."
+  @typedoc deprecated: "Use View.search_state() instead"
+  @typedoc "Search state. Deprecated: use View.search_state()."
   @type search_state :: View.search_state()
 
-  @typedoc "A notification toast."
+  @typedoc deprecated: "Use View.toast() instead"
+  @typedoc "A notification toast. Deprecated: use View.toast()."
   @type toast :: View.toast()
 
   @typedoc "Thinking level for models that support extended reasoning."

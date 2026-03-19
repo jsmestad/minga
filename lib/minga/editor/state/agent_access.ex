@@ -70,7 +70,8 @@ defmodule Minga.Editor.State.AgentAccess do
     %{state | agent: fun.(a)}
   end
 
-  @doc "Updates the full agent UI state via a transform function."
+  @doc deprecated: "Use update_panel/2 or update_view/2 for targeted sub-struct updates"
+  @doc "Updates the full agent UI state. Prefer update_panel/2 or update_view/2."
   @spec update_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
   def update_agent_ui(%EditorState{agent_ui: a} = state, fun) do
